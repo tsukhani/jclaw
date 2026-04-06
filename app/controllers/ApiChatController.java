@@ -73,13 +73,9 @@ public class ApiChatController extends Controller {
 
         var messageText = body.get("message").getAsString();
 
-        Conversation conversation;
-        if (body.has("conversationId") && !body.get("conversationId").isJsonNull()) {
-            conversation = ConversationService.findById(body.get("conversationId").getAsLong());
-            if (conversation == null) notFound();
-        } else {
-            conversation = ConversationService.findOrCreate(agent, "web", session.get("username"));
-        }
+        Long conversationId = (body.has("conversationId") && !body.get("conversationId").isJsonNull())
+                ? body.get("conversationId").getAsLong() : null;
+        String username = session.get("username");
 
         response.contentType = "text/event-stream";
         response.setHeader("Cache-Control", "no-cache");
@@ -87,17 +83,17 @@ public class ApiChatController extends Controller {
         response.setHeader("X-Accel-Buffering", "no");
 
         var out = response.out;
-
-        // Send conversation ID immediately so frontend knows which conversation this is
-        try {
-            var initEvent = gson.toJson(Map.of("type", "init", "conversationId", conversation.id));
-            out.write("data: %s\n\n".formatted(initEvent).getBytes(StandardCharsets.UTF_8));
-            out.flush();
-        } catch (Exception _) { return; }
-
         var latch = new CountDownLatch(1);
 
-        AgentRunner.runStreaming(agent, conversation, messageText,
+        AgentRunner.runStreaming(agent, conversationId, "web", username, messageText,
+                // onInit — send conversation ID as first SSE event
+                conversation -> {
+                    try {
+                        var initEvent = gson.toJson(Map.of("type", "init", "conversationId", conversation.id));
+                        out.write("data: %s\n\n".formatted(initEvent).getBytes(StandardCharsets.UTF_8));
+                        out.flush();
+                    } catch (Exception _) {}
+                },
                 // onToken
                 token -> {
                     try {

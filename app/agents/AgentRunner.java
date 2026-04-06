@@ -69,27 +69,44 @@ public class AgentRunner {
     }
 
     /**
-     * Run the agent with streaming. Calls onToken for each token, returns final response.
+     * Run the agent with streaming. Resolves the conversation inside the virtual thread
+     * so it commits in its own transaction before inserting messages.
      */
-    public static void runStreaming(Agent agent, Conversation conversation, String userMessage,
+    public static void runStreaming(Agent agent, Long conversationId, String channelType, String peerId,
+                                    String userMessage,
+                                    Consumer<Conversation> onInit,
                                     Consumer<String> onToken,
                                     Consumer<String> onComplete,
                                     Consumer<Exception> onError) {
         Thread.ofVirtual().start(() -> {
             try {
-                // 1. Persist user message (JPA via Tx for virtual thread)
+                // 1. Resolve conversation in its own committed transaction
+                Conversation conversation = services.Tx.run(() -> {
+                    if (conversationId != null) return ConversationService.findById(conversationId);
+                    return ConversationService.findOrCreate(agent, channelType, peerId);
+                });
+
+                if (conversation == null) {
+                    onError.accept(new RuntimeException("Conversation not found"));
+                    return;
+                }
+
+                // Notify caller (e.g., send SSE init event with conversation ID)
+                onInit.accept(conversation);
+
+                // 2. Persist user message
                 services.Tx.run(() ->
                         ConversationService.appendUserMessage(conversation, userMessage));
 
-                // 2. Assemble system prompt (reads JPA + filesystem)
+                // 3. Assemble system prompt (reads JPA + filesystem)
                 var assembled = services.Tx.run(() ->
                         SystemPromptAssembler.assemble(agent, userMessage));
 
-                // 3. Build messages from conversation history
+                // 4. Build messages from conversation history
                 var messages = services.Tx.run(() ->
                         buildMessages(assembled.systemPrompt(), conversation));
 
-                // 4. Get provider for this agent (no JPA needed)
+                // 5. Get provider for this agent (no JPA needed)
                 var agentProvider = ProviderRegistry.get(agent.modelProvider);
                 var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
                 if (primary == null) {
@@ -99,7 +116,7 @@ public class AgentRunner {
 
                 var tools = ToolRegistry.getToolDefs();
 
-                // 5. Stream with tool call handling (HTTP, no JPA)
+                // 6. Stream with tool call handling (HTTP, no JPA)
                 var accumulator = OpenAiCompatibleClient.chatStreamAccumulate(
                         primary, agent.modelId, messages, tools, onToken);
 
@@ -194,8 +211,10 @@ public class AgentRunner {
                     toolCall.function().arguments(), agent);
             currentMessages.add(ChatMessage.toolResult(toolCall.id(), result));
 
-            ConversationService.appendAssistantMessage(conversation, null, gson.toJson(toolCall));
-            ConversationService.appendToolResult(conversation, toolCall.id(), result);
+            services.Tx.run(() -> {
+                ConversationService.appendAssistantMessage(conversation, null, gson.toJson(toolCall));
+                ConversationService.appendToolResult(conversation, toolCall.id(), result);
+            });
         }
 
         // Continue with streaming after tool results
