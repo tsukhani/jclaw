@@ -106,9 +106,9 @@ public class AgentRunner {
                 var messages = services.Tx.run(() ->
                         buildMessages(assembled.systemPrompt(), conversation));
 
-                // 5. Get provider for this agent (no JPA needed)
-                var agentProvider = ProviderRegistry.get(agent.modelProvider);
-                var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
+                // 5. Get provider for this agent (may trigger JPA via ProviderRegistry refresh)
+                var agentProvider = services.Tx.run(() -> ProviderRegistry.get(agent.modelProvider));
+                var primary = agentProvider != null ? agentProvider : services.Tx.run(ProviderRegistry::getPrimary);
                 if (primary == null) {
                     onError.accept(new RuntimeException("No LLM provider configured"));
                     return;
