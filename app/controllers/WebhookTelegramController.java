@@ -67,16 +67,18 @@ public class WebhookTelegramController extends Controller {
     private static void processMessage(TelegramChannel.TelegramConfig config,
                                         TelegramChannel.InboundMessage message) {
         try {
-            var route = AgentRouter.resolve("telegram", message.chatId());
+            var route = services.Tx.run(() -> AgentRouter.resolve("telegram", message.chatId()));
             if (route == null) {
                 TelegramChannel.sendMessage(config, message.chatId(),
                         "No agent configured for this chat.");
                 return;
             }
 
-            var conversation = ConversationService.findOrCreate(
-                    route.agent(), "telegram", message.chatId());
-            var result = AgentRunner.run(route.agent(), conversation, message.text());
+            var result = services.Tx.run(() -> {
+                var conversation = ConversationService.findOrCreate(
+                        route.agent(), "telegram", message.chatId());
+                return AgentRunner.run(route.agent(), conversation, message.text());
+            });
 
             TelegramChannel.sendMessage(config, message.chatId(), result.response());
 

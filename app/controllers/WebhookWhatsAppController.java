@@ -90,7 +90,7 @@ public class WebhookWhatsAppController extends Controller {
     private static void processMessage(WhatsAppChannel.WhatsAppConfig config,
                                         WhatsAppChannel.InboundMessage message) {
         try {
-            var route = AgentRouter.resolve("whatsapp", message.from());
+            var route = services.Tx.run(() -> AgentRouter.resolve("whatsapp", message.from()));
             if (route == null) {
                 if (config != null) {
                     WhatsAppChannel.sendMessage(config, message.from(),
@@ -99,9 +99,11 @@ public class WebhookWhatsAppController extends Controller {
                 return;
             }
 
-            var conversation = ConversationService.findOrCreate(
-                    route.agent(), "whatsapp", message.from());
-            var result = AgentRunner.run(route.agent(), conversation, message.text());
+            var result = services.Tx.run(() -> {
+                var conversation = ConversationService.findOrCreate(
+                        route.agent(), "whatsapp", message.from());
+                return AgentRunner.run(route.agent(), conversation, message.text());
+            });
 
             if (config != null) {
                 WhatsAppChannel.sendMessage(config, message.from(), result.response());

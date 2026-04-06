@@ -77,16 +77,19 @@ public class AgentRunner {
                                     Consumer<Exception> onError) {
         Thread.ofVirtual().start(() -> {
             try {
-                // 1. Persist user message
-                ConversationService.appendUserMessage(conversation, userMessage);
+                // 1. Persist user message (JPA via Tx for virtual thread)
+                services.Tx.run(() ->
+                        ConversationService.appendUserMessage(conversation, userMessage));
 
-                // 2. Assemble system prompt
-                var assembled = SystemPromptAssembler.assemble(agent, userMessage);
+                // 2. Assemble system prompt (reads JPA + filesystem)
+                var assembled = services.Tx.run(() ->
+                        SystemPromptAssembler.assemble(agent, userMessage));
 
-                // 3. Build messages
-                var messages = buildMessages(assembled.systemPrompt(), conversation);
+                // 3. Build messages from conversation history
+                var messages = services.Tx.run(() ->
+                        buildMessages(assembled.systemPrompt(), conversation));
 
-                // 4. Get provider for this agent
+                // 4. Get provider for this agent (no JPA needed)
                 var agentProvider = ProviderRegistry.get(agent.modelProvider);
                 var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
                 if (primary == null) {
@@ -96,7 +99,7 @@ public class AgentRunner {
 
                 var tools = ToolRegistry.getToolDefs();
 
-                // 5. Stream with tool call handling
+                // 5. Stream with tool call handling (HTTP, no JPA)
                 var accumulator = OpenAiCompatibleClient.chatStreamAccumulate(
                         primary, agent.modelId, messages, tools, onToken);
 
@@ -116,7 +119,9 @@ public class AgentRunner {
                 }
 
                 // Persist and complete
-                ConversationService.appendAssistantMessage(conversation, content, null);
+                var finalContent = content;
+                services.Tx.run(() ->
+                        ConversationService.appendAssistantMessage(conversation, finalContent, null));
                 onComplete.accept(content);
 
             } catch (Exception e) {

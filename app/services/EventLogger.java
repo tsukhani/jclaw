@@ -11,20 +11,28 @@ public class EventLogger {
 
     public static void record(String level, String category, String agentId, String channel,
                               String message, String details) {
-        var event = new EventLog();
-        event.level = level;
-        event.category = category;
-        event.agentId = agentId;
-        event.channel = channel;
-        event.message = message;
-        event.details = details;
-        event.save();
-
+        // Log to SLF4J first (always safe)
         var logMessage = "[%s/%s] %s".formatted(category, level, message);
         switch (level) {
             case "ERROR" -> Logger.error(logMessage);
             case "WARN" -> Logger.warn(logMessage);
             default -> Logger.info(logMessage);
+        }
+
+        // Persist to DB — use Tx.run for virtual thread safety
+        try {
+            Tx.run(() -> {
+                var event = new EventLog();
+                event.level = level;
+                event.category = category;
+                event.agentId = agentId;
+                event.channel = channel;
+                event.message = message;
+                event.details = details;
+                event.save();
+            });
+        } catch (Exception e) {
+            Logger.warn("Failed to persist event log: %s", e.getMessage());
         }
     }
 
