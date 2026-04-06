@@ -1,4 +1,17 @@
 <script setup lang="ts">
+import { marked } from 'marked'
+
+// Configure marked for safe rendering
+marked.setOptions({
+  breaks: true,
+  gfm: true
+})
+
+function renderMarkdown(text: string): string {
+  if (!text) return ''
+  return marked.parse(text) as string
+}
+
 const { data: agents } = await useFetch<any[]>('/api/agents')
 const { data: conversations } = await useFetch<any[]>('/api/conversations?channel=web&limit=50')
 
@@ -114,16 +127,19 @@ function newChat() {
           :class="msg.role === 'user' ? 'ml-12' : 'mr-12'"
         >
           <div class="text-xs text-neutral-600 mb-1">{{ msg.role }}</div>
-          <div
-            :class="msg.role === 'user'
-              ? 'bg-neutral-800 text-neutral-200'
-              : 'bg-neutral-850 text-neutral-300 border border-neutral-800'"
-            class="px-3 py-2 text-sm whitespace-pre-wrap"
+          <!-- User messages: plain text -->
+          <div v-if="msg.role === 'user'"
+               class="bg-neutral-800 text-neutral-200 px-3 py-2 text-sm whitespace-pre-wrap"
           >{{ msg.content }}</div>
+          <!-- Assistant messages: rendered markdown -->
+          <div v-else
+               class="prose-chat text-neutral-300 border border-neutral-800 px-3 py-2 text-sm"
+               v-html="renderMarkdown(msg.content || '')"
+          />
         </div>
         <div v-if="streaming" class="mr-12">
           <div class="text-xs text-neutral-600 mb-1">assistant</div>
-          <div class="bg-neutral-850 text-neutral-300 border border-neutral-800 px-3 py-2 text-sm">
+          <div class="border border-neutral-800 px-3 py-2 text-sm text-neutral-300">
             <span class="animate-pulse">Thinking...</span>
           </div>
         </div>
@@ -151,3 +167,54 @@ function newChat() {
     </div>
   </div>
 </template>
+
+<style>
+/* Markdown rendering styles for chat messages */
+.prose-chat p { margin: 0.5em 0; }
+.prose-chat p:first-child { margin-top: 0; }
+.prose-chat p:last-child { margin-bottom: 0; }
+.prose-chat strong { color: #e5e5e5; font-weight: 600; }
+.prose-chat em { color: #d4d4d4; }
+.prose-chat code {
+  background: rgba(255,255,255,0.06);
+  padding: 0.15em 0.35em;
+  font-size: 0.875em;
+  font-family: ui-monospace, monospace;
+}
+.prose-chat pre {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  padding: 0.75em 1em;
+  margin: 0.5em 0;
+  overflow-x: auto;
+}
+.prose-chat pre code {
+  background: none;
+  padding: 0;
+}
+.prose-chat ul, .prose-chat ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+.prose-chat li { margin: 0.25em 0; }
+.prose-chat h1, .prose-chat h2, .prose-chat h3 {
+  color: #e5e5e5;
+  font-weight: 600;
+  margin: 0.75em 0 0.25em;
+}
+.prose-chat h1 { font-size: 1.1em; }
+.prose-chat h2 { font-size: 1em; }
+.prose-chat h3 { font-size: 0.95em; }
+.prose-chat a { color: #a3a3a3; text-decoration: underline; }
+.prose-chat blockquote {
+  border-left: 2px solid rgba(255,255,255,0.1);
+  padding-left: 0.75em;
+  margin: 0.5em 0;
+  color: #a3a3a3;
+}
+.prose-chat hr {
+  border: none;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  margin: 0.75em 0;
+}
+</style>
