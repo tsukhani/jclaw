@@ -1,0 +1,138 @@
+package memory;
+
+import play.Play;
+import services.EventLogger;
+
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * Neo4j-backed memory store. Stores memories as nodes with relationships.
+ * Uses the neo4j-java-driver for Bolt protocol communication.
+ * <p>
+ * This implementation fulfills the base MemoryStore contract. It can be extended
+ * with Neo4j-specific features (entity extraction, graph traversal, decay) via
+ * additional methods beyond the sealed interface.
+ */
+public class Neo4jMemoryStore implements MemoryStore {
+
+    private final org.neo4j.driver.Driver driver;
+
+    public Neo4jMemoryStore() {
+        var uri = Play.configuration.getProperty("memory.neo4j.uri", "bolt://localhost:7687");
+        var user = Play.configuration.getProperty("memory.neo4j.user", "neo4j");
+        var password = Play.configuration.getProperty("memory.neo4j.password", "");
+
+        this.driver = org.neo4j.driver.GraphDatabase.driver(
+                uri, org.neo4j.driver.AuthTokens.basic(user, password));
+
+        initSchema();
+        EventLogger.info("memory", "Neo4j memory store connected to %s".formatted(uri));
+    }
+
+    private void initSchema() {
+        try (var session = driver.session()) {
+            session.run("""
+                    CREATE INDEX memory_agent_idx IF NOT EXISTS
+                    FOR (m:Memory) ON (m.agentId)
+                    """);
+            session.run("""
+                    CREATE INDEX memory_id_idx IF NOT EXISTS
+                    FOR (m:Memory) ON (m.id)
+                    """);
+        } catch (Exception e) {
+            EventLogger.warn("memory", "Neo4j schema init warning: %s".formatted(e.getMessage()));
+        }
+    }
+
+    @Override
+    public String store(String agentId, String text, String category) {
+        var id = UUID.randomUUID().toString();
+        try (var session = driver.session()) {
+            session.run("""
+                    CREATE (m:Memory {
+                        id: $id,
+                        agentId: $agentId,
+                        text: $text,
+                        category: $category,
+                        createdAt: datetime()
+                    })
+                    """,
+                    Map.of("id", id, "agentId", agentId, "text", text,
+                            "category", category != null ? category : ""));
+        }
+        return id;
+    }
+
+    @Override
+    public List<MemoryEntry> search(String agentId, String query, int limit) {
+        // Full-text search using Neo4j's built-in CONTAINS for base implementation.
+        // A richer implementation would use vector indexes or full-text indexes.
+        try (var session = driver.session()) {
+            var result = session.run("""
+                    MATCH (m:Memory {agentId: $agentId})
+                    WHERE toLower(m.text) CONTAINS toLower($query)
+                    RETURN m.id AS id, m.agentId AS agentId, m.text AS text,
+                           m.category AS category, m.createdAt AS createdAt
+                    ORDER BY m.createdAt DESC
+                    LIMIT $limit
+                    """,
+                    Map.of("agentId", agentId, "query", query, "limit", limit));
+
+            var entries = new ArrayList<MemoryEntry>();
+            while (result.hasNext()) {
+                var record = result.next();
+                entries.add(new MemoryEntry(
+                        record.get("id").asString(),
+                        record.get("agentId").asString(),
+                        record.get("text").asString(),
+                        record.get("category").asString(""),
+                        record.get("createdAt").asZonedDateTime().toInstant()
+                ));
+            }
+            return entries;
+        }
+    }
+
+    @Override
+    public void delete(String id) {
+        try (var session = driver.session()) {
+            session.run("MATCH (m:Memory {id: $id}) DETACH DELETE m", Map.of("id", id));
+        }
+    }
+
+    @Override
+    public List<MemoryEntry> list(String agentId) {
+        try (var session = driver.session()) {
+            var result = session.run("""
+                    MATCH (m:Memory {agentId: $agentId})
+                    RETURN m.id AS id, m.agentId AS agentId, m.text AS text,
+                           m.category AS category, m.createdAt AS createdAt
+                    ORDER BY m.createdAt DESC
+                    """,
+                    Map.of("agentId", agentId));
+
+            var entries = new ArrayList<MemoryEntry>();
+            while (result.hasNext()) {
+                var record = result.next();
+                entries.add(new MemoryEntry(
+                        record.get("id").asString(),
+                        record.get("agentId").asString(),
+                        record.get("text").asString(),
+                        record.get("category").asString(""),
+                        record.get("createdAt").asZonedDateTime().toInstant()
+                ));
+            }
+            return entries;
+        }
+    }
+
+    public void close() {
+        if (driver != null) {
+            driver.close();
+        }
+    }
+}

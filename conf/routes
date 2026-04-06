@@ -12,7 +12,59 @@ GET     /favicon.ico                            404
 GET     /public/                                staticDir:public
 
 # API endpoints for Nuxt frontend
-GET     /api/status                ApiController.status
+GET     /api/status                             ApiController.status
+
+# Auth API
+POST    /api/auth/login                         ApiAuthController.login
+POST    /api/auth/logout                        ApiAuthController.logout
+
+# Tasks API
+GET     /api/tasks                              ApiTasksController.list
+POST    /api/tasks/{id}/cancel                  ApiTasksController.cancel
+POST    /api/tasks/{id}/retry                   ApiTasksController.retry
+
+# Bindings API
+GET     /api/bindings                           ApiBindingsController.list
+POST    /api/bindings                           ApiBindingsController.create
+PUT     /api/bindings/{id}                      ApiBindingsController.update
+DELETE  /api/bindings/{id}                      ApiBindingsController.delete
+
+# Agents API
+GET     /api/agents                             ApiAgentsController.list
+POST    /api/agents                             ApiAgentsController.create
+GET     /api/agents/{id}                        ApiAgentsController.get
+PUT     /api/agents/{id}                        ApiAgentsController.update
+DELETE  /api/agents/{id}                        ApiAgentsController.delete
+GET     /api/agents/{id}/workspace/{filename}   ApiAgentsController.getWorkspaceFile
+PUT     /api/agents/{id}/workspace/{filename}   ApiAgentsController.saveWorkspaceFile
+
+# Config API
+GET     /api/config                             ApiConfigController.list
+POST    /api/config                             ApiConfigController.save
+GET     /api/config/{key}                       ApiConfigController.get
+DELETE  /api/config/{key}                       ApiConfigController.delete
+
+# Chat API
+POST    /api/chat/send                          ApiChatController.send
+GET     /api/chat/stream/{conversationId}       ApiChatController.stream
+
+# Conversations API
+GET     /api/conversations                      ApiChatController.listConversations
+GET     /api/conversations/{id}/messages        ApiChatController.getMessages
+
+# Channels API
+GET     /api/channels                           ApiChannelsController.list
+GET     /api/channels/{channelType}             ApiChannelsController.get
+PUT     /api/channels/{channelType}             ApiChannelsController.save
+
+# Webhooks (no auth — verified by their own mechanisms)
+POST    /api/webhooks/telegram/{secret}         WebhookTelegramController.webhook
+POST    /api/webhooks/slack                     WebhookSlackController.webhook
+GET     /api/webhooks/whatsapp                  WebhookWhatsAppController.verify
+POST    /api/webhooks/whatsapp                  WebhookWhatsAppController.webhook
+
+# Logs API
+GET     /api/logs                               ApiLogsController.list
 
 # Catch all
 *       /{controller}/{action}                  {controller}.{action}

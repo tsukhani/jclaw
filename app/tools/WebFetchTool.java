@@ -1,0 +1,83 @@
+package tools;
+
+import agents.ToolRegistry;
+import com.google.gson.JsonParser;
+import models.Agent;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+
+public class WebFetchTool implements ToolRegistry.Tool {
+
+    private static final HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(10))
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build();
+
+    private static final int MAX_CONTENT_LENGTH = 50_000;
+    private static final int TIMEOUT_SECONDS = 30;
+
+    @Override
+    public String name() { return "web_fetch"; }
+
+    @Override
+    public String description() {
+        return "Fetch the content of a URL and return it as text. Useful for reading web pages, APIs, or documents.";
+    }
+
+    @Override
+    public Map<String, Object> parameters() {
+        return Map.of(
+                "type", "object",
+                "properties", Map.of(
+                        "url", Map.of("type", "string", "description", "The URL to fetch")
+                ),
+                "required", List.of("url")
+        );
+    }
+
+    @Override
+    public String execute(String argsJson, Agent agent) {
+        var args = JsonParser.parseString(argsJson).getAsJsonObject();
+        var url = args.get("url").getAsString();
+
+        try {
+            var request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("User-Agent", "JClaw/1.0")
+                    .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
+                    .GET()
+                    .build();
+
+            var response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() >= 400) {
+                return "Error: HTTP %d fetching %s".formatted(response.statusCode(), url);
+            }
+
+            var contentType = response.headers().firstValue("Content-Type").orElse("text/plain");
+            if (!contentType.contains("text") && !contentType.contains("json")
+                    && !contentType.contains("xml") && !contentType.contains("html")) {
+                return "Non-text content type: %s (size: %d bytes)".formatted(
+                        contentType, response.body().length());
+            }
+
+            var body = response.body();
+            if (body.length() > MAX_CONTENT_LENGTH) {
+                return body.substring(0, MAX_CONTENT_LENGTH) + "\n\n[Truncated: content exceeds %d characters]"
+                        .formatted(MAX_CONTENT_LENGTH);
+            }
+            return body;
+
+        } catch (java.net.http.HttpTimeoutException _) {
+            return "Error: Request timed out after %d seconds fetching %s".formatted(TIMEOUT_SECONDS, url);
+        } catch (Exception e) {
+            return "Error fetching URL: %s".formatted(e.getMessage());
+        }
+    }
+}

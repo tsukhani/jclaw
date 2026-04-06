@@ -1,0 +1,118 @@
+import org.junit.jupiter.api.*;
+import play.test.*;
+import memory.*;
+
+public class MemoryStoreTest extends UnitTest {
+
+    @BeforeEach
+    void setup() {
+        Fixtures.deleteDatabase();
+        MemoryStoreFactory.reset();
+    }
+
+    @Test
+    public void factoryReturnsJpaByDefault() {
+        var store = MemoryStoreFactory.get();
+        assertNotNull(store);
+        assertTrue(store instanceof JpaMemoryStore);
+    }
+
+    @Test
+    public void storeAndList() {
+        var store = MemoryStoreFactory.get();
+        store.store("agent-1", "User prefers dark mode", "preference");
+        store.store("agent-1", "User works at Acme Corp", "fact");
+
+        var all = store.list("agent-1");
+        assertEquals(2, all.size());
+    }
+
+    @Test
+    public void storeAndSearch() {
+        var store = MemoryStoreFactory.get();
+        store.store("agent-1", "User prefers concise responses", "preference");
+        store.store("agent-1", "User lives in Berlin", "fact");
+        store.store("agent-1", "User works on machine learning projects", "fact");
+
+        var results = store.search("agent-1", "concise", 10);
+        assertEquals(1, results.size());
+        assertTrue(results.getFirst().text().contains("concise"));
+    }
+
+    @Test
+    public void searchIsCaseInsensitive() {
+        var store = MemoryStoreFactory.get();
+        store.store("agent-1", "User prefers DARK MODE", "preference");
+
+        var results = store.search("agent-1", "dark mode", 10);
+        assertEquals(1, results.size());
+    }
+
+    @Test
+    public void searchFiltersByAgent() {
+        var store = MemoryStoreFactory.get();
+        store.store("agent-1", "Shared fact", "fact");
+        store.store("agent-2", "Other agent fact", "fact");
+
+        var results1 = store.search("agent-1", "fact", 10);
+        assertEquals(1, results1.size());
+
+        var results2 = store.search("agent-2", "fact", 10);
+        assertEquals(1, results2.size());
+    }
+
+    @Test
+    public void deleteRemovesMemory() {
+        var store = MemoryStoreFactory.get();
+        var id = store.store("agent-1", "Temporary memory", "fact");
+
+        var before = store.list("agent-1");
+        assertEquals(1, before.size());
+
+        store.delete(id);
+
+        var after = store.list("agent-1");
+        assertEquals(0, after.size());
+    }
+
+    @Test
+    public void searchRespectsLimit() {
+        var store = MemoryStoreFactory.get();
+        for (int i = 0; i < 10; i++) {
+            store.store("agent-1", "Memory item %d about testing".formatted(i), "fact");
+        }
+
+        var results = store.search("agent-1", "testing", 3);
+        assertEquals(3, results.size());
+    }
+
+    @Test
+    public void memoryEntryRecordFields() {
+        var store = MemoryStoreFactory.get();
+        var id = store.store("agent-1", "Important fact", "core");
+
+        var all = store.list("agent-1");
+        var entry = all.getFirst();
+        assertEquals(id, entry.id());
+        assertEquals("agent-1", entry.agentId());
+        assertEquals("Important fact", entry.text());
+        assertEquals("core", entry.category());
+        assertNotNull(entry.createdAt());
+    }
+
+    @Test
+    public void listReturnsEmptyForUnknownAgent() {
+        var store = MemoryStoreFactory.get();
+        var results = store.list("nonexistent-agent");
+        assertTrue(results.isEmpty());
+    }
+
+    @Test
+    public void searchReturnsEmptyForNoMatch() {
+        var store = MemoryStoreFactory.get();
+        store.store("agent-1", "Something about cats", "fact");
+
+        var results = store.search("agent-1", "zzzzz_no_match", 10);
+        assertTrue(results.isEmpty());
+    }
+}

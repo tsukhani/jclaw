@@ -3,3 +3,7 @@
 require:
     - play
     - play -> docviewer
+
+# Custom JARs in lib/ directory:
+# - PostgreSQL JDBC driver (production database)
+# - Neo4j Java driver (optional, for memory-neo4j backend)

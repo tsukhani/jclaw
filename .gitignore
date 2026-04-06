@@ -32,6 +32,8 @@ nbproject/
 nbproject/private/
 
 # Build outputs
+dist/
+test-result/
 *.war
 *.ear
 *.zip
