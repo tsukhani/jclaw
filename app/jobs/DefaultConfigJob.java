@@ -1,12 +1,14 @@
 package jobs;
 
+import models.Agent;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
+import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
 
 /**
- * Seeds default runtime configuration on first startup.
+ * Seeds default runtime configuration and default agent on first startup.
  * Only writes values that don't already exist.
  */
 @OnApplicationStart
@@ -14,6 +16,12 @@ public class DefaultConfigJob extends Job<Void> {
 
     @Override
     public void doJob() {
+        seedProviders();
+        seedDefaultAgent();
+        EventLogger.info("system", "Default configuration seeded");
+    }
+
+    private void seedProviders() {
         seedIfAbsent("provider.ollama-cloud.baseUrl", "https://ollama.com/v1");
         seedIfAbsent("provider.ollama-cloud.apiKey", "");
         seedIfAbsent("provider.ollama-cloud.models", """
@@ -28,8 +36,13 @@ public class DefaultConfigJob extends Job<Void> {
                 {"id":"anthropic/claude-sonnet-4-6","name":"Claude Sonnet 4.6","contextWindow":200000,"maxTokens":131072},\
                 {"id":"google/gemini-3-flash-preview","name":"Gemini 3 Flash","contextWindow":1000000,"maxTokens":65536},\
                 {"id":"deepseek/deepseek-v3.2","name":"DeepSeek V3.2","contextWindow":128000,"maxTokens":32768}]""");
+    }
 
-        EventLogger.info("system", "Default provider configuration seeded");
+    private void seedDefaultAgent() {
+        if (Agent.findByName("main") != null) return;
+
+        AgentService.create("main", "openrouter", "openai/gpt-4.1", true);
+        EventLogger.info("agent", "main", null, "Default agent 'main' created");
     }
 
     private void seedIfAbsent(String key, String value) {
