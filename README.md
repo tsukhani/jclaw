@@ -1,9 +1,10 @@
-# 🦞 JClaw - Pure Java-based Enterprise AI Assistant
+# 🦞 JClaw - Java-based Enterprise AI Assistant
 
 ---
 
 <p align="center">
-  <img src="mascot.jpg" height="160" alt="JClaw Mascot">&nbsp;&nbsp;&nbsp;&nbsp;<img src="jclaw-logo.png" height="100" alt="JClaw Logo">
+  <img src="mascot.jpg" height="220" alt="JClaw Mascot" valign="middle">&nbsp;&nbsp;&nbsp;&nbsp;
+  <img src="jclaw-logo.png" height="100" alt="JClaw Logo" valign="middle">
 </p>
 
 <p align="center">
