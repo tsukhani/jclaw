@@ -1,7 +1,7 @@
 # <span style="color: #228B22;">🦞</span> JClaw - Java-based Enterprise AI Assistant
 
 <p align="center">
-  <img src="combined-logo.png" width="675" alt="JClaw Logo">
+  <img src="combined-logo.png" width="650" alt="JClaw Logo">
 </p>
 
 <p align="center">
