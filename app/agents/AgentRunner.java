@@ -83,6 +83,9 @@ public class AgentRunner {
                 // 1. Resolve conversation in its own committed transaction
                 Conversation conversation = services.Tx.run(() -> {
                     if (conversationId != null) return ConversationService.findById(conversationId);
+                    // Web UI: always create a new conversation.
+                    // Messaging channels (Telegram, Slack, etc.): reuse by peer ID.
+                    if ("web".equals(channelType)) return ConversationService.create(agent, channelType, peerId);
                     return ConversationService.findOrCreate(agent, channelType, peerId);
                 });
 

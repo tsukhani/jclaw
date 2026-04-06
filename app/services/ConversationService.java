@@ -14,7 +14,10 @@ public class ConversationService {
     public static Conversation findOrCreate(Agent agent, String channelType, String peerId) {
         var existing = Conversation.findByAgentChannelPeer(agent, channelType, peerId);
         if (existing != null) return existing;
+        return create(agent, channelType, peerId);
+    }
 
+    public static Conversation create(Agent agent, String channelType, String peerId) {
         var convo = new Conversation();
         convo.agent = agent;
         convo.channelType = channelType;
