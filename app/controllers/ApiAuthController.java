@@ -36,7 +36,8 @@ public class ApiAuthController extends Controller {
                 renderJSON(gson.toJson(result));
             } else {
                 EventLogger.warn("auth", "Admin login failed for username: %s".formatted(username));
-                unauthorized("Invalid credentials");
+                response.status = 403;
+                renderJSON("{\"error\":\"Invalid credentials\"}");
             }
         } catch (Exception e) {
             badRequest();

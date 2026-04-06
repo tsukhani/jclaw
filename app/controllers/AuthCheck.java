@@ -20,7 +20,8 @@ public class AuthCheck extends Controller {
 
         var authenticated = session.get("authenticated");
         if (!"true".equals(authenticated)) {
-            unauthorized("Authentication required");
+            response.status = 403;
+            renderJSON("{\"error\":\"Authentication required\"}");
         }
     }
 }

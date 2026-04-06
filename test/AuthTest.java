@@ -23,7 +23,7 @@ public class AuthTest extends FunctionalTest {
                 {"username": "admin", "password": "wrong"}
                 """;
         var response = POST("/api/auth/login", "application/json", body);
-        assertEquals(401, response.status.intValue());
+        assertEquals(403, response.status.intValue());
     }
 
     @Test
@@ -35,7 +35,7 @@ public class AuthTest extends FunctionalTest {
     @Test
     public void protectedEndpointRequiresAuth() {
         var response = GET("/api/config");
-        assertEquals(401, response.status.intValue());
+        assertEquals(403, response.status.intValue());
     }
 
     @Test
@@ -66,6 +66,6 @@ public class AuthTest extends FunctionalTest {
 
         // Now protected endpoint should reject
         var response = GET("/api/config");
-        assertEquals(401, response.status.intValue());
+        assertEquals(403, response.status.intValue());
     }
 }
