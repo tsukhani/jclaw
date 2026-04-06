@@ -3,7 +3,7 @@
 ---
 
 <p align="center">
-  <img src="mascot.jpg" width="320" height="320" alt="JClaw Mascot">&nbsp;&nbsp;<img src="jclaw-logo.png" width="560" height="185" alt="JClaw Logo">
+  <img src="combined-logo.png" width="880" alt="JClaw Logo">
 </p>
 
 <p align="center">
