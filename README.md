@@ -1,8 +1,7 @@
 <h1 align="center">
   <img src="mascot.jpg" width="180" alt="JClaw Mascot">
-  <br><br>
-  <img src="https://img.shields.io/badge/J-228B22?style=for-the-badge&label=&labelColor=228B22" alt="J">
-  <img src="https://img.shields.io/badge/Claw-DC143C?style=for-the-badge&label=&labelColor=DC143C" alt="Claw">
+  <br> <br>
+  <img src="jclaw-logo.png" width="400" alt="JClaw">
   <br>
   <small>Java Automation Platform</small>
 </h1>
