@@ -74,7 +74,7 @@ jclaw/
 
 ### Prerequisites
 
-- Java 21+ (tested with Zulu 25)
+- JDK 25+ (Zulu recommended)
 - Play Framework 1.x (`play` command in PATH)
 - Node.js 20+ (for frontend)
 - pnpm (for frontend package management)
@@ -163,7 +163,7 @@ This is an internal Abundent project. For questions or contributions, ping the t
 
 ## License
 
-Internal use only — Abundent Academy proprietary.
+Internal use only — Abundent proprietary.
 
 ---
 
