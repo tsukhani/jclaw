@@ -19,6 +19,8 @@
   <img src="https://img.shields.io/badge/JDK-25%2B-orange?style=for-the-badge" alt="JDK: 25+">
 </p>
 
+<br>
+
 ## Overview
 
 JClaw is Abundent's take on an AI-powered automation platform — fully implemented in **pure Java** to eliminate runtime dependencies and reduce complexity. Built on a customized [Play Framework 1.x](https://github.com/tsukhani/play1) foundation, it brings together:
