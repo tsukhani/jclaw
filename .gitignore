@@ -16,9 +16,6 @@ precompiled/
 # Claude Code config
 .claude/
 
-# OpenSpec (local workflow artifacts)
-openspec/
-
 # Eclipse/IDE project files
 .classpath
 .project
