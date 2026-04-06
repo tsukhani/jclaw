@@ -1,10 +1,10 @@
-<h1 align="center">
-  <img src="mascot.jpg" width="180" alt="JClaw Mascot">
-  <br> <br>
-  <img src="jclaw-logo.png" width="400" alt="JClaw">
-  <br>
-  <small>Java Automation Platform</small>
-</h1>
+# 🦞 JClaw - Pure Java-based Enterprise AI Assistant
+
+---
+
+<p align="center">
+  <img src="mascot.jpg" height="160" alt="JClaw Mascot">&nbsp;&nbsp;&nbsp;&nbsp;<img src="jclaw-logo.png" height="100" alt="JClaw Logo">
+</p>
 
 <p align="center">
   <strong>JAVA FIRST. NO BLOAT. PURE POWER.</strong>
