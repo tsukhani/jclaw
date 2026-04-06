@@ -156,6 +156,11 @@ public class ApiChatController extends Controller {
             map.put("updatedAt", c.updatedAt.toString());
             var msgCount = Message.count("conversation = ?1", c);
             map.put("messageCount", msgCount);
+            Message firstMsg = Message.find("conversation = ?1 AND role = 'user' ORDER BY createdAt ASC", c).first();
+            var preview = firstMsg != null && firstMsg.content != null
+                    ? firstMsg.content.substring(0, Math.min(firstMsg.content.length(), 60))
+                    : "";
+            map.put("preview", preview);
             return map;
         }).toList();
 

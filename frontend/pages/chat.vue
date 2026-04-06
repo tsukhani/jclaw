@@ -137,7 +137,7 @@ function newChat() {
           :class="selectedConvoId === convo.id ? 'bg-neutral-800 text-white' : 'text-neutral-400'"
           class="w-full text-left px-3 py-2 text-xs hover:bg-neutral-800 transition-colors truncate"
         >
-          {{ convo.agentName }} &middot; {{ new Date(convo.updatedAt).toLocaleDateString() }}
+          {{ convo.preview || convo.agentName }} &middot; {{ new Date(convo.updatedAt).toLocaleDateString() }}
         </button>
       </div>
     </div>
