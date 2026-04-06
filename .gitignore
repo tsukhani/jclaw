@@ -1,0 +1,106 @@
+# -----------------------------------------------------------------------------
+# JClaw - Play Framework 1.x .gitignore
+# -----------------------------------------------------------------------------
+
+# Play Framework runtime files
+tmp/
+logs/
+*.log
+*.pid
+
+# Play precompiled files
+precompiled/
+
+# Eclipse/IDE project files
+.classpath
+.project
+.settings/
+.cache-main
+.cache-tests
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# NetBeans
+nbproject/
+nbproject/private/
+
+# Build outputs
+*.war
+*.ear
+*.zip
+*.tar.gz
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Node.js (for frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Frontend build outputs
+frontend/.nuxt/
+frontend/.output/
+frontend/dist/
+frontend/.cache/
+
+# Environment files (don't commit secrets!)
+conf/application.prod.conf
+conf/application.local.conf
+conf/secrets.conf
+.env
+.env.local
+.env.*.local
+
+# SSL certificates/keys
+certs/
+*.key
+*.pem
+*.crt
+*.p12
+*.jks
+
+# Database files
+*.db
+*.h2.db
+*.mv.db
+*.sql
+*.sqlite
+*.sqlite3
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Play modules (auto-downloaded)
+modules/*/
+!modules/.gitkeep
+
+# Ignore but keep empty directories
+!.gitkeep
+
+# Backup files
+*.bak
+*.swp
+*.swo
+*~
+*.tmp
+
+# Maven/Gradle local
+.mvn/
+.gradle/
+build/
