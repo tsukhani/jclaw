@@ -1,4 +1,4 @@
-# 🦞 JClaw - Java-based Enterprise AI Assistant
+# <span style="color: #228B22;">🦞</span> JClaw - Java-based Enterprise AI Assistant
 
 ---
 
