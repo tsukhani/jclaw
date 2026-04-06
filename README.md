@@ -25,8 +25,6 @@ A lightweight, pure Java implementation combining the best of [OpenClaw](https:/
 
 > 🎯 **Mission**: Powerful automation without the bloat. A lean Java-native alternative for workflow orchestration, job scheduling, and task automation.
 
----
-
 ## Overview
 
 JClaw is Abundent's take on an AI-powered automation platform — fully implemented in **pure Java** to eliminate runtime dependencies and reduce complexity. Built on a customized [Play Framework 1.x](https://github.com/tsukhani/play1) foundation, it brings together:
