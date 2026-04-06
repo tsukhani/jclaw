@@ -89,24 +89,24 @@ public class ApiChatController extends Controller {
                 // onInit — send conversation ID as first SSE event
                 conversation -> {
                     var initEvent = gson.toJson(Map.of("type", "init", "conversationId", conversation.id));
-                    res.writeChunk("data: %s\n\n".formatted(initEvent));
+                    res.writeChunk("data: %s\n\n".formatted(initEvent).getBytes(StandardCharsets.UTF_8));
                 },
                 // onToken
                 token -> {
                     var event = gson.toJson(Map.of("type", "token", "content", token));
-                    res.writeChunk("data: %s\n\n".formatted(event));
+                    res.writeChunk("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
                 },
                 // onComplete
                 content -> {
                     var event = gson.toJson(Map.of("type", "complete", "content", content));
-                    res.writeChunk("data: %s\n\n".formatted(event));
+                    res.writeChunk("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
                     latch.countDown();
                 },
                 // onError
                 error -> {
                     var event = gson.toJson(Map.of("type", "error",
                             "content", "An error occurred: " + error.getMessage()));
-                    res.writeChunk("data: %s\n\n".formatted(event));
+                    res.writeChunk("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
                     EventLogger.error("channel", agent.name, "web",
                             "SSE stream error: %s".formatted(error.getMessage()));
                     latch.countDown();
