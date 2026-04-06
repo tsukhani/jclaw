@@ -5,8 +5,8 @@ import play.libs.F;
 
 /**
  * Transaction helper for running JPA operations from any thread context.
- * On Play request threads, the JPA context already exists — runs directly.
- * On virtual threads (no JPA context), wraps in JPA.withTransaction.
+ * Delegates to JPA.withTransaction which handles both cases: if already inside
+ * a transaction (request thread) it runs directly; otherwise it creates a new one.
  */
 public class Tx {
 
@@ -14,14 +14,6 @@ public class Tx {
      * Run a block that returns a value, ensuring a JPA transaction is active.
      */
     public static <T> T run(F.Function0<T> block) {
-        if (JPA.isInitialized()) {
-            try {
-                return block.apply();
-            } catch (Throwable t) {
-                if (t instanceof RuntimeException re) throw re;
-                throw new RuntimeException(t);
-            }
-        }
         try {
             return JPA.withTransaction("default", false, block);
         } catch (Throwable t) {
