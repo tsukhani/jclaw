@@ -2,9 +2,10 @@
 
 ---
 
-<div align="center" style="display: flex; align-items: center; justify-content: center; gap: 30px;">
-  <img src="mascot.jpg" height="280" alt="JClaw Mascot" style="display: block;">
-  <img src="jclaw-logo.png" height="140" alt="JClaw Logo" style="display: block;">
+<div align="center">
+  <span style="display: inline-block; vertical-align: middle;"><img src="mascot.jpg" height="280" alt="JClaw Mascot"></span>
+  <span style="display: inline-block; width: 30px;"></span>
+  <span style="display: inline-block; vertical-align: middle;"><img src="jclaw-logo.png" height="140" alt="JClaw Logo"></span>
 </div>
 
 <p align="center">
