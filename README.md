@@ -22,7 +22,7 @@
 
 **Abundent's Java-based Automation Platform**
 
-A lightweight, pure Java implementation combining the best of [OpenClaw](https://github.com/openclaw/openclaw) and [JavaClaw](https://github.com/jobrunr/javaclaw), built on Play Framework 1.x.
+A lightweight, pure Java implementation combining the best of [OpenClaw](https://github.com/openclaw/openclaw) and [JavaClaw](https://github.com/jobrunr/javaclaw), built on a modified Play Framework 1.x.
 
 > 🎯 **Mission**: Powerful automation without the bloat. A lean Java-native alternative for workflow orchestration, job scheduling, and task automation.
 
