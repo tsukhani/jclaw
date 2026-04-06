@@ -31,6 +31,13 @@ function scrollToBottom() {
   })
 }
 
+// Filter out tool messages and empty assistant messages (tool call records) from display
+const displayMessages = computed(() =>
+  messages.value.filter(m =>
+    m.role !== 'tool' && !(m.role === 'assistant' && !m.content)
+  )
+)
+
 // Set default agent
 watch(agents, (val) => {
   if (val?.length && !selectedAgentId.value) {
@@ -161,9 +168,8 @@ function newChat() {
       <!-- Messages -->
       <div ref="messagesEl" class="flex-1 overflow-y-auto p-4 space-y-4">
         <div
-          v-for="(msg, i) in messages"
+          v-for="(msg, i) in displayMessages"
           :key="i"
-          v-show="!(streaming && !streamContent && i === messages.length - 1 && msg.role === 'assistant')"
           :class="msg.role === 'user' ? 'ml-12' : 'mr-12'"
         >
           <div class="text-xs text-neutral-600 mb-1">{{ msg.role }}</div>
