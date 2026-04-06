@@ -37,15 +37,21 @@ public class AgentRunner {
         // 3. Build messages list
         var messages = buildMessages(assembled.systemPrompt(), conversation);
 
-        // 4. Get provider config
-        var primary = ProviderRegistry.getPrimary();
-        var secondary = ProviderRegistry.getSecondary();
+        // 4. Get provider config for this agent
+        var agentProvider = ProviderRegistry.get(agent.modelProvider);
+        var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
+        var secondary = ProviderRegistry.listAll().stream()
+                .filter(p -> !p.name().equals(primary != null ? primary.name() : ""))
+                .findFirst().orElse(null);
         if (primary == null) {
             var error = "No LLM provider configured. Add provider config via Settings.";
             EventLogger.error("llm", agent.name, null, error);
             ConversationService.appendAssistantMessage(conversation, error, null);
             return new RunResult(error, conversation);
         }
+
+        EventLogger.info("llm", agent.name, conversation.channelType,
+                "Calling %s / %s".formatted(primary.name(), agent.modelId));
 
         // 5. Get registered tools
         var tools = ToolRegistry.getToolDefs();
@@ -80,8 +86,9 @@ public class AgentRunner {
                 // 3. Build messages
                 var messages = buildMessages(assembled.systemPrompt(), conversation);
 
-                // 4. Get provider
-                var primary = ProviderRegistry.getPrimary();
+                // 4. Get provider for this agent
+                var agentProvider = ProviderRegistry.get(agent.modelProvider);
+                var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
                 if (primary == null) {
                     onError.accept(new RuntimeException("No LLM provider configured"));
                     return;

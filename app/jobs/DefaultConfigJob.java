@@ -41,7 +41,7 @@ public class DefaultConfigJob extends Job<Void> {
     private void seedDefaultAgent() {
         if (Agent.findByName("main") != null) return;
 
-        AgentService.create("main", "openrouter", "openai/gpt-4.1", true);
+        AgentService.create("main", "ollama-cloud", "qwen3.5", true);
         EventLogger.info("agent", "main", null, "Default agent 'main' created");
     }
 
