@@ -3,8 +3,17 @@
 ---
 
 <p align="center">
-  <img src="mascot.jpg" height="220" alt="JClaw Mascot" valign="middle">&nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="jclaw-logo.png" height="100" alt="JClaw Logo" valign="middle">
+  <table>
+    <tr>
+      <td valign="middle">
+        <img src="mascot.jpg" height="260" alt="JClaw Mascot">
+      </td>
+      <td>&nbsp;&nbsp;&nbsp;&nbsp;</td>
+      <td valign="middle">
+        <img src="jclaw-logo.png" height="120" alt="JClaw Logo">
+      </td>
+    </tr>
+  </table>
 </p>
 
 <p align="center">
