@@ -163,7 +163,7 @@ This is an internal Abundent project. For questions or contributions, ping the t
 
 ## License
 
-Internal use only — Abundent proprietary.
+This project is licensed under the [MIT License](LICENSE).
 
 ---
 
