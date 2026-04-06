@@ -161,7 +161,7 @@ play dist
 
 ## Documentation
 
-- [Play Framework 1.x Docs](https://www.playframework.com/documentation/1.11.5/home)
+- [Play Framework 1.x](https://github.com/tsukhani/play1)
 - [OpenClaw Reference](https://docs.openclaw.ai)
 - [Nuxt 3 Docs](https://nuxt.com/docs)
 - [JavaClaw Concepts](https://github.com/jobrunr/javaclaw)
