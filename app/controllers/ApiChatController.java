@@ -77,10 +77,11 @@ public class ApiChatController extends Controller {
                 ? body.get("conversationId").getAsLong() : null;
         String username = session.get("username");
 
-        response.contentType = "text/event-stream";
-        response.setHeader("Cache-Control", "no-cache");
-        response.setHeader("Connection", "keep-alive");
-        response.setHeader("X-Accel-Buffering", "no");
+        var res = Http.Response.current();
+        res.contentType = "text/event-stream";
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("X-Accel-Buffering", "no");
 
         var latch = new CountDownLatch(1);
 
@@ -88,24 +89,24 @@ public class ApiChatController extends Controller {
                 // onInit — send conversation ID as first SSE event
                 conversation -> {
                     var initEvent = gson.toJson(Map.of("type", "init", "conversationId", conversation.id));
-                    response.writeChunk("data: %s\n\n".formatted(initEvent));
+                    res.writeChunk("data: %s\n\n".formatted(initEvent));
                 },
                 // onToken
                 token -> {
                     var event = gson.toJson(Map.of("type", "token", "content", token));
-                    response.writeChunk("data: %s\n\n".formatted(event));
+                    res.writeChunk("data: %s\n\n".formatted(event));
                 },
                 // onComplete
                 content -> {
                     var event = gson.toJson(Map.of("type", "complete", "content", content));
-                    response.writeChunk("data: %s\n\n".formatted(event));
+                    res.writeChunk("data: %s\n\n".formatted(event));
                     latch.countDown();
                 },
                 // onError
                 error -> {
                     var event = gson.toJson(Map.of("type", "error",
                             "content", "An error occurred: " + error.getMessage()));
-                    response.writeChunk("data: %s\n\n".formatted(event));
+                    res.writeChunk("data: %s\n\n".formatted(event));
                     EventLogger.error("channel", agent.name, "web",
                             "SSE stream error: %s".formatted(error.getMessage()));
                     latch.countDown();
