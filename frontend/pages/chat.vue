@@ -13,7 +13,7 @@ function renderMarkdown(text: string): string {
 }
 
 const { data: agents } = await useFetch<any[]>('/api/agents')
-const { data: conversations } = await useFetch<any[]>('/api/conversations?channel=web&limit=50')
+const { data: conversations, refresh: refreshConversations } = await useFetch<any[]>('/api/conversations?channel=web&limit=50')
 
 const selectedAgentId = ref<number | null>(null)
 const selectedConvoId = ref<number | null>(null)
@@ -111,6 +111,7 @@ async function sendMessage() {
     messages.value[assistantIdx].content = 'Error: ' + (e.message || 'Failed to get response')
   } finally {
     streaming.value = false
+    refreshConversations()
   }
 }
 
