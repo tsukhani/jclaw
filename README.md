@@ -3,9 +3,9 @@
 ---
 
 <div align="center">
-  <span style="display: inline-block; vertical-align: top;"><img src="mascot.jpg" width="320" height="320" alt="JClaw Mascot"></span>
+  <span style="display: inline-block; vertical-align: middle;"><img src="mascot.jpg" width="320" height="320" alt="JClaw Mascot"></span>
   <span style="display: inline-block; width: 30px;"></span>
-  <span style="display: inline-block; vertical-align: top; margin-top: -60px;"><img src="jclaw-logo.png" height="140" alt="JClaw Logo"></span>
+  <span style="display: inline-block; vertical-align: middle; margin-bottom: 30px;"><img src="jclaw-logo.png" height="140" alt="JClaw Logo"></span>
 </div>
 
 <p align="center">
