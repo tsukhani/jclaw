@@ -1,17 +1,11 @@
-# 🦀 JClaw — Java Automation Platform
-
-<p align="center">
-  
-```
-    ___  ________      _________.__                 
-   |  | |\_____  \    /   _____/|  |  __ __  _______
-   |  |  /  / \  |\   \_____  \ |  | |  |  |/  ___/
-   |  |_|  /  /_ \  |  /         \|  |_|  |  / /  (   \___  
-   |____/__/_______  //_______  /|____/__/  \__ \
-                   \/         \/              \/
-```
-
-</p>
+<h1 align="center">
+  <img src="mascot.jpg" width="180" alt="JClaw Mascot">
+  <br><br>
+  <img src="https://img.shields.io/badge/J-228B22?style=for-the-badge&label=&labelColor=228B22" alt="J">
+  <img src="https://img.shields.io/badge/Claw-DC143C?style=for-the-badge&label=&labelColor=DC143C" alt="Claw">
+  <br>
+  <small>Java Automation Platform</small>
+</h1>
 
 <p align="center">
   <strong>JAVA FIRST. NO BLOAT. PURE POWER.</strong>
