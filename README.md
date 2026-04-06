@@ -23,8 +23,8 @@
 
 JClaw is Abundent's take on an AI-powered automation platform — fully implemented in **pure Java** to eliminate runtime dependencies and reduce complexity. Built on a customized [Play Framework 1.x](https://github.com/tsukhani/play1) foundation, it brings together:
 
-- **OpenClaw's** agent orchestration, memory system, and conversational AI patterns
-- **JavaClaw's** job scheduling, background task processing, and distributed execution
+- **[OpenClaw](https://github.com/openclaw/openclaw)** agent orchestration, memory system, and conversational AI patterns
+- **[JavaClaw](https://github.com/jobrunr/javaclaw)** job scheduling, background task processing, and distributed execution
 
 The result: A leaner, faster, more maintainable platform for building AI agents and automation workflows.
 
