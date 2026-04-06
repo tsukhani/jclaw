@@ -2,6 +2,8 @@
 # JClaw - Play Framework 1.x .gitignore
 # -----------------------------------------------------------------------------
 
+.mcp.json
+
 # Play Framework runtime files
 tmp/
 logs/
