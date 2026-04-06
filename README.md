@@ -18,8 +18,6 @@
   <img src="https://img.shields.io/badge/JDK-25%2B-orange?style=for-the-badge" alt="JDK: 25+">
 </p>
 
----
-
 **Abundent's Java-based Automation Platform**
 
 A lightweight, pure Java implementation combining the best of [OpenClaw](https://github.com/openclaw/openclaw) and [JavaClaw](https://github.com/jobrunr/javaclaw), built on a customized Play Framework 1.x.
