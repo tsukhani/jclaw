@@ -46,31 +46,57 @@ async function sendMessage() {
   streaming.value = true
   streamContent.value = ''
 
+  // Add placeholder for streaming response
+  const assistantIdx = messages.value.length
+  messages.value.push({ role: 'assistant', content: '', createdAt: new Date().toISOString() })
+
   try {
-    const res = await $fetch<any>('/api/chat/send', {
+    const res = await fetch('/api/chat/stream', {
       method: 'POST',
-      body: {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         agentId: selectedAgentId.value,
         conversationId: selectedConvoId.value,
         message: text
+      })
+    })
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    if (!res.body) throw new Error('No response body')
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        try {
+          const event = JSON.parse(line.slice(6))
+          if (event.type === 'init' && event.conversationId) {
+            selectedConvoId.value = event.conversationId
+          } else if (event.type === 'token') {
+            streamContent.value += event.content
+            messages.value[assistantIdx].content = streamContent.value
+          } else if (event.type === 'complete') {
+            messages.value[assistantIdx].content = event.content || streamContent.value
+          } else if (event.type === 'error') {
+            messages.value[assistantIdx].content = event.content
+          }
+        } catch {
+          // Skip malformed events
+        }
       }
-    })
-
-    if (res.conversationId && !selectedConvoId.value) {
-      selectedConvoId.value = res.conversationId
     }
-
-    messages.value.push({
-      role: 'assistant',
-      content: res.response,
-      createdAt: new Date().toISOString()
-    })
   } catch (e: any) {
-    messages.value.push({
-      role: 'assistant',
-      content: 'Error: ' + (e.message || 'Failed to get response'),
-      createdAt: new Date().toISOString()
-    })
+    messages.value[assistantIdx].content = 'Error: ' + (e.message || 'Failed to get response')
   } finally {
     streaming.value = false
   }
@@ -137,9 +163,9 @@ function newChat() {
                v-html="renderMarkdown(msg.content || '')"
           />
         </div>
-        <div v-if="streaming" class="mr-12">
+        <div v-if="streaming && !streamContent" class="mr-12">
           <div class="text-xs text-neutral-600 mb-1">assistant</div>
-          <div class="border border-neutral-800 px-3 py-2 text-sm text-neutral-300">
+          <div class="border border-neutral-800 px-3 py-2 text-sm text-neutral-500">
             <span class="animate-pulse">Thinking...</span>
           </div>
         </div>

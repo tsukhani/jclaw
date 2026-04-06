@@ -17,6 +17,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 
 @With(AuthCheck.class)
 public class ApiChatController extends Controller {
@@ -24,8 +25,7 @@ public class ApiChatController extends Controller {
     private static final Gson gson = new Gson();
 
     /**
-     * POST /api/chat/send — Send a message and get a response.
-     * Body: { agentId, conversationId (optional), message }
+     * POST /api/chat/send — Send a message and get a synchronous response.
      */
     public static void send() {
         var body = readJsonBody();
@@ -35,9 +35,7 @@ public class ApiChatController extends Controller {
 
         var agentId = body.get("agentId").getAsLong();
         Agent agent = Agent.findById(agentId);
-        if (agent == null) {
-            notFound();
-        }
+        if (agent == null) notFound();
 
         var messageText = body.get("message").getAsString();
 
@@ -51,47 +49,55 @@ public class ApiChatController extends Controller {
 
         var result = AgentRunner.run(agent, conversation, messageText);
 
-        var response = new HashMap<String, Object>();
-        response.put("conversationId", conversation.id);
-        response.put("response", result.response());
-        response.put("agentId", agent.id);
-        response.put("agentName", agent.name);
-        renderJSON(gson.toJson(response));
+        var resp = new HashMap<String, Object>();
+        resp.put("conversationId", conversation.id);
+        resp.put("response", result.response());
+        resp.put("agentId", agent.id);
+        resp.put("agentName", agent.name);
+        renderJSON(gson.toJson(resp));
     }
 
     /**
-     * GET /api/chat/stream/{conversationId} — SSE streaming endpoint.
-     * Streams LLM response tokens as Server-Sent Events.
+     * POST /api/chat/stream — Send a message and stream the response as SSE.
+     * Body: { agentId, conversationId (optional), message }
      */
-    public static void stream(Long conversationId) {
-        Conversation conversation = Conversation.findById(conversationId);
-        if (conversation == null) notFound();
-
-        // Get the latest user message to process
-        var messages = ConversationService.loadRecentMessages(conversation);
-        if (messages.isEmpty()) {
-            notFound();
+    public static void streamChat() {
+        var body = readJsonBody();
+        if (body == null || !body.has("message") || !body.has("agentId")) {
+            badRequest();
         }
-        var lastMsg = messages.getLast();
-        if (!"user".equals(lastMsg.role)) {
-            // No pending user message to respond to
-            response.contentType = "text/event-stream";
-            response.setHeader("Cache-Control", "no-cache");
-            response.setHeader("Connection", "keep-alive");
-            renderText("data: {\"type\":\"complete\",\"content\":\"\"}\n\n");
-            return;
+
+        var agentId = body.get("agentId").getAsLong();
+        Agent agent = Agent.findById(agentId);
+        if (agent == null) notFound();
+
+        var messageText = body.get("message").getAsString();
+
+        Conversation conversation;
+        if (body.has("conversationId") && !body.get("conversationId").isJsonNull()) {
+            conversation = ConversationService.findById(body.get("conversationId").getAsLong());
+            if (conversation == null) notFound();
+        } else {
+            conversation = ConversationService.findOrCreate(agent, "web", session.get("username"));
         }
 
         response.contentType = "text/event-stream";
         response.setHeader("Cache-Control", "no-cache");
         response.setHeader("Connection", "keep-alive");
-        response.setHeader("X-Accel-Buffering", "no"); // Disable nginx buffering
+        response.setHeader("X-Accel-Buffering", "no");
 
-        var agent = conversation.agent;
         var out = response.out;
 
-        // Stream using AgentRunner
-        AgentRunner.runStreaming(agent, conversation, lastMsg.content,
+        // Send conversation ID immediately so frontend knows which conversation this is
+        try {
+            var initEvent = gson.toJson(Map.of("type", "init", "conversationId", conversation.id));
+            out.write("data: %s\n\n".formatted(initEvent).getBytes(StandardCharsets.UTF_8));
+            out.flush();
+        } catch (Exception _) { return; }
+
+        var latch = new CountDownLatch(1);
+
+        AgentRunner.runStreaming(agent, conversation, messageText,
                 // onToken
                 token -> {
                     try {
@@ -99,7 +105,7 @@ public class ApiChatController extends Controller {
                         out.write("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
                         out.flush();
                     } catch (Exception _) {
-                        // Client disconnected
+                        latch.countDown();
                     }
                 },
                 // onComplete
@@ -109,6 +115,7 @@ public class ApiChatController extends Controller {
                         out.write("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
                         out.flush();
                     } catch (Exception _) {}
+                    latch.countDown();
                 },
                 // onError
                 error -> {
@@ -120,13 +127,12 @@ public class ApiChatController extends Controller {
                     } catch (Exception _) {}
                     EventLogger.error("channel", agent.name, "web",
                             "SSE stream error: %s".formatted(error.getMessage()));
+                    latch.countDown();
                 }
         );
 
-        // Keep connection open until streaming completes
-        // The virtual thread in AgentRunner handles the lifecycle
         try {
-            Thread.sleep(120_000); // Max 2 min SSE connection
+            latch.await();
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
@@ -166,7 +172,6 @@ public class ApiChatController extends Controller {
             map.put("peerId", c.peerId);
             map.put("createdAt", c.createdAt.toString());
             map.put("updatedAt", c.updatedAt.toString());
-            // Message count via query
             var msgCount = Message.count("conversation = ?1", c);
             map.put("messageCount", msgCount);
             return map;

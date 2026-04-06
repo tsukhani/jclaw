@@ -46,7 +46,7 @@ DELETE  /api/config/{key}                       ApiConfigController.delete
 
 # Chat API
 POST    /api/chat/send                          ApiChatController.send
-GET     /api/chat/stream/{conversationId}       ApiChatController.stream
+POST    /api/chat/stream                        ApiChatController.streamChat
 
 # Conversations API
 GET     /api/conversations                      ApiChatController.listConversations
