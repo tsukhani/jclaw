@@ -4,7 +4,7 @@
 
 <div align="center" style="display: flex; justify-content: center; gap: 30px;">
   <img src="mascot.jpg" width="320" height="320" alt="JClaw Mascot">
-  <img src="jclaw-logo.png" alt="JClaw Logo">
+  <img src="jclaw-logo.png" height="320" alt="JClaw Logo">
 </div>
 
 <p align="center">
