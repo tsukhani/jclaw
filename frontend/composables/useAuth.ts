@@ -1,10 +1,10 @@
-const authenticated = useState('auth:authenticated', () => false)
-const username = useState<string | null>('auth:username', () => null)
-
 export function useAuth() {
+  const authenticated = useState('auth:authenticated', () => false)
+  const username = useState<string | null>('auth:username', () => null)
+
   async function login(user: string, pass: string): Promise<boolean> {
     try {
-      const result = await $fetch<any>('/api/auth/login', {
+      await $fetch<any>('/api/auth/login', {
         method: 'POST',
         body: { username: user, password: pass }
       })
@@ -29,7 +29,6 @@ export function useAuth() {
 
   async function checkAuth(): Promise<boolean> {
     try {
-      // Hit a protected endpoint to verify session
       await $fetch('/api/config')
       authenticated.value = true
       return true
