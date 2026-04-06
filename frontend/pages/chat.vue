@@ -21,6 +21,15 @@ const messages = ref<any[]>([])
 const input = ref('')
 const streaming = ref(false)
 const streamContent = ref('')
+const messagesEl = ref<HTMLElement | null>(null)
+
+function scrollToBottom() {
+  nextTick(() => {
+    if (messagesEl.value) {
+      messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+    }
+  })
+}
 
 // Set default agent
 watch(agents, (val) => {
@@ -34,6 +43,7 @@ async function loadConversation(id: number) {
   selectedConvoId.value = id
   const { data } = await useFetch<any[]>(`/api/conversations/${id}/messages`)
   messages.value = data.value ?? []
+  scrollToBottom()
 }
 
 async function sendMessage() {
@@ -42,6 +52,7 @@ async function sendMessage() {
   const text = input.value.trim()
   input.value = ''
   messages.value.push({ role: 'user', content: text, createdAt: new Date().toISOString() })
+  scrollToBottom()
 
   streaming.value = true
   streamContent.value = ''
@@ -85,6 +96,7 @@ async function sendMessage() {
           } else if (event.type === 'token') {
             streamContent.value += event.content
             messages.value[assistantIdx].content = streamContent.value
+            scrollToBottom()
           } else if (event.type === 'complete') {
             messages.value[assistantIdx].content = event.content || streamContent.value
           } else if (event.type === 'error') {
@@ -146,7 +158,7 @@ function newChat() {
       </div>
 
       <!-- Messages -->
-      <div class="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref="messagesEl" class="flex-1 overflow-y-auto p-4 space-y-4">
         <div
           v-for="(msg, i) in messages"
           :key="i"
