@@ -131,11 +131,11 @@ public class OpenAiCompatibleClient {
                     accumulator.toolCalls = toolCallAccumulator.values().stream()
                             .map(ToolCallBuilder::build)
                             .toList();
-                    accumulator.complete = true;
+                    accumulator.markComplete();
                 },
                 e -> {
                     accumulator.error = e;
-                    accumulator.complete = true;
+                    accumulator.markComplete();
                 });
 
         return accumulator;
@@ -346,11 +346,15 @@ public class OpenAiCompatibleClient {
         public volatile String finishReason;
         public volatile boolean complete = false;
         public volatile Exception error;
+        private final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+
+        void markComplete() {
+            complete = true;
+            latch.countDown();
+        }
 
         public void awaitCompletion() throws InterruptedException {
-            while (!complete) {
-                Thread.sleep(10);
-            }
+            latch.await();
         }
     }
 

@@ -82,45 +82,30 @@ public class ApiChatController extends Controller {
         response.setHeader("Connection", "keep-alive");
         response.setHeader("X-Accel-Buffering", "no");
 
-        var out = response.out;
         var latch = new CountDownLatch(1);
 
         AgentRunner.runStreaming(agent, conversationId, "web", username, messageText,
                 // onInit — send conversation ID as first SSE event
                 conversation -> {
-                    try {
-                        var initEvent = gson.toJson(Map.of("type", "init", "conversationId", conversation.id));
-                        out.write("data: %s\n\n".formatted(initEvent).getBytes(StandardCharsets.UTF_8));
-                        out.flush();
-                    } catch (Exception _) {}
+                    var initEvent = gson.toJson(Map.of("type", "init", "conversationId", conversation.id));
+                    response.writeChunk("data: %s\n\n".formatted(initEvent));
                 },
                 // onToken
                 token -> {
-                    try {
-                        var event = gson.toJson(Map.of("type", "token", "content", token));
-                        out.write("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
-                        out.flush();
-                    } catch (Exception _) {
-                        latch.countDown();
-                    }
+                    var event = gson.toJson(Map.of("type", "token", "content", token));
+                    response.writeChunk("data: %s\n\n".formatted(event));
                 },
                 // onComplete
                 content -> {
-                    try {
-                        var event = gson.toJson(Map.of("type", "complete", "content", content));
-                        out.write("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
-                        out.flush();
-                    } catch (Exception _) {}
+                    var event = gson.toJson(Map.of("type", "complete", "content", content));
+                    response.writeChunk("data: %s\n\n".formatted(event));
                     latch.countDown();
                 },
                 // onError
                 error -> {
-                    try {
-                        var event = gson.toJson(Map.of("type", "error",
-                                "content", "An error occurred: " + error.getMessage()));
-                        out.write("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
-                        out.flush();
-                    } catch (Exception _) {}
+                    var event = gson.toJson(Map.of("type", "error",
+                            "content", "An error occurred: " + error.getMessage()));
+                    response.writeChunk("data: %s\n\n".formatted(event));
                     EventLogger.error("channel", agent.name, "web",
                             "SSE stream error: %s".formatted(error.getMessage()));
                     latch.countDown();
