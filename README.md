@@ -2,19 +2,10 @@
 
 ---
 
-<p align="center">
-  <table>
-    <tr>
-      <td valign="middle">
-        <img src="mascot.jpg" height="260" alt="JClaw Mascot">
-      </td>
-      <td>&nbsp;&nbsp;&nbsp;&nbsp;</td>
-      <td valign="middle">
-        <img src="jclaw-logo.png" height="120" alt="JClaw Logo">
-      </td>
-    </tr>
-  </table>
-</p>
+<div align="center" style="display: flex; align-items: center; justify-content: center; gap: 30px;">
+  <img src="mascot.jpg" height="280" alt="JClaw Mascot" style="display: block;">
+  <img src="jclaw-logo.png" height="140" alt="JClaw Logo" style="display: block;">
+</div>
 
 <p align="center">
   <strong>JAVA FIRST. NO BLOAT. PURE POWER.</strong>
