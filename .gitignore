@@ -13,6 +13,9 @@ logs/
 # Play precompiled files
 precompiled/
 
+# Claude Code config
+.claude/
+
 # Eclipse/IDE project files
 .classpath
 .project
