@@ -150,6 +150,7 @@ function newChat() {
         <div
           v-for="(msg, i) in messages"
           :key="i"
+          v-show="!(streaming && !streamContent && i === messages.length - 1 && msg.role === 'assistant')"
           :class="msg.role === 'user' ? 'ml-12' : 'mr-12'"
         >
           <div class="text-xs text-neutral-600 mb-1">{{ msg.role }}</div>
