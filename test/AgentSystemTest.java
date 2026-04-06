@@ -12,16 +12,21 @@ import java.nio.file.Path;
 
 public class AgentSystemTest extends UnitTest {
 
+    private static final String[] TEST_AGENTS = {
+            "test-agent", "ws-agent", "missing-agent", "enabled-1", "disabled-1",
+            "skill-agent", "xml-agent", "convo-agent", "msg-agent", "prompt-agent",
+            "minimal-agent", "no-skills"
+    };
+
     @BeforeEach
     void setup() {
         Fixtures.deleteDatabase();
-        // Clean workspace for tests
-        deleteDir(AgentService.workspaceRoot());
+        cleanupTestAgents();
     }
 
     @AfterAll
     static void cleanup() {
-        deleteDir(AgentService.workspaceRoot());
+        cleanupTestAgents();
     }
 
     // --- AgentService tests ---
@@ -188,6 +193,12 @@ public class AgentSystemTest extends UnitTest {
     }
 
     // --- Helpers ---
+
+    private static void cleanupTestAgents() {
+        for (var name : TEST_AGENTS) {
+            deleteDir(AgentService.workspacePath(name));
+        }
+    }
 
     private static void deleteDir(Path dir) {
         if (!Files.exists(dir)) return;

@@ -14,10 +14,15 @@ import java.nio.file.Files;
  */
 public class IntegrationTest extends UnitTest {
 
+    private static final String[] TEST_AGENTS = {
+            "telegram-bot", "slack-bot", "wa-bot", "web-agent", "tool-agent",
+            "memory-agent", "skill-agent", "test-main", "test-support"
+    };
+
     @BeforeEach
     void setup() {
         Fixtures.deleteDatabase();
-        deleteWorkspace();
+        cleanupTestAgents();
         ConfigService.clearCache();
         ToolRegistry.clear();
         new jobs.ToolRegistrationJob().doJob();
@@ -25,7 +30,7 @@ public class IntegrationTest extends UnitTest {
 
     @AfterAll
     static void cleanup() {
-        deleteWorkspace();
+        cleanupTestAgents();
     }
 
     // --- Full pipeline: webhook → routing → agent → conversation ---
@@ -234,8 +239,8 @@ public class IntegrationTest extends UnitTest {
 
     @Test
     public void multiAgentRoutingFullPipeline() {
-        var mainAgent = AgentService.create("main", "openrouter", "gpt-4.1", true);
-        var supportAgent = AgentService.create("support", "ollama-cloud", "qwen3.5", false);
+        var mainAgent = AgentService.create("test-main", "openrouter", "gpt-4.1", true);
+        var supportAgent = AgentService.create("test-support", "ollama-cloud", "qwen3.5", false);
 
         // Bind support agent to specific Telegram user
         var binding = new AgentBinding();
@@ -247,21 +252,21 @@ public class IntegrationTest extends UnitTest {
         // VIP user routes to support
         var vipRoute = AgentRouter.resolve("telegram", "VIP_USER");
         assertNotNull(vipRoute);
-        assertEquals("support", vipRoute.agent().name);
+        assertEquals("test-support", vipRoute.agent().name);
         assertEquals("peer", vipRoute.matchedBy());
 
         // Regular user routes to default
         var regularRoute = AgentRouter.resolve("telegram", "REGULAR_USER");
         assertNotNull(regularRoute);
-        assertEquals("main", regularRoute.agent().name);
+        assertEquals("test-main", regularRoute.agent().name);
         assertEquals("default", regularRoute.matchedBy());
 
         // Each gets their own conversation
         var vipConvo = ConversationService.findOrCreate(vipRoute.agent(), "telegram", "VIP_USER");
         var regularConvo = ConversationService.findOrCreate(regularRoute.agent(), "telegram", "REGULAR_USER");
         assertNotEquals(vipConvo.id, regularConvo.id);
-        assertEquals("support", vipConvo.agent.name);
-        assertEquals("main", regularConvo.agent.name);
+        assertEquals("test-support", vipConvo.agent.name);
+        assertEquals("test-main", regularConvo.agent.name);
     }
 
     // --- Event logging across pipeline ---
@@ -282,8 +287,13 @@ public class IntegrationTest extends UnitTest {
 
     // --- Helpers ---
 
-    private static void deleteWorkspace() {
-        var dir = AgentService.workspaceRoot();
+    private static void cleanupTestAgents() {
+        for (var name : TEST_AGENTS) {
+            deleteDir(AgentService.workspacePath(name));
+        }
+    }
+
+    private static void deleteDir(java.nio.file.Path dir) {
         if (!Files.exists(dir)) return;
         try (var walk = Files.walk(dir)) {
             walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {

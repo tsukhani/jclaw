@@ -7,6 +7,9 @@ import services.AgentService;
 import tools.*;
 
 import java.io.IOException;
+import java.nio.file.Path;
+
+import java.io.IOException;
 import java.nio.file.Files;
 
 public class ToolSystemTest extends UnitTest {
@@ -16,7 +19,7 @@ public class ToolSystemTest extends UnitTest {
     @BeforeEach
     void setup() {
         Fixtures.deleteDatabase();
-        deleteWorkspace();
+        cleanupTestAgent();
         ToolRegistry.clear();
         ToolRegistry.register(new TaskTool());
         ToolRegistry.register(new CheckListTool());
@@ -27,8 +30,8 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @AfterAll
-    static void cleanup() {
-        deleteWorkspace();
+    static void cleanupTestAgent() {
+        deleteDir(AgentService.workspacePath("tool-test-agent"));
     }
 
     // --- ToolRegistry ---
@@ -207,8 +210,7 @@ public class ToolSystemTest extends UnitTest {
 
     // --- Helpers ---
 
-    private static void deleteWorkspace() {
-        var dir = AgentService.workspaceRoot();
+    private static void deleteDir(Path dir) {
         if (!Files.exists(dir)) return;
         try (var walk = Files.walk(dir)) {
             walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {

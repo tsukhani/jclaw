@@ -16,13 +16,13 @@ public class WebChatTest extends UnitTest {
     @BeforeEach
     void setup() {
         Fixtures.deleteDatabase();
-        deleteWorkspace();
+        cleanupTestAgent();
         agent = AgentService.create("chat-agent", "openrouter", "gpt-4.1", true);
     }
 
     @AfterAll
-    static void cleanup() {
-        deleteWorkspace();
+    static void cleanupTestAgent() {
+        deleteDir(AgentService.workspacePath("chat-agent"));
     }
 
     @Test
@@ -94,8 +94,7 @@ public class WebChatTest extends UnitTest {
         assertEquals(3, count);
     }
 
-    private static void deleteWorkspace() {
-        var dir = AgentService.workspaceRoot();
+    private static void deleteDir(java.nio.file.Path dir) {
         if (!Files.exists(dir)) return;
         try (var walk = Files.walk(dir)) {
             walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
