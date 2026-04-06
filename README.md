@@ -2,12 +2,10 @@
 
 ---
 
-<table align="center" cellpadding="20">
-  <tr valign="middle">
-    <td><img src="mascot.jpg" width="320" height="320" alt="JClaw Mascot"></td>
-    <td><img src="jclaw-logo.png" height="140" alt="JClaw Logo"></td>
-  </tr>
-</table>
+<div align="center" style="display: flex; justify-content: center; gap: 30px;">
+  <img src="mascot.jpg" width="320" height="320" alt="JClaw Mascot">
+  <img src="jclaw-logo.png" height="140" alt="JClaw Logo" style="margin-bottom: 80px;">
+</div>
 
 <p align="center">
   <strong>JAVA FIRST. NO BLOAT. PURE POWER.</strong>
