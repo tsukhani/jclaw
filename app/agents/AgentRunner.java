@@ -80,13 +80,20 @@ public class AgentRunner {
                                     Consumer<Exception> onError) {
         Thread.ofVirtual().start(() -> {
             try {
-                // 1. Resolve conversation in its own committed transaction
+                // 1. Resolve conversation and persist user message in one transaction
                 Conversation conversation = services.Tx.run(() -> {
-                    if (conversationId != null) return ConversationService.findById(conversationId);
-                    // Web UI: always create a new conversation.
-                    // Messaging channels (Telegram, Slack, etc.): reuse by peer ID.
-                    if ("web".equals(channelType)) return ConversationService.create(agent, channelType, peerId);
-                    return ConversationService.findOrCreate(agent, channelType, peerId);
+                    Conversation convo;
+                    if (conversationId != null) {
+                        convo = ConversationService.findById(conversationId);
+                    } else if ("web".equals(channelType)) {
+                        convo = ConversationService.create(agent, channelType, peerId);
+                    } else {
+                        convo = ConversationService.findOrCreate(agent, channelType, peerId);
+                    }
+                    if (convo != null) {
+                        ConversationService.appendUserMessage(convo, userMessage);
+                    }
+                    return convo;
                 });
 
                 if (conversation == null) {
@@ -96,10 +103,6 @@ public class AgentRunner {
 
                 // Notify caller (e.g., send SSE init event with conversation ID)
                 onInit.accept(conversation);
-
-                // 2. Persist user message
-                services.Tx.run(() ->
-                        ConversationService.appendUserMessage(conversation, userMessage));
 
                 // 3. Assemble system prompt (reads JPA + filesystem)
                 var assembled = services.Tx.run(() ->
