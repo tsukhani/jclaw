@@ -82,11 +82,9 @@ public class WebhookSlackController extends Controller {
                 return;
             }
 
-            var result = services.Tx.run(() -> {
-                var conversation = ConversationService.findOrCreate(
-                        route.agent(), "slack", message.channelId());
-                return AgentRunner.run(route.agent(), conversation, message.text());
-            });
+            var conversation = services.Tx.run(() ->
+                    ConversationService.findOrCreate(route.agent(), "slack", message.channelId()));
+            var result = AgentRunner.run(route.agent(), conversation, message.text());
 
             SlackChannel.sendMessage(config, message.channelId(), result.response());
 

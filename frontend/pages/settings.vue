@@ -9,25 +9,35 @@ const editValue = ref('')
 async function saveNew() {
   if (!newKey.value.trim()) return
   saving.value = true
-  await $fetch('/api/config', {
-    method: 'POST',
-    body: { key: newKey.value, value: newValue.value }
-  })
-  saving.value = false
-  newKey.value = ''
-  newValue.value = ''
-  refresh()
+  try {
+    await $fetch('/api/config', {
+      method: 'POST',
+      body: { key: newKey.value, value: newValue.value }
+    })
+    newKey.value = ''
+    newValue.value = ''
+    refresh()
+  } catch (e) {
+    console.error('Failed to save config:', e)
+  } finally {
+    saving.value = false
+  }
 }
 
 async function updateEntry(key: string) {
   saving.value = true
-  await $fetch('/api/config', {
-    method: 'POST',
-    body: { key, value: editValue.value }
-  })
-  saving.value = false
-  editingKey.value = null
-  refresh()
+  try {
+    await $fetch('/api/config', {
+      method: 'POST',
+      body: { key, value: editValue.value }
+    })
+    editingKey.value = null
+    refresh()
+  } catch (e) {
+    console.error('Failed to update config:', e)
+  } finally {
+    saving.value = false
+  }
 }
 
 async function deleteEntry(key: string) {
@@ -104,7 +114,7 @@ const providerEntries = computed(() => {
         <h2 class="text-sm font-medium text-neutral-300">Configuration</h2>
       </div>
       <div class="divide-y divide-neutral-800/50">
-        <div v-for="entry in configData?.entries" :key="entry.key"
+        <div v-for="entry in providerEntries.other" :key="entry.key"
              class="px-4 py-2.5 flex items-center gap-3">
           <span class="text-xs font-mono text-neutral-400 w-64 shrink-0 truncate">{{ entry.key }}</span>
           <template v-if="editingKey === entry.key">

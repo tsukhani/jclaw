@@ -101,15 +101,20 @@ watch(() => form.value.modelProvider, (newProvider) => {
 
 async function saveAgent() {
   saving.value = true
-  if (creating.value) {
-    await $fetch('/api/agents', { method: 'POST', body: form.value })
-  } else if (editing.value) {
-    await $fetch(`/api/agents/${editing.value.id}`, { method: 'PUT', body: form.value })
+  try {
+    if (creating.value) {
+      await $fetch('/api/agents', { method: 'POST', body: form.value })
+    } else if (editing.value) {
+      await $fetch(`/api/agents/${editing.value.id}`, { method: 'PUT', body: form.value })
+    }
+    editing.value = null
+    creating.value = false
+    refresh()
+  } catch (e) {
+    console.error('Failed to save agent:', e)
+  } finally {
+    saving.value = false
   }
-  saving.value = false
-  editing.value = null
-  creating.value = false
-  refresh()
 }
 
 async function deleteAgent(id: number) {

@@ -5,8 +5,7 @@ const messages = ref<any[]>([])
 
 async function selectConversation(convo: any) {
   selectedConvo.value = convo
-  const { data } = await useFetch<any[]>(`/api/conversations/${convo.id}/messages`)
-  messages.value = data.value ?? []
+  messages.value = await $fetch<any[]>(`/api/conversations/${convo.id}/messages`) ?? []
 }
 
 function back() {

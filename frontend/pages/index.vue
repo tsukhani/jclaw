@@ -1,8 +1,10 @@
 <script setup lang="ts">
-const { data: agents } = await useFetch('/api/agents')
-const { data: channels } = await useFetch('/api/channels')
-const { data: tasks } = await useFetch('/api/tasks?status=PENDING&limit=5')
-const { data: logs } = await useFetch<{ events: any[] }>('/api/logs?limit=10')
+const [{ data: agents }, { data: channels }, { data: tasks }, { data: logs }] = await Promise.all([
+  useFetch('/api/agents'),
+  useFetch('/api/channels'),
+  useFetch('/api/tasks?status=PENDING&limit=5'),
+  useFetch<{ events: any[] }>('/api/logs?limit=10'),
+])
 
 const agentCount = computed(() => (agents.value as any[])?.length ?? 0)
 const enabledAgents = computed(() => (agents.value as any[])?.filter((a: any) => a.enabled).length ?? 0)

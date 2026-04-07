@@ -74,11 +74,9 @@ public class WebhookTelegramController extends Controller {
                 return;
             }
 
-            var result = services.Tx.run(() -> {
-                var conversation = ConversationService.findOrCreate(
-                        route.agent(), "telegram", message.chatId());
-                return AgentRunner.run(route.agent(), conversation, message.text());
-            });
+            var conversation = services.Tx.run(() ->
+                    ConversationService.findOrCreate(route.agent(), "telegram", message.chatId()));
+            var result = AgentRunner.run(route.agent(), conversation, message.text());
 
             TelegramChannel.sendMessage(config, message.chatId(), result.response());
 

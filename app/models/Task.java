@@ -7,7 +7,9 @@ import java.time.Instant;
 import java.util.List;
 
 @Entity
-@Table(name = "task")
+@Table(name = "task", indexes = {
+        @Index(name = "idx_task_status_next_run", columnList = "status,next_run_at")
+})
 public class Task extends Model {
 
     public enum Type { IMMEDIATE, SCHEDULED, CRON }

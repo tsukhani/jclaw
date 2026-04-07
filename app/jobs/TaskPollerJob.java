@@ -6,6 +6,7 @@ import play.jobs.Every;
 import play.jobs.Job;
 import services.ConversationService;
 import services.EventLogger;
+import services.Tx;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -27,24 +28,26 @@ public class TaskPollerJob extends Job<Void> {
 
     private void executeTask(Task task) {
         try {
-            task.status = Task.Status.RUNNING;
-            task.save();
+            Tx.run(() -> {
+                task.status = Task.Status.RUNNING;
+                task.save();
+            });
 
             EventLogger.info("task", task.agent != null ? task.agent.name : null, null,
                     "Executing task: %s".formatted(task.name));
 
             if (task.agent != null) {
-                var conversation = ConversationService.findOrCreate(
-                        task.agent, "task", "task-%d".formatted(task.id));
+                var conversation = Tx.run(() -> ConversationService.findOrCreate(
+                        task.agent, "task", "task-%d".formatted(task.id)));
                 var prompt = "Execute the following task:\n\n**%s**\n\n%s"
                         .formatted(task.name, task.description != null ? task.description : "");
                 AgentRunner.run(task.agent, conversation, prompt);
             }
 
-            onSuccess(task);
+            Tx.run(() -> onSuccess(task));
 
         } catch (Exception e) {
-            onFailure(task, e);
+            Tx.run(() -> onFailure(task, e));
         }
     }
 
@@ -84,16 +87,18 @@ public class TaskPollerJob extends Job<Void> {
         try {
             var nextRun = CronParser.nextExecution(completedTask.cronExpression);
             if (nextRun != null) {
-                var next = new Task();
-                next.agent = completedTask.agent;
-                next.name = completedTask.name;
-                next.description = completedTask.description;
-                next.type = Task.Type.CRON;
-                next.cronExpression = completedTask.cronExpression;
-                next.nextRunAt = nextRun;
-                next.save();
-                EventLogger.info("task", null, null,
-                        "Next run of '%s' scheduled for %s".formatted(next.name, nextRun));
+                Tx.run(() -> {
+                    var next = new Task();
+                    next.agent = completedTask.agent;
+                    next.name = completedTask.name;
+                    next.description = completedTask.description;
+                    next.type = Task.Type.CRON;
+                    next.cronExpression = completedTask.cronExpression;
+                    next.nextRunAt = nextRun;
+                    next.save();
+                    EventLogger.info("task", null, null,
+                            "Next run of '%s' scheduled for %s".formatted(next.name, nextRun));
+                });
             }
         } catch (Exception e) {
             EventLogger.error("task", "Failed to schedule next CRON run for '%s': %s"

@@ -7,7 +7,10 @@ import java.time.Instant;
 import java.util.List;
 
 @Entity
-@Table(name = "event_log")
+@Table(name = "event_log", indexes = {
+        @Index(name = "idx_event_log_timestamp", columnList = "timestamp"),
+        @Index(name = "idx_event_log_category_level", columnList = "category,level")
+})
 public class EventLog extends Model {
 
     @Column(nullable = false)

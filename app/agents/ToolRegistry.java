@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Registry of available tools. Tools are registered at startup and made available
@@ -23,14 +24,20 @@ public class ToolRegistry {
         String execute(String argsJson, Agent agent);
     }
 
-    private static final Map<String, Tool> tools = new LinkedHashMap<>();
+    private static volatile Map<String, Tool> tools = Map.of();
+    private static final Map<String, Tool> registrationBuffer = new LinkedHashMap<>();
 
     public static void register(Tool tool) {
-        tools.put(tool.name(), tool);
+        registrationBuffer.put(tool.name(), tool);
     }
 
     public static void clear() {
-        tools.clear();
+        registrationBuffer.clear();
+    }
+
+    /** Called after all tools are registered to publish an immutable snapshot. */
+    public static void publish() {
+        tools = Map.copyOf(registrationBuffer);
     }
 
     public static List<ToolDef> getToolDefs() {

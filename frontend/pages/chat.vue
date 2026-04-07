@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 // Configure marked for safe rendering
 marked.setOptions({
@@ -9,7 +10,7 @@ marked.setOptions({
 
 function renderMarkdown(text: string): string {
   if (!text) return ''
-  return marked.parse(text) as string
+  return DOMPurify.sanitize(marked.parse(text) as string)
 }
 
 const { data: agents } = await useFetch<any[]>('/api/agents')
@@ -28,14 +29,20 @@ const input = ref('')
 const streaming = ref(false)
 const streamContent = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
+const abortController = ref<AbortController | null>(null)
 
+let scrollRaf: number | null = null
 function scrollToBottom() {
-  nextTick(() => {
-    if (messagesEl.value) {
-      messagesEl.value.scrollTop = messagesEl.value.scrollHeight
-    }
+  if (scrollRaf) return
+  scrollRaf = requestAnimationFrame(() => {
+    if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+    scrollRaf = null
   })
 }
+
+onUnmounted(() => {
+  abortController.value?.abort()
+})
 
 // Filter out tool messages and empty assistant messages (tool call records) from display
 const displayMessages = computed(() =>
@@ -60,8 +67,7 @@ watch(selectedAgentId, () => {
 
 async function loadConversation(id: number) {
   selectedConvoId.value = id
-  const { data } = await useFetch<any[]>(`/api/conversations/${id}/messages`)
-  messages.value = data.value ?? []
+  messages.value = await $fetch<any[]>(`/api/conversations/${id}/messages`) ?? []
   scrollToBottom()
 }
 
@@ -70,7 +76,7 @@ async function sendMessage() {
 
   const text = input.value.trim()
   input.value = ''
-  messages.value.push({ role: 'user', content: text, createdAt: new Date().toISOString() })
+  messages.value.push({ _key: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString() })
   scrollToBottom()
 
   streaming.value = true
@@ -78,12 +84,14 @@ async function sendMessage() {
 
   // Add placeholder for streaming response
   const assistantIdx = messages.value.length
-  messages.value.push({ role: 'assistant', content: '', createdAt: new Date().toISOString() })
+  messages.value.push({ _key: crypto.randomUUID(), role: 'assistant', content: '', createdAt: new Date().toISOString() })
 
+  abortController.value = new AbortController()
   try {
     const res = await fetch('/api/chat/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: abortController.value.signal,
       body: JSON.stringify({
         agentId: selectedAgentId.value,
         conversationId: selectedConvoId.value,
@@ -180,8 +188,8 @@ function newChat() {
       <!-- Messages -->
       <div ref="messagesEl" class="flex-1 overflow-y-auto p-4 space-y-4">
         <div
-          v-for="(msg, i) in displayMessages"
-          :key="i"
+          v-for="msg in displayMessages"
+          :key="msg.id ?? msg._key"
           :class="msg.role === 'user' ? 'ml-12' : 'mr-12'"
         >
           <div class="text-xs text-neutral-600 mb-1">{{ msg.role }}</div>

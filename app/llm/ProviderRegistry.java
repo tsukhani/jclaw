@@ -20,9 +20,10 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ProviderRegistry {
 
     private static final Gson gson = new Gson();
-    private static final Map<String, ProviderConfig> cache = new ConcurrentHashMap<>();
+    private static volatile Map<String, ProviderConfig> cache = Map.of();
     private static volatile long lastRefresh = 0;
     private static final long REFRESH_INTERVAL_MS = 60_000;
+    private static final Object refreshLock = new Object();
 
     public static ProviderConfig get(String name) {
         refreshIfNeeded();
@@ -46,12 +47,16 @@ public class ProviderRegistry {
 
     private static void refreshIfNeeded() {
         if (System.currentTimeMillis() - lastRefresh > REFRESH_INTERVAL_MS) {
-            refresh();
+            synchronized (refreshLock) {
+                if (System.currentTimeMillis() - lastRefresh > REFRESH_INTERVAL_MS) {
+                    refresh();
+                }
+            }
         }
     }
 
     public static void refresh() {
-        cache.clear();
+        var newCache = new java.util.HashMap<String, ProviderConfig>();
         var allConfigs = ConfigService.listAll();
         var providerNames = allConfigs.stream()
                 .map(c -> c.key)
@@ -75,8 +80,9 @@ public class ProviderRegistry {
                 }
             }
 
-            cache.put(name, new ProviderConfig(name, baseUrl, apiKey, models));
+            newCache.put(name, new ProviderConfig(name, baseUrl, apiKey, models));
         }
+        cache = Map.copyOf(newCache);
         lastRefresh = System.currentTimeMillis();
     }
 }

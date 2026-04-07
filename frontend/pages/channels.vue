@@ -27,13 +27,18 @@ function editChannel(type: string) {
 async function saveChannel() {
   if (!editing.value) return
   saving.value = true
-  await $fetch(`/api/channels/${editing.value}`, {
-    method: 'PUT',
-    body: { config: form.value, enabled: enabled.value }
-  })
-  saving.value = false
-  editing.value = null
-  refresh()
+  try {
+    await $fetch(`/api/channels/${editing.value}`, {
+      method: 'PUT',
+      body: { config: form.value, enabled: enabled.value }
+    })
+    editing.value = null
+    refresh()
+  } catch (e) {
+    console.error('Failed to save channel:', e)
+  } finally {
+    saving.value = false
+  }
 }
 
 function getChannelStatus(type: string) {

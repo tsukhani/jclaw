@@ -20,7 +20,7 @@ let interval: ReturnType<typeof setInterval>
 
 onMounted(() => {
   interval = setInterval(() => {
-    if (autoRefresh.value) refresh()
+    if (autoRefresh.value && !document.hidden) refresh()
   }, 5000)
 })
 

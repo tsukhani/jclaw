@@ -169,8 +169,10 @@ public class OpenAiCompatibleClient {
                 }
 
                 if (response.statusCode() == 429) {
+                    var defaultBackoff = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)] / 1000;
                     var retryAfter = response.headers().firstValue("Retry-After")
-                            .map(Long::parseLong).orElse(BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)] / 1000);
+                            .map(v -> { try { return Long.parseLong(v); } catch (NumberFormatException _) { return defaultBackoff; } })
+                            .orElse(defaultBackoff);
                     EventLogger.warn("llm", "Rate limited by %s, retrying after %ds".formatted(provider.name(), retryAfter));
                     Thread.sleep(retryAfter * 1000);
                     continue;

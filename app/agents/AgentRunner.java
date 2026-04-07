@@ -138,7 +138,7 @@ public class AgentRunner {
                 // Handle tool calls if present
                 if (!accumulator.toolCalls.isEmpty()) {
                     content = handleToolCallsStreaming(agent, conversation, messages, tools,
-                            accumulator.toolCalls, content, primary, onToken);
+                            accumulator.toolCalls, content, primary, onToken, 0);
                 }
 
                 // Persist and complete
@@ -208,7 +208,10 @@ public class AgentRunner {
                                                     List<ChatMessage> messages, List<ToolDef> tools,
                                                     List<ToolCall> toolCalls, String priorContent,
                                                     ProviderConfig provider,
-                                                    Consumer<String> onToken) {
+                                                    Consumer<String> onToken, int round) {
+        if (round >= MAX_TOOL_ROUNDS) {
+            return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
+        }
         var currentMessages = new ArrayList<>(messages);
         currentMessages.add(ChatMessage.assistant(priorContent, toolCalls));
 
@@ -237,7 +240,7 @@ public class AgentRunner {
         // Recursively handle if more tool calls
         if (!accumulator.toolCalls.isEmpty()) {
             return handleToolCallsStreaming(agent, conversation, currentMessages, tools,
-                    accumulator.toolCalls, accumulator.content, provider, onToken);
+                    accumulator.toolCalls, accumulator.content, provider, onToken, round + 1);
         }
 
         return accumulator.content;

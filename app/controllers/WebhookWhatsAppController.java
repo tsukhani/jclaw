@@ -99,11 +99,9 @@ public class WebhookWhatsAppController extends Controller {
                 return;
             }
 
-            var result = services.Tx.run(() -> {
-                var conversation = ConversationService.findOrCreate(
-                        route.agent(), "whatsapp", message.from());
-                return AgentRunner.run(route.agent(), conversation, message.text());
-            });
+            var conversation = services.Tx.run(() ->
+                    ConversationService.findOrCreate(route.agent(), "whatsapp", message.from()));
+            var result = AgentRunner.run(route.agent(), conversation, message.text());
 
             if (config != null) {
                 WhatsAppChannel.sendMessage(config, message.from(), result.response());

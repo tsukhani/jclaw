@@ -7,7 +7,9 @@ import java.time.Instant;
 import java.util.List;
 
 @Entity
-@Table(name = "memory")
+@Table(name = "memory", indexes = {
+        @Index(name = "idx_memory_agent", columnList = "agent_id")
+})
 public class Memory extends Model {
 
     @Column(name = "agent_id", nullable = false)
@@ -38,7 +40,7 @@ public class Memory extends Model {
     }
 
     public static List<Memory> findByAgent(String agentId) {
-        return Memory.find("agentId", agentId).fetch();
+        return Memory.find("agentId = ?1 ORDER BY updatedAt DESC", agentId).fetch(1000);
     }
 
     public static List<Memory> searchByText(String agentId, String query, int limit) {

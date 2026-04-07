@@ -14,11 +14,14 @@ import java.util.List;
 public class JpaMemoryStore implements MemoryStore {
 
     private final boolean vectorEnabled;
+    private final boolean isPostgres;
     private final String vectorProvider;
     private final String vectorModel;
     private final int vectorDimensions;
 
     public JpaMemoryStore() {
+        var dbUrl = Play.configuration.getProperty("db.url", "");
+        this.isPostgres = dbUrl.contains("postgresql") || dbUrl.contains("postgres");
         this.vectorEnabled = "true".equals(
                 Play.configuration.getProperty("memory.jpa.vector.enabled", "false"));
         this.vectorProvider = Play.configuration.getProperty("memory.jpa.vector.provider", "openai");
@@ -90,9 +93,8 @@ public class JpaMemoryStore implements MemoryStore {
                 ORDER BY ts_rank(to_tsvector('english', m.text), plainto_tsquery('english', ?)) DESC
                 LIMIT ?
                 """;
-        try {
-            var conn = DB.getConnection();
-            try (var stmt = conn.prepareStatement(sql)) {
+        try (var conn = DB.getConnection();
+             var stmt = conn.prepareStatement(sql)) {
                 stmt.setString(1, agentId);
                 stmt.setString(2, query);
                 stmt.setString(3, query);
@@ -135,8 +137,8 @@ public class JpaMemoryStore implements MemoryStore {
                     LIMIT ?
                     """.formatted(embeddingStr, embeddingStr);
 
-            var conn = DB.getConnection();
-            try (var stmt = conn.prepareStatement(sql)) {
+            try (var conn = DB.getConnection();
+                 var stmt = conn.prepareStatement(sql)) {
                 stmt.setString(1, query);
                 stmt.setString(2, agentId);
                 stmt.setString(3, query);
@@ -167,8 +169,8 @@ public class JpaMemoryStore implements MemoryStore {
                 // Store embedding as raw SQL since JPA doesn't natively handle pgvector
                 var sql = "UPDATE memory SET embedding = '%s'::vector WHERE id = ?"
                         .formatted(toVectorLiteral(embedding));
-                var conn = DB.getConnection();
-                try (var stmt = conn.prepareStatement(sql)) {
+                try (var conn = DB.getConnection();
+                     var stmt = conn.prepareStatement(sql)) {
                     stmt.setLong(1, (Long) memory.id);
                     stmt.executeUpdate();
                 }
@@ -202,8 +204,7 @@ public class JpaMemoryStore implements MemoryStore {
     // --- Helpers ---
 
     private boolean isPostgreSQL() {
-        var url = Play.configuration.getProperty("db.url", "");
-        return url.contains("postgresql") || url.contains("postgres");
+        return isPostgres;
     }
 
     private MemoryEntry toEntry(Memory m) {

@@ -65,9 +65,15 @@ public class FileSystemTools implements ToolRegistry.Tool {
         };
     }
 
+    private static final long MAX_FILE_READ_BYTES = 1_048_576; // 1MB
+
     private String readFile(Path path) {
         try {
             if (!Files.exists(path)) return "Error: File not found: %s".formatted(path.getFileName());
+            if (Files.size(path) > MAX_FILE_READ_BYTES) {
+                return "Error: File exceeds read limit (%d bytes). File size: %d bytes."
+                        .formatted(MAX_FILE_READ_BYTES, Files.size(path));
+            }
             return Files.readString(path);
         } catch (IOException e) {
             return "Error reading file: %s".formatted(e.getMessage());

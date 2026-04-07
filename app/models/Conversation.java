@@ -7,7 +7,9 @@ import java.time.Instant;
 import java.util.List;
 
 @Entity
-@Table(name = "conversation")
+@Table(name = "conversation", indexes = {
+        @Index(name = "idx_conversation_agent_channel_peer", columnList = "agent_id,channel_type,peer_id")
+})
 public class Conversation extends Model {
 
     @ManyToOne(optional = false)

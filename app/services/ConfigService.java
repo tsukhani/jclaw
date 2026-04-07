@@ -18,6 +18,8 @@ public class ConfigService {
 
     private static final ConcurrentHashMap<String, CachedValue> cache = new ConcurrentHashMap<>();
 
+    private static final CachedValue NEGATIVE_HIT = new CachedValue(null, 0);
+
     public static String get(String key) {
         var cached = cache.get(key);
         if (cached != null && !cached.isExpired()) {
@@ -28,6 +30,8 @@ public class ConfigService {
             cache.put(key, new CachedValue(config.value, System.currentTimeMillis() + CACHE_TTL_MS));
             return config.value;
         }
+        // Cache negative hit to avoid repeated DB lookups for absent keys
+        cache.put(key, new CachedValue(null, System.currentTimeMillis() + CACHE_TTL_MS));
         return null;
     }
 

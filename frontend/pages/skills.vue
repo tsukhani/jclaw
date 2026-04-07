@@ -12,19 +12,10 @@ watch(agents, (val) => {
   }
 }, { immediate: true })
 
-watch(selectedAgentId, async (id) => {
+watch(selectedAgentId, (id) => {
   if (!id) return
-  // Use the filesystem tool endpoint to list skills
-  try {
-    const agent = agents.value?.find((a: any) => a.id === id)
-    if (!agent) return
-    const { data } = await useFetch<any>(`/api/agents/${id}/workspace/skills`)
-    // Parse directory listing if it comes as text
-    skills.value = [] // Will be populated from skill loader
-  } catch {
-    skills.value = []
-  }
-  // For now, list by fetching the workspace directory
+  selectedSkill.value = null
+  skillContent.value = ''
   loadSkills()
 })
 
@@ -58,11 +49,16 @@ async function selectSkill(skill: any) {
 async function saveSkill() {
   if (!selectedAgentId.value || !selectedSkill.value) return
   saving.value = true
-  await $fetch(
-    `/api/agents/${selectedAgentId.value}/workspace/skills/${selectedSkill.value.name}/SKILL.md`,
-    { method: 'PUT', body: { content: skillContent.value } }
-  )
-  saving.value = false
+  try {
+    await $fetch(
+      `/api/agents/${selectedAgentId.value}/workspace/skills/${selectedSkill.value.name}/SKILL.md`,
+      { method: 'PUT', body: { content: skillContent.value } }
+    )
+  } catch (e) {
+    console.error('Failed to save skill:', e)
+  } finally {
+    saving.value = false
+  }
 }
 </script>
 

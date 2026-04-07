@@ -7,7 +7,10 @@ import java.time.Instant;
 import java.util.List;
 
 @Entity
-@Table(name = "message")
+@Table(name = "message", indexes = {
+        @Index(name = "idx_message_conversation", columnList = "conversation_id"),
+        @Index(name = "idx_message_conversation_created", columnList = "conversation_id,created_at")
+})
 public class Message extends Model {
 
     @ManyToOne(optional = false)

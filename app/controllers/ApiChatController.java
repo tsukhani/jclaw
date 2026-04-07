@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 @With(AuthCheck.class)
 public class ApiChatController extends Controller {
@@ -88,33 +89,54 @@ public class ApiChatController extends Controller {
         AgentRunner.runStreaming(agent, conversationId, "web", username, messageText,
                 // onInit — send conversation ID as first SSE event
                 conversation -> {
-                    var initEvent = gson.toJson(Map.of("type", "init", "conversationId", conversation.id));
-                    res.writeChunk("data: %s\n\n".formatted(initEvent).getBytes(StandardCharsets.UTF_8));
+                    try {
+                        var initEvent = gson.toJson(Map.of("type", "init", "conversationId", conversation.id));
+                        res.writeChunk("data: %s\n\n".formatted(initEvent).getBytes(StandardCharsets.UTF_8));
+                    } catch (Exception e) {
+                        // Client disconnected — ignore
+                    }
                 },
                 // onToken
                 token -> {
-                    var event = gson.toJson(Map.of("type", "token", "content", token));
-                    res.writeChunk("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
+                    try {
+                        var event = gson.toJson(Map.of("type", "token", "content", token));
+                        res.writeChunk("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
+                    } catch (Exception e) {
+                        // Client disconnected — ignore
+                    }
                 },
                 // onComplete
                 content -> {
-                    var event = gson.toJson(Map.of("type", "complete", "content", content));
-                    res.writeChunk("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
-                    latch.countDown();
+                    try {
+                        var event = gson.toJson(Map.of("type", "complete", "content", content));
+                        res.writeChunk("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
+                    } finally {
+                        latch.countDown();
+                    }
                 },
                 // onError
                 error -> {
-                    var event = gson.toJson(Map.of("type", "error",
-                            "content", "An error occurred: " + error.getMessage()));
-                    res.writeChunk("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
-                    EventLogger.error("channel", agent.name, "web",
-                            "SSE stream error: %s".formatted(error.getMessage()));
-                    latch.countDown();
+                    try {
+                        var event = gson.toJson(Map.of("type", "error",
+                                "content", "An error occurred: " + error.getMessage()));
+                        res.writeChunk("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
+                        EventLogger.error("channel", agent.name, "web",
+                                "SSE stream error: %s".formatted(error.getMessage()));
+                    } finally {
+                        latch.countDown();
+                    }
                 }
         );
 
         try {
-            latch.await();
+            if (!latch.await(120, TimeUnit.SECONDS)) {
+                try {
+                    var event = gson.toJson(Map.of("type", "error", "content", "Request timed out"));
+                    res.writeChunk("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
+                } catch (Exception e) {
+                    // Client already disconnected
+                }
+            }
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
