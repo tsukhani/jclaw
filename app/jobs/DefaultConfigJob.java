@@ -39,10 +39,12 @@ public class DefaultConfigJob extends Job<Void> {
     }
 
     private void seedDefaultAgent() {
-        if (Agent.findByName("test") != null) return;
-
-        AgentService.create("test", "ollama-cloud", "kimi-k2.5", true);
-        EventLogger.info("agent", "test", null, "Default agent 'test' created");
+        if (Agent.findByName("test") == null) {
+            AgentService.create("test", "ollama-cloud", "kimi-k2.5", true);
+            EventLogger.info("agent", "test", null, "Default agent 'test' created");
+        }
+        // Always reset the built-in agent's workspace to match tracked files
+        AgentService.resetWorkspace("test");
     }
 
     private void seedIfAbsent(String key, String value) {

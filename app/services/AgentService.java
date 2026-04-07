@@ -92,12 +92,20 @@ public class AgentService {
     }
 
     public static void createWorkspace(String agentName) {
+        writeWorkspaceFiles(agentName, false);
+    }
+
+    public static void resetWorkspace(String agentName) {
+        writeWorkspaceFiles(agentName, true);
+    }
+
+    private static void writeWorkspaceFiles(String agentName, boolean overwrite) {
         var dir = workspacePath(agentName);
         try {
             Files.createDirectories(dir);
             Files.createDirectories(dir.resolve("skills"));
 
-            writeIfAbsent(dir.resolve("AGENT.md"), """
+            writeFile(dir.resolve("AGENT.md"), """
                     # Agent Instructions
 
                     You are a helpful AI assistant. Follow these guidelines:
@@ -105,23 +113,29 @@ public class AgentService {
                     - Be concise and accurate
                     - Ask for clarification when the request is ambiguous
                     - Use tools when they would help accomplish the task
-                    """);
+                    """, overwrite);
 
-            writeIfAbsent(dir.resolve("IDENTITY.md"), """
+            writeFile(dir.resolve("IDENTITY.md"), """
                     # Identity
 
                     Name: %s
-                    """.formatted(agentName));
+                    """.formatted(agentName), overwrite);
 
-            writeIfAbsent(dir.resolve("USER.md"), """
+            writeFile(dir.resolve("USER.md"), """
                     # User Information
 
                     <!-- Add information about the user here. The agent will use this context. -->
-                    """);
+                    """, overwrite);
 
         } catch (IOException e) {
             EventLogger.error("agent", "Failed to create workspace for agent %s: %s"
                     .formatted(agentName, e.getMessage()));
+        }
+    }
+
+    private static void writeFile(Path path, String content, boolean overwrite) throws IOException {
+        if (overwrite || !Files.exists(path)) {
+            Files.writeString(path, content);
         }
     }
 
@@ -149,9 +163,4 @@ public class AgentService {
         }
     }
 
-    private static void writeIfAbsent(Path path, String content) throws IOException {
-        if (!Files.exists(path)) {
-            Files.writeString(path, content);
-        }
-    }
 }
