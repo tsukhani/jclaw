@@ -28,46 +28,58 @@ public class AgentRunner {
      * Run the agent synchronously. Returns the final assistant response.
      */
     public static RunResult run(Agent agent, Conversation conversation, String userMessage) {
-        // 1. Persist user message
-        ConversationService.appendUserMessage(conversation, userMessage);
-
-        // 2. Assemble system prompt
-        var assembled = SystemPromptAssembler.assemble(agent, userMessage);
-
-        // 3. Build messages list
-        var messages = buildMessages(assembled.systemPrompt(), conversation);
-
-        // 4. Get provider config for this agent
-        var agentProvider = ProviderRegistry.get(agent.modelProvider);
-        var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
-        var secondary = ProviderRegistry.listAll().stream()
-                .filter(p -> !p.name().equals(primary != null ? primary.name() : ""))
-                .findFirst().orElse(null);
-        if (primary == null) {
-            var error = "No LLM provider configured. Add provider config via Settings.";
-            EventLogger.error("llm", agent.name, null, error);
-            ConversationService.appendAssistantMessage(conversation, error, null);
-            return new RunResult(error, conversation);
+        // Acquire conversation queue — prevents concurrent message corruption
+        var queueMsg = new services.ConversationQueue.QueuedMessage(
+                userMessage, conversation.channelType, conversation.peerId, agent);
+        if (!services.ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
+            return new RunResult("Your message has been queued and will be processed shortly.", conversation);
         }
 
-        messages = trimToContextWindow(messages, agent, primary);
+        try {
+            // 1. Persist user message
+            ConversationService.appendUserMessage(conversation, userMessage);
 
-        EventLogger.info("llm", agent.name, conversation.channelType,
-                "Calling %s / %s".formatted(primary.name(), agent.modelId));
+            // 2. Assemble system prompt
+            var assembled = SystemPromptAssembler.assemble(agent, userMessage);
 
-        // 5. Get registered tools
-        var tools = ToolRegistry.getToolDefsForAgent(agent);
+            // 3. Build messages list
+            var messages = buildMessages(assembled.systemPrompt(), conversation);
 
-        // 6. LLM call loop (handles tool calls)
-        var response = callWithToolLoop(agent, conversation, messages, tools, primary, secondary);
+            // 4. Get provider config for this agent
+            var agentProvider = ProviderRegistry.get(agent.modelProvider);
+            var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
+            var secondary = ProviderRegistry.listAll().stream()
+                    .filter(p -> !p.name().equals(primary != null ? primary.name() : ""))
+                    .findFirst().orElse(null);
+            if (primary == null) {
+                var error = "No LLM provider configured. Add provider config via Settings.";
+                EventLogger.error("llm", agent.name, null, error);
+                ConversationService.appendAssistantMessage(conversation, error, null);
+                return new RunResult(error, conversation);
+            }
 
-        // 7. Persist final assistant response
-        ConversationService.appendAssistantMessage(conversation, response, null);
+            messages = trimToContextWindow(messages, agent, primary);
 
-        EventLogger.info("llm", agent.name, conversation.channelType,
-                "Response generated (%d chars)".formatted(response.length()));
+            EventLogger.info("llm", agent.name, conversation.channelType,
+                    "Calling %s / %s".formatted(primary.name(), agent.modelId));
 
-        return new RunResult(response, conversation);
+            // 5. Get registered tools
+            var tools = ToolRegistry.getToolDefsForAgent(agent);
+
+            // 6. LLM call loop (handles tool calls)
+            var response = callWithToolLoop(agent, conversation, messages, tools, primary, secondary);
+
+            // 7. Persist final assistant response
+            ConversationService.appendAssistantMessage(conversation, response, null);
+
+            EventLogger.info("llm", agent.name, conversation.channelType,
+                    "Response generated (%d chars)".formatted(response.length()));
+
+            return new RunResult(response, conversation);
+        } finally {
+            // Always release the queue to prevent deadlock
+            services.ConversationQueue.drain(conversation.id);
+        }
     }
 
     /**
@@ -81,6 +93,7 @@ public class AgentRunner {
                                     Consumer<String> onComplete,
                                     Consumer<Exception> onError) {
         Thread.ofVirtual().start(() -> {
+            final Long[] conversationIdRef = {null};
             try {
                 // 1. Resolve conversation and persist user message in one transaction
                 Conversation conversation = services.Tx.run(() -> {
@@ -100,6 +113,17 @@ public class AgentRunner {
 
                 if (conversation == null) {
                     onError.accept(new RuntimeException("Conversation not found"));
+                    return;
+                }
+                conversationIdRef[0] = conversation.id;
+
+                // Acquire conversation queue — prevents concurrent message corruption
+                var queueMsg = new services.ConversationQueue.QueuedMessage(
+                        userMessage, channelType, peerId, agent);
+                if (!services.ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
+                    // Message was queued — notify caller and return
+                    onInit.accept(conversation);
+                    onComplete.accept("Your message has been queued and will be processed shortly.");
                     return;
                 }
 
@@ -179,6 +203,11 @@ public class AgentRunner {
                 EventLogger.error("llm", agent.name, channelType,
                         "Streaming error: %s".formatted(e.getMessage()));
                 onError.accept(e);
+            } finally {
+                // Always release the queue to prevent deadlock
+                if (conversationIdRef[0] != null) {
+                    services.ConversationQueue.drain(conversationIdRef[0]);
+                }
             }
         });
     }

@@ -207,6 +207,18 @@ public class ApiChatController extends Controller {
         renderJSON(gson.toJson(result));
     }
 
+    /**
+     * GET /api/conversations/{id}/queue — Get queue status for a conversation.
+     */
+    public static void getQueueStatus(Long id) {
+        var busy = services.ConversationQueue.isBusy(id);
+        var queueSize = services.ConversationQueue.getQueueSize(id);
+        renderJSON(gson.toJson(java.util.Map.of(
+                "busy", busy,
+                "queueSize", queueSize
+        )));
+    }
+
     private static com.google.gson.JsonObject readJsonBody() {
         try {
             var reader = new InputStreamReader(Http.Request.current().body, StandardCharsets.UTF_8);

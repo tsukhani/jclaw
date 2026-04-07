@@ -65,6 +65,7 @@ POST    /api/chat/stream                        ApiChatController.streamChat
 # Conversations API
 GET     /api/conversations                      ApiChatController.listConversations
 GET     /api/conversations/{id}/messages        ApiChatController.getMessages
+GET     /api/conversations/{id}/queue           ApiChatController.getQueueStatus
 
 # Channels API
 GET     /api/channels                           ApiChannelsController.list

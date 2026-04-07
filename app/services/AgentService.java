@@ -29,6 +29,15 @@ public class AgentService {
 
         createWorkspace(name);
 
+        // Disable browser tool for non-main agents (security)
+        if (!"main".equalsIgnoreCase(name)) {
+            var browserConfig = new models.AgentToolConfig();
+            browserConfig.agent = agent;
+            browserConfig.toolName = "browser";
+            browserConfig.enabled = false;
+            browserConfig.save();
+        }
+
         EventLogger.info("agent", name, null, "Agent '%s' created (provider: %s, model: %s)"
                 .formatted(name, modelProvider, modelId));
         return agent;
