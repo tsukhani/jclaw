@@ -36,27 +36,27 @@ const currentPageLabel = computed(() => {
 const navGroups = [
   {
     items: [
-      { label: 'Dashboard', to: '/', icon: '◉' },
-      { label: 'Chat', to: '/chat', icon: '◈' },
+      { label: 'Dashboard', to: '/', icon: 'svg-dashboard' },
     ]
   },
   {
     items: [
-      { label: 'Channels', to: '/channels', icon: '⊞' },
-      { label: 'Conversations', to: '/conversations', icon: '≡' },
+      { label: 'Chat', to: '/chat', icon: 'svg-chat' },
+      { label: 'Channels', to: '/channels', icon: 'svg-channels' },
+      { label: 'Conversations', to: '/conversations', icon: 'svg-conversations' },
     ]
   },
   {
     items: [
-      { label: 'Tasks', to: '/tasks', icon: '⊡' },
-      { label: 'Agents', to: '/agents', icon: '⊙' },
-      { label: 'Skills', to: '/skills', icon: '⊕' },
+      { label: 'Tasks', to: '/tasks', icon: 'svg-tasks' },
+      { label: 'Agents', to: '/agents', icon: 'svg-agents' },
+      { label: 'Skills', to: '/skills', icon: 'svg-skills' },
     ]
   },
   {
     items: [
-      { label: 'Settings', to: '/settings', icon: '⊘' },
-      { label: 'Logs', to: '/logs', icon: '⊟' },
+      { label: 'Settings', to: '/settings', icon: 'svg-settings' },
+      { label: 'Logs', to: '/logs', icon: 'svg-logs' },
     ]
   }
 ]
@@ -95,11 +95,30 @@ const navGroups = [
             v-for="item in group.items"
             :key="item.to"
             :to="item.to"
-            class="flex items-center gap-2.5 px-4 py-1.5 text-sm text-neutral-400
+            class="flex items-center gap-3 px-4 py-2.5 text-[15px] text-neutral-400
                    hover:text-white hover:bg-neutral-900 transition-colors"
             active-class="!text-emerald-400 bg-emerald-500/10 border-r-2 border-emerald-500"
           >
-            <span class="w-4 text-center text-xs opacity-50">{{ item.icon }}</span>
+            <svg class="w-5 h-5 opacity-60 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <!-- Dashboard -->
+              <path v-if="item.icon === 'svg-dashboard'" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0a1 1 0 01-1-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 01-1 1" />
+              <!-- Chat -->
+              <path v-if="item.icon === 'svg-chat'" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              <!-- Channels -->
+              <path v-if="item.icon === 'svg-channels'" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+              <!-- Conversations -->
+              <path v-if="item.icon === 'svg-conversations'" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a2 2 0 01-2-2v-1m0-3V4a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H9l-4 4V8z" />
+              <!-- Tasks -->
+              <path v-if="item.icon === 'svg-tasks'" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+              <!-- Agents -->
+              <path v-if="item.icon === 'svg-agents'" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714a2.25 2.25 0 00.659 1.591L19 14.5M14.25 3.104c.251.023.501.05.75.082M19 14.5l-1.5 4.5H6.5L5 14.5m14 0H5" />
+              <!-- Skills -->
+              <path v-if="item.icon === 'svg-skills'" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 10V3L4 14h7v7l9-11h-7z" />
+              <!-- Settings -->
+              <path v-if="item.icon === 'svg-settings'" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <!-- Logs -->
+              <path v-if="item.icon === 'svg-logs'" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+            </svg>
             {{ item.label }}
           </NuxtLink>
           <div v-if="gi < navGroups.length - 1" class="my-2 mx-4 border-t border-neutral-800/50" />
