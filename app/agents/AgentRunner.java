@@ -124,7 +124,7 @@ public class AgentRunner {
 
                 messages = trimToContextWindow(messages, agent, primary);
 
-                var tools = ToolRegistry.getToolDefsForAgent(agent);
+                var tools = services.Tx.run(() -> ToolRegistry.getToolDefsForAgent(agent));
                 var modelInfo = primary.models().stream()
                         .filter(m -> m.id().equals(agent.modelId))
                         .findFirst().orElse(null);
