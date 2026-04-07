@@ -118,7 +118,7 @@ public class OpenAiCompatibleClient {
                                 }
                             }
                         }
-                        if ("stop".equals(choice.finishReason()) || "tool_calls".equals(choice.finishReason())) {
+                        if (choice.finishReason() != null) {
                             accumulator.finishReason = choice.finishReason();
                         }
                     }

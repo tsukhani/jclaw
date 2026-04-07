@@ -220,6 +220,24 @@ public class AgentRunner {
 
                 var content = accumulator.content;
 
+                // Check for truncated response (max tokens hit mid-tool-call)
+                if ("length".equals(accumulator.finishReason) && !accumulator.toolCalls.isEmpty()) {
+                    EventLogger.warn("llm", agent.name, channelType,
+                            "Response truncated (finish_reason=length) with pending tool calls — skipping execution of incomplete tool arguments");
+                    var truncMsg = content.isEmpty()
+                            ? "I tried to use a tool but my response was too long and got cut off. Let me try a more concise approach."
+                            : content;
+                    onToken.accept(truncMsg.equals(content) ? "" : "\n\n*[Response was truncated — retrying with a simpler approach]*");
+                    // Persist and complete with the truncation notice
+                    var finalContent = truncMsg;
+                    services.Tx.run(() -> {
+                        var conv = ConversationService.findById(conversation.id);
+                        ConversationService.appendAssistantMessage(conv, finalContent, null);
+                    });
+                    onComplete.accept(finalContent);
+                    return;
+                }
+
                 // Handle tool calls if present
                 if (!accumulator.toolCalls.isEmpty()) {
                     content = handleToolCallsStreaming(agent, conversation.id, messages, tools,
@@ -287,6 +305,14 @@ public class AgentRunner {
             // No tool calls — return the content
             if (assistantMsg.toolCalls() == null || assistantMsg.toolCalls().isEmpty()) {
                 return assistantMsg.content() != null ? (String) assistantMsg.content() : "";
+            }
+
+            // Check for truncated response (max tokens hit mid-tool-call)
+            if ("length".equals(choice.finishReason())) {
+                EventLogger.warn("llm", agent.name, null,
+                        "Response truncated (finish_reason=length) with pending tool calls — skipping execution of incomplete tool arguments");
+                return assistantMsg.content() != null ? (String) assistantMsg.content()
+                        : "I tried to use a tool but my response was too long and got cut off. Let me try a more concise approach.";
             }
 
             // Tool calls — execute and continue
