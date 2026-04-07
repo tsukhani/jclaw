@@ -5,6 +5,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonParser;
 import models.Agent;
 import services.ConfigService;
+import services.EventLogger;
 import utils.HttpClients;
 
 import java.net.URI;
@@ -106,17 +107,29 @@ public class WebSearchTool implements ToolRegistry.Tool {
         }
 
         try {
+            EventLogger.info("search", agent != null ? agent.name : null, null,
+                    "Searching via %s: \"%s\" (numResults=%d)".formatted(provider.displayName(), query, numResults));
+
             var request = provider.buildRequest(apiKey, query, numResults);
             var response = HttpClients.LLM.send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() != 200) {
+                EventLogger.error("search", agent != null ? agent.name : null, null,
+                        "%s API returned HTTP %d: %s".formatted(provider.displayName(), response.statusCode(),
+                                response.body().substring(0, Math.min(response.body().length(), 200))));
                 return "Error: %s API returned HTTP %d: %s".formatted(
                         provider.displayName(), response.statusCode(),
                         response.body().substring(0, Math.min(response.body().length(), 200)));
             }
 
-            return provider.formatResults(response.body());
+            var formatted = provider.formatResults(response.body());
+            EventLogger.info("search", agent != null ? agent.name : null, null,
+                    "%s returned %d chars for \"%s\"".formatted(provider.displayName(), formatted.length(), query));
+
+            return formatted;
         } catch (Exception e) {
+            EventLogger.error("search", agent != null ? agent.name : null, null,
+                    "%s search failed: %s".formatted(provider.displayName(), e.getMessage()));
             return "Error searching with %s: %s".formatted(provider.displayName(), e.getMessage());
         }
     }
