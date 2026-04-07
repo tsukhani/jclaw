@@ -17,7 +17,7 @@ public class DefaultConfigJob extends Job<Void> {
     @Override
     public void doJob() {
         seedProviders();
-        seedShellConfig();
+        seedToolConfig();
         seedDefaultAgent();
         EventLogger.info("system", "Default configuration seeded");
     }
@@ -39,7 +39,12 @@ public class DefaultConfigJob extends Job<Void> {
                 {"id":"deepseek/deepseek-v3.2","name":"DeepSeek V3.2","contextWindow":128000,"maxTokens":32768}]""");
     }
 
-    private void seedShellConfig() {
+    private void seedToolConfig() {
+        // Playwright browser tool
+        seedIfAbsent("jclaw.tools.playwright.enabled", "true");
+        seedIfAbsent("jclaw.tools.playwright.headless", "true");
+
+        // Shell execution tool
         seedIfAbsent("jclaw.tools.shell.enabled", "true");
         seedIfAbsent("shell.allowlist",
                 "git,npm,npx,pnpm,node,python,python3,pip,ls,cat,head,tail,grep,find,wc,sort,uniq,diff,mkdir,cp,mv,echo,curl,wget,jq,tar,zip,unzip");

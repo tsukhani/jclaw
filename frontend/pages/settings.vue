@@ -55,6 +55,36 @@ function isSensitive(key: string) {
   return ['key', 'secret', 'password', 'token'].some(s => lower.includes(s))
 }
 
+// Tool config keys to exclude from general Configuration section
+const TOOL_CONFIG_KEYS = new Set([
+  'jclaw.tools.playwright.enabled', 'jclaw.tools.playwright.headless',
+  'jclaw.tools.shell.enabled', 'shell.allowlist', 'shell.defaultTimeoutSeconds',
+  'shell.maxTimeoutSeconds', 'shell.maxOutputBytes', 'shell.allowGlobalPaths',
+])
+
+// Playwright config
+const playwrightEnabled = computed(() => {
+  const entries = configData.value?.entries ?? []
+  return entries.find((e: any) => e.key === 'jclaw.tools.playwright.enabled')?.value === 'true'
+})
+
+const playwrightHeadless = computed(() => {
+  const entries = configData.value?.entries ?? []
+  return entries.find((e: any) => e.key === 'jclaw.tools.playwright.headless')?.value !== 'false'
+})
+
+async function togglePlaywrightEnabled() {
+  const newVal = playwrightEnabled.value ? 'false' : 'true'
+  await $fetch('/api/config', { method: 'POST', body: { key: 'jclaw.tools.playwright.enabled', value: newVal } })
+  refresh()
+}
+
+async function togglePlaywrightHeadless() {
+  const newVal = playwrightHeadless.value ? 'false' : 'true'
+  await $fetch('/api/config', { method: 'POST', body: { key: 'jclaw.tools.playwright.headless', value: newVal } })
+  refresh()
+}
+
 // Shell execution config
 const SHELL_KEYS = ['shell.allowlist', 'shell.defaultTimeoutSeconds', 'shell.maxTimeoutSeconds', 'shell.maxOutputBytes', 'shell.allowGlobalPaths'] as const
 
@@ -167,7 +197,7 @@ const providerEntries = computed(() => {
           }
         }
       }
-      if (!matched && !SHELL_KEYS.includes(e.key) && e.key !== 'jclaw.tools.shell.enabled') other.push(e)
+      if (!matched && !TOOL_CONFIG_KEYS.has(e.key)) other.push(e)
     }
   }
   return { providers, searchEntries, other }
@@ -239,10 +269,43 @@ const providerEntries = computed(() => {
       </div>
     </div>
 
+    <!-- Browser (Playwright) -->
+    <div class="mb-6 space-y-4">
+      <h2 class="text-sm font-medium text-neutral-400">Browser (Playwright)</h2>
+      <p class="text-xs text-neutral-600">Headless browser automation for JS-heavy pages. Requires the Playwright driver bundle.</p>
+      <div class="bg-neutral-900 border border-neutral-800">
+        <div class="px-4 py-2.5 border-b border-neutral-800 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium text-white">Enabled</span>
+            <span v-if="playwrightEnabled" class="text-[10px] text-green-400 border border-green-400/30 px-1">active</span>
+            <span v-else class="text-[10px] text-neutral-500 border border-neutral-700 px-1">disabled</span>
+          </div>
+          <button @click="togglePlaywrightEnabled"
+                  :class="playwrightEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-neutral-700 hover:bg-neutral-600'"
+                  class="relative w-9 h-5 rounded-full transition-colors">
+            <span :class="playwrightEnabled ? 'translate-x-4' : 'translate-x-0.5'"
+                  class="block w-4 h-4 bg-white rounded-full transition-transform" />
+          </button>
+        </div>
+        <div class="px-4 py-2.5 flex items-center justify-between">
+          <div>
+            <span class="text-xs font-mono text-neutral-500">headless</span>
+            <p v-if="!playwrightHeadless" class="text-[10px] text-amber-400 mt-0.5">Browser window will be visible on the host</p>
+          </div>
+          <button @click="togglePlaywrightHeadless"
+                  :class="playwrightHeadless ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-neutral-700 hover:bg-neutral-600'"
+                  class="relative w-9 h-5 rounded-full transition-colors">
+            <span :class="playwrightHeadless ? 'translate-x-4' : 'translate-x-0.5'"
+                  class="block w-4 h-4 bg-white rounded-full transition-transform" />
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Shell Execution -->
     <div class="mb-6 space-y-4">
       <h2 class="text-sm font-medium text-neutral-400">Shell Execution</h2>
-      <p class="text-xs text-neutral-600">Allow agents to execute shell commands on the host. Requires restart after toggling.</p>
+      <p class="text-xs text-neutral-600">Allow agents to execute shell commands on the host.</p>
       <div class="bg-neutral-900 border border-neutral-800">
         <div class="px-4 py-2.5 border-b border-neutral-800 flex items-center justify-between">
           <div class="flex items-center gap-2">
