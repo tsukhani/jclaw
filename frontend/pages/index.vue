@@ -50,6 +50,7 @@ const pendingTasks = computed(() => (tasks.value as any[])?.length ?? 0)
             class="text-xs font-mono mt-0.5 shrink-0 w-10"
           >{{ event.level }}</span>
           <span class="text-xs text-neutral-500 shrink-0 w-16 font-mono">{{ event.category }}</span>
+          <span v-if="event.agentId" class="text-xs text-neutral-600 shrink-0 font-mono">{{ event.agentId }}</span>
           <span class="text-sm text-neutral-300 min-w-0 truncate">{{ event.message }}</span>
           <span class="text-xs text-neutral-600 ml-auto shrink-0">{{ new Date(event.timestamp).toLocaleTimeString() }}</span>
         </div>

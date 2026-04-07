@@ -21,8 +21,8 @@ public class AgentService {
         agent.save();
 
         createWorkspace(name);
-        EventLogger.info("agent", name, null, "Agent created (provider: %s, model: %s)"
-                .formatted(modelProvider, modelId));
+        EventLogger.info("agent", name, null, "Agent '%s' created (provider: %s, model: %s)"
+                .formatted(name, modelProvider, modelId));
         return agent;
     }
 

@@ -25,7 +25,7 @@ public class ConversationService {
         convo.save();
 
         EventLogger.info("agent", agent.name, channelType,
-                "New conversation created (peer: %s)".formatted(peerId != null ? peerId : "none"));
+                "New conversation created (agent: %s, peer: %s)".formatted(agent.name, peerId != null ? peerId : "none"));
         return convo;
     }
 
