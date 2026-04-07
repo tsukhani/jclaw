@@ -246,6 +246,43 @@ public class ApiChatController extends Controller {
     }
 
     /**
+     * DELETE /api/conversations/{id} — Delete a conversation and all its messages.
+     */
+    public static void deleteConversation(Long id) {
+        Conversation conversation = Conversation.findById(id);
+        if (conversation == null) notFound();
+
+        // Delete messages first (no cascade configured)
+        Message.delete("conversation = ?1", conversation);
+        conversation.delete();
+
+        renderJSON(gson.toJson(Map.of("status", "deleted")));
+    }
+
+    /**
+     * DELETE /api/conversations — Bulk delete conversations by IDs.
+     * Body: { "ids": [1, 2, 3] }
+     */
+    public static void deleteConversations() {
+        var body = readJsonBody();
+        if (body == null || !body.has("ids")) badRequest();
+
+        var ids = body.getAsJsonArray("ids");
+        int deleted = 0;
+        for (var elem : ids) {
+            var convoId = elem.getAsLong();
+            Conversation convo = Conversation.findById(convoId);
+            if (convo != null) {
+                Message.delete("conversation = ?1", convo);
+                convo.delete();
+                deleted++;
+            }
+        }
+
+        renderJSON(gson.toJson(Map.of("deleted", deleted)));
+    }
+
+    /**
      * POST /api/conversations/{id}/generate-title — Generate a title for a conversation via LLM.
      */
     public static void generateTitle(Long id) {

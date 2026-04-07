@@ -52,6 +52,44 @@ function startResize(e: MouseEvent) {
   document.addEventListener('mouseup', onUp)
 }
 
+const selectMode = ref(false)
+const selectedIds = ref<Set<number>>(new Set())
+
+function toggleSelect(id: number) {
+  const s = new Set(selectedIds.value)
+  if (s.has(id)) s.delete(id); else s.add(id)
+  selectedIds.value = s
+}
+
+function selectAll() {
+  if (!conversations.value) return
+  if (selectedIds.value.size === conversations.value.length) {
+    selectedIds.value = new Set()
+  } else {
+    selectedIds.value = new Set(conversations.value.map((c: any) => c.id))
+  }
+}
+
+async function deleteSelected() {
+  if (selectedIds.value.size === 0) return
+  const ids = [...selectedIds.value]
+  try {
+    await $fetch('/api/conversations', { method: 'DELETE', body: { ids } })
+    if (selectedConvoId.value && selectedIds.value.has(selectedConvoId.value)) {
+      selectedConvoId.value = null
+      messages.value = []
+    }
+    selectedIds.value = new Set()
+    selectMode.value = false
+    refreshConversations()
+  } catch { /* ignore */ }
+}
+
+function exitSelectMode() {
+  selectMode.value = false
+  selectedIds.value = new Set()
+}
+
 let scrollRaf: number | null = null
 function scrollToBottom() {
   if (scrollRaf) return
@@ -201,19 +239,48 @@ function newChat() {
     <!-- Conversation sidebar -->
     <div :style="{ width: sidebarWidth + 'px' }" class="shrink-0 bg-neutral-900 border border-neutral-800 flex flex-col overflow-hidden">
       <div class="p-3 border-b border-neutral-800 flex items-center justify-between">
-        <span class="text-xs font-medium text-neutral-400">Conversations</span>
-        <button @click="newChat" class="text-xs text-neutral-500 hover:text-white transition-colors">+ New</button>
+        <template v-if="selectMode">
+          <button @click="selectAll" class="text-xs text-neutral-500 hover:text-white transition-colors">
+            {{ selectedIds.size === (conversations?.length || 0) ? 'None' : 'All' }}
+          </button>
+          <div class="flex items-center gap-2">
+            <button
+              @click="deleteSelected"
+              :disabled="selectedIds.size === 0"
+              class="text-xs text-red-400 hover:text-red-300 disabled:text-neutral-600 transition-colors"
+            >Delete ({{ selectedIds.size }})</button>
+            <button @click="exitSelectMode" class="text-xs text-neutral-500 hover:text-white transition-colors">Done</button>
+          </div>
+        </template>
+        <template v-else>
+          <span class="text-xs font-medium text-neutral-400">Conversations</span>
+          <div class="flex items-center gap-2">
+            <button
+              v-if="conversations?.length"
+              @click="selectMode = true"
+              class="text-xs text-neutral-500 hover:text-white transition-colors"
+            >Edit</button>
+            <button @click="newChat" class="text-xs text-neutral-500 hover:text-white transition-colors">+ New</button>
+          </div>
+        </template>
       </div>
       <div class="flex-1 overflow-y-auto">
-        <button
+        <div
           v-for="convo in conversations"
           :key="convo.id"
-          @click="loadConversation(convo.id)"
-          :class="selectedConvoId === convo.id ? 'bg-neutral-800 text-white' : 'text-neutral-400'"
-          class="w-full text-left px-3 py-2 text-xs hover:bg-neutral-800 transition-colors truncate"
+          @click="selectMode ? toggleSelect(convo.id) : loadConversation(convo.id)"
+          :class="[
+            selectMode && selectedIds.has(convo.id) ? 'bg-neutral-700 text-white' :
+            selectedConvoId === convo.id ? 'bg-neutral-800 text-white' : 'text-neutral-400'
+          ]"
+          class="w-full text-left px-3 py-2 text-xs hover:bg-neutral-800 transition-colors truncate flex items-center gap-2 cursor-pointer"
         >
-          {{ convo.preview || convo.agentName }} &middot; {{ new Date(convo.updatedAt).toLocaleDateString() }}
-        </button>
+          <span v-if="selectMode" class="shrink-0 w-3.5 h-3.5 border border-neutral-600 flex items-center justify-center text-[10px]"
+                :class="selectedIds.has(convo.id) ? 'bg-white text-neutral-900 border-white' : ''">
+            <span v-if="selectedIds.has(convo.id)">&#10003;</span>
+          </span>
+          <span class="truncate">{{ convo.preview || convo.agentName }} &middot; {{ new Date(convo.updatedAt).toLocaleDateString() }}</span>
+        </div>
       </div>
     </div>
 
