@@ -6,6 +6,7 @@ import com.google.gson.JsonParser;
 import models.Agent;
 import models.Conversation;
 import models.Message;
+import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.Http;
 import play.mvc.With;
@@ -85,15 +86,31 @@ public class ApiChatController extends Controller {
         res.setHeader("X-Accel-Buffering", "no");
 
         var latch = new CountDownLatch(1);
+        var cancelled = new java.util.concurrent.atomic.AtomicBoolean(false);
+
+        // SSE heartbeat to prevent proxy/browser timeouts during long tool chains
+        var heartbeatExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(
+                r -> Thread.ofVirtual().unstarted(r));
+        heartbeatExecutor.scheduleAtFixedRate(() -> {
+            if (cancelled.get()) return;
+            try {
+                res.writeChunk(": keep-alive\n\n".getBytes(StandardCharsets.UTF_8));
+            } catch (Exception e) {
+                cancelled.set(true);
+                latch.countDown();
+            }
+        }, 30, 30, TimeUnit.SECONDS);
 
         AgentRunner.runStreaming(agent, conversationId, "web", username, messageText,
+                cancelled,
                 // onInit — send conversation ID as first SSE event
                 conversation -> {
                     try {
                         var initEvent = gson.toJson(Map.of("type", "init", "conversationId", conversation.id));
                         res.writeChunk("data: %s\n\n".formatted(initEvent).getBytes(StandardCharsets.UTF_8));
                     } catch (Exception e) {
-                        // Client disconnected — ignore
+                        cancelled.set(true);
+                        latch.countDown();
                     }
                 },
                 // onToken
@@ -102,7 +119,8 @@ public class ApiChatController extends Controller {
                         var event = gson.toJson(Map.of("type", "token", "content", token));
                         res.writeChunk("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
                     } catch (Exception e) {
-                        // Client disconnected — ignore
+                        cancelled.set(true);
+                        latch.countDown();
                     }
                 },
                 // onComplete
@@ -129,7 +147,7 @@ public class ApiChatController extends Controller {
         );
 
         try {
-            if (!latch.await(600, TimeUnit.SECONDS)) {
+            if (!latch.await(180, TimeUnit.SECONDS)) {
                 try {
                     var event = gson.toJson(Map.of("type", "error", "content", "Request timed out"));
                     res.writeChunk("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
@@ -139,6 +157,8 @@ public class ApiChatController extends Controller {
             }
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
+        } finally {
+            heartbeatExecutor.shutdownNow();
         }
     }
 
@@ -160,12 +180,18 @@ public class ApiChatController extends Controller {
             params.add(agentId);
         }
 
-        var orderBy = query.isEmpty() ? "ORDER BY updatedAt DESC" : query + " ORDER BY updatedAt DESC";
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 100) : 20;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
 
-        List<Conversation> convos = Conversation.find(orderBy.toString(), params.toArray())
-                .from(effectiveOffset).fetch(effectiveLimit);
+        String jpql = query.isEmpty()
+                ? "SELECT c FROM Conversation c JOIN FETCH c.agent ORDER BY c.updatedAt DESC"
+                : "SELECT c FROM Conversation c JOIN FETCH c.agent WHERE " + query + " ORDER BY c.updatedAt DESC";
+        var q = JPA.em().createQuery(jpql, Conversation.class);
+        for (int i = 0; i < params.size(); i++) {
+            q.setParameter(i + 1, params.get(i));
+        }
+        List<Conversation> convos = q.setFirstResult(effectiveOffset)
+                .setMaxResults(effectiveLimit).getResultList();
 
         var result = convos.stream().map(c -> {
             var map = new HashMap<String, Object>();

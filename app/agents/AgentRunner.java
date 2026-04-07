@@ -11,6 +11,7 @@ import services.EventLogger;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
@@ -24,8 +25,17 @@ public class AgentRunner {
 
     public record RunResult(String response, Conversation conversation) {}
 
+    private record PreparedData(
+        List<ChatMessage> messages,
+        ProviderConfig primary,
+        ProviderConfig secondary,
+        List<ToolDef> tools
+    ) {}
+
     /**
      * Run the agent synchronously. Returns the final assistant response.
+     * JPA transactions are scoped to short Tx.run() blocks — no JDBC connection
+     * is held during LLM HTTP calls or tool execution.
      */
     public static RunResult run(Agent agent, Conversation conversation, String userMessage) {
         // Acquire conversation queue — prevents concurrent message corruption
@@ -35,50 +45,59 @@ public class AgentRunner {
             return new RunResult("Your message has been queued and will be processed shortly.", conversation);
         }
 
+        final Long conversationId = conversation.id;
+
         try {
-            // 1. Persist user message
-            ConversationService.appendUserMessage(conversation, userMessage);
+            // Short setup transaction: persist user message, assemble prompt, resolve provider
+            var prepared = services.Tx.run(() -> {
+                ConversationService.appendUserMessage(conversation, userMessage);
 
-            // 2. Assemble system prompt
-            var assembled = SystemPromptAssembler.assemble(agent, userMessage);
+                var assembled = SystemPromptAssembler.assemble(agent, userMessage);
+                var messages = buildMessages(assembled.systemPrompt(), conversation);
 
-            // 3. Build messages list
-            var messages = buildMessages(assembled.systemPrompt(), conversation);
+                var agentProvider = ProviderRegistry.get(agent.modelProvider);
+                var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
+                if (primary == null) {
+                    var error = "No LLM provider configured. Add provider config via Settings.";
+                    EventLogger.error("llm", agent.name, null, error);
+                    ConversationService.appendAssistantMessage(conversation, error, null);
+                    return null;
+                }
+                var secondary = ProviderRegistry.getSecondary();
 
-            // 4. Get provider config for this agent
-            var agentProvider = ProviderRegistry.get(agent.modelProvider);
-            var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
-            var secondary = ProviderRegistry.listAll().stream()
-                    .filter(p -> !p.name().equals(primary != null ? primary.name() : ""))
-                    .findFirst().orElse(null);
-            if (primary == null) {
+                var trimmed = trimToContextWindow(messages, agent, primary);
+                var tools = ToolRegistry.getToolDefsForAgent(agent);
+
+                EventLogger.info("llm", agent.name, conversation.channelType,
+                        "Calling %s / %s".formatted(primary.name(), agent.modelId));
+
+                return new PreparedData(trimmed, primary, secondary, tools);
+            });
+
+            if (prepared == null) {
                 var error = "No LLM provider configured. Add provider config via Settings.";
-                EventLogger.error("llm", agent.name, null, error);
-                ConversationService.appendAssistantMessage(conversation, error, null);
-                return new RunResult(error, conversation);
+                return new RunResult(error,
+                        services.Tx.run(() -> ConversationService.findById(conversationId)));
             }
 
-            messages = trimToContextWindow(messages, agent, primary);
+            // LLM call loop — no transaction open, JDBC connection back in pool
+            var response = callWithToolLoop(agent, conversationId,
+                    prepared.messages(), prepared.tools(), prepared.primary(), prepared.secondary());
 
-            EventLogger.info("llm", agent.name, conversation.channelType,
-                    "Calling %s / %s".formatted(primary.name(), agent.modelId));
-
-            // 5. Get registered tools
-            var tools = ToolRegistry.getToolDefsForAgent(agent);
-
-            // 6. LLM call loop (handles tool calls)
-            var response = callWithToolLoop(agent, conversation, messages, tools, primary, secondary);
-
-            // 7. Persist final assistant response
-            ConversationService.appendAssistantMessage(conversation, response, null);
+            // Short persistence transaction: final assistant message
+            services.Tx.run(() -> {
+                var conv = ConversationService.findById(conversationId);
+                ConversationService.appendAssistantMessage(conv, response, null);
+            });
 
             EventLogger.info("llm", agent.name, conversation.channelType,
                     "Response generated (%d chars)".formatted(response.length()));
 
-            return new RunResult(response, conversation);
+            var updatedConversation = services.Tx.run(() -> ConversationService.findById(conversationId));
+            return new RunResult(response, updatedConversation);
         } finally {
             // Always release the queue to prevent deadlock
-            services.ConversationQueue.drain(conversation.id);
+            services.ConversationQueue.drain(conversationId);
         }
     }
 
@@ -88,6 +107,7 @@ public class AgentRunner {
      */
     public static void runStreaming(Agent agent, Long conversationId, String channelType, String peerId,
                                     String userMessage,
+                                    AtomicBoolean isCancelled,
                                     Consumer<Conversation> onInit,
                                     Consumer<String> onToken,
                                     Consumer<String> onComplete,
@@ -121,7 +141,6 @@ public class AgentRunner {
                 var queueMsg = new services.ConversationQueue.QueuedMessage(
                         userMessage, channelType, peerId, agent);
                 if (!services.ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
-                    // Message was queued — notify caller and return
                     onInit.accept(conversation);
                     onComplete.accept("Your message has been queued and will be processed shortly.");
                     return;
@@ -130,23 +149,35 @@ public class AgentRunner {
                 // Notify caller (e.g., send SSE init event with conversation ID)
                 onInit.accept(conversation);
 
+                if (isCancelled.get()) {
+                    EventLogger.info("llm", agent.name, channelType, "Stream cancelled by client disconnect");
+                    return;
+                }
+
                 EventLogger.info("llm", agent.name, channelType,
                         "Streaming: assembling prompt for conversation %d".formatted(conversation.id));
 
-                // 3. Assemble system prompt (reads JPA + filesystem)
                 var assembled = services.Tx.run(() ->
                         SystemPromptAssembler.assemble(agent, userMessage));
 
-                // 4. Build messages from conversation history
+                if (isCancelled.get()) {
+                    EventLogger.info("llm", agent.name, channelType, "Stream cancelled by client disconnect");
+                    return;
+                }
+
                 var messages = services.Tx.run(() ->
                         buildMessages(assembled.systemPrompt(), conversation));
 
-                // 5. Get provider for this agent (may trigger JPA via ProviderRegistry refresh)
                 var agentProvider = services.Tx.run(() -> ProviderRegistry.get(agent.modelProvider));
                 var primary = agentProvider != null ? agentProvider : services.Tx.run(ProviderRegistry::getPrimary);
                 if (primary == null) {
                     EventLogger.error("llm", agent.name, channelType, "No LLM provider configured");
                     onError.accept(new RuntimeException("No LLM provider configured"));
+                    return;
+                }
+
+                if (isCancelled.get()) {
+                    EventLogger.info("llm", agent.name, channelType, "Stream cancelled by client disconnect");
                     return;
                 }
 
@@ -162,7 +193,7 @@ public class AgentRunner {
                         .findFirst().orElse(null);
                 var maxTokens = modelInfo != null && modelInfo.maxTokens() > 0 ? modelInfo.maxTokens() : null;
 
-                // 6. Stream with tool call handling (HTTP, no JPA)
+                // Stream with tool call handling (HTTP, no JPA)
                 var accumulator = OpenAiCompatibleClient.chatStreamAccumulate(
                         primary, agent.modelId, messages, tools, onToken, maxTokens);
 
@@ -177,6 +208,11 @@ public class AgentRunner {
                     accumulator.awaitCompletion();
                 }
 
+                if (isCancelled.get()) {
+                    EventLogger.info("llm", agent.name, channelType, "Stream cancelled by client disconnect");
+                    return;
+                }
+
                 if (accumulator.error != null) {
                     onError.accept(accumulator.error);
                     return;
@@ -187,7 +223,12 @@ public class AgentRunner {
                 // Handle tool calls if present
                 if (!accumulator.toolCalls.isEmpty()) {
                     content = handleToolCallsStreaming(agent, conversation, messages, tools,
-                            accumulator.toolCalls, content, primary, onToken, maxTokens, 0);
+                            accumulator.toolCalls, content, primary, onToken, maxTokens, 0, isCancelled);
+                }
+
+                if (isCancelled.get()) {
+                    EventLogger.info("llm", agent.name, channelType, "Stream cancelled by client disconnect");
+                    return;
                 }
 
                 // Persist and complete
@@ -214,7 +255,7 @@ public class AgentRunner {
 
     // --- Internal ---
 
-    private static String callWithToolLoop(Agent agent, Conversation conversation,
+    private static String callWithToolLoop(Agent agent, Long conversationId,
                                             List<ChatMessage> messages, List<ToolDef> tools,
                                             ProviderConfig primary, ProviderConfig secondary) {
         var currentMessages = new ArrayList<>(messages);
@@ -265,11 +306,14 @@ public class AgentRunner {
                         "Tool '%s' returned: %s".formatted(toolCall.function().name(), resultPreview));
                 currentMessages.add(ChatMessage.toolResult(toolCall.id(), result));
 
-                // Persist tool interaction
-                ConversationService.appendAssistantMessage(conversation,
-                        null, gson.toJson(toolCall));
-                ConversationService.appendToolResult(conversation,
-                        toolCall.id(), result);
+                // Persist tool interaction in a short transaction
+                services.Tx.run(() -> {
+                    var conv = ConversationService.findById(conversationId);
+                    ConversationService.appendAssistantMessage(conv,
+                            null, gson.toJson(toolCall));
+                    ConversationService.appendToolResult(conv,
+                            toolCall.id(), result);
+                });
             }
         }
 
@@ -281,9 +325,12 @@ public class AgentRunner {
                                                     List<ToolCall> toolCalls, String priorContent,
                                                     ProviderConfig provider,
                                                     Consumer<String> onToken, Integer maxTokens,
-                                                    int round) {
+                                                    int round, AtomicBoolean isCancelled) {
         if (round >= MAX_TOOL_ROUNDS) {
             return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
+        }
+        if (isCancelled.get()) {
+            return priorContent;
         }
         EventLogger.info("tool", agent.name, null,
                 "Streaming round %d: executing %d tool call(s)".formatted(round + 1, toolCalls.size()));
@@ -292,6 +339,7 @@ public class AgentRunner {
         currentMessages.add(ChatMessage.assistant(priorContent, toolCalls));
 
         for (var toolCall : toolCalls) {
+            if (isCancelled.get()) return priorContent;
             EventLogger.info("tool", agent.name, null,
                     "Executing tool '%s' (id: %s, args: %s)"
                             .formatted(toolCall.function().name(), toolCall.id(),
@@ -311,6 +359,8 @@ public class AgentRunner {
             });
         }
 
+        if (isCancelled.get()) return priorContent;
+
         EventLogger.info("llm", agent.name, null,
                 "Streaming round %d: continuing LLM call after tool results".formatted(round + 1));
 
@@ -325,10 +375,12 @@ public class AgentRunner {
             return priorContent;
         }
 
+        if (isCancelled.get()) return priorContent;
+
         // Recursively handle if more tool calls
         if (!accumulator.toolCalls.isEmpty()) {
             return handleToolCallsStreaming(agent, conversation, currentMessages, tools,
-                    accumulator.toolCalls, accumulator.content, provider, onToken, maxTokens, round + 1);
+                    accumulator.toolCalls, accumulator.content, provider, onToken, maxTokens, round + 1, isCancelled);
         }
 
         return accumulator.content;

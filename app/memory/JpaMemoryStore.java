@@ -2,7 +2,7 @@ package memory;
 
 import models.Memory;
 import play.Play;
-import play.db.DB;
+import play.db.jpa.JPA;
 import services.EventLogger;
 
 import java.util.List;
@@ -93,8 +93,8 @@ public class JpaMemoryStore implements MemoryStore {
                 ORDER BY ts_rank(to_tsvector('english', m.text), plainto_tsquery('english', ?)) DESC
                 LIMIT ?
                 """;
-        try (var conn = DB.getConnection();
-             var stmt = conn.prepareStatement(sql)) {
+        var conn = JPA.em().unwrap(java.sql.Connection.class);
+        try (var stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, agentId);
             stmt.setString(2, query);
             stmt.setString(3, query);
@@ -104,9 +104,12 @@ public class JpaMemoryStore implements MemoryStore {
             while (rs.next()) {
                 ids.add(rs.getLong("id"));
             }
-            return ids.stream()
-                    .map(id -> (Memory) Memory.findById(id))
-                    .filter(m -> m != null)
+            if (ids.isEmpty()) return List.of();
+            List<Memory> memories = Memory.<Memory>find("id IN (?1)", ids).fetch();
+            var idRank = new java.util.HashMap<Long, Integer>();
+            for (int i = 0; i < ids.size(); i++) idRank.put(ids.get(i), i);
+            return memories.stream()
+                    .sorted(java.util.Comparator.comparingInt(m -> idRank.getOrDefault((Long) m.id, Integer.MAX_VALUE)))
                     .map(this::toEntry)
                     .toList();
         } catch (Exception e) {
@@ -136,8 +139,8 @@ public class JpaMemoryStore implements MemoryStore {
                     LIMIT ?
                     """;
 
-            try (var conn = DB.getConnection();
-                 var stmt = conn.prepareStatement(sql)) {
+            var conn = JPA.em().unwrap(java.sql.Connection.class);
+            try (var stmt = conn.prepareStatement(sql)) {
                 stmt.setString(1, query);
                 stmt.setString(2, embeddingStr);
                 stmt.setString(3, agentId);
@@ -149,9 +152,12 @@ public class JpaMemoryStore implements MemoryStore {
                 while (rs.next()) {
                     ids.add(rs.getLong("id"));
                 }
-                return ids.stream()
-                        .map(id -> (Memory) Memory.findById(id))
-                        .filter(m -> m != null)
+                if (ids.isEmpty()) return List.of();
+                List<Memory> memories = Memory.<Memory>find("id IN (?1)", ids).fetch();
+                var idRank = new java.util.HashMap<Long, Integer>();
+                for (int i = 0; i < ids.size(); i++) idRank.put(ids.get(i), i);
+                return memories.stream()
+                        .sorted(java.util.Comparator.comparingInt(m -> idRank.getOrDefault((Long) m.id, Integer.MAX_VALUE)))
                         .map(this::toEntry)
                         .toList();
             }
@@ -169,8 +175,8 @@ public class JpaMemoryStore implements MemoryStore {
             if (embedding != null) {
                 // Store embedding as raw SQL since JPA doesn't natively handle pgvector
                 var sql = "UPDATE memory SET embedding = ?::text::vector WHERE id = ?";
-                try (var conn = DB.getConnection();
-                     var stmt = conn.prepareStatement(sql)) {
+                var conn = JPA.em().unwrap(java.sql.Connection.class);
+                try (var stmt = conn.prepareStatement(sql)) {
                     stmt.setString(1, toVectorLiteral(embedding));
                     stmt.setLong(2, (Long) memory.id);
                     stmt.executeUpdate();

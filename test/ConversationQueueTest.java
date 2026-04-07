@@ -4,8 +4,10 @@ import models.Agent;
 import services.ConversationQueue;
 import services.ConversationQueue.QueuedMessage;
 
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class ConversationQueueTest extends UnitTest {
@@ -162,5 +164,115 @@ public class ConversationQueueTest extends UnitTest {
     @Test
     public void getQueueSizeReturnsZeroForUnknownConversation() {
         assertEquals(0, ConversationQueue.getQueueSize(9999L));
+    }
+
+    @Test
+    public void concurrentInterruptModeDoesNotCorruptArrayDeque() throws Exception {
+        // Task 3.7: Two virtual threads call tryAcquire in interrupt mode simultaneously.
+        // Before the fix, the unsynchronized state.pending.clear() could corrupt the deque.
+        services.ConfigService.set("agent.queue-test-agent.queue.mode", "interrupt");
+
+        int iterations = 50;
+        var corrupted = new AtomicBoolean(false);
+
+        for (int iter = 0; iter < iterations; iter++) {
+            long convId = 2000L + iter;
+            var msg1 = new QueuedMessage("First", "web", "admin", agent);
+            ConversationQueue.tryAcquire(convId, msg1); // acquire processing
+
+            // Queue some messages
+            for (int i = 0; i < 5; i++) {
+                ConversationQueue.tryAcquire(convId,
+                        new QueuedMessage("Queued " + i, "web", "admin", agent));
+            }
+
+            int threadCount = 4;
+            var barrier = new CyclicBarrier(threadCount);
+            var latch = new CountDownLatch(threadCount);
+
+            for (int t = 0; t < threadCount; t++) {
+                final int idx = t;
+                Thread.ofVirtual().start(() -> {
+                    try {
+                        barrier.await();
+                        // Half interrupt (clear), half drain (poll)
+                        if (idx % 2 == 0) {
+                            ConversationQueue.tryAcquire(convId,
+                                    new QueuedMessage("Interrupt " + idx, "web", "admin", agent));
+                        } else {
+                            ConversationQueue.drain(convId);
+                        }
+                    } catch (Exception e) {
+                        corrupted.set(true);
+                    } finally {
+                        latch.countDown();
+                    }
+                });
+            }
+
+            assertTrue(latch.await(10, TimeUnit.SECONDS));
+            // Clean up for next iteration
+            ConversationQueue.drain(convId);
+            while (!ConversationQueue.drain(convId).isEmpty()) {}
+        }
+
+        assertFalse(corrupted.get(), "ArrayDeque should not throw from concurrent access");
+        services.ConfigService.delete("agent.queue-test-agent.queue.mode");
+    }
+
+    @Test
+    public void getQueueSizeConsistentUnderConcurrentEnqueue() throws Exception {
+        // Task 3.8: getQueueSize() returns a consistent value under concurrent enqueue
+        long convId = 3000L;
+        var msg1 = new QueuedMessage("First", "web", "admin", agent);
+        ConversationQueue.tryAcquire(convId, msg1); // acquire processing
+
+        int threadCount = 20;
+        var barrier = new CyclicBarrier(threadCount + 1); // +1 for the reader thread
+        var latch = new CountDownLatch(threadCount + 1);
+        var sizeError = new AtomicBoolean(false);
+
+        // Writer threads: enqueue messages
+        for (int i = 0; i < threadCount; i++) {
+            final int idx = i;
+            Thread.ofVirtual().start(() -> {
+                try {
+                    barrier.await();
+                    ConversationQueue.tryAcquire(convId,
+                            new QueuedMessage("Thread " + idx, "web", "admin", agent));
+                } catch (Exception _) {
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+
+        // Reader thread: repeatedly read size — should never throw or return negative
+        Thread.ofVirtual().start(() -> {
+            try {
+                barrier.await();
+                for (int i = 0; i < 100; i++) {
+                    int size = ConversationQueue.getQueueSize(convId);
+                    if (size < 0) {
+                        sizeError.set(true);
+                    }
+                }
+            } catch (Exception e) {
+                sizeError.set(true);
+            } finally {
+                latch.countDown();
+            }
+        });
+
+        assertTrue(latch.await(10, TimeUnit.SECONDS));
+        assertFalse(sizeError.get(), "getQueueSize() should never return a negative value or throw");
+
+        int finalSize = ConversationQueue.getQueueSize(convId);
+        assertTrue(finalSize >= 0 && finalSize <= 20,
+                "Final queue size should be between 0 and cap (20), got: " + finalSize);
+
+        // Cleanup
+        ConversationQueue.drain(convId);
+        while (!ConversationQueue.drain(convId).isEmpty()) {}
     }
 }

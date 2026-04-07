@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.AgentBinding;
+import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.Http;
 import play.mvc.With;
@@ -19,7 +20,9 @@ public class ApiBindingsController extends Controller {
     private static final Gson gson = new Gson();
 
     public static void list() {
-        java.util.List<AgentBinding> bindings = AgentBinding.findAll();
+        java.util.List<AgentBinding> bindings = JPA.em()
+                .createQuery("SELECT b FROM AgentBinding b JOIN FETCH b.agent", AgentBinding.class)
+                .getResultList();
         var result = bindings.stream()
                 .map(ApiBindingsController::bindingToMap)
                 .toList();

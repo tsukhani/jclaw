@@ -56,33 +56,35 @@ public class ProviderRegistry {
     }
 
     public static void refresh() {
-        var newCache = new java.util.HashMap<String, ProviderConfig>();
-        var allConfigs = ConfigService.listAll();
-        var providerNames = allConfigs.stream()
-                .map(c -> c.key)
-                .filter(k -> k.startsWith("provider.") && k.endsWith(".baseUrl"))
-                .map(k -> k.substring("provider.".length(), k.lastIndexOf(".")))
-                .distinct()
-                .toList();
+        synchronized (refreshLock) {
+            var newCache = new java.util.HashMap<String, ProviderConfig>();
+            var allConfigs = ConfigService.listAll();
+            var providerNames = allConfigs.stream()
+                    .map(c -> c.key)
+                    .filter(k -> k.startsWith("provider.") && k.endsWith(".baseUrl"))
+                    .map(k -> k.substring("provider.".length(), k.lastIndexOf(".")))
+                    .distinct()
+                    .toList();
 
-        for (var name : providerNames) {
-            var baseUrl = ConfigService.get("provider." + name + ".baseUrl");
-            var apiKey = ConfigService.get("provider." + name + ".apiKey");
-            if (baseUrl == null || baseUrl.isBlank() || apiKey == null || apiKey.isBlank()) continue;
+            for (var name : providerNames) {
+                var baseUrl = ConfigService.get("provider." + name + ".baseUrl");
+                var apiKey = ConfigService.get("provider." + name + ".apiKey");
+                if (baseUrl == null || baseUrl.isBlank() || apiKey == null || apiKey.isBlank()) continue;
 
-            var modelsJson = ConfigService.get("provider." + name + ".models");
-            List<ModelInfo> models = List.of();
-            if (modelsJson != null && !modelsJson.isBlank()) {
-                try {
-                    models = gson.fromJson(modelsJson, new TypeToken<List<ModelInfo>>() {}.getType());
-                } catch (Exception e) {
-                    // Skip malformed model JSON
+                var modelsJson = ConfigService.get("provider." + name + ".models");
+                List<ModelInfo> models = List.of();
+                if (modelsJson != null && !modelsJson.isBlank()) {
+                    try {
+                        models = gson.fromJson(modelsJson, new TypeToken<List<ModelInfo>>() {}.getType());
+                    } catch (Exception e) {
+                        // Skip malformed model JSON
+                    }
                 }
-            }
 
-            newCache.put(name, new ProviderConfig(name, baseUrl, apiKey, models));
+                newCache.put(name, new ProviderConfig(name, baseUrl, apiKey, models));
+            }
+            cache = Map.copyOf(newCache);
+            lastRefresh = System.currentTimeMillis();
         }
-        cache = Map.copyOf(newCache);
-        lastRefresh = System.currentTimeMillis();
     }
 }

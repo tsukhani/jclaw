@@ -4,7 +4,6 @@ import models.Agent;
 import models.Conversation;
 import models.Message;
 import play.Play;
-import play.db.jpa.JPA;
 
 import java.util.Collections;
 import java.util.List;
@@ -31,11 +30,6 @@ public class ConversationService {
 
     public static Message appendMessage(Conversation conversation, String role, String content,
                                          String toolCalls, String toolResults) {
-        // Re-attach if detached (happens when called across Tx.run() boundaries on virtual threads)
-        if (!JPA.em().contains(conversation)) {
-            conversation = JPA.em().merge(conversation);
-        }
-
         var msg = new Message();
         msg.conversation = conversation;
         msg.role = role;

@@ -5,7 +5,8 @@ import play.db.jpa.Model;
 
 @Entity
 @Table(name = "agent_binding", indexes = {
-        @Index(name = "idx_binding_channel_peer", columnList = "channel_type,peer_id")
+        @Index(name = "idx_binding_channel_peer", columnList = "channel_type,peer_id"),
+        @Index(name = "idx_binding_agent", columnList = "agent_id")
 })
 public class AgentBinding extends Model {
 

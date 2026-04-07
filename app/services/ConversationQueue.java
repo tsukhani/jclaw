@@ -6,7 +6,6 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Per-conversation message queue that serializes agent processing.
@@ -25,10 +24,9 @@ public class ConversationQueue {
     public record QueuedMessage(String text, String channelType, String peerId, Agent agent) {}
 
     static class QueueState {
-        final ReentrantLock lock = new ReentrantLock();
         final ArrayDeque<QueuedMessage> pending = new ArrayDeque<>();
         volatile boolean processing = false;
-        volatile String mode = "queue";
+        String mode = "queue"; // all reads/writes guarded by synchronized(this)
 
         synchronized boolean tryStartProcessing() {
             if (processing) return false;
@@ -52,17 +50,22 @@ public class ConversationQueue {
     public static boolean tryAcquire(Long conversationId, QueuedMessage message) {
         var state = queues.computeIfAbsent(conversationId, _ -> new QueueState());
 
-        // Load queue mode from config
-        state.mode = ConfigService.get("agent." + message.agent().name + ".queue.mode", "queue");
+        // Snapshot mode under the monitor to prevent races between concurrent tryAcquire() calls
+        String mode;
+        synchronized (state) {
+            mode = ConfigService.get("agent." + message.agent().name + ".queue.mode", "queue");
+            state.mode = mode;
+        }
 
         if (state.tryStartProcessing()) {
             return true; // Caller should process this message
         }
 
         // Agent is busy -- handle based on mode
-        if ("interrupt".equals(state.mode)) {
-            // Clear pending and let caller process (caller is responsible for cancelling in-flight)
-            state.pending.clear();
+        if ("interrupt".equals(mode)) {
+            synchronized (state) {
+                state.pending.clear();
+            }
             return true;
         }
 
@@ -78,7 +81,7 @@ public class ConversationQueue {
 
         EventLogger.info("queue", message.agent().name, message.channelType(),
                 "Message queued for conversation %d (position: %d)"
-                        .formatted(conversationId, state.pending.size()));
+                        .formatted(conversationId, getQueueSize(conversationId)));
 
         return false; // Message was queued, caller should NOT process
     }
@@ -94,16 +97,15 @@ public class ConversationQueue {
         var state = queues.get(conversationId);
         if (state == null) return List.of();
 
-        state.finishProcessing();
-
         synchronized (state) {
+            state.finishProcessing();
+
             if (state.pending.isEmpty()) {
                 queues.remove(conversationId);
                 return List.of();
             }
 
             if ("collect".equals(state.mode)) {
-                // Return all pending messages
                 var all = new ArrayList<>(state.pending);
                 state.pending.clear();
                 return all;
@@ -133,7 +135,10 @@ public class ConversationQueue {
      */
     public static int getQueueSize(Long conversationId) {
         var state = queues.get(conversationId);
-        return state != null ? state.pending.size() : 0;
+        if (state == null) return 0;
+        synchronized (state) {
+            return state.pending.size();
+        }
     }
 
     /**

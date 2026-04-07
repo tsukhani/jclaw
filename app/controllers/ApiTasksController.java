@@ -2,6 +2,7 @@ package controllers;
 
 import com.google.gson.Gson;
 import models.Task;
+import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
 
@@ -35,12 +36,18 @@ public class ApiTasksController extends Controller {
             params.add(agentId);
         }
 
-        var orderBy = query.isEmpty() ? "ORDER BY createdAt DESC" : query + " ORDER BY createdAt DESC";
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 200) : 50;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
 
-        List<Task> tasks = Task.find(orderBy.toString(), params.toArray())
-                .from(effectiveOffset).fetch(effectiveLimit);
+        String jpql = query.isEmpty()
+                ? "SELECT t FROM Task t LEFT JOIN FETCH t.agent ORDER BY t.createdAt DESC"
+                : "SELECT t FROM Task t LEFT JOIN FETCH t.agent WHERE " + query + " ORDER BY t.createdAt DESC";
+        var q = JPA.em().createQuery(jpql, Task.class);
+        for (int i = 0; i < params.size(); i++) {
+            q.setParameter(i + 1, params.get(i));
+        }
+        List<Task> tasks = q.setFirstResult(effectiveOffset)
+                .setMaxResults(effectiveLimit).getResultList();
 
         renderJSON(gson.toJson(tasks.stream().map(ApiTasksController::taskToMap).toList()));
     }
