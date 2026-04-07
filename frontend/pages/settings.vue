@@ -55,6 +55,64 @@ function isSensitive(key: string) {
   return ['key', 'secret', 'password', 'token'].some(s => lower.includes(s))
 }
 
+// Shell execution config
+const SHELL_KEYS = ['shell.allowlist', 'shell.defaultTimeoutSeconds', 'shell.maxTimeoutSeconds', 'shell.maxOutputBytes', 'shell.allowGlobalPaths'] as const
+
+const shellEnabled = computed(() => {
+  const entries = configData.value?.entries ?? []
+  return entries.find((e: any) => e.key === 'jclaw.tools.shell.enabled')?.value === 'true'
+})
+
+const shellConfig = computed(() => {
+  const entries = configData.value?.entries ?? []
+  const map = new Map<string, string>()
+  for (const e of entries) {
+    if (SHELL_KEYS.includes(e.key as any)) {
+      map.set(e.key, e.value)
+    }
+  }
+  return {
+    allowlist: map.get('shell.allowlist') ?? '',
+    defaultTimeout: map.get('shell.defaultTimeoutSeconds') ?? '30',
+    maxTimeout: map.get('shell.maxTimeoutSeconds') ?? '300',
+    maxOutput: map.get('shell.maxOutputBytes') ?? '102400',
+    allowGlobalPaths: map.get('shell.allowGlobalPaths') === 'true',
+  }
+})
+
+const shellAllowlistEdit = ref('')
+const shellTimeoutEdit = ref('')
+const editingShellField = ref<string | null>(null)
+
+function startShellEdit(field: string, value: string) {
+  editingShellField.value = field
+  if (field === 'allowlist') shellAllowlistEdit.value = value
+  else shellTimeoutEdit.value = value
+}
+
+async function saveShellField(configKey: string, value: string) {
+  saving.value = true
+  try {
+    await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
+    editingShellField.value = null
+    refresh()
+  } finally {
+    saving.value = false
+  }
+}
+
+async function toggleShellEnabled() {
+  const newVal = shellEnabled.value ? 'false' : 'true'
+  await $fetch('/api/config', { method: 'POST', body: { key: 'jclaw.tools.shell.enabled', value: newVal } })
+  refresh()
+}
+
+async function toggleShellGlobalPaths() {
+  const newVal = shellConfig.value.allowGlobalPaths ? 'false' : 'true'
+  await $fetch('/api/config', { method: 'POST', body: { key: 'shell.allowGlobalPaths', value: newVal } })
+  refresh()
+}
+
 const SEARCH_PROVIDERS: Record<string, { label: string, keys: { key: string, label: string, placeholder: string }[] }> = {
   exa: {
     label: 'Exa',
@@ -109,7 +167,7 @@ const providerEntries = computed(() => {
           }
         }
       }
-      if (!matched) other.push(e)
+      if (!matched && !SHELL_KEYS.includes(e.key) && e.key !== 'jclaw.tools.shell.enabled') other.push(e)
     }
   }
   return { providers, searchEntries, other }
@@ -176,6 +234,72 @@ const providerEntries = computed(() => {
               <span class="flex-1 text-sm text-neutral-300 font-mono truncate">{{ entry.value || '(not set)' }}</span>
               <button @click="startEdit(entry)" class="text-xs text-neutral-500 hover:text-white transition-colors">Edit</button>
             </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Shell Execution -->
+    <div class="mb-6 space-y-4">
+      <h2 class="text-sm font-medium text-neutral-400">Shell Execution</h2>
+      <p class="text-xs text-neutral-600">Allow agents to execute shell commands on the host. Requires restart after toggling.</p>
+      <div class="bg-neutral-900 border border-neutral-800">
+        <div class="px-4 py-2.5 border-b border-neutral-800 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium text-white">Enabled</span>
+            <span v-if="shellEnabled" class="text-[10px] text-green-400 border border-green-400/30 px-1">active</span>
+            <span v-else class="text-[10px] text-neutral-500 border border-neutral-700 px-1">disabled</span>
+          </div>
+          <button @click="toggleShellEnabled"
+                  :class="shellEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-neutral-700 hover:bg-neutral-600'"
+                  class="relative w-9 h-5 rounded-full transition-colors">
+            <span :class="shellEnabled ? 'translate-x-4' : 'translate-x-0.5'"
+                  class="block w-4 h-4 bg-white rounded-full transition-transform" />
+          </button>
+        </div>
+        <div class="divide-y divide-neutral-800/50">
+          <!-- Allowlist -->
+          <div class="px-4 py-2.5 flex items-start gap-3">
+            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0 pt-0.5">allowlist</span>
+            <template v-if="editingShellField === 'allowlist'">
+              <textarea v-model="shellAllowlistEdit" rows="3"
+                        class="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white font-mono focus:outline-none resize-none" />
+              <div class="flex flex-col gap-1">
+                <button @click="saveShellField('shell.allowlist', shellAllowlistEdit)" class="text-xs text-white hover:text-emerald-400 transition-colors">Save</button>
+                <button @click="editingShellField = null" class="text-xs text-neutral-500 hover:text-white transition-colors">Cancel</button>
+              </div>
+            </template>
+            <template v-else>
+              <span class="flex-1 text-sm text-neutral-300 font-mono truncate">{{ shellConfig.allowlist || '(not set)' }}</span>
+              <button @click="startShellEdit('allowlist', shellConfig.allowlist)" class="text-xs text-neutral-500 hover:text-white transition-colors">Edit</button>
+            </template>
+          </div>
+          <!-- Default timeout -->
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">defaultTimeoutSeconds</span>
+            <template v-if="editingShellField === 'timeout'">
+              <input v-model="shellTimeoutEdit" type="number" min="1" max="300"
+                     class="w-24 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white font-mono focus:outline-none" />
+              <button @click="saveShellField('shell.defaultTimeoutSeconds', shellTimeoutEdit)" class="text-xs text-white hover:text-emerald-400 transition-colors">Save</button>
+              <button @click="editingShellField = null" class="text-xs text-neutral-500 hover:text-white transition-colors">Cancel</button>
+            </template>
+            <template v-else>
+              <span class="flex-1 text-sm text-neutral-300 font-mono">{{ shellConfig.defaultTimeout }}s</span>
+              <button @click="startShellEdit('timeout', shellConfig.defaultTimeout)" class="text-xs text-neutral-500 hover:text-white transition-colors">Edit</button>
+            </template>
+          </div>
+          <!-- Allow global paths -->
+          <div class="px-4 py-2.5 flex items-center justify-between">
+            <div>
+              <span class="text-xs font-mono text-neutral-500">allowGlobalPaths</span>
+              <p v-if="shellConfig.allowGlobalPaths" class="text-[10px] text-amber-400 mt-0.5">Commands can access any directory on the host</p>
+            </div>
+            <button @click="toggleShellGlobalPaths"
+                    :class="shellConfig.allowGlobalPaths ? 'bg-amber-600 hover:bg-amber-500' : 'bg-neutral-700 hover:bg-neutral-600'"
+                    class="relative w-9 h-5 rounded-full transition-colors">
+              <span :class="shellConfig.allowGlobalPaths ? 'translate-x-4' : 'translate-x-0.5'"
+                    class="block w-4 h-4 bg-white rounded-full transition-transform" />
+            </button>
           </div>
         </div>
       </div>

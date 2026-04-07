@@ -20,6 +20,9 @@ public class ToolRegistrationJob extends Job<Void> {
         if ("true".equals(play.Play.configuration.getProperty("jclaw.tools.playwright.enabled", "false"))) {
             ToolRegistry.register(new PlaywrightBrowserTool());
         }
+        if ("true".equals(play.Play.configuration.getProperty("jclaw.tools.shell.enabled", "false"))) {
+            ToolRegistry.register(new ShellExecTool());
+        }
         ToolRegistry.publish();
         services.EventLogger.info("system", "Registered %d tools".formatted(ToolRegistry.listTools().size()));
     }
