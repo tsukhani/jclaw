@@ -106,6 +106,9 @@ public class AgentRunner {
                 // Notify caller (e.g., send SSE init event with conversation ID)
                 onInit.accept(conversation);
 
+                EventLogger.info("llm", agent.name, channelType,
+                        "Streaming: assembling prompt for conversation %d".formatted(conversation.id));
+
                 // 3. Assemble system prompt (reads JPA + filesystem)
                 var assembled = services.Tx.run(() ->
                         SystemPromptAssembler.assemble(agent, userMessage));
@@ -118,6 +121,7 @@ public class AgentRunner {
                 var agentProvider = services.Tx.run(() -> ProviderRegistry.get(agent.modelProvider));
                 var primary = agentProvider != null ? agentProvider : services.Tx.run(ProviderRegistry::getPrimary);
                 if (primary == null) {
+                    EventLogger.error("llm", agent.name, channelType, "No LLM provider configured");
                     onError.accept(new RuntimeException("No LLM provider configured"));
                     return;
                 }
@@ -125,6 +129,10 @@ public class AgentRunner {
                 messages = trimToContextWindow(messages, agent, primary);
 
                 var tools = services.Tx.run(() -> ToolRegistry.getToolDefsForAgent(agent));
+                EventLogger.info("llm", agent.name, channelType,
+                        "Streaming: calling %s / %s (%d messages, %d tools, %d skills)"
+                                .formatted(primary.name(), agent.modelId,
+                                        messages.size(), tools.size(), assembled.skills().size()));
                 var modelInfo = primary.models().stream()
                         .filter(m -> m.id().equals(agent.modelId))
                         .findFirst().orElse(null);
@@ -162,9 +170,14 @@ public class AgentRunner {
                 var finalContent = content;
                 services.Tx.run(() ->
                         ConversationService.appendAssistantMessage(conversation, finalContent, null));
+
+                EventLogger.info("llm", agent.name, channelType,
+                        "Streaming complete (%d chars)".formatted(content.length()));
                 onComplete.accept(content);
 
             } catch (Exception e) {
+                EventLogger.error("llm", agent.name, channelType,
+                        "Streaming error: %s".formatted(e.getMessage()));
                 onError.accept(e);
             }
         });
@@ -207,11 +220,20 @@ public class AgentRunner {
             // Tool calls — execute and continue
             currentMessages.add(assistantMsg);
             EventLogger.info("tool", agent.name, null,
-                    "Executing %d tool call(s)".formatted(assistantMsg.toolCalls().size()));
+                    "Round %d: executing %d tool call(s)".formatted(round + 1, assistantMsg.toolCalls().size()));
 
             for (var toolCall : assistantMsg.toolCalls()) {
+                EventLogger.info("tool", agent.name, null,
+                        "Executing tool '%s' (id: %s, args: %s)"
+                                .formatted(toolCall.function().name(), toolCall.id(),
+                                        toolCall.function().arguments().length() > 200
+                                                ? toolCall.function().arguments().substring(0, 200) + "..."
+                                                : toolCall.function().arguments()));
                 var result = ToolRegistry.execute(toolCall.function().name(),
                         toolCall.function().arguments(), agent);
+                var resultPreview = result.length() > 200 ? result.substring(0, 200) + "... (%d chars)".formatted(result.length()) : result;
+                EventLogger.info("tool", agent.name, null,
+                        "Tool '%s' returned: %s".formatted(toolCall.function().name(), resultPreview));
                 currentMessages.add(ChatMessage.toolResult(toolCall.id(), result));
 
                 // Persist tool interaction
@@ -234,12 +256,24 @@ public class AgentRunner {
         if (round >= MAX_TOOL_ROUNDS) {
             return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
         }
+        EventLogger.info("tool", agent.name, null,
+                "Streaming round %d: executing %d tool call(s)".formatted(round + 1, toolCalls.size()));
+
         var currentMessages = new ArrayList<>(messages);
         currentMessages.add(ChatMessage.assistant(priorContent, toolCalls));
 
         for (var toolCall : toolCalls) {
+            EventLogger.info("tool", agent.name, null,
+                    "Executing tool '%s' (id: %s, args: %s)"
+                            .formatted(toolCall.function().name(), toolCall.id(),
+                                    toolCall.function().arguments().length() > 200
+                                            ? toolCall.function().arguments().substring(0, 200) + "..."
+                                            : toolCall.function().arguments()));
             var result = ToolRegistry.execute(toolCall.function().name(),
                     toolCall.function().arguments(), agent);
+            var resultPreview = result.length() > 200 ? result.substring(0, 200) + "... (%d chars)".formatted(result.length()) : result;
+            EventLogger.info("tool", agent.name, null,
+                    "Tool '%s' returned: %s".formatted(toolCall.function().name(), resultPreview));
             currentMessages.add(ChatMessage.toolResult(toolCall.id(), result));
 
             services.Tx.run(() -> {
@@ -247,6 +281,9 @@ public class AgentRunner {
                 ConversationService.appendToolResult(conversation, toolCall.id(), result);
             });
         }
+
+        EventLogger.info("llm", agent.name, null,
+                "Streaming round %d: continuing LLM call after tool results".formatted(round + 1));
 
         // Continue with streaming after tool results
         var accumulator = OpenAiCompatibleClient.chatStreamAccumulate(
