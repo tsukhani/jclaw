@@ -412,6 +412,14 @@ public class AgentRunner {
                     accumulator.toolCalls, accumulator.content, provider, onToken, maxTokens, round + 1, isCancelled);
         }
 
+        // If LLM returned empty content after tool calls, emit "Done." so the user isn't left
+        // with a blank response. Some models return empty content when tool results are self-explanatory.
+        if (accumulator.content == null || accumulator.content.isBlank()) {
+            var fallback = "Done.";
+            onToken.accept(fallback);
+            return fallback;
+        }
+
         return accumulator.content;
     }
 
