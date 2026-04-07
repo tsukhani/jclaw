@@ -55,11 +55,31 @@ function isSensitive(key: string) {
   return ['key', 'secret', 'password', 'token'].some(s => lower.includes(s))
 }
 
+const SEARCH_PROVIDERS: Record<string, { label: string, keys: { key: string, label: string, placeholder: string }[] }> = {
+  exa: {
+    label: 'Exa',
+    keys: [
+      { key: 'exa.apiKey', label: 'apiKey', placeholder: 'Your Exa API key from exa.ai' }
+    ]
+  }
+}
+
 // Group config entries by provider
 const providerEntries = computed(() => {
   const entries = configData.value?.entries ?? []
   const providers = new Map<string, any[]>()
+  const searchEntries = new Map<string, Map<string, any>>()
   const other: any[] = []
+
+  // Initialize search providers with all expected keys
+  for (const [id, def] of Object.entries(SEARCH_PROVIDERS)) {
+    const keyMap = new Map<string, any>()
+    for (const k of def.keys) {
+      keyMap.set(k.key, { key: k.key, value: '', label: k.label, placeholder: k.placeholder })
+    }
+    searchEntries.set(id, keyMap)
+  }
+
   for (const e of entries) {
     if (e.key.startsWith('provider.')) {
       const parts = e.key.split('.')
@@ -67,10 +87,20 @@ const providerEntries = computed(() => {
       if (!providers.has(name)) providers.set(name, [])
       providers.get(name)!.push(e)
     } else {
-      other.push(e)
+      // Check if it belongs to a search provider
+      let matched = false
+      for (const [id, def] of Object.entries(SEARCH_PROVIDERS)) {
+        for (const k of def.keys) {
+          if (e.key === k.key) {
+            searchEntries.get(id)!.set(k.key, { ...e, label: k.label, placeholder: k.placeholder })
+            matched = true
+          }
+        }
+      }
+      if (!matched) other.push(e)
     }
   }
-  return { providers, other }
+  return { providers, searchEntries, other }
 })
 </script>
 
@@ -101,6 +131,37 @@ const providerEntries = computed(() => {
             </template>
             <template v-else>
               <span class="flex-1 text-sm text-neutral-300 font-mono truncate">{{ entry.value || '(empty)' }}</span>
+              <button @click="startEdit(entry)" class="text-xs text-neutral-500 hover:text-white transition-colors">Edit</button>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Search Providers -->
+    <div class="mb-6 space-y-4">
+      <h2 class="text-sm font-medium text-neutral-400">Search Providers</h2>
+      <p class="text-xs text-neutral-600">Configure API keys for web search tools used by agents.</p>
+      <div v-for="[id, keyMap] in providerEntries.searchEntries" :key="id"
+           class="bg-neutral-900 border border-neutral-800">
+        <div class="px-4 py-2.5 border-b border-neutral-800">
+          <span class="text-sm font-medium text-white">{{ SEARCH_PROVIDERS[id].label }}</span>
+          <span v-if="[...keyMap.values()].find(e => e.key.endsWith('apiKey') && e.value && e.value !== '(empty)')"
+                class="ml-2 text-[10px] text-green-400 border border-green-400/30 px-1">configured</span>
+        </div>
+        <div class="divide-y divide-neutral-800/50">
+          <div v-for="entry in [...keyMap.values()]" :key="entry.key" class="px-4 py-2 flex items-center gap-3">
+            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">{{ entry.label }}</span>
+            <template v-if="editingKey === entry.key">
+              <input v-model="editValue"
+                     :type="isSensitive(entry.key) ? 'password' : 'text'"
+                     :placeholder="entry.placeholder"
+                     class="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none" />
+              <button @click="updateEntry(entry.key)" class="text-xs text-white hover:text-green-400 transition-colors">Save</button>
+              <button @click="editingKey = null" class="text-xs text-neutral-500 hover:text-white transition-colors">Cancel</button>
+            </template>
+            <template v-else>
+              <span class="flex-1 text-sm text-neutral-300 font-mono truncate">{{ entry.value || '(not set)' }}</span>
               <button @click="startEdit(entry)" class="text-xs text-neutral-500 hover:text-white transition-colors">Edit</button>
             </template>
           </div>
