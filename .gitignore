@@ -94,7 +94,7 @@ coverage/
 .nyc_output/
 
 # Play modules (auto-downloaded)
-modules/*/
+modules/*
 !modules/.gitkeep
 
 # Ignore but keep empty directories

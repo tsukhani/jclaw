@@ -26,7 +26,7 @@ public class Conversation extends Model {
     @Column(name = "updated_at", nullable = false)
     public Instant updatedAt;
 
-    @OneToMany(mappedBy = "conversation", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OneToMany(mappedBy = "conversation")
     @OrderBy("createdAt ASC")
     public List<Message> messages;
 
