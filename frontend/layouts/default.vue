@@ -90,7 +90,7 @@ const navGroups = [
 
       <!-- Version -->
       <div class="px-4 py-2.5 shrink-0 border-t border-neutral-800">
-        <div class="flex items-center justify-between">
+        <div class="flex items-center justify-between bg-neutral-900 border border-neutral-600/40 rounded-lg px-3 py-2">
           <div class="flex items-center gap-2">
             <span class="text-xs text-neutral-500 font-mono uppercase tracking-wider">Version</span>
             <span class="text-sm text-neutral-300 font-mono">v0.2.0</span>
@@ -174,7 +174,7 @@ const navGroups = [
       </header>
 
       <!-- Content -->
-      <main class="flex-1 overflow-auto p-6">
+      <main class="flex-1 min-h-0 overflow-auto p-6">
         <slot />
       </main>
     </div>

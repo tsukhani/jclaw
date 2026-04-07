@@ -232,10 +232,51 @@ function newChat() {
   selectedConvoId.value = null
   messages.value = []
 }
+
+const fileInput = ref<HTMLInputElement | null>(null)
+
+function triggerFileUpload() {
+  fileInput.value?.click()
+}
+
+function handleFileUpload(event: Event) {
+  const target = event.target as HTMLInputElement
+  const file = target.files?.[0]
+  if (!file) return
+  // Read as text and paste into input
+  const reader = new FileReader()
+  reader.onload = () => {
+    const text = reader.result as string
+    input.value = `[Attached: ${file.name}]\n${text.substring(0, 10000)}`
+  }
+  reader.readAsText(file)
+  target.value = '' // Reset so same file can be re-uploaded
+}
+
+function exportConversation() {
+  if (!displayMessages.value.length) return
+  const convo = conversations.value?.find((c: any) => c.id === selectedConvoId.value)
+  const title = convo?.preview || 'conversation'
+  const lines: string[] = [`# ${title}\n`]
+  for (const msg of displayMessages.value) {
+    if (msg.role === 'user') {
+      lines.push(`## User\n\n${msg.content}\n`)
+    } else if (msg.role === 'assistant') {
+      lines.push(`## Assistant\n\n${msg.content}\n`)
+    }
+  }
+  const blob = new Blob([lines.join('\n')], { type: 'text/markdown' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${title.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '-').toLowerCase()}.md`
+  a.click()
+  URL.revokeObjectURL(url)
+}
 </script>
 
 <template>
-  <div class="flex h-full -m-6" :class="{ 'select-none': isResizing }">
+  <div class="flex -m-6" style="height: calc(100vh - 3rem);" :class="{ 'select-none': isResizing }">
     <!-- Conversation sidebar -->
     <div :style="{ width: sidebarWidth + 'px' }" class="shrink-0 border-r border-neutral-800 flex flex-col overflow-hidden">
       <div class="p-3 border-b border-neutral-800 flex items-center justify-between">
@@ -254,14 +295,14 @@ function newChat() {
         </template>
         <template v-else>
           <span class="text-xs font-medium text-neutral-400">Conversations</span>
-          <div class="flex items-center gap-2">
-            <button
-              v-if="conversations?.length"
-              @click="selectMode = true"
-              class="text-xs text-neutral-500 hover:text-white transition-colors"
-            >Edit</button>
-            <button @click="newChat" class="text-xs text-neutral-500 hover:text-white transition-colors">+ New</button>
-          </div>
+          <button
+            v-if="conversations?.length"
+            @click="selectMode = true"
+            class="p-1 text-neutral-500 hover:text-white transition-colors"
+            title="Edit conversations"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+          </button>
         </template>
       </div>
       <div class="flex-1 overflow-y-auto">
@@ -337,7 +378,7 @@ function newChat() {
       <!-- Input -->
       <div class="px-4 py-3">
         <form @submit.prevent="sendMessage"
-              class="bg-neutral-800/60 border border-neutral-700/50 rounded-xl overflow-hidden">
+              class="bg-neutral-900 border border-neutral-600/40 rounded-xl overflow-hidden">
           <input
             v-model="input"
             type="text"
@@ -346,20 +387,24 @@ function newChat() {
             class="w-full px-4 pt-3 pb-2 bg-transparent text-sm text-white
                    placeholder-neutral-600 focus:outline-none"
           />
+          <input ref="fileInput" type="file" class="hidden" @change="handleFileUpload" />
           <div class="flex items-center justify-between px-3 pb-2.5">
             <div class="flex items-center gap-1">
-              <button type="button" class="p-1.5 text-neutral-600 hover:text-neutral-400 transition-colors" title="Attach file">
+              <button type="button" @click="triggerFileUpload" class="p-1.5 text-neutral-500 hover:text-neutral-300 transition-colors" title="Attach file">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
               </button>
             </div>
             <div class="flex items-center gap-1">
-              <button type="button" class="p-1.5 text-neutral-600 hover:text-neutral-400 transition-colors" title="New conversation">
+              <button type="button" @click="newChat" class="p-1.5 text-neutral-500 hover:text-neutral-300 transition-colors" title="New conversation">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4" /></svg>
+              </button>
+              <button type="button" @click="exportConversation" :disabled="!displayMessages.length" class="p-1.5 text-neutral-500 hover:text-neutral-300 disabled:text-neutral-700 transition-colors" title="Export as Markdown">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
               </button>
               <button
                 type="submit"
                 :disabled="streaming || !input.trim()"
-                class="p-1.5 text-neutral-600 hover:text-emerald-400 disabled:text-neutral-700 transition-colors"
+                class="p-1.5 text-neutral-500 hover:text-emerald-400 disabled:text-neutral-700 transition-colors"
                 title="Send"
               >
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 12L3 21l18-9L3 3l3 9zm0 0h8" /></svg>
