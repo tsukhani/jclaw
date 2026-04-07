@@ -52,15 +52,11 @@ public class SkillLoader {
     private static List<SkillInfo> loadSkillsFromDisk(String agentName) {
         var allSkills = new ArrayList<SkillInfo>();
 
-        // 1. Scan global skills directory
-        var globalDir = globalSkillsPath();
-        scanSkillsDirectory(globalDir, allSkills);
-
-        // 2. Scan agent-specific skills directory
+        // Only scan agent workspace skills — global skills must be explicitly copied to agents
         var agentDir = AgentService.workspacePath(agentName).resolve("skills");
         scanSkillsDirectory(agentDir, allSkills);
 
-        // 3. Filter by permissions
+        // Filter by permissions
         var agent = Agent.findByName(agentName);
         if (agent != null) {
             var configs = AgentSkillConfig.findByAgent(agent);

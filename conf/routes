@@ -51,6 +51,7 @@ PUT     /api/skills/{name}                      ApiSkillsController.update
 DELETE  /api/skills/{name}                      ApiSkillsController.delete
 GET     /api/agents/{id}/skills                 ApiSkillsController.listForAgent
 PUT     /api/agents/{id}/skills/{name}          ApiSkillsController.updateForAgent
+POST    /api/agents/{id}/skills/{name}/copy     ApiSkillsController.copyToAgent
 
 # Config API
 GET     /api/config                             ApiConfigController.list

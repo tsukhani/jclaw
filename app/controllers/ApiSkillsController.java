@@ -130,50 +130,33 @@ public class ApiSkillsController extends Controller {
         }
     }
 
-    /** GET /api/agents/{id}/skills — List all skills for an agent with enabled status. */
+    /** GET /api/agents/{id}/skills — List workspace skills for an agent with enabled status. */
     public static void listForAgent(Long id) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
 
-        var allSkills = new java.util.ArrayList<SkillLoader.SkillInfo>();
-
-        // Scan global skills
-        var globalDir = SkillLoader.globalSkillsPath();
-        if (Files.isDirectory(globalDir)) {
-            try (var dirs = Files.list(globalDir)) {
-                dirs.filter(Files::isDirectory).forEach(dir -> {
-                    var skillFile = dir.resolve("SKILL.md");
-                    if (Files.exists(skillFile)) {
-                        var info = SkillLoader.parseSkillFile(skillFile);
-                        if (info != null) allSkills.add(info);
-                    }
-                });
-            } catch (IOException _) {}
-        }
-
-        // Scan agent-specific skills
         var agentDir = AgentService.workspacePath(agent.name).resolve("skills");
+        var skills = new java.util.ArrayList<SkillLoader.SkillInfo>();
         if (Files.isDirectory(agentDir)) {
             try (var dirs = Files.list(agentDir)) {
                 dirs.filter(Files::isDirectory).forEach(dir -> {
                     var skillFile = dir.resolve("SKILL.md");
                     if (Files.exists(skillFile)) {
                         var info = SkillLoader.parseSkillFile(skillFile);
-                        if (info != null) allSkills.add(info);
+                        if (info != null) skills.add(info);
                     }
                 });
             } catch (IOException _) {}
         }
 
-        // Get permission configs
         var configs = AgentSkillConfig.findByAgent(agent);
         var configMap = new HashMap<String, Boolean>();
         for (var c : configs) {
             configMap.put(c.skillName, c.enabled);
         }
 
-        var result = allSkills.stream().map(s -> {
-            var map = skillToMap(s, s.location() != null && s.location().startsWith(globalDir));
+        var result = skills.stream().map(s -> {
+            var map = skillToMap(s, false);
             map.put("enabled", configMap.getOrDefault(s.name(), true));
             return map;
         }).toList();
@@ -199,6 +182,52 @@ public class ApiSkillsController extends Controller {
         config.save();
 
         renderJSON(gson.toJson(java.util.Map.of("name", name, "enabled", enabled, "status", "ok")));
+    }
+
+    /** POST /api/agents/{id}/skills/{name}/copy — Copy a global skill into the agent's workspace. */
+    public static void copyToAgent(Long id, String name) {
+        Agent agent = Agent.findById(id);
+        if (agent == null) notFound();
+
+        var globalDir = SkillLoader.globalSkillsPath().resolve(name);
+        if (!Files.isDirectory(globalDir)) {
+            error(404, "Global skill '%s' not found".formatted(name));
+        }
+
+        var targetDir = AgentService.workspacePath(agent.name).resolve("skills").resolve(name);
+        if (Files.isDirectory(targetDir) && Files.exists(targetDir.resolve("SKILL.md"))) {
+            error(409, "Skill '%s' already exists in agent workspace".formatted(name));
+        }
+
+        try {
+            Files.createDirectories(targetDir);
+            try (var walk = Files.walk(globalDir)) {
+                walk.forEach(source -> {
+                    var target = targetDir.resolve(globalDir.relativize(source));
+                    try {
+                        if (Files.isDirectory(source)) {
+                            Files.createDirectories(target);
+                        } else {
+                            Files.copy(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                        }
+                    } catch (IOException ex) {
+                        throw new RuntimeException("Failed to copy " + source, ex);
+                    }
+                });
+            }
+            SkillLoader.clearCache();
+
+            // Ensure skill is enabled for this agent
+            var config = AgentSkillConfig.findByAgentAndSkill(agent, name);
+            if (config != null && !config.enabled) {
+                config.enabled = true;
+                config.save();
+            }
+
+            renderJSON(gson.toJson(java.util.Map.of("name", name, "status", "ok")));
+        } catch (IOException e) {
+            error(500, "Failed to copy skill: " + e.getMessage());
+        }
     }
 
     // --- Helpers ---
