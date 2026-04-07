@@ -2,6 +2,7 @@ package controllers;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonParser;
+import llm.ProviderRegistry;
 import models.Agent;
 import play.mvc.Controller;
 import play.mvc.Http;
@@ -97,6 +98,12 @@ public class ApiAgentsController extends Controller {
         map.put("isDefault", a.isDefault);
         map.put("createdAt", a.createdAt.toString());
         map.put("updatedAt", a.updatedAt.toString());
+
+        var provider = ProviderRegistry.get(a.modelProvider);
+        var providerConfigured = provider != null
+                && provider.models().stream().anyMatch(m -> m.id().equals(a.modelId));
+        map.put("providerConfigured", providerConfigured);
+
         return map;
     }
 

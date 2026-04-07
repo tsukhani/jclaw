@@ -58,6 +58,13 @@ const availableModels = computed(() => {
   return provider?.models ?? []
 })
 
+// Whether the selected provider is configured and the selected model is available
+const providerValid = computed(() => {
+  const provider = providers.value.find(p => p.name === form.value.modelProvider)
+  if (!provider) return false
+  return !form.value.modelId || provider.models.some((m: any) => m.id === form.value.modelId)
+})
+
 // Auto-select first provider when creating
 function newAgent() {
   const defaultProvider = providers.value[0]?.name ?? ''
@@ -80,12 +87,15 @@ function editAgent(agent: any) {
   loadWorkspaceFile(agent.id, 'AGENT.md')
 }
 
-// When provider changes, reset model to first available
+// When provider changes, reset model to first available and disable if provider invalid
 watch(() => form.value.modelProvider, (newProvider) => {
   const provider = providers.value.find(p => p.name === newProvider)
   const currentModelValid = provider?.models?.some((m: any) => m.id === form.value.modelId)
   if (!currentModelValid) {
     form.value.modelId = provider?.models?.[0]?.id ?? ''
+  }
+  if (!provider) {
+    form.value.enabled = false
   }
 })
 
@@ -159,8 +169,8 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
           <span v-if="agent.isDefault" class="ml-2 text-[10px] text-neutral-500 border border-neutral-700 px-1">default</span>
           <div class="text-xs text-neutral-500 mt-0.5">{{ agent.modelProvider }} / {{ agent.modelId }}</div>
         </div>
-        <span :class="agent.enabled ? 'text-green-400' : 'text-neutral-600'" class="text-xs font-mono">
-          {{ agent.enabled ? 'enabled' : 'disabled' }}
+        <span :class="agent.enabled && agent.providerConfigured ? 'text-green-400' : 'text-neutral-600'" class="text-xs font-mono">
+          {{ agent.enabled && agent.providerConfigured ? 'enabled' : 'disabled' }}
         </span>
       </div>
       <div v-if="!agents?.length" class="px-4 py-8 text-center text-sm text-neutral-600">
@@ -194,8 +204,9 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
             </select>
           </div>
           <div class="flex items-end gap-4">
-            <label class="flex items-center gap-1.5 text-xs text-neutral-400">
-              <input type="checkbox" v-model="form.enabled" class="accent-white" /> Enabled
+            <label class="flex items-center gap-1.5 text-xs" :class="providerValid ? 'text-neutral-400' : 'text-neutral-600'">
+              <input type="checkbox" v-model="form.enabled" :disabled="!providerValid" class="accent-white" /> Enabled
+              <span v-if="!providerValid" class="text-neutral-600 ml-1">(provider not configured)</span>
             </label>
             <label class="flex items-center gap-1.5 text-xs text-neutral-400">
               <input type="checkbox" v-model="form.isDefault" class="accent-white" /> Default

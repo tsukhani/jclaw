@@ -1,5 +1,6 @@
 package services;
 
+import llm.ProviderRegistry;
 import models.Agent;
 import play.Play;
 
@@ -15,6 +16,7 @@ public class AgentService {
         agent.name = name;
         agent.modelProvider = modelProvider;
         agent.modelId = modelId;
+        agent.enabled = isProviderConfigured(modelProvider, modelId);
         agent.isDefault = isDefault;
         agent.save();
 
@@ -29,10 +31,16 @@ public class AgentService {
         agent.name = name;
         agent.modelProvider = modelProvider;
         agent.modelId = modelId;
-        agent.enabled = enabled;
+        agent.enabled = enabled && isProviderConfigured(modelProvider, modelId);
         agent.isDefault = isDefault;
         agent.save();
         return agent;
+    }
+
+    private static boolean isProviderConfigured(String providerName, String modelId) {
+        var provider = ProviderRegistry.get(providerName);
+        return provider != null
+                && provider.models().stream().anyMatch(m -> m.id().equals(modelId));
     }
 
     public static void delete(Agent agent) {
