@@ -46,8 +46,7 @@ JClaw aims to be a Java-first AI automation platform that combines OpenClaw's ag
 Gaps identified from OpenClaw/JavaClaw audit — not in v0.1.0 scope but needed for production parity:
 
 ### High Priority
-- `memory-auto-capture`: Automatic extraction of facts from conversations after each turn. OpenClaw uses an LLM-based pipeline during session compaction to decompose conversations into atomic memories. Without this, the agent only remembers what it's explicitly told to save via the memory_save tool.
-- `channel-dm-policy`: Access control for who can message the bot via external channels (Telegram, Slack, WhatsApp). OpenClaw supports pairing (verification code), allowlist (specific user IDs), and open modes. JavaClaw uses username whitelists. Currently JClaw responds to any sender.
+- `tool-playwright`: Browser automation via Playwright for JS-heavy pages. JavaClaw uses `PlaywrightBrowserTool` with navigate, click, fill, extract actions. Needed because `web_fetch` can only handle static HTML — SPAs and dynamic content require a real browser engine.
 - `concurrent-message-handling`: Queue or interrupt modes for handling multiple simultaneous messages to the same conversation. OpenClaw supports queue mode (buffer and process in order) and interrupt mode (cancel in-flight, process new). Currently JClaw has no concurrency control — two simultaneous messages could interleave and corrupt conversation state.
 
 ### Medium Priority
@@ -56,9 +55,10 @@ Gaps identified from OpenClaw/JavaClaw audit — not in v0.1.0 scope but needed 
 - `multi-account-channels`: Support multiple accounts per channel type (e.g., multiple Telegram bots, multiple Slack workspaces). OpenClaw supports this via account IDs in bindings. Currently JClaw has one ChannelConfig per channel type.
 
 ### Deferred (captured in design Non-Goals)
+- `memory-auto-capture`: Automatic extraction of facts from conversations after each turn. OpenClaw uses an LLM-based pipeline during session compaction to decompose conversations into atomic memories. Without this, the agent only remembers what it's explicitly told to save via the memory_save tool.
+- `channel-dm-policy`: Access control for who can message the bot via external channels (Telegram, Slack, WhatsApp). OpenClaw supports pairing (verification code), allowlist (specific user IDs), and open modes. JavaClaw uses username whitelists. Currently JClaw responds to any sender.
 - `session-compaction`: Auto-summarize older messages when context window fills up
 - `sub-agents`: Spawn child agents for delegated tasks
-- `tool-playwright`: Browser automation via Playwright
 - `tool-brave-search`: Web search via Brave API
 - `tool-mcp`: Model Context Protocol server integration
 - `multi-user-auth`: Multiple users with role-based access control
