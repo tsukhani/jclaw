@@ -166,7 +166,7 @@ public class AgentRunner {
                 }
 
                 var messages = services.Tx.run(() ->
-                        buildMessages(assembled.systemPrompt(), conversation));
+                        buildMessages(assembled.systemPrompt(), ConversationService.findById(conversation.id)));
 
                 var agentProvider = services.Tx.run(() -> ProviderRegistry.get(agent.modelProvider));
                 var primary = agentProvider != null ? agentProvider : services.Tx.run(ProviderRegistry::getPrimary);
@@ -222,7 +222,7 @@ public class AgentRunner {
 
                 // Handle tool calls if present
                 if (!accumulator.toolCalls.isEmpty()) {
-                    content = handleToolCallsStreaming(agent, conversation, messages, tools,
+                    content = handleToolCallsStreaming(agent, conversation.id, messages, tools,
                             accumulator.toolCalls, content, primary, onToken, maxTokens, 0, isCancelled);
                 }
 
@@ -233,8 +233,10 @@ public class AgentRunner {
 
                 // Persist and complete
                 var finalContent = content;
-                services.Tx.run(() ->
-                        ConversationService.appendAssistantMessage(conversation, finalContent, null));
+                services.Tx.run(() -> {
+                    var conv = ConversationService.findById(conversation.id);
+                    ConversationService.appendAssistantMessage(conv, finalContent, null);
+                });
 
                 EventLogger.info("llm", agent.name, channelType,
                         "Streaming complete (%d chars)".formatted(content.length()));
@@ -320,7 +322,7 @@ public class AgentRunner {
         return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
     }
 
-    private static String handleToolCallsStreaming(Agent agent, Conversation conversation,
+    private static String handleToolCallsStreaming(Agent agent, Long conversationId,
                                                     List<ChatMessage> messages, List<ToolDef> tools,
                                                     List<ToolCall> toolCalls, String priorContent,
                                                     ProviderConfig provider,
@@ -354,8 +356,9 @@ public class AgentRunner {
             currentMessages.add(ChatMessage.toolResult(toolCall.id(), result));
 
             services.Tx.run(() -> {
-                ConversationService.appendAssistantMessage(conversation, null, gson.toJson(toolCall));
-                ConversationService.appendToolResult(conversation, toolCall.id(), result);
+                var conv = ConversationService.findById(conversationId);
+                ConversationService.appendAssistantMessage(conv, null, gson.toJson(toolCall));
+                ConversationService.appendToolResult(conv, toolCall.id(), result);
             });
         }
 
@@ -379,7 +382,7 @@ public class AgentRunner {
 
         // Recursively handle if more tool calls
         if (!accumulator.toolCalls.isEmpty()) {
-            return handleToolCallsStreaming(agent, conversation, currentMessages, tools,
+            return handleToolCallsStreaming(agent, conversationId, currentMessages, tools,
                     accumulator.toolCalls, accumulator.content, provider, onToken, maxTokens, round + 1, isCancelled);
         }
 
