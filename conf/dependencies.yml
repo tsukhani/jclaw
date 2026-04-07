@@ -3,7 +3,5 @@
 require:
     - play
     - play -> docviewer
-
-# Custom JARs in lib/ directory:
-# - PostgreSQL JDBC driver (production database)
-# - Neo4j Java driver (optional, for memory-neo4j backend)
+    - org.jsoup -> jsoup 1.18.3
+    - com.microsoft.playwright -> playwright 1.52.0

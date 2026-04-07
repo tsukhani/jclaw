@@ -81,11 +81,8 @@ certs/
 *.p12
 *.jks
 
-# Playwright runtime (too large for GitHub, downloaded separately — see README)
-bin/playwright/
-lib/playwright-*.jar
-lib/driver-*.jar
-lib/Java-WebSocket-*.jar
+# lib/ JARs managed by play deps --sync (downloaded from Maven Central)
+lib/*.jar
 
 # Database files
 data/
