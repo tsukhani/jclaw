@@ -2,6 +2,24 @@
 const { logout, username } = useAuth()
 const { themeMode, setTheme } = useTheme()
 const sidebarOpen = ref(true)
+const searchInput = ref<HTMLInputElement | null>(null)
+const isMac = ref(true)
+
+onMounted(() => {
+  isMac.value = navigator.platform.includes('Mac') || navigator.userAgent.includes('Mac')
+})
+
+onMounted(() => {
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault()
+      searchInput.value?.focus()
+    }
+    if (e.key === 'Escape' && document.activeElement === searchInput.value) {
+      searchInput.value?.blur()
+    }
+  })
+})
 
 const route = useRoute()
 
@@ -137,12 +155,13 @@ const navGroups = [
         <div class="flex items-center gap-3">
           <div class="relative">
             <input
+              ref="searchInput"
               type="text"
               placeholder="Search"
-              class="w-64 pl-3 pr-14 py-1.5 bg-neutral-800 border border-neutral-700 rounded-lg text-sm text-white
+              class="w-64 pl-3 pr-16 py-1.5 bg-neutral-800 border border-neutral-700 rounded-lg text-sm text-white
                      placeholder-neutral-500 focus:outline-none focus:border-neutral-600 transition-colors"
             />
-            <kbd class="absolute right-2.5 top-1/2 -translate-y-1/2 px-1.5 py-0.5 bg-neutral-700 border border-neutral-600 rounded text-[10px] text-neutral-400 font-mono">⌘K</kbd>
+            <kbd class="absolute right-2.5 top-1/2 -translate-y-1/2 px-1.5 py-0.5 bg-neutral-700 border border-neutral-600 rounded text-[10px] text-neutral-400 font-mono tracking-widest">{{ isMac ? '⌘ K' : 'Ctrl K' }}</kbd>
           </div>
           <div class="flex items-center border border-neutral-700 rounded-lg overflow-hidden">
             <button
