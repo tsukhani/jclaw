@@ -103,7 +103,7 @@ openspec/archive/
 
 # Agent workspaces (only track the default test agent)
 workspace/*
-!workspace/test/
+!workspace/main/
 
 # Ignore but keep empty directories
 !.gitkeep

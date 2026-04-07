@@ -1,3 +1,3 @@
 # Identity
 
-Name: test
+Name: main

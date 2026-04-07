@@ -30,7 +30,7 @@ public class ApiAgentsController extends Controller {
         renderJSON(gson.toJson(agentToMap(agent)));
     }
 
-    private static final String RESERVED_AGENT_NAME = "test";
+    private static final String RESERVED_AGENT_NAME = "main";
 
     public static void create() {
         var body = readJsonBody();
@@ -38,7 +38,7 @@ public class ApiAgentsController extends Controller {
 
         var name = body.get("name").getAsString();
         if (RESERVED_AGENT_NAME.equalsIgnoreCase(name)) {
-            error(409, "The agent name 'test' is reserved for the built-in agent");
+            error(409, "The agent name 'main' is reserved for the built-in agent");
         }
         var modelProvider = body.get("modelProvider").getAsString();
         var modelId = body.get("modelId").getAsString();
@@ -57,7 +57,7 @@ public class ApiAgentsController extends Controller {
 
         var name = body.has("name") ? body.get("name").getAsString() : agent.name;
         if (!agent.name.equalsIgnoreCase(RESERVED_AGENT_NAME) && RESERVED_AGENT_NAME.equalsIgnoreCase(name)) {
-            error(409, "The agent name 'test' is reserved for the built-in agent");
+            error(409, "The agent name 'main' is reserved for the built-in agent");
         }
         var modelProvider = body.has("modelProvider") ? body.get("modelProvider").getAsString() : agent.modelProvider;
         var modelId = body.has("modelId") ? body.get("modelId").getAsString() : agent.modelId;
@@ -72,7 +72,7 @@ public class ApiAgentsController extends Controller {
         var agent = AgentService.findById(id);
         if (agent == null) notFound();
         if (RESERVED_AGENT_NAME.equalsIgnoreCase(agent.name)) {
-            error(409, "The built-in 'test' agent cannot be deleted");
+            error(409, "The built-in 'main' agent cannot be deleted");
         }
         AgentService.delete(agent);
         renderJSON(gson.toJson(new HashMap<>(java.util.Map.of("status", "ok"))));
