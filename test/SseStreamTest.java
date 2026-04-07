@@ -47,7 +47,7 @@ public class SseStreamTest extends UnitTest {
         var completed = new AtomicBoolean(false);
 
         // Simulate onComplete callback that throws, but with finally guard
-        Thread.ofVirtual().start(() -> {
+        Thread.ofVirtual().uncaughtExceptionHandler((_, _) -> {}).start(() -> {
             try {
                 throw new RuntimeException("simulated writeChunk failure");
             } finally {
@@ -64,7 +64,7 @@ public class SseStreamTest extends UnitTest {
         var latch = new CountDownLatch(1);
 
         // Simulate onError callback that throws (client disconnected during error write)
-        Thread.ofVirtual().start(() -> {
+        Thread.ofVirtual().uncaughtExceptionHandler((_, _) -> {}).start(() -> {
             try {
                 // Simulate error handling that itself fails
                 throw new RuntimeException("writeChunk failed in onError");
