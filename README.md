@@ -10,7 +10,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/BUILD-PASSING-brightgreen?style=for-the-badge" alt="Build: Passing">
-  <img src="https://img.shields.io/badge/RELEASE-V0.1.0-blue?style=for-the-badge" alt="Release: v0.1.0">
+  <img src="https://img.shields.io/badge/RELEASE-V0.2.0-blue?style=for-the-badge" alt="Release: v0.2.0">
   <img src="https://img.shields.io/badge/LICENSE-MIT-green?style=for-the-badge" alt="License: MIT">
   <img src="https://img.shields.io/badge/JDK-25%2B-orange?style=for-the-badge" alt="JDK: 25+">
 </p>
