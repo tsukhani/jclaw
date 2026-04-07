@@ -4,6 +4,7 @@ import agents.SkillLoader;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
+import services.AgentService;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -60,7 +61,9 @@ public class SkillsTool implements ToolRegistry.Tool {
                 if (skill.isEmpty()) yield "Error: Skill '%s' not found or not available.".formatted(skillName);
                 if (skill.get().location() == null) yield "Error: Skill '%s' has no file location.".formatted(skillName);
                 try {
-                    yield Files.readString(skill.get().location());
+                    // Location is relative to agent workspace — resolve to absolute path
+                    var path = AgentService.workspacePath(agent.name).resolve(skill.get().location());
+                    yield Files.readString(path);
                 } catch (IOException e) {
                     yield "Error reading skill: %s".formatted(e.getMessage());
                 }

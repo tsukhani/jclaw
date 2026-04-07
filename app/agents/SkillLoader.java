@@ -53,20 +53,31 @@ public class SkillLoader {
         var allSkills = new ArrayList<SkillInfo>();
 
         // Only scan agent workspace skills — global skills must be explicitly copied to agents
-        var agentDir = AgentService.workspacePath(agentName).resolve("skills");
+        var workspaceDir = AgentService.workspacePath(agentName);
+        var agentDir = workspaceDir.resolve("skills");
         scanSkillsDirectory(agentDir, allSkills);
 
-        // Filter by permissions
-        var agent = Agent.findByName(agentName);
-        if (agent != null) {
+        // Make locations relative to the agent's workspace (readFile tool resolves relative to workspace)
+        allSkills.replaceAll(s -> {
+            if (s.location() != null && s.location().startsWith(workspaceDir)) {
+                return new SkillInfo(s.name(), s.description(), workspaceDir.relativize(s.location()));
+            }
+            return s;
+        });
+
+        // Filter by permissions (JPA access — may be called from tool execution outside request thread)
+        var disabledSkills = services.Tx.run(() -> {
+            var agent = Agent.findByName(agentName);
+            if (agent == null) return new HashSet<String>();
             var configs = AgentSkillConfig.findByAgent(agent);
-            var disabledSkills = new HashSet<String>();
+            var disabled = new HashSet<String>();
             for (var c : configs) {
-                if (!c.enabled) disabledSkills.add(c.skillName);
+                if (!c.enabled) disabled.add(c.skillName);
             }
-            if (!disabledSkills.isEmpty()) {
-                allSkills.removeIf(s -> disabledSkills.contains(s.name()));
-            }
+            return disabled;
+        });
+        if (!disabledSkills.isEmpty()) {
+            allSkills.removeIf(s -> disabledSkills.contains(s.name()));
         }
 
         return allSkills.stream().limit(MAX_SKILLS).toList();
