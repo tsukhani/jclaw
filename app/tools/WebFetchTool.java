@@ -3,6 +3,8 @@ package tools;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
+import org.jsoup.Jsoup;
+import org.jsoup.safety.Safelist;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
@@ -16,9 +18,15 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Fetch the content of a URL. Supports two modes:
+ * - "text" (default): Extract readable text from HTML using Jsoup. Best for reading/summarizing.
+ * - "html": Return raw HTML. Best for saving the actual page to a file.
+ */
 public class WebFetchTool implements ToolRegistry.Tool {
 
-    private static final int MAX_CONTENT_LENGTH = 50_000;
+    private static final int MAX_TEXT_LENGTH = 50_000;
+    private static final int MAX_HTML_LENGTH = 500_000;
     private static final int TIMEOUT_SECONDS = 30;
 
     @Override
@@ -26,7 +34,10 @@ public class WebFetchTool implements ToolRegistry.Tool {
 
     @Override
     public String description() {
-        return "Fetch the content of a URL and return it as text. Useful for reading web pages, APIs, or documents.";
+        return """
+                Fetch the content of a URL. \
+                Use mode "text" (default) to extract readable text from web pages — best for reading, summarizing, or answering questions. \
+                Use mode "html" to get the raw HTML — only use this when the user explicitly wants to save the HTML file.""";
     }
 
     @Override
@@ -34,7 +45,10 @@ public class WebFetchTool implements ToolRegistry.Tool {
         return Map.of(
                 "type", "object",
                 "properties", Map.of(
-                        "url", Map.of("type", "string", "description", "The URL to fetch")
+                        "url", Map.of("type", "string", "description", "The URL to fetch"),
+                        "mode", Map.of("type", "string",
+                                "enum", List.of("text", "html"),
+                                "description", "Extraction mode: 'text' extracts readable content (default), 'html' returns raw HTML")
                 ),
                 "required", List.of("url")
         );
@@ -44,53 +58,112 @@ public class WebFetchTool implements ToolRegistry.Tool {
     public String execute(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
         var url = args.get("url").getAsString();
+        var mode = args.has("mode") ? args.get("mode").getAsString() : "text";
 
         try {
-            var request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("User-Agent", "JClaw/1.0")
-                    .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
-                    .GET()
-                    .build();
-
-            var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
-
-            if (response.statusCode() >= 400) {
-                return "Error: HTTP %d fetching %s".formatted(response.statusCode(), url);
-            }
-
-            var contentType = response.headers().firstValue("Content-Type").orElse("text/plain");
-            if (!contentType.contains("text") && !contentType.contains("json")
-                    && !contentType.contains("xml") && !contentType.contains("html")) {
-                return "Non-text content type: %s (size: %d bytes)".formatted(
-                        contentType, response.body().length());
-            }
-
-            var body = response.body();
-            if (body.length() > MAX_CONTENT_LENGTH) {
-                return body.substring(0, MAX_CONTENT_LENGTH) + "\n\n[Truncated: content exceeds %d characters]"
-                        .formatted(MAX_CONTENT_LENGTH);
-            }
-            return body;
-
+            var body = fetchUrl(url);
+            return processResponse(body, mode, url);
         } catch (java.net.http.HttpTimeoutException _) {
             return "Error: Request timed out after %d seconds fetching %s".formatted(TIMEOUT_SECONDS, url);
         } catch (javax.net.ssl.SSLException _) {
-            // Retry with lenient SSL for sites with misconfigured certificate chains
-            return fetchWithLenientSsl(url);
+            return fetchWithLenientSsl(url, mode);
         } catch (Exception e) {
             if (e.getCause() instanceof javax.net.ssl.SSLException) {
-                return fetchWithLenientSsl(url);
+                return fetchWithLenientSsl(url, mode);
             }
             return "Error fetching URL: %s".formatted(e.getMessage());
         }
     }
 
-    private String fetchWithLenientSsl(String url) {
+    private String fetchUrl(String url) throws Exception {
+        var request = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("User-Agent", "Mozilla/5.0 (compatible; JClaw/1.0)")
+                .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
+                .GET()
+                .build();
+
+        var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() >= 400) {
+            throw new RuntimeException("HTTP %d fetching %s".formatted(response.statusCode(), url));
+        }
+
+        return response.body();
+    }
+
+    private String processResponse(String body, String mode, String url) {
+        if ("html".equals(mode)) {
+            // Raw HTML mode — return as-is with higher limit
+            if (body.length() > MAX_HTML_LENGTH) {
+                return body.substring(0, MAX_HTML_LENGTH)
+                        + "\n\n[Truncated: HTML exceeds %d characters]".formatted(MAX_HTML_LENGTH);
+            }
+            return body;
+        }
+
+        // Text mode — extract readable content
+        var contentType = body.trim().startsWith("<") ? "html" : "text";
+        if ("html".equals(contentType)) {
+            return extractText(body, url);
+        }
+
+        // Already plain text (JSON, XML, etc.)
+        if (body.length() > MAX_TEXT_LENGTH) {
+            return body.substring(0, MAX_TEXT_LENGTH)
+                    + "\n\n[Truncated: content exceeds %d characters]".formatted(MAX_TEXT_LENGTH);
+        }
+        return body;
+    }
+
+    /**
+     * Extract readable text from HTML using Jsoup.
+     * Strips scripts, styles, nav, and other non-content elements.
+     * Preserves document structure with headers, paragraphs, and lists.
+     */
+    private String extractText(String html, String url) {
+        var doc = Jsoup.parse(html, url);
+
+        // Remove non-content elements
+        doc.select("script, style, noscript, iframe, svg, canvas, nav, footer, " +
+                   "header, aside, form, button, input, select, textarea, " +
+                   "[role=navigation], [role=banner], [role=complementary], " +
+                   "[aria-hidden=true], .hidden, .sr-only, .visually-hidden").remove();
+
+        // Extract title
+        var title = doc.title();
+
+        // Get text with whitespace structure preserved
+        doc.outputSettings().prettyPrint(false);
+        var text = doc.body() != null ? doc.body().wholeText() : doc.text();
+
+        // Clean up excessive whitespace while preserving paragraph breaks
+        text = text.replaceAll("[ \\t]+", " ")           // Collapse horizontal whitespace
+                   .replaceAll("\\n[ \\t]+", "\n")        // Trim leading whitespace on lines
+                   .replaceAll("[ \\t]+\\n", "\n")        // Trim trailing whitespace on lines
+                   .replaceAll("\\n{3,}", "\n\n")         // Max two consecutive newlines
+                   .strip();
+
+        var result = new StringBuilder();
+        if (!title.isBlank()) {
+            result.append("# ").append(title).append("\n\n");
+        }
+        result.append(text);
+
+        if (result.length() > MAX_TEXT_LENGTH) {
+            return result.substring(0, MAX_TEXT_LENGTH)
+                    + "\n\n[Truncated: extracted text exceeds %d characters]".formatted(MAX_TEXT_LENGTH);
+        }
+        return result.toString();
+    }
+
+    // --- SSL fallback ---
+
+    private String fetchWithLenientSsl(String url, String mode) {
         try {
             var request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
-                    .header("User-Agent", "JClaw/1.0")
+                    .header("User-Agent", "Mozilla/5.0 (compatible; JClaw/1.0)")
                     .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
                     .GET()
                     .build();
@@ -101,12 +174,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
                 return "Error: HTTP %d fetching %s".formatted(response.statusCode(), url);
             }
 
-            var body = response.body();
-            if (body.length() > MAX_CONTENT_LENGTH) {
-                return body.substring(0, MAX_CONTENT_LENGTH) + "\n\n[Truncated: content exceeds %d characters]"
-                        .formatted(MAX_CONTENT_LENGTH);
-            }
-            return body;
+            return processResponse(response.body(), mode, url);
         } catch (Exception e) {
             return "Error fetching URL: %s".formatted(e.getMessage());
         }
