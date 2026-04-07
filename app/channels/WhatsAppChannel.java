@@ -9,7 +9,6 @@ import services.EventLogger;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -22,9 +21,6 @@ import java.util.Map;
  */
 public class WhatsAppChannel {
 
-    private static final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
     private static final Gson gson = new Gson();
     private static final String API_BASE = "https://graph.facebook.com/v21.0/";
 
@@ -70,7 +66,7 @@ public class WhatsAppChannel {
                         .POST(HttpRequest.BodyPublishers.ofString(body))
                         .build();
 
-                var response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
                 if (response.statusCode() == 200) {
                     EventLogger.info("channel", null, "whatsapp",
                             "Message sent to %s".formatted(to));
@@ -113,7 +109,7 @@ public class WhatsAppChannel {
                     .timeout(Duration.ofSeconds(10))
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
-            httpClient.send(request, HttpResponse.BodyHandlers.discarding());
+            utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.discarding());
         } catch (Exception _) {
             // Read receipt failure is non-critical
         }

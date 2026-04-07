@@ -24,22 +24,41 @@ public class CronParser {
         var monthSpec = parts[3];
         var dowSpec = parts[4];
 
-        var start = LocalDateTime.ofInstant(after, ZoneId.systemDefault())
+        var candidate = LocalDateTime.ofInstant(after, ZoneId.systemDefault())
                 .plusMinutes(1)
                 .withSecond(0)
                 .withNano(0);
 
-        // Search up to 366 days ahead
-        for (var candidate = start; candidate.isBefore(start.plusDays(366));
-             candidate = candidate.plusMinutes(1)) {
+        var end = candidate.plusDays(366);
 
-            if (matches(candidate.getMinute(), minuteSpec)
-                    && matches(candidate.getHour(), hourSpec)
-                    && matches(candidate.getDayOfMonth(), domSpec)
-                    && matches(candidate.getMonthValue(), monthSpec)
-                    && matchesDow(candidate.getDayOfWeek().getValue() % 7, dowSpec)) {
+        // Search up to 366 days ahead with coarse-granularity skipping
+        while (candidate.isBefore(end)) {
+
+            // Skip entire months that don't match
+            if (!matches(candidate.getMonthValue(), monthSpec)) {
+                candidate = candidate.plusMonths(1).withDayOfMonth(1).withHour(0).withMinute(0);
+                continue;
+            }
+
+            // Skip entire days where day-of-month or day-of-week don't match
+            if (!matches(candidate.getDayOfMonth(), domSpec)
+                    || !matchesDow(candidate.getDayOfWeek().getValue() % 7, dowSpec)) {
+                candidate = candidate.plusDays(1).withHour(0).withMinute(0);
+                continue;
+            }
+
+            // Skip hours that don't match
+            if (!matches(candidate.getHour(), hourSpec)) {
+                candidate = candidate.plusHours(1).withMinute(0);
+                continue;
+            }
+
+            // Check minute
+            if (matches(candidate.getMinute(), minuteSpec)) {
                 return candidate.atZone(ZoneId.systemDefault()).toInstant();
             }
+
+            candidate = candidate.plusMinutes(1);
         }
 
         return null;

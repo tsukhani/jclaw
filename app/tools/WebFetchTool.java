@@ -5,7 +5,6 @@ import com.google.gson.JsonParser;
 import models.Agent;
 
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
@@ -13,11 +12,6 @@ import java.util.List;
 import java.util.Map;
 
 public class WebFetchTool implements ToolRegistry.Tool {
-
-    private static final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build();
 
     private static final int MAX_CONTENT_LENGTH = 50_000;
     private static final int TIMEOUT_SECONDS = 30;
@@ -54,7 +48,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
                     .GET()
                     .build();
 
-            var response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() >= 400) {
                 return "Error: HTTP %d fetching %s".formatted(response.statusCode(), url);

@@ -7,7 +7,6 @@ import services.EventLogger;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -28,18 +27,15 @@ public class OpenAiCompatibleClient {
             .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
             .create();
 
-    private static final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
-
     private static final int MAX_RETRIES = 3;
     private static final long[] BACKOFF_MS = {1000, 2000, 4000};
 
     // --- Synchronous chat completion ---
 
     public static ChatResponse chat(ProviderConfig provider, String model,
-                                     List<ChatMessage> messages, List<ToolDef> tools) {
-        var request = new ChatRequest(model, messages, tools, false, null);
+                                     List<ChatMessage> messages, List<ToolDef> tools,
+                                     Integer maxTokens) {
+        var request = new ChatRequest(model, messages, tools, false, maxTokens);
         var json = serializeRequest(request);
         var responseBody = executeWithRetry(provider, "/chat/completions", json);
         return deserializeResponse(responseBody);
@@ -51,14 +47,15 @@ public class OpenAiCompatibleClient {
                                    List<ChatMessage> messages, List<ToolDef> tools,
                                    Consumer<ChatCompletionChunk> onChunk,
                                    Runnable onComplete,
-                                   Consumer<Exception> onError) {
+                                   Consumer<Exception> onError,
+                                   Integer maxTokens) {
         Thread.ofVirtual().start(() -> {
             try {
-                var request = new ChatRequest(model, messages, tools, true, null);
+                var request = new ChatRequest(model, messages, tools, true, maxTokens);
                 var json = serializeRequest(request);
                 var httpReq = buildRequest(provider, "/chat/completions", json);
 
-                var response = httpClient.send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
+                var response = utils.HttpClients.LLM.send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
                 if (response.statusCode() != 200) {
                     var body = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
                     onError.accept(new LlmException("HTTP %d: %s".formatted(response.statusCode(), body)));
@@ -96,7 +93,7 @@ public class OpenAiCompatibleClient {
 
     public static StreamAccumulator chatStreamAccumulate(ProviderConfig provider, String model,
                                                           List<ChatMessage> messages, List<ToolDef> tools,
-                                                          Consumer<String> onToken) {
+                                                          Consumer<String> onToken, Integer maxTokens) {
         var accumulator = new StreamAccumulator();
         var contentBuilder = new StringBuilder();
         var toolCallAccumulator = new java.util.HashMap<Integer, ToolCallBuilder>();
@@ -136,7 +133,8 @@ public class OpenAiCompatibleClient {
                 e -> {
                     accumulator.error = e;
                     accumulator.markComplete();
-                });
+                },
+                maxTokens);
 
         return accumulator;
     }
@@ -162,7 +160,7 @@ public class OpenAiCompatibleClient {
         for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             try {
                 var httpReq = buildRequest(provider, path, json);
-                var response = httpClient.send(httpReq, HttpResponse.BodyHandlers.ofString());
+                var response = utils.HttpClients.LLM.send(httpReq, HttpResponse.BodyHandlers.ofString());
 
                 if (response.statusCode() == 200) {
                     return response.body();
@@ -214,14 +212,14 @@ public class OpenAiCompatibleClient {
 
     public static ChatResponse chatWithFailover(ProviderConfig primary, ProviderConfig secondary,
                                                  String model, List<ChatMessage> messages,
-                                                 List<ToolDef> tools) {
+                                                 List<ToolDef> tools, Integer maxTokens) {
         try {
-            return chat(primary, model, messages, tools);
+            return chat(primary, model, messages, tools, maxTokens);
         } catch (LlmException e) {
             if (secondary != null) {
                 EventLogger.warn("llm", "Failing over from %s to %s: %s"
                         .formatted(primary.name(), secondary.name(), e.getMessage()));
-                return chat(secondary, model, messages, tools);
+                return chat(secondary, model, messages, tools, maxTokens);
             }
             throw e;
         }

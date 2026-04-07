@@ -128,21 +128,23 @@ public class JpaMemoryStore implements MemoryStore {
             var sql = """
                     SELECT m.id,
                            ts_rank(to_tsvector('english', m.text), plainto_tsquery('english', ?)) AS text_rank,
-                           1 - (m.embedding <=> '%s'::vector) AS vector_score
+                           1 - (m.embedding <=> ?::text::vector) AS vector_score
                     FROM memory m
                     WHERE m.agent_id = ?
                     AND m.embedding IS NOT NULL
                     ORDER BY (COALESCE(ts_rank(to_tsvector('english', m.text), plainto_tsquery('english', ?)), 0) * 0.3
-                             + (1 - (m.embedding <=> '%s'::vector)) * 0.7) DESC
+                             + (1 - (m.embedding <=> ?::text::vector)) * 0.7) DESC
                     LIMIT ?
-                    """.formatted(embeddingStr, embeddingStr);
+                    """;
 
             try (var conn = DB.getConnection();
                  var stmt = conn.prepareStatement(sql)) {
                 stmt.setString(1, query);
-                stmt.setString(2, agentId);
-                stmt.setString(3, query);
-                stmt.setInt(4, limit);
+                stmt.setString(2, embeddingStr);
+                stmt.setString(3, agentId);
+                stmt.setString(4, query);
+                stmt.setString(5, embeddingStr);
+                stmt.setInt(6, limit);
                 var rs = stmt.executeQuery();
                 var ids = new java.util.ArrayList<Long>();
                 while (rs.next()) {
@@ -167,11 +169,11 @@ public class JpaMemoryStore implements MemoryStore {
             var embedding = generateEmbedding(memory.text);
             if (embedding != null) {
                 // Store embedding as raw SQL since JPA doesn't natively handle pgvector
-                var sql = "UPDATE memory SET embedding = '%s'::vector WHERE id = ?"
-                        .formatted(toVectorLiteral(embedding));
+                var sql = "UPDATE memory SET embedding = ?::text::vector WHERE id = ?";
                 try (var conn = DB.getConnection();
                      var stmt = conn.prepareStatement(sql)) {
-                    stmt.setLong(1, (Long) memory.id);
+                    stmt.setString(1, toVectorLiteral(embedding));
+                    stmt.setLong(2, (Long) memory.id);
                     stmt.executeUpdate();
                 }
             }

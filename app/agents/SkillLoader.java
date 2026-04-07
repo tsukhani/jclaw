@@ -18,12 +18,29 @@ public class SkillLoader {
 
     public record SkillInfo(String name, String description, Path location) {}
 
+    private static final java.util.concurrent.ConcurrentHashMap<String, CachedSkills> skillCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long CACHE_TTL_MS = 30_000;
+
+    private record CachedSkills(List<SkillInfo> skills, long expiresAt) {
+        boolean isExpired() { return System.currentTimeMillis() > expiresAt; }
+    }
+
     private static final int MAX_SKILLS = 150;
     private static final int MAX_SKILLS_CHARS = 30_000;
     private static final Pattern FRONTMATTER_PATTERN = Pattern.compile(
             "^---\\s*\\n(.*?)\\n---", Pattern.DOTALL);
 
     public static List<SkillInfo> loadSkills(String agentName) {
+        var cached = skillCache.get(agentName);
+        if (cached != null && !cached.isExpired()) {
+            return cached.skills();
+        }
+        var skills = loadSkillsFromDisk(agentName);
+        skillCache.put(agentName, new CachedSkills(skills, System.currentTimeMillis() + CACHE_TTL_MS));
+        return skills;
+    }
+
+    private static List<SkillInfo> loadSkillsFromDisk(String agentName) {
         var skillsDir = AgentService.workspacePath(agentName).resolve("skills");
         if (!Files.isDirectory(skillsDir)) {
             return List.of();

@@ -50,6 +50,8 @@ public class AgentRunner {
             return new RunResult(error, conversation);
         }
 
+        messages = trimToContextWindow(messages, agent, primary);
+
         EventLogger.info("llm", agent.name, conversation.channelType,
                 "Calling %s / %s".formatted(primary.name(), agent.modelId));
 
@@ -120,13 +122,28 @@ public class AgentRunner {
                     return;
                 }
 
+                messages = trimToContextWindow(messages, agent, primary);
+
                 var tools = ToolRegistry.getToolDefs();
+                var modelInfo = primary.models().stream()
+                        .filter(m -> m.id().equals(agent.modelId))
+                        .findFirst().orElse(null);
+                var maxTokens = modelInfo != null && modelInfo.maxTokens() > 0 ? modelInfo.maxTokens() : null;
 
                 // 6. Stream with tool call handling (HTTP, no JPA)
                 var accumulator = OpenAiCompatibleClient.chatStreamAccumulate(
-                        primary, agent.modelId, messages, tools, onToken);
+                        primary, agent.modelId, messages, tools, onToken, maxTokens);
 
                 accumulator.awaitCompletion();
+
+                // Retry once on transient 5xx errors
+                if (accumulator.error != null && accumulator.error.getMessage() != null
+                        && accumulator.error.getMessage().contains("HTTP 5")) {
+                    EventLogger.warn("llm", agent.name, null, "Retrying streaming after transient error");
+                    accumulator = OpenAiCompatibleClient.chatStreamAccumulate(
+                            primary, agent.modelId, messages, tools, onToken, maxTokens);
+                    accumulator.awaitCompletion();
+                }
 
                 if (accumulator.error != null) {
                     onError.accept(accumulator.error);
@@ -138,7 +155,7 @@ public class AgentRunner {
                 // Handle tool calls if present
                 if (!accumulator.toolCalls.isEmpty()) {
                     content = handleToolCallsStreaming(agent, conversation, messages, tools,
-                            accumulator.toolCalls, content, primary, onToken, 0);
+                            accumulator.toolCalls, content, primary, onToken, maxTokens, 0);
                 }
 
                 // Persist and complete
@@ -159,13 +176,17 @@ public class AgentRunner {
                                             List<ChatMessage> messages, List<ToolDef> tools,
                                             ProviderConfig primary, ProviderConfig secondary) {
         var currentMessages = new ArrayList<>(messages);
+        var modelInfo = primary.models().stream()
+                .filter(m -> m.id().equals(agent.modelId))
+                .findFirst().orElse(null);
+        var maxTokens = modelInfo != null && modelInfo.maxTokens() > 0 ? modelInfo.maxTokens() : null;
 
         for (int round = 0; round < MAX_TOOL_ROUNDS; round++) {
             ChatResponse response;
             try {
                 response = (secondary != null)
-                        ? OpenAiCompatibleClient.chatWithFailover(primary, secondary, agent.modelId, currentMessages, tools)
-                        : OpenAiCompatibleClient.chat(primary, agent.modelId, currentMessages, tools);
+                        ? OpenAiCompatibleClient.chatWithFailover(primary, secondary, agent.modelId, currentMessages, tools, maxTokens)
+                        : OpenAiCompatibleClient.chat(primary, agent.modelId, currentMessages, tools, maxTokens);
             } catch (Exception e) {
                 EventLogger.error("llm", agent.name, null, "LLM call failed: %s".formatted(e.getMessage()));
                 return "I'm sorry, I encountered an error communicating with the AI provider. Please try again.";
@@ -208,7 +229,8 @@ public class AgentRunner {
                                                     List<ChatMessage> messages, List<ToolDef> tools,
                                                     List<ToolCall> toolCalls, String priorContent,
                                                     ProviderConfig provider,
-                                                    Consumer<String> onToken, int round) {
+                                                    Consumer<String> onToken, Integer maxTokens,
+                                                    int round) {
         if (round >= MAX_TOOL_ROUNDS) {
             return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
         }
@@ -228,7 +250,7 @@ public class AgentRunner {
 
         // Continue with streaming after tool results
         var accumulator = OpenAiCompatibleClient.chatStreamAccumulate(
-                provider, agent.modelId, currentMessages, tools, onToken);
+                provider, agent.modelId, currentMessages, tools, onToken, maxTokens);
 
         try {
             accumulator.awaitCompletion();
@@ -240,7 +262,7 @@ public class AgentRunner {
         // Recursively handle if more tool calls
         if (!accumulator.toolCalls.isEmpty()) {
             return handleToolCallsStreaming(agent, conversation, currentMessages, tools,
-                    accumulator.toolCalls, accumulator.content, provider, onToken, round + 1);
+                    accumulator.toolCalls, accumulator.content, provider, onToken, maxTokens, round + 1);
         }
 
         return accumulator.content;
@@ -267,6 +289,42 @@ public class AgentRunner {
         }
 
         return messages;
+    }
+
+    private static List<ChatMessage> trimToContextWindow(List<ChatMessage> messages, Agent agent, ProviderConfig provider) {
+        // Find the model's context window
+        var modelInfo = provider.models().stream()
+                .filter(m -> m.id().equals(agent.modelId))
+                .findFirst().orElse(null);
+        if (modelInfo == null || modelInfo.contextWindow() <= 0) return messages;
+
+        int maxTokens = modelInfo.contextWindow();
+        int estimatedTokens = estimateTokens(messages);
+
+        if (estimatedTokens <= maxTokens) return messages;
+
+        // Trim oldest non-system messages until we fit
+        var trimmed = new ArrayList<>(messages);
+        int removed = 0;
+        while (estimateTokens(trimmed) > maxTokens && trimmed.size() > 2) {
+            // Remove the second message (first after system prompt) — oldest history
+            trimmed.remove(1);
+            removed++;
+        }
+        if (removed > 0) {
+            EventLogger.warn("llm", agent.name, null,
+                    "Trimmed %d messages to fit context window (%d tokens max, estimated %d)"
+                            .formatted(removed, maxTokens, estimatedTokens));
+        }
+        return trimmed;
+    }
+
+    private static int estimateTokens(List<ChatMessage> messages) {
+        int chars = 0;
+        for (var msg : messages) {
+            if (msg.content() instanceof String s) chars += s.length();
+        }
+        return chars / 4; // rough approximation: ~4 chars per token
     }
 
     private static List<ToolCall> parseToolCalls(String json) {

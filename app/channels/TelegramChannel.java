@@ -7,7 +7,6 @@ import models.ChannelConfig;
 import services.EventLogger;
 
 import java.net.URI;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
@@ -19,9 +18,6 @@ import java.util.Map;
  */
 public class TelegramChannel {
 
-    private static final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(10))
-            .build();
     private static final Gson gson = new Gson();
     private static final String API_BASE = "https://api.telegram.org/bot";
 
@@ -60,7 +56,7 @@ public class TelegramChannel {
                         .POST(HttpRequest.BodyPublishers.ofString(body))
                         .build();
 
-                var response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
                 var result = JsonParser.parseString(response.body()).getAsJsonObject();
 
                 if (result.get("ok").getAsBoolean()) {
@@ -108,7 +104,7 @@ public class TelegramChannel {
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
 
-            var response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
             var result = JsonParser.parseString(response.body()).getAsJsonObject();
 
             if (result.get("ok").getAsBoolean()) {

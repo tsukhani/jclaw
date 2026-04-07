@@ -44,9 +44,16 @@ public class ConversationService {
         msg.toolResults = toolResults;
         msg.save();
 
-        // Update conversation timestamp
-        conversation.updatedAt = java.time.Instant.now();
-        conversation.save();
+        conversation.messageCount++;
+        if ("user".equals(role) && content != null && conversation.preview == null) {
+            conversation.preview = content.substring(0, Math.min(content.length(), 100));
+        }
+
+        // Only save conversation for user/final-assistant messages to avoid redundant
+        // UPDATEs during tool call rounds. @PreUpdate handles updatedAt automatically.
+        if ("user".equals(role) || ("assistant".equals(role) && content != null)) {
+            conversation.save();
+        }
 
         return msg;
     }

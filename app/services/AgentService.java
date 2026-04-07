@@ -11,6 +11,13 @@ import java.util.List;
 
 public class AgentService {
 
+    private static final java.util.concurrent.ConcurrentHashMap<String, CachedFile> fileCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long FILE_CACHE_TTL_MS = 30_000;
+
+    private record CachedFile(String content, long expiresAt) {
+        boolean isExpired() { return System.currentTimeMillis() > expiresAt; }
+    }
+
     public static Agent create(String name, String modelProvider, String modelId, boolean isDefault) {
         var agent = new Agent();
         agent.name = name;
@@ -140,10 +147,17 @@ public class AgentService {
     }
 
     public static String readWorkspaceFile(String agentName, String filename) {
+        var cacheKey = agentName + "/" + filename;
+        var cached = fileCache.get(cacheKey);
+        if (cached != null && !cached.isExpired()) {
+            return cached.content();
+        }
         var path = workspacePath(agentName).resolve(filename);
         try {
             if (Files.exists(path)) {
-                return Files.readString(path);
+                var content = Files.readString(path);
+                fileCache.put(cacheKey, new CachedFile(content, System.currentTimeMillis() + FILE_CACHE_TTL_MS));
+                return content;
             }
         } catch (IOException e) {
             EventLogger.warn("agent", "Failed to read workspace file %s/%s: %s"
@@ -157,6 +171,7 @@ public class AgentService {
         try {
             Files.createDirectories(path.getParent());
             Files.writeString(path, content);
+            fileCache.remove(agentName + "/" + filename);
         } catch (IOException e) {
             EventLogger.error("agent", "Failed to write workspace file %s/%s: %s"
                     .formatted(agentName, filename, e.getMessage()));

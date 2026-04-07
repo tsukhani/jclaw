@@ -22,6 +22,12 @@ public class Conversation extends Model {
     @Column(name = "peer_id")
     public String peerId;
 
+    @Column(name = "message_count", nullable = false)
+    public int messageCount = 0;
+
+    @Column(length = 100)
+    public String preview;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 
