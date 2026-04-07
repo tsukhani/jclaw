@@ -12,8 +12,8 @@
 - [x] 1.10 Wrap JPA operations in `TaskPollerJob.executeTask` virtual thread with `Tx.run()`
 - [x] 1.11 Add DOMPurify dependency to frontend `package.json`
 - [x] 1.12 Sanitize `marked` output with DOMPurify before passing to `v-html` in `chat.vue`
-- [ ] 1.13 Write test: verify SSE stream completes normally and on timeout
-- [ ] 1.14 Write test: verify `TaskPollerJob` executes tasks without `TransactionRequiredException`
+- [x] 1.13 Write test: verify SSE stream completes normally and on timeout
+- [x] 1.14 Write test: verify `TaskPollerJob` executes tasks without `TransactionRequiredException`
 
 ## Phase 2 — Correctness & Safety
 
@@ -30,7 +30,7 @@
 - [x] 2.11 Replace `useFetch` with `$fetch` in `skills.vue` watch callback
 - [x] 2.12 Add token count estimation in `AgentRunner` before LLM dispatch, trim to fit `ModelInfo.contextWindow`
 - [x] 2.13 Log warning when message history is truncated due to context window limits
-- [ ] 2.14 Write test: verify streaming tool calls stop at `MAX_TOOL_ROUNDS`
+- [x] 2.14 Write test: verify streaming tool calls stop at `MAX_TOOL_ROUNDS`
 
 ## Phase 3 — Performance Under Load
 
@@ -47,7 +47,7 @@
 - [x] 3.11 Replace static `HttpClient` in `SlackChannel`, `TelegramChannel`, `WhatsAppChannel` with shared instance
 - [x] 3.12 Replace static `HttpClient` in `WebFetchTool` with shared instance
 - [x] 3.13 Refactor `ConversationService.appendMessage` to skip redundant saves during tool call rounds
-- [ ] 3.14 Write test: verify ProviderRegistry refresh is atomic (concurrent reads never see empty cache)
+- [x] 3.14 Write test: verify ProviderRegistry refresh is atomic (concurrent reads never see empty cache)
 
 ## Phase 4 — Frontend Quality
 
