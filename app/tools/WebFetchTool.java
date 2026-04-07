@@ -26,7 +26,7 @@ import java.util.Map;
 public class WebFetchTool implements ToolRegistry.Tool {
 
     private static final int MAX_TEXT_LENGTH = 50_000;
-    private static final int MAX_HTML_LENGTH = 500_000;
+    private static final int MAX_HTML_LENGTH = 100_000;
     private static final int TIMEOUT_SECONDS = 30;
 
     @Override
@@ -36,8 +36,8 @@ public class WebFetchTool implements ToolRegistry.Tool {
     public String description() {
         return """
                 Fetch the content of a URL. \
-                Use mode "text" (default) to extract readable text from web pages — best for reading, summarizing, or answering questions. \
-                Use mode "html" to get the raw HTML — only use this when the user explicitly wants to save the HTML file.""";
+                Use mode "text" (default) to extract readable text — best for reading, summarizing, saving content, or answering questions about a page. \
+                Use mode "html" ONLY when the user explicitly asks for the raw HTML source code of a page.""";
     }
 
     @Override
@@ -62,14 +62,14 @@ public class WebFetchTool implements ToolRegistry.Tool {
 
         try {
             var body = fetchUrl(url);
-            return processResponse(body, mode, url);
+            return processResponse(body, mode, url, agent);
         } catch (java.net.http.HttpTimeoutException _) {
             return "Error: Request timed out after %d seconds fetching %s".formatted(TIMEOUT_SECONDS, url);
         } catch (javax.net.ssl.SSLException _) {
-            return fetchWithLenientSsl(url, mode);
+            return fetchWithLenientSsl(url, mode, agent);
         } catch (Exception e) {
             if (e.getCause() instanceof javax.net.ssl.SSLException) {
-                return fetchWithLenientSsl(url, mode);
+                return fetchWithLenientSsl(url, mode, agent);
             }
             return "Error fetching URL: %s".formatted(e.getMessage());
         }
@@ -92,9 +92,16 @@ public class WebFetchTool implements ToolRegistry.Tool {
         return response.body();
     }
 
-    private String processResponse(String body, String mode, String url) {
+    private String processResponse(String body, String mode, String url, Agent agent) {
         if ("html".equals(mode)) {
-            // Raw HTML mode — return as-is with higher limit
+            // Raw HTML mode — for large pages, auto-save to workspace to avoid
+            // flooding the LLM context with hundreds of KB of HTML
+            if (body.length() > MAX_TEXT_LENGTH && agent != null) {
+                var filename = URI.create(url).getHost().replaceAll("[^a-zA-Z0-9.-]", "_") + ".html";
+                services.AgentService.writeWorkspaceFile(agent.name, filename, body);
+                return "HTML saved to workspace as '%s' (%d characters from %s)"
+                        .formatted(filename, body.length(), url);
+            }
             if (body.length() > MAX_HTML_LENGTH) {
                 return body.substring(0, MAX_HTML_LENGTH)
                         + "\n\n[Truncated: HTML exceeds %d characters]".formatted(MAX_HTML_LENGTH);
@@ -159,7 +166,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
 
     // --- SSL fallback ---
 
-    private String fetchWithLenientSsl(String url, String mode) {
+    private String fetchWithLenientSsl(String url, String mode, Agent agent) {
         try {
             var request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
@@ -174,7 +181,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
                 return "Error: HTTP %d fetching %s".formatted(response.statusCode(), url);
             }
 
-            return processResponse(response.body(), mode, url);
+            return processResponse(response.body(), mode, url, agent);
         } catch (Exception e) {
             return "Error fetching URL: %s".formatted(e.getMessage());
         }
