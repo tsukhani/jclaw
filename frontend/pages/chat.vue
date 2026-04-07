@@ -31,6 +31,26 @@ const agentBusy = ref(false)
 const streamContent = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
 const abortController = ref<AbortController | null>(null)
+const sidebarWidth = ref(224) // 14rem = 224px (matches w-56)
+const isResizing = ref(false)
+
+function startResize(e: MouseEvent) {
+  isResizing.value = true
+  const startX = e.clientX
+  const startWidth = sidebarWidth.value
+
+  function onMove(e: MouseEvent) {
+    const newWidth = startWidth + (e.clientX - startX)
+    sidebarWidth.value = Math.max(120, Math.min(newWidth, 600))
+  }
+  function onUp() {
+    isResizing.value = false
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onUp)
+  }
+  document.addEventListener('mousemove', onMove)
+  document.addEventListener('mouseup', onUp)
+}
 
 let scrollRaf: number | null = null
 function scrollToBottom() {
@@ -159,9 +179,9 @@ function newChat() {
 </script>
 
 <template>
-  <div class="flex h-[calc(100vh-7rem)] gap-4">
+  <div class="flex h-[calc(100vh-7rem)]" :class="{ 'select-none': isResizing }">
     <!-- Conversation sidebar -->
-    <div class="w-56 shrink-0 bg-neutral-900 border border-neutral-800 flex flex-col overflow-hidden">
+    <div :style="{ width: sidebarWidth + 'px' }" class="shrink-0 bg-neutral-900 border border-neutral-800 flex flex-col overflow-hidden">
       <div class="p-3 border-b border-neutral-800 flex items-center justify-between">
         <span class="text-xs font-medium text-neutral-400">Conversations</span>
         <button @click="newChat" class="text-xs text-neutral-500 hover:text-white transition-colors">+ New</button>
@@ -178,6 +198,12 @@ function newChat() {
         </button>
       </div>
     </div>
+
+    <!-- Resize handle -->
+    <div
+      @mousedown="startResize"
+      class="w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-neutral-600 active:bg-neutral-500 transition-colors"
+    />
 
     <!-- Chat area -->
     <div class="flex-1 flex flex-col bg-neutral-900 border border-neutral-800">
