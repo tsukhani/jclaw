@@ -25,7 +25,7 @@ public class ConfigService {
         if (cached != null && !cached.isExpired()) {
             return cached.value();
         }
-        var config = Config.findByKey(key);
+        var config = Tx.run(() -> Config.findByKey(key));
         if (config != null) {
             cache.put(key, new CachedValue(config.value, System.currentTimeMillis() + CACHE_TTL_MS));
             return config.value;
@@ -41,20 +41,22 @@ public class ConfigService {
     }
 
     public static void set(String key, String value) {
-        Config.upsert(key, value);
+        Tx.run(() -> Config.upsert(key, value));
         cache.put(key, new CachedValue(value, System.currentTimeMillis() + CACHE_TTL_MS));
     }
 
     public static void delete(String key) {
-        var config = Config.findByKey(key);
-        if (config != null) {
-            config.delete();
-        }
+        Tx.run(() -> {
+            var config = Config.findByKey(key);
+            if (config != null) {
+                config.delete();
+            }
+        });
         cache.remove(key);
     }
 
     public static List<Config> listAll() {
-        return Config.findAll();
+        return Tx.run(() -> Config.<Config>findAll().fetch());
     }
 
     public static void clearCache() {
