@@ -40,8 +40,13 @@ public class DefaultConfigJob extends Job<Void> {
     }
 
     private void seedShellConfig() {
+        seedIfAbsent("jclaw.tools.shell.enabled", "true");
         seedIfAbsent("shell.allowlist",
                 "git,npm,npx,pnpm,node,python,python3,pip,ls,cat,head,tail,grep,find,wc,sort,uniq,diff,mkdir,cp,mv,echo,curl,wget,jq,tar,zip,unzip");
+        seedIfAbsent("shell.defaultTimeoutSeconds", "30");
+        seedIfAbsent("shell.maxTimeoutSeconds", "300");
+        seedIfAbsent("shell.maxOutputBytes", "102400");
+        seedIfAbsent("shell.allowGlobalPaths", "false");
     }
 
     private void seedDefaultAgent() {

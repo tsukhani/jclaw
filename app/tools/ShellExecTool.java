@@ -4,7 +4,6 @@ import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
-import play.Play;
 import services.AgentService;
 import services.ConfigService;
 
@@ -81,10 +80,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
         }
 
         // Timeout
-        int defaultTimeout = Integer.parseInt(
-                Play.configuration.getProperty("jclaw.tools.shell.defaultTimeoutSeconds", "30"));
-        int maxTimeout = Integer.parseInt(
-                Play.configuration.getProperty("jclaw.tools.shell.maxTimeoutSeconds", "300"));
+        int defaultTimeout = Integer.parseInt(ConfigService.get("shell.defaultTimeoutSeconds", "30"));
+        int maxTimeout = Integer.parseInt(ConfigService.get("shell.maxTimeoutSeconds", "300"));
         int timeout = defaultTimeout;
         if (args.has("timeout")) {
             timeout = Math.min(args.get("timeout").getAsInt(), maxTimeout);
@@ -92,8 +89,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
         }
 
         // Max output
-        int maxOutputBytes = Integer.parseInt(
-                Play.configuration.getProperty("jclaw.tools.shell.maxOutputBytes", "102400"));
+        int maxOutputBytes = Integer.parseInt(ConfigService.get("shell.maxOutputBytes", "102400"));
 
         // Build environment
         var env = buildEnvironment(args);
@@ -134,8 +130,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
     }
 
     Path resolveWorkdir(JsonObject args, Path workspace) {
-        boolean allowGlobal = "true".equals(
-                Play.configuration.getProperty("jclaw.tools.shell.allowGlobalPaths", "false"));
+        boolean allowGlobal = "true".equals(ConfigService.get("shell.allowGlobalPaths", "false"));
 
         if (!args.has("workdir") || args.get("workdir").getAsString().trim().isEmpty()) {
             if (!Files.isDirectory(workspace)) {
