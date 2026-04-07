@@ -27,6 +27,14 @@ const selectedConvoId = ref<number | null>(null)
 const messages = ref<any[]>([])
 const input = ref('')
 const streaming = ref(false)
+const chatInput = ref<HTMLTextAreaElement | null>(null)
+
+function autoResize() {
+  const el = chatInput.value
+  if (!el) return
+  el.style.height = 'auto'
+  el.style.height = Math.min(el.scrollHeight, 200) + 'px'
+}
 const agentBusy = ref(false)
 const streamContent = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
@@ -139,6 +147,7 @@ async function sendMessage() {
 
   const text = input.value.trim()
   input.value = ''
+  if (chatInput.value) chatInput.value.style.height = 'auto'
   messages.value.push({ _key: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString() })
   scrollToBottom()
 
@@ -379,13 +388,16 @@ function exportConversation() {
       <div class="px-4 py-3">
         <form @submit.prevent="sendMessage"
               class="bg-neutral-900 border border-neutral-600/40 rounded-xl overflow-hidden">
-          <input
+          <textarea
             v-model="input"
-            type="text"
             placeholder="Type a message..."
             :disabled="streaming"
+            rows="1"
+            @keydown.enter.exact.prevent="sendMessage()"
+            @input="autoResize"
+            ref="chatInput"
             class="w-full px-4 pt-3 pb-2 bg-transparent text-sm text-white
-                   placeholder-neutral-600 focus:outline-none"
+                   placeholder-neutral-600 focus:outline-none resize-none overflow-hidden"
           />
           <input ref="fileInput" type="file" class="hidden" @change="handleFileUpload" />
           <div class="flex items-center justify-between px-3 pb-2.5">
