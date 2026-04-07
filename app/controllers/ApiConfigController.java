@@ -60,6 +60,9 @@ public class ApiConfigController extends Controller {
         if (key.startsWith("provider.")) {
             AgentService.syncEnabledStates();
         }
+        if (key.startsWith("jclaw.tools.")) {
+            jobs.ToolRegistrationJob.registerAll();
+        }
 
         var map = new HashMap<String, Object>();
         map.put("key", key);

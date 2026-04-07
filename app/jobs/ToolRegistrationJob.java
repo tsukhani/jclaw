@@ -10,6 +10,11 @@ public class ToolRegistrationJob extends Job<Void> {
 
     @Override
     public void doJob() {
+        registerAll();
+    }
+
+    /** Re-run tool registration. Safe to call at runtime — the volatile map swap in publish() is atomic for readers. */
+    public static void registerAll() {
         ToolRegistry.clear();
         ToolRegistry.register(new TaskTool());
         ToolRegistry.register(new CheckListTool());
@@ -17,13 +22,20 @@ public class ToolRegistrationJob extends Job<Void> {
         ToolRegistry.register(new WebFetchTool());
         ToolRegistry.register(new WebSearchTool());
         ToolRegistry.register(new SkillsTool());
-        if ("true".equals(play.Play.configuration.getProperty("jclaw.tools.playwright.enabled", "false"))) {
+        if (isToolEnabled("jclaw.tools.playwright.enabled")) {
             ToolRegistry.register(new PlaywrightBrowserTool());
         }
-        if ("true".equals(play.Play.configuration.getProperty("jclaw.tools.shell.enabled", "false"))) {
+        if (isToolEnabled("jclaw.tools.shell.enabled")) {
             ToolRegistry.register(new ShellExecTool());
         }
         ToolRegistry.publish();
         services.EventLogger.info("system", "Registered %d tools".formatted(ToolRegistry.listTools().size()));
+    }
+
+    /** Check Config DB first (set by Settings UI), fall back to application.conf. */
+    private static boolean isToolEnabled(String key) {
+        var dbValue = services.ConfigService.get(key);
+        if (dbValue != null) return "true".equals(dbValue);
+        return "true".equals(play.Play.configuration.getProperty(key, "false"));
     }
 }
