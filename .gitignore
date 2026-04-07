@@ -98,6 +98,9 @@ coverage/
 modules/*
 !modules/.gitkeep
 
+# OpenSpec archived proposals (completed work, recoverable from git history)
+openspec/archive/
+
 # Agent workspaces (only track the default test agent)
 workspace/*
 !workspace/test/
