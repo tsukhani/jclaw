@@ -61,6 +61,18 @@ const SEARCH_PROVIDERS: Record<string, { label: string, keys: { key: string, lab
     keys: [
       { key: 'exa.apiKey', label: 'apiKey', placeholder: 'Your Exa API key from exa.ai' }
     ]
+  },
+  brave: {
+    label: 'Brave',
+    keys: [
+      { key: 'brave.apiKey', label: 'apiKey', placeholder: 'Your Brave Search API key from brave.com/search/api' }
+    ]
+  },
+  tavily: {
+    label: 'Tavily',
+    keys: [
+      { key: 'tavily.apiKey', label: 'apiKey', placeholder: 'Your Tavily API key from tavily.com' }
+    ]
   }
 }
 
