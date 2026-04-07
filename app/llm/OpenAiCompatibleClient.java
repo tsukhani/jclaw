@@ -236,7 +236,7 @@ public class OpenAiCompatibleClient {
                 .uri(URI.create(url))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + provider.apiKey())
-                .timeout(Duration.ofSeconds(60))
+                .timeout(Duration.ofSeconds(180))
                 .POST(HttpRequest.BodyPublishers.ofString(json))
                 .build();
     }
