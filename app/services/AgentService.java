@@ -29,15 +29,6 @@ public class AgentService {
 
         createWorkspace(name);
 
-        // Disable skill_manager tool for non-test agents (security)
-        if (!"test".equalsIgnoreCase(name)) {
-            var config = new models.AgentToolConfig();
-            config.agent = agent;
-            config.toolName = "skill_manager";
-            config.enabled = false;
-            config.save();
-        }
-
         EventLogger.info("agent", name, null, "Agent '%s' created (provider: %s, model: %s)"
                 .formatted(name, modelProvider, modelId));
         return agent;

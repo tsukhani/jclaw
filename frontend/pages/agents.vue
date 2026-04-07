@@ -119,14 +119,13 @@ async function loadAgentSkills(agentId: number) {
   }
 }
 
-async function toggleSkill(skillId: number, assigned: boolean) {
+async function toggleSkill(skillName: string, enabled: boolean) {
   if (!editing.value) return
   try {
-    if (assigned) {
-      await $fetch(`/api/agents/${editing.value.id}/skills/${skillId}`, { method: 'POST' })
-    } else {
-      await $fetch(`/api/agents/${editing.value.id}/skills/${skillId}`, { method: 'DELETE' })
-    }
+    await $fetch(`/api/agents/${editing.value.id}/skills/${skillName}`, {
+      method: 'PUT',
+      body: { enabled }
+    })
     await loadAgentSkills(editing.value.id)
   } catch (e) {
     console.error('Failed to toggle skill:', e)
@@ -307,26 +306,26 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
       <div v-if="editing" class="bg-neutral-900 border border-neutral-800">
         <div class="px-4 py-2.5 border-b border-neutral-800">
           <span class="text-sm font-medium text-white">Skills</span>
-          <span class="ml-2 text-xs text-neutral-500">{{ agentSkills.filter(s => s.assigned).length }}/{{ agentSkills.length }} assigned</span>
+          <span class="ml-2 text-xs text-neutral-500">{{ agentSkills.filter(s => s.enabled).length }}/{{ agentSkills.length }} enabled</span>
         </div>
         <div class="divide-y divide-neutral-800/50">
-          <div v-for="skill in agentSkills" :key="skill.id"
+          <div v-for="skill in agentSkills" :key="skill.name"
                class="px-4 py-2 flex items-center justify-between">
             <div>
-              <span class="text-sm text-white">{{ skill.name }}</span>
+              <span class="text-sm text-white font-mono">{{ skill.name }}</span>
               <span v-if="skill.isGlobal" class="ml-2 text-[10px] text-green-400 border border-green-400/30 px-1">global</span>
+              <span v-else class="ml-2 text-[10px] text-neutral-500 border border-neutral-700 px-1">workspace</span>
               <div class="text-xs text-neutral-500 mt-0.5">{{ skill.description || '' }}</div>
             </div>
             <label class="flex items-center shrink-0">
-              <input type="checkbox" :checked="skill.assigned"
-                     :disabled="skill.isGlobal"
-                     @change="(e: Event) => toggleSkill(skill.id, (e.target as HTMLInputElement).checked)"
+              <input type="checkbox" :checked="skill.enabled"
+                     @change="(e: Event) => { skill.enabled = (e.target as HTMLInputElement).checked; toggleSkill(skill.name, skill.enabled) }"
                      class="accent-white" />
             </label>
           </div>
         </div>
         <div v-if="!agentSkills.length" class="px-4 py-4 text-xs text-neutral-600 text-center">
-          No skills in the registry
+          No skills available
         </div>
       </div>
 

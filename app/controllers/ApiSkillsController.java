@@ -1,16 +1,20 @@
 package controllers;
 
+import agents.SkillLoader;
 import com.google.gson.Gson;
 import com.google.gson.JsonParser;
 import models.Agent;
-import models.AgentSkill;
-import models.Skill;
+import models.AgentSkillConfig;
 import play.mvc.Controller;
 import play.mvc.Http;
 import play.mvc.With;
+import services.AgentService;
 
 import java.io.InputStreamReader;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 
@@ -19,132 +23,192 @@ public class ApiSkillsController extends Controller {
 
     private static final Gson gson = new Gson();
 
-    /** GET /api/skills — List all skills in the registry. */
+    /** GET /api/skills — List all global skills. */
     public static void list() {
-        List<Skill> skills = Skill.find("ORDER BY name ASC").fetch();
-        var result = skills.stream().map(s -> skillToMap(s)).toList();
+        var skills = new java.util.ArrayList<SkillLoader.SkillInfo>();
+        var globalDir = SkillLoader.globalSkillsPath();
+        if (Files.isDirectory(globalDir)) {
+            try (var dirs = Files.list(globalDir)) {
+                dirs.filter(Files::isDirectory).forEach(dir -> {
+                    var skillFile = dir.resolve("SKILL.md");
+                    if (Files.exists(skillFile)) {
+                        var info = SkillLoader.parseSkillFile(skillFile);
+                        if (info != null) skills.add(info);
+                    }
+                });
+            } catch (IOException e) {
+                // ignore
+            }
+        }
+        var result = skills.stream().map(s -> skillToMap(s, true)).toList();
         renderJSON(gson.toJson(result));
     }
 
-    /** GET /api/skills/{id} — Get a single skill with full content. */
-    public static void get(Long id) {
-        Skill skill = Skill.findById(id);
-        if (skill == null) notFound();
-        var map = skillToMap(skill);
-        map.put("content", skill.content);
-        renderJSON(gson.toJson(map));
+    /** GET /api/skills/{name} — Get a global skill with full content. */
+    public static void get(String name) {
+        var path = SkillLoader.globalSkillsPath().resolve(name).resolve("SKILL.md");
+        if (!Files.exists(path)) notFound();
+        try {
+            var info = SkillLoader.parseSkillFile(path);
+            var map = skillToMap(info, true);
+            map.put("content", Files.readString(path));
+            renderJSON(gson.toJson(map));
+        } catch (IOException e) {
+            error(500, "Failed to read skill: " + e.getMessage());
+        }
     }
 
-    /** POST /api/skills — Create a new skill. */
+    /** POST /api/skills — Create a new global skill. */
     public static void create() {
         var body = readJsonBody();
         if (body == null || !body.has("name")) badRequest();
 
         var name = body.get("name").getAsString();
-        if (Skill.findByName(name) != null) {
-            error(409, "A skill named '%s' already exists".formatted(name));
+        var dir = SkillLoader.globalSkillsPath().resolve(name);
+        if (Files.exists(dir.resolve("SKILL.md"))) {
+            error(409, "Skill '%s' already exists".formatted(name));
         }
 
-        var skill = new Skill();
-        skill.name = name;
-        skill.description = body.has("description") ? body.get("description").getAsString() : "";
-        skill.content = body.has("content") ? body.get("content").getAsString() : "";
-        skill.isGlobal = body.has("isGlobal") && body.get("isGlobal").getAsBoolean();
-        skill.save();
+        var description = body.has("description") ? body.get("description").getAsString() : "";
+        var content = body.has("content") ? body.get("content").getAsString() : "";
 
-        var map = skillToMap(skill);
-        map.put("content", skill.content);
-        renderJSON(gson.toJson(map));
+        // If content doesn't have frontmatter, add it
+        if (!content.startsWith("---")) {
+            content = "---\nname: %s\ndescription: %s\n---\n\n%s".formatted(name, description, content);
+        }
+
+        try {
+            Files.createDirectories(dir);
+            Files.writeString(dir.resolve("SKILL.md"), content);
+            SkillLoader.clearCache();
+            var info = SkillLoader.parseSkillFile(dir.resolve("SKILL.md"));
+            var map = skillToMap(info, true);
+            map.put("content", content);
+            renderJSON(gson.toJson(map));
+        } catch (IOException e) {
+            error(500, "Failed to create skill: " + e.getMessage());
+        }
     }
 
-    /** PUT /api/skills/{id} — Update a skill. */
-    public static void update(Long id) {
-        Skill skill = Skill.findById(id);
-        if (skill == null) notFound();
+    /** PUT /api/skills/{name} — Update a global skill. */
+    public static void update(String name) {
+        var path = SkillLoader.globalSkillsPath().resolve(name).resolve("SKILL.md");
+        if (!Files.exists(path)) notFound();
 
         var body = readJsonBody();
         if (body == null) badRequest();
 
-        if (body.has("name")) skill.name = body.get("name").getAsString();
-        if (body.has("description")) skill.description = body.get("description").getAsString();
-        if (body.has("content")) skill.content = body.get("content").getAsString();
-        if (body.has("isGlobal")) skill.isGlobal = body.get("isGlobal").getAsBoolean();
-        skill.save();
-
-        var map = skillToMap(skill);
-        map.put("content", skill.content);
-        renderJSON(gson.toJson(map));
+        try {
+            var content = body.has("content") ? body.get("content").getAsString() : Files.readString(path);
+            Files.writeString(path, content);
+            SkillLoader.clearCache();
+            var info = SkillLoader.parseSkillFile(path);
+            var map = skillToMap(info, true);
+            map.put("content", content);
+            renderJSON(gson.toJson(map));
+        } catch (IOException e) {
+            error(500, "Failed to update skill: " + e.getMessage());
+        }
     }
 
-    /** DELETE /api/skills/{id} — Delete a skill. */
-    public static void delete(Long id) {
-        Skill skill = Skill.findById(id);
-        if (skill == null) notFound();
+    /** DELETE /api/skills/{name} — Delete a global skill. */
+    public static void delete(String name) {
+        var dir = SkillLoader.globalSkillsPath().resolve(name);
+        if (!Files.isDirectory(dir)) notFound();
 
-        AgentSkill.delete("skill = ?1", skill);
-        skill.delete();
-        renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
+        try {
+            // Delete all files in the skill directory
+            try (var walk = Files.walk(dir)) {
+                walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                    try { Files.delete(p); } catch (IOException _) {}
+                });
+            }
+            SkillLoader.clearCache();
+            renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
+        } catch (IOException e) {
+            error(500, "Failed to delete skill: " + e.getMessage());
+        }
     }
 
-    /** GET /api/agents/{id}/skills — List skills for an agent (global + assigned). */
+    /** GET /api/agents/{id}/skills — List all skills for an agent with enabled status. */
     public static void listForAgent(Long id) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
 
-        var skills = AgentSkill.findSkillsForAgent(agent);
-        var assigned = AgentSkill.findByAgent(agent);
-        var assignedIds = assigned.stream().map(a -> (Long) a.skill.id).collect(java.util.stream.Collectors.toSet());
+        var allSkills = new java.util.ArrayList<SkillLoader.SkillInfo>();
 
-        var result = skills.stream().map(s -> {
-            var map = skillToMap(s);
-            map.put("assigned", s.isGlobal || assignedIds.contains(s.id));
-            map.put("removable", !s.isGlobal); // Global skills can't be unassigned
+        // Scan global skills
+        var globalDir = SkillLoader.globalSkillsPath();
+        if (Files.isDirectory(globalDir)) {
+            try (var dirs = Files.list(globalDir)) {
+                dirs.filter(Files::isDirectory).forEach(dir -> {
+                    var skillFile = dir.resolve("SKILL.md");
+                    if (Files.exists(skillFile)) {
+                        var info = SkillLoader.parseSkillFile(skillFile);
+                        if (info != null) allSkills.add(info);
+                    }
+                });
+            } catch (IOException _) {}
+        }
+
+        // Scan agent-specific skills
+        var agentDir = AgentService.workspacePath(agent.name).resolve("skills");
+        if (Files.isDirectory(agentDir)) {
+            try (var dirs = Files.list(agentDir)) {
+                dirs.filter(Files::isDirectory).forEach(dir -> {
+                    var skillFile = dir.resolve("SKILL.md");
+                    if (Files.exists(skillFile)) {
+                        var info = SkillLoader.parseSkillFile(skillFile);
+                        if (info != null) allSkills.add(info);
+                    }
+                });
+            } catch (IOException _) {}
+        }
+
+        // Get permission configs
+        var configs = AgentSkillConfig.findByAgent(agent);
+        var configMap = new HashMap<String, Boolean>();
+        for (var c : configs) {
+            configMap.put(c.skillName, c.enabled);
+        }
+
+        var result = allSkills.stream().map(s -> {
+            var map = skillToMap(s, s.location() != null && s.location().startsWith(globalDir));
+            map.put("enabled", configMap.getOrDefault(s.name(), true));
             return map;
         }).toList();
         renderJSON(gson.toJson(result));
     }
 
-    /** POST /api/agents/{id}/skills/{skillId} — Assign a skill to an agent. */
-    public static void assignToAgent(Long id, Long skillId) {
+    /** PUT /api/agents/{id}/skills/{name} — Enable or disable a skill for an agent. */
+    public static void updateForAgent(Long id, String name) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
-        Skill skill = Skill.findById(skillId);
-        if (skill == null) notFound();
 
-        if (AgentSkill.findByAgentAndSkill(agent, skill) != null) {
-            renderJSON(gson.toJson(java.util.Map.of("status", "already_assigned")));
-            return;
+        var body = readJsonBody();
+        if (body == null || !body.has("enabled")) badRequest();
+        var enabled = body.get("enabled").getAsBoolean();
+
+        var config = AgentSkillConfig.findByAgentAndSkill(agent, name);
+        if (config == null) {
+            config = new AgentSkillConfig();
+            config.agent = agent;
+            config.skillName = name;
         }
+        config.enabled = enabled;
+        config.save();
 
-        var as = new AgentSkill();
-        as.agent = agent;
-        as.skill = skill;
-        as.save();
-        renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
-    }
-
-    /** DELETE /api/agents/{id}/skills/{skillId} — Unassign a skill from an agent. */
-    public static void unassignFromAgent(Long id, Long skillId) {
-        Agent agent = Agent.findById(id);
-        if (agent == null) notFound();
-        Skill skill = Skill.findById(skillId);
-        if (skill == null) notFound();
-
-        var as = AgentSkill.findByAgentAndSkill(agent, skill);
-        if (as != null) as.delete();
-        renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
+        renderJSON(gson.toJson(java.util.Map.of("name", name, "enabled", enabled, "status", "ok")));
     }
 
     // --- Helpers ---
 
-    private static HashMap<String, Object> skillToMap(Skill s) {
+    private static HashMap<String, Object> skillToMap(SkillLoader.SkillInfo s, boolean isGlobal) {
         var map = new HashMap<String, Object>();
-        map.put("id", s.id);
-        map.put("name", s.name);
-        map.put("description", s.description);
-        map.put("isGlobal", s.isGlobal);
-        map.put("createdAt", s.createdAt.toString());
-        map.put("updatedAt", s.updatedAt.toString());
+        map.put("name", s.name());
+        map.put("description", s.description());
+        map.put("isGlobal", isGlobal);
+        map.put("location", s.location() != null ? s.location().toString() : "");
         return map;
     }
 

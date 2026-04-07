@@ -80,20 +80,22 @@ public class AgentSystemTest extends UnitTest {
     // --- SkillLoader tests ---
 
     @Test
-    public void loadSkillsFromDatabase() {
+    public void loadSkillsFromFilesystem() {
         var agent = AgentService.create("skill-agent", "openrouter", "gpt-4.1", false);
 
-        var skill = new models.Skill();
-        skill.name = "coding";
-        skill.description = "Help with writing and reviewing code";
-        skill.content = "# Coding Skill\nFollow best practices when writing code.";
-        skill.isGlobal = false;
-        skill.save();
-
-        var assignment = new models.AgentSkill();
-        assignment.agent = agent;
-        assignment.skill = skill;
-        assignment.save();
+        // Create a skill file in the agent's workspace
+        var skillDir = AgentService.workspacePath("skill-agent").resolve("skills").resolve("coding");
+        try {
+            Files.createDirectories(skillDir);
+            Files.writeString(skillDir.resolve("SKILL.md"), """
+                    ---
+                    name: coding
+                    description: Help with writing and reviewing code
+                    ---
+                    # Coding Skill
+                    Follow best practices when writing code.
+                    """);
+        } catch (IOException e) { fail(e); }
 
         SkillLoader.clearCache();
         var skills = SkillLoader.loadSkills("skill-agent");
@@ -105,6 +107,7 @@ public class AgentSystemTest extends UnitTest {
     @Test
     public void loadSkillsReturnsEmptyForNoSkills() {
         AgentService.create("no-skills", "openrouter", "gpt-4.1", false);
+        SkillLoader.clearCache();
         var skills = SkillLoader.loadSkills("no-skills");
         assertTrue(skills.isEmpty());
     }
@@ -113,17 +116,18 @@ public class AgentSystemTest extends UnitTest {
     public void formatSkillsXmlContainsSkillData() {
         var agent = AgentService.create("xml-agent", "openrouter", "gpt-4.1", false);
 
-        var skill = new models.Skill();
-        skill.name = "research";
-        skill.description = "Deep web research with citations";
-        skill.content = "Research instructions here.";
-        skill.isGlobal = false;
-        skill.save();
-
-        var assignment = new models.AgentSkill();
-        assignment.agent = agent;
-        assignment.skill = skill;
-        assignment.save();
+        // Create a skill file in the agent's workspace
+        var skillDir = AgentService.workspacePath("xml-agent").resolve("skills").resolve("research");
+        try {
+            Files.createDirectories(skillDir);
+            Files.writeString(skillDir.resolve("SKILL.md"), """
+                    ---
+                    name: research
+                    description: Deep web research with citations
+                    ---
+                    Research instructions here.
+                    """);
+        } catch (IOException e) { fail(e); }
 
         SkillLoader.clearCache();
         var skills = SkillLoader.loadSkills("xml-agent");

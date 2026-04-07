@@ -222,17 +222,19 @@ public class IntegrationTest extends UnitTest {
     public void skillsLoadedDuringPromptAssembly() {
         var agent = AgentService.create("skill-agent", "openrouter", "gpt-4.1", true);
 
-        var skill = new models.Skill();
-        skill.name = "coding";
-        skill.description = "Help with code review and writing";
-        skill.content = "# Coding Skill\nReview code carefully.";
-        skill.isGlobal = false;
-        skill.save();
-
-        var assignment = new models.AgentSkill();
-        assignment.agent = agent;
-        assignment.skill = skill;
-        assignment.save();
+        // Create a skill file in the agent's workspace
+        var skillDir = AgentService.workspacePath("skill-agent").resolve("skills").resolve("coding");
+        try {
+            java.nio.file.Files.createDirectories(skillDir);
+            java.nio.file.Files.writeString(skillDir.resolve("SKILL.md"), """
+                    ---
+                    name: coding
+                    description: Help with code review and writing
+                    ---
+                    # Coding Skill
+                    Review code carefully.
+                    """);
+        } catch (java.io.IOException e) { fail(e); }
 
         agents.SkillLoader.clearCache();
         var assembled = SystemPromptAssembler.assemble(agent, "review my code");

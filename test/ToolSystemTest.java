@@ -177,6 +177,7 @@ public class ToolSystemTest extends UnitTest {
 
     @Test
     public void skillsToolListEmpty() {
+        agents.SkillLoader.clearCache();
         var result = ToolRegistry.execute("skills",
                 """
                 {"action": "listSkills"}
@@ -186,17 +187,19 @@ public class ToolSystemTest extends UnitTest {
 
     @Test
     public void skillsToolListAndRead() {
-        var skill = new models.Skill();
-        skill.name = "test-skill";
-        skill.description = "A test skill";
-        skill.content = "# Test Skill Instructions\nDo the test thing.";
-        skill.isGlobal = false;
-        skill.save();
-
-        var assignment = new models.AgentSkill();
-        assignment.agent = agent;
-        assignment.skill = skill;
-        assignment.save();
+        // Create a skill file in the agent's workspace
+        var skillDir = AgentService.workspacePath("tool-test-agent").resolve("skills").resolve("test-skill");
+        try {
+            Files.createDirectories(skillDir);
+            Files.writeString(skillDir.resolve("SKILL.md"), """
+                    ---
+                    name: test-skill
+                    description: A test skill
+                    ---
+                    # Test Skill Instructions
+                    Do the test thing.
+                    """);
+        } catch (IOException e) { fail(e); }
 
         agents.SkillLoader.clearCache();
 

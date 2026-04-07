@@ -1,17 +1,29 @@
 package agents;
 
+import models.Agent;
+import models.AgentSkillConfig;
+import play.Play;
+import services.AgentService;
+import services.EventLogger;
+
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
- * Loads skills from the database for system prompt injection.
+ * Scans global skills/ and workspace/{agent}/skills/ directories,
+ * filters by per-agent permissions, and provides skill metadata for system prompt injection.
  */
 public class SkillLoader {
 
     public record SkillInfo(String name, String description, Path location) {}
 
-    private static final java.util.concurrent.ConcurrentHashMap<String, CachedSkills> skillCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, CachedSkills> skillCache = new ConcurrentHashMap<>();
     private static final long CACHE_TTL_MS = 30_000;
 
     private record CachedSkills(List<SkillInfo> skills, long expiresAt) {
@@ -20,6 +32,8 @@ public class SkillLoader {
 
     private static final int MAX_SKILLS = 150;
     private static final int MAX_SKILLS_CHARS = 30_000;
+    private static final Pattern FRONTMATTER_PATTERN = Pattern.compile(
+            "^---\\s*\\n(.*?)\\n---", Pattern.DOTALL);
 
     public static void clearCache() {
         skillCache.clear();
@@ -30,19 +44,58 @@ public class SkillLoader {
         if (cached != null && !cached.isExpired()) {
             return cached.skills();
         }
-        var skills = loadSkillsFromDb(agentName);
+        var skills = loadSkillsFromDisk(agentName);
         skillCache.put(agentName, new CachedSkills(skills, System.currentTimeMillis() + CACHE_TTL_MS));
         return skills;
     }
 
-    private static List<SkillInfo> loadSkillsFromDb(String agentName) {
-        var agent = models.Agent.findByName(agentName);
-        if (agent == null) return List.of();
-        var skills = models.AgentSkill.findSkillsForAgent(agent);
-        return skills.stream()
-                .map(s -> new SkillInfo(s.name, s.description != null ? s.description : "", null))
-                .limit(MAX_SKILLS)
-                .toList();
+    private static List<SkillInfo> loadSkillsFromDisk(String agentName) {
+        var allSkills = new ArrayList<SkillInfo>();
+
+        // 1. Scan global skills directory
+        var globalDir = globalSkillsPath();
+        scanSkillsDirectory(globalDir, allSkills);
+
+        // 2. Scan agent-specific skills directory
+        var agentDir = AgentService.workspacePath(agentName).resolve("skills");
+        scanSkillsDirectory(agentDir, allSkills);
+
+        // 3. Filter by permissions
+        var agent = Agent.findByName(agentName);
+        if (agent != null) {
+            var configs = AgentSkillConfig.findByAgent(agent);
+            var disabledSkills = new HashSet<String>();
+            for (var c : configs) {
+                if (!c.enabled) disabledSkills.add(c.skillName);
+            }
+            if (!disabledSkills.isEmpty()) {
+                allSkills.removeIf(s -> disabledSkills.contains(s.name()));
+            }
+        }
+
+        return allSkills.stream().limit(MAX_SKILLS).toList();
+    }
+
+    private static void scanSkillsDirectory(Path skillsDir, List<SkillInfo> skills) {
+        if (!Files.isDirectory(skillsDir)) return;
+        try (var dirs = Files.list(skillsDir)) {
+            dirs.filter(Files::isDirectory).forEach(dir -> {
+                var skillFile = dir.resolve("SKILL.md");
+                if (Files.exists(skillFile)) {
+                    var info = parseSkillFile(skillFile);
+                    if (info != null) {
+                        skills.add(info);
+                    }
+                }
+            });
+        } catch (IOException e) {
+            EventLogger.warn("agent", "Failed to scan skills directory %s: %s"
+                    .formatted(skillsDir, e.getMessage()));
+        }
+    }
+
+    public static Path globalSkillsPath() {
+        return Path.of(Play.configuration.getProperty("jclaw.skills.path", "skills"));
     }
 
     /**
@@ -60,7 +113,6 @@ public class SkillLoader {
         for (var skill : skills) {
             var entry = formatSkillEntry(skill, !compact);
             if (totalChars + entry.length() > MAX_SKILLS_CHARS && !compact) {
-                // Switch to compact format
                 compact = true;
                 sb.setLength(0);
                 sb.append("<available_skills>\n");
@@ -95,8 +147,28 @@ public class SkillLoader {
                 """;
     }
 
+    // --- Internal ---
+
+    public static SkillInfo parseSkillFile(Path path) {
+        try {
+            var content = Files.readString(path);
+            var matcher = FRONTMATTER_PATTERN.matcher(content);
+            if (matcher.find()) {
+                var frontmatter = matcher.group(1);
+                var name = extractYamlValue(frontmatter, "name");
+                var description = extractYamlValue(frontmatter, "description");
+                if (name != null) {
+                    return new SkillInfo(name, description != null ? description : "", path);
+                }
+            }
+            // Fallback: use directory name
+            return new SkillInfo(path.getParent().getFileName().toString(), "", path);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
     public static String extractYamlValue(String yaml, String key) {
-        // Simple single-line YAML value extraction (handles key: value and key: "value")
         var pattern = Pattern.compile("^" + Pattern.quote(key) + ":\\s*[\"']?(.*?)[\"']?\\s*$",
                 Pattern.MULTILINE);
         var matcher = pattern.matcher(yaml);
@@ -104,7 +176,6 @@ public class SkillLoader {
             var value = matcher.group(1).trim();
             return value.isEmpty() ? null : value;
         }
-        // Handle multiline value with | or >
         var multiPattern = Pattern.compile("^" + Pattern.quote(key) + ":\\s*[|>]\\s*\\n((?:  .*\\n?)+)",
                 Pattern.MULTILINE);
         var multiMatcher = multiPattern.matcher(yaml);
@@ -122,13 +193,15 @@ public class SkillLoader {
                         <description>%s</description>
                         <location>%s</location>
                       </skill>
-                    """.formatted(skill.name(), skill.description(), skill.location());
+                    """.formatted(skill.name(), skill.description(),
+                    skill.location() != null ? skill.location() : "");
         }
         return """
                   <skill>
                     <name>%s</name>
                     <location>%s</location>
                   </skill>
-                """.formatted(skill.name(), skill.location());
+                """.formatted(skill.name(),
+                skill.location() != null ? skill.location() : "");
     }
 }
