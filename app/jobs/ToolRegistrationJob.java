@@ -15,6 +15,7 @@ public class ToolRegistrationJob extends Job<Void> {
         ToolRegistry.register(new CheckListTool());
         ToolRegistry.register(new FileSystemTools());
         ToolRegistry.register(new WebFetchTool());
+        ToolRegistry.register(new WebSearchTool());
         ToolRegistry.register(new SkillsTool());
         if ("true".equals(play.Play.configuration.getProperty("jclaw.tools.playwright.enabled", "false"))) {
             ToolRegistry.register(new PlaywrightBrowserTool());
