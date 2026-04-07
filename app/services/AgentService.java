@@ -43,6 +43,22 @@ public class AgentService {
                 && provider.models().stream().anyMatch(m -> m.id().equals(modelId));
     }
 
+    /**
+     * Syncs the enabled state of all agents based on current provider configuration.
+     * Agents whose provider+model are configured get enabled; others get disabled.
+     */
+    public static void syncEnabledStates() {
+        ProviderRegistry.refresh();
+        List<Agent> agents = listAll();
+        for (var agent : agents) {
+            var shouldBeEnabled = isProviderConfigured(agent.modelProvider, agent.modelId);
+            if (agent.enabled != shouldBeEnabled) {
+                agent.enabled = shouldBeEnabled;
+                agent.save();
+            }
+        }
+    }
+
     public static void delete(Agent agent) {
         EventLogger.info("agent", agent.name, null, "Agent deleted");
         agent.delete();

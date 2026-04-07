@@ -6,6 +6,7 @@ import com.google.gson.JsonParser;
 import play.mvc.Controller;
 import play.mvc.Http;
 import play.mvc.With;
+import services.AgentService;
 import services.ConfigService;
 
 import java.io.InputStreamReader;
@@ -56,6 +57,10 @@ public class ApiConfigController extends Controller {
         }
         ConfigService.set(key, value);
 
+        if (key.startsWith("provider.")) {
+            AgentService.syncEnabledStates();
+        }
+
         var map = new HashMap<String, Object>();
         map.put("key", key);
         map.put("value", ConfigService.maskValue(key, value));
@@ -65,6 +70,11 @@ public class ApiConfigController extends Controller {
 
     public static void delete(String key) {
         ConfigService.delete(key);
+
+        if (key.startsWith("provider.")) {
+            AgentService.syncEnabledStates();
+        }
+
         var map = new HashMap<String, Object>();
         map.put("status", "ok");
         map.put("key", key);
