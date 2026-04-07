@@ -24,12 +24,30 @@ async function loadAllAgentSkills() {
 
 watch(agents, () => loadAllAgentSkills(), { immediate: true })
 
-// Drag state
+// Drag state — supports both directions
 const dragging = ref<any>(null)
+const dragSource = ref<'global' | 'agent' | null>(null)
+const dragSourceAgentId = ref<number | null>(null)
 const dropTarget = ref<number | null>(null)
+const dropTargetGlobal = ref(false)
+const promoting = ref(false)
 
-function onDragStart(e: DragEvent, skill: any) {
+// --- Global skill → Agent card (copy to workspace) ---
+
+function onGlobalDragStart(e: DragEvent, skill: any) {
   dragging.value = skill
+  dragSource.value = 'global'
+  dragSourceAgentId.value = null
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'copy'
+    e.dataTransfer.setData('text/plain', skill.name)
+  }
+}
+
+function onAgentSkillDragStart(e: DragEvent, skill: any, agentId: number) {
+  dragging.value = skill
+  dragSource.value = 'agent'
+  dragSourceAgentId.value = agentId
   if (e.dataTransfer) {
     e.dataTransfer.effectAllowed = 'copy'
     e.dataTransfer.setData('text/plain', skill.name)
@@ -38,46 +56,43 @@ function onDragStart(e: DragEvent, skill: any) {
 
 function onDragEnd() {
   dragging.value = null
+  dragSource.value = null
+  dragSourceAgentId.value = null
   dropTarget.value = null
+  dropTargetGlobal.value = false
 }
 
-function onDragOver(e: DragEvent, agentId: number) {
+function onAgentDragOver(e: DragEvent, agentId: number) {
+  if (dragSource.value !== 'global') return
   e.preventDefault()
   if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
   dropTarget.value = agentId
 }
 
-function onDragLeave(agentId: number) {
+function onAgentDragLeave(agentId: number) {
   if (dropTarget.value === agentId) dropTarget.value = null
 }
 
-async function onDrop(e: DragEvent, agent: any) {
+async function onAgentDrop(e: DragEvent, agent: any) {
   e.preventDefault()
   dropTarget.value = null
-  if (!dragging.value) return
+  if (!dragging.value || dragSource.value !== 'global') return
 
-  const skillName = dragging.value.name
-  const existing = agentSkillsMap.value[agent.id]?.find((s: any) => s.name === skillName)
+  const skillName = dragging.value.folderName || dragging.value.name
+  const existing = agentSkillsMap.value[agent.id]?.find((s: any) => s.name === dragging.value.name)
 
-  // If skill already exists as a workspace skill and is enabled, do nothing
-  if (existing && !existing.isGlobal && existing.enabled) {
+  if (existing && existing.enabled) {
     dragging.value = null
     return
   }
 
   try {
-    // Copy the global skill into the agent's workspace
-    await $fetch(`/api/agents/${agent.id}/skills/${skillName}/copy`, {
-      method: 'POST'
-    })
-    // Reload skills for this agent
+    await $fetch(`/api/agents/${agent.id}/skills/${skillName}/copy`, { method: 'POST' })
     agentSkillsMap.value[agent.id] = await $fetch<any[]>(`/api/agents/${agent.id}/skills`)
   } catch (err: any) {
-    // 409 = already exists in workspace, just ensure it's enabled
     if (err?.response?.status === 409 && existing && !existing.enabled) {
       await $fetch(`/api/agents/${agent.id}/skills/${skillName}`, {
-        method: 'PUT',
-        body: { enabled: true }
+        method: 'PUT', body: { enabled: true }
       })
       agentSkillsMap.value[agent.id] = await $fetch<any[]>(`/api/agents/${agent.id}/skills`)
     } else if (err?.response?.status !== 409) {
@@ -87,11 +102,48 @@ async function onDrop(e: DragEvent, agent: any) {
   dragging.value = null
 }
 
+// --- Agent skill → Global section (promote with LLM sanitization) ---
+
+function onGlobalSectionDragOver(e: DragEvent) {
+  if (dragSource.value !== 'agent') return
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+  dropTargetGlobal.value = true
+}
+
+function onGlobalSectionDragLeave() {
+  dropTargetGlobal.value = false
+}
+
+async function onGlobalSectionDrop(e: DragEvent) {
+  e.preventDefault()
+  dropTargetGlobal.value = false
+  if (!dragging.value || dragSource.value !== 'agent' || dragSourceAgentId.value === null) return
+
+  const skillName = dragging.value.folderName || dragging.value.name
+  const agentId = dragSourceAgentId.value
+  promoting.value = true
+
+  try {
+    await $fetch('/api/skills/promote', {
+      method: 'POST',
+      body: { agentId, skillName }
+    })
+    refreshSkills()
+  } catch (err) {
+    console.error('Failed to promote skill:', err)
+  } finally {
+    promoting.value = false
+    dragging.value = null
+  }
+}
+
+// --- Agent skill toggle ---
+
 async function toggleAgentSkill(agentId: number, skillName: string, enabled: boolean) {
   try {
     await $fetch(`/api/agents/${agentId}/skills/${skillName}`, {
-      method: 'PUT',
-      body: { enabled }
+      method: 'PUT', body: { enabled }
     })
     agentSkillsMap.value[agentId] = await $fetch<any[]>(`/api/agents/${agentId}/skills`)
   } catch (e) {
@@ -99,7 +151,43 @@ async function toggleAgentSkill(agentId: number, skillName: string, enabled: boo
   }
 }
 
-// Skill editing
+// --- Global skill inline rename ---
+
+const renamingSkill = ref<string | null>(null)
+const renameValue = ref('')
+
+function startRename(skill: any) {
+  renamingSkill.value = skill.folderName || skill.name
+  renameValue.value = skill.folderName || skill.name
+}
+
+function cancelRename() {
+  renamingSkill.value = null
+  renameValue.value = ''
+}
+
+async function commitRename(skill: any) {
+  const oldName = skill.folderName || skill.name
+  const newName = renameValue.value.trim()
+  if (!newName || newName === oldName) {
+    cancelRename()
+    return
+  }
+  try {
+    await $fetch(`/api/skills/${oldName}/rename`, {
+      method: 'PUT', body: { newName }
+    })
+    refreshSkills()
+  } catch (err: any) {
+    console.error('Failed to rename skill:', err)
+  } finally {
+    renamingSkill.value = null
+    renameValue.value = ''
+  }
+}
+
+// --- Skill editing (create / edit form) ---
+
 const editing = ref<any>(null)
 const creating = ref(false)
 const form = ref({ name: '', content: '' })
@@ -113,9 +201,10 @@ function newSkill() {
 
 async function editSkill(skill: any) {
   try {
-    const full = await $fetch<any>(`/api/skills/${skill.name}`)
-    form.value = { name: full.name, content: full.content || '' }
-    editing.value = skill
+    const folderName = skill.folderName || skill.name
+    const full = await $fetch<any>(`/api/skills/${folderName}`)
+    form.value = { name: full.folderName || full.name, content: full.content || '' }
+    editing.value = { ...skill, folderName }
     creating.value = false
   } catch (e) {
     console.error('Failed to load skill:', e)
@@ -128,7 +217,8 @@ async function saveSkill() {
     if (creating.value) {
       await $fetch('/api/skills', { method: 'POST', body: { name: form.value.name, content: form.value.content } })
     } else if (editing.value) {
-      await $fetch(`/api/skills/${editing.value.name}`, { method: 'PUT', body: { content: form.value.content } })
+      const folderName = editing.value.folderName || editing.value.name
+      await $fetch(`/api/skills/${folderName}`, { method: 'PUT', body: { content: form.value.content } })
     }
     editing.value = null
     creating.value = false
@@ -140,9 +230,10 @@ async function saveSkill() {
   }
 }
 
-async function deleteSkill(name: string) {
+async function deleteSkill(skill: any) {
+  const folderName = skill.folderName || skill.name
   try {
-    await $fetch(`/api/skills/${name}`, { method: 'DELETE' })
+    await $fetch(`/api/skills/${folderName}`, { method: 'DELETE' })
     editing.value = null
     refreshSkills()
     loadAllAgentSkills()
@@ -184,9 +275,9 @@ function totalSkillCount(agentId: number) {
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           <div v-for="agent in agents" :key="agent.id"
-               @dragover="onDragOver($event, agent.id)"
-               @dragleave="onDragLeave(agent.id)"
-               @drop="onDrop($event, agent)"
+               @dragover="onAgentDragOver($event, agent.id)"
+               @dragleave="onAgentDragLeave(agent.id)"
+               @drop="onAgentDrop($event, agent)"
                :class="[
                  'bg-neutral-900 border p-4 transition-all duration-150',
                  dropTarget === agent.id
@@ -205,14 +296,17 @@ function totalSkillCount(agentId: number) {
             </div>
             <div class="text-xs text-neutral-600 mb-3">{{ agent.modelProvider }} / {{ agent.modelId }}</div>
 
-            <!-- Agent's skills -->
+            <!-- Agent's skills (draggable for promotion) -->
             <div v-if="agentSkillsMap[agent.id]?.length" class="space-y-1">
               <div v-for="skill in agentSkillsMap[agent.id]" :key="skill.name"
-                   class="flex items-center justify-between px-2 py-1.5 bg-neutral-800/50 group">
+                   draggable="true"
+                   @dragstart="onAgentSkillDragStart($event, skill, agent.id)"
+                   @dragend="onDragEnd"
+                   class="flex items-center justify-between px-2 py-1.5 bg-neutral-800/50 cursor-grab active:cursor-grabbing select-none group">
                 <div class="flex items-center gap-2 min-w-0">
                   <span class="text-xs text-white font-mono truncate">{{ skill.name }}</span>
                 </div>
-                <label class="flex items-center shrink-0">
+                <label class="flex items-center shrink-0" @click.stop>
                   <input type="checkbox" :checked="skill.enabled"
                          @change="(e: Event) => toggleAgentSkill(agent.id, skill.name, (e.target as HTMLInputElement).checked)"
                          class="accent-emerald-500 scale-90" />
@@ -223,8 +317,8 @@ function totalSkillCount(agentId: number) {
               {{ loadingAgents ? 'Loading...' : 'No skills assigned' }}
             </div>
 
-            <!-- Drop hint -->
-            <div v-if="dragging && dropTarget !== agent.id"
+            <!-- Drop hint (global → agent) -->
+            <div v-if="dragging && dragSource === 'global' && dropTarget !== agent.id"
                  class="mt-3 border border-dashed border-neutral-700 py-2 text-center text-[10px] text-neutral-600">
               Drop skill here
             </div>
@@ -236,26 +330,66 @@ function totalSkillCount(agentId: number) {
         </div>
       </div>
 
-      <!-- Global skills (draggable) -->
-      <div>
-        <div class="text-xs text-neutral-500 uppercase tracking-wider mb-3">Global Skills</div>
-        <div class="text-[10px] text-neutral-600 mb-3">Drag a skill onto an agent card above to assign it</div>
-        <div v-if="!skills?.length" class="bg-neutral-900 border border-neutral-800 px-4 py-6 text-center text-sm text-neutral-600">
+      <!-- Global skills (draggable + drop target for promotion) -->
+      <div @dragover="onGlobalSectionDragOver"
+           @dragleave="onGlobalSectionDragLeave"
+           @drop="onGlobalSectionDrop"
+           :class="[
+             'transition-all duration-150 p-4 -m-4',
+             dropTargetGlobal ? 'bg-emerald-500/5 ring-1 ring-emerald-500/20 rounded' : ''
+           ]">
+        <div class="flex items-center gap-3 mb-3">
+          <div class="text-xs text-neutral-500 uppercase tracking-wider">Global Skills</div>
+          <div v-if="promoting" class="flex items-center gap-1.5 text-[10px] text-emerald-400">
+            <svg class="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+            </svg>
+            Sanitizing &amp; promoting...
+          </div>
+        </div>
+        <div class="text-[10px] text-neutral-600 mb-3">
+          Drag a skill onto an agent above to assign it. Drag an agent skill here to promote it.
+        </div>
+
+        <!-- Drop hint when dragging agent skill over global section -->
+        <div v-if="dragSource === 'agent' && dropTargetGlobal"
+             class="mb-3 border border-dashed border-emerald-500/40 py-3 text-center text-xs text-emerald-400">
+          Release to promote to global registry (secrets will be stripped)
+        </div>
+
+        <div v-if="!skills?.length && !promoting" class="bg-neutral-900 border border-neutral-800 px-4 py-6 text-center text-sm text-neutral-600">
           No global skills. Create one to get started.
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          <div v-for="skill in skills" :key="skill.name"
+          <div v-for="skill in skills" :key="skill.folderName || skill.name"
                draggable="true"
-               @dragstart="onDragStart($event, skill)"
+               @dragstart="onGlobalDragStart($event, skill)"
                @dragend="onDragEnd"
                :class="[
                  'bg-neutral-900 border border-neutral-800 p-4 cursor-grab active:cursor-grabbing transition-all duration-150 select-none',
-                 dragging?.name === skill.name ? 'opacity-50 scale-95' : 'hover:border-neutral-700'
+                 dragging?.name === skill.name && dragSource === 'global' ? 'opacity-50 scale-95' : 'hover:border-neutral-700'
                ]">
             <div class="flex items-center justify-between mb-1">
-              <span class="text-sm text-white font-mono">{{ skill.name }}</span>
-              <span class="text-[10px] text-green-400 border border-green-400/30 px-1">global</span>
+              <!-- Inline folder name editing -->
+              <template v-if="renamingSkill === (skill.folderName || skill.name)">
+                <input v-model="renameValue"
+                       @keydown.enter="commitRename(skill)"
+                       @keydown.escape="cancelRename"
+                       @blur="commitRename(skill)"
+                       @click.stop
+                       @mousedown.stop
+                       ref="renameInput"
+                       class="text-sm text-white font-mono bg-neutral-800 border border-neutral-600 px-1.5 py-0.5 w-full mr-2 focus:outline-none focus:border-emerald-500" />
+              </template>
+              <template v-else>
+                <span class="text-sm text-white font-mono cursor-text"
+                      @dblclick.stop="startRename(skill)">{{ skill.folderName || skill.name }}</span>
+              </template>
+              <span class="text-[10px] text-green-400 border border-green-400/30 px-1 shrink-0">global</span>
             </div>
+            <div v-if="skill.name !== (skill.folderName || skill.name)"
+                 class="text-[10px] text-neutral-600 mb-0.5">name: {{ skill.name }}</div>
             <div class="text-xs text-neutral-500">{{ skill.description || '(no description)' }}</div>
             <button @click.stop="editSkill(skill)"
                     class="mt-3 text-[10px] text-neutral-600 hover:text-neutral-300 transition-colors">
@@ -289,7 +423,7 @@ function totalSkillCount(agentId: number) {
             {{ saving ? 'Saving...' : 'Save' }}
           </button>
           <button @click="cancel" class="px-4 py-1.5 text-xs text-neutral-400 hover:text-white transition-colors">Cancel</button>
-          <button v-if="editing" @click="deleteSkill(editing.name)"
+          <button v-if="editing" @click="deleteSkill(editing)"
                   class="px-4 py-1.5 text-xs text-red-400/60 hover:text-red-400 ml-auto transition-colors">Delete</button>
         </div>
       </div>

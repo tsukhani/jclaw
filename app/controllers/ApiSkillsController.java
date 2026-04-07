@@ -3,6 +3,9 @@ package controllers;
 import agents.SkillLoader;
 import com.google.gson.Gson;
 import com.google.gson.JsonParser;
+import llm.LlmTypes.ChatMessage;
+import llm.OpenAiCompatibleClient;
+import llm.ProviderRegistry;
 import models.Agent;
 import models.AgentSkillConfig;
 import play.mvc.Controller;
@@ -16,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 
 @With(AuthCheck.class)
@@ -230,6 +234,211 @@ public class ApiSkillsController extends Controller {
         }
     }
 
+    /** POST /api/skills/promote — Promote an agent workspace skill to the global registry (with LLM sanitization). */
+    public static void promote() {
+        var body = readJsonBody();
+        if (body == null || !body.has("agentId") || !body.has("skillName")) badRequest();
+
+        var agentId = body.get("agentId").getAsLong();
+        var skillName = body.get("skillName").getAsString();
+
+        Agent agent = Agent.findById(agentId);
+        if (agent == null) notFound();
+
+        var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve(skillName);
+        if (!Files.isDirectory(skillDir) || !Files.exists(skillDir.resolve("SKILL.md"))) {
+            error(404, "Skill '%s' not found in agent workspace".formatted(skillName));
+        }
+
+        // Read text files from the skill folder (SKILL.md, credentials.json, tools/**)
+        var textFiles = new LinkedHashMap<String, String>();
+        var binaryFiles = new java.util.ArrayList<String>();
+        try (var walk = Files.walk(skillDir)) {
+            walk.filter(Files::isRegularFile).forEach(file -> {
+                var relName = skillDir.relativize(file).toString();
+                try {
+                    if (isTextFile(relName)) {
+                        textFiles.put(relName, Files.readString(file));
+                    } else {
+                        binaryFiles.add(relName);
+                    }
+                } catch (IOException _) {}
+            });
+        } catch (IOException e) {
+            error(500, "Failed to read skill files: " + e.getMessage());
+        }
+
+        // Strip credentials.json deterministically before LLM review
+        if (textFiles.containsKey("credentials.json")) {
+            textFiles.put("credentials.json", stripCredentialsJson(textFiles.get("credentials.json")));
+        }
+
+        // Sanitize remaining text files via the default agent's LLM
+        var sanitized = sanitizeWithLlm(textFiles);
+
+        // Determine target folder name, appending " copy" on conflict
+        var globalDir = SkillLoader.globalSkillsPath();
+        var targetName = skillName;
+        while (Files.isDirectory(globalDir.resolve(targetName))) {
+            targetName = targetName + " copy";
+        }
+
+        // Write sanitized text files and copy binary files
+        var targetDir = globalDir.resolve(targetName);
+        try {
+            Files.createDirectories(targetDir);
+            for (var entry : sanitized.entrySet()) {
+                var targetFile = targetDir.resolve(entry.getKey());
+                Files.createDirectories(targetFile.getParent());
+                Files.writeString(targetFile, entry.getValue());
+            }
+            for (var binFile : binaryFiles) {
+                var source = skillDir.resolve(binFile);
+                var target = targetDir.resolve(binFile);
+                Files.createDirectories(target.getParent());
+                Files.copy(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            SkillLoader.clearCache();
+
+            var info = SkillLoader.parseSkillFile(targetDir.resolve("SKILL.md"));
+            var map = skillToMap(info, true);
+            map.put("folderName", targetName);
+            renderJSON(gson.toJson(map));
+        } catch (IOException e) {
+            error(500, "Failed to write promoted skill: " + e.getMessage());
+        }
+    }
+
+    /** PUT /api/skills/{name}/rename — Rename a global skill folder. */
+    public static void rename(String name) {
+        var body = readJsonBody();
+        if (body == null || !body.has("newName")) badRequest();
+
+        var newName = body.get("newName").getAsString().trim();
+        if (newName.isEmpty()) badRequest();
+
+        var globalDir = SkillLoader.globalSkillsPath();
+        var sourceDir = globalDir.resolve(name);
+        if (!Files.isDirectory(sourceDir)) notFound();
+
+        var targetDir = globalDir.resolve(newName);
+        if (Files.exists(targetDir)) {
+            error(409, "A skill with folder name '%s' already exists".formatted(newName));
+        }
+
+        try {
+            Files.move(sourceDir, targetDir);
+            SkillLoader.clearCache();
+            renderJSON(gson.toJson(java.util.Map.of("oldName", name, "newName", newName, "status", "ok")));
+        } catch (IOException e) {
+            error(500, "Failed to rename skill: " + e.getMessage());
+        }
+    }
+
+    // --- LLM sanitization ---
+
+    private static LinkedHashMap<String, String> sanitizeWithLlm(LinkedHashMap<String, String> fileContents) {
+        // Find the default agent's provider
+        Agent defaultAgent = Agent.findDefault();
+        if (defaultAgent == null) {
+            // No default agent — return files as-is
+            return fileContents;
+        }
+
+        var provider = ProviderRegistry.get(defaultAgent.modelProvider);
+        if (provider == null) {
+            return fileContents;
+        }
+
+        // Build file listing for the prompt
+        var sb = new StringBuilder();
+        for (var entry : fileContents.entrySet()) {
+            sb.append("=== FILE: %s ===\n".formatted(entry.getKey()));
+            sb.append(entry.getValue());
+            sb.append("\n\n");
+        }
+
+        var systemPrompt = """
+                You are a security reviewer. You will receive text files from an AI agent's skill folder.
+                A skill folder has this structure:
+                - SKILL.md — the main skill instructions (may contain hardcoded secrets, tokens, URLs with keys, PII in examples)
+                - credentials.json — already pre-stripped, no action needed
+                - tools/ — optional tool scripts that may contain hardcoded secrets or personal data
+
+                Your job is to identify and redact any secrets, API keys, tokens, passwords, bearer tokens, \
+                webhook URLs, personal information (names, emails, phone numbers, addresses, usernames), \
+                or other sensitive data that may have been embedded in the files.
+
+                Replace each redacted value with a descriptive placeholder like [API_KEY], [PASSWORD], [EMAIL], \
+                [PHONE_NUMBER], [PERSONAL_NAME], [TOKEN], [WEBHOOK_URL], [USERNAME], etc.
+
+                Return ONLY a valid JSON object mapping each filename to its sanitized content. \
+                Do not include any other text, markdown formatting, or code fences. \
+                Example: {"SKILL.md": "sanitized content here"}
+
+                If no sensitive data is found in a file, return its content unchanged.
+                """;
+
+        var messages = List.of(
+                ChatMessage.system(systemPrompt),
+                ChatMessage.user(sb.toString())
+        );
+
+        try {
+            var response = OpenAiCompatibleClient.chat(provider, defaultAgent.modelId, messages, null, null);
+            var text = response.choices().get(0).message().content().toString().trim();
+
+            // Strip markdown code fences if the LLM wrapped it
+            if (text.startsWith("```")) {
+                text = text.replaceFirst("^```(?:json)?\\s*\\n?", "").replaceFirst("\\n?```$", "").trim();
+            }
+
+            var json = JsonParser.parseString(text).getAsJsonObject();
+            var result = new LinkedHashMap<String, String>();
+            for (var entry : fileContents.entrySet()) {
+                if (json.has(entry.getKey())) {
+                    result.put(entry.getKey(), json.get(entry.getKey()).getAsString());
+                } else {
+                    result.put(entry.getKey(), entry.getValue());
+                }
+            }
+            return result;
+        } catch (Exception e) {
+            // If LLM fails, return original content rather than blocking the promotion
+            services.EventLogger.warn("skills", "LLM sanitization failed, using original content: " + e.getMessage());
+            return fileContents;
+        }
+    }
+
+    /** Deterministically strip all values from credentials.json, preserving keys as documentation. */
+    private static String stripCredentialsJson(String content) {
+        try {
+            var json = JsonParser.parseString(content).getAsJsonObject();
+            var stripped = new com.google.gson.JsonObject();
+            for (var entry : json.entrySet()) {
+                stripped.addProperty(entry.getKey(), "[CREDENTIAL]");
+            }
+            return new Gson().newBuilder().setPrettyPrinting().create().toJson(stripped);
+        } catch (Exception _) {
+            // Not valid JSON — return empty object with a comment
+            return "{}";
+        }
+    }
+
+    /** Check if a file is likely a text file based on extension. */
+    private static boolean isTextFile(String name) {
+        var lower = name.toLowerCase();
+        return lower.endsWith(".md") || lower.endsWith(".json") || lower.endsWith(".txt")
+                || lower.endsWith(".yaml") || lower.endsWith(".yml") || lower.endsWith(".xml")
+                || lower.endsWith(".sh") || lower.endsWith(".py") || lower.endsWith(".js")
+                || lower.endsWith(".ts") || lower.endsWith(".java") || lower.endsWith(".html")
+                || lower.endsWith(".css") || lower.endsWith(".toml") || lower.endsWith(".ini")
+                || lower.endsWith(".cfg") || lower.endsWith(".conf") || lower.endsWith(".env")
+                || lower.endsWith(".properties") || lower.endsWith(".rb") || lower.endsWith(".go")
+                || lower.endsWith(".rs") || lower.endsWith(".lua") || lower.endsWith(".sql")
+                || !lower.contains(".");  // extensionless files (READMEs, Makefiles, etc.)
+    }
+
     // --- Helpers ---
 
     private static HashMap<String, Object> skillToMap(SkillLoader.SkillInfo s, boolean isGlobal) {
@@ -238,6 +447,12 @@ public class ApiSkillsController extends Controller {
         map.put("description", s.description());
         map.put("isGlobal", isGlobal);
         map.put("location", s.location() != null ? s.location().toString() : "");
+        // Folder name = parent directory name of the SKILL.md file
+        if (s.location() != null && s.location().getParent() != null) {
+            map.put("folderName", s.location().getParent().getFileName().toString());
+        } else {
+            map.put("folderName", s.name());
+        }
         return map;
     }
 

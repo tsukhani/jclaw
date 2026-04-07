@@ -46,8 +46,10 @@ PUT     /api/agents/{id}/tools/{name}           ApiToolsController.updateForAgen
 # Skills API
 GET     /api/skills                             ApiSkillsController.list
 POST    /api/skills                             ApiSkillsController.create
+POST    /api/skills/promote                     ApiSkillsController.promote
 GET     /api/skills/{name}                      ApiSkillsController.get
 PUT     /api/skills/{name}                      ApiSkillsController.update
+PUT     /api/skills/{name}/rename               ApiSkillsController.rename
 DELETE  /api/skills/{name}                      ApiSkillsController.delete
 GET     /api/agents/{id}/skills                 ApiSkillsController.listForAgent
 PUT     /api/agents/{id}/skills/{name}          ApiSkillsController.updateForAgent
