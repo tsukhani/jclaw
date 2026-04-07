@@ -204,12 +204,25 @@ public class ShellExecTool implements ToolRegistry.Tool {
             pb.environment().putAll(env);
 
             var process = pb.start();
-            var output = captureOutput(process.getInputStream(), maxOutputBytes);
+
+            // Read output on a separate thread so waitFor timeout isn't blocked by
+            // a process that hangs with stdout open (e.g. sed waiting for stdin)
+            var outputFuture = new java.util.concurrent.CompletableFuture<CapturedOutput>();
+            var readerThread = Thread.startVirtualThread(() -> {
+                try {
+                    outputFuture.complete(captureOutput(process.getInputStream(), maxOutputBytes));
+                } catch (IOException e) {
+                    outputFuture.complete(new CapturedOutput("", false));
+                }
+            });
+
             boolean completed = process.waitFor(timeoutSec, TimeUnit.SECONDS);
 
             if (!completed) {
                 process.destroyForcibly();
                 process.waitFor(5, TimeUnit.SECONDS);
+                readerThread.interrupt();
+                var output = outputFuture.getNow(new CapturedOutput("", false));
                 long durationMs = System.currentTimeMillis() - startTime;
                 var result = new JsonObject();
                 result.addProperty("exitCode", -1);
@@ -219,6 +232,9 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 result.addProperty("timedOut", true);
                 return result.toString();
             }
+
+            // Process exited — wait briefly for reader to finish draining output
+            var output = outputFuture.get(5, TimeUnit.SECONDS);
 
             long durationMs = System.currentTimeMillis() - startTime;
             var result = new JsonObject();
@@ -234,6 +250,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return "Error: Command execution interrupted.";
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
+            return "Error: Failed to read command output: " + e.getMessage();
         }
     }
 
