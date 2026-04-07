@@ -56,7 +56,7 @@ public class ConfigService {
     }
 
     public static List<Config> listAll() {
-        return Tx.run(() -> Config.<Config>findAll().fetch());
+        return Tx.run(() -> Config.<Config>findAll());
     }
 
     public static void clearCache() {
