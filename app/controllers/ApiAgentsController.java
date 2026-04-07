@@ -30,11 +30,16 @@ public class ApiAgentsController extends Controller {
         renderJSON(gson.toJson(agentToMap(agent)));
     }
 
+    private static final String RESERVED_AGENT_NAME = "test";
+
     public static void create() {
         var body = readJsonBody();
         if (body == null) badRequest();
 
         var name = body.get("name").getAsString();
+        if (RESERVED_AGENT_NAME.equalsIgnoreCase(name)) {
+            error(409, "The agent name 'test' is reserved for the built-in agent");
+        }
         var modelProvider = body.get("modelProvider").getAsString();
         var modelId = body.get("modelId").getAsString();
         var isDefault = body.has("isDefault") && body.get("isDefault").getAsBoolean();
@@ -51,6 +56,9 @@ public class ApiAgentsController extends Controller {
         if (body == null) badRequest();
 
         var name = body.has("name") ? body.get("name").getAsString() : agent.name;
+        if (!agent.name.equalsIgnoreCase(RESERVED_AGENT_NAME) && RESERVED_AGENT_NAME.equalsIgnoreCase(name)) {
+            error(409, "The agent name 'test' is reserved for the built-in agent");
+        }
         var modelProvider = body.has("modelProvider") ? body.get("modelProvider").getAsString() : agent.modelProvider;
         var modelId = body.has("modelId") ? body.get("modelId").getAsString() : agent.modelId;
         var enabled = body.has("enabled") ? body.get("enabled").getAsBoolean() : agent.enabled;
@@ -63,6 +71,9 @@ public class ApiAgentsController extends Controller {
     public static void delete(Long id) {
         var agent = AgentService.findById(id);
         if (agent == null) notFound();
+        if (RESERVED_AGENT_NAME.equalsIgnoreCase(agent.name)) {
+            error(409, "The built-in 'test' agent cannot be deleted");
+        }
         AgentService.delete(agent);
         renderJSON(gson.toJson(new HashMap<>(java.util.Map.of("status", "ok"))));
     }

@@ -39,10 +39,10 @@ public class DefaultConfigJob extends Job<Void> {
     }
 
     private void seedDefaultAgent() {
-        if (Agent.findByName("main") != null) return;
+        if (Agent.findByName("test") != null) return;
 
-        AgentService.create("main", "ollama-cloud", "kimi-k2.5", true);
-        EventLogger.info("agent", "main", null, "Default agent 'main' created");
+        AgentService.create("test", "ollama-cloud", "kimi-k2.5", true);
+        EventLogger.info("agent", "test", null, "Default agent 'test' created");
     }
 
     private void seedIfAbsent(String key, String value) {

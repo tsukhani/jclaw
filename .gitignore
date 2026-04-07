@@ -97,6 +97,10 @@ coverage/
 modules/*
 !modules/.gitkeep
 
+# Agent workspaces (only track the default test agent)
+workspace/*
+!workspace/test/
+
 # Ignore but keep empty directories
 !.gitkeep
 
