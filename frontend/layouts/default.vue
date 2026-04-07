@@ -1,6 +1,19 @@
 <script setup lang="ts">
 const { logout, username } = useAuth()
+const { themeMode, setTheme } = useTheme()
 const sidebarOpen = ref(true)
+
+const route = useRoute()
+
+const currentPageLabel = computed(() => {
+  const path = route.path
+  for (const group of navGroups) {
+    for (const item of group.items) {
+      if (item.to === path) return item.label
+    }
+  }
+  return 'Dashboard'
+})
 
 const navGroups = [
   {
@@ -36,12 +49,25 @@ const navGroups = [
     <!-- Sidebar -->
     <aside
       :class="sidebarOpen ? 'w-52' : 'w-0 -ml-52'"
-      class="fixed inset-y-0 left-0 z-30 bg-neutral-950 border-r border-neutral-800
+      class="fixed inset-y-0 left-0 z-30 bg-neutral-900/50 border-r border-neutral-800
              flex flex-col transition-all duration-200 overflow-hidden lg:relative lg:ml-0"
     >
       <!-- Logo -->
-      <div class="h-12 flex items-center px-4 border-b border-neutral-800 shrink-0">
-        <span class="text-sm font-semibold text-emerald-400 tracking-tight">JClaw</span>
+      <div class="h-14 flex items-center justify-between px-3 border-b border-neutral-800 shrink-0">
+        <div class="flex items-center gap-2.5">
+          <img src="/avatar.png" alt="JClaw" class="w-9 h-9 rounded-full" />
+          <div class="leading-tight">
+            <div class="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">Control</div>
+            <div class="text-sm font-semibold text-emerald-400">JClaw</div>
+          </div>
+        </div>
+        <button
+          @click="sidebarOpen = false"
+          class="p-1.5 rounded-full border border-neutral-700 text-neutral-500 hover:text-white hover:border-neutral-500 transition-colors"
+          title="Collapse sidebar"
+        >
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" /></svg>
+        </button>
       </div>
 
       <!-- Nav -->
@@ -90,13 +116,61 @@ const navGroups = [
     <!-- Main -->
     <div class="flex-1 flex flex-col min-w-0">
       <!-- Top bar -->
-      <header class="h-12 flex items-center px-4 border-b border-neutral-800 border-t-2 border-t-emerald-600 shrink-0">
-        <button
-          @click="sidebarOpen = !sidebarOpen"
-          class="p-1 text-neutral-500 hover:text-white transition-colors lg:hidden"
-        >
-          <span class="text-lg">☰</span>
-        </button>
+      <header class="h-12 flex items-center justify-between px-4 bg-neutral-900/50 border-b border-neutral-800 shrink-0">
+        <!-- Left: hamburger + breadcrumb -->
+        <div class="flex items-center gap-3">
+          <button
+            v-if="!sidebarOpen"
+            @click="sidebarOpen = true"
+            class="p-1 text-neutral-500 hover:text-white transition-colors"
+          >
+            <span class="text-lg">☰</span>
+          </button>
+          <nav class="text-sm">
+            <span class="text-neutral-500">JClaw</span>
+            <span class="text-neutral-600 mx-1.5">›</span>
+            <span class="text-emerald-400 font-medium">{{ currentPageLabel }}</span>
+          </nav>
+        </div>
+
+        <!-- Right: search + theme toggle -->
+        <div class="flex items-center gap-3">
+          <div class="relative">
+            <input
+              type="text"
+              placeholder="Search"
+              class="w-64 pl-3 pr-14 py-1.5 bg-neutral-800 border border-neutral-700 rounded-lg text-sm text-white
+                     placeholder-neutral-500 focus:outline-none focus:border-neutral-600 transition-colors"
+            />
+            <kbd class="absolute right-2.5 top-1/2 -translate-y-1/2 px-1.5 py-0.5 bg-neutral-700 border border-neutral-600 rounded text-[10px] text-neutral-400 font-mono">⌘K</kbd>
+          </div>
+          <div class="flex items-center border border-neutral-700 rounded-lg overflow-hidden">
+            <button
+              @click="setTheme('system')"
+              :class="themeMode === 'system' ? 'bg-neutral-700 text-white' : 'text-neutral-500 hover:text-white'"
+              class="p-1.5 transition-colors"
+              title="System theme"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+            </button>
+            <button
+              @click="setTheme('light')"
+              :class="themeMode === 'light' ? 'bg-neutral-700 text-white' : 'text-neutral-500 hover:text-white'"
+              class="p-1.5 transition-colors"
+              title="Light theme"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+            </button>
+            <button
+              @click="setTheme('dark')"
+              :class="themeMode === 'dark' ? 'bg-neutral-700 text-white' : 'text-neutral-500 hover:text-white'"
+              class="p-1.5 transition-colors"
+              title="Dark theme"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" /></svg>
+            </button>
+          </div>
+        </div>
       </header>
 
       <!-- Content -->

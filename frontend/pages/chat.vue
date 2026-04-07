@@ -235,9 +235,9 @@ function newChat() {
 </script>
 
 <template>
-  <div class="flex h-[calc(100vh-7rem)]" :class="{ 'select-none': isResizing }">
+  <div class="flex h-full -m-6" :class="{ 'select-none': isResizing }">
     <!-- Conversation sidebar -->
-    <div :style="{ width: sidebarWidth + 'px' }" class="shrink-0 bg-neutral-900 border border-neutral-800 flex flex-col overflow-hidden">
+    <div :style="{ width: sidebarWidth + 'px' }" class="shrink-0 border-r border-neutral-800 flex flex-col overflow-hidden">
       <div class="p-3 border-b border-neutral-800 flex items-center justify-between">
         <template v-if="selectMode">
           <button @click="selectAll" class="text-xs text-neutral-500 hover:text-white transition-colors">
@@ -291,7 +291,7 @@ function newChat() {
     />
 
     <!-- Chat area -->
-    <div class="flex-1 flex flex-col bg-neutral-900 border border-neutral-800">
+    <div class="flex-1 flex flex-col">
       <!-- Agent selector -->
       <div class="px-4 py-2.5 border-b border-neutral-800 flex items-center gap-3">
         <label class="text-xs text-neutral-500">Agent:</label>
@@ -335,22 +335,37 @@ function newChat() {
       </div>
 
       <!-- Input -->
-      <div class="p-3 border-t border-neutral-800">
-        <form @submit.prevent="sendMessage" class="flex gap-2">
+      <div class="px-4 py-3">
+        <form @submit.prevent="sendMessage"
+              class="bg-neutral-800/60 border border-neutral-700/50 rounded-xl overflow-hidden">
           <input
             v-model="input"
             type="text"
             placeholder="Type a message..."
             :disabled="streaming"
-            class="flex-1 px-3 py-2 bg-neutral-800 border border-neutral-700 text-sm text-white
-                   placeholder-neutral-600 focus:outline-none focus:border-neutral-500 transition-colors"
+            class="w-full px-4 pt-3 pb-2 bg-transparent text-sm text-white
+                   placeholder-neutral-600 focus:outline-none"
           />
-          <button
-            type="submit"
-            :disabled="streaming || !input.trim()"
-            class="px-4 py-2 bg-emerald-600 text-white text-sm font-medium
-                   hover:bg-emerald-500 disabled:opacity-40 transition-colors"
-          >Send</button>
+          <div class="flex items-center justify-between px-3 pb-2.5">
+            <div class="flex items-center gap-1">
+              <button type="button" class="p-1.5 text-neutral-600 hover:text-neutral-400 transition-colors" title="Attach file">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+              </button>
+            </div>
+            <div class="flex items-center gap-1">
+              <button type="button" class="p-1.5 text-neutral-600 hover:text-neutral-400 transition-colors" title="New conversation">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4" /></svg>
+              </button>
+              <button
+                type="submit"
+                :disabled="streaming || !input.trim()"
+                class="p-1.5 text-neutral-600 hover:text-emerald-400 disabled:text-neutral-700 transition-colors"
+                title="Send"
+              >
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 12L3 21l18-9L3 3l3 9zm0 0h8" /></svg>
+              </button>
+            </div>
+          </div>
         </form>
       </div>
     </div>
