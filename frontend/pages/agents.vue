@@ -208,6 +208,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
 
     <!-- Edit / Create form -->
     <div v-if="editing || creating" class="space-y-4">
+      <button @click="cancel" class="text-xs text-neutral-500 hover:text-white transition-colors">&larr; Back to agents</button>
       <div class="bg-neutral-900 border border-neutral-800 p-4">
         <h2 class="text-sm font-medium text-white mb-4">{{ creating ? 'New Agent' : 'Edit Agent' }}</h2>
         <div class="grid grid-cols-2 gap-3">
