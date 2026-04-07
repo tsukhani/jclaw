@@ -27,6 +27,7 @@ const selectedConvoId = ref<number | null>(null)
 const messages = ref<any[]>([])
 const input = ref('')
 const streaming = ref(false)
+const agentBusy = ref(false)
 const streamContent = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
 const abortController = ref<AbortController | null>(null)
@@ -128,6 +129,8 @@ async function sendMessage() {
             messages.value[assistantIdx].content = event.content || streamContent.value
           } else if (event.type === 'error') {
             messages.value[assistantIdx].content = event.content
+          } else if (event.type === 'queued') {
+            messages.value[assistantIdx].content = 'Your message has been queued (position: ' + (event.position || '?') + '). Processing shortly...'
           }
         } catch {
           // Skip malformed events
@@ -138,6 +141,13 @@ async function sendMessage() {
     messages.value[assistantIdx].content = 'Error: ' + (e.message || 'Failed to get response')
   } finally {
     streaming.value = false
+    // Check if agent is still processing queued messages
+    if (selectedConvoId.value) {
+      try {
+        const status = await $fetch<any>(`/api/conversations/${selectedConvoId.value}/queue`)
+        agentBusy.value = status.busy
+      } catch { agentBusy.value = false }
+    }
     refreshConversations()
   }
 }
@@ -183,6 +193,8 @@ function newChat() {
             {{ agent.name }} ({{ agent.modelId }})
           </option>
         </select>
+        <span v-if="streaming" class="text-xs text-yellow-400 animate-pulse">streaming...</span>
+        <span v-else-if="agentBusy" class="text-xs text-neutral-500 animate-pulse">processing queue...</span>
       </div>
 
       <!-- Messages -->

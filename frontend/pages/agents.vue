@@ -9,6 +9,7 @@ const workspaceContent = ref('')
 const form = ref({ name: '', modelProvider: '', modelId: '', enabled: true, isDefault: false })
 const agentTools = ref<any[]>([])
 const agentSkills = ref<any[]>([])
+const queueMode = ref('queue')
 const saving = ref(false)
 
 // Extract configured providers (those with non-empty API keys)
@@ -89,6 +90,7 @@ function editAgent(agent: any) {
   loadWorkspaceFile(agent.id, 'AGENT.md')
   loadAgentTools(agent.id)
   loadAgentSkills(agent.id)
+  loadQueueMode(agent.name)
 }
 
 async function loadAgentTools(agentId: number) {
@@ -116,6 +118,27 @@ async function loadAgentSkills(agentId: number) {
     agentSkills.value = await $fetch<any[]>(`/api/agents/${agentId}/skills`)
   } catch {
     agentSkills.value = []
+  }
+}
+
+async function loadQueueMode(agentName: string) {
+  try {
+    const config = await $fetch<any>(`/api/config/agent.${agentName}.queue.mode`)
+    queueMode.value = config.value || 'queue'
+  } catch {
+    queueMode.value = 'queue'
+  }
+}
+
+async function saveQueueMode() {
+  if (!editing.value) return
+  try {
+    await $fetch('/api/config', {
+      method: 'POST',
+      body: { key: `agent.${editing.value.name}.queue.mode`, value: queueMode.value }
+    })
+  } catch (e) {
+    console.error('Failed to save queue mode:', e)
   }
 }
 
@@ -191,6 +214,7 @@ function cancel() {
   creating.value = false
   agentTools.value = []
   agentSkills.value = []
+  queueMode.value = 'queue'
 }
 
 const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
@@ -274,6 +298,24 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
           <button @click="cancel" class="px-4 py-1.5 text-xs text-neutral-400 hover:text-white transition-colors">Cancel</button>
           <button v-if="editing" @click="deleteAgent(editing.id)"
                   class="px-4 py-1.5 text-xs text-red-400/60 hover:text-red-400 ml-auto transition-colors">Delete</button>
+        </div>
+      </div>
+
+      <!-- Queue Mode -->
+      <div v-if="editing" class="bg-neutral-900 border border-neutral-800 p-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="text-sm font-medium text-white">Queue Mode</span>
+            <div class="text-xs text-neutral-500 mt-0.5">How to handle messages when the agent is busy</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <select v-model="queueMode" @change="saveQueueMode"
+                    class="bg-neutral-800 border border-neutral-700 text-sm text-white px-2 py-1 focus:outline-none focus:border-neutral-600">
+              <option value="queue">Queue (FIFO)</option>
+              <option value="collect">Collect (batch)</option>
+              <option value="interrupt">Interrupt</option>
+            </select>
+          </div>
         </div>
       </div>
 
