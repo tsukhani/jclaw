@@ -13,9 +13,15 @@ function renderMarkdown(text: string): string {
 }
 
 const { data: agents } = await useFetch<any[]>('/api/agents')
-const { data: conversations, refresh: refreshConversations } = await useFetch<any[]>('/api/conversations?channel=web&limit=50')
 
 const selectedAgentId = ref<number | null>(null)
+
+const conversationsUrl = computed(() =>
+  selectedAgentId.value
+    ? `/api/conversations?channel=web&agentId=${selectedAgentId.value}&limit=50`
+    : null
+)
+const { data: conversations, refresh: refreshConversations } = await useFetch<any[]>(conversationsUrl)
 const selectedConvoId = ref<number | null>(null)
 const messages = ref<any[]>([])
 const input = ref('')
@@ -45,6 +51,12 @@ watch(agents, (val) => {
     selectedAgentId.value = def.id
   }
 }, { immediate: true })
+
+// When agent changes, clear current conversation and refresh list
+watch(selectedAgentId, () => {
+  selectedConvoId.value = null
+  messages.value = []
+})
 
 async function loadConversation(id: number) {
   selectedConvoId.value = id
