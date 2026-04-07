@@ -7,6 +7,7 @@ const creating = ref(false)
 const workspaceTab = ref('AGENT.md')
 const workspaceContent = ref('')
 const form = ref({ name: '', modelProvider: '', modelId: '', enabled: true, isDefault: false })
+const agentTools = ref<any[]>([])
 const saving = ref(false)
 
 // Extract configured providers (those with non-empty API keys)
@@ -85,6 +86,27 @@ function editAgent(agent: any) {
   editing.value = agent
   creating.value = false
   loadWorkspaceFile(agent.id, 'AGENT.md')
+  loadAgentTools(agent.id)
+}
+
+async function loadAgentTools(agentId: number) {
+  try {
+    agentTools.value = await $fetch<any[]>(`/api/agents/${agentId}/tools`)
+  } catch {
+    agentTools.value = []
+  }
+}
+
+async function toggleTool(toolName: string, enabled: boolean) {
+  if (!editing.value) return
+  try {
+    await $fetch(`/api/agents/${editing.value.id}/tools/${toolName}`, {
+      method: 'PUT',
+      body: { enabled }
+    })
+  } catch (e) {
+    console.error('Failed to toggle tool:', e)
+  }
 }
 
 // When provider changes, reset model to first available and disable if provider invalid
@@ -144,6 +166,7 @@ async function saveWorkspaceFile() {
 function cancel() {
   editing.value = null
   creating.value = false
+  agentTools.value = []
 }
 
 const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
@@ -226,6 +249,31 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
           <button @click="cancel" class="px-4 py-1.5 text-xs text-neutral-400 hover:text-white transition-colors">Cancel</button>
           <button v-if="editing" @click="deleteAgent(editing.id)"
                   class="px-4 py-1.5 text-xs text-red-400/60 hover:text-red-400 ml-auto transition-colors">Delete</button>
+        </div>
+      </div>
+
+      <!-- Tools -->
+      <div v-if="editing" class="bg-neutral-900 border border-neutral-800">
+        <div class="px-4 py-2.5 border-b border-neutral-800">
+          <span class="text-sm font-medium text-white">Tools</span>
+          <span class="ml-2 text-xs text-neutral-500">{{ agentTools.filter(t => t.enabled).length }}/{{ agentTools.length }} enabled</span>
+        </div>
+        <div class="divide-y divide-neutral-800/50">
+          <div v-for="tool in agentTools" :key="tool.name"
+               class="px-4 py-2 flex items-center justify-between">
+            <div>
+              <span class="text-sm text-white font-mono">{{ tool.name }}</span>
+              <div class="text-xs text-neutral-500 mt-0.5">{{ tool.description }}</div>
+            </div>
+            <label class="flex items-center gap-1.5 shrink-0">
+              <input type="checkbox" :checked="tool.enabled"
+                     @change="(e: Event) => { tool.enabled = (e.target as HTMLInputElement).checked; toggleTool(tool.name, tool.enabled) }"
+                     class="accent-white" />
+            </label>
+          </div>
+        </div>
+        <div v-if="!agentTools.length" class="px-4 py-4 text-xs text-neutral-600 text-center">
+          No tools registered
         </div>
       </div>
 

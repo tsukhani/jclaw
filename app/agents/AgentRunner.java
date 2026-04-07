@@ -56,7 +56,7 @@ public class AgentRunner {
                 "Calling %s / %s".formatted(primary.name(), agent.modelId));
 
         // 5. Get registered tools
-        var tools = ToolRegistry.getToolDefs();
+        var tools = ToolRegistry.getToolDefsForAgent(agent);
 
         // 6. LLM call loop (handles tool calls)
         var response = callWithToolLoop(agent, conversation, messages, tools, primary, secondary);
@@ -124,7 +124,7 @@ public class AgentRunner {
 
                 messages = trimToContextWindow(messages, agent, primary);
 
-                var tools = ToolRegistry.getToolDefs();
+                var tools = ToolRegistry.getToolDefsForAgent(agent);
                 var modelInfo = primary.models().stream()
                         .filter(m -> m.id().equals(agent.modelId))
                         .findFirst().orElse(null);

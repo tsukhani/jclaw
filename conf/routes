@@ -38,6 +38,11 @@ DELETE  /api/agents/{id}                        ApiAgentsController.delete
 GET     /api/agents/{id}/workspace/{filename}   ApiAgentsController.getWorkspaceFile
 PUT     /api/agents/{id}/workspace/{filename}   ApiAgentsController.saveWorkspaceFile
 
+# Tools API
+GET     /api/tools                              ApiToolsController.list
+GET     /api/agents/{id}/tools                  ApiToolsController.listForAgent
+PUT     /api/agents/{id}/tools/{name}           ApiToolsController.updateForAgent
+
 # Config API
 GET     /api/config                             ApiConfigController.list
 POST    /api/config                             ApiConfigController.save
