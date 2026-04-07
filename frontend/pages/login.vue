@@ -24,7 +24,7 @@ async function handleLogin() {
   <div class="min-h-screen bg-neutral-950 flex items-center justify-center">
     <div class="w-full max-w-sm">
       <div class="mb-8 text-center">
-        <h1 class="text-xl font-semibold text-white tracking-tight">JClaw</h1>
+        <h1 class="text-xl font-semibold text-emerald-400 tracking-tight">JClaw</h1>
         <p class="text-sm text-neutral-500 mt-1">Sign in to continue</p>
       </div>
 
@@ -57,8 +57,8 @@ async function handleLogin() {
         <button
           type="submit"
           :disabled="loading || !username || !password"
-          class="w-full py-2 bg-white text-neutral-950 text-sm font-medium
-                 hover:bg-neutral-200 disabled:opacity-40 disabled:cursor-not-allowed
+          class="w-full py-2 bg-emerald-600 text-white text-sm font-medium
+                 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed
                  transition-colors"
         >
           {{ loading ? 'Signing in...' : 'Sign in' }}

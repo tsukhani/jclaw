@@ -138,7 +138,7 @@ const providerEntries = computed(() => {
               <input v-model="editValue"
                      :type="isSensitive(entry.key) ? 'password' : 'text'"
                      class="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none" />
-              <button @click="updateEntry(entry.key)" class="text-xs text-white hover:text-green-400 transition-colors">Save</button>
+              <button @click="updateEntry(entry.key)" class="text-xs text-white hover:text-emerald-400 transition-colors">Save</button>
               <button @click="editingKey = null" class="text-xs text-neutral-500 hover:text-white transition-colors">Cancel</button>
             </template>
             <template v-else>
@@ -169,7 +169,7 @@ const providerEntries = computed(() => {
                      :type="isSensitive(entry.key) ? 'password' : 'text'"
                      :placeholder="entry.placeholder"
                      class="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none" />
-              <button @click="updateEntry(entry.key)" class="text-xs text-white hover:text-green-400 transition-colors">Save</button>
+              <button @click="updateEntry(entry.key)" class="text-xs text-white hover:text-emerald-400 transition-colors">Save</button>
               <button @click="editingKey = null" class="text-xs text-neutral-500 hover:text-white transition-colors">Cancel</button>
             </template>
             <template v-else>
@@ -194,7 +194,7 @@ const providerEntries = computed(() => {
             <input v-model="editValue"
                    :type="isSensitive(entry.key) ? 'password' : 'text'"
                    class="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none" />
-            <button @click="updateEntry(entry.key)" class="text-xs text-white hover:text-green-400 transition-colors">Save</button>
+            <button @click="updateEntry(entry.key)" class="text-xs text-white hover:text-emerald-400 transition-colors">Save</button>
             <button @click="editingKey = null" class="text-xs text-neutral-500 hover:text-white transition-colors">Cancel</button>
           </template>
           <template v-else>
@@ -216,7 +216,7 @@ const providerEntries = computed(() => {
         <input v-model="newKey" placeholder="key" class="flex-1 px-2 py-1.5 bg-neutral-800 border border-neutral-700 text-sm text-white font-mono focus:outline-none" />
         <input v-model="newValue" placeholder="value" class="flex-1 px-2 py-1.5 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none" />
         <button @click="saveNew" :disabled="saving || !newKey.trim()"
-                class="px-3 py-1.5 bg-white text-neutral-950 text-xs font-medium hover:bg-neutral-200 disabled:opacity-40 transition-colors">Add</button>
+                class="px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 disabled:opacity-40 transition-colors">Add</button>
       </div>
     </div>
   </div>

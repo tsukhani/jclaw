@@ -41,8 +41,7 @@ const navGroups = [
     >
       <!-- Logo -->
       <div class="h-12 flex items-center px-4 border-b border-neutral-800 shrink-0">
-        <span class="text-sm font-semibold text-white tracking-tight">JClaw</span>
-        <span class="ml-2 text-[10px] text-neutral-600 font-mono">v0.1.0</span>
+        <span class="text-sm font-semibold text-emerald-400 tracking-tight">JClaw</span>
       </div>
 
       <!-- Nav -->
@@ -54,7 +53,7 @@ const navGroups = [
             :to="item.to"
             class="flex items-center gap-2.5 px-4 py-1.5 text-sm text-neutral-400
                    hover:text-white hover:bg-neutral-900 transition-colors"
-            active-class="!text-white bg-neutral-900"
+            active-class="!text-emerald-400 bg-emerald-500/10 border-r-2 border-emerald-500"
           >
             <span class="w-4 text-center text-xs opacity-50">{{ item.icon }}</span>
             {{ item.label }}
@@ -62,6 +61,17 @@ const navGroups = [
           <div v-if="gi < navGroups.length - 1" class="my-2 mx-4 border-t border-neutral-800/50" />
         </div>
       </nav>
+
+      <!-- Version -->
+      <div class="px-4 py-2.5 shrink-0 border-t border-neutral-800">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-neutral-500 font-mono uppercase tracking-wider">Version</span>
+            <span class="text-sm text-neutral-300 font-mono">v0.2.0</span>
+          </div>
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500" />
+        </div>
+      </div>
 
       <!-- User -->
       <div class="border-t border-neutral-800 px-4 py-3 shrink-0">
@@ -80,7 +90,7 @@ const navGroups = [
     <!-- Main -->
     <div class="flex-1 flex flex-col min-w-0">
       <!-- Top bar -->
-      <header class="h-12 flex items-center px-4 border-b border-neutral-800 shrink-0">
+      <header class="h-12 flex items-center px-4 border-b border-neutral-800 border-t-2 border-t-emerald-600 shrink-0">
         <button
           @click="sidebarOpen = !sidebarOpen"
           class="p-1 text-neutral-500 hover:text-white transition-colors lg:hidden"

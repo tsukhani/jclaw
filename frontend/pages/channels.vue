@@ -96,8 +96,8 @@ function getChannelStatus(type: string) {
         <button
           @click="saveChannel"
           :disabled="saving"
-          class="px-4 py-1.5 bg-white text-neutral-950 text-sm font-medium
-                 hover:bg-neutral-200 disabled:opacity-40 transition-colors"
+          class="px-4 py-1.5 bg-emerald-600 text-white text-sm font-medium
+                 hover:bg-emerald-500 disabled:opacity-40 transition-colors"
         >{{ saving ? 'Saving...' : 'Save' }}</button>
         <button
           @click="editing = null"

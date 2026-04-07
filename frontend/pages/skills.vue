@@ -62,7 +62,7 @@ function cancel() {
     <div class="flex items-center justify-between mb-6">
       <h1 class="text-lg font-semibold text-white">Skills</h1>
       <button v-if="!editing && !creating" @click="newSkill"
-              class="px-3 py-1.5 bg-white text-neutral-950 text-xs font-medium hover:bg-neutral-200 transition-colors">
+              class="px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 transition-colors">
         New Skill
       </button>
     </div>
@@ -102,7 +102,7 @@ function cancel() {
         </div>
         <div class="flex gap-2 mt-4">
           <button @click="saveSkill" :disabled="saving || !form.name"
-                  class="px-4 py-1.5 bg-white text-neutral-950 text-xs font-medium hover:bg-neutral-200 disabled:opacity-40 transition-colors">
+                  class="px-4 py-1.5 bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 disabled:opacity-40 transition-colors">
             {{ saving ? 'Saving...' : 'Save' }}
           </button>
           <button @click="cancel" class="px-4 py-1.5 text-xs text-neutral-400 hover:text-white transition-colors">Cancel</button>

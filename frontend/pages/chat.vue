@@ -304,7 +304,7 @@ function newChat() {
             {{ agent.name }} ({{ agent.modelId }})
           </option>
         </select>
-        <span v-if="streaming" class="text-xs text-yellow-400 animate-pulse">streaming...</span>
+        <span v-if="streaming" class="text-xs text-emerald-400 animate-pulse">streaming...</span>
         <span v-else-if="agentBusy" class="text-xs text-neutral-500 animate-pulse">processing queue...</span>
       </div>
 
@@ -348,8 +348,8 @@ function newChat() {
           <button
             type="submit"
             :disabled="streaming || !input.trim()"
-            class="px-4 py-2 bg-white text-neutral-950 text-sm font-medium
-                   hover:bg-neutral-200 disabled:opacity-40 transition-colors"
+            class="px-4 py-2 bg-emerald-600 text-white text-sm font-medium
+                   hover:bg-emerald-500 disabled:opacity-40 transition-colors"
           >Send</button>
         </form>
       </div>

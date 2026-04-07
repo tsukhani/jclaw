@@ -225,7 +225,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
     <div class="flex items-center justify-between mb-6">
       <h1 class="text-lg font-semibold text-white">Agents</h1>
       <button @click="newAgent" :disabled="!providers.length"
-              class="px-3 py-1.5 bg-white text-neutral-950 text-xs font-medium hover:bg-neutral-200 disabled:opacity-40 transition-colors">
+              class="px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 disabled:opacity-40 transition-colors">
         New Agent
       </button>
     </div>
@@ -292,7 +292,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
         </div>
         <div class="flex gap-2 mt-4">
           <button @click="saveAgent" :disabled="saving || !form.name || !form.modelProvider || !form.modelId"
-                  class="px-4 py-1.5 bg-white text-neutral-950 text-xs font-medium hover:bg-neutral-200 disabled:opacity-40 transition-colors">
+                  class="px-4 py-1.5 bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 disabled:opacity-40 transition-colors">
             {{ saving ? 'Saving...' : 'Save' }}
           </button>
           <button @click="cancel" class="px-4 py-1.5 text-xs text-neutral-400 hover:text-white transition-colors">Cancel</button>
