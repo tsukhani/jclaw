@@ -104,6 +104,9 @@ modules/*
 # OpenSpec archived proposals (completed work, recoverable from git history)
 openspec/archive/
 
+# BMAD method output (generated artifacts, not source)
+_bmad-output/
+
 # Agent workspaces (only track the default test agent)
 workspace/*
 !workspace/main/
