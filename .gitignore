@@ -82,6 +82,7 @@ certs/
 *.jks
 
 # Database files
+data/
 *.db
 *.h2.db
 *.mv.db
