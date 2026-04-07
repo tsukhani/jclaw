@@ -1,18 +1,11 @@
 package agents;
 
-import services.AgentService;
-import services.EventLogger;
-
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
 /**
- * Scans workspace/{agentId}/skills/SKILL.md files, parses YAML frontmatter,
- * returns skill metadata for system prompt injection.
+ * Loads skills from the database for system prompt injection.
  */
 public class SkillLoader {
 
@@ -27,8 +20,6 @@ public class SkillLoader {
 
     private static final int MAX_SKILLS = 150;
     private static final int MAX_SKILLS_CHARS = 30_000;
-    private static final Pattern FRONTMATTER_PATTERN = Pattern.compile(
-            "^---\\s*\\n(.*?)\\n---", Pattern.DOTALL);
 
     public static void clearCache() {
         skillCache.clear();
@@ -39,34 +30,19 @@ public class SkillLoader {
         if (cached != null && !cached.isExpired()) {
             return cached.skills();
         }
-        var skills = loadSkillsFromDisk(agentName);
+        var skills = loadSkillsFromDb(agentName);
         skillCache.put(agentName, new CachedSkills(skills, System.currentTimeMillis() + CACHE_TTL_MS));
         return skills;
     }
 
-    private static List<SkillInfo> loadSkillsFromDisk(String agentName) {
-        var skillsDir = AgentService.workspacePath(agentName).resolve("skills");
-        if (!Files.isDirectory(skillsDir)) {
-            return List.of();
-        }
-
-        var skills = new ArrayList<SkillInfo>();
-        try (var dirs = Files.list(skillsDir)) {
-            dirs.filter(Files::isDirectory).forEach(dir -> {
-                var skillFile = dir.resolve("SKILL.md");
-                if (Files.exists(skillFile)) {
-                    var info = parseSkillFile(skillFile);
-                    if (info != null) {
-                        skills.add(info);
-                    }
-                }
-            });
-        } catch (IOException e) {
-            EventLogger.warn("agent", "Failed to scan skills for %s: %s"
-                    .formatted(agentName, e.getMessage()));
-        }
-
-        return skills.stream().limit(MAX_SKILLS).toList();
+    private static List<SkillInfo> loadSkillsFromDb(String agentName) {
+        var agent = models.Agent.findByName(agentName);
+        if (agent == null) return List.of();
+        var skills = models.AgentSkill.findSkillsForAgent(agent);
+        return skills.stream()
+                .map(s -> new SkillInfo(s.name, s.description != null ? s.description : "", null))
+                .limit(MAX_SKILLS)
+                .toList();
     }
 
     /**
@@ -117,27 +93,6 @@ public class SkillLoader {
                 - If none clearly apply: do not read any SKILL.md.
                 Constraints: never read more than one skill up front; only read after selecting.
                 """;
-    }
-
-    // --- Internal ---
-
-    private static SkillInfo parseSkillFile(Path path) {
-        try {
-            var content = Files.readString(path);
-            var matcher = FRONTMATTER_PATTERN.matcher(content);
-            if (matcher.find()) {
-                var frontmatter = matcher.group(1);
-                var name = extractYamlValue(frontmatter, "name");
-                var description = extractYamlValue(frontmatter, "description");
-                if (name != null) {
-                    return new SkillInfo(name, description != null ? description : "", path);
-                }
-            }
-            // Fallback: use directory name
-            return new SkillInfo(path.getParent().getFileName().toString(), "", path);
-        } catch (IOException e) {
-            return null;
-        }
     }
 
     public static String extractYamlValue(String yaml, String key) {

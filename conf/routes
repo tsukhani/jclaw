@@ -43,6 +43,16 @@ GET     /api/tools                              ApiToolsController.list
 GET     /api/agents/{id}/tools                  ApiToolsController.listForAgent
 PUT     /api/agents/{id}/tools/{name}           ApiToolsController.updateForAgent
 
+# Skills API
+GET     /api/skills                             ApiSkillsController.list
+POST    /api/skills                             ApiSkillsController.create
+GET     /api/skills/{id}                        ApiSkillsController.get
+PUT     /api/skills/{id}                        ApiSkillsController.update
+DELETE  /api/skills/{id}                        ApiSkillsController.delete
+GET     /api/agents/{id}/skills                 ApiSkillsController.listForAgent
+POST    /api/agents/{id}/skills/{skillId}       ApiSkillsController.assignToAgent
+DELETE  /api/agents/{id}/skills/{skillId}       ApiSkillsController.unassignFromAgent
+
 # Config API
 GET     /api/config                             ApiConfigController.list
 POST    /api/config                             ApiConfigController.save

@@ -16,6 +16,7 @@ public class ToolRegistrationJob extends Job<Void> {
         ToolRegistry.register(new FileSystemTools());
         ToolRegistry.register(new WebFetchTool());
         ToolRegistry.register(new SkillsTool());
+        ToolRegistry.register(new SkillManagerTool());
         ToolRegistry.publish();
         services.EventLogger.info("system", "Registered %d tools".formatted(ToolRegistry.listTools().size()));
     }

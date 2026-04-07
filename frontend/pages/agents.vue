@@ -8,6 +8,7 @@ const workspaceTab = ref('AGENT.md')
 const workspaceContent = ref('')
 const form = ref({ name: '', modelProvider: '', modelId: '', enabled: true, isDefault: false })
 const agentTools = ref<any[]>([])
+const agentSkills = ref<any[]>([])
 const saving = ref(false)
 
 // Extract configured providers (those with non-empty API keys)
@@ -87,6 +88,7 @@ function editAgent(agent: any) {
   creating.value = false
   loadWorkspaceFile(agent.id, 'AGENT.md')
   loadAgentTools(agent.id)
+  loadAgentSkills(agent.id)
 }
 
 async function loadAgentTools(agentId: number) {
@@ -106,6 +108,28 @@ async function toggleTool(toolName: string, enabled: boolean) {
     })
   } catch (e) {
     console.error('Failed to toggle tool:', e)
+  }
+}
+
+async function loadAgentSkills(agentId: number) {
+  try {
+    agentSkills.value = await $fetch<any[]>(`/api/agents/${agentId}/skills`)
+  } catch {
+    agentSkills.value = []
+  }
+}
+
+async function toggleSkill(skillId: number, assigned: boolean) {
+  if (!editing.value) return
+  try {
+    if (assigned) {
+      await $fetch(`/api/agents/${editing.value.id}/skills/${skillId}`, { method: 'POST' })
+    } else {
+      await $fetch(`/api/agents/${editing.value.id}/skills/${skillId}`, { method: 'DELETE' })
+    }
+    await loadAgentSkills(editing.value.id)
+  } catch (e) {
+    console.error('Failed to toggle skill:', e)
   }
 }
 
@@ -167,6 +191,7 @@ function cancel() {
   editing.value = null
   creating.value = false
   agentTools.value = []
+  agentSkills.value = []
 }
 
 const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
@@ -275,6 +300,33 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
         </div>
         <div v-if="!agentTools.length" class="px-4 py-4 text-xs text-neutral-600 text-center">
           No tools registered
+        </div>
+      </div>
+
+      <!-- Skills -->
+      <div v-if="editing" class="bg-neutral-900 border border-neutral-800">
+        <div class="px-4 py-2.5 border-b border-neutral-800">
+          <span class="text-sm font-medium text-white">Skills</span>
+          <span class="ml-2 text-xs text-neutral-500">{{ agentSkills.filter(s => s.assigned).length }}/{{ agentSkills.length }} assigned</span>
+        </div>
+        <div class="divide-y divide-neutral-800/50">
+          <div v-for="skill in agentSkills" :key="skill.id"
+               class="px-4 py-2 flex items-center justify-between">
+            <div>
+              <span class="text-sm text-white">{{ skill.name }}</span>
+              <span v-if="skill.isGlobal" class="ml-2 text-[10px] text-green-400 border border-green-400/30 px-1">global</span>
+              <div class="text-xs text-neutral-500 mt-0.5">{{ skill.description || '' }}</div>
+            </div>
+            <label class="flex items-center shrink-0">
+              <input type="checkbox" :checked="skill.assigned"
+                     :disabled="skill.isGlobal"
+                     @change="(e: Event) => toggleSkill(skill.id, (e.target as HTMLInputElement).checked)"
+                     class="accent-white" />
+            </label>
+          </div>
+        </div>
+        <div v-if="!agentSkills.length" class="px-4 py-4 text-xs text-neutral-600 text-center">
+          No skills in the registry
         </div>
       </div>
 

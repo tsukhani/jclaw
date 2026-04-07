@@ -185,18 +185,20 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void skillsToolListAndRead() throws IOException {
+    public void skillsToolListAndRead() {
+        var skill = new models.Skill();
+        skill.name = "test-skill";
+        skill.description = "A test skill";
+        skill.content = "# Test Skill Instructions\nDo the test thing.";
+        skill.isGlobal = false;
+        skill.save();
+
+        var assignment = new models.AgentSkill();
+        assignment.agent = agent;
+        assignment.skill = skill;
+        assignment.save();
+
         agents.SkillLoader.clearCache();
-        var skillDir = AgentService.workspacePath(agent.name).resolve("skills/test-skill");
-        Files.createDirectories(skillDir);
-        Files.writeString(skillDir.resolve("SKILL.md"), """
-                ---
-                name: test-skill
-                description: A test skill
-                ---
-                # Test Skill Instructions
-                Do the test thing.
-                """);
 
         var listResult = ToolRegistry.execute("skills",
                 """

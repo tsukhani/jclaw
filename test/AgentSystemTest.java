@@ -80,20 +80,22 @@ public class AgentSystemTest extends UnitTest {
     // --- SkillLoader tests ---
 
     @Test
-    public void loadSkillsFromWorkspace() throws IOException {
-        AgentService.create("skill-agent", "openrouter", "gpt-4.1", false);
-        var skillDir = AgentService.workspacePath("skill-agent").resolve("skills/coding");
-        Files.createDirectories(skillDir);
-        Files.writeString(skillDir.resolve("SKILL.md"), """
-                ---
-                name: coding
-                description: Help with writing and reviewing code
-                ---
+    public void loadSkillsFromDatabase() {
+        var agent = AgentService.create("skill-agent", "openrouter", "gpt-4.1", false);
 
-                # Coding Skill
-                Follow best practices when writing code.
-                """);
+        var skill = new models.Skill();
+        skill.name = "coding";
+        skill.description = "Help with writing and reviewing code";
+        skill.content = "# Coding Skill\nFollow best practices when writing code.";
+        skill.isGlobal = false;
+        skill.save();
 
+        var assignment = new models.AgentSkill();
+        assignment.agent = agent;
+        assignment.skill = skill;
+        assignment.save();
+
+        SkillLoader.clearCache();
         var skills = SkillLoader.loadSkills("skill-agent");
         assertEquals(1, skills.size());
         assertEquals("coding", skills.getFirst().name());
@@ -108,19 +110,22 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void formatSkillsXmlContainsSkillData() throws IOException {
-        AgentService.create("xml-agent", "openrouter", "gpt-4.1", false);
-        var skillDir = AgentService.workspacePath("xml-agent").resolve("skills/research");
-        Files.createDirectories(skillDir);
-        Files.writeString(skillDir.resolve("SKILL.md"), """
-                ---
-                name: research
-                description: Deep web research with citations
-                ---
+    public void formatSkillsXmlContainsSkillData() {
+        var agent = AgentService.create("xml-agent", "openrouter", "gpt-4.1", false);
 
-                Research instructions here.
-                """);
+        var skill = new models.Skill();
+        skill.name = "research";
+        skill.description = "Deep web research with citations";
+        skill.content = "Research instructions here.";
+        skill.isGlobal = false;
+        skill.save();
 
+        var assignment = new models.AgentSkill();
+        assignment.agent = agent;
+        assignment.skill = skill;
+        assignment.save();
+
+        SkillLoader.clearCache();
         var skills = SkillLoader.loadSkills("xml-agent");
         var xml = SkillLoader.formatSkillsXml(skills);
         assertTrue(xml.contains("<available_skills>"));

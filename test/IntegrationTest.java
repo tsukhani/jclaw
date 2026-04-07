@@ -219,19 +219,22 @@ public class IntegrationTest extends UnitTest {
     // --- Skill loading in prompt assembly ---
 
     @Test
-    public void skillsLoadedDuringPromptAssembly() throws IOException {
+    public void skillsLoadedDuringPromptAssembly() {
         var agent = AgentService.create("skill-agent", "openrouter", "gpt-4.1", true);
-        var skillDir = AgentService.workspacePath("skill-agent").resolve("skills/coding");
-        Files.createDirectories(skillDir);
-        Files.writeString(skillDir.resolve("SKILL.md"), """
-                ---
-                name: coding
-                description: Help with code review and writing
-                ---
-                # Coding Skill
-                Review code carefully.
-                """);
 
+        var skill = new models.Skill();
+        skill.name = "coding";
+        skill.description = "Help with code review and writing";
+        skill.content = "# Coding Skill\nReview code carefully.";
+        skill.isGlobal = false;
+        skill.save();
+
+        var assignment = new models.AgentSkill();
+        assignment.agent = agent;
+        assignment.skill = skill;
+        assignment.save();
+
+        agents.SkillLoader.clearCache();
         var assembled = SystemPromptAssembler.assemble(agent, "review my code");
         assertTrue(assembled.systemPrompt().contains("<available_skills>"));
         assertTrue(assembled.systemPrompt().contains("coding"));
