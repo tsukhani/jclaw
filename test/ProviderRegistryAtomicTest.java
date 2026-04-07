@@ -24,7 +24,7 @@ public class ProviderRegistryAtomicTest extends UnitTest {
         ConfigService.set("provider.test-provider.baseUrl", "https://test.ai/v1");
         ConfigService.set("provider.test-provider.apiKey", "sk-test");
         ConfigService.set("provider.test-provider.models",
-                """[{"id":"model-1","name":"Model 1","contextWindow":100000,"maxTokens":4096}]""");
+                "[{\"id\":\"model-1\",\"name\":\"Model 1\",\"contextWindow\":100000,\"maxTokens\":4096}]");
 
         ProviderRegistry.refresh();
 

@@ -39,6 +39,7 @@ public class IntegrationTest extends UnitTest {
     public void telegramWebhookParsesAndRoutes() {
         // Setup: agent + binding
         var agent = AgentService.create("telegram-bot", "openrouter", "gpt-4.1", true);
+        agent.enabled = true; agent.save();
         var binding = new AgentBinding();
         binding.agent = agent;
         binding.channelType = "telegram";
@@ -85,6 +86,7 @@ public class IntegrationTest extends UnitTest {
     @Test
     public void slackWebhookVerifiesAndRoutes() {
         var agent = AgentService.create("slack-bot", "openrouter", "gpt-4.1", true);
+        agent.enabled = true; agent.save();
 
         // Simulate Slack event payload
         var payload = JsonParser.parseString("""
@@ -114,6 +116,7 @@ public class IntegrationTest extends UnitTest {
     @Test
     public void whatsappWebhookParsesAndRoutes() {
         var agent = AgentService.create("wa-bot", "ollama-cloud", "qwen3.5", true);
+        agent.enabled = true; agent.save();
 
         var payload = JsonParser.parseString("""
                 {
@@ -240,7 +243,9 @@ public class IntegrationTest extends UnitTest {
     @Test
     public void multiAgentRoutingFullPipeline() {
         var mainAgent = AgentService.create("test-main", "openrouter", "gpt-4.1", true);
+        mainAgent.enabled = true; mainAgent.save();
         var supportAgent = AgentService.create("test-support", "ollama-cloud", "qwen3.5", false);
+        supportAgent.enabled = true; supportAgent.save();
 
         // Bind support agent to specific Telegram user
         var binding = new AgentBinding();

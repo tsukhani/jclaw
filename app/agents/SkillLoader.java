@@ -30,6 +30,10 @@ public class SkillLoader {
     private static final Pattern FRONTMATTER_PATTERN = Pattern.compile(
             "^---\\s*\\n(.*?)\\n---", Pattern.DOTALL);
 
+    public static void clearCache() {
+        skillCache.clear();
+    }
+
     public static List<SkillInfo> loadSkills(String agentName) {
         var cached = skillCache.get(agentName);
         if (cached != null && !cached.isExpired()) {

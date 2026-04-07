@@ -26,6 +26,7 @@ public class ToolSystemTest extends UnitTest {
         ToolRegistry.register(new FileSystemTools());
         ToolRegistry.register(new WebFetchTool());
         ToolRegistry.register(new SkillsTool());
+        ToolRegistry.publish();
         agent = AgentService.create("tool-test-agent", "openrouter", "gpt-4.1", true);
     }
 
@@ -56,6 +57,7 @@ public class ToolSystemTest extends UnitTest {
             public java.util.Map<String, Object> parameters() { return java.util.Map.of(); }
             public String execute(String args, Agent a) { throw new RuntimeException("boom"); }
         });
+        ToolRegistry.publish();
         var result = ToolRegistry.execute("throwing_tool", "{}", agent);
         assertTrue(result.contains("Error executing tool"));
         assertTrue(result.contains("boom"));
@@ -184,6 +186,7 @@ public class ToolSystemTest extends UnitTest {
 
     @Test
     public void skillsToolListAndRead() throws IOException {
+        agents.SkillLoader.clearCache();
         var skillDir = AgentService.workspacePath(agent.name).resolve("skills/test-skill");
         Files.createDirectories(skillDir);
         Files.writeString(skillDir.resolve("SKILL.md"), """

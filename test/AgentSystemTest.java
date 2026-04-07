@@ -65,7 +65,9 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void listEnabledFiltersDisabled() {
-        AgentService.create("enabled-1", "openrouter", "gpt-4.1", false);
+        var agent1 = AgentService.create("enabled-1", "openrouter", "gpt-4.1", false);
+        agent1.enabled = true;
+        agent1.save();
         var agent2 = AgentService.create("disabled-1", "openrouter", "gpt-4.1", false);
         agent2.enabled = false;
         agent2.save();

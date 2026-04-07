@@ -95,21 +95,20 @@ public class JpaMemoryStore implements MemoryStore {
                 """;
         try (var conn = DB.getConnection();
              var stmt = conn.prepareStatement(sql)) {
-                stmt.setString(1, agentId);
-                stmt.setString(2, query);
-                stmt.setString(3, query);
-                stmt.setInt(4, limit);
-                var rs = stmt.executeQuery();
-                var ids = new java.util.ArrayList<Long>();
-                while (rs.next()) {
-                    ids.add(rs.getLong("id"));
-                }
-                return ids.stream()
-                        .map(id -> (Memory) Memory.findById(id))
-                        .filter(m -> m != null)
-                        .map(this::toEntry)
-                        .toList();
+            stmt.setString(1, agentId);
+            stmt.setString(2, query);
+            stmt.setString(3, query);
+            stmt.setInt(4, limit);
+            var rs = stmt.executeQuery();
+            var ids = new java.util.ArrayList<Long>();
+            while (rs.next()) {
+                ids.add(rs.getLong("id"));
             }
+            return ids.stream()
+                    .map(id -> (Memory) Memory.findById(id))
+                    .filter(m -> m != null)
+                    .map(this::toEntry)
+                    .toList();
         } catch (Exception e) {
             EventLogger.warn("memory", "PG FTS failed, falling back to LIKE search: %s".formatted(e.getMessage()));
             return likeSearch(agentId, query, limit);
