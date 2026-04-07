@@ -81,7 +81,8 @@ certs/
 *.p12
 *.jks
 
-# Playwright JARs (too large for GitHub, downloaded separately)
+# Playwright runtime (too large for GitHub, downloaded separately — see README)
+bin/playwright/
 lib/playwright-*.jar
 lib/driver-*.jar
 lib/Java-WebSocket-*.jar
