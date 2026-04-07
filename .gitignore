@@ -81,8 +81,8 @@ certs/
 *.p12
 *.jks
 
-# lib/ JARs managed by play deps --sync (downloaded from Maven Central)
-lib/*.jar
+# lib/ managed by play deps --sync (downloaded from Maven Central)
+lib/
 
 # Database files
 data/
