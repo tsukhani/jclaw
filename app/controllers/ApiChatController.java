@@ -245,6 +245,39 @@ public class ApiChatController extends Controller {
         )));
     }
 
+    /**
+     * POST /api/conversations/{id}/generate-title — Generate a title for a conversation via LLM.
+     */
+    public static void generateTitle(Long id) {
+        Conversation conversation = Conversation.findById(id);
+        if (conversation == null) notFound();
+
+        // Collect user and assistant messages for context
+        List<Message> msgs = Message.find("conversation = ?1 ORDER BY createdAt ASC", conversation).fetch(10);
+        var userParts = new StringBuilder();
+        var assistantParts = new StringBuilder();
+        for (var m : msgs) {
+            if ("user".equals(m.role) && m.content != null) {
+                if (!userParts.isEmpty()) userParts.append("\n");
+                userParts.append(m.content);
+            } else if ("assistant".equals(m.role) && m.content != null) {
+                if (!assistantParts.isEmpty()) assistantParts.append("\n");
+                assistantParts.append(m.content);
+            }
+        }
+
+        if (userParts.isEmpty()) {
+            renderJSON(gson.toJson(Map.of("title", conversation.preview != null ? conversation.preview : "")));
+            return;
+        }
+
+        ConversationService.generateTitleAsync(id,
+                userParts.substring(0, Math.min(userParts.length(), 500)),
+                assistantParts.substring(0, Math.min(assistantParts.length(), 500)));
+
+        renderJSON(gson.toJson(Map.of("status", "generating")));
+    }
+
     private static com.google.gson.JsonObject readJsonBody() {
         try {
             var reader = new InputStreamReader(Http.Request.current().body, StandardCharsets.UTF_8);

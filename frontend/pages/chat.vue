@@ -87,6 +87,10 @@ watch(selectedAgentId, () => {
 })
 
 async function loadConversation(id: number) {
+  // Generate a title for the conversation we're leaving (if it still has a truncated preview)
+  if (selectedConvoId.value && selectedConvoId.value !== id) {
+    generateTitleForConversation(selectedConvoId.value)
+  }
   selectedConvoId.value = id
   messages.value = await $fetch<any[]>(`/api/conversations/${id}/messages`) ?? []
   scrollToBottom()
@@ -172,7 +176,21 @@ async function sendMessage() {
   }
 }
 
+async function generateTitleForConversation(convoId: number) {
+  try {
+    await $fetch(`/api/conversations/${convoId}/generate-title`, { method: 'POST' })
+    // Refresh after a delay to pick up the async-generated title
+    setTimeout(() => refreshConversations(), 3000)
+  } catch {
+    // Best-effort — ignore failures
+  }
+}
+
 function newChat() {
+  // Generate a title for the conversation we're leaving
+  if (selectedConvoId.value) {
+    generateTitleForConversation(selectedConvoId.value)
+  }
   selectedConvoId.value = null
   messages.value = []
 }
