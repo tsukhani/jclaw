@@ -200,6 +200,7 @@ const activeFile = ref<string | null>(null)
 const fileContent = ref('')
 const fileDirty = ref(false)
 const fileSaving = ref(false)
+const isReadOnly = computed(() => (editing.value?.folderName || editing.value?.name) === 'skill-creator')
 
 function newSkill() {
   form.value = { name: '', content: '---\nname: \ndescription: \n---\n\n' }
@@ -477,8 +478,14 @@ function totalSkillCount(agentId: number) {
             <div class="text-xs text-neutral-500">{{ skill.description || '(no description)' }}</div>
             <div class="mt-3 flex items-center justify-end gap-2">
               <button @click.stop="editSkill(skill)"
-                      class="p-1.5 text-neutral-500 hover:text-white transition-colors" title="Edit skill">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                      class="p-1.5 text-neutral-500 hover:text-white transition-colors"
+                      :title="(skill.folderName || skill.name) === 'skill-creator' ? 'View skill' : 'Edit skill'">
+                <!-- Eye icon for skill-creator (view-only) -->
+                <svg v-if="(skill.folderName || skill.name) === 'skill-creator'"
+                     class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                <!-- Pencil icon for editable skills -->
+                <svg v-else
+                     class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
               </button>
               <button v-if="(skill.folderName || skill.name) !== 'skill-creator'"
                       @click.stop="deleteSkill(skill)"
@@ -587,15 +594,18 @@ function totalSkillCount(agentId: number) {
             <div class="px-4 py-2 border-b border-neutral-800 flex items-center justify-between">
               <div class="flex items-center gap-2">
                 <span class="text-xs font-mono text-neutral-400">{{ activeFile }}</span>
-                <span v-if="fileDirty" class="text-[10px] text-amber-400">(unsaved)</span>
+                <span v-if="isReadOnly" class="text-[10px] text-neutral-600">(read-only)</span>
+                <span v-else-if="fileDirty" class="text-[10px] text-amber-400">(unsaved)</span>
               </div>
-              <button @click="saveFile" :disabled="!fileDirty || fileSaving"
+              <button v-if="!isReadOnly" @click="saveFile" :disabled="!fileDirty || fileSaving"
                       class="px-3 py-1 text-xs bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-30 transition-colors">
                 {{ fileSaving ? 'Saving...' : 'Save' }}
               </button>
             </div>
             <textarea v-model="fileContent"
                       @input="fileDirty = true"
+                      :readonly="isReadOnly"
+                      :class="isReadOnly ? 'cursor-default opacity-70' : ''"
                       class="flex-1 w-full px-4 py-3 bg-transparent text-sm text-neutral-300 font-mono resize-none focus:outline-none"
                       spellcheck="false" />
           </template>
