@@ -6,11 +6,12 @@ FRONTEND_PID_FILE="frontend.pid"
 
 usage() {
     cat <<EOF
-Usage: jclaw.sh [options] <start|stop|status>
+Usage: jclaw.sh [options] <start|stop|restart|status>
 
 Commands:
   start    Start the Play backend and Nuxt frontend
   stop     Stop the running Play backend and Nuxt frontend
+  restart  Stop and start (combines stop + start)
   status   Show whether backend and frontend are running
 
 Options:
@@ -57,7 +58,7 @@ while [[ $# -gt 0 ]]; do
             FRONTEND_PORT="$2"
             shift 2
             ;;
-        start|stop|status)
+        start|stop|restart|status)
             COMMAND="$1"
             shift
             ;;
@@ -404,6 +405,21 @@ case "$COMMAND" in
             do_stop_dev
         else
             do_stop_prod
+        fi
+        ;;
+    restart)
+        check_java
+        if [[ "$DEV_MODE" == true ]]; then
+            do_stop_dev
+            sleep 1
+            mkdir -p "$JCLAW_DIR/logs"
+            do_start_dev
+        else
+            do_stop_prod
+            sleep 1
+            [[ -n "$DEPLOY_DIR" ]] && do_deploy
+            mkdir -p "$JCLAW_DIR/logs"
+            do_start_prod
         fi
         ;;
     status)
