@@ -98,14 +98,14 @@ jclaw/
 - Node.js 20+ (24 recommended) for frontend
 - pnpm for frontend package management
 
-### Clone & Setup
+### Clone
 
 ```bash
 git clone https://bitbucket.abundent.com/scm/jclaw/jclaw.git
 cd jclaw
-cd frontend && pnpm install && cd ..
-play deps --sync
 ```
+
+Dependencies are automatically installed when you start with `jclaw.sh`.
 
 ### Development
 

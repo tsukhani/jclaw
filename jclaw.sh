@@ -249,6 +249,15 @@ do_start_dev() {
         exit 1
     fi
 
+    # Ensure dependencies are installed
+    echo "==> Checking frontend dependencies..."
+    cd "$JCLAW_DIR/frontend"
+    pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+    cd "$JCLAW_DIR"
+
+    echo "==> Resolving backend dependencies..."
+    play deps --sync
+
     # Update nuxt devProxy if backend port is non-default
     if [[ "$BACKEND_PORT" != "9000" ]]; then
         echo "==> Updating frontend devProxy to use backend port $BACKEND_PORT..."
