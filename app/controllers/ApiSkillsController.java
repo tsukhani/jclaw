@@ -170,6 +170,17 @@ public class ApiSkillsController extends Controller {
                     ));
                 }
             }
+            // Detect exec tool from bash/shell code blocks or command patterns
+            if (!seen.contains("Shell command execution")
+                    && (content.contains("```bash") || content.contains("```sh")
+                        || content.contains("```shell") || content.contains("run the command")
+                        || content.contains("execute the command"))) {
+                seen.add("Shell command execution");
+                detectedTools.add(java.util.Map.of(
+                        "name", "exec",
+                        "description", "Shell command execution"
+                ));
+            }
 
             var result = new java.util.HashMap<String, Object>();
             result.put("files", files);
