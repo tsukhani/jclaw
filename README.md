@@ -125,14 +125,14 @@ Default ports: backend on **:9000**, frontend on **:3000**.
 ### Production Deployment
 
 ```bash
-# Deploy to a target directory, build everything, and start
-./jclaw.sh --deploy /opt/jclaw start
+# Deploy to /opt (creates /opt/jclaw), build everything, and start
+./jclaw.sh --deploy /opt start
 
 # Stop
-./jclaw.sh --deploy /opt/jclaw stop
+./jclaw.sh --deploy /opt stop
 ```
 
-This packages the app with `play dist`, copies to the target directory, installs dependencies, builds the frontend, and starts both services in production mode.
+This packages the app with `play dist`, unzips to `<dir>/jclaw/`, installs dependencies, builds the frontend, and starts both services in production mode.
 
 To start an existing deployment (without re-packaging):
 
@@ -152,8 +152,8 @@ Use `--backend-port` and `--frontend-port` with any mode. The script automatical
 # Dev mode with custom ports
 ./jclaw.sh --dev --backend-port 8080 --frontend-port 4000 start
 
-# Production deploy with custom ports
-./jclaw.sh --deploy /opt/jclaw --backend-port 8080 --frontend-port 4000 start
+# Production deploy with custom ports (creates /opt/jclaw)
+./jclaw.sh --deploy /opt --backend-port 8080 --frontend-port 4000 start
 ```
 
 ---
