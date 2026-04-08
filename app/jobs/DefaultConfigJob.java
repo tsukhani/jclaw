@@ -40,6 +40,9 @@ public class DefaultConfigJob extends Job<Void> {
     }
 
     private void seedToolConfig() {
+        // Agent settings
+        seedIfAbsent("agent.maxToolRounds", "10");
+
         // Playwright browser tool
         seedIfAbsent("jclaw.tools.playwright.enabled", "true");
         seedIfAbsent("jclaw.tools.playwright.headless", "true");

@@ -21,7 +21,15 @@ import java.util.function.Consumer;
 public class AgentRunner {
 
     private static final Gson gson = new Gson();
-    private static final int MAX_TOOL_ROUNDS = 10;
+    private static final int DEFAULT_maxToolRounds() = 10;
+
+    private static int maxToolRounds() {
+        try {
+            return Integer.parseInt(services.ConfigService.get("agent.maxToolRounds", "10"));
+        } catch (NumberFormatException e) {
+            return DEFAULT_maxToolRounds();
+        }
+    }
 
     public record RunResult(String response, Conversation conversation) {}
 
@@ -284,7 +292,7 @@ public class AgentRunner {
                 .findFirst().orElse(null);
         var maxTokens = modelInfo != null && modelInfo.maxTokens() > 0 ? modelInfo.maxTokens() : null;
 
-        for (int round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        for (int round = 0; round < maxToolRounds(); round++) {
             ChatResponse response;
             try {
                 response = (secondary != null)
@@ -354,7 +362,7 @@ public class AgentRunner {
                                                     ProviderConfig provider,
                                                     Consumer<String> onToken, Integer maxTokens,
                                                     int round, AtomicBoolean isCancelled) {
-        if (round >= MAX_TOOL_ROUNDS) {
+        if (round >= maxToolRounds()) {
             return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
         }
         if (isCancelled.get()) {

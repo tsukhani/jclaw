@@ -55,12 +55,33 @@ function isSensitive(key: string) {
   return ['key', 'secret', 'password', 'token'].some(s => lower.includes(s))
 }
 
-// Tool config keys to exclude from general Configuration section
-const TOOL_CONFIG_KEYS = new Set([
+// Config keys managed by dedicated UI sections (excluded from general Configuration)
+const MANAGED_CONFIG_KEYS = new Set([
+  'agent.maxToolRounds',
   'jclaw.tools.playwright.enabled', 'jclaw.tools.playwright.headless',
   'jclaw.tools.shell.enabled', 'shell.allowlist', 'shell.defaultTimeoutSeconds',
   'shell.maxTimeoutSeconds', 'shell.maxOutputBytes', 'shell.allowGlobalPaths',
 ])
+
+// Agent config
+const agentMaxToolRounds = computed(() => {
+  const entries = configData.value?.entries ?? []
+  return entries.find((e: any) => e.key === 'agent.maxToolRounds')?.value ?? '10'
+})
+
+const editingAgentField = ref<string | null>(null)
+const agentFieldEdit = ref('')
+
+async function saveAgentField(configKey: string, value: string) {
+  saving.value = true
+  try {
+    await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
+    editingAgentField.value = null
+    refresh()
+  } finally {
+    saving.value = false
+  }
+}
 
 // Playwright config
 const playwrightEnabled = computed(() => {
@@ -197,7 +218,7 @@ const providerEntries = computed(() => {
           }
         }
       }
-      if (!matched && !TOOL_CONFIG_KEYS.has(e.key)) other.push(e)
+      if (!matched && !MANAGED_CONFIG_KEYS.has(e.key)) other.push(e)
     }
   }
   return { providers, searchEntries, other }
@@ -263,6 +284,29 @@ const providerEntries = computed(() => {
             <template v-else>
               <span class="flex-1 text-sm text-neutral-300 font-mono truncate">{{ entry.value || '(not set)' }}</span>
               <button @click="startEdit(entry)" class="text-xs text-neutral-500 hover:text-white transition-colors">Edit</button>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Agent Settings -->
+    <div class="mb-6 space-y-4">
+      <h2 class="text-sm font-medium text-neutral-400">Agent</h2>
+      <p class="text-xs text-neutral-600">Configure agent behavior limits.</p>
+      <div class="bg-neutral-900 border border-neutral-800">
+        <div class="divide-y divide-neutral-800/50">
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">maxToolRounds</span>
+            <template v-if="editingAgentField === 'maxToolRounds'">
+              <input v-model="agentFieldEdit" type="number" min="1" max="50"
+                     class="w-24 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white font-mono focus:outline-none" />
+              <button @click="saveAgentField('agent.maxToolRounds', agentFieldEdit)" class="text-xs text-white hover:text-emerald-400 transition-colors">Save</button>
+              <button @click="editingAgentField = null" class="text-xs text-neutral-500 hover:text-white transition-colors">Cancel</button>
+            </template>
+            <template v-else>
+              <span class="flex-1 text-sm text-neutral-300 font-mono">{{ agentMaxToolRounds }} rounds</span>
+              <button @click="editingAgentField = 'maxToolRounds'; agentFieldEdit = agentMaxToolRounds" class="text-xs text-neutral-500 hover:text-white transition-colors">Edit</button>
             </template>
           </div>
         </div>
