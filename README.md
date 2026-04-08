@@ -122,14 +122,23 @@ The application will be available at:
 - **Backend API**: http://localhost:9000
 - **Frontend SPA**: http://localhost:3000
 
-### Production Build
+### Production Deployment
 
 ```bash
-# Build Nuxt frontend
-cd frontend && pnpm build
-
-# Deploy Play application
+# 1. Package the application as a ZIP
 play dist
+# Creates dist/jclaw.zip
+
+# 2. Copy dist/jclaw.zip to your deployment machine, then:
+unzip jclaw.zip
+cd jclaw
+
+# 3. Install and build the frontend
+cd frontend && pnpm install && pnpm build && cd ..
+
+# 4. Start the backend and frontend
+play start --%prod
+cd frontend && node .output/server/index.mjs
 ```
 
 ---
