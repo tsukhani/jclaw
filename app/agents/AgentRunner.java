@@ -21,13 +21,13 @@ import java.util.function.Consumer;
 public class AgentRunner {
 
     private static final Gson gson = new Gson();
-    private static final int DEFAULT_maxToolRounds() = 10;
+    private static final int DEFAULT_MAX_TOOL_ROUNDS = 10;
 
     private static int maxToolRounds() {
         try {
             return Integer.parseInt(services.ConfigService.get("agent.maxToolRounds", "10"));
         } catch (NumberFormatException e) {
-            return DEFAULT_maxToolRounds();
+            return DEFAULT_MAX_TOOL_ROUNDS;
         }
     }
 
