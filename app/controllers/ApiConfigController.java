@@ -55,6 +55,17 @@ public class ApiConfigController extends Controller {
         if (key.isBlank()) {
             badRequest();
         }
+
+        // Shell exec privileges (bypassAllowlist, allowGlobalPaths) are restricted to the default agent
+        if (key.matches("agent\\..+\\.shell\\.(bypassAllowlist|allowGlobalPaths)")) {
+            var agentName = key.split("\\.")[1];
+            var agent = models.Agent.findByName(agentName);
+            if (agent == null || !agent.isDefault) {
+                error(403, "Shell exec privileges can only be set for the default (main) agent.");
+                return;
+            }
+        }
+
         ConfigService.set(key, value);
 
         if (key.startsWith("provider.")) {

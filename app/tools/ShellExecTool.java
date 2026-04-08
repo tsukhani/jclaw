@@ -66,16 +66,16 @@ public class ShellExecTool implements ToolRegistry.Tool {
             return "Error: command is required and must not be empty.";
         }
 
-        // Allowlist validation (bypass if agent has it configured)
-        boolean bypassAllowlist = "true".equals(
+        // Allowlist validation (bypass only for the default/main agent)
+        boolean bypassAllowlist = agent.isDefault && "true".equals(
                 ConfigService.get("agent." + agent.name + ".shell.bypassAllowlist", "false"));
         if (!bypassAllowlist) {
             var allowlistError = validateAllowlist(command);
             if (allowlistError != null) return allowlistError;
         }
 
-        // Working directory resolution (per-agent allowGlobalPaths overrides global setting)
-        boolean agentAllowGlobal = "true".equals(
+        // Working directory resolution (allowGlobalPaths only for the default/main agent)
+        boolean agentAllowGlobal = agent.isDefault && "true".equals(
                 ConfigService.get("agent." + agent.name + ".shell.allowGlobalPaths", "false"));
         var workspace = AgentService.workspacePath(agent.name).toAbsolutePath().normalize();
         Path workdir;
