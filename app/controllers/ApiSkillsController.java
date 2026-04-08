@@ -341,14 +341,18 @@ public class ApiSkillsController extends Controller {
         // Find the default agent's provider
         Agent defaultAgent = Agent.findDefault();
         if (defaultAgent == null) {
-            // No default agent — return files as-is
+            services.EventLogger.warn("skills", "Sanitization skipped: no default agent configured");
             return fileContents;
         }
 
         var provider = ProviderRegistry.get(defaultAgent.modelProvider);
         if (provider == null) {
+            services.EventLogger.warn("skills", "Sanitization skipped: no provider for agent " + defaultAgent.name);
             return fileContents;
         }
+
+        services.EventLogger.info("skills", "Starting LLM sanitization of %d file(s) via %s / %s"
+                .formatted(fileContents.size(), provider.name(), defaultAgent.modelId));
 
         // Build file listing for the prompt
         var sb = new StringBuilder();
@@ -385,8 +389,16 @@ public class ApiSkillsController extends Controller {
         );
 
         try {
+            for (var entry : fileContents.entrySet()) {
+                services.EventLogger.info("skills", "Sanitizing file: %s (%d chars)"
+                        .formatted(entry.getKey(), entry.getValue().length()));
+            }
+
             var response = OpenAiCompatibleClient.chat(provider, defaultAgent.modelId, messages, null, null);
             var text = response.choices().get(0).message().content().toString().trim();
+
+            services.EventLogger.info("skills", "LLM sanitization response (%d chars): %s"
+                    .formatted(text.length(), text.length() > 500 ? text.substring(0, 500) + "..." : text));
 
             // Strip markdown code fences if the LLM wrapped it
             if (text.startsWith("```")) {
@@ -397,11 +409,19 @@ public class ApiSkillsController extends Controller {
             var result = new LinkedHashMap<String, String>();
             for (var entry : fileContents.entrySet()) {
                 if (json.has(entry.getKey())) {
-                    result.put(entry.getKey(), json.get(entry.getKey()).getAsString());
+                    var sanitized = json.get(entry.getKey()).getAsString();
+                    var changed = !sanitized.equals(entry.getValue());
+                    result.put(entry.getKey(), sanitized);
+                    services.EventLogger.info("skills", "  %s: %s"
+                            .formatted(entry.getKey(), changed ? "REDACTED (content changed)" : "clean (no changes)"));
                 } else {
                     result.put(entry.getKey(), entry.getValue());
+                    services.EventLogger.info("skills", "  %s: not in LLM response, kept original"
+                            .formatted(entry.getKey()));
                 }
             }
+
+            services.EventLogger.info("skills", "Sanitization complete");
             return result;
         } catch (Exception e) {
             // If LLM fails, return original content rather than blocking the promotion
