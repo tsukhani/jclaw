@@ -50,9 +50,9 @@ POST    /api/skills/promote                     ApiSkillsController.promote
 GET     /api/skills/{name}                      ApiSkillsController.get
 PUT     /api/skills/{name}                      ApiSkillsController.update
 PUT     /api/skills/{name}/rename               ApiSkillsController.rename
+GET     /api/skills/{name}/files/{<.+>filePath} ApiSkillsController.readFile
+PUT     /api/skills/{name}/files/{<.+>filePath} ApiSkillsController.writeFile
 GET     /api/skills/{name}/files                 ApiSkillsController.listFiles
-GET     /api/skills/{name}/files/{<path>filePath} ApiSkillsController.readFile
-PUT     /api/skills/{name}/files/{<path>filePath} ApiSkillsController.writeFile
 DELETE  /api/skills/{name}                      ApiSkillsController.delete
 GET     /api/agents/{id}/skills                 ApiSkillsController.listForAgent
 PUT     /api/agents/{id}/skills/{name}          ApiSkillsController.updateForAgent
