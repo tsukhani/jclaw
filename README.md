@@ -173,7 +173,7 @@ cd frontend && node .output/server/index.mjs
 2. **Minimal Dependencies** — Only bring in what we absolutely need.
 3. **Memory & Context** — Agents remember. Context persists. Conversations flow.
 4. **Async by Default** — Jobs run in background. APIs are non-blocking.
-5. **Modular Skills** — Add capabilities via plugins, not monolithic code.
+5. **Modular Skills** — Agents can automatically create, share, and chain skills. Skill primitives are reusable across agents and shareable with other JClaw users.
 
 ---
 
