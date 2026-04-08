@@ -356,6 +356,11 @@ public class OpenAiCompatibleClient {
         public void awaitCompletion() throws InterruptedException {
             latch.await();
         }
+
+        /** Await with timeout. Returns true if completed, false if timed out. */
+        public boolean awaitCompletion(long timeoutMs) throws InterruptedException {
+            return latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+        }
     }
 
     private static class ToolCallBuilder {

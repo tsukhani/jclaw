@@ -205,7 +205,12 @@ public class AgentRunner {
                 var accumulator = OpenAiCompatibleClient.chatStreamAccumulate(
                         primary, agent.modelId, messages, tools, onToken, maxTokens);
 
-                accumulator.awaitCompletion();
+                while (!accumulator.awaitCompletion(5000)) {
+                    if (isCancelled.get()) {
+                        EventLogger.info("llm", agent.name, channelType, "Stream cancelled by client disconnect");
+                        return;
+                    }
+                }
 
                 // Retry once on transient 5xx errors
                 if (accumulator.error != null && accumulator.error.getMessage() != null
@@ -213,7 +218,12 @@ public class AgentRunner {
                     EventLogger.warn("llm", agent.name, null, "Retrying streaming after transient error");
                     accumulator = OpenAiCompatibleClient.chatStreamAccumulate(
                             primary, agent.modelId, messages, tools, onToken, maxTokens);
-                    accumulator.awaitCompletion();
+                    while (!accumulator.awaitCompletion(5000)) {
+                        if (isCancelled.get()) {
+                            EventLogger.info("llm", agent.name, channelType, "Stream cancelled by client disconnect");
+                            return;
+                        }
+                    }
                 }
 
                 if (isCancelled.get()) {
@@ -406,7 +416,14 @@ public class AgentRunner {
                 provider, agent.modelId, currentMessages, tools, onToken, maxTokens);
 
         try {
-            accumulator.awaitCompletion();
+            // Poll with timeout so we can detect client disconnect
+            while (!accumulator.awaitCompletion(5000)) {
+                if (isCancelled.get()) {
+                    EventLogger.info("llm", agent.name, null,
+                            "Aborting streaming tool round — client disconnected");
+                    return priorContent;
+                }
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return priorContent;
