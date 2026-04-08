@@ -107,6 +107,9 @@ cd jclaw
 
 # Install frontend dependencies
 cd frontend && pnpm install && cd ..
+
+# Resolve backend dependencies
+play deps --sync
 ```
 
 ### Development
