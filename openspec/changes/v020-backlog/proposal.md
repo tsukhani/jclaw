@@ -108,8 +108,8 @@ Identified via full-codebase performance audit (2026-04-07) covering database/JP
 
 ### Critical — Fix Immediately
 
-- `fix-sync-transaction-scope`: `AgentRunner.run()` holds a JPA transaction (and JDBC connection) open across the entire `callWithToolLoop()` — up to 10 rounds of blocking LLM HTTP calls (each up to 180s). A few concurrent chats exhaust the connection pool and starve all other DB operations. The streaming path already does this correctly with scoped `Tx.run()` calls. Apply the same pattern to the synchronous path. `AgentRunner.java:30-83`. **Medium complexity.**
-- `fix-db-pool-config`: No `db.pool.minSize/maxSize/timeout` configured in `application.conf`. Play defaults to a small pool (~5-10 connections). Combined with virtual thread concurrency and the transaction scope issue above, pool exhaustion is near-certain under load. Add explicit pool sizing (maxSize=20-30 for prod). `application.conf:83-87`. **Small complexity.**
+- ~~`fix-sync-transaction-scope`~~: **Done.** Sync path already uses scoped `Tx.run()` calls — setup, LLM loop (no tx), persist.
+- ~~`fix-db-pool-config`~~: **Done.** Pool sizing configured in `application.conf` (minSize=5, maxSize=20, prod maxSize=30).
 - `fix-queue-thread-safety`: `ConversationQueue` has unsynchronized `ArrayDeque` mutation in the `interrupt` mode path (`state.pending.clear()` without holding the monitor) and `getQueueSize()` reads `state.pending.size()` unsynchronized. `ArrayDeque` is not thread-safe — concurrent access corrupts internal state. Also has a dead `ReentrantLock lock` field. `ConversationQueue.java:63-66,134`. **Small complexity.**
 - `fix-tailwind-purge`: `tailwind.config.js` has `content: []` which disables CSS purging — the entire Tailwind CSS (~3-4 MB) ships to every user. Set content paths to cover Vue/TS source files. `frontend/tailwind.config.js:3`. **Small complexity.**
 
