@@ -156,7 +156,8 @@ public class ApiChatController extends Controller {
         );
 
         try {
-            if (!latch.await(180, TimeUnit.SECONDS)) {
+            if (!latch.await(600, TimeUnit.SECONDS)) {
+                cancelled.set(true);
                 try {
                     var event = gson.toJson(Map.of("type", "error", "content", "Request timed out"));
                     res.writeChunk("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
