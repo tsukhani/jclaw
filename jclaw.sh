@@ -6,36 +6,45 @@ FRONTEND_PID_FILE="frontend.pid"
 
 usage() {
     cat <<EOF
-Usage: jclaw.sh [--deploy <dir>] [--backend-port <port>] [--frontend-port <port>] <start|stop|status>
+Usage: jclaw.sh [options] <start|stop|status>
 
 Commands:
-  start    Start the Play backend and Nuxt frontend in production mode
+  start    Start the Play backend and Nuxt frontend
   stop     Stop the running Play backend and Nuxt frontend
   status   Show whether backend and frontend are running
 
 Options:
-  --deploy <dir>          Package with play dist, copy to <dir>, and run from there
+  --dev                   Run in development mode (play run + pnpm dev)
+  --deploy <dir>          Package with play dist, copy to <dir>, and run in production
   --backend-port <port>   Play backend port (default: 9000)
   --frontend-port <port>  Nuxt frontend port (default: 3000)
 
 Examples:
-  ./jclaw.sh start                          # Start in current directory
-  ./jclaw.sh --deploy /tmp start            # Build, deploy to /tmp/jclaw, and start
-  ./jclaw.sh --backend-port 8080 start      # Start backend on port 8080
-  ./jclaw.sh --deploy /tmp stop             # Stop services in /tmp/jclaw
-  ./jclaw.sh stop                           # Stop services in current directory
+  ./jclaw.sh --dev start                              # Start in dev mode
+  ./jclaw.sh --dev --backend-port 8080 start          # Dev mode with custom backend port
+  ./jclaw.sh start                                    # Start production in current directory
+  ./jclaw.sh --deploy /tmp start                      # Build, deploy to /tmp/jclaw, and start
+  ./jclaw.sh --deploy /tmp --backend-port 8080 start  # Deploy with custom ports
+  ./jclaw.sh --dev stop                               # Stop dev mode services
+  ./jclaw.sh --deploy /tmp stop                       # Stop services in /tmp/jclaw
+  ./jclaw.sh stop                                     # Stop production in current directory
 EOF
     exit 1
 }
 
 # Parse arguments
 DEPLOY_DIR=""
+DEV_MODE=false
 BACKEND_PORT="9000"
 FRONTEND_PORT="3000"
 COMMAND=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --dev)
+            DEV_MODE=true
+            shift
+            ;;
         --deploy)
             DEPLOY_DIR="$2"
             shift 2
@@ -61,6 +70,12 @@ done
 
 [[ -z "$COMMAND" ]] && usage
 
+# Validate flag combinations
+if [[ "$DEV_MODE" == true && -n "$DEPLOY_DIR" ]]; then
+    echo "Error: --dev and --deploy cannot be used together."
+    exit 1
+fi
+
 # Verify Java 25+ is available
 check_java() {
     local java_version
@@ -79,9 +94,13 @@ check_java() {
 # Determine the working directory
 if [[ -n "$DEPLOY_DIR" ]]; then
     JCLAW_DIR="$DEPLOY_DIR/jclaw"
+elif [[ "$DEV_MODE" == true ]]; then
+    JCLAW_DIR="$SCRIPT_DIR"
 else
     JCLAW_DIR="$(pwd)"
 fi
+
+# ─── Production deploy ───
 
 do_deploy() {
     echo "==> Packaging application..."
@@ -128,7 +147,9 @@ do_deploy() {
     echo "==> Deployment ready at $JCLAW_DIR"
 }
 
-do_start() {
+# ─── Production start/stop ───
+
+do_start_prod() {
     cd "$JCLAW_DIR"
 
     if [[ ! -f "conf/application.conf" ]]; then
@@ -150,7 +171,7 @@ do_start() {
         echo "         and run 'cd frontend && pnpm build' before starting."
     fi
 
-    echo "==> Starting Play backend on port $BACKEND_PORT..."
+    echo "==> Starting Play backend on port $BACKEND_PORT (prod)..."
     play start --%prod --http.port="$BACKEND_PORT"
 
     echo "==> Starting Nuxt frontend on port $FRONTEND_PORT..."
@@ -165,14 +186,14 @@ do_start() {
     echo $! > "$JCLAW_DIR/$FRONTEND_PID_FILE"
 
     echo ""
-    echo "JClaw is running:"
+    echo "JClaw is running (production):"
     echo "  Backend:  http://localhost:$BACKEND_PORT  (pid: $(cat "$JCLAW_DIR/server.pid"))"
     echo "  Frontend: http://localhost:$FRONTEND_PORT  (pid: $(cat "$JCLAW_DIR/$FRONTEND_PID_FILE"))"
     echo ""
     echo "Stop with: $0 ${DEPLOY_DIR:+--deploy $DEPLOY_DIR }stop"
 }
 
-do_stop() {
+do_stop_prod() {
     cd "$JCLAW_DIR"
 
     local stopped=0
@@ -212,10 +233,132 @@ do_stop() {
     fi
 }
 
+# ─── Dev mode start/stop ───
+
+do_start_dev() {
+    cd "$JCLAW_DIR"
+
+    if [[ ! -f "conf/application.conf" ]]; then
+        echo "Error: Not a JClaw directory (conf/application.conf not found)"
+        exit 1
+    fi
+
+    # Check if already running
+    if [[ -f "server.pid" ]] && kill -0 "$(cat server.pid)" 2>/dev/null; then
+        echo "Error: Play backend is already running (pid: $(cat server.pid))"
+        exit 1
+    fi
+
+    # Update nuxt devProxy if backend port is non-default
+    if [[ "$BACKEND_PORT" != "9000" ]]; then
+        echo "==> Updating frontend devProxy to use backend port $BACKEND_PORT..."
+        sed -i '' "s|localhost:9000|localhost:$BACKEND_PORT|g" "$JCLAW_DIR/frontend/nuxt.config.ts"
+    fi
+
+    echo "==> Starting Play backend on port $BACKEND_PORT (dev)..."
+    nohup play run --http.port="$BACKEND_PORT" > "$JCLAW_DIR/logs/backend-dev.out" 2>&1 &
+    local play_pid=$!
+    # play run doesn't create server.pid — store the wrapper pid ourselves
+    echo "$play_pid" > "$JCLAW_DIR/server.pid"
+
+    # Wait for backend to be ready by polling the port
+    echo "    Waiting for backend to start..."
+    local waited=0
+    while ! curl -s -o /dev/null "http://localhost:$BACKEND_PORT" 2>/dev/null && kill -0 "$play_pid" 2>/dev/null; do
+        sleep 1
+        waited=$((waited + 1))
+        if [[ $waited -ge 60 ]]; then
+            echo "Error: Backend did not start within 60 seconds."
+            echo "       Check logs/backend-dev.out for details."
+            kill "$play_pid" 2>/dev/null
+            rm -f "$JCLAW_DIR/server.pid"
+            exit 1
+        fi
+    done
+
+    echo "==> Starting Nuxt dev server on port $FRONTEND_PORT..."
+    cd "$JCLAW_DIR/frontend"
+    PORT="$FRONTEND_PORT" nohup pnpm dev > "$JCLAW_DIR/logs/frontend-dev.out" 2>&1 &
+    echo $! > "$JCLAW_DIR/$FRONTEND_PID_FILE"
+
+    echo ""
+    echo "JClaw is running (dev):"
+    echo "  Backend:  http://localhost:$BACKEND_PORT  (pid: $play_pid)"
+    echo "  Frontend: http://localhost:$FRONTEND_PORT  (pid: $(cat "$JCLAW_DIR/$FRONTEND_PID_FILE"))"
+    echo "  Logs:     logs/backend-dev.out, logs/frontend-dev.out"
+    echo ""
+    echo "Stop with: $0 --dev stop"
+}
+
+do_stop_dev() {
+    cd "$JCLAW_DIR"
+
+    local stopped=0
+
+    # Stop frontend (pnpm dev)
+    if [[ -f "$FRONTEND_PID_FILE" ]]; then
+        local fpid
+        fpid=$(cat "$FRONTEND_PID_FILE")
+        if kill -0 "$fpid" 2>/dev/null; then
+            echo "==> Stopping Nuxt dev server (pid: $fpid)..."
+            # Kill child processes first (pnpm spawns node), then the parent
+            pkill -P "$fpid" 2>/dev/null || true
+            kill "$fpid" 2>/dev/null || true
+            rm -f "$FRONTEND_PID_FILE"
+            stopped=1
+        else
+            echo "    Frontend not running (stale pid file)"
+            rm -f "$FRONTEND_PID_FILE"
+        fi
+    else
+        echo "    No frontend pid file found"
+    fi
+
+    # Stop backend (play run — we manage the pid file, not Play)
+    if [[ -f "server.pid" ]]; then
+        local bpid
+        bpid=$(cat "server.pid")
+        if kill -0 "$bpid" 2>/dev/null; then
+            echo "==> Stopping Play backend (pid: $bpid)..."
+            kill "$bpid" 2>/dev/null
+            # Also kill any child java processes in the group
+            pkill -P "$bpid" 2>/dev/null || true
+            rm -f "server.pid"
+            stopped=1
+        else
+            echo "    Backend not running (stale pid file)"
+            rm -f "server.pid"
+        fi
+    else
+        echo "    No backend pid file found"
+    fi
+
+    # Restore nuxt.config.ts if it was modified
+    if git -C "$JCLAW_DIR" diff --quiet frontend/nuxt.config.ts 2>/dev/null; then
+        : # no changes to restore
+    else
+        echo "==> Restoring frontend/nuxt.config.ts..."
+        git -C "$JCLAW_DIR" checkout frontend/nuxt.config.ts 2>/dev/null || true
+    fi
+
+    if [[ $stopped -eq 1 ]]; then
+        echo ""
+        echo "JClaw stopped."
+    else
+        echo ""
+        echo "Nothing to stop — JClaw does not appear to be running in $JCLAW_DIR"
+    fi
+}
+
+# ─── Status ───
+
 do_status() {
     cd "$JCLAW_DIR"
 
-    echo "JClaw status ($JCLAW_DIR):"
+    local mode="production"
+    [[ "$DEV_MODE" == true ]] && mode="dev"
+
+    echo "JClaw status ($JCLAW_DIR, $mode):"
     echo ""
 
     # Backend
@@ -233,17 +376,26 @@ do_status() {
     fi
 }
 
-# Execute
+# ─── Execute ───
+
 case "$COMMAND" in
     start)
         check_java
-        [[ -n "$DEPLOY_DIR" ]] && do_deploy
-        # Ensure logs directory exists
-        mkdir -p "$JCLAW_DIR/logs"
-        do_start
+        if [[ "$DEV_MODE" == true ]]; then
+            mkdir -p "$JCLAW_DIR/logs"
+            do_start_dev
+        else
+            [[ -n "$DEPLOY_DIR" ]] && do_deploy
+            mkdir -p "$JCLAW_DIR/logs"
+            do_start_prod
+        fi
         ;;
     stop)
-        do_stop
+        if [[ "$DEV_MODE" == true ]]; then
+            do_stop_dev
+        else
+            do_stop_prod
+        fi
         ;;
     status)
         do_status
