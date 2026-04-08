@@ -130,7 +130,6 @@ cd frontend && pnpm build
 
 # Deploy Play application
 play dist
-# Uploads to Bitbucket or run standalone
 ```
 
 ---
