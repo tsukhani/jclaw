@@ -125,7 +125,7 @@ onUnmounted(() => {
 // Filter out tool messages and empty assistant messages (tool call records) from display
 const displayMessages = computed(() =>
   messages.value.filter(m =>
-    m.role !== 'tool' && !(m.role === 'assistant' && !m.content)
+    m.role !== 'tool' && m.content
   )
 )
 
