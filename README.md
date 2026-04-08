@@ -136,7 +136,8 @@ cd jclaw
 # 3. Install and build the frontend
 cd frontend && pnpm install && pnpm build && cd ..
 
-# 4. Start the backend and frontend
+# 4. Resolve backend dependencies and start
+play deps --sync
 play start --%prod
 cd frontend && node .output/server/index.mjs
 ```
