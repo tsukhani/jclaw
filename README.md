@@ -28,6 +28,15 @@ The result: A leaner, faster, more maintainable platform for building AI agents 
 
 ---
 
+## Screenshot
+
+<p align="center">
+  <img src="jclaw-screenshot.png" width="900" alt="JClaw Chat Interface">
+</p>
+<p align="center"><em>Web chat with memory-aware agents, tool execution, and markdown rendering.</em></p>
+
+---
+
 ## Features
 
 - 🤖 **Agent System** — Conversational AI agents with memory and context
