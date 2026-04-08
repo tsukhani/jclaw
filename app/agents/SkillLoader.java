@@ -39,6 +39,63 @@ public class SkillLoader {
         skillCache.clear();
     }
 
+    /**
+     * Remove AgentSkillConfig records that reference skills no longer on disk.
+     * Called at startup to sync DB with the actual skills/ directory.
+     */
+    public static void syncSkillConfigs() {
+        // Collect all skill names that exist on disk (global + all agent workspaces)
+        var existingSkills = new HashSet<String>();
+
+        // Global skills
+        var globalDir = globalSkillsPath();
+        if (Files.isDirectory(globalDir)) {
+            try (var dirs = Files.list(globalDir)) {
+                dirs.filter(Files::isDirectory).forEach(dir -> {
+                    if (Files.exists(dir.resolve("SKILL.md"))) {
+                        var info = parseSkillFile(dir.resolve("SKILL.md"));
+                        if (info != null) existingSkills.add(info.name());
+                    }
+                });
+            } catch (IOException ignored) {}
+        }
+
+        // Agent workspace skills
+        var workspaceRoot = AgentService.workspaceRoot();
+        if (Files.isDirectory(workspaceRoot)) {
+            try (var agents = Files.list(workspaceRoot)) {
+                agents.filter(Files::isDirectory).forEach(agentDir -> {
+                    var skillsDir = agentDir.resolve("skills");
+                    if (Files.isDirectory(skillsDir)) {
+                        try (var dirs = Files.list(skillsDir)) {
+                            dirs.filter(Files::isDirectory).forEach(dir -> {
+                                if (Files.exists(dir.resolve("SKILL.md"))) {
+                                    var info = parseSkillFile(dir.resolve("SKILL.md"));
+                                    if (info != null) existingSkills.add(info.name());
+                                }
+                            });
+                        } catch (IOException ignored) {}
+                    }
+                });
+            } catch (IOException ignored) {}
+        }
+
+        // Remove orphaned configs
+        services.Tx.run(() -> {
+            List<AgentSkillConfig> allConfigs = AgentSkillConfig.findAll();
+            int removed = 0;
+            for (var config : allConfigs) {
+                if (!existingSkills.contains(config.skillName)) {
+                    config.delete();
+                    removed++;
+                }
+            }
+            if (removed > 0) {
+                EventLogger.info("skills", "Removed %d orphaned skill config(s) for deleted skills".formatted(removed));
+            }
+        });
+    }
+
     public static List<SkillInfo> loadSkills(String agentName) {
         var cached = skillCache.get(agentName);
         if (cached != null && !cached.isExpired()) {

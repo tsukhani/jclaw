@@ -19,6 +19,7 @@ public class DefaultConfigJob extends Job<Void> {
         seedProviders();
         seedToolConfig();
         seedDefaultAgent();
+        agents.SkillLoader.syncSkillConfigs();
         EventLogger.info("system", "Default configuration seeded");
     }
 
