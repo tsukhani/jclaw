@@ -107,9 +107,14 @@ openspec/archive/
 # BMAD method output (generated artifacts, not source)
 _bmad-output/
 
-# Agent workspaces (only track the default test agent)
+# Global skills (only track built-in skill-creator)
+skills/*
+!skills/skill-creator/
+
+# Agent workspaces (only track the default main agent, exclude its skills)
 workspace/*
 !workspace/main/
+workspace/main/skills/
 
 # Ignore but keep empty directories
 !.gitkeep
