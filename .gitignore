@@ -111,10 +111,13 @@ _bmad-output/
 skills/*
 !skills/skill-creator/
 
-# Agent workspaces (only track the default main agent, exclude its skills)
+# Agent workspaces (only track the default main agent's core files)
 workspace/*
 !workspace/main/
-workspace/main/skills/
+workspace/main/*
+!workspace/main/AGENT.md
+!workspace/main/IDENTITY.md
+!workspace/main/USER.md
 
 # Ignore but keep empty directories
 !.gitkeep
