@@ -126,6 +126,18 @@ The application will be available at:
 - **Backend API**: http://localhost:9000
 - **Frontend SPA**: http://localhost:3000
 
+To use custom ports:
+
+```bash
+# Play backend on a different port
+play run --http.port=8080
+
+# Nuxt frontend on a different port
+cd frontend && PORT=4000 pnpm dev
+```
+
+> **Note:** If you change the Play backend port, update `frontend/nuxt.config.ts` to point the API proxy (`devProxy` and `routeRules`) at the new port.
+
 ### Production Deployment
 
 ```bash
