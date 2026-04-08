@@ -118,6 +118,7 @@ public class AgentRunner {
                                     AtomicBoolean isCancelled,
                                     Consumer<Conversation> onInit,
                                     Consumer<String> onToken,
+                                    Consumer<String> onStatus,
                                     Consumer<String> onComplete,
                                     Consumer<Exception> onError) {
         Thread.ofVirtual().start(() -> {
@@ -259,7 +260,7 @@ public class AgentRunner {
                 // Handle tool calls if present
                 if (!accumulator.toolCalls.isEmpty()) {
                     content = handleToolCallsStreaming(agent, conversation.id, messages, tools,
-                            accumulator.toolCalls, content, primary, onToken, maxTokens, 0, isCancelled);
+                            accumulator.toolCalls, content, primary, onToken, onStatus, maxTokens, 0, isCancelled);
                 }
 
                 if (isCancelled.get()) {
@@ -370,7 +371,8 @@ public class AgentRunner {
                                                     List<ChatMessage> messages, List<ToolDef> tools,
                                                     List<ToolCall> toolCalls, String priorContent,
                                                     ProviderConfig provider,
-                                                    Consumer<String> onToken, Integer maxTokens,
+                                                    Consumer<String> onToken, Consumer<String> onStatus,
+                                                    Integer maxTokens,
                                                     int round, AtomicBoolean isCancelled) {
         if (round >= maxToolRounds()) {
             return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
@@ -386,6 +388,7 @@ public class AgentRunner {
 
         for (var toolCall : toolCalls) {
             if (isCancelled.get()) return priorContent;
+            onStatus.accept("Using tool: " + toolCall.function().name());
             EventLogger.info("tool", agent.name, null,
                     "Executing tool '%s' (id: %s, args: %s)"
                             .formatted(toolCall.function().name(), toolCall.id(),
@@ -408,6 +411,7 @@ public class AgentRunner {
 
         if (isCancelled.get()) return priorContent;
 
+        onStatus.accept("Processing results (round %d)...".formatted(round + 1));
         EventLogger.info("llm", agent.name, null,
                 "Streaming round %d: continuing LLM call after tool results".formatted(round + 1));
 
@@ -434,7 +438,7 @@ public class AgentRunner {
         // Recursively handle if more tool calls
         if (!accumulator.toolCalls.isEmpty()) {
             return handleToolCallsStreaming(agent, conversationId, currentMessages, tools,
-                    accumulator.toolCalls, accumulator.content, provider, onToken, maxTokens, round + 1, isCancelled);
+                    accumulator.toolCalls, accumulator.content, provider, onToken, onStatus, maxTokens, round + 1, isCancelled);
         }
 
         // If LLM returned empty content after tool calls, emit "Done." so the user isn't left

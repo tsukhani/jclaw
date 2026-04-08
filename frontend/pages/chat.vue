@@ -38,6 +38,7 @@ const selectedConvoId = ref<number | null>(null)
 const messages = ref<any[]>([])
 const input = ref('')
 const streaming = ref(false)
+const streamStatus = ref('')
 const chatInput = ref<HTMLTextAreaElement | null>(null)
 
 function autoResize() {
@@ -164,6 +165,7 @@ async function sendMessage() {
 
   streaming.value = true
   streamContent.value = ''
+  streamStatus.value = ''
 
   // Add placeholder for streaming response
   const assistantIdx = messages.value.length
@@ -203,12 +205,16 @@ async function sendMessage() {
           const event = JSON.parse(line.slice(6))
           if (event.type === 'init' && event.conversationId) {
             selectedConvoId.value = event.conversationId
+          } else if (event.type === 'status') {
+            streamStatus.value = event.content
           } else if (event.type === 'token') {
+            streamStatus.value = ''
             if (event.timestamp) messages.value[assistantIdx].createdAt = event.timestamp
             streamContent.value += event.content
             messages.value[assistantIdx].content = streamContent.value
             scrollToBottom()
           } else if (event.type === 'complete') {
+            streamStatus.value = ''
             messages.value[assistantIdx].content = event.content || streamContent.value
           } else if (event.type === 'error') {
             messages.value[assistantIdx].content = event.content
@@ -366,7 +372,7 @@ function exportConversation() {
             {{ agent.name }} ({{ agent.modelId }})
           </option>
         </select>
-        <span v-if="streaming" class="text-xs text-emerald-400 animate-pulse">streaming...</span>
+        <span v-if="streaming" class="text-xs text-emerald-400 animate-pulse">{{ streamStatus || 'streaming...' }}</span>
         <span v-else-if="agentBusy" class="text-xs text-neutral-500 animate-pulse">processing queue...</span>
       </div>
 
@@ -401,7 +407,7 @@ function exportConversation() {
               <span class="text-xs font-medium text-emerald-400">assistant</span>
             </div>
             <div class="bg-neutral-800/50 border border-neutral-700/50 rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm text-neutral-500">
-              <span class="animate-pulse">Thinking...</span>
+              <span class="animate-pulse">{{ streamStatus || 'Thinking...' }}</span>
             </div>
           </div>
         </div>

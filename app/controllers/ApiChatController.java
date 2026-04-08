@@ -132,6 +132,16 @@ public class ApiChatController extends Controller {
                     }
                     }
                 },
+                // onStatus — progress updates during tool execution
+                status -> {
+                    try {
+                        var event = gson.toJson(Map.of("type", "status", "content", status));
+                        res.writeChunk("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
+                    } catch (Exception e) {
+                        cancelled.set(true);
+                        latch.countDown();
+                    }
+                },
                 // onComplete
                 content -> {
                     try {
