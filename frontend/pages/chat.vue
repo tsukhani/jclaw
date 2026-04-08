@@ -19,7 +19,7 @@ function formatTimestamp(iso: string): string {
   if (isNaN(date.getTime())) return ''
   return date.toLocaleString(undefined, {
     month: 'long', day: 'numeric', year: 'numeric',
-    hour: 'numeric', minute: '2-digit',
+    hour: 'numeric', minute: '2-digit', second: '2-digit',
     timeZoneName: 'short'
   })
 }
@@ -204,6 +204,7 @@ async function sendMessage() {
           if (event.type === 'init' && event.conversationId) {
             selectedConvoId.value = event.conversationId
           } else if (event.type === 'token') {
+            if (event.timestamp) messages.value[assistantIdx].createdAt = event.timestamp
             streamContent.value += event.content
             messages.value[assistantIdx].content = streamContent.value
             scrollToBottom()
@@ -381,7 +382,7 @@ function exportConversation() {
               <span class="text-xs font-medium" :class="msg.role === 'user' ? 'text-blue-400' : 'text-emerald-400'">
                 {{ msg.role === 'user' ? 'you' : 'assistant' }}
               </span>
-              <span v-if="msg.createdAt" class="text-[10px] text-neutral-600">{{ formatTimestamp(msg.createdAt) }}</span>
+              <span v-if="msg.createdAt" class="text-xs text-neutral-400">{{ formatTimestamp(msg.createdAt) }}</span>
             </div>
             <!-- User messages: plain text -->
             <div v-if="msg.role === 'user'"

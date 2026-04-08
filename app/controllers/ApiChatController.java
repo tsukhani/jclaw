@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 @With(AuthCheck.class)
 public class ApiChatController extends Controller {
@@ -113,14 +114,22 @@ public class ApiChatController extends Controller {
                         latch.countDown();
                     }
                 },
-                // onToken
-                token -> {
+                // onToken — include server timestamp on the first token (time-to-first-token)
+                new Consumer<String>() {
+                    private boolean first = true;
+                    @Override public void accept(String token) {
                     try {
-                        var event = gson.toJson(Map.of("type", "token", "content", token));
+                        Map<String, Object> data = new java.util.HashMap<>(Map.of("type", "token", "content", token));
+                        if (first) {
+                            data.put("timestamp", java.time.Instant.now().toString());
+                            first = false;
+                        }
+                        var event = gson.toJson(data);
                         res.writeChunk("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
                     } catch (Exception e) {
                         cancelled.set(true);
                         latch.countDown();
+                    }
                     }
                 },
                 // onComplete
