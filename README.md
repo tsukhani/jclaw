@@ -94,7 +94,7 @@ jclaw/
 
 - JDK 25+ (Zulu recommended)
 - Python 3.9+ (3.12 recommended) — Play's CLI commands are Python scripts
-- Play Framework 1.x (`play` command in PATH)
+- [Abundent's Play Framework 1.x](https://github.com/tsukhani/play1) (`play` command in PATH)
 - Node.js 20+ (24 recommended) for frontend
 - pnpm for frontend package management
 
