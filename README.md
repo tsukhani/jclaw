@@ -188,7 +188,7 @@ cd frontend && node .output/server/index.mjs
 
 ## Contributing
 
-This is an internal Abundent project. For questions or contributions, ping the team.
+This is an internal Abundent project. For questions or contributions, [reach out to the team](mailto:support@abundent.com).
 
 ---
 
