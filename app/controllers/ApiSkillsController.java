@@ -117,6 +117,10 @@ public class ApiSkillsController extends Controller {
 
     /** DELETE /api/skills/{name} — Delete a global skill. */
     public static void delete(String name) {
+        if ("skill-creator".equals(name)) {
+            error(403, "The skill-creator skill is a built-in skill and cannot be deleted.");
+            return;
+        }
         var dir = SkillLoader.globalSkillsPath().resolve(name);
         if (!Files.isDirectory(dir)) notFound();
 

@@ -391,10 +391,17 @@ function totalSkillCount(agentId: number) {
             <div v-if="skill.name !== (skill.folderName || skill.name)"
                  class="text-[10px] text-neutral-600 mb-0.5">name: {{ skill.name }}</div>
             <div class="text-xs text-neutral-500">{{ skill.description || '(no description)' }}</div>
-            <button @click.stop="editSkill(skill)"
-                    class="mt-3 text-[10px] text-neutral-600 hover:text-neutral-300 transition-colors">
-              Edit
-            </button>
+            <div class="mt-3 flex items-center gap-3">
+              <button @click.stop="editSkill(skill)"
+                      class="text-[10px] text-neutral-600 hover:text-neutral-300 transition-colors">
+                Edit
+              </button>
+              <button v-if="(skill.folderName || skill.name) !== 'skill-creator'"
+                      @click.stop="deleteSkill(skill)"
+                      class="text-[10px] text-neutral-600 hover:text-red-400 transition-colors">
+                Delete
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -423,7 +430,8 @@ function totalSkillCount(agentId: number) {
             {{ saving ? 'Saving...' : 'Save' }}
           </button>
           <button @click="cancel" class="px-4 py-1.5 text-xs text-neutral-400 hover:text-white transition-colors">Cancel</button>
-          <button v-if="editing" @click="deleteSkill(editing)"
+          <button v-if="editing && (editing.folderName || editing.name) !== 'skill-creator'"
+                  @click="deleteSkill(editing)"
                   class="px-4 py-1.5 text-xs text-red-400/60 hover:text-red-400 ml-auto transition-colors">Delete</button>
         </div>
       </div>
