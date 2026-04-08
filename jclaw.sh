@@ -112,6 +112,12 @@ do_deploy() {
     cd "$JCLAW_DIR/frontend"
     pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 
+    # Update nuxt.config.ts proxy target if backend port is non-default
+    if [[ "$BACKEND_PORT" != "9000" ]]; then
+        echo "==> Updating frontend proxy to use backend port $BACKEND_PORT..."
+        sed -i '' "s|localhost:9000|localhost:$BACKEND_PORT|g" nuxt.config.ts
+    fi
+
     echo "==> Building frontend..."
     pnpm build
 
@@ -135,6 +141,13 @@ do_start() {
     if [[ -f "server.pid" ]] && kill -0 "$(cat server.pid)" 2>/dev/null; then
         echo "Error: Play backend is already running (pid: $(cat server.pid))"
         exit 1
+    fi
+
+    # Warn if custom backend port without --deploy (proxy target may be stale)
+    if [[ "$BACKEND_PORT" != "9000" && -z "$DEPLOY_DIR" ]]; then
+        echo "Warning: Using custom backend port $BACKEND_PORT without --deploy."
+        echo "         Ensure frontend/nuxt.config.ts proxy points to port $BACKEND_PORT"
+        echo "         and run 'cd frontend && pnpm build' before starting."
     fi
 
     echo "==> Starting Play backend on port $BACKEND_PORT..."
