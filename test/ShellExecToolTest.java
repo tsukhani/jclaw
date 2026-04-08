@@ -75,7 +75,7 @@ public class ShellExecToolTest extends UnitTest {
     public void defaultWorkspaceDir() {
         var workspace = AgentService.workspacePath(agent.name).toAbsolutePath().normalize();
         var args = com.google.gson.JsonParser.parseString("{}").getAsJsonObject();
-        var resolved = tool.resolveWorkdir(args, workspace);
+        var resolved = tool.resolveWorkdir(args, workspace, false);
         assertEquals(workspace, resolved);
     }
 
@@ -85,7 +85,7 @@ public class ShellExecToolTest extends UnitTest {
         var args = com.google.gson.JsonParser.parseString("""
                 {"workdir": "skills"}
                 """).getAsJsonObject();
-        var resolved = tool.resolveWorkdir(args, workspace);
+        var resolved = tool.resolveWorkdir(args, workspace, false);
         assertEquals(workspace.resolve("skills"), resolved);
     }
 
@@ -95,7 +95,7 @@ public class ShellExecToolTest extends UnitTest {
         var args = com.google.gson.JsonParser.parseString("""
                 {"workdir": "../../etc"}
                 """).getAsJsonObject();
-        assertThrows(IllegalArgumentException.class, () -> tool.resolveWorkdir(args, workspace));
+        assertThrows(IllegalArgumentException.class, () -> tool.resolveWorkdir(args, workspace, false));
     }
 
     @Test
@@ -104,7 +104,7 @@ public class ShellExecToolTest extends UnitTest {
         var args = com.google.gson.JsonParser.parseString("""
                 {"workdir": "/tmp"}
                 """).getAsJsonObject();
-        assertThrows(IllegalArgumentException.class, () -> tool.resolveWorkdir(args, workspace));
+        assertThrows(IllegalArgumentException.class, () -> tool.resolveWorkdir(args, workspace, false));
     }
 
     // ==================== Environment Filtering ====================

@@ -60,7 +60,7 @@ const MANAGED_CONFIG_KEYS = new Set([
   'agent.maxToolRounds',
   'jclaw.tools.playwright.enabled', 'jclaw.tools.playwright.headless',
   'jclaw.tools.shell.enabled', 'shell.allowlist', 'shell.defaultTimeoutSeconds',
-  'shell.maxTimeoutSeconds', 'shell.maxOutputBytes', 'shell.allowGlobalPaths',
+  'shell.maxTimeoutSeconds', 'shell.maxOutputBytes',
 ])
 
 // Agent config
@@ -107,7 +107,7 @@ async function togglePlaywrightHeadless() {
 }
 
 // Shell execution config
-const SHELL_KEYS = ['shell.allowlist', 'shell.defaultTimeoutSeconds', 'shell.maxTimeoutSeconds', 'shell.maxOutputBytes', 'shell.allowGlobalPaths'] as const
+const SHELL_KEYS = ['shell.allowlist', 'shell.defaultTimeoutSeconds', 'shell.maxTimeoutSeconds', 'shell.maxOutputBytes'] as const
 
 const shellEnabled = computed(() => {
   const entries = configData.value?.entries ?? []
@@ -127,7 +127,6 @@ const shellConfig = computed(() => {
     defaultTimeout: map.get('shell.defaultTimeoutSeconds') ?? '30',
     maxTimeout: map.get('shell.maxTimeoutSeconds') ?? '300',
     maxOutput: map.get('shell.maxOutputBytes') ?? '102400',
-    allowGlobalPaths: map.get('shell.allowGlobalPaths') === 'true',
   }
 })
 
@@ -158,11 +157,6 @@ async function toggleShellEnabled() {
   refresh()
 }
 
-async function toggleShellGlobalPaths() {
-  const newVal = shellConfig.value.allowGlobalPaths ? 'false' : 'true'
-  await $fetch('/api/config', { method: 'POST', body: { key: 'shell.allowGlobalPaths', value: newVal } })
-  refresh()
-}
 
 const SEARCH_PROVIDERS: Record<string, { label: string, keys: { key: string, label: string, placeholder: string }[] }> = {
   exa: {
@@ -394,19 +388,6 @@ const providerEntries = computed(() => {
               <span class="flex-1 text-sm text-neutral-300 font-mono">{{ shellConfig.defaultTimeout }}s</span>
               <button @click="startShellEdit('timeout', shellConfig.defaultTimeout)" class="text-xs text-neutral-500 hover:text-white transition-colors">Edit</button>
             </template>
-          </div>
-          <!-- Allow global paths -->
-          <div class="px-4 py-2.5 flex items-center justify-between">
-            <div>
-              <span class="text-xs font-mono text-neutral-500">allowGlobalPaths</span>
-              <p v-if="shellConfig.allowGlobalPaths" class="text-[10px] text-amber-400 mt-0.5">Commands can access any directory on the host</p>
-            </div>
-            <button @click="toggleShellGlobalPaths"
-                    :class="shellConfig.allowGlobalPaths ? 'bg-amber-600 hover:bg-amber-500' : 'bg-neutral-700 hover:bg-neutral-600'"
-                    class="relative w-9 h-5 rounded-full transition-colors">
-              <span :class="shellConfig.allowGlobalPaths ? 'translate-x-4' : 'translate-x-0.5'"
-                    class="block w-4 h-4 bg-white rounded-full transition-transform" />
-            </button>
           </div>
         </div>
       </div>

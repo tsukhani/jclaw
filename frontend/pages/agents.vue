@@ -10,6 +10,8 @@ const form = ref({ name: '', modelProvider: '', modelId: '', enabled: true, isDe
 const agentTools = ref<any[]>([])
 const agentSkills = ref<any[]>([])
 const queueMode = ref('queue')
+const execBypassAllowlist = ref(false)
+const execAllowGlobalPaths = ref(false)
 const saving = ref(false)
 
 // Extract configured providers (those with non-empty API keys)
@@ -91,6 +93,7 @@ function editAgent(agent: any) {
   loadAgentTools(agent.id)
   loadAgentSkills(agent.id)
   loadQueueMode(agent.name)
+  loadExecConfig(agent.name)
 }
 
 async function loadAgentTools(agentId: number) {
@@ -139,6 +142,30 @@ async function saveQueueMode() {
     })
   } catch (e) {
     console.error('Failed to save queue mode:', e)
+  }
+}
+
+async function loadExecConfig(agentName: string) {
+  try {
+    const bypass = await $fetch<any>(`/api/config/agent.${agentName}.shell.bypassAllowlist`).catch(() => null)
+    execBypassAllowlist.value = bypass?.value === 'true'
+    const globalPaths = await $fetch<any>(`/api/config/agent.${agentName}.shell.allowGlobalPaths`).catch(() => null)
+    execAllowGlobalPaths.value = globalPaths?.value === 'true'
+  } catch {
+    execBypassAllowlist.value = false
+    execAllowGlobalPaths.value = false
+  }
+}
+
+async function toggleExecConfig(key: string, value: boolean) {
+  if (!editing.value) return
+  try {
+    await $fetch('/api/config', {
+      method: 'POST',
+      body: { key: `agent.${editing.value.name}.shell.${key}`, value: String(value) }
+    })
+  } catch (e) {
+    console.error('Failed to save exec config:', e)
   }
 }
 
@@ -341,6 +368,40 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
         </div>
         <div v-if="!agentTools.length" class="px-4 py-4 text-xs text-neutral-600 text-center">
           No tools registered
+        </div>
+      </div>
+
+      <!-- Exec privileges (main agent only) -->
+      <div v-if="editing && form.isDefault" class="bg-neutral-900 border border-neutral-800">
+        <div class="px-4 py-2.5 border-b border-neutral-800">
+          <span class="text-sm font-medium text-white">Shell Exec Privileges</span>
+          <span class="ml-2 text-[10px] text-amber-400">main agent only</span>
+        </div>
+        <div class="divide-y divide-neutral-800/50">
+          <div class="px-4 py-2.5 flex items-center justify-between">
+            <div>
+              <span class="text-sm text-white">Bypass allowlist</span>
+              <div class="text-xs text-neutral-500 mt-0.5">Allow any command without allowlist validation</div>
+            </div>
+            <button @click="execBypassAllowlist = !execBypassAllowlist; toggleExecConfig('bypassAllowlist', execBypassAllowlist)"
+                    :class="execBypassAllowlist ? 'bg-amber-600 hover:bg-amber-500' : 'bg-neutral-700 hover:bg-neutral-600'"
+                    class="relative w-9 h-5 rounded-full transition-colors shrink-0">
+              <span :class="execBypassAllowlist ? 'translate-x-4' : 'translate-x-0.5'"
+                    class="block w-4 h-4 bg-white rounded-full transition-transform" />
+            </button>
+          </div>
+          <div class="px-4 py-2.5 flex items-center justify-between">
+            <div>
+              <span class="text-sm text-white">Allow global paths</span>
+              <div class="text-xs text-neutral-500 mt-0.5">Execute commands outside the agent workspace directory</div>
+            </div>
+            <button @click="execAllowGlobalPaths = !execAllowGlobalPaths; toggleExecConfig('allowGlobalPaths', execAllowGlobalPaths)"
+                    :class="execAllowGlobalPaths ? 'bg-amber-600 hover:bg-amber-500' : 'bg-neutral-700 hover:bg-neutral-600'"
+                    class="relative w-9 h-5 rounded-full transition-colors shrink-0">
+              <span :class="execAllowGlobalPaths ? 'translate-x-4' : 'translate-x-0.5'"
+                    class="block w-4 h-4 bg-white rounded-full transition-transform" />
+            </button>
+          </div>
         </div>
       </div>
 

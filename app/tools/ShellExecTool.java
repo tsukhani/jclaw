@@ -66,15 +66,21 @@ public class ShellExecTool implements ToolRegistry.Tool {
             return "Error: command is required and must not be empty.";
         }
 
-        // Allowlist validation
-        var allowlistError = validateAllowlist(command);
-        if (allowlistError != null) return allowlistError;
+        // Allowlist validation (bypass if agent has it configured)
+        boolean bypassAllowlist = "true".equals(
+                ConfigService.get("agent." + agent.name + ".shell.bypassAllowlist", "false"));
+        if (!bypassAllowlist) {
+            var allowlistError = validateAllowlist(command);
+            if (allowlistError != null) return allowlistError;
+        }
 
-        // Working directory resolution
+        // Working directory resolution (per-agent allowGlobalPaths overrides global setting)
+        boolean agentAllowGlobal = "true".equals(
+                ConfigService.get("agent." + agent.name + ".shell.allowGlobalPaths", "false"));
         var workspace = AgentService.workspacePath(agent.name).toAbsolutePath().normalize();
         Path workdir;
         try {
-            workdir = resolveWorkdir(args, workspace);
+            workdir = resolveWorkdir(args, workspace, agentAllowGlobal);
         } catch (IllegalArgumentException e) {
             return "Error: " + e.getMessage();
         }
@@ -129,8 +135,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
         return idx == -1 ? trimmed : trimmed.substring(0, idx);
     }
 
-    Path resolveWorkdir(JsonObject args, Path workspace) {
-        boolean allowGlobal = "true".equals(ConfigService.get("shell.allowGlobalPaths", "false"));
+    Path resolveWorkdir(JsonObject args, Path workspace, boolean allowGlobal) {
 
         if (!args.has("workdir") || args.get("workdir").getAsString().trim().isEmpty()) {
             if (!Files.isDirectory(workspace)) {

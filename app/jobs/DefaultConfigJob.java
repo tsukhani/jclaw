@@ -55,7 +55,6 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("shell.defaultTimeoutSeconds", "30");
         seedIfAbsent("shell.maxTimeoutSeconds", "300");
         seedIfAbsent("shell.maxOutputBytes", "102400");
-        seedIfAbsent("shell.allowGlobalPaths", "false");
     }
 
     private void seedDefaultAgent() {
