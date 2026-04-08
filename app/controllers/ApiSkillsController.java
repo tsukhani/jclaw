@@ -115,6 +115,81 @@ public class ApiSkillsController extends Controller {
         }
     }
 
+    /** GET /api/skills/{name}/files — List all files in a skill folder with metadata. */
+    public static void listFiles(String name) {
+        var dir = SkillLoader.globalSkillsPath().resolve(name);
+        if (!Files.isDirectory(dir)) notFound();
+
+        try {
+            var files = new java.util.ArrayList<java.util.Map<String, Object>>();
+            try (var walk = Files.walk(dir)) {
+                walk.filter(Files::isRegularFile)
+                    .sorted()
+                    .forEach(p -> {
+                        var rel = dir.relativize(p).toString();
+                        var map = new java.util.HashMap<String, Object>();
+                        map.put("path", rel);
+                        map.put("name", p.getFileName().toString());
+                        try { map.put("size", Files.size(p)); } catch (IOException _) { map.put("size", 0); }
+                        map.put("isText", isTextFile(p));
+                        files.add(map);
+                    });
+            }
+            renderJSON(gson.toJson(java.util.Map.of("files", files)));
+        } catch (IOException e) {
+            error(500, "Failed to list skill files: " + e.getMessage());
+        }
+    }
+
+    /** GET /api/skills/{name}/files/{<path>filePath} — Read a text file from a skill folder. */
+    public static void readFile(String name, String filePath) {
+        var dir = SkillLoader.globalSkillsPath().resolve(name);
+        var target = dir.resolve(filePath).normalize();
+        if (!target.startsWith(dir)) { error(403, "Path escapes skill directory"); return; }
+        if (!Files.exists(target)) notFound();
+
+        try {
+            renderJSON(gson.toJson(java.util.Map.of(
+                    "path", filePath,
+                    "content", Files.readString(target)
+            )));
+        } catch (IOException e) {
+            error(500, "Failed to read file: " + e.getMessage());
+        }
+    }
+
+    /** PUT /api/skills/{name}/files/{<path>filePath} — Write a text file in a skill folder. */
+    public static void writeFile(String name, String filePath) {
+        var dir = SkillLoader.globalSkillsPath().resolve(name);
+        var target = dir.resolve(filePath).normalize();
+        if (!target.startsWith(dir)) { error(403, "Path escapes skill directory"); return; }
+
+        var body = readJsonBody();
+        if (body == null || !body.has("content")) badRequest();
+
+        try {
+            Files.createDirectories(target.getParent());
+            Files.writeString(target, body.get("content").getAsString());
+            if ("SKILL.md".equals(target.getFileName().toString())) {
+                SkillLoader.clearCache();
+            }
+            renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
+        } catch (IOException e) {
+            error(500, "Failed to write file: " + e.getMessage());
+        }
+    }
+
+    private static boolean isTextFile(Path p) {
+        var name = p.getFileName().toString().toLowerCase();
+        return name.endsWith(".md") || name.endsWith(".txt") || name.endsWith(".json")
+                || name.endsWith(".yaml") || name.endsWith(".yml") || name.endsWith(".xml")
+                || name.endsWith(".js") || name.endsWith(".ts") || name.endsWith(".py")
+                || name.endsWith(".sh") || name.endsWith(".html") || name.endsWith(".css")
+                || name.endsWith(".csv") || name.endsWith(".toml") || name.endsWith(".ini")
+                || name.endsWith(".cfg") || name.endsWith(".conf") || name.endsWith(".env")
+                || name.endsWith(".log") || name.endsWith(".sql");
+    }
+
     /** DELETE /api/skills/{name} — Delete a global skill. */
     public static void delete(String name) {
         if ("skill-creator".equals(name)) {
