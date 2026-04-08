@@ -101,74 +101,60 @@ jclaw/
 ### Clone & Setup
 
 ```bash
-# Clone the repository
 git clone https://bitbucket.abundent.com/scm/jclaw/jclaw.git
 cd jclaw
-
-# Install frontend dependencies
 cd frontend && pnpm install && cd ..
-
-# Resolve backend dependencies
 play deps --sync
 ```
 
 ### Development
 
 ```bash
-# Terminal 1: Start Play backend
-play run
+# Start both backend and frontend in dev mode
+./jclaw.sh --dev start
 
-# Terminal 2: Start Nuxt dev server
-cd frontend && pnpm dev
+# Stop
+./jclaw.sh --dev stop
+
+# Check status
+./jclaw.sh --dev status
 ```
 
-The application will be available at:
-- **Backend API**: http://localhost:9000
-- **Frontend SPA**: http://localhost:3000
-
-To use custom ports:
-
-```bash
-# Play backend on a different port
-play run --http.port=8080
-
-# Nuxt frontend on a different port
-cd frontend && PORT=4000 pnpm dev
-```
-
-> **Note:** If you change the Play backend port, update `frontend/nuxt.config.ts` to point the API proxy (`devProxy` and `routeRules`) at the new port.
+Default ports: backend on **:9000**, frontend on **:3000**.
 
 ### Production Deployment
 
 ```bash
-# 1. Package the application as a ZIP
-play dist
-# Creates dist/jclaw.zip
+# Deploy to a target directory, build everything, and start
+./jclaw.sh --deploy /opt/jclaw start
 
-# 2. Copy dist/jclaw.zip to your deployment machine, then:
-unzip jclaw.zip
-cd jclaw
-
-# 3. Install and build the frontend
-cd frontend && pnpm install && pnpm build && cd ..
-
-# 4. Resolve backend dependencies and start
-play deps --sync
-play start --%prod
-cd frontend && node .output/server/index.mjs
+# Stop
+./jclaw.sh --deploy /opt/jclaw stop
 ```
 
-To use custom ports in production:
+This packages the app with `play dist`, copies to the target directory, installs dependencies, builds the frontend, and starts both services in production mode.
+
+To start an existing deployment (without re-packaging):
 
 ```bash
-# Play backend on port 8080
-play start --%prod --http.port=8080
+cd /opt/jclaw
+./jclaw.sh start
 
-# Nuxt frontend on port 4000
-cd frontend && PORT=4000 node .output/server/index.mjs
+# Stop
+./jclaw.sh stop
 ```
 
-> **Note:** If you change the Play backend port, update the `routeRules` proxy target in `frontend/nuxt.config.ts` before building the frontend.
+### Custom Ports
+
+Use `--backend-port` and `--frontend-port` with any mode. The script automatically updates the frontend API proxy to point at the correct backend port.
+
+```bash
+# Dev mode with custom ports
+./jclaw.sh --dev --backend-port 8080 --frontend-port 4000 start
+
+# Production deploy with custom ports
+./jclaw.sh --deploy /opt/jclaw --backend-port 8080 --frontend-port 4000 start
+```
 
 ---
 
