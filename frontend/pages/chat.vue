@@ -13,6 +13,17 @@ function renderMarkdown(text: string): string {
   return DOMPurify.sanitize(marked.parse(text) as string)
 }
 
+function formatTimestamp(iso: string): string {
+  if (!iso) return ''
+  const date = new Date(iso)
+  if (isNaN(date.getTime())) return ''
+  return date.toLocaleString(undefined, {
+    month: 'long', day: 'numeric', year: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+    timeZoneName: 'short'
+  })
+}
+
 const { data: agents } = await useFetch<any[]>('/api/agents')
 
 const selectedAgentId = ref<number | null>(null)
@@ -359,27 +370,38 @@ function exportConversation() {
       </div>
 
       <!-- Messages -->
-      <div ref="messagesEl" class="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref="messagesEl" class="flex-1 overflow-y-auto p-4 space-y-5">
         <div
           v-for="msg in displayMessages"
           :key="msg.id ?? msg._key"
-          :class="msg.role === 'user' ? 'ml-12' : 'mr-12'"
+          :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'"
         >
-          <div class="text-xs text-neutral-600 mb-1">{{ msg.role }}</div>
-          <!-- User messages: plain text -->
-          <div v-if="msg.role === 'user'"
-               class="bg-neutral-800 text-neutral-200 px-3 py-2 text-sm whitespace-pre-wrap"
-          >{{ msg.content }}</div>
-          <!-- Assistant messages: rendered markdown -->
-          <div v-else
-               class="prose-chat text-neutral-300 border border-neutral-800 px-3 py-2 text-sm"
-               v-html="renderMarkdown(msg.content || '')"
-          />
+          <div :class="msg.role === 'user' ? 'max-w-[80%]' : 'max-w-[85%]'">
+            <div class="flex items-baseline gap-2 mb-1" :class="msg.role === 'user' ? 'justify-end' : ''">
+              <span class="text-xs font-medium" :class="msg.role === 'user' ? 'text-blue-400' : 'text-emerald-400'">
+                {{ msg.role === 'user' ? 'you' : 'assistant' }}
+              </span>
+              <span v-if="msg.createdAt" class="text-[10px] text-neutral-600">{{ formatTimestamp(msg.createdAt) }}</span>
+            </div>
+            <!-- User messages: plain text -->
+            <div v-if="msg.role === 'user'"
+                 class="bg-blue-900/30 border border-blue-800/40 rounded-2xl rounded-tr-sm text-neutral-200 px-4 py-2.5 text-sm whitespace-pre-wrap"
+            >{{ msg.content }}</div>
+            <!-- Assistant messages: rendered markdown -->
+            <div v-else
+                 class="prose-chat bg-neutral-800/50 border border-neutral-700/50 rounded-2xl rounded-tl-sm text-neutral-300 px-4 py-2.5 text-sm"
+                 v-html="renderMarkdown(msg.content || '')"
+            />
+          </div>
         </div>
-        <div v-if="streaming && !streamContent" class="mr-12">
-          <div class="text-xs text-neutral-600 mb-1">assistant</div>
-          <div class="border border-neutral-800 px-3 py-2 text-sm text-neutral-500">
-            <span class="animate-pulse">Thinking...</span>
+        <div v-if="streaming && !streamContent" class="flex justify-start">
+          <div class="max-w-[85%]">
+            <div class="flex items-baseline gap-2 mb-1">
+              <span class="text-xs font-medium text-emerald-400">assistant</span>
+            </div>
+            <div class="bg-neutral-800/50 border border-neutral-700/50 rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm text-neutral-500">
+              <span class="animate-pulse">Thinking...</span>
+            </div>
           </div>
         </div>
       </div>
