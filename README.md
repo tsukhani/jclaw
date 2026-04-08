@@ -158,6 +158,18 @@ play start --%prod
 cd frontend && node .output/server/index.mjs
 ```
 
+To use custom ports in production:
+
+```bash
+# Play backend on port 8080
+play start --%prod --http.port=8080
+
+# Nuxt frontend on port 4000
+cd frontend && PORT=4000 node .output/server/index.mjs
+```
+
+> **Note:** If you change the Play backend port, update the `routeRules` proxy target in `frontend/nuxt.config.ts` before building the frontend.
+
 ---
 
 ## Architecture
