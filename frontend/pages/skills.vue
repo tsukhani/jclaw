@@ -195,6 +195,7 @@ const saving = ref(false)
 
 // File browser state for edit mode
 const skillFiles = ref<any[]>([])
+const skillTools = ref<any[]>([])
 const activeFile = ref<string | null>(null)
 const fileContent = ref('')
 const fileDirty = ref(false)
@@ -205,6 +206,7 @@ function newSkill() {
   creating.value = true
   editing.value = null
   skillFiles.value = []
+  skillTools.value = []
   activeFile.value = null
 }
 
@@ -216,9 +218,10 @@ async function editSkill(skill: any) {
     editing.value = { ...skill, folderName }
     creating.value = false
 
-    // Load file listing
+    // Load file listing and tool dependencies
     const res = await $fetch<any>(`/api/skills/${folderName}/files`)
     skillFiles.value = res.files || []
+    skillTools.value = res.tools || []
 
     // Auto-select SKILL.md
     const skillMd = skillFiles.value.find((f: any) => f.path === 'SKILL.md')
@@ -306,6 +309,7 @@ function cancel() {
   editing.value = null
   creating.value = false
   skillFiles.value = []
+  skillTools.value = []
   activeFile.value = null
 }
 
@@ -534,6 +538,21 @@ function totalSkillCount(agentId: number) {
           <div>
             <div class="text-sm font-medium text-white font-mono">{{ editing.folderName || editing.name }}</div>
             <div class="text-xs text-neutral-500">{{ skillFiles.length }} file{{ skillFiles.length !== 1 ? 's' : '' }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tool dependencies -->
+      <div v-if="skillTools.length" class="bg-neutral-900 border border-neutral-800 px-4 py-3">
+        <div class="flex items-center gap-2 mb-2">
+          <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+          <span class="text-xs font-medium text-neutral-400 uppercase tracking-wider">Required Tools</span>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <div v-for="tool in skillTools" :key="tool.name"
+               class="flex items-center gap-1.5 px-2.5 py-1 bg-amber-900/20 border border-amber-800/30 rounded">
+            <span class="text-xs font-mono text-amber-300">{{ tool.name }}</span>
+            <span class="text-[10px] text-neutral-500">{{ tool.description }}</span>
           </div>
         </div>
       </div>

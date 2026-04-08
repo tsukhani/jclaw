@@ -115,13 +115,30 @@ public class ApiSkillsController extends Controller {
         }
     }
 
-    /** GET /api/skills/{name}/files — List all files in a skill folder with metadata. */
+    // Known tool names in JClaw — used for detecting skill dependencies
+    private static final java.util.Map<String, String> KNOWN_TOOLS = java.util.Map.ofEntries(
+            java.util.Map.entry("exec", "Shell command execution"),
+            java.util.Map.entry("shell", "Shell command execution"),
+            java.util.Map.entry("filesystem", "File read/write/list"),
+            java.util.Map.entry("readFile", "File read (filesystem)"),
+            java.util.Map.entry("writeFile", "File write (filesystem)"),
+            java.util.Map.entry("listFiles", "File listing (filesystem)"),
+            java.util.Map.entry("web_search", "Web search"),
+            java.util.Map.entry("web_fetch", "Fetch URL content"),
+            java.util.Map.entry("browser", "Browser automation (Playwright)"),
+            java.util.Map.entry("task_manager", "Task scheduling"),
+            java.util.Map.entry("checklist", "Progress tracking"),
+            java.util.Map.entry("skills", "Skill management")
+    );
+
+    /** GET /api/skills/{name}/files — List all files in a skill folder with metadata and detected tool dependencies. */
     public static void listFiles(String name) {
         var dir = SkillLoader.globalSkillsPath().resolve(name);
         if (!Files.isDirectory(dir)) notFound();
 
         try {
             var files = new java.util.ArrayList<java.util.Map<String, Object>>();
+            var allTextContent = new StringBuilder();
             try (var walk = Files.walk(dir)) {
                 walk.filter(Files::isRegularFile)
                     .sorted()
@@ -131,11 +148,33 @@ public class ApiSkillsController extends Controller {
                         map.put("path", rel);
                         map.put("name", p.getFileName().toString());
                         try { map.put("size", Files.size(p)); } catch (IOException _) { map.put("size", 0); }
-                        map.put("isText", isTextFile(p));
+                        var text = isTextFile(p);
+                        map.put("isText", text);
                         files.add(map);
+                        if (text) {
+                            try { allTextContent.append(Files.readString(p)).append("\n"); } catch (IOException _) {}
+                        }
                     });
             }
-            renderJSON(gson.toJson(java.util.Map.of("files", files)));
+
+            // Detect tool dependencies from text content
+            var content = allTextContent.toString();
+            var detectedTools = new java.util.ArrayList<java.util.Map<String, String>>();
+            var seen = new java.util.HashSet<String>();
+            for (var entry : KNOWN_TOOLS.entrySet()) {
+                if (content.contains(entry.getKey()) && !seen.contains(entry.getValue())) {
+                    seen.add(entry.getValue());
+                    detectedTools.add(java.util.Map.of(
+                            "name", entry.getKey(),
+                            "description", entry.getValue()
+                    ));
+                }
+            }
+
+            var result = new java.util.HashMap<String, Object>();
+            result.put("files", files);
+            result.put("tools", detectedTools);
+            renderJSON(gson.toJson(result));
         } catch (IOException e) {
             error(500, "Failed to list skill files: " + e.getMessage());
         }
