@@ -371,13 +371,13 @@ function exportConversation() {
       </div>
 
       <!-- Messages -->
-      <div ref="messagesEl" class="flex-1 overflow-y-auto p-4 space-y-5">
+      <div ref="messagesEl" class="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-5">
         <div
           v-for="msg in displayMessages"
           :key="msg.id ?? msg._key"
           :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'"
         >
-          <div :class="msg.role === 'user' ? 'max-w-[80%]' : 'max-w-[85%]'">
+          <div :class="msg.role === 'user' ? 'max-w-[80%]' : 'max-w-[85%]'" class="min-w-0">
             <div class="flex items-baseline gap-2 mb-1" :class="msg.role === 'user' ? 'justify-end' : ''">
               <span class="text-xs font-medium" :class="msg.role === 'user' ? 'text-blue-400' : 'text-emerald-400'">
                 {{ msg.role === 'user' ? 'you' : 'assistant' }}
@@ -386,11 +386,11 @@ function exportConversation() {
             </div>
             <!-- User messages: plain text -->
             <div v-if="msg.role === 'user'"
-                 class="bg-blue-900/30 border border-blue-800/40 rounded-2xl rounded-tr-sm text-neutral-200 px-4 py-2.5 text-sm whitespace-pre-wrap"
+                 class="bg-blue-900/30 border border-blue-800/40 rounded-2xl rounded-tr-sm text-neutral-200 px-4 py-2.5 text-sm whitespace-pre-wrap break-words"
             >{{ msg.content }}</div>
             <!-- Assistant messages: rendered markdown -->
             <div v-else
-                 class="prose-chat bg-neutral-800/50 border border-neutral-700/50 rounded-2xl rounded-tl-sm text-neutral-300 px-4 py-2.5 text-sm"
+                 class="prose-chat bg-neutral-800/50 border border-neutral-700/50 rounded-2xl rounded-tl-sm text-neutral-300 px-4 py-2.5 text-sm overflow-x-auto break-words"
                  v-html="renderMarkdown(msg.content || '')"
             />
           </div>
@@ -454,6 +454,7 @@ function exportConversation() {
 
 <style>
 /* Markdown rendering styles for chat messages */
+.prose-chat { overflow-wrap: break-word; word-break: break-word; }
 .prose-chat p { margin: 0.5em 0; }
 .prose-chat p:first-child { margin-top: 0; }
 .prose-chat p:last-child { margin-bottom: 0; }
