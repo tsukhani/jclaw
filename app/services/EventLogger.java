@@ -27,7 +27,8 @@ public class EventLogger {
                 event.category = category;
                 event.agentId = agentId;
                 event.channel = channel;
-                event.message = message;
+                event.message = message != null && message.length() > 500
+                        ? message.substring(0, 497) + "..." : message;
                 event.details = details;
                 event.save();
             });

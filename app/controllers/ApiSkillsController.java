@@ -397,8 +397,9 @@ public class ApiSkillsController extends Controller {
             var response = OpenAiCompatibleClient.chat(provider, defaultAgent.modelId, messages, null, null);
             var text = response.choices().get(0).message().content().toString().trim();
 
-            services.EventLogger.info("skills", "LLM sanitization response (%d chars): %s"
-                    .formatted(text.length(), text.length() > 500 ? text.substring(0, 500) + "..." : text));
+            services.EventLogger.info("skills",
+                    "LLM sanitization response (%d chars)".formatted(text.length()),
+                    text);
 
             // Strip markdown code fences if the LLM wrapped it
             if (text.startsWith("```")) {
