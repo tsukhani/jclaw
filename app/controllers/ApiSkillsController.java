@@ -157,30 +157,8 @@ public class ApiSkillsController extends Controller {
                     });
             }
 
-            // Detect tool dependencies from text content
             var content = allTextContent.toString();
-            var detectedTools = new java.util.ArrayList<java.util.Map<String, String>>();
-            var seen = new java.util.HashSet<String>();
-            for (var entry : KNOWN_TOOLS.entrySet()) {
-                if (content.contains(entry.getKey()) && !seen.contains(entry.getValue())) {
-                    seen.add(entry.getValue());
-                    detectedTools.add(java.util.Map.of(
-                            "name", entry.getKey(),
-                            "description", entry.getValue()
-                    ));
-                }
-            }
-            // Detect exec tool from bash/shell code blocks or command patterns
-            if (!seen.contains("Shell command execution")
-                    && (content.contains("```bash") || content.contains("```sh")
-                        || content.contains("```shell") || content.contains("run the command")
-                        || content.contains("execute the command"))) {
-                seen.add("Shell command execution");
-                detectedTools.add(java.util.Map.of(
-                        "name", "exec",
-                        "description", "Shell command execution"
-                ));
-            }
+            var detectedTools = detectTools(content);
 
             var result = new java.util.HashMap<String, Object>();
             result.put("files", files);
@@ -227,6 +205,24 @@ public class ApiSkillsController extends Controller {
         } catch (IOException e) {
             error(500, "Failed to write file: " + e.getMessage());
         }
+    }
+
+    private static java.util.List<java.util.Map<String, String>> detectTools(String content) {
+        var detectedTools = new java.util.ArrayList<java.util.Map<String, String>>();
+        var seen = new java.util.HashSet<String>();
+        for (var entry : KNOWN_TOOLS.entrySet()) {
+            if (content.contains(entry.getKey()) && !seen.contains(entry.getValue())) {
+                seen.add(entry.getValue());
+                detectedTools.add(java.util.Map.of("name", entry.getKey(), "description", entry.getValue()));
+            }
+        }
+        if (!seen.contains("Shell command execution")
+                && (content.contains("```bash") || content.contains("```sh")
+                    || content.contains("```shell") || content.contains("run the command")
+                    || content.contains("execute the command"))) {
+            detectedTools.add(java.util.Map.of("name", "exec", "description", "Shell command execution"));
+        }
+        return detectedTools;
     }
 
     private static boolean isTextFile(Path p) {
@@ -360,6 +356,101 @@ public class ApiSkillsController extends Controller {
             renderJSON(gson.toJson(java.util.Map.of("name", name, "status", "ok")));
         } catch (IOException e) {
             error(500, "Failed to copy skill: " + e.getMessage());
+        }
+    }
+
+    /** GET /api/agents/{id}/skills/{name}/files — List files in an agent workspace skill folder. */
+    public static void listAgentSkillFiles(Long id, String name) {
+        Agent agent = Agent.findById(id);
+        if (agent == null) notFound();
+        var dir = AgentService.workspacePath(agent.name).resolve("skills").resolve(name);
+        if (!Files.isDirectory(dir)) notFound();
+
+        try {
+            var files = new java.util.ArrayList<java.util.Map<String, Object>>();
+            var allTextContent = new StringBuilder();
+            try (var walk = Files.walk(dir)) {
+                walk.filter(Files::isRegularFile).sorted().forEach(p -> {
+                    var rel = dir.relativize(p).toString();
+                    var map = new java.util.HashMap<String, Object>();
+                    map.put("path", rel);
+                    map.put("name", p.getFileName().toString());
+                    try { map.put("size", Files.size(p)); } catch (IOException _) { map.put("size", 0); }
+                    var text = isTextFile(p);
+                    map.put("isText", text);
+                    files.add(map);
+                    if (text) {
+                        try { allTextContent.append(Files.readString(p)).append("\n"); } catch (IOException _) {}
+                    }
+                });
+            }
+
+            var content = allTextContent.toString();
+            var detectedTools = detectTools(content);
+
+            var result = new java.util.HashMap<String, Object>();
+            result.put("files", files);
+            result.put("tools", detectedTools);
+            renderJSON(gson.toJson(result));
+        } catch (IOException e) {
+            error(500, "Failed to list agent skill files: " + e.getMessage());
+        }
+    }
+
+    /** GET /api/agents/{id}/skills/{name}/files/{filePath} — Read a text file from an agent skill. */
+    public static void readAgentSkillFile(Long id, String name, String filePath) {
+        Agent agent = Agent.findById(id);
+        if (agent == null) notFound();
+        var dir = AgentService.workspacePath(agent.name).resolve("skills").resolve(name);
+        var target = dir.resolve(filePath).normalize();
+        if (!target.startsWith(dir)) { error(403, "Path escapes skill directory"); return; }
+        if (!Files.exists(target)) notFound();
+
+        try {
+            renderJSON(gson.toJson(java.util.Map.of("path", filePath, "content", Files.readString(target))));
+        } catch (IOException e) {
+            error(500, "Failed to read file: " + e.getMessage());
+        }
+    }
+
+    /** PUT /api/agents/{id}/skills/{name}/files/{filePath} — Write a text file in an agent skill. */
+    public static void writeAgentSkillFile(Long id, String name, String filePath) {
+        Agent agent = Agent.findById(id);
+        if (agent == null) notFound();
+        var dir = AgentService.workspacePath(agent.name).resolve("skills").resolve(name);
+        var target = dir.resolve(filePath).normalize();
+        if (!target.startsWith(dir)) { error(403, "Path escapes skill directory"); return; }
+
+        var body = readJsonBody();
+        if (body == null || !body.has("content")) badRequest();
+
+        try {
+            Files.createDirectories(target.getParent());
+            Files.writeString(target, body.get("content").getAsString());
+            if ("SKILL.md".equals(target.getFileName().toString())) SkillLoader.clearCache();
+            renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
+        } catch (IOException e) {
+            error(500, "Failed to write file: " + e.getMessage());
+        }
+    }
+
+    /** DELETE /api/agents/{id}/skills/{name}/delete — Delete a skill from an agent's workspace. */
+    public static void deleteAgentSkill(Long id, String name) {
+        Agent agent = Agent.findById(id);
+        if (agent == null) notFound();
+        var dir = AgentService.workspacePath(agent.name).resolve("skills").resolve(name);
+        if (!Files.isDirectory(dir)) notFound();
+
+        try {
+            try (var walk = Files.walk(dir)) {
+                walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                    try { Files.delete(p); } catch (IOException _) {}
+                });
+            }
+            SkillLoader.clearCache();
+            renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
+        } catch (IOException e) {
+            error(500, "Failed to delete agent skill: " + e.getMessage());
         }
     }
 

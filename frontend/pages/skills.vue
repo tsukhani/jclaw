@@ -200,6 +200,7 @@ const activeFile = ref<string | null>(null)
 const fileContent = ref('')
 const fileDirty = ref(false)
 const fileSaving = ref(false)
+const editingAgentId = ref<number | null>(null)  // null = global skill, number = agent workspace skill
 const isReadOnly = computed(() => (editing.value?.folderName || editing.value?.name) === 'skill-creator')
 
 function newSkill() {
@@ -239,11 +240,18 @@ async function editSkill(skill: any) {
   }
 }
 
+function skillFileApiBase() {
+  const folderName = editing.value?.folderName || editing.value?.name
+  if (editingAgentId.value != null) {
+    return `/api/agents/${editingAgentId.value}/skills/${folderName}/files`
+  }
+  return `/api/skills/${folderName}/files`
+}
+
 async function selectFile(file: any) {
   if (!file.isText) return
-  const folderName = editing.value?.folderName || editing.value?.name
   try {
-    const res = await $fetch<any>(`/api/skills/${folderName}/files/${file.path}`)
+    const res = await $fetch<any>(`${skillFileApiBase()}/${file.path}`)
     activeFile.value = file.path
     fileContent.value = res.content
     fileDirty.value = false
@@ -256,17 +264,16 @@ async function saveFile() {
   if (!activeFile.value || !editing.value) return
   fileSaving.value = true
   try {
-    const folderName = editing.value.folderName || editing.value.name
-    await $fetch(`/api/skills/${folderName}/files/${activeFile.value}`, {
+    await $fetch(`${skillFileApiBase()}/${activeFile.value}`, {
       method: 'PUT',
       body: { content: fileContent.value }
     })
     fileDirty.value = false
-    // If we saved SKILL.md, also update the form content for backward compat
     if (activeFile.value === 'SKILL.md') {
       form.value.content = fileContent.value
     }
     refreshSkills()
+    if (editingAgentId.value != null) loadAllAgentSkills()
   } catch (e) {
     console.error('Failed to save file:', e)
   } finally {
@@ -306,8 +313,49 @@ async function deleteSkill(skill: any) {
   }
 }
 
+async function editAgentSkill(agentId: number, skill: any) {
+  try {
+    const name = skill.folderName || skill.name
+    editing.value = { ...skill, folderName: name }
+    editingAgentId.value = agentId
+    creating.value = false
+
+    const res = await $fetch<any>(`/api/agents/${agentId}/skills/${name}/files`)
+    skillFiles.value = res.files || []
+    skillTools.value = res.tools || []
+
+    const skillMd = skillFiles.value.find((f: any) => f.path === 'SKILL.md')
+    if (skillMd) {
+      await selectFile(skillMd)
+    } else if (skillFiles.value.length > 0 && skillFiles.value[0].isText) {
+      await selectFile(skillFiles.value[0])
+    } else {
+      activeFile.value = null
+      fileContent.value = ''
+    }
+  } catch (e) {
+    console.error('Failed to load agent skill:', e)
+  }
+}
+
+async function deleteAgentSkill(agentId: number, skill: any) {
+  const name = skill.folderName || skill.name
+  try {
+    await $fetch(`/api/agents/${agentId}/skills/${name}/delete`, { method: 'DELETE' })
+    editing.value = null
+    editingAgentId.value = null
+    skillFiles.value = []
+    skillTools.value = []
+    activeFile.value = null
+    loadAllAgentSkills()
+  } catch (e) {
+    console.error('Failed to delete agent skill:', e)
+  }
+}
+
 function cancel() {
   editing.value = null
+  editingAgentId.value = null
   creating.value = false
   skillFiles.value = []
   skillTools.value = []
@@ -391,11 +439,21 @@ function totalSkillCount(agentId: number) {
                 <div class="flex items-center gap-2 min-w-0">
                   <span class="text-xs text-white font-mono truncate">{{ skill.name }}</span>
                 </div>
-                <label class="flex items-center shrink-0" @click.stop>
-                  <input type="checkbox" :checked="skill.enabled"
-                         @change="(e: Event) => toggleAgentSkill(agent.id, skill.name, (e.target as HTMLInputElement).checked)"
-                         class="accent-emerald-500 scale-90" />
-                </label>
+                <div class="flex items-center gap-1 shrink-0">
+                  <button @click.stop="editAgentSkill(agent.id, skill)"
+                          class="p-1 text-neutral-600 hover:text-white transition-colors opacity-0 group-hover:opacity-100" title="Edit skill">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                  </button>
+                  <button @click.stop="deleteAgentSkill(agent.id, skill)"
+                          class="p-1 text-neutral-600 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100" title="Delete skill">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                  </button>
+                  <label class="flex items-center" @click.stop>
+                    <input type="checkbox" :checked="skill.enabled"
+                           @change="(e: Event) => toggleAgentSkill(agent.id, skill.name, (e.target as HTMLInputElement).checked)"
+                           class="accent-emerald-500 scale-90" />
+                  </label>
+                </div>
               </div>
             </div>
             <div v-else class="text-xs text-neutral-600 italic">
@@ -530,7 +588,7 @@ function totalSkillCount(agentId: number) {
       <div class="flex items-center justify-between">
         <button @click="cancel" class="text-xs text-neutral-500 hover:text-white transition-colors">&larr; Back to skills</button>
         <button v-if="(editing.folderName || editing.name) !== 'skill-creator'"
-                @click="deleteSkill(editing)"
+                @click="editingAgentId != null ? deleteAgentSkill(editingAgentId, editing) : deleteSkill(editing)"
                 class="p-1.5 text-red-400/70 hover:text-red-400 transition-colors" title="Delete skill">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
         </button>
@@ -543,7 +601,13 @@ function totalSkillCount(agentId: number) {
             <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
           </div>
           <div>
-            <div class="text-sm font-medium text-white font-mono">{{ editing.folderName || editing.name }}</div>
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium text-white font-mono">{{ editing.folderName || editing.name }}</span>
+              <span v-if="editingAgentId != null" class="text-[10px] text-blue-400 border border-blue-400/30 px-1">
+                {{ agents?.find((a: any) => a.id === editingAgentId)?.name ?? 'agent' }}
+              </span>
+              <span v-else class="text-[10px] text-green-400 border border-green-400/30 px-1">global</span>
+            </div>
             <div class="text-xs text-neutral-500">{{ skillFiles.length }} file{{ skillFiles.length !== 1 ? 's' : '' }}</div>
           </div>
         </div>
