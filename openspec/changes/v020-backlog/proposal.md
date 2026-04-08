@@ -58,6 +58,30 @@ JClaw v0.1.0 (core platform) and v0.2.0 high-priority features (Playwright brows
 - `health-check-enriched`: /api/status is minimal. Should include DB connectivity, provider reachability, memory store status. **Small complexity.**
 - `opentelemetry-export`: No metrics/traces export. OpenClaw exports OTLP/Protobuf to any OTel-compatible backend. **Medium complexity.**
 
+## Tool Gap Analysis — OpenClaw (29 tools) vs JClaw (8 tools)
+
+| Category | OpenClaw | JClaw |
+|---|---|---|
+| File operations | read, write, edit, apply_patch | filesystem (read/write/list) |
+| Shell execution | exec, process (background) | exec |
+| Web | web_search, web_fetch | web_search, web_fetch |
+| Browser | *(none — uses exec + puppeteer)* | browser (Playwright) |
+| Tasks/scheduling | cron | task_manager |
+| Skills/workflow | checklist-like via update_plan | checklist, skills |
+| Session management | sessions_list, sessions_history, sessions_send, sessions_spawn, sessions_yield, session_status | *(none)* |
+| Agent management | agents_list, subagents, gateway | *(none)* |
+| Media | image, image_generate, video_generate, music_generate, tts, pdf | *(none)* |
+| Communication | canvas, message, nodes | *(none)* |
+
+**Biggest gaps by impact:**
+1. Session/sub-agent tools (6 tools) — multi-agent orchestration with spawn/yield/announce
+2. Media pipeline (6 tools) — image/video/audio generation + PDF extraction
+3. File edit tool — line-range editing vs full-file write-only
+4. Background process management — OpenClaw can track/query running processes
+5. Message tool — proactive cross-channel messaging to arbitrary targets
+6. Canvas — desktop-app-specific UI panel, not applicable to JClaw's web architecture
+7. Nodes — companion device control (iOS/Android/macOS), not applicable to single-server
+
 ## Deferred
 
 - `memory-sleep-cycle`: 10-phase memory consolidation (dedup, entity extraction, decay, graph linking). Requires Neo4j. **Large.**
