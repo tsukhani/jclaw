@@ -1,10 +1,6 @@
 pipeline {
     agent any
 
-    parameters {
-        string(name: 'RELEASE_VERSION', defaultValue: '', description: 'Set to a version tag (e.g. v0.3.0) to create a GitHub Release. Leave empty for normal CI builds.')
-    }
-
     tools {
         jdk 'JDK25'
         nodejs 'node-22'
@@ -80,16 +76,20 @@ pipeline {
 
         stage('Release') {
             when {
-                expression { params.RELEASE_VERSION?.trim() }
+                expression { env.GIT_BRANCH ==~ /.*\/v\d+.*/ || env.GIT_BRANCH ==~ /v\d+.*/ }
             }
             steps {
-                withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
-                    sh """
-                        gh release create ${params.RELEASE_VERSION} dist/jclaw.zip \
-                            --repo tsukhani/jclaw \
-                            --title "JClaw ${params.RELEASE_VERSION}" \
-                            --generate-notes
-                    """
+                script {
+                    def version = env.GIT_BRANCH.replaceAll('.*/', '')
+                    sh "echo 'Detected release version: ${version} (GIT_BRANCH=${env.GIT_BRANCH})'"
+                    withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
+                        sh """
+                            gh release create ${version} dist/jclaw.zip \
+                                --repo tsukhani/jclaw \
+                                --title "JClaw ${version}" \
+                                --generate-notes
+                        """
+                    }
                 }
             }
         }
