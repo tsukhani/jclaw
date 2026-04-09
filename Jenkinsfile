@@ -87,12 +87,22 @@ pipeline {
                     def version = 'v' + sh(script: "grep '^application.version=' conf/application.conf | cut -d= -f2", returnStdout: true).trim()
                     sh "echo 'Creating release: ${version}'"
                     sh "git tag ${version} || true"
+
+                    // GitHub Release with dist zip
                     withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
                         sh """
                             gh release create ${version} dist/jclaw.zip \
                                 --repo tsukhani/jclaw \
                                 --title "JClaw ${version}" \
                                 --generate-notes
+                        """
+
+                        // Docker image to GitHub Container Registry
+                        sh """
+                            echo \$GH_TOKEN | docker login ghcr.io -u tsukhani --password-stdin
+                            docker build -t ghcr.io/tsukhani/jclaw:${version} -t ghcr.io/tsukhani/jclaw:latest .
+                            docker push ghcr.io/tsukhani/jclaw:${version}
+                            docker push ghcr.io/tsukhani/jclaw:latest
                         """
                     }
                 }

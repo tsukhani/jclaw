@@ -1,0 +1,32 @@
+# Build artifacts
+dist/
+tmp/
+logs/
+data/
+test-result/
+precompiled/
+
+# Frontend build (handled by multi-stage build)
+frontend/.nuxt/
+frontend/.output/
+frontend/node_modules/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Git
+.git/
+
+# Project management
+_bmad/
+_bmad-output/
+openspec/
+
+# OS
+.DS_Store
+
+# Dependencies (resolved inside container)
+lib/
+modules/
