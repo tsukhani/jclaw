@@ -182,7 +182,7 @@ const SEARCH_PROVIDERS: Record<string, { label: string, keys: { key: string, lab
 // --- Model management ---
 const expandedModelsProvider = ref<string | null>(null)
 const editingModelIdx = ref<number | null>(null)
-const modelForm = ref({ id: '', name: '', contextWindow: 131072, maxTokens: 8192, supportsThinking: false })
+const modelForm = ref({ id: '', name: '', contextWindow: 131072, maxTokens: 8192, supportsThinking: false, promptPrice: -1, completionPrice: -1 })
 const addingModel = ref(false)
 
 function getProviderModels(providerName: string): any[] {
@@ -211,10 +211,30 @@ async function fetchRanksForProvider(providerName: string) {
   try {
     const res = await $fetch<any>(`/api/providers/${providerName}/discover-models`, { method: 'POST' })
     const rankMap = new Map<string, number>()
+    const discoveredMap = new Map<string, any>()
     for (const m of (res.models || [])) {
       if (m.leaderboardRank) rankMap.set(m.id, m.leaderboardRank)
+      discoveredMap.set(m.id, m)
     }
     configuredModelRanks.value = new Map(configuredModelRanks.value).set(providerName, rankMap)
+
+    // Backfill pricing on configured models that are missing it
+    const configured = getProviderModels(providerName)
+    let updated = false
+    for (const model of configured) {
+      const discovered = discoveredMap.get(model.id)
+      if (discovered) {
+        if (model.promptPrice == null && discovered.promptPrice >= 0) {
+          model.promptPrice = discovered.promptPrice
+          updated = true
+        }
+        if (model.completionPrice == null && discovered.completionPrice >= 0) {
+          model.completionPrice = discovered.completionPrice
+          updated = true
+        }
+      }
+    }
+    if (updated) await saveModels(providerName, configured)
   } catch {
     // Best-effort — no ranks if discovery fails
   }
@@ -232,14 +252,16 @@ function startEditModel(providerName: string, idx: number) {
     name: m.name || '',
     contextWindow: m.contextWindow || 131072,
     maxTokens: m.maxTokens || 8192,
-    supportsThinking: m.supportsThinking || false
+    supportsThinking: m.supportsThinking || false,
+    promptPrice: m.promptPrice ?? -1,
+    completionPrice: m.completionPrice ?? -1
   }
   editingModelIdx.value = idx
   addingModel.value = false
 }
 
 function startAddModel() {
-  modelForm.value = { id: '', name: '', contextWindow: 131072, maxTokens: 8192, supportsThinking: false }
+  modelForm.value = { id: '', name: '', contextWindow: 131072, maxTokens: 8192, supportsThinking: false, promptPrice: -1, completionPrice: -1 }
   addingModel.value = true
   editingModelIdx.value = null
 }
@@ -382,8 +404,9 @@ async function addDiscoveredModels() {
       name: m.name,
       contextWindow: m.contextWindow,
       maxTokens: m.maxTokens,
-      // Only auto-enable thinking if the provider confirmed it via metadata
-      supportsThinking: m.thinkingDetectedFromProvider ? m.supportsThinking : false
+      supportsThinking: m.thinkingDetectedFromProvider ? m.supportsThinking : false,
+      ...(m.promptPrice >= 0 ? { promptPrice: m.promptPrice } : {}),
+      ...(m.completionPrice >= 0 ? { completionPrice: m.completionPrice } : {})
     }))
   const merged = [...existing, ...toAdd]
   await saveModels(discoveryProvider.value, merged)
@@ -514,6 +537,14 @@ const providerEntries = computed(() => {
                     <label class="block text-[10px] text-neutral-600 mb-0.5">Max Tokens</label>
                     <input v-model.number="modelForm.maxTokens" type="number" class="w-full px-2 py-1 bg-neutral-800 border border-neutral-700 text-xs text-white font-mono focus:outline-none" />
                   </div>
+                  <div>
+                    <label class="block text-[10px] text-neutral-600 mb-0.5">Input $/M tokens</label>
+                    <input v-model.number="modelForm.promptPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-800 border border-neutral-700 text-xs text-white font-mono focus:outline-none" />
+                  </div>
+                  <div>
+                    <label class="block text-[10px] text-neutral-600 mb-0.5">Output $/M tokens</label>
+                    <input v-model.number="modelForm.completionPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-800 border border-neutral-700 text-xs text-white font-mono focus:outline-none" />
+                  </div>
                 </div>
                 <div class="flex items-center justify-between">
                   <label class="flex items-center gap-1.5 text-xs text-neutral-400">
@@ -547,8 +578,14 @@ const providerEntries = computed(() => {
                       <span v-if="model.supportsThinking" class="ml-2 text-[10px] text-blue-400 border border-blue-400/30 px-1">thinking</span>
                     </div>
                   </div>
-                  <div class="flex items-center gap-3">
-                    <span class="text-[10px] text-neutral-600 font-mono">{{ (model.contextWindow / 1024).toFixed(0) }}K ctx / {{ (model.maxTokens / 1024).toFixed(0) }}K out</span>
+                  <div class="flex items-center gap-2">
+                    <span v-if="model.promptPrice > 0"
+                          class="text-xs text-amber-500/70 font-mono"
+                          :title="`Input: $${model.promptPrice}/M tokens, Output: $${model.completionPrice}/M tokens`">
+                      ${{ model.promptPrice < 1 ? model.promptPrice.toFixed(2) : model.promptPrice.toFixed(0) }}/M
+                    </span>
+                    <span class="text-xs text-neutral-500 font-mono">{{ (model.contextWindow / 1024).toFixed(0) }}K ctx</span>
+                    <span class="text-xs text-neutral-600 font-mono">{{ (model.maxTokens / 1024).toFixed(0) }}K out</span>
                     <button @click="startEditModel(name, idx)" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit model">
                       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
                     </button>
@@ -577,6 +614,14 @@ const providerEntries = computed(() => {
                 <div>
                   <label class="block text-[10px] text-neutral-600 mb-0.5">Max Tokens</label>
                   <input v-model.number="modelForm.maxTokens" type="number" class="w-full px-2 py-1 bg-neutral-800 border border-neutral-700 text-xs text-white font-mono focus:outline-none" />
+                </div>
+                <div>
+                  <label class="block text-[10px] text-neutral-600 mb-0.5">Input $/M tokens</label>
+                  <input v-model.number="modelForm.promptPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-800 border border-neutral-700 text-xs text-white font-mono focus:outline-none" />
+                </div>
+                <div>
+                  <label class="block text-[10px] text-neutral-600 mb-0.5">Output $/M tokens</label>
+                  <input v-model.number="modelForm.completionPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-800 border border-neutral-700 text-xs text-white font-mono focus:outline-none" />
                 </div>
               </div>
               <div class="flex items-center justify-between">

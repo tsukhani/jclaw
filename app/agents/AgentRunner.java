@@ -205,6 +205,7 @@ public class AgentRunner {
                 var maxTokens = modelInfo != null && modelInfo.maxTokens() > 0 ? modelInfo.maxTokens() : null;
 
                 // Stream with tool call handling (HTTP, no JPA)
+                var streamStartMs = System.currentTimeMillis();
                 var accumulator = primary.chatStreamAccumulate(
                         agent.modelId, messages, tools, onToken, onReasoning, maxTokens, agent.thinkingMode);
 
@@ -277,21 +278,49 @@ public class AgentRunner {
                     ConversationService.appendAssistantMessage(conv, finalContent, null);
                 });
 
-                // Log and emit usage including reasoning tokens if available
+                // Log and emit usage including reasoning tokens, timing, and pricing
+                var durationMs = System.currentTimeMillis() - streamStartMs;
                 if (accumulator.usage != null) {
                     var u = accumulator.usage;
-                    var usageSummary = " [%d prompt, %d completion, %d total tokens%s]".formatted(
+                    var usageSummary = " [%d prompt, %d completion, %d total tokens%s, %.1fs]".formatted(
                             u.promptTokens(), u.completionTokens(), u.totalTokens(),
-                            u.reasoningTokens() > 0 ? ", %d reasoning".formatted(u.reasoningTokens()) : "");
+                            u.reasoningTokens() > 0 ? ", %d reasoning".formatted(u.reasoningTokens()) : "",
+                            durationMs / 1000.0);
                     EventLogger.info("llm", agent.name, channelType,
                             "Streaming complete (%d chars)%s".formatted(content.length(), usageSummary));
-                    // Emit usage as a JSON status so the frontend can display token counts
-                    var usageJson = "{\"usage\":{\"prompt\":%d,\"completion\":%d,\"total\":%d,\"reasoning\":%d}}"
-                            .formatted(u.promptTokens(), u.completionTokens(), u.totalTokens(), u.reasoningTokens());
-                    onStatus.accept(usageJson);
+
+                    // Build usage JSON with timing and pricing for the frontend
+                    var sb = new StringBuilder("{\"usage\":{");
+                    sb.append("\"prompt\":%d,\"completion\":%d,\"total\":%d,\"reasoning\":%d,\"durationMs\":%d"
+                            .formatted(u.promptTokens(), u.completionTokens(), u.totalTokens(), u.reasoningTokens(), durationMs));
+
+                    // Include model pricing if available from provider config
+                    if (modelInfo != null) {
+                        // Look up pricing from the config entries
+                        var modelsJson = services.ConfigService.get("provider." + agent.modelProvider + ".models");
+                        if (modelsJson != null) {
+                            try {
+                                var modelsArray = com.google.gson.JsonParser.parseString(modelsJson).getAsJsonArray();
+                                for (var el : modelsArray) {
+                                    var mObj = el.getAsJsonObject();
+                                    if (mObj.has("id") && mObj.get("id").getAsString().equals(agent.modelId)) {
+                                        if (mObj.has("promptPrice"))
+                                            sb.append(",\"promptPrice\":").append(mObj.get("promptPrice"));
+                                        if (mObj.has("completionPrice"))
+                                            sb.append(",\"completionPrice\":").append(mObj.get("completionPrice"));
+                                        break;
+                                    }
+                                }
+                            } catch (Exception _) { /* skip pricing if parse fails */ }
+                        }
+                    }
+                    sb.append("}}");
+                    onStatus.accept(sb.toString());
                 } else {
                     EventLogger.info("llm", agent.name, channelType,
-                            "Streaming complete (%d chars)".formatted(content.length()));
+                            "Streaming complete (%d chars, %.1fs)".formatted(content.length(), durationMs / 1000.0));
+                    // Emit timing even without usage data
+                    onStatus.accept("{\"usage\":{\"durationMs\":%d}}".formatted(durationMs));
                 }
                 onComplete.accept(content);
 

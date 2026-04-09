@@ -8,6 +8,21 @@ marked.setOptions({
   gfm: true
 })
 
+function formatUsageCost(usage: MessageUsage): string | null {
+  if (!usage.promptPrice && !usage.completionPrice) return null
+  const inputCost = (usage.prompt / 1_000_000) * (usage.promptPrice || 0)
+  const outputCost = (usage.completion / 1_000_000) * (usage.completionPrice || 0)
+  const total = inputCost + outputCost
+  if (total < 0.0001) return '< $0.0001'
+  return '$' + total.toFixed(4)
+}
+
+function formatTokensPerSec(usage: MessageUsage): string | null {
+  if (!usage.durationMs || usage.durationMs <= 0 || !usage.completion) return null
+  const tps = (usage.completion / usage.durationMs) * 1000
+  return tps.toFixed(1) + ' tok/s'
+}
+
 function renderMarkdown(text: string): string {
   if (!text) return ''
   return DOMPurify.sanitize(marked.parse(text) as string)
@@ -127,7 +142,15 @@ const agentBusy = ref(false)
 const streamContent = ref('')
 const streamReasoning = ref('')
 const showThinking = ref(true)
-const lastUsage = ref<{ prompt: number, completion: number, total: number, reasoning: number } | null>(null)
+interface MessageUsage {
+  prompt: number
+  completion: number
+  total: number
+  reasoning: number
+  durationMs: number
+  promptPrice?: number      // cost per million tokens (input)
+  completionPrice?: number  // cost per million tokens (output)
+}
 const messagesEl = ref<HTMLElement | null>(null)
 const abortController = ref<AbortController | null>(null)
 const sidebarWidth = ref(224) // 14rem = 224px (matches w-56)
@@ -203,9 +226,10 @@ onUnmounted(() => {
 })
 
 // Filter out tool messages and empty assistant messages (tool call records) from display
+// Keep assistant messages that have content, reasoning, or usage metrics
 const displayMessages = computed(() =>
   messages.value.filter(m =>
-    m.role !== 'tool' && m.content
+    m.role !== 'tool' && (m.content || m.reasoning || m.usage)
   )
 )
 
@@ -246,7 +270,6 @@ async function sendMessage() {
   streamContent.value = ''
   streamReasoning.value = ''
   streamStatus.value = ''
-  lastUsage.value = null
 
   // Add placeholder for streaming response
   const assistantIdx = messages.value.length
@@ -294,7 +317,7 @@ async function sendMessage() {
             if (event.content?.startsWith('{') && event.content.includes('"usage"')) {
               try {
                 const parsed = JSON.parse(event.content)
-                if (parsed.usage) lastUsage.value = parsed.usage
+                if (parsed.usage) messages.value[assistantIdx].usage = parsed.usage
               } catch { /* not JSON, treat as status text */ }
             } else {
               streamStatus.value = event.content
@@ -508,10 +531,6 @@ function exportConversation() {
 
         <span v-if="streaming" class="text-xs text-emerald-400 animate-pulse">{{ streamStatus || 'streaming...' }}</span>
         <span v-else-if="agentBusy" class="text-xs text-neutral-500 animate-pulse">processing queue...</span>
-        <span v-else-if="lastUsage" class="text-[10px] text-neutral-600 font-mono"
-              :title="`${lastUsage.prompt} prompt + ${lastUsage.completion} completion${lastUsage.reasoning ? ' (' + lastUsage.reasoning + ' reasoning)' : ''} = ${lastUsage.total} total tokens`">
-          {{ lastUsage.total.toLocaleString() }} tokens<template v-if="lastUsage.reasoning"> ({{ lastUsage.reasoning.toLocaleString() }} reasoning)</template>
-        </span>
       </div>
 
       <!-- Messages -->
@@ -544,9 +563,45 @@ function exportConversation() {
                 {{ msg.reasoning }}
               </div>
               <!-- Response content -->
-              <div class="prose-chat bg-neutral-800/50 border border-neutral-700/50 rounded-2xl rounded-tl-sm text-neutral-300 px-4 py-2.5 text-sm overflow-x-auto break-words"
-                   v-html="renderMarkdown(msg.content || '')"
+              <div v-if="msg.content"
+                   class="prose-chat bg-neutral-800/50 border border-neutral-700/50 rounded-2xl rounded-tl-sm text-neutral-300 px-4 py-2.5 text-sm overflow-x-auto break-words"
+                   v-html="renderMarkdown(msg.content)"
               />
+              <div v-else-if="!msg.reasoning"
+                   class="bg-neutral-800/50 border border-neutral-700/50 rounded-2xl rounded-tl-sm text-neutral-500 px-4 py-2.5 text-sm italic">
+                (empty response)
+              </div>
+              <!-- Usage metrics footer -->
+              <div v-if="msg.usage" class="flex items-center gap-2 flex-wrap mt-1.5 px-1">
+                <span class="inline-flex items-center gap-1 text-xs text-neutral-400"
+                      :title="`${msg.usage.prompt.toLocaleString()} input tokens`">
+                  <svg class="w-3 h-3 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11l5-5m0 0l5 5m-5-5v12" /></svg>
+                  {{ msg.usage.prompt.toLocaleString() }}
+                </span>
+                <span v-if="msg.usage.reasoning"
+                      class="inline-flex items-center gap-1 text-xs text-blue-400/70"
+                      :title="`${msg.usage.reasoning.toLocaleString()} reasoning tokens`">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                  {{ msg.usage.reasoning.toLocaleString() }}
+                </span>
+                <span class="inline-flex items-center gap-1 text-xs text-neutral-400"
+                      :title="`${msg.usage.completion.toLocaleString()} output tokens`">
+                  <svg class="w-3 h-3 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 13l-5 5m0 0l-5-5m5 5V6" /></svg>
+                  {{ msg.usage.completion.toLocaleString() }}
+                </span>
+                <span class="text-neutral-700 text-xs">|</span>
+                <span v-if="formatTokensPerSec(msg.usage)" class="text-xs text-neutral-500" title="Output tokens per second">
+                  {{ formatTokensPerSec(msg.usage) }}
+                </span>
+                <span v-if="msg.usage.durationMs" class="text-xs text-neutral-500" title="Total response time">
+                  {{ (msg.usage.durationMs / 1000).toFixed(1) }}s
+                </span>
+                <span v-if="formatUsageCost(msg.usage)"
+                      class="text-xs text-amber-500/80 font-medium"
+                      :title="`Input: $${((msg.usage.prompt / 1000000) * (msg.usage.promptPrice || 0)).toFixed(6)} + Output: $${((msg.usage.completion / 1000000) * (msg.usage.completionPrice || 0)).toFixed(6)}`">
+                  {{ formatUsageCost(msg.usage) }}
+                </span>
+              </div>
             </div>
           </div>
         </div>
