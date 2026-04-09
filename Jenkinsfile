@@ -47,12 +47,23 @@ pipeline {
         }
 
         stage('Test') {
-            steps {
-                sh 'play autotest'
-            }
-            post {
-                always {
-                    junit testResults: 'test-result/*.xml', allowEmptyResults: true
+            parallel {
+                stage('Backend') {
+                    steps {
+                        sh 'play autotest'
+                    }
+                    post {
+                        always {
+                            junit testResults: 'test-result/*.xml', allowEmptyResults: true
+                        }
+                    }
+                }
+                stage('Frontend') {
+                    steps {
+                        dir('frontend') {
+                            sh 'pnpm test'
+                        }
+                    }
                 }
             }
         }
