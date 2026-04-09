@@ -7,7 +7,7 @@ pipeline {
     }
 
     environment {
-        PLAY_HOME = '/opt/play-1.11.7'
+        PLAY_HOME = '/opt/play-1.11.x'
         PATH = "${PLAY_HOME}:${env.PATH}"
         PNPM_HOME = "${env.WORKSPACE}/.pnpm-store"
     }
@@ -44,7 +44,7 @@ pipeline {
 
         stage('Test') {
             steps {
-                sh 'play auto-test'
+                sh 'play test'
             }
             post {
                 always {
