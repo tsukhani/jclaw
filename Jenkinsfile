@@ -54,12 +54,6 @@ pipeline {
         }
 
         stage('Package') {
-            when {
-                anyOf {
-                    branch 'main'
-                    buildingTag()
-                }
-            }
             steps {
                 sh 'play dist'
 
@@ -79,16 +73,19 @@ pipeline {
 
         stage('Release') {
             when {
-                buildingTag()
+                expression { env.GIT_BRANCH ==~ /.*tags\/v.*/ }
             }
             steps {
-                withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
-                    sh """
-                        gh release create ${env.TAG_NAME} dist/jclaw.zip \
-                            --repo tsukhani/jclaw \
-                            --title "JClaw ${env.TAG_NAME}" \
-                            --generate-notes
-                    """
+                script {
+                    def version = env.GIT_BRANCH.replaceAll('.*/tags/', '')
+                    withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
+                        sh """
+                            gh release create ${version} dist/jclaw.zip \
+                                --repo tsukhani/jclaw \
+                                --title "JClaw ${version}" \
+                                --generate-notes
+                        """
+                    }
                 }
             }
         }
