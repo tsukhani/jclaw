@@ -88,9 +88,10 @@ pipeline {
                     sh "echo 'Creating release: ${version}'"
                     sh "git tag ${version} || true"
 
-                    // GitHub Release with dist zip
+                    // GitHub Release with dist zip (delete existing release if re-running)
                     withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
                         sh """
+                            gh release delete ${version} --repo tsukhani/jclaw --yes || true
                             gh release create ${version} dist/jclaw.zip \
                                 --repo tsukhani/jclaw \
                                 --title "JClaw ${version}" \
