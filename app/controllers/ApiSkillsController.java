@@ -497,16 +497,16 @@ public class ApiSkillsController extends Controller {
         services.EventLogger.info("skills", "Starting background promotion of '%s'".formatted(skillName));
 
         // Read all files from the skill folder
-        var textFiles = new LinkedHashMap<String, String>();
-        var binaryFiles = new java.util.ArrayList<String>();
+        var sourceTextFiles = new LinkedHashMap<String, String>();
+        var sourceBinaryFiles = new java.util.ArrayList<String>();
         try (var walk = Files.walk(skillDir)) {
             walk.filter(Files::isRegularFile).forEach(file -> {
                 var relName = skillDir.relativize(file).toString();
                 try {
                     if (isTextFile(relName)) {
-                        textFiles.put(relName, Files.readString(file));
+                        sourceTextFiles.put(relName, Files.readString(file));
                     } else {
-                        binaryFiles.add(relName);
+                        sourceBinaryFiles.add(relName);
                     }
                 } catch (IOException _) {}
             });
@@ -523,26 +523,22 @@ public class ApiSkillsController extends Controller {
         //   - Text files in tools/ stay in tools/
 
         // Relocate misplaced text files
-        var relocatedText = new LinkedHashMap<String, String>();
-        for (var entry : textFiles.entrySet()) {
-            var path = entry.getKey();
-            var content = entry.getValue();
-            relocatedText.put(enforceTextFilePath(path), content);
+        var textFiles = new LinkedHashMap<String, String>();
+        for (var entry : sourceTextFiles.entrySet()) {
+            textFiles.put(enforceTextFilePath(entry.getKey()), entry.getValue());
         }
-        textFiles = relocatedText;
 
         // Relocate misplaced binary files — all binaries must be in tools/
-        var relocatedBinaries = new java.util.ArrayList<String>();
-        for (var binFile : binaryFiles) {
+        var binaryFiles = new java.util.ArrayList<String>();
+        for (var binFile : sourceBinaryFiles) {
             if (binFile.startsWith("tools/")) {
-                relocatedBinaries.add(binFile);
+                binaryFiles.add(binFile);
             } else {
                 var fileName = binFile.contains("/") ? binFile.substring(binFile.lastIndexOf('/') + 1) : binFile;
-                relocatedBinaries.add("tools/" + fileName);
+                binaryFiles.add("tools/" + fileName);
                 services.EventLogger.info("skills", "Relocated binary '%s' → 'tools/%s'".formatted(binFile, fileName));
             }
         }
-        binaryFiles = relocatedBinaries;
 
         // Strip credentials deterministically before LLM review
         for (var key : textFiles.keySet().stream().toList()) {
