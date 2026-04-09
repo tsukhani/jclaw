@@ -49,6 +49,10 @@ COPY .gitignore .distignore ./
 COPY conf/dependencies.yml conf/dependencies.yml
 RUN play deps --sync
 
+# Pre-install only Chromium for Playwright (skip Firefox/WebKit)
+RUN java -cp "$(echo lib/playwright-*.jar lib/driver-*.jar | tr ' ' ':')" \
+        com.microsoft.playwright.CLI install chromium
+
 # Copy frontend SPA build
 COPY --from=frontend-build /app/frontend/.output/public public/spa/
 
