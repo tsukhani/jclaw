@@ -6,7 +6,7 @@ const editing = ref<any>(null)
 const creating = ref(false)
 const workspaceTab = ref('AGENT.md')
 const workspaceContent = ref('')
-const form = ref({ name: '', modelProvider: '', modelId: '', enabled: true, isDefault: false })
+const form = ref({ name: '', modelProvider: '', modelId: '', enabled: true, isDefault: false, thinkingMode: '' })
 const agentTools = ref<any[]>([])
 const agentSkills = ref<any[]>([])
 const queueMode = ref('queue')
@@ -63,6 +63,12 @@ const availableModels = computed(() => {
   return provider?.models ?? []
 })
 
+// Whether the selected model supports thinking/reasoning
+const selectedModelSupportsThinking = computed(() => {
+  const model = availableModels.value.find((m: any) => m.id === form.value.modelId)
+  return model?.supportsThinking === true
+})
+
 // Whether the selected provider is configured and the selected model is available
 const providerValid = computed(() => {
   const provider = providers.value.find(p => p.name === form.value.modelProvider)
@@ -74,7 +80,7 @@ const providerValid = computed(() => {
 function newAgent() {
   const defaultProvider = providers.value[0]?.name ?? ''
   const defaultModel = providers.value[0]?.models?.[0]?.id ?? ''
-  form.value = { name: '', modelProvider: defaultProvider, modelId: defaultModel, enabled: true, isDefault: false }
+  form.value = { name: '', modelProvider: defaultProvider, modelId: defaultModel, enabled: true, isDefault: false, thinkingMode: '' }
   creating.value = true
   editing.value = null
 }
@@ -85,7 +91,8 @@ function editAgent(agent: any) {
     modelProvider: agent.modelProvider,
     modelId: agent.modelId,
     enabled: agent.enabled,
-    isDefault: agent.isDefault
+    isDefault: agent.isDefault,
+    thinkingMode: agent.thinkingMode || ''
   }
   editing.value = agent
   creating.value = false
@@ -191,6 +198,13 @@ watch(() => form.value.modelProvider, (newProvider) => {
   }
   if (!provider) {
     form.value.enabled = false
+  }
+})
+
+// Clear thinking mode if selected model doesn't support it
+watch(() => form.value.modelId, () => {
+  if (!selectedModelSupportsThinking.value) {
+    form.value.thinkingMode = ''
   }
 })
 
@@ -305,6 +319,17 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
               <option v-for="m in availableModels" :key="m.id" :value="m.id">
                 {{ m.name || m.id }}
               </option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-neutral-500 mb-1" :class="{ 'opacity-40': !selectedModelSupportsThinking }">Thinking Mode</label>
+            <select v-model="form.thinkingMode" :disabled="!selectedModelSupportsThinking"
+                    class="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none focus:border-neutral-600
+                           disabled:opacity-40 disabled:cursor-not-allowed">
+              <option value="">Off</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
             </select>
           </div>
           <div class="flex items-end gap-4">

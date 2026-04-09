@@ -4,7 +4,7 @@ import agents.SkillLoader;
 import com.google.gson.Gson;
 import com.google.gson.JsonParser;
 import llm.LlmTypes.ChatMessage;
-import llm.OpenAiCompatibleClient;
+import llm.LlmProvider;
 import llm.ProviderRegistry;
 import models.Agent;
 import models.AgentSkillConfig;
@@ -572,7 +572,7 @@ public class ApiSkillsController extends Controller {
         }
 
         services.EventLogger.info("skills", "Starting LLM sanitization of %d file(s) via %s / %s"
-                .formatted(fileContents.size(), provider.name(), defaultAgent.modelId));
+                .formatted(fileContents.size(), provider.config().name(), defaultAgent.modelId));
 
         // Build file listing for the prompt
         var sb = new StringBuilder();
@@ -614,7 +614,7 @@ public class ApiSkillsController extends Controller {
                         .formatted(entry.getKey(), entry.getValue().length()));
             }
 
-            var response = OpenAiCompatibleClient.chat(provider, defaultAgent.modelId, messages, null, null);
+            var response = provider.chat(defaultAgent.modelId, messages, null, null, null);
             var text = response.choices().get(0).message().content().toString().trim();
 
             services.EventLogger.info("skills",

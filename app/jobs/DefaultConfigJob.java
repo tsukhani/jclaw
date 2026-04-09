@@ -26,6 +26,7 @@ public class DefaultConfigJob extends Job<Void> {
     private void seedProviders() {
         seedIfAbsent("provider.ollama-cloud.baseUrl", "https://ollama.com/v1");
         seedIfAbsent("provider.ollama-cloud.apiKey", "");
+        seedIfAbsent("provider.ollama-cloud.leaderboardUrl", "");
         seedIfAbsent("provider.ollama-cloud.models", """
                 [{"id":"qwen3.5","name":"Qwen 3.5","contextWindow":262144,"maxTokens":65535},\
                 {"id":"kimi-k2.5","name":"Kimi K2.5","contextWindow":262144,"maxTokens":65535},\
@@ -33,6 +34,7 @@ public class DefaultConfigJob extends Job<Void> {
 
         seedIfAbsent("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
         seedIfAbsent("provider.openrouter.apiKey", "");
+        seedIfAbsent("provider.openrouter.leaderboardUrl", "https://openrouter.ai/rankings");
         seedIfAbsent("provider.openrouter.models", """
                 [{"id":"openai/gpt-4.1","name":"GPT-4.1","contextWindow":1047576,"maxTokens":32768},\
                 {"id":"anthropic/claude-sonnet-4-6","name":"Claude Sonnet 4.6","contextWindow":200000,"maxTokens":131072},\
@@ -59,7 +61,7 @@ public class DefaultConfigJob extends Job<Void> {
 
     private void seedDefaultAgent() {
         if (Agent.findByName("main") == null) {
-            AgentService.create("main", "ollama-cloud", "kimi-k2.5", true);
+            AgentService.create("main", "ollama-cloud", "kimi-k2.5", true, null);
             EventLogger.info("agent", "main", null, "Default agent 'test' created");
         }
         // Always reset the built-in agent's workspace to match tracked files

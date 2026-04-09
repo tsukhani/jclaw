@@ -43,8 +43,10 @@ public class ApiAgentsController extends Controller {
         var modelProvider = body.get("modelProvider").getAsString();
         var modelId = body.get("modelId").getAsString();
         var isDefault = body.has("isDefault") && body.get("isDefault").getAsBoolean();
+        var thinkingMode = body.has("thinkingMode") && !body.get("thinkingMode").isJsonNull()
+                ? body.get("thinkingMode").getAsString() : null;
 
-        var agent = AgentService.create(name, modelProvider, modelId, isDefault);
+        var agent = AgentService.create(name, modelProvider, modelId, isDefault, thinkingMode);
         renderJSON(gson.toJson(agentToMap(agent)));
     }
 
@@ -63,8 +65,11 @@ public class ApiAgentsController extends Controller {
         var modelId = body.has("modelId") ? body.get("modelId").getAsString() : agent.modelId;
         var enabled = body.has("enabled") ? body.get("enabled").getAsBoolean() : agent.enabled;
         var isDefault = body.has("isDefault") ? body.get("isDefault").getAsBoolean() : agent.isDefault;
+        var thinkingMode = body.has("thinkingMode")
+                ? (body.get("thinkingMode").isJsonNull() ? null : body.get("thinkingMode").getAsString())
+                : agent.thinkingMode;
 
-        agent = AgentService.update(agent, name, modelProvider, modelId, enabled, isDefault);
+        agent = AgentService.update(agent, name, modelProvider, modelId, enabled, isDefault, thinkingMode);
         renderJSON(gson.toJson(agentToMap(agent)));
     }
 
@@ -107,12 +112,13 @@ public class ApiAgentsController extends Controller {
         map.put("modelId", a.modelId);
         map.put("enabled", a.enabled);
         map.put("isDefault", a.isDefault);
+        map.put("thinkingMode", a.thinkingMode);
         map.put("createdAt", a.createdAt.toString());
         map.put("updatedAt", a.updatedAt.toString());
 
         var provider = ProviderRegistry.get(a.modelProvider);
         var providerConfigured = provider != null
-                && provider.models().stream().anyMatch(m -> m.id().equals(a.modelId));
+                && provider.config().models().stream().anyMatch(m -> m.id().equals(a.modelId));
         map.put("providerConfigured", providerConfigured);
 
         return map;

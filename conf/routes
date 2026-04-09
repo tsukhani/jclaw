@@ -62,6 +62,9 @@ GET     /api/agents/{id}/skills/{name}/files     ApiSkillsController.listAgentSk
 DELETE  /api/agents/{id}/skills/{name}/delete    ApiSkillsController.deleteAgentSkill
 POST    /api/agents/{id}/skills/{name}/copy     ApiSkillsController.copyToAgent
 
+# Providers API
+POST    /api/providers/{name}/discover-models   ApiProvidersController.discoverModels
+
 # Config API
 GET     /api/config                             ApiConfigController.list
 POST    /api/config                             ApiConfigController.save

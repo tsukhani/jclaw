@@ -24,9 +24,85 @@ function formatTimestamp(iso: string): string {
   })
 }
 
-const { data: agents } = await useFetch<any[]>('/api/agents')
+const { data: agents, refresh: refreshAgents } = await useFetch<any[]>('/api/agents')
+const { data: configData } = await useFetch<{ entries: any[] }>('/api/config')
 
 const selectedAgentId = ref<number | null>(null)
+
+// Extract configured providers and their models from config
+const providers = computed(() => {
+  const entries = configData.value?.entries ?? []
+  const providerMap = new Map<string, { name: string, models: any[] }>()
+
+  for (const e of entries) {
+    if (!e.key.startsWith('provider.')) continue
+    const name = e.key.split('.')[1]
+    if (!providerMap.has(name)) providerMap.set(name, { name, models: [] })
+  }
+
+  for (const e of entries) {
+    if (e.key.endsWith('.apiKey') && e.key.startsWith('provider.')) {
+      const name = e.key.split('.')[1]
+      if (!e.value || e.value === '(empty)') providerMap.delete(name)
+    }
+  }
+
+  for (const e of entries) {
+    if (e.key.endsWith('.models') && e.key.startsWith('provider.')) {
+      const name = e.key.split('.')[1]
+      const provider = providerMap.get(name)
+      if (provider) {
+        try { provider.models = JSON.parse(e.value) } catch { provider.models = [] }
+      }
+    }
+  }
+
+  return Array.from(providerMap.values())
+})
+
+// The currently selected agent object
+const selectedAgent = computed(() => agents.value?.find((a: any) => a.id === selectedAgentId.value))
+
+// Available models for the selected agent's provider
+const availableModels = computed(() => {
+  const providerName = selectedAgent.value?.modelProvider
+  if (!providerName) return []
+  return providers.value.find(p => p.name === providerName)?.models ?? []
+})
+
+// Current model info for the selected agent
+const selectedModelInfo = computed(() => {
+  const modelId = selectedAgent.value?.modelId
+  return availableModels.value.find((m: any) => m.id === modelId) ?? null
+})
+
+// Whether the selected model supports thinking
+const thinkingSupported = computed(() => selectedModelInfo.value?.supportsThinking === true)
+
+// Sync model or thinking mode change back to the agent
+async function updateAgentSetting(updates: Record<string, any>) {
+  if (!selectedAgentId.value) return
+  try {
+    await $fetch(`/api/agents/${selectedAgentId.value}`, { method: 'PUT', body: updates })
+    refreshAgents()
+  } catch { /* ignore */ }
+}
+
+function onModelChange(event: Event) {
+  const modelId = (event.target as HTMLSelectElement).value
+  const model = availableModels.value.find((m: any) => m.id === modelId)
+  const updates: Record<string, any> = { modelId }
+  // Clear thinking mode if new model doesn't support it
+  if (!model?.supportsThinking) {
+    updates.thinkingMode = null
+  }
+  updateAgentSetting(updates)
+}
+
+function onThinkingModeChange(event: Event) {
+  const val = (event.target as HTMLSelectElement).value
+  updateAgentSetting({ thinkingMode: val || null })
+}
 
 const conversationsUrl = computed(() =>
   selectedAgentId.value
@@ -49,6 +125,9 @@ function autoResize() {
 }
 const agentBusy = ref(false)
 const streamContent = ref('')
+const streamReasoning = ref('')
+const showThinking = ref(true)
+const lastUsage = ref<{ prompt: number, completion: number, total: number, reasoning: number } | null>(null)
 const messagesEl = ref<HTMLElement | null>(null)
 const abortController = ref<AbortController | null>(null)
 const sidebarWidth = ref(224) // 14rem = 224px (matches w-56)
@@ -165,7 +244,9 @@ async function sendMessage() {
 
   streaming.value = true
   streamContent.value = ''
+  streamReasoning.value = ''
   streamStatus.value = ''
+  lastUsage.value = null
 
   // Add placeholder for streaming response
   const assistantIdx = messages.value.length
@@ -205,8 +286,26 @@ async function sendMessage() {
           const event = JSON.parse(line.slice(6))
           if (event.type === 'init' && event.conversationId) {
             selectedConvoId.value = event.conversationId
+            if (event.thinkingMode) {
+              streamStatus.value = `thinking (${event.thinkingMode})...`
+            }
           } else if (event.type === 'status') {
-            streamStatus.value = event.content
+            // Check if this is a usage JSON payload
+            if (event.content?.startsWith('{') && event.content.includes('"usage"')) {
+              try {
+                const parsed = JSON.parse(event.content)
+                if (parsed.usage) lastUsage.value = parsed.usage
+              } catch { /* not JSON, treat as status text */ }
+            } else {
+              streamStatus.value = event.content
+            }
+          } else if (event.type === 'reasoning') {
+            streamReasoning.value += event.content
+            messages.value[assistantIdx].reasoning = streamReasoning.value
+            if (!streamContent.value) {
+              streamStatus.value = 'thinking...'
+            }
+            scrollToBottom()
           } else if (event.type === 'token') {
             streamStatus.value = ''
             if (event.timestamp) messages.value[assistantIdx].createdAt = event.timestamp
@@ -360,8 +459,8 @@ function exportConversation() {
 
     <!-- Chat area -->
     <div class="flex-1 flex flex-col">
-      <!-- Agent selector -->
-      <div class="px-4 py-2.5 border-b border-neutral-800 flex items-center gap-3">
+      <!-- Agent / Model / Thinking selector -->
+      <div class="px-4 py-2.5 border-b border-neutral-800 flex items-center gap-3 flex-wrap">
         <label class="text-xs text-neutral-500">Agent:</label>
         <select
           v-model="selectedAgentId"
@@ -369,11 +468,50 @@ function exportConversation() {
                  focus:outline-none focus:border-neutral-600"
         >
           <option v-for="agent in agents" :key="agent.id" :value="agent.id">
-            {{ agent.name }} ({{ agent.modelId }})
+            {{ agent.name }}
           </option>
         </select>
+
+        <label class="text-xs text-neutral-500">Model:</label>
+        <select
+          :value="selectedAgent?.modelId"
+          @change="onModelChange"
+          class="bg-neutral-800 border border-neutral-700 text-sm text-white px-2 py-1
+                 focus:outline-none focus:border-neutral-600"
+        >
+          <option v-for="m in availableModels" :key="m.id" :value="m.id">
+            {{ m.name || m.id }}
+          </option>
+        </select>
+
+        <label class="text-xs text-neutral-500" :class="{ 'opacity-40': !thinkingSupported }">Thinking:</label>
+        <select
+          :value="selectedAgent?.thinkingMode || ''"
+          @change="onThinkingModeChange"
+          :disabled="!thinkingSupported"
+          class="bg-neutral-800 border border-neutral-700 text-sm text-white px-2 py-1
+                 focus:outline-none focus:border-neutral-600
+                 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <option value="">Off</option>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+        </select>
+
+        <button @click="showThinking = !showThinking"
+                :class="showThinking ? 'text-blue-400' : 'text-neutral-600'"
+                class="p-1 hover:text-blue-300 transition-colors"
+                title="Toggle thinking display">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+        </button>
+
         <span v-if="streaming" class="text-xs text-emerald-400 animate-pulse">{{ streamStatus || 'streaming...' }}</span>
         <span v-else-if="agentBusy" class="text-xs text-neutral-500 animate-pulse">processing queue...</span>
+        <span v-else-if="lastUsage" class="text-[10px] text-neutral-600 font-mono"
+              :title="`${lastUsage.prompt} prompt + ${lastUsage.completion} completion${lastUsage.reasoning ? ' (' + lastUsage.reasoning + ' reasoning)' : ''} = ${lastUsage.total} total tokens`">
+          {{ lastUsage.total.toLocaleString() }} tokens<template v-if="lastUsage.reasoning"> ({{ lastUsage.reasoning.toLocaleString() }} reasoning)</template>
+        </span>
       </div>
 
       <!-- Messages -->
@@ -394,11 +532,22 @@ function exportConversation() {
             <div v-if="msg.role === 'user'"
                  class="bg-blue-900/30 border border-blue-800/40 rounded-2xl rounded-tr-sm text-neutral-200 px-4 py-2.5 text-sm whitespace-pre-wrap break-words"
             >{{ msg.content }}</div>
-            <!-- Assistant messages: rendered markdown -->
-            <div v-else
-                 class="prose-chat bg-neutral-800/50 border border-neutral-700/50 rounded-2xl rounded-tl-sm text-neutral-300 px-4 py-2.5 text-sm overflow-x-auto break-words"
-                 v-html="renderMarkdown(msg.content || '')"
-            />
+            <!-- Assistant messages: rendered markdown with optional thinking -->
+            <div v-else>
+              <!-- Thinking/reasoning block -->
+              <div v-if="showThinking && msg.reasoning"
+                   class="bg-blue-950/30 border border-blue-800/20 rounded-xl rounded-tl-sm text-blue-300/70 px-3 py-2 text-xs font-mono mb-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap break-words">
+                <div class="flex items-center gap-1.5 mb-1 text-blue-400/60 text-[10px] font-sans font-medium">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                  Thinking
+                </div>
+                {{ msg.reasoning }}
+              </div>
+              <!-- Response content -->
+              <div class="prose-chat bg-neutral-800/50 border border-neutral-700/50 rounded-2xl rounded-tl-sm text-neutral-300 px-4 py-2.5 text-sm overflow-x-auto break-words"
+                   v-html="renderMarkdown(msg.content || '')"
+              />
+            </div>
           </div>
         </div>
         <div v-if="streaming && !streamContent" class="flex justify-start">

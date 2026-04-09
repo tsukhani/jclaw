@@ -25,6 +25,9 @@ public class Agent extends Model {
     @Column(name = "is_default", nullable = false)
     public boolean isDefault = false;
 
+    @Column(name = "thinking_mode")
+    public String thinkingMode;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 

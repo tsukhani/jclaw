@@ -1,7 +1,7 @@
 package services;
 
 import llm.LlmTypes.*;
-import llm.OpenAiCompatibleClient;
+import llm.LlmProvider;
 import llm.ProviderRegistry;
 import models.Agent;
 import models.Conversation;
@@ -97,7 +97,7 @@ public class ConversationService {
                 var provider = Tx.run(ProviderRegistry::getPrimary);
                 if (provider == null) return;
 
-                var modelId = provider.models().isEmpty() ? null : provider.models().getFirst().id();
+                var modelId = provider.config().models().isEmpty() ? null : provider.config().models().getFirst().id();
                 if (modelId == null) return;
 
                 var messages = List.of(
@@ -107,7 +107,7 @@ public class ConversationService {
                                 userContext, assistantContext))
                 );
 
-                var response = OpenAiCompatibleClient.chat(provider, modelId, messages, List.of(), null);
+                var response = provider.chat(modelId, messages, List.of(), null, null);
                 if (response.choices() == null || response.choices().isEmpty()) return;
 
                 var title = ((String) response.choices().getFirst().message().content()).trim();

@@ -13,47 +13,74 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Flow;
-import java.util.concurrent.SubmissionPublisher;
 import java.util.function.Consumer;
 
 /**
- * OpenAI-compatible chat completions client using JDK 25 HttpClient.
- * Supports synchronous chat, streaming via SSE, tool calling, and embeddings.
+ * Abstract base for LLM provider integrations. Implements shared OpenAI-compatible
+ * HTTP, retry, streaming, and serialization logic. Subclasses override template methods
+ * to handle provider-specific differences (reasoning params, response parsing, etc.).
  */
-public class OpenAiCompatibleClient {
+public abstract class LlmProvider {
 
-    private static final Gson gson = new GsonBuilder()
+    protected static final Gson gson = new GsonBuilder()
             .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
             .create();
 
     private static final int MAX_RETRIES = 3;
     private static final long[] BACKOFF_MS = {1000, 2000, 4000};
 
-    // --- Synchronous chat completion ---
+    protected final ProviderConfig config;
 
-    public static ChatResponse chat(ProviderConfig provider, String model,
-                                     List<ChatMessage> messages, List<ToolDef> tools,
-                                     Integer maxTokens, String thinkingMode) {
+    protected LlmProvider(ProviderConfig config) {
+        this.config = config;
+    }
+
+    public ProviderConfig config() { return config; }
+
+    // ─── Template methods (override in subclasses) ───────────────────────
+
+    /** Add provider-specific reasoning/thinking parameters to the request JSON. */
+    protected void addReasoningParams(JsonObject request, String thinkingMode) {
+        // Default: no reasoning support
+    }
+
+    /**
+     * Extract reasoning text from a streaming chunk delta.
+     * Called for each chunk during streaming. Return null if no reasoning in this chunk.
+     */
+    protected String extractReasoningFromDelta(ChunkDelta delta) {
+        return null;
+    }
+
+    /**
+     * Extract reasoning token count from a usage JSON object.
+     * Called when parsing the usage block in responses.
+     */
+    protected int extractReasoningTokens(JsonObject usageObj) {
+        return 0;
+    }
+
+    // ─── Synchronous chat ────────────────────────────────────────────────
+
+    public ChatResponse chat(String model, List<ChatMessage> messages, List<ToolDef> tools,
+                             Integer maxTokens, String thinkingMode) {
         var request = new ChatRequest(model, messages, tools, false, maxTokens, thinkingMode);
         var json = serializeRequest(request);
-        var responseBody = executeWithRetry(provider, "/chat/completions", json);
+        var responseBody = executeWithRetry("/chat/completions", json);
         return deserializeResponse(responseBody);
     }
 
-    // --- Streaming chat completion ---
+    // ─── Streaming chat ──────────────────────────────────────────────────
 
-    public static void chatStream(ProviderConfig provider, String model,
-                                   List<ChatMessage> messages, List<ToolDef> tools,
-                                   Consumer<ChatCompletionChunk> onChunk,
-                                   Runnable onComplete,
-                                   Consumer<Exception> onError,
-                                   Integer maxTokens, String thinkingMode) {
+    public void chatStream(String model, List<ChatMessage> messages, List<ToolDef> tools,
+                           Consumer<ChatCompletionChunk> onChunk,
+                           Runnable onComplete, Consumer<Exception> onError,
+                           Integer maxTokens, String thinkingMode) {
         Thread.ofVirtual().start(() -> {
             try {
                 var request = new ChatRequest(model, messages, tools, true, maxTokens, thinkingMode);
                 var json = serializeRequest(request);
-                var httpReq = buildRequest(provider, "/chat/completions", json);
+                var httpReq = buildRequest("/chat/completions", json);
 
                 var response = utils.HttpClients.LLM.send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
                 if (response.statusCode() != 200) {
@@ -67,19 +94,14 @@ public class OpenAiCompatibleClient {
                     while ((line = reader.readLine()) != null) {
                         if (line.startsWith("data: ")) {
                             var data = line.substring(6).trim();
-                            if ("[DONE]".equals(data)) {
-                                break;
-                            }
+                            if ("[DONE]".equals(data)) break;
                             try {
                                 var chunk = gson.fromJson(data, ChatCompletionChunk.class);
-                                if (chunk != null) {
-                                    onChunk.accept(chunk);
-                                }
-                            } catch (JsonSyntaxException e) {
+                                if (chunk != null) onChunk.accept(chunk);
+                            } catch (JsonSyntaxException _) {
                                 // Skip malformed chunks
                             }
                         }
-                        // Ignore empty lines, comments, and other SSE fields
                     }
                 }
                 onComplete.run();
@@ -89,21 +111,18 @@ public class OpenAiCompatibleClient {
         });
     }
 
-    // --- Streaming with tool call accumulation ---
+    // ─── Streaming with accumulation ─────────────────────────────────────
 
-    public static StreamAccumulator chatStreamAccumulate(ProviderConfig provider, String model,
-                                                          List<ChatMessage> messages, List<ToolDef> tools,
-                                                          Consumer<String> onToken,
-                                                          Consumer<String> onReasoning,
-                                                          Integer maxTokens,
-                                                          String thinkingMode) {
+    public StreamAccumulator chatStreamAccumulate(String model, List<ChatMessage> messages,
+                                                   List<ToolDef> tools, Consumer<String> onToken,
+                                                   Consumer<String> onReasoning,
+                                                   Integer maxTokens, String thinkingMode) {
         var accumulator = new StreamAccumulator();
         var contentBuilder = new StringBuilder();
         var toolCallAccumulator = new java.util.HashMap<Integer, ToolCallBuilder>();
 
-        chatStream(provider, model, messages, tools,
+        chatStream(model, messages, tools,
                 chunk -> {
-                    // Capture usage from the final chunk (sent when stream_options.include_usage=true)
                     if (chunk.usage() != null) {
                         accumulator.usage = chunk.usage();
                         if (chunk.usage().reasoningTokens() > 0) {
@@ -117,16 +136,11 @@ public class OpenAiCompatibleClient {
                             contentBuilder.append(delta.content());
                             onToken.accept(delta.content());
                         }
-                        // Forward reasoning text from delta
-                        if (delta.reasoning() != null && onReasoning != null) {
+                        // Delegate reasoning extraction to the provider subclass
+                        var reasoningText = extractReasoningFromDelta(delta);
+                        if (reasoningText != null && onReasoning != null) {
                             accumulator.reasoningDetected = true;
-                            onReasoning.accept(delta.reasoning());
-                        }
-                        if (delta.reasoningDetails() != null && onReasoning != null) {
-                            accumulator.reasoningDetected = true;
-                            for (var rd : delta.reasoningDetails()) {
-                                if (rd.text() != null) onReasoning.accept(rd.text());
-                            }
+                            onReasoning.accept(reasoningText);
                         }
                         if (delta.toolCalls() != null) {
                             for (var tc : delta.toolCalls()) {
@@ -148,8 +162,7 @@ public class OpenAiCompatibleClient {
                 () -> {
                     accumulator.content = contentBuilder.toString();
                     accumulator.toolCalls = toolCallAccumulator.values().stream()
-                            .map(ToolCallBuilder::build)
-                            .toList();
+                            .map(ToolCallBuilder::build).toList();
                     accumulator.markComplete();
                 },
                 e -> {
@@ -161,12 +174,12 @@ public class OpenAiCompatibleClient {
         return accumulator;
     }
 
-    // --- Embeddings ---
+    // ─── Embeddings ──────────────────────────────────────────────────────
 
-    public static float[] embeddings(ProviderConfig provider, String model, String input) {
+    public float[] embeddings(String model, String input) {
         var request = new EmbeddingRequest(model, input);
         var json = gson.toJson(request);
-        var responseBody = executeWithRetry(provider, "/embeddings", json);
+        var responseBody = executeWithRetry("/embeddings", json);
         var response = gson.fromJson(responseBody, EmbeddingResponse.class);
         if (response.data() == null || response.data().isEmpty()) {
             throw new LlmException("Empty embedding response");
@@ -174,97 +187,27 @@ public class OpenAiCompatibleClient {
         return response.data().getFirst().embedding();
     }
 
-    // --- Retry with exponential backoff ---
+    // ─── Failover (static utility) ───────────────────────────────────────
 
-    private static String executeWithRetry(ProviderConfig provider, String path, String json) {
-        Exception lastException = null;
-
-        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-            try {
-                var httpReq = buildRequest(provider, path, json);
-                var response = utils.HttpClients.LLM.send(httpReq, HttpResponse.BodyHandlers.ofString());
-
-                if (response.statusCode() == 200) {
-                    return response.body();
-                }
-
-                if (response.statusCode() == 429) {
-                    var defaultBackoff = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)] / 1000;
-                    var retryAfter = response.headers().firstValue("Retry-After")
-                            .map(v -> { try { return Long.parseLong(v); } catch (NumberFormatException _) { return defaultBackoff; } })
-                            .orElse(defaultBackoff);
-                    EventLogger.warn("llm", "Rate limited by %s, retrying after %ds".formatted(provider.name(), retryAfter));
-                    Thread.sleep(retryAfter * 1000);
-                    continue;
-                }
-
-                if (response.statusCode() >= 400 && response.statusCode() < 500) {
-                    // Non-retryable client error
-                    throw new LlmException("HTTP %d from %s: %s".formatted(
-                            response.statusCode(), provider.name(), response.body()));
-                }
-
-                // 5xx — retryable
-                lastException = new LlmException("HTTP %d from %s: %s".formatted(
-                        response.statusCode(), provider.name(), response.body()));
-
-            } catch (LlmException e) {
-                throw e; // Don't retry non-retryable errors
-            } catch (Exception e) {
-                lastException = e;
-            }
-
-            if (attempt < MAX_RETRIES) {
-                try {
-                    var backoff = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)];
-                    EventLogger.warn("llm", "Retry %d/%d for %s after %dms"
-                            .formatted(attempt + 1, MAX_RETRIES, provider.name(), backoff));
-                    Thread.sleep(backoff);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new LlmException("Interrupted during retry", ie);
-                }
-            }
-        }
-
-        throw new LlmException("All retries exhausted for " + provider.name(), lastException);
-    }
-
-    // --- Provider failover ---
-
-    public static ChatResponse chatWithFailover(ProviderConfig primary, ProviderConfig secondary,
+    public static ChatResponse chatWithFailover(LlmProvider primary, LlmProvider secondary,
                                                  String model, List<ChatMessage> messages,
                                                  List<ToolDef> tools, Integer maxTokens,
                                                  String thinkingMode) {
         try {
-            return chat(primary, model, messages, tools, maxTokens, thinkingMode);
+            return primary.chat(model, messages, tools, maxTokens, thinkingMode);
         } catch (LlmException e) {
             if (secondary != null) {
                 EventLogger.warn("llm", "Failing over from %s to %s: %s"
-                        .formatted(primary.name(), secondary.name(), e.getMessage()));
-                return chat(secondary, model, messages, tools, maxTokens, thinkingMode);
+                        .formatted(primary.config().name(), secondary.config().name(), e.getMessage()));
+                return secondary.chat(model, messages, tools, maxTokens, thinkingMode);
             }
             throw e;
         }
     }
 
-    // --- Internal helpers ---
+    // ─── Shared internals ────────────────────────────────────────────────
 
-    private static HttpRequest buildRequest(ProviderConfig provider, String path, String json) {
-        var url = provider.baseUrl().endsWith("/")
-                ? provider.baseUrl() + path.substring(1)
-                : provider.baseUrl() + path;
-
-        return HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + provider.apiKey())
-                .timeout(Duration.ofSeconds(180))
-                .POST(HttpRequest.BodyPublishers.ofString(json))
-                .build();
-    }
-
-    private static String serializeRequest(ChatRequest request) {
+    protected String serializeRequest(ChatRequest request) {
         var obj = new JsonObject();
         obj.addProperty("model", request.model());
         obj.add("messages", serializeMessages(request.messages()));
@@ -273,7 +216,6 @@ public class OpenAiCompatibleClient {
         }
         if (request.stream()) {
             obj.addProperty("stream", true);
-            // Request usage stats in the final streaming chunk
             var streamOptions = new JsonObject();
             streamOptions.addProperty("include_usage", true);
             obj.add("stream_options", streamOptions);
@@ -282,18 +224,12 @@ public class OpenAiCompatibleClient {
             obj.addProperty("max_tokens", request.maxTokens());
         }
         if (request.thinkingMode() != null && !request.thinkingMode().isBlank()) {
-            // OpenAI native format: top-level reasoning_effort
-            obj.addProperty("reasoning_effort", request.thinkingMode());
-
-            // OpenRouter format: reasoning object with effort level
-            var reasoning = new JsonObject();
-            reasoning.addProperty("effort", request.thinkingMode());
-            obj.add("reasoning", reasoning);
+            addReasoningParams(obj, request.thinkingMode());
         }
         return gson.toJson(obj);
     }
 
-    private static JsonArray serializeMessages(List<ChatMessage> messages) {
+    private JsonArray serializeMessages(List<ChatMessage> messages) {
         var array = new JsonArray();
         for (var msg : messages) {
             var obj = new JsonObject();
@@ -314,7 +250,7 @@ public class OpenAiCompatibleClient {
         return array;
     }
 
-    private static ChatResponse deserializeResponse(String json) {
+    protected ChatResponse deserializeResponse(String json) {
         var obj = JsonParser.parseString(json).getAsJsonObject();
         var id = obj.has("id") ? obj.get("id").getAsString() : null;
         var model = obj.has("model") ? obj.get("model").getAsString() : null;
@@ -335,19 +271,7 @@ public class OpenAiCompatibleClient {
         Usage usage = null;
         if (obj.has("usage") && !obj.get("usage").isJsonNull()) {
             var usageObj = obj.getAsJsonObject("usage");
-            int reasoningTokens = 0;
-            // OpenRouter / direct: usage.reasoning_tokens
-            if (usageObj.has("reasoning_tokens") && !usageObj.get("reasoning_tokens").isJsonNull()) {
-                reasoningTokens = usageObj.get("reasoning_tokens").getAsInt();
-            }
-            // OpenAI: usage.completion_tokens_details.reasoning_tokens
-            if (reasoningTokens == 0 && usageObj.has("completion_tokens_details")
-                    && !usageObj.get("completion_tokens_details").isJsonNull()) {
-                var details = usageObj.getAsJsonObject("completion_tokens_details");
-                if (details.has("reasoning_tokens") && !details.get("reasoning_tokens").isJsonNull()) {
-                    reasoningTokens = details.get("reasoning_tokens").getAsInt();
-                }
-            }
+            int reasoningTokens = extractReasoningTokens(usageObj);
             usage = new Usage(
                     usageObj.has("prompt_tokens") ? usageObj.get("prompt_tokens").getAsInt() : 0,
                     usageObj.has("completion_tokens") ? usageObj.get("completion_tokens").getAsInt() : 0,
@@ -359,7 +283,7 @@ public class OpenAiCompatibleClient {
         return new ChatResponse(id, model, choices, usage);
     }
 
-    private static ChatMessage deserializeMessage(JsonObject msgObj) {
+    private ChatMessage deserializeMessage(JsonObject msgObj) {
         var role = msgObj.get("role").getAsString();
         String content = null;
         if (msgObj.has("content") && !msgObj.get("content").isJsonNull()) {
@@ -388,7 +312,71 @@ public class OpenAiCompatibleClient {
         return new ChatMessage(role, content, toolCalls, toolCallId);
     }
 
-    // --- Helper classes ---
+    protected HttpRequest buildRequest(String path, String json) {
+        var url = config.baseUrl().endsWith("/")
+                ? config.baseUrl() + path.substring(1)
+                : config.baseUrl() + path;
+
+        return HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Content-Type", "application/json")
+                .header("Authorization", "Bearer " + config.apiKey())
+                .timeout(Duration.ofSeconds(180))
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+    }
+
+    protected String executeWithRetry(String path, String json) {
+        Exception lastException = null;
+
+        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                var httpReq = buildRequest(path, json);
+                var response = utils.HttpClients.LLM.send(httpReq, HttpResponse.BodyHandlers.ofString());
+
+                if (response.statusCode() == 200) return response.body();
+
+                if (response.statusCode() == 429) {
+                    var defaultBackoff = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)] / 1000;
+                    var retryAfter = response.headers().firstValue("Retry-After")
+                            .map(v -> { try { return Long.parseLong(v); } catch (NumberFormatException _) { return defaultBackoff; } })
+                            .orElse(defaultBackoff);
+                    EventLogger.warn("llm", "Rate limited by %s, retrying after %ds".formatted(config.name(), retryAfter));
+                    Thread.sleep(retryAfter * 1000);
+                    continue;
+                }
+
+                if (response.statusCode() >= 400 && response.statusCode() < 500) {
+                    throw new LlmException("HTTP %d from %s: %s".formatted(
+                            response.statusCode(), config.name(), response.body()));
+                }
+
+                lastException = new LlmException("HTTP %d from %s: %s".formatted(
+                        response.statusCode(), config.name(), response.body()));
+
+            } catch (LlmException e) {
+                throw e;
+            } catch (Exception e) {
+                lastException = e;
+            }
+
+            if (attempt < MAX_RETRIES) {
+                try {
+                    var backoff = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)];
+                    EventLogger.warn("llm", "Retry %d/%d for %s after %dms"
+                            .formatted(attempt + 1, MAX_RETRIES, config.name(), backoff));
+                    Thread.sleep(backoff);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new LlmException("Interrupted during retry", ie);
+                }
+            }
+        }
+
+        throw new LlmException("All retries exhausted for " + config.name(), lastException);
+    }
+
+    // ─── Shared helper classes ───────────────────────────────────────────
 
     public static class StreamAccumulator {
         public volatile String content = "";
@@ -401,22 +389,14 @@ public class OpenAiCompatibleClient {
         public volatile Usage usage;
         private final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
 
-        void markComplete() {
-            complete = true;
-            latch.countDown();
-        }
-
-        public void awaitCompletion() throws InterruptedException {
-            latch.await();
-        }
-
-        /** Await with timeout. Returns true if completed, false if timed out. */
+        void markComplete() { complete = true; latch.countDown(); }
+        public void awaitCompletion() throws InterruptedException { latch.await(); }
         public boolean awaitCompletion(long timeoutMs) throws InterruptedException {
             return latch.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
         }
     }
 
-    private static class ToolCallBuilder {
+    protected static class ToolCallBuilder {
         String id;
         String type = "function";
         String functionName;

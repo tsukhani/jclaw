@@ -17,7 +17,8 @@ public final class LlmTypes {
             List<ChatMessage> messages,
             List<ToolDef> tools,
             boolean stream,
-            Integer maxTokens
+            Integer maxTokens,
+            String thinkingMode
     ) {}
 
     public record ChatMessage(
@@ -91,7 +92,8 @@ public final class LlmTypes {
     public record Usage(
             int promptTokens,
             int completionTokens,
-            int totalTokens
+            int totalTokens,
+            int reasoningTokens
     ) {}
 
     // --- Streaming types ---
@@ -99,7 +101,8 @@ public final class LlmTypes {
     public record ChatCompletionChunk(
             String id,
             String model,
-            List<ChunkChoice> choices
+            List<ChunkChoice> choices,
+            Usage usage
     ) {}
 
     public record ChunkChoice(
@@ -111,7 +114,14 @@ public final class LlmTypes {
     public record ChunkDelta(
             String role,
             String content,
-            List<ToolCallChunk> toolCalls
+            List<ToolCallChunk> toolCalls,
+            String reasoning,
+            List<ReasoningDetail> reasoningDetails
+    ) {}
+
+    public record ReasoningDetail(
+            String type,
+            String text
     ) {}
 
     public record ToolCallChunk(
@@ -151,6 +161,7 @@ public final class LlmTypes {
             String id,
             String name,
             int contextWindow,
-            int maxTokens
+            int maxTokens,
+            boolean supportsThinking
     ) {}
 }

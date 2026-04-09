@@ -1,8 +1,8 @@
 package agents;
 
 import com.google.gson.Gson;
+import llm.LlmProvider;
 import llm.LlmTypes.*;
-import llm.OpenAiCompatibleClient;
 import llm.ProviderRegistry;
 import models.Agent;
 import models.Conversation;
@@ -35,8 +35,8 @@ public class AgentRunner {
 
     private record PreparedData(
         List<ChatMessage> messages,
-        ProviderConfig primary,
-        ProviderConfig secondary,
+        LlmProvider primary,
+        LlmProvider secondary,
         List<ToolDef> tools
     ) {}
 
@@ -77,7 +77,7 @@ public class AgentRunner {
                 var tools = ToolRegistry.getToolDefsForAgent(agent);
 
                 EventLogger.info("llm", agent.name, conversation.channelType,
-                        "Calling %s / %s".formatted(primary.name(), agent.modelId));
+                        "Calling %s / %s".formatted(primary.config().name(), agent.modelId));
 
                 return new PreparedData(trimmed, primary, secondary, tools);
             });
@@ -118,6 +118,7 @@ public class AgentRunner {
                                     AtomicBoolean isCancelled,
                                     Consumer<Conversation> onInit,
                                     Consumer<String> onToken,
+                                    Consumer<String> onReasoning,
                                     Consumer<String> onStatus,
                                     Consumer<String> onComplete,
                                     Consumer<Exception> onError) {
@@ -194,17 +195,18 @@ public class AgentRunner {
 
                 var tools = services.Tx.run(() -> ToolRegistry.getToolDefsForAgent(agent));
                 EventLogger.info("llm", agent.name, channelType,
-                        "Streaming: calling %s / %s (%d messages, %d tools, %d skills)"
-                                .formatted(primary.name(), agent.modelId,
-                                        messages.size(), tools.size(), assembled.skills().size()));
-                var modelInfo = primary.models().stream()
+                        "Streaming: calling %s / %s (%d messages, %d tools, %d skills%s)"
+                                .formatted(primary.config().name(), agent.modelId,
+                                        messages.size(), tools.size(), assembled.skills().size(),
+                                        agent.thinkingMode != null ? ", thinking=" + agent.thinkingMode : ""));
+                var modelInfo = primary.config().models().stream()
                         .filter(m -> m.id().equals(agent.modelId))
                         .findFirst().orElse(null);
                 var maxTokens = modelInfo != null && modelInfo.maxTokens() > 0 ? modelInfo.maxTokens() : null;
 
                 // Stream with tool call handling (HTTP, no JPA)
-                var accumulator = OpenAiCompatibleClient.chatStreamAccumulate(
-                        primary, agent.modelId, messages, tools, onToken, maxTokens);
+                var accumulator = primary.chatStreamAccumulate(
+                        agent.modelId, messages, tools, onToken, onReasoning, maxTokens, agent.thinkingMode);
 
                 while (!accumulator.awaitCompletion(5000)) {
                     if (isCancelled.get()) {
@@ -217,8 +219,8 @@ public class AgentRunner {
                 if (accumulator.error != null && accumulator.error.getMessage() != null
                         && accumulator.error.getMessage().contains("HTTP 5")) {
                     EventLogger.warn("llm", agent.name, null, "Retrying streaming after transient error");
-                    accumulator = OpenAiCompatibleClient.chatStreamAccumulate(
-                            primary, agent.modelId, messages, tools, onToken, maxTokens);
+                    accumulator = primary.chatStreamAccumulate(
+                            agent.modelId, messages, tools, onToken, onReasoning, maxTokens, agent.thinkingMode);
                     while (!accumulator.awaitCompletion(5000)) {
                         if (isCancelled.get()) {
                             EventLogger.info("llm", agent.name, channelType, "Stream cancelled by client disconnect");
@@ -260,7 +262,7 @@ public class AgentRunner {
                 // Handle tool calls if present
                 if (!accumulator.toolCalls.isEmpty()) {
                     content = handleToolCallsStreaming(agent, conversation.id, messages, tools,
-                            accumulator.toolCalls, content, primary, onToken, onStatus, maxTokens, 0, isCancelled);
+                            accumulator.toolCalls, content, primary, onToken, onReasoning, onStatus, maxTokens, 0, isCancelled);
                 }
 
                 if (isCancelled.get()) {
@@ -275,8 +277,22 @@ public class AgentRunner {
                     ConversationService.appendAssistantMessage(conv, finalContent, null);
                 });
 
-                EventLogger.info("llm", agent.name, channelType,
-                        "Streaming complete (%d chars)".formatted(content.length()));
+                // Log and emit usage including reasoning tokens if available
+                if (accumulator.usage != null) {
+                    var u = accumulator.usage;
+                    var usageSummary = " [%d prompt, %d completion, %d total tokens%s]".formatted(
+                            u.promptTokens(), u.completionTokens(), u.totalTokens(),
+                            u.reasoningTokens() > 0 ? ", %d reasoning".formatted(u.reasoningTokens()) : "");
+                    EventLogger.info("llm", agent.name, channelType,
+                            "Streaming complete (%d chars)%s".formatted(content.length(), usageSummary));
+                    // Emit usage as a JSON status so the frontend can display token counts
+                    var usageJson = "{\"usage\":{\"prompt\":%d,\"completion\":%d,\"total\":%d,\"reasoning\":%d}}"
+                            .formatted(u.promptTokens(), u.completionTokens(), u.totalTokens(), u.reasoningTokens());
+                    onStatus.accept(usageJson);
+                } else {
+                    EventLogger.info("llm", agent.name, channelType,
+                            "Streaming complete (%d chars)".formatted(content.length()));
+                }
                 onComplete.accept(content);
 
             } catch (Exception e) {
@@ -296,9 +312,9 @@ public class AgentRunner {
 
     private static String callWithToolLoop(Agent agent, Long conversationId,
                                             List<ChatMessage> messages, List<ToolDef> tools,
-                                            ProviderConfig primary, ProviderConfig secondary) {
+                                            LlmProvider primary, LlmProvider secondary) {
         var currentMessages = new ArrayList<>(messages);
-        var modelInfo = primary.models().stream()
+        var modelInfo = primary.config().models().stream()
                 .filter(m -> m.id().equals(agent.modelId))
                 .findFirst().orElse(null);
         var maxTokens = modelInfo != null && modelInfo.maxTokens() > 0 ? modelInfo.maxTokens() : null;
@@ -307,8 +323,8 @@ public class AgentRunner {
             ChatResponse response;
             try {
                 response = (secondary != null)
-                        ? OpenAiCompatibleClient.chatWithFailover(primary, secondary, agent.modelId, currentMessages, tools, maxTokens)
-                        : OpenAiCompatibleClient.chat(primary, agent.modelId, currentMessages, tools, maxTokens);
+                        ? LlmProvider.chatWithFailover(primary, secondary, agent.modelId, currentMessages, tools, maxTokens, agent.thinkingMode)
+                        : primary.chat(agent.modelId, currentMessages, tools, maxTokens, agent.thinkingMode);
             } catch (Exception e) {
                 EventLogger.error("llm", agent.name, null, "LLM call failed: %s".formatted(e.getMessage()));
                 return "I'm sorry, I encountered an error communicating with the AI provider. Please try again.";
@@ -370,8 +386,9 @@ public class AgentRunner {
     private static String handleToolCallsStreaming(Agent agent, Long conversationId,
                                                     List<ChatMessage> messages, List<ToolDef> tools,
                                                     List<ToolCall> toolCalls, String priorContent,
-                                                    ProviderConfig provider,
-                                                    Consumer<String> onToken, Consumer<String> onStatus,
+                                                    LlmProvider provider,
+                                                    Consumer<String> onToken, Consumer<String> onReasoning,
+                                                    Consumer<String> onStatus,
                                                     Integer maxTokens,
                                                     int round, AtomicBoolean isCancelled) {
         if (round >= maxToolRounds()) {
@@ -416,8 +433,8 @@ public class AgentRunner {
                 "Streaming round %d: continuing LLM call after tool results".formatted(round + 1));
 
         // Continue with streaming after tool results
-        var accumulator = OpenAiCompatibleClient.chatStreamAccumulate(
-                provider, agent.modelId, currentMessages, tools, onToken, maxTokens);
+        var accumulator = provider.chatStreamAccumulate(
+                agent.modelId, currentMessages, tools, onToken, onReasoning, maxTokens, agent.thinkingMode);
 
         try {
             // Poll with timeout so we can detect client disconnect
@@ -438,7 +455,7 @@ public class AgentRunner {
         // Recursively handle if more tool calls
         if (!accumulator.toolCalls.isEmpty()) {
             return handleToolCallsStreaming(agent, conversationId, currentMessages, tools,
-                    accumulator.toolCalls, accumulator.content, provider, onToken, onStatus, maxTokens, round + 1, isCancelled);
+                    accumulator.toolCalls, accumulator.content, provider, onToken, onReasoning, onStatus, maxTokens, round + 1, isCancelled);
         }
 
         // If LLM returned empty content after tool calls, emit "Done." so the user isn't left
@@ -475,9 +492,9 @@ public class AgentRunner {
         return messages;
     }
 
-    private static List<ChatMessage> trimToContextWindow(List<ChatMessage> messages, Agent agent, ProviderConfig provider) {
+    private static List<ChatMessage> trimToContextWindow(List<ChatMessage> messages, Agent agent, LlmProvider provider) {
         // Find the model's context window
-        var modelInfo = provider.models().stream()
+        var modelInfo = provider.config().models().stream()
                 .filter(m -> m.id().equals(agent.modelId))
                 .findFirst().orElse(null);
         if (modelInfo == null || modelInfo.contextWindow() <= 0) return messages;

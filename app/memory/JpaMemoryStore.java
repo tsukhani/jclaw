@@ -191,7 +191,7 @@ public class JpaMemoryStore implements MemoryStore {
         try {
             var provider = llm.ProviderRegistry.getPrimary();
             if (provider == null) return null;
-            return llm.OpenAiCompatibleClient.embeddings(provider, vectorModel, text);
+            return provider.embeddings(vectorModel, text);
         } catch (Exception e) {
             EventLogger.warn("memory", "Embedding generation failed: %s".formatted(e.getMessage()));
             return null;

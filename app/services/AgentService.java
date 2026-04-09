@@ -18,13 +18,14 @@ public class AgentService {
         boolean isExpired() { return System.currentTimeMillis() > expiresAt; }
     }
 
-    public static Agent create(String name, String modelProvider, String modelId, boolean isDefault) {
+    public static Agent create(String name, String modelProvider, String modelId, boolean isDefault, String thinkingMode) {
         var agent = new Agent();
         agent.name = name;
         agent.modelProvider = modelProvider;
         agent.modelId = modelId;
         agent.enabled = isProviderConfigured(modelProvider, modelId);
         agent.isDefault = isDefault;
+        agent.thinkingMode = thinkingMode;
         agent.save();
 
         createWorkspace(name);
@@ -44,12 +45,13 @@ public class AgentService {
     }
 
     public static Agent update(Agent agent, String name, String modelProvider, String modelId,
-                                boolean enabled, boolean isDefault) {
+                                boolean enabled, boolean isDefault, String thinkingMode) {
         agent.name = name;
         agent.modelProvider = modelProvider;
         agent.modelId = modelId;
         agent.enabled = enabled && isProviderConfigured(modelProvider, modelId);
         agent.isDefault = isDefault;
+        agent.thinkingMode = thinkingMode;
         agent.save();
         return agent;
     }
@@ -57,7 +59,7 @@ public class AgentService {
     private static boolean isProviderConfigured(String providerName, String modelId) {
         var provider = ProviderRegistry.get(providerName);
         return provider != null
-                && provider.models().stream().anyMatch(m -> m.id().equals(modelId));
+                && provider.config().models().stream().anyMatch(m -> m.id().equals(modelId));
     }
 
     /**

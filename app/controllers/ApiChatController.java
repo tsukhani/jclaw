@@ -104,10 +104,14 @@ public class ApiChatController extends Controller {
 
         AgentRunner.runStreaming(agent, conversationId, "web", username, messageText,
                 cancelled,
-                // onInit — send conversation ID as first SSE event
+                // onInit — send conversation ID and thinking config as first SSE event
                 conversation -> {
                     try {
-                        var initEvent = gson.toJson(Map.of("type", "init", "conversationId", conversation.id));
+                        var initData = new java.util.HashMap<>(Map.of("type", "init", "conversationId", conversation.id));
+                        if (agent.thinkingMode != null && !agent.thinkingMode.isBlank()) {
+                            initData.put("thinkingMode", agent.thinkingMode);
+                        }
+                        var initEvent = gson.toJson(initData);
                         res.writeChunk("data: %s\n\n".formatted(initEvent).getBytes(StandardCharsets.UTF_8));
                     } catch (Exception e) {
                         cancelled.set(true);
@@ -130,6 +134,16 @@ public class ApiChatController extends Controller {
                         cancelled.set(true);
                         latch.countDown();
                     }
+                    }
+                },
+                // onReasoning — stream reasoning/thinking tokens
+                reasoning -> {
+                    try {
+                        var event = gson.toJson(Map.of("type", "reasoning", "content", reasoning));
+                        res.writeChunk("data: %s\n\n".formatted(event).getBytes(StandardCharsets.UTF_8));
+                    } catch (Exception e) {
+                        cancelled.set(true);
+                        latch.countDown();
                     }
                 },
                 // onStatus — progress updates during tool execution
