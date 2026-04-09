@@ -7,4 +7,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+      - ./workspace:/app/workspace
+      - ./skills:/app/skills
     restart: unless-stopped
