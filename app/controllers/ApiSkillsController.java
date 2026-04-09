@@ -696,17 +696,26 @@ public class ApiSkillsController extends Controller {
     }
 
     /** Check if a file is likely a text file based on extension. */
+    private static final java.util.Set<String> TEXT_EXTENSIONS = java.util.Set.of(
+            ".md", ".json", ".txt", ".yaml", ".yml", ".xml", ".sh", ".py", ".js",
+            ".ts", ".java", ".html", ".css", ".toml", ".ini", ".cfg", ".conf", ".env",
+            ".properties", ".rb", ".go", ".rs", ".lua", ".sql"
+    );
+
+    private static final java.util.Set<String> KNOWN_TEXT_FILES = java.util.Set.of(
+            "readme", "makefile", "dockerfile", "license", "changelog",
+            "gemfile", "rakefile", "procfile", "vagrantfile"
+    );
+
     private static boolean isTextFile(String name) {
         var lower = name.toLowerCase();
-        return lower.endsWith(".md") || lower.endsWith(".json") || lower.endsWith(".txt")
-                || lower.endsWith(".yaml") || lower.endsWith(".yml") || lower.endsWith(".xml")
-                || lower.endsWith(".sh") || lower.endsWith(".py") || lower.endsWith(".js")
-                || lower.endsWith(".ts") || lower.endsWith(".java") || lower.endsWith(".html")
-                || lower.endsWith(".css") || lower.endsWith(".toml") || lower.endsWith(".ini")
-                || lower.endsWith(".cfg") || lower.endsWith(".conf") || lower.endsWith(".env")
-                || lower.endsWith(".properties") || lower.endsWith(".rb") || lower.endsWith(".go")
-                || lower.endsWith(".rs") || lower.endsWith(".lua") || lower.endsWith(".sql")
-                || !lower.contains(".");  // extensionless files (READMEs, Makefiles, etc.)
+        // Check known text extensions
+        for (var ext : TEXT_EXTENSIONS) {
+            if (lower.endsWith(ext)) return true;
+        }
+        // Check known extensionless text files by filename
+        var baseName = lower.contains("/") ? lower.substring(lower.lastIndexOf('/') + 1) : lower;
+        return KNOWN_TEXT_FILES.contains(baseName);
     }
 
     // --- Helpers ---
