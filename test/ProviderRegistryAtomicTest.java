@@ -30,8 +30,8 @@ public class ProviderRegistryAtomicTest extends UnitTest {
 
         var provider = ProviderRegistry.get("test-provider");
         assertNotNull(provider);
-        assertEquals("https://test.ai/v1", provider.baseUrl());
-        assertEquals(1, provider.models().size());
+        assertEquals("https://test.ai/v1", provider.config().baseUrl());
+        assertEquals(1, provider.config().models().size());
     }
 
     @Test

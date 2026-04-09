@@ -1,6 +1,7 @@
 import org.junit.jupiter.api.*;
 import play.test.*;
 import agents.AgentRunner;
+import llm.LlmProvider;
 import llm.LlmTypes.*;
 
 import java.util.ArrayList;
@@ -10,6 +11,11 @@ import java.util.List;
  * Tests that streaming tool call recursion is capped at MAX_TOOL_ROUNDS.
  */
 public class StreamingToolRoundTest extends UnitTest {
+
+    /** Minimal concrete LlmProvider for testing reflection-based methods. */
+    static class TestProvider extends LlmProvider {
+        TestProvider(ProviderConfig config) { super(config); }
+    }
 
     @Test
     public void estimateTokensCalculatesApproximately() throws Exception {
@@ -54,12 +60,12 @@ public class StreamingToolRoundTest extends UnitTest {
     @Test
     public void trimToContextWindowPreservesSystemPrompt() throws Exception {
         var method = AgentRunner.class.getDeclaredMethod("trimToContextWindow",
-                List.class, models.Agent.class, ProviderConfig.class);
+                List.class, models.Agent.class, LlmProvider.class);
         method.setAccessible(true);
 
         // Create a provider with a very small context window
-        var provider = new ProviderConfig("test", "http://test", "key",
-                List.of(new ModelInfo("model-1", "Model 1", 10, 100))); // 10 tokens max
+        var provider = new TestProvider(new ProviderConfig("test", "http://test", "key",
+                List.of(new ModelInfo("model-1", "Model 1", 10, 100, false)))); // 10 tokens max
 
         var agent = new models.Agent();
         agent.name = "trim-test";
@@ -83,12 +89,12 @@ public class StreamingToolRoundTest extends UnitTest {
     @Test
     public void trimToContextWindowNoOpWhenFits() throws Exception {
         var method = AgentRunner.class.getDeclaredMethod("trimToContextWindow",
-                List.class, models.Agent.class, ProviderConfig.class);
+                List.class, models.Agent.class, LlmProvider.class);
         method.setAccessible(true);
 
         // Large context window — nothing should be trimmed
-        var provider = new ProviderConfig("test", "http://test", "key",
-                List.of(new ModelInfo("model-1", "Model 1", 100000, 100)));
+        var provider = new TestProvider(new ProviderConfig("test", "http://test", "key",
+                List.of(new ModelInfo("model-1", "Model 1", 100000, 100, false))));
 
         var agent = new models.Agent();
         agent.name = "no-trim-test";
@@ -108,7 +114,7 @@ public class StreamingToolRoundTest extends UnitTest {
     @Test
     public void maxToolRoundsConstantExists() throws Exception {
         // Verify MAX_TOOL_ROUNDS is accessible and reasonable
-        var field = AgentRunner.class.getDeclaredField("MAX_TOOL_ROUNDS");
+        var field = AgentRunner.class.getDeclaredField("DEFAULT_MAX_TOOL_ROUNDS");
         field.setAccessible(true);
         var maxRounds = (int) field.get(null);
         assertTrue(maxRounds > 0 && maxRounds <= 20,

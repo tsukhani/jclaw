@@ -17,7 +17,7 @@ public class WebChatTest extends UnitTest {
     void setup() {
         Fixtures.deleteDatabase();
         cleanupTestAgent();
-        agent = AgentService.create("chat-agent", "openrouter", "gpt-4.1", true);
+        agent = AgentService.create("chat-agent", "openrouter", "gpt-4.1", true, null);
     }
 
     @AfterAll

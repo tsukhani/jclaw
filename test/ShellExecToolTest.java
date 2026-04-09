@@ -19,7 +19,7 @@ public class ShellExecToolTest extends UnitTest {
         Fixtures.deleteDatabase();
         cleanupTestAgent();
         tool = new ShellExecTool();
-        agent = AgentService.create("shell-test-agent", "openrouter", "gpt-4.1", false);
+        agent = AgentService.create("shell-test-agent", "openrouter", "gpt-4.1", false, null);
         // Seed allowlist
         ConfigService.set("shell.allowlist", "echo,ls,cat,git,head,sleep,pwd,printenv,exit,sh,wc,grep");
     }

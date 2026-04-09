@@ -104,7 +104,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
         return executeCommand(command, workdir, timeout, maxOutputBytes, env, startTime, agent);
     }
 
-    String validateAllowlist(String command) {
+    public String validateAllowlist(String command) {
         var firstToken = extractFirstToken(command);
         if (firstToken.isEmpty()) {
             return "Error: command is required and must not be empty.";
@@ -135,7 +135,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
         return idx == -1 ? trimmed : trimmed.substring(0, idx);
     }
 
-    Path resolveWorkdir(JsonObject args, Path workspace, boolean allowGlobal) {
+    public Path resolveWorkdir(JsonObject args, Path workspace, boolean allowGlobal) {
 
         if (!args.has("workdir") || args.get("workdir").getAsString().trim().isEmpty()) {
             if (!Files.isDirectory(workspace)) {
@@ -164,7 +164,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
         return resolved;
     }
 
-    Map<String, String> buildEnvironment(JsonObject args) {
+    public Map<String, String> buildEnvironment(JsonObject args) {
         var env = new LinkedHashMap<String, String>();
 
         // Start with filtered host environment
@@ -187,7 +187,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
         return env;
     }
 
-    static boolean isSensitiveEnvVar(String name) {
+    public static boolean isSensitiveEnvVar(String name) {
         var upper = name.toUpperCase();
         for (var prefix : SENSITIVE_PREFIXES) {
             if (upper.startsWith(prefix)) return true;

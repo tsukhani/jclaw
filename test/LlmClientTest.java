@@ -48,8 +48,8 @@ public class LlmClientTest extends UnitTest {
                 "https://openrouter.ai/api/v1",
                 "sk-test-key",
                 List.of(
-                        new ModelInfo("openai/gpt-4.1", "GPT-4.1", 1047576, 32768),
-                        new ModelInfo("anthropic/claude-sonnet-4-6", "Claude Sonnet 4.6", 200000, 8192)
+                        new ModelInfo("openai/gpt-4.1", "GPT-4.1", 1047576, 32768, false),
+                        new ModelInfo("anthropic/claude-sonnet-4-6", "Claude Sonnet 4.6", 200000, 8192, false)
                 ));
 
         assertEquals("openrouter", config.name());
@@ -109,12 +109,12 @@ public class LlmClientTest extends UnitTest {
 
         var openrouter = ProviderRegistry.get("openrouter");
         assertNotNull(openrouter);
-        assertEquals("https://openrouter.ai/api/v1", openrouter.baseUrl());
-        assertEquals(1, openrouter.models().size());
+        assertEquals("https://openrouter.ai/api/v1", openrouter.config().baseUrl());
+        assertEquals(1, openrouter.config().models().size());
 
         var ollama = ProviderRegistry.get("ollama-cloud");
         assertNotNull(ollama);
-        assertEquals("https://ollama.com/v1", ollama.baseUrl());
+        assertEquals("https://ollama.com/v1", ollama.config().baseUrl());
     }
 
     @Test

@@ -16,7 +16,7 @@ public class PlaywrightToolTest extends UnitTest {
     void setup() {
         Fixtures.deleteDatabase();
         cleanupTestAgent();
-        agent = AgentService.create("browser-test-agent", "openrouter", "gpt-4.1", true);
+        agent = AgentService.create("browser-test-agent", "openrouter", "gpt-4.1", true, null);
         agent.enabled = true;
         agent.save();
     }
@@ -75,7 +75,7 @@ public class PlaywrightToolTest extends UnitTest {
 
     @Test
     public void browserToolDisabledForNonMainAgent() {
-        var otherAgent = AgentService.create("non-main-agent", "openrouter", "gpt-4.1", false);
+        var otherAgent = AgentService.create("non-main-agent", "openrouter", "gpt-4.1", false, null);
         // Check that AgentToolConfig was created with browser disabled
         var configs = models.AgentToolConfig.findByAgent(otherAgent);
         var browserConfig = configs.stream()

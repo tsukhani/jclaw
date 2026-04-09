@@ -22,7 +22,7 @@ public class SseStreamTest extends UnitTest {
     void setup() {
         Fixtures.deleteDatabase();
         cleanupTestAgent();
-        agent = AgentService.create("sse-test-agent", "openrouter", "gpt-4.1", true);
+        agent = AgentService.create("sse-test-agent", "openrouter", "gpt-4.1", true, null);
     }
 
     @AfterAll

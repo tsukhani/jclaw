@@ -33,7 +33,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void createAgentCreatesWorkspace() {
-        var agent = AgentService.create("test-agent", "openrouter", "gpt-4.1", true);
+        var agent = AgentService.create("test-agent", "openrouter", "gpt-4.1", true, null);
         assertNotNull(agent);
         assertEquals("test-agent", agent.name);
         assertTrue(agent.isDefault);
@@ -48,7 +48,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void readAndWriteWorkspaceFile() {
-        AgentService.create("ws-agent", "openrouter", "gpt-4.1", false);
+        AgentService.create("ws-agent", "openrouter", "gpt-4.1", false, null);
 
         AgentService.writeWorkspaceFile("ws-agent", "AGENT.md", "# Custom Instructions\nBe helpful.");
         var content = AgentService.readWorkspaceFile("ws-agent", "AGENT.md");
@@ -58,17 +58,17 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void readMissingWorkspaceFileReturnsNull() {
-        AgentService.create("missing-agent", "openrouter", "gpt-4.1", false);
+        AgentService.create("missing-agent", "openrouter", "gpt-4.1", false, null);
         var content = AgentService.readWorkspaceFile("missing-agent", "NONEXISTENT.md");
         assertNull(content);
     }
 
     @Test
     public void listEnabledFiltersDisabled() {
-        var agent1 = AgentService.create("enabled-1", "openrouter", "gpt-4.1", false);
+        var agent1 = AgentService.create("enabled-1", "openrouter", "gpt-4.1", false, null);
         agent1.enabled = true;
         agent1.save();
-        var agent2 = AgentService.create("disabled-1", "openrouter", "gpt-4.1", false);
+        var agent2 = AgentService.create("disabled-1", "openrouter", "gpt-4.1", false, null);
         agent2.enabled = false;
         agent2.save();
 
@@ -81,7 +81,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void loadSkillsFromFilesystem() {
-        var agent = AgentService.create("skill-agent", "openrouter", "gpt-4.1", false);
+        var agent = AgentService.create("skill-agent", "openrouter", "gpt-4.1", false, null);
 
         // Create a skill file in the agent's workspace
         var skillDir = AgentService.workspacePath("skill-agent").resolve("skills").resolve("coding");
@@ -106,7 +106,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void loadSkillsReturnsEmptyForNoSkills() {
-        AgentService.create("no-skills", "openrouter", "gpt-4.1", false);
+        AgentService.create("no-skills", "openrouter", "gpt-4.1", false, null);
         SkillLoader.clearCache();
         var skills = SkillLoader.loadSkills("no-skills");
         assertTrue(skills.isEmpty());
@@ -114,7 +114,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void formatSkillsXmlContainsSkillData() {
-        var agent = AgentService.create("xml-agent", "openrouter", "gpt-4.1", false);
+        var agent = AgentService.create("xml-agent", "openrouter", "gpt-4.1", false, null);
 
         // Create a skill file in the agent's workspace
         var skillDir = AgentService.workspacePath("xml-agent").resolve("skills").resolve("research");
@@ -149,7 +149,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void findOrCreateConversation() {
-        var agent = AgentService.create("convo-agent", "openrouter", "gpt-4.1", true);
+        var agent = AgentService.create("convo-agent", "openrouter", "gpt-4.1", true, null);
         var convo1 = ConversationService.findOrCreate(agent, "web", "admin");
         assertNotNull(convo1);
 
@@ -159,7 +159,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void appendAndLoadMessages() {
-        var agent = AgentService.create("msg-agent", "openrouter", "gpt-4.1", true);
+        var agent = AgentService.create("msg-agent", "openrouter", "gpt-4.1", true, null);
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
 
         ConversationService.appendUserMessage(convo, "Hello");
@@ -178,7 +178,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void assembleIncludesWorkspaceFiles() {
-        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1", true);
+        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1", true, null);
         AgentService.writeWorkspaceFile("prompt-agent", "AGENT.md", "# Be helpful and concise");
 
         var assembled = SystemPromptAssembler.assemble(agent, "test query");
@@ -190,7 +190,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void assembleSkipsOptionalFiles() {
-        var agent = AgentService.create("minimal-agent", "openrouter", "gpt-4.1", true);
+        var agent = AgentService.create("minimal-agent", "openrouter", "gpt-4.1", true, null);
         // Delete optional files
         try {
             Files.deleteIfExists(AgentService.workspacePath("minimal-agent").resolve("IDENTITY.md"));

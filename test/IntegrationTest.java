@@ -38,7 +38,7 @@ public class IntegrationTest extends UnitTest {
     @Test
     public void telegramWebhookParsesAndRoutes() {
         // Setup: agent + binding
-        var agent = AgentService.create("telegram-bot", "openrouter", "gpt-4.1", true);
+        var agent = AgentService.create("telegram-bot", "openrouter", "gpt-4.1", true, null);
         agent.enabled = true; agent.save();
         var binding = new AgentBinding();
         binding.agent = agent;
@@ -85,7 +85,7 @@ public class IntegrationTest extends UnitTest {
 
     @Test
     public void slackWebhookVerifiesAndRoutes() {
-        var agent = AgentService.create("slack-bot", "openrouter", "gpt-4.1", true);
+        var agent = AgentService.create("slack-bot", "openrouter", "gpt-4.1", true, null);
         agent.enabled = true; agent.save();
 
         // Simulate Slack event payload
@@ -115,7 +115,7 @@ public class IntegrationTest extends UnitTest {
 
     @Test
     public void whatsappWebhookParsesAndRoutes() {
-        var agent = AgentService.create("wa-bot", "ollama-cloud", "qwen3.5", true);
+        var agent = AgentService.create("wa-bot", "ollama-cloud", "qwen3.5", true, null);
         agent.enabled = true; agent.save();
 
         var payload = JsonParser.parseString("""
@@ -151,7 +151,7 @@ public class IntegrationTest extends UnitTest {
 
     @Test
     public void webChatCreatesConversationAndStoresMessages() {
-        var agent = AgentService.create("web-agent", "openrouter", "gpt-4.1", true);
+        var agent = AgentService.create("web-agent", "openrouter", "gpt-4.1", true, null);
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
 
         ConversationService.appendUserMessage(convo, "What is JClaw?");
@@ -178,7 +178,7 @@ public class IntegrationTest extends UnitTest {
 
     @Test
     public void toolExecutionInAgentPipeline() {
-        var agent = AgentService.create("tool-agent", "openrouter", "gpt-4.1", true);
+        var agent = AgentService.create("tool-agent", "openrouter", "gpt-4.1", true, null);
 
         // Test TaskTool creates a task
         var result = ToolRegistry.execute("task_manager",
@@ -204,7 +204,7 @@ public class IntegrationTest extends UnitTest {
 
     @Test
     public void memoryRecalledDuringPromptAssembly() {
-        var agent = AgentService.create("memory-agent", "openrouter", "gpt-4.1", true);
+        var agent = AgentService.create("memory-agent", "openrouter", "gpt-4.1", true, null);
 
         // Store a memory
         var store = memory.MemoryStoreFactory.get();
@@ -220,7 +220,7 @@ public class IntegrationTest extends UnitTest {
 
     @Test
     public void skillsLoadedDuringPromptAssembly() {
-        var agent = AgentService.create("skill-agent", "openrouter", "gpt-4.1", true);
+        var agent = AgentService.create("skill-agent", "openrouter", "gpt-4.1", true, null);
 
         // Create a skill file in the agent's workspace
         var skillDir = AgentService.workspacePath("skill-agent").resolve("skills").resolve("coding");
@@ -247,9 +247,9 @@ public class IntegrationTest extends UnitTest {
 
     @Test
     public void multiAgentRoutingFullPipeline() {
-        var mainAgent = AgentService.create("test-main", "openrouter", "gpt-4.1", true);
+        var mainAgent = AgentService.create("test-main", "openrouter", "gpt-4.1", true, null);
         mainAgent.enabled = true; mainAgent.save();
-        var supportAgent = AgentService.create("test-support", "ollama-cloud", "qwen3.5", false);
+        var supportAgent = AgentService.create("test-support", "ollama-cloud", "qwen3.5", false, null);
         supportAgent.enabled = true; supportAgent.save();
 
         // Bind support agent to specific Telegram user

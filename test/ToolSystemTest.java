@@ -27,7 +27,7 @@ public class ToolSystemTest extends UnitTest {
         ToolRegistry.register(new WebFetchTool());
         ToolRegistry.register(new SkillsTool());
         ToolRegistry.publish();
-        agent = AgentService.create("tool-test-agent", "openrouter", "gpt-4.1", true);
+        agent = AgentService.create("tool-test-agent", "openrouter", "gpt-4.1", true, null);
     }
 
     @AfterAll
