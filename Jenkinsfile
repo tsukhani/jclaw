@@ -82,22 +82,13 @@ pipeline {
                 buildingTag()
             }
             steps {
-                script {
-                    def version = env.TAG_NAME
-                    echo "Creating release for ${version}"
-
-                    // Publish to Bitbucket Downloads (requires Bitbucket credentials)
-                    withCredentials([usernamePassword(
-                        credentialsId: 'abundent',
-                        usernameVariable: 'BB_USER',
-                        passwordVariable: 'BB_PASS'
-                    )]) {
-                        sh """
-                            curl -u \$BB_USER:\$BB_PASS -X POST \
-                                https://bitbucket.abundent.com/rest/api/latest/projects/JCLAW/repos/jclaw/browse/downloads/jclaw-${version}.zip \
-                                -F file=@dist/jclaw.zip
-                        """
-                    }
+                withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
+                    sh """
+                        gh release create ${env.TAG_NAME} dist/jclaw.zip \
+                            --repo tsukhani/jclaw \
+                            --title "JClaw ${env.TAG_NAME}" \
+                            --generate-notes
+                    """
                 }
             }
         }
