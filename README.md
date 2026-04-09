@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://jenkins.abundent.com/buildStatus/icon?job=JClaw&style=for-the-badge" alt="Build Status">
+  <img src="https://img.shields.io/jenkins/build?jobUrl=https%3A%2F%2Fjenkins.abundent.com%2Fjob%2FJClaw&style=for-the-badge&label=BUILD" alt="Build Status">
   <img src="https://img.shields.io/github/v/release/tsukhani/jclaw?style=for-the-badge&label=RELEASE&color=blue" alt="Release">
   <img src="https://img.shields.io/badge/LICENSE-MIT-green?style=for-the-badge" alt="License: MIT">
   <img src="https://img.shields.io/badge/JDK-25%2B-orange?style=for-the-badge" alt="JDK: 25+">
