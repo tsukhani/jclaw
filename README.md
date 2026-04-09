@@ -9,10 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="https://jenkins.abundent.com/job/JClaw/"><img src="https://jenkins.abundent.com/buildStatus/icon?job=JClaw&style=for-the-badge" height="28" alt="Build Status"></a>
-  <img src="https://img.shields.io/github/v/release/tsukhani/jclaw?style=for-the-badge&label=RELEASE&color=blue" alt="Release">
-  <img src="https://img.shields.io/badge/LICENSE-MIT-green?style=for-the-badge" alt="License: MIT">
-  <img src="https://img.shields.io/badge/JDK-25%2B-orange?style=for-the-badge" alt="JDK: 25+">
+  <a href="https://jenkins.abundent.com/job/JClaw/"><img src="https://jenkins.abundent.com/buildStatus/icon?job=JClaw&style=flat-square" alt="Build Status"></a>
+  <img src="https://img.shields.io/github/v/release/tsukhani/jclaw?style=flat-square&label=release&color=blue" alt="Release">
+  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License: MIT">
+  <img src="https://img.shields.io/badge/JDK-25%2B-orange?style=flat-square" alt="JDK: 25+">
 </p>
 
 <br>
