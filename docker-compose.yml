@@ -1,6 +1,7 @@
 services:
   jclaw:
     image: ghcr.io/tsukhani/jclaw:latest
+    pull_policy: always
     ports:
       - "9000:9000"
     volumes:
