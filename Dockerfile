@@ -13,15 +13,16 @@ RUN npx nuxi generate
 # ── Stage 2: Runtime ─────────────────────────────────────────────────────────
 FROM azul/zulu-openjdk:25 AS runtime
 
-# Install Play Framework
-ARG PLAY_VERSION=1.11.7
+# Install Play Framework (latest release from tsukhani/play1)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl unzip python3 && \
-    curl -fsSL -L https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip -o /tmp/play.zip && \
+        curl unzip python3 jq && \
+    PLAY_URL=$(curl -fsSL https://api.github.com/repos/tsukhani/play1/releases/latest | jq -r '.assets[0].browser_download_url') && \
+    PLAY_VERSION=$(curl -fsSL https://api.github.com/repos/tsukhani/play1/releases/latest | jq -r '.tag_name' | sed 's/^v//') && \
+    curl -fsSL -L "$PLAY_URL" -o /tmp/play.zip && \
     unzip -q /tmp/play.zip -d /opt && \
     ln -s /opt/play-${PLAY_VERSION} /opt/play && \
     rm /tmp/play.zip && \
-    apt-get remove -y curl unzip && apt-get autoremove -y && \
+    apt-get remove -y curl unzip jq && apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 
 ENV PLAY_HOME=/opt/play
