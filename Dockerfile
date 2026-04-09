@@ -34,6 +34,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 ENV PLAY_HOME=/opt/play
 ENV PATH="${PLAY_HOME}:${PATH}"
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 # Copy application
 WORKDIR /app
