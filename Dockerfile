@@ -15,15 +15,14 @@ FROM azul/zulu-openjdk:25 AS runtime
 
 LABEL org.opencontainers.image.source=https://github.com/tsukhani/jclaw
 
-# Install Play Framework (latest release from tsukhani/play1) + Playwright browser deps
+# Install Play Framework (latest release from tsukhani/play1) + Chromium deps for Playwright
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl unzip python3 jq \
-        libglib2.0-0 libnss3 libnspr4 libdbus-1-3 libatk1.0-0 \
-        libatk-bridge2.0-0 libcups2 libxkbcommon0 libatspi2.0-0 \
-        libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
-        libpango-1.0-0 libcairo2 libx11-xcb1 libxcursor1 \
-        libgtk-3-0 libpangocairo-1.0-0 libcairo-gobject2 \
-        libgdk-pixbuf-2.0-0 && \
+        libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 \
+        libcairo2 libcups2 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0 \
+        libnspr4 libnss3 libpango-1.0-0 libwayland-client0 libx11-6 \
+        libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
+        libxkbcommon0 libxrandr2 && \
     PLAY_URL=$(curl -fsSL https://api.github.com/repos/tsukhani/play1/releases/latest | jq -r '.assets[0].browser_download_url') && \
     PLAY_VERSION=$(curl -fsSL https://api.github.com/repos/tsukhani/play1/releases/latest | jq -r '.tag_name' | sed 's/^v//') && \
     curl -fsSL -L "$PLAY_URL" -o /tmp/play.zip && \
