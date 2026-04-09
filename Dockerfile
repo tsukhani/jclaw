@@ -13,6 +13,8 @@ RUN npx nuxi generate
 # ── Stage 2: Runtime ─────────────────────────────────────────────────────────
 FROM azul/zulu-openjdk:25 AS runtime
 
+LABEL org.opencontainers.image.source=https://github.com/tsukhani/jclaw
+
 # Install Play Framework (latest release from tsukhani/play1)
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl unzip python3 jq && \
