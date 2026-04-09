@@ -85,6 +85,49 @@ public class ApiAgentsController extends Controller {
 
     // --- Workspace file endpoints ---
 
+    /**
+     * GET /api/agents/{id}/files/{filePath} — Serve a workspace file with proper content type.
+     * Supports images, PDFs, and other binary files for inline rendering or download.
+     */
+    public static void serveWorkspaceFile(Long id, String filePath) {
+        var agent = AgentService.findById(id);
+        if (agent == null) notFound();
+
+        // Prevent directory traversal
+        if (filePath.contains("..")) forbidden();
+
+        var path = AgentService.workspacePath(agent.name).resolve(filePath);
+        var file = path.toFile();
+        if (!file.exists() || !file.isFile()) notFound();
+
+        // Determine content type
+        var contentType = switch (filePath.substring(filePath.lastIndexOf('.') + 1).toLowerCase()) {
+            case "png" -> "image/png";
+            case "jpg", "jpeg" -> "image/jpeg";
+            case "gif" -> "image/gif";
+            case "webp" -> "image/webp";
+            case "svg" -> "image/svg+xml";
+            case "pdf" -> "application/pdf";
+            case "mp3" -> "audio/mpeg";
+            case "mp4" -> "video/mp4";
+            case "wav" -> "audio/wav";
+            case "json" -> "application/json";
+            case "csv" -> "text/csv";
+            case "txt", "md", "log" -> "text/plain";
+            default -> "application/octet-stream";
+        };
+
+        response.setHeader("Content-Type", contentType);
+        response.setHeader("Cache-Control", "private, max-age=300");
+
+        var inline = contentType.startsWith("image/") || contentType.equals("application/pdf");
+        try {
+            renderBinary(new java.io.FileInputStream(file), file.getName(), file.length(), contentType, inline);
+        } catch (java.io.FileNotFoundException e) {
+            notFound();
+        }
+    }
+
     public static void getWorkspaceFile(Long id, String filename) {
         var agent = AgentService.findById(id);
         if (agent == null) notFound();

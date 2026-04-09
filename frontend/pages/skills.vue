@@ -30,7 +30,23 @@ const dragSource = ref<'global' | 'agent' | null>(null)
 const dragSourceAgentId = ref<number | null>(null)
 const dropTarget = ref<number | null>(null)
 const dropTargetGlobal = ref(false)
-const promoting = ref(false)
+// Track multiple concurrent promotions by skill name (survives navigation via useState)
+const promotingSkills = useState<Set<string>>('promotingSkills', () => new Set())
+
+// Listen for promotion completion via SSE
+const { on } = useEventBus()
+on('skill.promoted', (data: any) => {
+  refreshSkills()
+  const s = new Set(promotingSkills.value)
+  s.delete(data.skillName)
+  promotingSkills.value = s
+})
+on('skill.promote_failed', (data: any) => {
+  console.error('Skill promotion failed:', data.skillName, data.error)
+  const s = new Set(promotingSkills.value)
+  s.delete(data.skillName)
+  promotingSkills.value = s
+})
 
 // --- Global skill → Agent card (copy to workspace) ---
 
@@ -122,20 +138,24 @@ async function onGlobalSectionDrop(e: DragEvent) {
 
   const skillName = dragging.value.folderName || dragging.value.name
   const agentId = dragSourceAgentId.value
-  promoting.value = true
+  dragging.value = null
 
-  try {
-    await $fetch('/api/skills/promote', {
-      method: 'POST',
-      body: { agentId, skillName }
-    })
-    refreshSkills()
-  } catch (err) {
+  // Skip if already promoting this skill
+  if (promotingSkills.value.has(skillName)) return
+
+  // Add to in-progress set and run in background (non-blocking)
+  promotingSkills.value = new Set([...promotingSkills.value, skillName])
+
+  // Send promote request — returns immediately, SSE event will notify on completion
+  $fetch('/api/skills/promote', {
+    method: 'POST',
+    body: { agentId, skillName }
+  }).catch((err) => {
     console.error('Failed to promote skill:', err)
-  } finally {
-    promoting.value = false
-    dragging.value = null
-  }
+    const s = new Set(promotingSkills.value)
+    s.delete(skillName)
+    promotingSkills.value = s
+  })
 }
 
 // --- Agent skill toggle ---
@@ -483,12 +503,12 @@ function totalSkillCount(agentId: number) {
            ]">
         <div class="flex items-center gap-3 mb-3">
           <div class="text-xs text-neutral-500 uppercase tracking-wider">Global Skills</div>
-          <div v-if="promoting" class="flex items-center gap-1.5 text-[10px] text-emerald-400">
+          <div v-if="promotingSkills.size" class="flex items-center gap-1.5 text-[10px] text-emerald-400">
             <svg class="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
             </svg>
-            Sanitizing &amp; promoting...
+            Promoting {{ promotingSkills.size }} skill{{ promotingSkills.size > 1 ? 's' : '' }}...
           </div>
         </div>
         <div class="text-[10px] text-neutral-600 mb-3">
@@ -501,7 +521,7 @@ function totalSkillCount(agentId: number) {
           Release to promote to global registry (secrets will be stripped)
         </div>
 
-        <div v-if="!skills?.length && !promoting" class="bg-neutral-900 border border-neutral-800 px-4 py-6 text-center text-sm text-neutral-600">
+        <div v-if="!skills?.length && !promotingSkills.size" class="bg-neutral-900 border border-neutral-800 px-4 py-6 text-center text-sm text-neutral-600">
           No global skills. Create one to get started.
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">

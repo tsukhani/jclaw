@@ -29,6 +29,14 @@ public class OpenRouterProvider extends LlmProvider {
     }
 
     @Override
+    protected void disableReasoning(JsonObject request) {
+        // Explicitly disable reasoning for models that think by default
+        var reasoning = new JsonObject();
+        reasoning.addProperty("effort", "none");
+        request.add("reasoning", reasoning);
+    }
+
+    @Override
     protected String extractReasoningFromDelta(ChunkDelta delta) {
         // OpenRouter sends reasoning as reasoning_details array with type "reasoning.text"
         if (delta.reasoningDetails() != null) {

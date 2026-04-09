@@ -23,9 +23,25 @@ function formatTokensPerSec(usage: MessageUsage): string | null {
   return tps.toFixed(1) + ' tok/s'
 }
 
+// Configure DOMPurify to allow images, audio, video, and download links
+DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+  // Allow src attributes on img/audio/video/source that point to our API
+  if (data.attrName === 'src' && data.attrValue?.startsWith('/api/')) {
+    data.forceKeepAttr = true
+  }
+  // Allow href for download links to our API
+  if (data.attrName === 'href' && data.attrValue?.startsWith('/api/')) {
+    data.forceKeepAttr = true
+  }
+})
+
 function renderMarkdown(text: string): string {
   if (!text) return ''
-  return DOMPurify.sanitize(marked.parse(text) as string)
+  const html = marked.parse(text) as string
+  return DOMPurify.sanitize(html, {
+    ADD_TAGS: ['img', 'audio', 'video', 'source'],
+    ADD_ATTR: ['src', 'controls', 'autoplay', 'download', 'target']
+  })
 }
 
 function formatTimestamp(iso: string): string {
@@ -117,6 +133,8 @@ function onModelChange(event: Event) {
 function onThinkingModeChange(event: Event) {
   const val = (event.target as HTMLSelectElement).value
   updateAgentSetting({ thinkingMode: val || null })
+  // Auto-toggle thinking display to match
+  showThinking.value = !!val
 }
 
 const conversationsUrl = computed(() =>
@@ -141,7 +159,8 @@ function autoResize() {
 const agentBusy = ref(false)
 const streamContent = ref('')
 const streamReasoning = ref('')
-const showThinking = ref(true)
+// Default thinking display to match whether the agent has thinking enabled
+const showThinking = ref(false)
 interface MessageUsage {
   prompt: number
   completion: number
@@ -241,10 +260,12 @@ watch(agents, (val) => {
   }
 }, { immediate: true })
 
-// When agent changes, clear current conversation and refresh list
+// When agent changes, clear current conversation and sync thinking toggle
 watch(selectedAgentId, () => {
   selectedConvoId.value = null
   messages.value = []
+  const agent = agents.value?.find((a: any) => a.id === selectedAgentId.value)
+  showThinking.value = !!agent?.thinkingMode
 })
 
 async function loadConversation(id: number) {
@@ -711,5 +732,21 @@ function exportConversation() {
   border: none;
   border-top: 1px solid rgba(255,255,255,0.08);
   margin: 0.75em 0;
+}
+.prose-chat img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5em;
+  border: 1px solid rgba(255,255,255,0.08);
+  margin: 0.5em 0;
+  cursor: pointer;
+}
+.prose-chat img:hover {
+  border-color: rgba(255,255,255,0.2);
+}
+.prose-chat audio, .prose-chat video {
+  max-width: 100%;
+  margin: 0.5em 0;
+  border-radius: 0.5em;
 }
 </style>

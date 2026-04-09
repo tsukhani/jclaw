@@ -454,7 +454,11 @@ public class ApiSkillsController extends Controller {
         }
     }
 
-    /** POST /api/skills/promote — Promote an agent workspace skill to the global registry (with LLM sanitization). */
+    /**
+     * POST /api/skills/promote — Promote an agent workspace skill to the global registry.
+     * Returns immediately and runs LLM sanitization asynchronously on a virtual thread.
+     * The frontend polls the skills list to detect completion.
+     */
     public static void promote() {
         var body = readJsonBody();
         if (body == null || !body.has("agentId") || !body.has("skillName")) badRequest();
@@ -465,12 +469,30 @@ public class ApiSkillsController extends Controller {
         Agent agent = Agent.findById(agentId);
         if (agent == null) notFound();
 
-        var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve(skillName);
+        var agentName = agent.name;
+        var skillDir = AgentService.workspacePath(agentName).resolve("skills").resolve(skillName);
         if (!Files.isDirectory(skillDir) || !Files.exists(skillDir.resolve("SKILL.md"))) {
             error(404, "Skill '%s' not found in agent workspace".formatted(skillName));
         }
 
-        // Read text files from the skill folder (SKILL.md, credentials.json, tools/**)
+        // Return immediately — run sanitization in the background
+        Thread.ofVirtual().start(() -> {
+            try {
+                promoteInBackground(skillDir, skillName);
+            } catch (Exception e) {
+                services.EventLogger.error("skills", "Background promotion failed for '%s': %s"
+                        .formatted(skillName, e.getMessage()));
+            }
+        });
+
+        renderJSON(gson.toJson(java.util.Map.of("status", "promoting", "skillName", skillName)));
+    }
+
+    /** Background promotion: read files, sanitize via LLM, write to global skills directory. */
+    private static void promoteInBackground(Path skillDir, String skillName) {
+        services.EventLogger.info("skills", "Starting background promotion of '%s'".formatted(skillName));
+
+        // Read text files from the skill folder
         var textFiles = new LinkedHashMap<String, String>();
         var binaryFiles = new java.util.ArrayList<String>();
         try (var walk = Files.walk(skillDir)) {
@@ -485,7 +507,8 @@ public class ApiSkillsController extends Controller {
                 } catch (IOException _) {}
             });
         } catch (IOException e) {
-            error(500, "Failed to read skill files: " + e.getMessage());
+            services.EventLogger.error("skills", "Failed to read skill files: " + e.getMessage());
+            return;
         }
 
         // Strip credentials.json deterministically before LLM review
@@ -519,13 +542,19 @@ public class ApiSkillsController extends Controller {
                 Files.copy(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
             SkillLoader.clearCache();
+            services.EventLogger.info("skills", "Promotion of '%s' completed as '%s'".formatted(skillName, targetName));
 
-            var info = SkillLoader.parseSkillFile(targetDir.resolve("SKILL.md"));
-            var map = skillToMap(info, true);
-            map.put("folderName", targetName);
-            renderJSON(gson.toJson(map));
+            // Notify connected frontends
+            services.NotificationBus.publish("skill.promoted", java.util.Map.of(
+                    "skillName", skillName,
+                    "folderName", targetName
+            ));
         } catch (IOException e) {
-            error(500, "Failed to write promoted skill: " + e.getMessage());
+            services.EventLogger.error("skills", "Failed to write promoted skill: " + e.getMessage());
+            services.NotificationBus.publish("skill.promote_failed", java.util.Map.of(
+                    "skillName", skillName,
+                    "error", e.getMessage()
+            ));
         }
     }
 

@@ -25,6 +25,13 @@ public class OllamaProvider extends LlmProvider {
     }
 
     @Override
+    protected void disableReasoning(JsonObject request) {
+        // Ollama models like Kimi K2.5 think by default. The native API uses "think": false
+        // to disable it. Pass this through the /v1 endpoint — Ollama may forward it to the model.
+        request.addProperty("think", false);
+    }
+
+    @Override
     protected String extractReasoningFromDelta(ChunkDelta delta) {
         // Ollama sends reasoning text as a simple "reasoning" string field on the delta
         return delta.reasoning();

@@ -44,6 +44,11 @@ public abstract class LlmProvider {
         // Default: no reasoning support
     }
 
+    /** Explicitly disable reasoning for models that think by default. Called when thinkingMode is off. */
+    protected void disableReasoning(JsonObject request) {
+        // Default: no action (most providers don't need explicit disable)
+    }
+
     /**
      * Extract reasoning text from a streaming chunk delta.
      * Called for each chunk during streaming. Return null if no reasoning in this chunk.
@@ -225,6 +230,8 @@ public abstract class LlmProvider {
         }
         if (request.thinkingMode() != null && !request.thinkingMode().isBlank()) {
             addReasoningParams(obj, request.thinkingMode());
+        } else {
+            disableReasoning(obj);
         }
         return gson.toJson(obj);
     }

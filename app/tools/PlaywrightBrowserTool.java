@@ -86,7 +86,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                     var selector = args.has("selector") ? args.get("selector").getAsString() : "body";
                     yield getText(agent.name, selector);
                 }
-                case "screenshot" -> screenshot(agent.name);
+                case "screenshot" -> screenshot(agent.name, agent.id);
                 case "evaluate" -> {
                     var expression = args.get("expression").getAsString();
                     yield evaluate(agent.name, expression);
@@ -139,11 +139,16 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         return text != null ? text : "(no text content)";
     }
 
-    private String screenshot(String agentName) {
+    private String screenshot(String agentName, Long agentId) {
         var page = getOrCreatePage(agentName);
-        var path = AgentService.workspacePath(agentName).resolve("screenshot.png");
+        var timestamp = System.currentTimeMillis();
+        var filename = "screenshot-%d.png".formatted(timestamp);
+        var path = AgentService.workspacePath(agentName).resolve(filename);
         page.screenshot(new Page.ScreenshotOptions().setPath(path).setFullPage(true));
-        return "Screenshot saved to screenshot.png";
+
+        // Return a URL the LLM can embed in its markdown response
+        var url = "/api/agents/%d/files/%s".formatted(agentId, filename);
+        return "Screenshot saved. Display it with: ![Screenshot](%s)".formatted(url);
     }
 
     private String evaluate(String agentName, String expression) {
@@ -193,5 +198,10 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                 closeSession(name);
             }
         });
+    }
+
+    /** Close all sessions — called on application shutdown. */
+    public static void closeAllSessions() {
+        sessions.keySet().forEach(PlaywrightBrowserTool::closeSession);
     }
 }

@@ -64,6 +64,7 @@ frontend/.nuxt/
 frontend/.output/
 frontend/dist/
 frontend/.cache/
+public/spa/
 
 # Environment files (don't commit secrets!)
 conf/application.prod.conf

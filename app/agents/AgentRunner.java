@@ -431,6 +431,7 @@ public class AgentRunner {
 
         var currentMessages = new ArrayList<>(messages);
         currentMessages.add(ChatMessage.assistant(priorContent, toolCalls));
+        var collectedImages = new ArrayList<String>();
 
         for (var toolCall : toolCalls) {
             if (isCancelled.get()) return priorContent;
@@ -447,6 +448,9 @@ public class AgentRunner {
             EventLogger.info("tool", agent.name, null,
                     "Tool '%s' returned: %s".formatted(toolCall.function().name(), resultPreview));
             currentMessages.add(ChatMessage.toolResult(toolCall.id(), result));
+
+            // Collect rendered image URLs to prepend to the final response
+            extractImageUrls(result, collectedImages);
 
             services.Tx.run(() -> {
                 var conv = ConversationService.findById(conversationId);
@@ -487,15 +491,19 @@ public class AgentRunner {
                     accumulator.toolCalls, accumulator.content, provider, onToken, onReasoning, onStatus, maxTokens, round + 1, isCancelled);
         }
 
+        // Prepend any collected images to the final response content
+        var imagePrefix = collectedImages.isEmpty() ? ""
+                : String.join("\n\n", collectedImages) + "\n\n";
+
         // If LLM returned empty content after tool calls, emit "Done." so the user isn't left
         // with a blank response. Some models return empty content when tool results are self-explanatory.
         if (accumulator.content == null || accumulator.content.isBlank()) {
-            var fallback = "Done.";
+            var fallback = imagePrefix.isEmpty() ? "Done." : imagePrefix.trim();
             onToken.accept(fallback);
             return fallback;
         }
 
-        return accumulator.content;
+        return imagePrefix + accumulator.content;
     }
 
     private static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation) {
@@ -555,6 +563,20 @@ public class AgentRunner {
             if (msg.content() instanceof String s) chars += s.length();
         }
         return chars / 4; // rough approximation: ~4 chars per token
+    }
+
+    /**
+     * Extract markdown image URLs from tool results and stream them directly to the frontend.
+     * This ensures rendered images (screenshots, QR codes, etc.) appear in the chat
+     * regardless of whether the LLM includes them in its response.
+     */
+    private static void extractImageUrls(String toolResult, List<String> collectedImages) {
+        if (collectedImages == null || toolResult == null) return;
+        var pattern = java.util.regex.Pattern.compile("!\\[([^\\]]*)\\]\\((/api/[^)]+)\\)");
+        var matcher = pattern.matcher(toolResult);
+        while (matcher.find()) {
+            collectedImages.add(matcher.group(0));
+        }
     }
 
     private static List<ToolCall> parseToolCalls(String json) {

@@ -69,13 +69,22 @@ public class Task extends Model {
         updatedAt = Instant.now();
     }
 
+    @SuppressWarnings("unchecked")
     public static List<Task> findPendingDue() {
-        return Task.find("status = ?1 AND nextRunAt <= ?2",
-                Status.PENDING, Instant.now()).fetch();
+        // Use string comparison to avoid Play 1.x classloader enum mismatch during hot-reload
+        return play.db.jpa.JPA.em()
+                .createNativeQuery("SELECT * FROM task WHERE status = ?1 AND next_run_at <= ?2", Task.class)
+                .setParameter(1, Status.PENDING.name())
+                .setParameter(2, Instant.now())
+                .getResultList();
     }
 
+    @SuppressWarnings("unchecked")
     public static List<Task> findByStatus(Status status) {
-        return Task.find("status", status).fetch();
+        return play.db.jpa.JPA.em()
+                .createNativeQuery("SELECT * FROM task WHERE status = ?1", Task.class)
+                .setParameter(1, status.name())
+                .getResultList();
     }
 
     public static List<Task> findRecurring() {

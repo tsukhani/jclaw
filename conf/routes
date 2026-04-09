@@ -36,6 +36,7 @@ GET     /api/agents/{id}                        ApiAgentsController.get
 PUT     /api/agents/{id}                        ApiAgentsController.update
 DELETE  /api/agents/{id}                        ApiAgentsController.delete
 GET     /api/agents/{id}/workspace/{filename}   ApiAgentsController.getWorkspaceFile
+GET     /api/agents/{id}/files/{<.+>filePath}   ApiAgentsController.serveWorkspaceFile
 PUT     /api/agents/{id}/workspace/{filename}   ApiAgentsController.saveWorkspaceFile
 
 # Tools API
@@ -61,6 +62,9 @@ PUT     /api/agents/{id}/skills/{name}/files/{<.+>filePath} ApiSkillsController.
 GET     /api/agents/{id}/skills/{name}/files     ApiSkillsController.listAgentSkillFiles
 DELETE  /api/agents/{id}/skills/{name}/delete    ApiSkillsController.deleteAgentSkill
 POST    /api/agents/{id}/skills/{name}/copy     ApiSkillsController.copyToAgent
+
+# Events API (SSE notification bus)
+GET     /api/events                             ApiEventsController.stream
 
 # Providers API
 POST    /api/providers/{name}/discover-models   ApiProvidersController.discoverModels
@@ -96,6 +100,12 @@ POST    /api/webhooks/whatsapp                  WebhookWhatsAppController.webhoo
 
 # Logs API
 GET     /api/logs                               ApiLogsController.list
+
+# SPA static assets (production build: nuxi generate output copied to public/spa/)
+GET     /_nuxt/                                 staticDir:public/spa/_nuxt
+
+# SPA catch-all — serves index.html for all frontend routes (must be after API routes)
+GET     /{<(?!api/|public/|_nuxt/).+>path}      Application.spa
 
 # Catch all
 *       /{controller}/{action}                  {controller}.{action}

@@ -13,19 +13,20 @@ Commands:
   stop     Stop the running Play backend and Nuxt frontend
   restart  Stop and start (combines stop + start)
   status   Show whether backend and frontend are running
+  logs     Tail the production application log
 
 Options:
   --dev                   Run in development mode (play run + pnpm dev)
   --deploy <dir>          Package with play dist, copy to <dir>, and run in production
   --backend-port <port>   Play backend port (default: 9000)
-  --frontend-port <port>  Nuxt frontend port (default: 3000)
+  --frontend-port <port>  Nuxt dev server port, dev mode only (default: 3000)
 
 Examples:
   ./jclaw.sh --dev start                              # Start in dev mode
   ./jclaw.sh --dev --backend-port 8080 start          # Dev mode with custom backend port
   ./jclaw.sh start                                    # Start production in current directory
   ./jclaw.sh --deploy /tmp start                      # Build, deploy to /tmp/jclaw, and start
-  ./jclaw.sh --deploy /tmp --backend-port 8080 start  # Deploy with custom ports
+  ./jclaw.sh --deploy /tmp --backend-port 8080 start  # Deploy with custom port
   ./jclaw.sh --dev stop                               # Stop dev mode services
   ./jclaw.sh --deploy /tmp stop                       # Stop services in /tmp/jclaw
   ./jclaw.sh stop                                     # Stop production in current directory
@@ -58,7 +59,7 @@ while [[ $# -gt 0 ]]; do
             FRONTEND_PORT="$2"
             shift 2
             ;;
-        start|stop|restart|status)
+        start|stop|restart|status|logs)
             COMMAND="$1"
             shift
             ;;
@@ -132,14 +133,12 @@ do_deploy() {
     cd "$JCLAW_DIR/frontend"
     pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 
-    # Update nuxt.config.ts proxy target if backend port is non-default
-    if [[ "$BACKEND_PORT" != "9000" ]]; then
-        echo "==> Updating frontend proxy to use backend port $BACKEND_PORT..."
-        sed -i '' "s|localhost:9000|localhost:$BACKEND_PORT|g" nuxt.config.ts
-    fi
+    echo "==> Generating static SPA..."
+    npx nuxi generate
 
-    echo "==> Building frontend..."
-    pnpm build
+    echo "==> Copying SPA build to public/spa/..."
+    rm -rf "$JCLAW_DIR/public/spa"
+    cp -r .output/public "$JCLAW_DIR/public/spa"
 
     echo "==> Resolving backend dependencies..."
     cd "$JCLAW_DIR"
@@ -165,31 +164,20 @@ do_start_prod() {
         exit 1
     fi
 
-    # Warn if custom backend port without --deploy (proxy target may be stale)
-    if [[ "$BACKEND_PORT" != "9000" && -z "$DEPLOY_DIR" ]]; then
-        echo "Warning: Using custom backend port $BACKEND_PORT without --deploy."
-        echo "         Ensure frontend/nuxt.config.ts proxy points to port $BACKEND_PORT"
-        echo "         and run 'cd frontend && pnpm build' before starting."
-    fi
-
-    echo "==> Starting Play backend on port $BACKEND_PORT (prod)..."
-    play start --%prod --http.port="$BACKEND_PORT"
-
-    echo "==> Starting Nuxt frontend on port $FRONTEND_PORT..."
-    cd "$JCLAW_DIR/frontend"
-
-    if [[ ! -f ".output/server/index.mjs" ]]; then
-        echo "Error: Frontend not built. Run 'cd frontend && pnpm build' first."
+    # Verify SPA has been built
+    if [[ ! -f "$JCLAW_DIR/public/spa/index.html" ]]; then
+        echo "Error: SPA not built. Run with --deploy or manually:"
+        echo "       cd frontend && npx nuxi generate && cp -r .output/public ../public/spa"
         exit 1
     fi
 
-    PORT="$FRONTEND_PORT" nohup node .output/server/index.mjs > "$JCLAW_DIR/logs/frontend.out" 2>&1 &
-    echo $! > "$JCLAW_DIR/$FRONTEND_PID_FILE"
+    echo "==> Starting Play backend on port $BACKEND_PORT (prod)..."
+    echo "    (Frontend SPA served from public/spa/ — no separate Node process needed)"
+    play start --%prod --http.port="$BACKEND_PORT"
 
     echo ""
     echo "JClaw is running (production):"
-    echo "  Backend:  http://localhost:$BACKEND_PORT  (pid: $(cat "$JCLAW_DIR/server.pid"))"
-    echo "  Frontend: http://localhost:$FRONTEND_PORT  (pid: $(cat "$JCLAW_DIR/$FRONTEND_PID_FILE"))"
+    echo "  App: http://localhost:$BACKEND_PORT  (pid: $(cat "$JCLAW_DIR/server.pid"))"
     echo ""
     echo "Stop with: $0 ${DEPLOY_DIR:+--deploy $DEPLOY_DIR }stop"
 }
@@ -197,39 +185,12 @@ do_start_prod() {
 do_stop_prod() {
     cd "$JCLAW_DIR"
 
-    local stopped=0
-
-    # Stop frontend
-    if [[ -f "$FRONTEND_PID_FILE" ]]; then
-        local fpid
-        fpid=$(cat "$FRONTEND_PID_FILE")
-        if kill -0 "$fpid" 2>/dev/null; then
-            echo "==> Stopping Nuxt frontend (pid: $fpid)..."
-            kill "$fpid"
-            rm -f "$FRONTEND_PID_FILE"
-            stopped=1
-        else
-            echo "    Frontend not running (stale pid file)"
-            rm -f "$FRONTEND_PID_FILE"
-        fi
-    else
-        echo "    No frontend pid file found"
-    fi
-
-    # Stop backend
     if [[ -f "server.pid" ]]; then
         echo "==> Stopping Play backend..."
         play stop
-        stopped=1
-    else
-        echo "    No backend pid file found"
-    fi
-
-    if [[ $stopped -eq 1 ]]; then
         echo ""
         echo "JClaw stopped."
     else
-        echo ""
         echo "Nothing to stop — JClaw does not appear to be running in $JCLAW_DIR"
     fi
 }
@@ -378,12 +339,40 @@ do_status() {
         echo "  Backend:  stopped"
     fi
 
-    # Frontend
-    if [[ -f "$FRONTEND_PID_FILE" ]] && kill -0 "$(cat "$FRONTEND_PID_FILE")" 2>/dev/null; then
-        echo "  Frontend: running (pid: $(cat "$FRONTEND_PID_FILE"))"
+    # Frontend (dev mode only — production serves SPA from Play)
+    if [[ "$DEV_MODE" == true ]]; then
+        if [[ -f "$FRONTEND_PID_FILE" ]] && kill -0 "$(cat "$FRONTEND_PID_FILE")" 2>/dev/null; then
+            echo "  Frontend: running (pid: $(cat "$FRONTEND_PID_FILE"))"
+        else
+            echo "  Frontend: stopped"
+        fi
     else
-        echo "  Frontend: stopped"
+        if [[ -f "$JCLAW_DIR/public/spa/index.html" ]]; then
+            echo "  Frontend: built (served from public/spa/)"
+        else
+            echo "  Frontend: not built (run --deploy or nuxi generate)"
+        fi
     fi
+}
+
+# ─── Logs ───
+
+do_logs() {
+    cd "$JCLAW_DIR"
+
+    local log_file
+    if [[ "$DEV_MODE" == true ]]; then
+        log_file="logs/backend-dev.out"
+    else
+        log_file="logs/application.log"
+    fi
+
+    if [[ ! -f "$log_file" ]]; then
+        echo "No log file found at $JCLAW_DIR/$log_file"
+        exit 1
+    fi
+
+    tail -f "$log_file"
 }
 
 # ─── Execute ───
@@ -424,5 +413,8 @@ case "$COMMAND" in
         ;;
     status)
         do_status
+        ;;
+    logs)
+        do_logs
         ;;
 esac

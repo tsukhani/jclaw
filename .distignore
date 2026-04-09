@@ -1,0 +1,4 @@
+# Exclude project management artifacts from distribution
+_bmad/
+_bmad-output/
+openspec/
