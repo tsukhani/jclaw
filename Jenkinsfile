@@ -2,7 +2,7 @@ pipeline {
     agent any
 
     tools {
-        jdk 'jdk-25'
+        jdk 'JDK25'
         nodejs 'node-22'
     }
 
@@ -88,7 +88,7 @@ pipeline {
 
                     // Publish to Bitbucket Downloads (requires Bitbucket credentials)
                     withCredentials([usernamePassword(
-                        credentialsId: 'bitbucket-credentials',
+                        credentialsId: 'abundent',
                         usernameVariable: 'BB_USER',
                         passwordVariable: 'BB_PASS'
                     )]) {
