@@ -1,6 +1,10 @@
 pipeline {
     agent any
 
+    parameters {
+        booleanParam(name: 'RELEASE', defaultValue: false, description: 'Check to create a GitHub Release from this build')
+    }
+
     tools {
         jdk 'JDK25'
         nodejs 'node-22'
@@ -76,12 +80,14 @@ pipeline {
 
         stage('Release') {
             when {
-                expression { env.GIT_BRANCH ==~ /.*\/v\d+.*/ || env.GIT_BRANCH ==~ /v\d+.*/ }
+                expression { params.RELEASE }
             }
             steps {
                 script {
-                    def version = env.GIT_BRANCH.replaceAll('.*/', '')
-                    sh "echo 'Detected release version: ${version} (GIT_BRANCH=${env.GIT_BRANCH})'"
+                    def version = 'v' + sh(script: "grep '^application.version=' conf/application.conf | cut -d= -f2", returnStdout: true).trim()
+                    sh "echo 'Creating release: ${version}'"
+                    sh "git tag ${version} || true"
+                    sh "git push origin ${version} || true"
                     withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
                         sh """
                             gh release create ${version} dist/jclaw.zip \
