@@ -15,7 +15,6 @@ pipeline {
     stages {
         stage('Setup') {
             steps {
-                sh "echo 'GIT_BRANCH=${env.GIT_BRANCH} BRANCH_NAME=${env.BRANCH_NAME} TAG_NAME=${env.TAG_NAME}'"
                 sh 'java -version'
                 sh 'play version || echo "Play not found at ${PLAY_HOME}"'
                 sh 'corepack enable && corepack prepare pnpm@10.33.0 --activate'
@@ -59,13 +58,16 @@ pipeline {
                 sh 'play dist'
 
                 // Inject the SPA build into the dist zip
+                // play dist names the zip after the workspace directory, so find it dynamically
                 sh '''
                     cd dist
-                    unzip -q jclaw.zip
-                    cp -r ../frontend/.output/public jclaw/public/spa
-                    rm jclaw.zip
-                    zip -qr jclaw.zip jclaw/
-                    rm -rf jclaw/
+                    ZIP_FILE=$(ls *.zip | head -1)
+                    DIR_NAME="${ZIP_FILE%.zip}"
+                    unzip -q "$ZIP_FILE"
+                    cp -r ../frontend/.output/public "$DIR_NAME/public/spa"
+                    rm "$ZIP_FILE"
+                    zip -qr jclaw.zip "$DIR_NAME/"
+                    rm -rf "$DIR_NAME/"
                 '''
 
                 archiveArtifacts artifacts: 'dist/jclaw.zip', fingerprint: true
@@ -74,11 +76,11 @@ pipeline {
 
         stage('Release') {
             when {
-                expression { env.GIT_BRANCH ==~ /.*tags\/v.*/ }
+                expression { env.GIT_BRANCH ==~ /.*\/v\d+.*/ || env.GIT_BRANCH ==~ /v\d+.*/ }
             }
             steps {
                 script {
-                    def version = env.GIT_BRANCH.replaceAll('.*/tags/', '')
+                    def version = env.GIT_BRANCH.replaceAll('.*/', '')
                     withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
                         sh """
                             gh release create ${version} dist/jclaw.zip \
