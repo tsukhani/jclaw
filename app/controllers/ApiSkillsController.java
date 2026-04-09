@@ -478,10 +478,10 @@ public class ApiSkillsController extends Controller {
         // Return immediately — run sanitization in the background
         Thread.ofVirtual().start(() -> {
             try {
-                promoteInBackground(skillDir, skillName);
+                services.Tx.run(() -> promoteInBackground(skillDir, skillName));
             } catch (Exception e) {
-                services.EventLogger.error("skills", "Background promotion failed for '%s': %s"
-                        .formatted(skillName, e.getMessage()));
+                play.Logger.error("Background promotion failed for '%s': %s",
+                        skillName, e.getMessage());
             }
         });
 
