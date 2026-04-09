@@ -15,6 +15,9 @@ pipeline {
     stages {
         stage('Setup') {
             steps {
+                // Fetch tags so we can detect tag-triggered builds
+                sh 'git fetch --tags'
+                sh "echo 'GIT_BRANCH=${env.GIT_BRANCH} BRANCH_NAME=${env.BRANCH_NAME} TAG_NAME=${env.TAG_NAME}'"
                 sh 'java -version'
                 sh 'play version || echo "Play not found at ${PLAY_HOME}"'
                 sh 'corepack enable && corepack prepare pnpm@10.33.0 --activate'
