@@ -489,10 +489,14 @@ public class ApiSkillsController extends Controller {
     }
 
     /** Background promotion: read files, sanitize via LLM, write to global skills directory. */
+    private static final java.util.Set<String> CREDENTIAL_EXTENSIONS = java.util.Set.of(
+            ".json", ".txt", ".env", ".yaml", ".yml", ".properties"
+    );
+
     private static void promoteInBackground(Path skillDir, String skillName) {
         services.EventLogger.info("skills", "Starting background promotion of '%s'".formatted(skillName));
 
-        // Read text files from the skill folder
+        // Read all files from the skill folder
         var textFiles = new LinkedHashMap<String, String>();
         var binaryFiles = new java.util.ArrayList<String>();
         try (var walk = Files.walk(skillDir)) {
@@ -511,12 +515,43 @@ public class ApiSkillsController extends Controller {
             return;
         }
 
-        // Strip credentials.json deterministically before LLM review
-        if (textFiles.containsKey("credentials.json")) {
-            textFiles.put("credentials.json", stripCredentialsJson(textFiles.get("credentials.json")));
+        // ── Enforce standard directory structure ──
+        // Relocate files that are not in the correct folder:
+        //   - SKILL.md stays in root
+        //   - Credential text files (json, txt, env, yaml, properties) → credentials/
+        //   - Binary files anywhere → tools/
+        //   - Text files in tools/ stay in tools/
+
+        // Relocate misplaced text files
+        var relocatedText = new LinkedHashMap<String, String>();
+        for (var entry : textFiles.entrySet()) {
+            var path = entry.getKey();
+            var content = entry.getValue();
+            relocatedText.put(enforceTextFilePath(path), content);
+        }
+        textFiles = relocatedText;
+
+        // Relocate misplaced binary files — all binaries must be in tools/
+        var relocatedBinaries = new java.util.ArrayList<String>();
+        for (var binFile : binaryFiles) {
+            if (binFile.startsWith("tools/")) {
+                relocatedBinaries.add(binFile);
+            } else {
+                var fileName = binFile.contains("/") ? binFile.substring(binFile.lastIndexOf('/') + 1) : binFile;
+                relocatedBinaries.add("tools/" + fileName);
+                services.EventLogger.info("skills", "Relocated binary '%s' → 'tools/%s'".formatted(binFile, fileName));
+            }
+        }
+        binaryFiles = relocatedBinaries;
+
+        // Strip credentials deterministically before LLM review
+        for (var key : textFiles.keySet().stream().toList()) {
+            if (key.startsWith("credentials/")) {
+                textFiles.put(key, stripCredentialsJson(textFiles.get(key)));
+            }
         }
 
-        // Sanitize remaining text files via the default agent's LLM
+        // Sanitize text files via the default agent's LLM
         var sanitized = sanitizeWithLlm(textFiles);
 
         // Determine target folder name, appending " copy" on conflict
@@ -530,21 +565,46 @@ public class ApiSkillsController extends Controller {
         var targetDir = globalDir.resolve(targetName);
         try {
             Files.createDirectories(targetDir);
+            Files.createDirectories(targetDir.resolve("credentials"));
+            Files.createDirectories(targetDir.resolve("tools"));
+
             for (var entry : sanitized.entrySet()) {
                 var targetFile = targetDir.resolve(entry.getKey());
                 Files.createDirectories(targetFile.getParent());
                 Files.writeString(targetFile, entry.getValue());
             }
-            for (var binFile : binaryFiles) {
-                var source = skillDir.resolve(binFile);
-                var target = targetDir.resolve(binFile);
-                Files.createDirectories(target.getParent());
-                Files.copy(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            for (int i = 0; i < binaryFiles.size(); i++) {
+                var originalPath = i < binaryFiles.size() ? binaryFiles.get(i) : null;
+                // Find the original source file — check relocated name first, then original
+                var sourceName = binaryFiles.get(i);
+                var source = skillDir.resolve(sourceName);
+                if (!Files.exists(source)) {
+                    // File was relocated — find the original in the source dir
+                    var fileName = sourceName.contains("/") ? sourceName.substring(sourceName.lastIndexOf('/') + 1) : sourceName;
+                    try (var srcWalk = Files.walk(skillDir)) {
+                        source = srcWalk.filter(Files::isRegularFile)
+                                .filter(f -> f.getFileName().toString().equals(fileName))
+                                .findFirst().orElse(null);
+                    }
+                }
+                if (source != null && Files.exists(source)) {
+                    var target = targetDir.resolve(sourceName);
+                    Files.createDirectories(target.getParent());
+                    Files.copy(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
             }
+
+            // Remove empty subdirectories
+            for (var subDir : List.of("credentials", "tools")) {
+                var dir = targetDir.resolve(subDir);
+                if (Files.isDirectory(dir) && Files.list(dir).findAny().isEmpty()) {
+                    Files.delete(dir);
+                }
+            }
+
             SkillLoader.clearCache();
             services.EventLogger.info("skills", "Promotion of '%s' completed as '%s'".formatted(skillName, targetName));
 
-            // Notify connected frontends
             services.NotificationBus.publish("skill.promoted", java.util.Map.of(
                     "skillName", skillName,
                     "folderName", targetName
@@ -556,6 +616,27 @@ public class ApiSkillsController extends Controller {
                     "error", e.getMessage()
             ));
         }
+    }
+
+    /**
+     * Enforce standard skill directory structure for text file paths:
+     * - SKILL.md stays in root
+     * - Credential files (json, txt, env, yaml, properties) in root → credentials/
+     * - Text files in tools/ stay in tools/
+     * - Text files in credentials/ stay in credentials/
+     */
+    private static String enforceTextFilePath(String path) {
+        // Already in a subfolder — keep it
+        if (path.startsWith("tools/") || path.startsWith("credentials/")) return path;
+        // SKILL.md stays in root
+        if (path.equals("SKILL.md")) return path;
+        // Credential-like files in root → move to credentials/
+        var lower = path.toLowerCase();
+        for (var ext : CREDENTIAL_EXTENSIONS) {
+            if (lower.endsWith(ext)) return "credentials/" + path;
+        }
+        // Other text files in root (e.g., README.md) stay in root
+        return path;
     }
 
     /** PUT /api/skills/{name}/rename — Rename a global skill folder. */
