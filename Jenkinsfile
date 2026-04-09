@@ -87,7 +87,7 @@ pipeline {
                     def version = 'v' + sh(script: "grep '^application.version=' conf/application.conf | cut -d= -f2", returnStdout: true).trim()
                     sh "echo 'Creating release: ${version}'"
                     sh "git tag ${version} || true"
-                    sh "git push origin ${version} || true"
+                    sh "git push jclaw ${version} || true"
                     withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
                         sh """
                             gh release create ${version} dist/jclaw.zip \
