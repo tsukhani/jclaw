@@ -1,0 +1,13 @@
+services:
+  jclaw:
+    image: ghcr.io/tsukhani/jclaw:latest
+    ports:
+      - "9000:9000"
+    volumes:
+      - jclaw-data:/app/data
+      - jclaw-logs:/app/logs
+    restart: unless-stopped
+
+volumes:
+  jclaw-data:
+  jclaw-logs:
