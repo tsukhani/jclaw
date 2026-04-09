@@ -1,17 +1,19 @@
 package controllers;
 
+import play.libs.F;
 import play.mvc.Controller;
 import play.mvc.Http;
 import play.mvc.With;
 import services.NotificationBus;
 
 import java.nio.charset.StandardCharsets;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
  * GET /api/events — Server-Sent Events endpoint for real-time notifications.
  * The frontend connects once on app load and receives events from the NotificationBus.
+ *
+ * Uses Play's async continuation (await) to avoid blocking the thread pool.
  */
 @With(AuthCheck.class)
 public class ApiEventsController extends Controller {
@@ -23,7 +25,6 @@ public class ApiEventsController extends Controller {
         res.setHeader("Connection", "keep-alive");
         res.setHeader("X-Accel-Buffering", "no");
 
-        var latch = new CountDownLatch(1);
         var disconnected = new java.util.concurrent.atomic.AtomicBoolean(false);
 
         // Subscribe to the notification bus
@@ -33,7 +34,6 @@ public class ApiEventsController extends Controller {
                 res.writeChunk(ssePayload.getBytes(StandardCharsets.UTF_8));
             } catch (Exception _) {
                 disconnected.set(true);
-                latch.countDown();
             }
         });
 
@@ -46,18 +46,17 @@ public class ApiEventsController extends Controller {
                 res.writeChunk(": heartbeat\n\n".getBytes(StandardCharsets.UTF_8));
             } catch (Exception _) {
                 disconnected.set(true);
-                latch.countDown();
             }
         }, 30, 30, TimeUnit.SECONDS);
 
-        try {
-            // Hold the connection open until client disconnects or server shuts down
-            latch.await(24, TimeUnit.HOURS);
-        } catch (InterruptedException _) {
-            Thread.currentThread().interrupt();
-        } finally {
-            unsubscribe.run();
-            heartbeat.shutdownNow();
-        }
+        // Use Play's async continuation — releases the thread back to the pool
+        // and resumes when the promise completes (client disconnect or timeout)
+        var promise = new F.Promise<Void>();
+        heartbeat.schedule((Runnable) () -> promise.invoke(null), 24, TimeUnit.HOURS);
+
+        await(promise);
+
+        unsubscribe.run();
+        heartbeat.shutdownNow();
     }
 }
