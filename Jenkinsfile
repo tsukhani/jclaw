@@ -44,7 +44,7 @@ pipeline {
 
         stage('Test') {
             steps {
-                sh 'play test'
+                sh 'play auto-test --http.port=9100'
             }
             post {
                 always {
