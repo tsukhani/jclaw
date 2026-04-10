@@ -206,6 +206,9 @@ public class SkillLoader {
                 Before replying: scan <available_skills> <description> entries.
                 - If exactly one skill clearly applies: read its SKILL.md at <location> with the readFile tool, then follow it.
                 - If multiple could apply: choose the most specific one, then read/follow it.
+                - If platform-specific variants exist (e.g., mac vs linux): select the variant matching the current platform from the Environment section.
+                - If the user's request involves multiple skills: select the skill matching the user's primary action (the first or most important verb), not secondary follow-up actions.
+                - Match by intent, not exact wording. A skill applies when the user's goal falls within the skill's domain, even if the description includes details the user did not mention. Example: a user asking "recommend a restaurant" matches a skill described as "restaurants in City X" — the skill's specifics are implementation details, not prerequisites.
                 - If none clearly apply: do not read any SKILL.md.
                 Constraints: never read more than one skill up front; only read after selecting.
                 """;

@@ -16,6 +16,9 @@ precompiled/
 # Claude Code config
 .claude/
 
+# Autoresearch state
+.autoresearch/
+
 # Eclipse/IDE project files
 .classpath
 .project
