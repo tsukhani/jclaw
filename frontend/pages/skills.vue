@@ -24,6 +24,9 @@ async function loadAllAgentSkills() {
 
 watch(agents, () => loadAllAgentSkills(), { immediate: true })
 
+// Confirm dialog (replaces native window.confirm for destructive actions)
+const { confirm } = useConfirm()
+
 // Drag state — supports both directions
 const dragging = ref<any>(null)
 const dragSource = ref<'global' | 'agent' | null>(null)
@@ -186,10 +189,13 @@ async function onAgentDrop(e: DragEvent, agent: any) {
       return
     }
     // Existing is older — confirm replacement
-    const ok = window.confirm(
-      `Agent '${agent.name}' has '${skillName}' at version ${existing.version || '0.0.0'}. ` +
-      `Replace with global version ${globalVersion}?`
-    )
+    const ok = await confirm({
+      title: 'Replace skill',
+      message:
+        `Agent '${agent.name}' has '${skillName}' at version ${existing.version || '0.0.0'}.\n` +
+        `Replace with global version ${globalVersion}?`,
+      confirmText: 'Replace',
+    })
     if (!ok) {
       dragging.value = null
       return
@@ -243,9 +249,13 @@ async function onGlobalSectionDrop(e: DragEvent) {
   // firing the promote — the backend will overwrite it in place.
   const existingGlobal = skills.value?.find((s: any) => (s.folderName || s.name) === skillName)
   if (existingGlobal) {
-    const ok = window.confirm(
-      `A global skill named '${skillName}' already exists. Promoting will replace it with the sanitized version from the agent workspace. Continue?`
-    )
+    const ok = await confirm({
+      title: 'Replace global skill',
+      message:
+        `A global skill named '${skillName}' already exists.\n\n` +
+        `Promoting will replace it with the sanitized version from the agent workspace. Continue?`,
+      confirmText: 'Promote',
+    })
     if (!ok) return
   }
 

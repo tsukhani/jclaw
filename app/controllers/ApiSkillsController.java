@@ -312,7 +312,8 @@ public class ApiSkillsController extends Controller {
                     if (!validation.unknown().isEmpty()) {
                         parts.add("unknown: [" + String.join(", ", validation.unknown()) + "]");
                     }
-                    error(400, "Cannot add skill '%s' to agent '%s': missing tools — %s. Enable the required tools for this agent and try again."
+                    response.status = 400;
+                    renderText("Cannot add skill '%s' to agent '%s': missing tools — %s. Enable the required tools for this agent and try again."
                             .formatted(name, agent.name, String.join("; ", parts)));
                 }
             }
@@ -500,6 +501,19 @@ public class ApiSkillsController extends Controller {
             try {
                 var workspaceHash = SkillLoader.hashSkillDirectory(skillDir);
                 var globalHash = SkillLoader.hashSkillDirectory(globalDirCheck);
+                // Diagnostic: capture on-disk versions + hashes so drop 1 vs drop 2 can be
+                // compared side-by-side in the event log.
+                var wsInfoDiag = SkillLoader.parseSkillFile(skillDir.resolve("SKILL.md"));
+                var globalInfoDiag = SkillLoader.parseSkillFile(globalDirCheck.resolve("SKILL.md"));
+                services.EventLogger.info("skills",
+                        "Promote hash-check '%s': workspace[v=%s, hash=%s] global[v=%s, hash=%s] equal=%s"
+                                .formatted(
+                                        skillName,
+                                        wsInfoDiag != null ? wsInfoDiag.version() : "?",
+                                        workspaceHash.isEmpty() ? "EMPTY" : workspaceHash.substring(0, 12),
+                                        globalInfoDiag != null ? globalInfoDiag.version() : "?",
+                                        globalHash.isEmpty() ? "EMPTY" : globalHash.substring(0, 12),
+                                        workspaceHash.equals(globalHash)));
                 if (workspaceHash.equals(globalHash) && !workspaceHash.isEmpty()) {
                     services.EventLogger.info("skills", "Promotion of '%s' skipped: workspace copy is identical to global".formatted(skillName));
                     services.NotificationBus.publish("skill.promote_noop", java.util.Map.of(

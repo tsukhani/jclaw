@@ -495,10 +495,41 @@ public class AgentRunner {
         var imagePrefix = collectedImages.isEmpty() ? ""
                 : String.join("\n\n", collectedImages) + "\n\n";
 
-        // If LLM returned empty content after tool calls, emit "Done." so the user isn't left
-        // with a blank response. Some models return empty content when tool results are self-explanatory.
+        // Some models (especially smaller/distilled ones) occasionally return zero tokens
+        // on the continue-after-tool-results turn, treating the tool output as self-explanatory
+        // even when the user clearly wants synthesis. Retry once with an explicit synthesis
+        // nudge before giving up and emitting a diagnostic fallback.
         if (accumulator.content == null || accumulator.content.isBlank()) {
-            var fallback = imagePrefix.isEmpty() ? "Done." : imagePrefix.trim();
+            EventLogger.warn("llm", agent.name, null,
+                    "Empty continuation after tool calls in round %d — retrying with synthesis nudge"
+                            .formatted(round + 1));
+            onStatus.accept("Synthesizing response (retry)...");
+
+            var retryMessages = new ArrayList<>(currentMessages);
+            retryMessages.add(ChatMessage.user(
+                    "Synthesize the final response for me now using the tool results above. "
+                            + "Do not call any more tools. Write the full answer as markdown."));
+
+            var retry = provider.chatStreamAccumulate(
+                    agent.modelId, retryMessages, tools, onToken, onReasoning, maxTokens, agent.thinkingMode);
+            try {
+                while (!retry.awaitCompletion(5000)) {
+                    if (isCancelled.get()) return priorContent;
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return priorContent;
+            }
+
+            if (retry.content != null && !retry.content.isBlank()) {
+                return imagePrefix + retry.content;
+            }
+
+            // Retry also empty — emit a labeled diagnostic so the user knows why.
+            EventLogger.warn("llm", agent.name, null,
+                    "Retry also returned empty content — emitting diagnostic fallback");
+            var fallback = imagePrefix
+                    + "*[The model returned no synthesis after tool calls. Tool results are in the conversation history above — try rephrasing your request or switching to a larger model.]*";
             onToken.accept(fallback);
             return fallback;
         }

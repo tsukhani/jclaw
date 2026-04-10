@@ -156,6 +156,32 @@ function autoResize() {
   el.style.height = 'auto'
   el.style.height = Math.min(el.scrollHeight, 200) + 'px'
 }
+
+// Per-message "just copied" flash so the user gets visual feedback without a toast.
+const copiedMessageId = ref<string | number | null>(null)
+async function copyUserMessage(msg: any) {
+  try {
+    await navigator.clipboard.writeText(msg.content ?? '')
+    copiedMessageId.value = msg.id ?? msg._key ?? null
+    setTimeout(() => {
+      if (copiedMessageId.value === (msg.id ?? msg._key ?? null)) copiedMessageId.value = null
+    }, 1200)
+  } catch (e) {
+    console.error('Failed to copy message:', e)
+  }
+}
+async function editUserMessage(msg: any) {
+  if (streaming.value) return
+  input.value = msg.content ?? ''
+  await nextTick()
+  const el = chatInput.value
+  if (el) {
+    autoResize()
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+    el.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }
+}
 const agentBusy = ref(false)
 const streamContent = ref('')
 const streamReasoning = ref('')
@@ -568,10 +594,32 @@ function exportConversation() {
               </span>
               <span v-if="msg.createdAt" class="text-xs text-neutral-400">{{ formatTimestamp(msg.createdAt) }}</span>
             </div>
-            <!-- User messages: plain text -->
-            <div v-if="msg.role === 'user'"
-                 class="bg-blue-900/30 border border-blue-800/40 rounded-2xl rounded-tr-sm text-neutral-200 px-4 py-2.5 text-sm whitespace-pre-wrap break-words"
-            >{{ msg.content }}</div>
+            <!-- User messages: plain text + hover actions (copy, edit) -->
+            <div v-if="msg.role === 'user'" class="group">
+              <div
+                class="bg-blue-900/30 border border-blue-800/40 rounded-2xl rounded-tr-sm text-neutral-200 px-4 py-2.5 text-sm whitespace-pre-wrap break-words"
+              >{{ msg.content }}</div>
+              <div class="flex items-center justify-end gap-1 mt-1 h-5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button
+                  type="button"
+                  @click="copyUserMessage(msg)"
+                  class="p-1 text-neutral-500 hover:text-neutral-200 transition-colors"
+                  :title="copiedMessageId === (msg.id ?? msg._key) ? 'Copied' : 'Copy to clipboard'"
+                >
+                  <svg v-if="copiedMessageId !== (msg.id ?? msg._key)" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                  <svg v-else class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" /></svg>
+                </button>
+                <button
+                  type="button"
+                  @click="editUserMessage(msg)"
+                  :disabled="streaming"
+                  class="p-1 text-neutral-500 hover:text-neutral-200 disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
+                  title="Edit & resubmit"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                </button>
+              </div>
+            </div>
             <!-- Assistant messages: rendered markdown with optional thinking -->
             <div v-else>
               <!-- Thinking/reasoning block -->

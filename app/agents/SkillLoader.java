@@ -292,6 +292,7 @@ public class SkillLoader {
                 - If the user's request involves multiple skills: select the skill matching the user's primary action (the first or most important verb), not secondary follow-up actions.
                 - Match by intent, not exact wording. A skill applies when the user's goal falls within the skill's domain, even if the description includes details the user did not mention. Example: a user asking "recommend a restaurant" matches a skill described as "restaurants in City X" — the skill's specifics are implementation details, not prerequisites.
                 - If none clearly apply: do not read any SKILL.md.
+                - **Skill authoring is always routed through skill-creator.** If the user asks to create, update, modify, edit, rename, refactor, fix, or change a skill (anything under `skills/<name>/`), the applicable skill is `skill-creator` — regardless of whether the user mentions it by name. Read `skill-creator`'s SKILL.md first and follow its workflow. Never edit files under `skills/<name>/` directly via the filesystem tool without going through skill-creator.
                 Constraints: never read more than one skill up front; only read after selecting.
                 """;
     }
