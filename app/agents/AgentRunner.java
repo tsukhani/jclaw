@@ -491,10 +491,6 @@ public class AgentRunner {
                     accumulator.toolCalls, accumulator.content, provider, onToken, onReasoning, onStatus, maxTokens, round + 1, isCancelled);
         }
 
-        // Prepend any collected images to the final response content
-        var imagePrefix = collectedImages.isEmpty() ? ""
-                : String.join("\n\n", collectedImages) + "\n\n";
-
         // Some models (especially smaller/distilled ones) occasionally return zero tokens
         // on the continue-after-tool-results turn, treating the tool output as self-explanatory
         // even when the user clearly wants synthesis. Retry once with an explicit synthesis
@@ -522,19 +518,22 @@ public class AgentRunner {
             }
 
             if (retry.content != null && !retry.content.isBlank()) {
-                return imagePrefix + retry.content;
+                return buildImagePrefix(collectedImages, retry.content) + retry.content;
             }
 
             // Retry also empty — emit a labeled diagnostic so the user knows why.
             EventLogger.warn("llm", agent.name, null,
                     "Retry also returned empty content — emitting diagnostic fallback");
-            var fallback = imagePrefix
+            // No LLM content to dedupe against — prepend every collected image unchanged.
+            var fallbackPrefix = collectedImages.isEmpty() ? ""
+                    : String.join("\n\n", collectedImages) + "\n\n";
+            var fallback = fallbackPrefix
                     + "*[The model returned no synthesis after tool calls. Tool results are in the conversation history above — try rephrasing your request or switching to a larger model.]*";
             onToken.accept(fallback);
             return fallback;
         }
 
-        return imagePrefix + accumulator.content;
+        return buildImagePrefix(collectedImages, accumulator.content) + accumulator.content;
     }
 
     private static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation) {
@@ -608,6 +607,29 @@ public class AgentRunner {
         while (matcher.find()) {
             collectedImages.add(matcher.group(0));
         }
+    }
+
+    /**
+     * Build a leading image block containing only collected images whose URL is
+     * NOT already present in {@code content}. Prevents double-rendering when the
+     * LLM echoes the markdown image from a tool result (which it commonly does,
+     * because tool results like {@code PlaywrightBrowserTool.screenshot()}
+     * literally include an {@code ![Screenshot](url)} hint).
+     *
+     * <p>When the LLM drops the image from its reply, every collected image
+     * survives the filter and the prefix acts as a safety net.
+     */
+    private static String buildImagePrefix(List<String> collectedImages, String content) {
+        if (collectedImages == null || collectedImages.isEmpty()) return "";
+        var safeContent = content != null ? content : "";
+        var urlPattern = java.util.regex.Pattern.compile("\\(([^)]+)\\)");
+        var missing = new ArrayList<String>();
+        for (var img : collectedImages) {
+            var m = urlPattern.matcher(img);
+            if (m.find() && safeContent.contains(m.group(1))) continue;
+            missing.add(img);
+        }
+        return missing.isEmpty() ? "" : String.join("\n\n", missing) + "\n\n";
     }
 
     private static List<ToolCall> parseToolCalls(String json) {
