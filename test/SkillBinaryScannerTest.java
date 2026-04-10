@@ -43,6 +43,11 @@ public class SkillBinaryScannerTest extends UnitTest {
         }
     }
 
+    private static boolean hasMalwareBazaarKey() {
+        var key = System.getenv("MALWAREBAZAAR_AUTH_KEY");
+        return key != null && !key.isBlank();
+    }
+
     @AfterEach
     void teardown() throws Exception {
         if (tmpSkill != null && Files.exists(tmpSkill)) {
@@ -57,10 +62,10 @@ public class SkillBinaryScannerTest extends UnitTest {
     public void malwareBazaarLookupFlagsKnownMalwareHash() {
         // Proves the HTTP integration end-to-end: hashing, Auth-Key header,
         // POST body encoding, and JSON parsing all work against the real API.
-        org.junit.jupiter.api.Assumptions.assumeTrue(
-                System.getenv("MALWAREBAZAAR_AUTH_KEY") != null
-                        && !System.getenv("MALWAREBAZAAR_AUTH_KEY").isBlank(),
-                "MALWAREBAZAAR_AUTH_KEY env var not set — skipping live lookup");
+        if (!hasMalwareBazaarKey()) {
+            System.err.println("[SkillBinaryScannerTest] MALWAREBAZAAR_AUTH_KEY not set — skipping live lookup");
+            return;
+        }
 
         var verdict = MalwareBazaarScanner.lookup(KNOWN_MALICIOUS_SHA256);
 
@@ -75,10 +80,10 @@ public class SkillBinaryScannerTest extends UnitTest {
     @Test
     public void malwareBazaarLookupReturnsCleanForUnknownHash() {
         // Any random SHA-256 (e.g. hash of the empty string) should come back clean.
-        org.junit.jupiter.api.Assumptions.assumeTrue(
-                System.getenv("MALWAREBAZAAR_AUTH_KEY") != null
-                        && !System.getenv("MALWAREBAZAAR_AUTH_KEY").isBlank(),
-                "MALWAREBAZAAR_AUTH_KEY env var not set — skipping live lookup");
+        if (!hasMalwareBazaarKey()) {
+            System.err.println("[SkillBinaryScannerTest] MALWAREBAZAAR_AUTH_KEY not set — skipping live lookup");
+            return;
+        }
 
         // SHA-256 of the empty string — guaranteed not to be in any malware DB
         var emptyHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
