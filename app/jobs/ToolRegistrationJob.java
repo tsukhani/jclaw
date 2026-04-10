@@ -19,6 +19,7 @@ public class ToolRegistrationJob extends Job<Void> {
         ToolRegistry.register(new TaskTool());
         ToolRegistry.register(new CheckListTool());
         ToolRegistry.register(new FileSystemTools());
+        ToolRegistry.register(new DocumentsTool());
         ToolRegistry.register(new WebFetchTool());
         ToolRegistry.register(new WebSearchTool());
         ToolRegistry.register(new SkillsTool());

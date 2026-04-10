@@ -110,6 +110,17 @@ public class AgentService {
         return workspaceRoot().resolve(agentName);
     }
 
+    /**
+     * Resolve a relative path inside an agent's workspace and reject any target
+     * that escapes the workspace root (via {@code ..} or absolute paths). Returns
+     * {@code null} on escape; callers should surface a traversal error.
+     */
+    public static Path resolveWorkspacePath(String agentName, String relativePath) {
+        var workspace = workspacePath(agentName).toAbsolutePath().normalize();
+        var target = workspace.resolve(relativePath).normalize();
+        return target.startsWith(workspace) ? target : null;
+    }
+
     public static void createWorkspace(String agentName) {
         writeWorkspaceFiles(agentName, false);
     }
