@@ -152,7 +152,7 @@ public class ApiSkillsController extends Controller {
             }
 
             var content = allTextContent.toString();
-            var detectedTools = detectTools(content);
+            var detectedTools = resolveSkillTools(dir, content);
 
             var result = new java.util.HashMap<String, Object>();
             result.put("files", files);
@@ -199,6 +199,34 @@ public class ApiSkillsController extends Controller {
         } catch (IOException e) {
             error(500, "Failed to write file: " + e.getMessage());
         }
+    }
+
+    /**
+     * Resolve the tools a skill needs. Prefers the explicit {@code tools:} frontmatter
+     * (the authoritative declaration) and only falls back to body-text heuristics for
+     * legacy skills that haven't declared dependencies yet.
+     */
+    private static java.util.List<java.util.Map<String, String>> resolveSkillTools(Path skillDir, String allContent) {
+        var skillFile = skillDir.resolve("SKILL.md");
+        if (Files.exists(skillFile)) {
+            var info = SkillLoader.parseSkillFile(skillFile);
+            if (info != null && info.tools() != null && !info.tools().isEmpty()) {
+                var result = new java.util.ArrayList<java.util.Map<String, String>>();
+                for (var name : info.tools()) {
+                    var tool = agents.ToolRegistry.listTools().stream()
+                            .filter(t -> t.name().equals(name))
+                            .findFirst()
+                            .orElse(null);
+                    result.add(java.util.Map.of(
+                            "name", name,
+                            "description", tool != null && tool.description() != null ? tool.description() : ""
+                    ));
+                }
+                return result;
+            }
+        }
+        // Legacy skill with no declaration — fall back to the body-text heuristic
+        return detectTools(allContent);
     }
 
     private static java.util.List<java.util.Map<String, String>> detectTools(String content) {
@@ -422,7 +450,7 @@ public class ApiSkillsController extends Controller {
             }
 
             var content = allTextContent.toString();
-            var detectedTools = detectTools(content);
+            var detectedTools = resolveSkillTools(dir, content);
 
             var result = new java.util.HashMap<String, Object>();
             result.put("files", files);
