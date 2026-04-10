@@ -41,12 +41,14 @@ import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.apache.poi.xwpf.usermodel.XWPFTableCell;
 import org.apache.poi.xwpf.usermodel.XWPFTableRow;
+import org.openxmlformats.schemas.wordprocessingml.x2006.main.STTblWidth;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.xhtmlrenderer.pdf.ITextRenderer;
 
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -87,8 +89,8 @@ public class DocumentWriter {
             code { font-family: 'Courier New', monospace; background: #f2f2f2; padding: 1px 4px; border-radius: 3px; }
             pre { font-family: 'Courier New', monospace; background: #f2f2f2; padding: 8px 10px; border-radius: 3px; white-space: pre-wrap; }
             blockquote { border-left: 3px solid #bbb; padding-left: 10px; color: #555; margin: 0.6em 0; }
-            table { border-collapse: collapse; margin: 0.6em 0; }
-            th, td { border: 1px solid #888; padding: 4px 8px; text-align: left; }
+            table { border-collapse: collapse; margin: 0.6em 0; width: 100%; table-layout: auto; }
+            th, td { border: 1px solid #888; padding: 4px 8px; text-align: left; vertical-align: top; }
             th { background: #eee; }
             hr { border: none; border-top: 1px solid #ccc; margin: 1em 0; }
             ul, ol { margin: 0.4em 0 0.4em 1.5em; padding: 0; }
@@ -344,6 +346,21 @@ public class DocumentWriter {
             if (rows == 0 || cols == 0) return;
 
             XWPFTable xwpfTable = doc.createTable(rows, cols);
+            // POI's createTable leaves the grid and cell widths unset, which makes
+            // Word / LibreOffice fall back to minimum content width — long words end
+            // up wrapping one character per line. Pin a sensible total width
+            // (~6.25" of Letter/A4 content area at 1440 DXA/inch) and distribute
+            // evenly across columns in both tblGrid and per-cell tcW.
+            final int totalWidth = 9000;
+            final int colWidth = totalWidth / cols;
+            xwpfTable.setWidth(String.valueOf(totalWidth));
+            var ctTbl = xwpfTable.getCTTbl();
+            var ctGrid = ctTbl.getTblGrid() != null ? ctTbl.getTblGrid() : ctTbl.addNewTblGrid();
+            while (ctGrid.sizeOfGridColArray() > 0) ctGrid.removeGridCol(0);
+            for (int i = 0; i < cols; i++) {
+                ctGrid.addNewGridCol().setW(BigInteger.valueOf(colWidth));
+            }
+
             int rowIdx = 0;
             for (Node section = table.getFirstChild(); section != null; section = section.getNext()) {
                 boolean isHeader = section instanceof TableHead;
@@ -355,6 +372,14 @@ public class DocumentWriter {
                         for (Node cell = row.getFirstChild(); cell != null; cell = cell.getNext()) {
                             if (!(cell instanceof TableCell)) continue;
                             XWPFTableCell xwpfCell = xwpfRow.getCell(colIdx);
+                            // Fix the cell width too (tcW) — some viewers ignore
+                            // tblGrid unless individual cells also declare a width.
+                            var ctTc = xwpfCell.getCTTc();
+                            var tcPr = ctTc.getTcPr() != null ? ctTc.getTcPr() : ctTc.addNewTcPr();
+                            var tcW = tcPr.isSetTcW() ? tcPr.getTcW() : tcPr.addNewTcW();
+                            tcW.setW(BigInteger.valueOf(colWidth));
+                            tcW.setType(STTblWidth.DXA);
+
                             // Remove the default paragraph that POI auto-adds.
                             xwpfCell.removeParagraph(0);
                             var cellP = xwpfCell.addParagraph();
