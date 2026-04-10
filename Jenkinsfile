@@ -127,6 +127,45 @@ pipeline {
                 }
             }
         }
+
+        stage('Cleanup Old Releases') {
+            when {
+                expression { params.RELEASE }
+            }
+            steps {
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
+                        // Keep only the 5 most recent GitHub Releases.
+                        sh '''
+                            echo "Pruning old GitHub Releases (keeping last 5)..."
+                            gh release list --repo tsukhani/jclaw --limit 100 \
+                                --json tagName,createdAt \
+                                | jq -r 'sort_by(.createdAt) | reverse | .[5:] | .[].tagName' \
+                                | while read tag; do
+                                    [ -z "$tag" ] && continue
+                                    echo "Deleting release: $tag"
+                                    gh release delete "$tag" --repo tsukhani/jclaw --yes || true
+                                done
+                        '''
+
+                        // Keep only the 5 most recent GHCR package versions, never touching
+                        // whichever version the :latest tag currently points at.
+                        sh '''
+                            echo "Pruning old GHCR package versions (keeping last 5, preserving :latest)..."
+                            gh api --paginate /users/tsukhani/packages/container/jclaw/versions \
+                                | jq -r '[.[] | select((.metadata.container.tags | index("latest")) | not)]
+                                         | sort_by(.created_at) | reverse
+                                         | .[5:] | .[].id' \
+                                | while read id; do
+                                    [ -z "$id" ] && continue
+                                    echo "Deleting GHCR version id: $id"
+                                    gh api -X DELETE "/user/packages/container/jclaw/versions/$id" || true
+                                done
+                        '''
+                    }
+                }
+            }
+        }
     }
 
     post {
