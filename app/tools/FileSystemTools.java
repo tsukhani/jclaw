@@ -4,9 +4,16 @@ import agents.SkillLoader;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
+import org.apache.tika.exception.TikaException;
+import org.apache.tika.metadata.Metadata;
+import org.apache.tika.parser.AutoDetectParser;
+import org.apache.tika.parser.ParseContext;
+import org.apache.tika.sax.BodyContentHandler;
+import org.xml.sax.SAXException;
 import services.AgentService;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -21,7 +28,11 @@ public class FileSystemTools implements ToolRegistry.Tool {
     public String description() {
         return """
                 Read, write, and list files in the agent's workspace directory. \
-                Actions: readFile, writeFile, listFiles. All paths are relative to the workspace.""";
+                Actions: readFile (plain text/code), writeFile, listFiles, \
+                readDocument (extracts text from PDF, DOCX, DOC, XLSX, PPTX, RTF, \
+                ODT, HTML and other rich document formats via Apache Tika). \
+                All paths are relative to the workspace. Use readDocument for any \
+                binary document format; use readFile for plain text and source code.""";
     }
 
     @Override
@@ -30,7 +41,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
                 "type", "object",
                 "properties", Map.of(
                         "action", Map.of("type", "string",
-                                "enum", List.of("readFile", "writeFile", "listFiles"),
+                                "enum", List.of("readFile", "writeFile", "listFiles", "readDocument"),
                                 "description", "The file operation to perform"),
                         "path", Map.of("type", "string",
                                 "description", "File or directory path relative to workspace"),
@@ -77,22 +88,69 @@ public class FileSystemTools implements ToolRegistry.Tool {
                 yield writeFile(target, content);
             }
             case "listFiles" -> listFiles(target);
+            case "readDocument" -> readDocument(target);
             default -> "Error: Unknown action '%s'".formatted(action);
         };
     }
 
     private static final long MAX_FILE_READ_BYTES = 1_048_576; // 1MB
+    private static final long MAX_DOCUMENT_READ_BYTES = 25L * 1024 * 1024; // 25MB
+    private static final int MAX_DOCUMENT_TEXT_CHARS = 2_000_000; // ~2MB of extracted text
 
     private String readFile(Path path) {
         try {
             if (!Files.exists(path)) return "Error: File not found: %s".formatted(path.getFileName());
             if (Files.size(path) > MAX_FILE_READ_BYTES) {
-                return "Error: File exceeds read limit (%d bytes). File size: %d bytes."
-                        .formatted(MAX_FILE_READ_BYTES, Files.size(path));
+                return "Error: File exceeds read limit (%d bytes). File size: %d bytes. "
+                        .formatted(MAX_FILE_READ_BYTES, Files.size(path))
+                        + "For rich document formats (PDF, DOCX, XLSX, etc.), use the readDocument action.";
             }
             return Files.readString(path);
         } catch (IOException e) {
             return "Error reading file: %s".formatted(e.getMessage());
+        }
+    }
+
+    /**
+     * Extract text from a rich document using Apache Tika's AutoDetectParser.
+     * Handles PDF, DOCX, DOC, XLSX, PPTX, RTF, ODT, HTML, EPUB and more.
+     */
+    private String readDocument(Path path) {
+        try {
+            if (!Files.exists(path)) return "Error: File not found: %s".formatted(path.getFileName());
+            var size = Files.size(path);
+            if (size > MAX_DOCUMENT_READ_BYTES) {
+                return "Error: Document exceeds read limit (%d bytes). File size: %d bytes."
+                        .formatted(MAX_DOCUMENT_READ_BYTES, size);
+            }
+
+            var parser = new AutoDetectParser();
+            var handler = new BodyContentHandler(MAX_DOCUMENT_TEXT_CHARS);
+            var metadata = new Metadata();
+            boolean truncated = false;
+            try (InputStream in = Files.newInputStream(path)) {
+                parser.parse(in, handler, metadata, new ParseContext());
+            } catch (SAXException e) {
+                // BodyContentHandler throws WriteLimitReachedException (a SAXException)
+                // when the cap is hit — the text captured so far is still useful.
+                if (!e.getClass().getSimpleName().contains("WriteLimitReached")) {
+                    return "Error parsing document: %s".formatted(e.getMessage());
+                }
+                truncated = true;
+            }
+            var text = handler.toString();
+            if (text.isBlank()) {
+                return "(Document parsed but contained no extractable text: "
+                        + path.getFileName() + ")";
+            }
+            if (truncated) {
+                text += "\n\n[... truncated at " + MAX_DOCUMENT_TEXT_CHARS + " characters ...]";
+            }
+            return text;
+        } catch (TikaException e) {
+            return "Error parsing document: %s".formatted(e.getMessage());
+        } catch (IOException e) {
+            return "Error reading document: %s".formatted(e.getMessage());
         }
     }
 

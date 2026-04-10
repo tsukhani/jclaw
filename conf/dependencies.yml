@@ -5,3 +5,27 @@ require:
     - play -> docviewer
     - org.jsoup -> jsoup 1.18.3
     - com.microsoft.playwright -> playwright 1.52.0
+    - org.apache.tika -> tika-core 3.2.3:
+        exclude:
+            - javax.mail -> *
+            - com.sun.mail -> *
+            - javax.activation -> *
+            - com.sun.activation -> *
+            - org.apache.logging.log4j -> *
+    - org.apache.tika -> tika-parsers-standard-package 3.2.3:
+        exclude:
+            - org.apache.lucene -> *
+            - org.ow2.asm -> *
+            - org.apache.cxf -> *
+            - org.apache.httpcomponents -> *
+            - org.apache.logging.log4j -> *
+            - org.bouncycastle -> *
+            - org.slf4j -> *
+            - com.healthmarketscience.jackcess -> *
+            - edu.ucar -> *
+            - javax.mail -> *
+            - com.sun.mail -> *
+            - javax.activation -> *
+            - com.sun.activation -> *
+            - org.apache.tika -> tika-parser-mail-commons
+            - org.apache.tika -> tika-parser-mail-module
