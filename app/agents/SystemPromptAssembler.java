@@ -41,6 +41,16 @@ public class SystemPromptAssembler {
             sb.append("\n");
             sb.append(SkillLoader.formatSkillsXml(skills));
             sb.append("\n");
+
+            // Inject the live tool catalog so skills (especially skill-creator) can reference
+            // the authoritative set of tool names instead of hardcoding them in SKILL.md files.
+            var catalog = ToolCatalog.formatCatalogForPrompt();
+            if (!catalog.isEmpty()) {
+                sb.append("\n## Tool Catalog\n");
+                sb.append("The complete set of tools that exist in JClaw. When a skill declares a `tools:` list, it MUST use names from this table:\n\n");
+                sb.append(catalog);
+                sb.append("\n");
+            }
         }
 
         // 5. Recalled memories
@@ -48,6 +58,8 @@ public class SystemPromptAssembler {
 
         // 6. Environment info
         sb.append("\n## Environment\n");
+        sb.append("- Agent name: %s\n".formatted(agent.name));
+        sb.append("- Agent ID: %d\n".formatted(agent.id));
         sb.append("- Current time: %s\n".formatted(
                 DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
                         .format(Instant.now().atZone(ZoneId.systemDefault()))));

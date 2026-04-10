@@ -1,6 +1,7 @@
 ---
 name: skill-creator
 description: Create new skills or refactor existing skills to follow the standard directory structure.
+tools: [filesystem, web_fetch]
 ---
 
 # Skill Creator & Refactorer
@@ -28,22 +29,44 @@ Every skill MUST follow this layout:
 - The skill root folder may ONLY contain `SKILL.md` and the two subfolders.
 - Skill names must be kebab-case (e.g., `web-scraper`, `slack-notifier`).
 
+## Tool Catalog (authoritative)
+
+Every skill MUST declare the exact tools it needs in a `tools:` YAML list in its frontmatter. The authoritative list of valid tool names lives in the `## Tool Catalog` section of your system prompt — it is generated live from the running JClaw build, so it always reflects what actually exists. Pick ONLY from the names in that table. If a name isn't in the Tool Catalog section, it is not a real tool.
+
 ## Creating a New Skill
 
 1. **Ask** the user what the skill should do. Get a clear name and description.
-2. **Draft** the SKILL.md content. A good skill includes:
-   - YAML frontmatter with `name` and `description` fields
+2. **Determine required tools.** Walk through the steps the skill will perform and pick EVERY tool it will need from the `## Tool Catalog` section of your system prompt. Be exhaustive but exact: do not add tools the skill will not use, and do not omit tools the skill cannot work without. Read each tool's description in the Tool Catalog and match it against what the skill actually does.
+   - Only use names that appear verbatim in the Tool Catalog table. If a capability isn't in the catalog, the skill cannot do it.
+   - **Pure reasoning / computation only (no I/O, no external data)** → `tools: []` (empty list). Do NOT invent tools for tasks the LLM can answer on its own. Example: "compute 2+2" or "rephrase this sentence" need zero tools.
+3. **Pre-flight check (mandatory).** Before writing any files, verify the agent actually has every required tool enabled:
+   - Read the `Agent ID` field from the `## Environment` section at the end of the system prompt.
+   - Use `web_fetch` to GET `http://localhost:9000/api/agents/{agent-id}/tools` (substituting the real numeric id).
+   - Parse the JSON response. Each entry has `name` and `enabled` fields. Collect the names where `enabled = true`.
+   - Compute the set difference: `required_tools − enabled_tools = missing_tools`.
+   - **If `missing_tools` is non-empty**: STOP. Do not write any files. Tell the user: "Cannot create skill `{name}` for this agent: it requires tools [list] that are disabled. Ask an admin to enable them on the Agents page and try again."
+   - **If `missing_tools` is empty (or `required_tools` is empty)**: proceed to step 4.
+4. **Draft** the SKILL.md content:
+   - YAML frontmatter with `name`, `description`, and `tools:` (the exact list from step 2)
    - A clear title and purpose
    - Step-by-step instructions the agent should follow
-   - Which tools to use and how
+   - Reference each declared tool by name in the body
    - Example inputs and expected outputs
    - Edge cases and error handling
-3. **Create** the skill using the filesystem tool:
+5. **Create** the skill using the filesystem tool:
    - Create the directory: `skills/{skill-name}/`
-   - Write `skills/{skill-name}/SKILL.md` with YAML frontmatter
-   - If credentials are needed, create `credentials/` with placeholder files explaining what keys are required
-   - If binary tools are needed, create `tools/` and add documentation explaining how to obtain/install them
-4. **Confirm** creation and explain the skill is now available in your workspace.
+   - Write `skills/{skill-name}/SKILL.md`
+   - If credentials are needed, create `credentials/` with placeholder files
+   - If binary tools are needed, create `tools/` with documentation
+6. **Confirm** creation. Tell the user the declared `tools:` list so they can verify.
+
+### Rules for the `tools:` field
+
+- Use inline YAML list form: `tools: [tool_a, tool_b]` — substitute real names from the Tool Catalog.
+- Use an empty list if the skill uses no tools at all: `tools: []`
+- Tool names are case-sensitive and MUST match the Tool Catalog exactly.
+- NEVER invent tool names. If a name isn't in the Tool Catalog section of your system prompt, it doesn't exist. Common mistakes: writing `readFile` instead of `filesystem`, `shell` instead of `exec`, `http` instead of `web_fetch`.
+- The declared list must equal the set of tools actually referenced in the skill body — no more, no less.
 
 ## Refactoring an Existing Skill
 
@@ -82,14 +105,15 @@ whatsapp-notifier/
 ---
 name: whatsapp-notifier
 description: Send WhatsApp messages using the wacli tool
+tools: [exec, filesystem]
 ---
 
 # WhatsApp Notifier
 
 When asked to send a WhatsApp message:
 
-1. Read credentials from `credentials/api-config.json`
-2. Use the `tools/wacli` binary with the shell tool to send the message
+1. Read credentials from `credentials/api-config.json` using the `filesystem` tool
+2. Use the `exec` tool to run `tools/wacli` to send the message
 3. Confirm delivery status to the user
 ```
 
@@ -97,7 +121,7 @@ When asked to send a WhatsApp message:
 
 - Keep skill names short and descriptive (kebab-case)
 - Write clear, actionable instructions that an LLM can follow
-- Reference available tools by name (web_fetch, filesystem, task_manager, checklist)
+- Reference tools ONLY by the exact names from the live Tool Catalog in your system prompt — nothing else is valid
 - Skills should be focused on one task — create multiple skills for complex workflows
 - Skills you create go into your workspace and are available only to you
 - An admin can promote a skill to global by copying it to the shared skills directory

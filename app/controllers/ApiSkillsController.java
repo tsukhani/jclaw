@@ -1,6 +1,7 @@
 package controllers;
 
 import agents.SkillLoader;
+import agents.ToolCatalog;
 import com.google.gson.Gson;
 import com.google.gson.JsonParser;
 import llm.LlmTypes.ChatMessage;
@@ -115,20 +116,13 @@ public class ApiSkillsController extends Controller {
         }
     }
 
-    // Known tool names in JClaw — used for detecting skill dependencies
-    private static final java.util.Map<String, String> KNOWN_TOOLS = java.util.Map.ofEntries(
-            java.util.Map.entry("exec", "Shell command execution"),
-            java.util.Map.entry("shell", "Shell command execution"),
-            java.util.Map.entry("filesystem", "File read/write/list"),
-            java.util.Map.entry("readFile", "File read (filesystem)"),
-            java.util.Map.entry("writeFile", "File write (filesystem)"),
-            java.util.Map.entry("listFiles", "File listing (filesystem)"),
-            java.util.Map.entry("web_search", "Web search"),
-            java.util.Map.entry("web_fetch", "Fetch URL content"),
-            java.util.Map.entry("browser", "Browser automation (Playwright)"),
-            java.util.Map.entry("task_manager", "Task scheduling"),
-            java.util.Map.entry("checklist", "Progress tracking"),
-            java.util.Map.entry("skills", "Skill management")
+    // Aliases for body-text heuristic detection only — maps informal names to canonical tool names.
+    // The canonical tool list itself is derived live from ToolRegistry via ToolCatalog.
+    private static final java.util.Map<String, String> TOOL_ALIASES = java.util.Map.ofEntries(
+            java.util.Map.entry("shell", "exec"),
+            java.util.Map.entry("readFile", "filesystem"),
+            java.util.Map.entry("writeFile", "filesystem"),
+            java.util.Map.entry("listFiles", "filesystem")
     );
 
     /** GET /api/skills/{name}/files — List all files in a skill folder with metadata and detected tool dependencies. */
@@ -210,17 +204,39 @@ public class ApiSkillsController extends Controller {
     private static java.util.List<java.util.Map<String, String>> detectTools(String content) {
         var detectedTools = new java.util.ArrayList<java.util.Map<String, String>>();
         var seen = new java.util.HashSet<String>();
-        for (var entry : KNOWN_TOOLS.entrySet()) {
-            if (content.contains(entry.getKey()) && !seen.contains(entry.getValue())) {
-                seen.add(entry.getValue());
-                detectedTools.add(java.util.Map.of("name", entry.getKey(), "description", entry.getValue()));
+
+        // Scan every live tool name from the registry against the body text
+        for (var tool : agents.ToolRegistry.listTools()) {
+            if (content.contains(tool.name()) && seen.add(tool.name())) {
+                detectedTools.add(java.util.Map.of("name", tool.name(),
+                        "description", tool.description() != null ? tool.description() : ""));
             }
         }
-        if (!seen.contains("Shell command execution")
+
+        // Informal aliases (readFile, shell, writeFile) → map to the canonical tool
+        for (var entry : TOOL_ALIASES.entrySet()) {
+            if (content.contains(entry.getKey()) && seen.add(entry.getValue())) {
+                var canonical = entry.getValue();
+                var tool = agents.ToolRegistry.listTools().stream()
+                        .filter(t -> t.name().equals(canonical))
+                        .findFirst()
+                        .orElse(null);
+                detectedTools.add(java.util.Map.of("name", canonical,
+                        "description", tool != null && tool.description() != null ? tool.description() : ""));
+            }
+        }
+
+        // Implicit shell usage — bash/sh code fences
+        if (seen.add("exec")
                 && (content.contains("```bash") || content.contains("```sh")
                     || content.contains("```shell") || content.contains("run the command")
                     || content.contains("execute the command"))) {
-            detectedTools.add(java.util.Map.of("name", "exec", "description", "Shell command execution"));
+            var tool = agents.ToolRegistry.listTools().stream()
+                    .filter(t -> t.name().equals("exec"))
+                    .findFirst()
+                    .orElse(null);
+            detectedTools.add(java.util.Map.of("name", "exec",
+                    "description", tool != null && tool.description() != null ? tool.description() : "Shell command execution"));
         }
         return detectedTools;
     }
@@ -326,6 +342,26 @@ public class ApiSkillsController extends Controller {
         var targetDir = AgentService.workspacePath(agent.name).resolve("skills").resolve(name);
         if (Files.isDirectory(targetDir) && Files.exists(targetDir.resolve("SKILL.md"))) {
             error(409, "Skill '%s' already exists in agent workspace".formatted(name));
+        }
+
+        // Verify the agent has every tool this skill declares it needs
+        var globalSkillFile = globalDir.resolve("SKILL.md");
+        if (Files.exists(globalSkillFile)) {
+            var info = SkillLoader.parseSkillFile(globalSkillFile);
+            if (info != null && info.tools() != null && !info.tools().isEmpty()) {
+                var validation = ToolCatalog.validateSkillTools(agent, info.tools());
+                if (!validation.isOk()) {
+                    var parts = new java.util.ArrayList<String>();
+                    if (!validation.disabled().isEmpty()) {
+                        parts.add("disabled: [" + String.join(", ", validation.disabled()) + "]");
+                    }
+                    if (!validation.unknown().isEmpty()) {
+                        parts.add("unknown: [" + String.join(", ", validation.unknown()) + "]");
+                    }
+                    error(400, "Cannot add skill '%s' to agent '%s': missing tools — %s. Enable the required tools for this agent and try again."
+                            .formatted(name, agent.name, String.join("; ", parts)));
+                }
+            }
         }
 
         try {
@@ -803,6 +839,7 @@ public class ApiSkillsController extends Controller {
         map.put("description", s.description());
         map.put("isGlobal", isGlobal);
         map.put("location", s.location() != null ? s.location().toString() : "");
+        map.put("tools", s.tools() != null ? s.tools() : List.of());
         // Folder name = parent directory name of the SKILL.md file
         if (s.location() != null && s.location().getParent() != null) {
             map.put("folderName", s.location().getParent().getFileName().toString());

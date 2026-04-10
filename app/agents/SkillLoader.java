@@ -21,7 +21,11 @@ import java.util.regex.Pattern;
  */
 public class SkillLoader {
 
-    public record SkillInfo(String name, String description, Path location) {}
+    public record SkillInfo(String name, String description, Path location, List<String> tools) {
+        public SkillInfo(String name, String description, Path location) {
+            this(name, description, location, List.of());
+        }
+    }
 
     private static final ConcurrentHashMap<String, CachedSkills> skillCache = new ConcurrentHashMap<>();
     private static final long CACHE_TTL_MS = 30_000;
@@ -117,25 +121,40 @@ public class SkillLoader {
         // Make locations relative to the agent's workspace (readFile tool resolves relative to workspace)
         allSkills.replaceAll(s -> {
             if (s.location() != null && s.location().startsWith(workspaceDir)) {
-                return new SkillInfo(s.name(), s.description(), workspaceDir.relativize(s.location()));
+                return new SkillInfo(s.name(), s.description(), workspaceDir.relativize(s.location()), s.tools());
             }
             return s;
         });
 
-        // Filter by permissions (JPA access — may be called from tool execution outside request thread)
-        var disabledSkills = services.Tx.run(() -> {
+        // Filter by permissions + validate tool requirements (JPA access — may be called from tool execution
+        // outside a request thread, so wrap in a Tx)
+        services.Tx.run(() -> {
             var agent = Agent.findByName(agentName);
-            if (agent == null) return new HashSet<String>();
+            if (agent == null) return;
+
             var configs = AgentSkillConfig.findByAgent(agent);
-            var disabled = new HashSet<String>();
+            var disabledSkills = new HashSet<String>();
             for (var c : configs) {
-                if (!c.enabled) disabled.add(c.skillName);
+                if (!c.enabled) disabledSkills.add(c.skillName);
             }
-            return disabled;
+            if (!disabledSkills.isEmpty()) {
+                allSkills.removeIf(s -> disabledSkills.contains(s.name()));
+            }
+
+            // Defense-in-depth: exclude any skill whose declared tools are not all available to this agent
+            // (catches skills authored outside the drag-drop API flow, e.g. by skill-creator writing files
+            // directly).
+            allSkills.removeIf(s -> {
+                if (s.tools() == null || s.tools().isEmpty()) return false;
+                var result = ToolCatalog.validateSkillTools(agent, s.tools());
+                if (!result.isOk()) {
+                    EventLogger.warn("skills", "Excluding skill '%s' from agent '%s': missing tools %s"
+                            .formatted(s.name(), agentName, result.missing()));
+                    return true;
+                }
+                return false;
+            });
         });
-        if (!disabledSkills.isEmpty()) {
-            allSkills.removeIf(s -> disabledSkills.contains(s.name()));
-        }
 
         return allSkills.stream().limit(MAX_SKILLS).toList();
     }
@@ -224,15 +243,61 @@ public class SkillLoader {
                 var frontmatter = matcher.group(1);
                 var name = extractYamlValue(frontmatter, "name");
                 var description = extractYamlValue(frontmatter, "description");
+                var tools = extractYamlList(frontmatter, "tools");
                 if (name != null) {
-                    return new SkillInfo(name, description != null ? description : "", path);
+                    return new SkillInfo(name, description != null ? description : "", path, tools);
                 }
             }
             // Fallback: use directory name
-            return new SkillInfo(path.getParent().getFileName().toString(), "", path);
+            return new SkillInfo(path.getParent().getFileName().toString(), "", path, List.of());
         } catch (IOException e) {
             return null;
         }
+    }
+
+    /**
+     * Extract a YAML list value for the given key. Supports both inline form
+     * {@code key: [a, b, c]} and block form:
+     * <pre>
+     * key:
+     *   - a
+     *   - b
+     * </pre>
+     */
+    public static List<String> extractYamlList(String yaml, String key) {
+        // Inline form: key: [a, b, c]
+        var inlinePattern = Pattern.compile("^" + Pattern.quote(key) + ":\\s*\\[(.*?)\\]\\s*$",
+                Pattern.MULTILINE);
+        var inlineMatcher = inlinePattern.matcher(yaml);
+        if (inlineMatcher.find()) {
+            var items = inlineMatcher.group(1).trim();
+            if (items.isEmpty()) return List.of();
+            var result = new ArrayList<String>();
+            for (var part : items.split(",")) {
+                var cleaned = part.trim().replaceAll("^[\"']|[\"']$", "");
+                if (!cleaned.isEmpty()) result.add(cleaned);
+            }
+            return result;
+        }
+
+        // Block form: key:\n  - a\n  - b
+        var blockPattern = Pattern.compile("^" + Pattern.quote(key) + ":\\s*\\n((?:\\s*-\\s*.*\\n?)+)",
+                Pattern.MULTILINE);
+        var blockMatcher = blockPattern.matcher(yaml);
+        if (blockMatcher.find()) {
+            var body = blockMatcher.group(1);
+            var result = new ArrayList<String>();
+            for (var line : body.split("\\n")) {
+                var trimmed = line.trim();
+                if (trimmed.startsWith("-")) {
+                    var item = trimmed.substring(1).trim().replaceAll("^[\"']|[\"']$", "");
+                    if (!item.isEmpty()) result.add(item);
+                }
+            }
+            return result;
+        }
+
+        return List.of();
     }
 
     public static String extractYamlValue(String yaml, String key) {
@@ -253,22 +318,17 @@ public class SkillLoader {
     }
 
     private static String formatSkillEntry(SkillInfo skill, boolean full) {
+        var sb = new StringBuilder();
+        sb.append("  <skill>\n");
+        sb.append("    <name>").append(skill.name()).append("</name>\n");
         if (full) {
-            return """
-                      <skill>
-                        <name>%s</name>
-                        <description>%s</description>
-                        <location>%s</location>
-                      </skill>
-                    """.formatted(skill.name(), skill.description(),
-                    skill.location() != null ? skill.location() : "");
+            sb.append("    <description>").append(skill.description()).append("</description>\n");
         }
-        return """
-                  <skill>
-                    <name>%s</name>
-                    <location>%s</location>
-                  </skill>
-                """.formatted(skill.name(),
-                skill.location() != null ? skill.location() : "");
+        sb.append("    <location>").append(skill.location() != null ? skill.location() : "").append("</location>\n");
+        if (skill.tools() != null && !skill.tools().isEmpty()) {
+            sb.append("    <tools>").append(String.join(", ", skill.tools())).append("</tools>\n");
+        }
+        sb.append("  </skill>\n");
+        return sb.toString();
     }
 }

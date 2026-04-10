@@ -30,6 +30,15 @@ const dragSource = ref<'global' | 'agent' | null>(null)
 const dragSourceAgentId = ref<number | null>(null)
 const dropTarget = ref<number | null>(null)
 const dropTargetGlobal = ref(false)
+
+// Error banner for drag-drop failures (e.g. missing tools on target agent)
+const dragError = ref<string | null>(null)
+let dragErrorTimer: ReturnType<typeof setTimeout> | null = null
+function showDragError(msg: string) {
+  dragError.value = msg
+  if (dragErrorTimer) clearTimeout(dragErrorTimer)
+  dragErrorTimer = setTimeout(() => { dragError.value = null }, 8000)
+}
 // Track multiple concurrent promotions by skill name (survives navigation via useState)
 const promotingSkills = useState<Set<string>>('promotingSkills', () => new Set())
 
@@ -106,13 +115,19 @@ async function onAgentDrop(e: DragEvent, agent: any) {
     await $fetch(`/api/agents/${agent.id}/skills/${skillName}/copy`, { method: 'POST' })
     agentSkillsMap.value[agent.id] = await $fetch<any[]>(`/api/agents/${agent.id}/skills`)
   } catch (err: any) {
-    if (err?.response?.status === 409 && existing && !existing.enabled) {
+    const status = err?.response?.status
+    if (status === 409 && existing && !existing.enabled) {
       await $fetch(`/api/agents/${agent.id}/skills/${skillName}`, {
         method: 'PUT', body: { enabled: true }
       })
       agentSkillsMap.value[agent.id] = await $fetch<any[]>(`/api/agents/${agent.id}/skills`)
-    } else if (err?.response?.status !== 409) {
+    } else if (status === 400) {
+      // Missing tools — surface the server's error message to the user
+      const msg = err?.response?._data || err?.data || err?.message || 'Cannot add skill to this agent.'
+      showDragError(typeof msg === 'string' ? msg : 'Cannot add skill to this agent.')
+    } else if (status !== 409) {
       console.error('Failed to copy skill:', err)
+      showDragError('Failed to add skill to agent.')
     }
   }
   dragging.value = null
@@ -417,6 +432,12 @@ function totalSkillCount(agentId: number) {
               class="px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 transition-colors">
         New Skill
       </button>
+    </div>
+
+    <div v-if="dragError"
+         class="mb-4 px-3 py-2 bg-red-950/40 border border-red-900/60 text-red-300 text-xs flex items-start justify-between gap-3">
+      <span>{{ dragError }}</span>
+      <button @click="dragError = null" class="text-red-400 hover:text-red-200 shrink-0" title="Dismiss">×</button>
     </div>
 
     <template v-if="!editing && !creating">

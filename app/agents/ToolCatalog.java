@@ -1,0 +1,96 @@
+package agents;
+
+import models.Agent;
+import models.AgentToolConfig;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+/**
+ * Catalog facade over {@link ToolRegistry}. Provides the live set of registered tool names
+ * plus validation helpers that cross-check a skill's declared tool requirements against an
+ * agent's enabled tools.
+ *
+ * <p>There is no hardcoded tool list here — everything derives from what is actually
+ * registered at runtime, so adding a new tool in {@code app/tools/} automatically flows
+ * through to skill validation and the skill-creator catalog without any manual updates.
+ */
+public class ToolCatalog {
+
+    /** Every tool name currently registered in {@link ToolRegistry}. */
+    public static Set<String> allToolNames() {
+        return ToolRegistry.listTools().stream()
+                .map(ToolRegistry.Tool::name)
+                .collect(Collectors.toUnmodifiableSet());
+    }
+
+    /**
+     * Format the live tool catalog as a markdown table suitable for injection into
+     * a system prompt. Returns empty string if no tools are registered.
+     */
+    public static String formatCatalogForPrompt() {
+        var tools = ToolRegistry.listTools();
+        if (tools.isEmpty()) return "";
+        var sb = new StringBuilder();
+        sb.append("| Tool | Purpose |\n");
+        sb.append("|---|---|\n");
+        for (var t : tools) {
+            sb.append("| `").append(t.name()).append("` | ")
+              .append(t.description() != null ? t.description().replace("\n", " ") : "")
+              .append(" |\n");
+        }
+        return sb.toString();
+    }
+
+    public record ValidationResult(List<String> unknown, List<String> disabled) {
+        public boolean isOk() { return unknown.isEmpty() && disabled.isEmpty(); }
+        public List<String> missing() {
+            var all = new ArrayList<String>(unknown.size() + disabled.size());
+            all.addAll(unknown);
+            all.addAll(disabled);
+            return all;
+        }
+    }
+
+    /**
+     * Check whether an agent has every tool a skill requires.
+     * Returns the lists of unknown (typo/invalid) and disabled-for-this-agent tool names.
+     */
+    public static ValidationResult validateSkillTools(Agent agent, List<String> requiredTools) {
+        if (requiredTools == null || requiredTools.isEmpty()) {
+            return new ValidationResult(List.of(), List.of());
+        }
+
+        var knownToolSet = allToolNames();
+        var unknown = new ArrayList<String>();
+        var knownRequired = new ArrayList<String>();
+        for (var t : requiredTools) {
+            if (t == null || t.isBlank()) continue;
+            var name = t.trim();
+            if (!knownToolSet.contains(name)) {
+                unknown.add(name);
+            } else {
+                knownRequired.add(name);
+            }
+        }
+
+        if (knownRequired.isEmpty()) {
+            return new ValidationResult(unknown, List.of());
+        }
+
+        var disabledForAgent = new HashSet<String>();
+        for (var c : AgentToolConfig.findByAgent(agent)) {
+            if (!c.enabled) disabledForAgent.add(c.toolName);
+        }
+
+        var disabled = new ArrayList<String>();
+        for (var t : knownRequired) {
+            if (disabledForAgent.contains(t)) disabled.add(t);
+        }
+
+        return new ValidationResult(unknown, disabled);
+    }
+}
