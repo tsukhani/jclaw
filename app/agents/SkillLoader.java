@@ -21,9 +21,15 @@ import java.util.regex.Pattern;
  */
 public class SkillLoader {
 
-    public record SkillInfo(String name, String description, Path location, List<String> tools) {
+    /**
+     * @param toolsDeclared true when the SKILL.md frontmatter contained a {@code tools:} key
+     *                      (even if the list was empty). false means the skill predates the
+     *                      declaration system and callers should fall back to heuristics.
+     */
+    public record SkillInfo(String name, String description, Path location,
+                            List<String> tools, boolean toolsDeclared) {
         public SkillInfo(String name, String description, Path location) {
-            this(name, description, location, List.of());
+            this(name, description, location, List.of(), false);
         }
     }
 
@@ -121,7 +127,8 @@ public class SkillLoader {
         // Make locations relative to the agent's workspace (readFile tool resolves relative to workspace)
         allSkills.replaceAll(s -> {
             if (s.location() != null && s.location().startsWith(workspaceDir)) {
-                return new SkillInfo(s.name(), s.description(), workspaceDir.relativize(s.location()), s.tools());
+                return new SkillInfo(s.name(), s.description(), workspaceDir.relativize(s.location()),
+                        s.tools(), s.toolsDeclared());
             }
             return s;
         });
@@ -235,6 +242,9 @@ public class SkillLoader {
 
     // --- Internal ---
 
+    /** Matches a top-level {@code tools:} key in YAML frontmatter (inline or block form). */
+    private static final Pattern TOOLS_KEY_PRESENT = Pattern.compile("(?m)^tools:");
+
     public static SkillInfo parseSkillFile(Path path) {
         try {
             var content = Files.readString(path);
@@ -243,13 +253,14 @@ public class SkillLoader {
                 var frontmatter = matcher.group(1);
                 var name = extractYamlValue(frontmatter, "name");
                 var description = extractYamlValue(frontmatter, "description");
+                var toolsDeclared = TOOLS_KEY_PRESENT.matcher(frontmatter).find();
                 var tools = extractYamlList(frontmatter, "tools");
                 if (name != null) {
-                    return new SkillInfo(name, description != null ? description : "", path, tools);
+                    return new SkillInfo(name, description != null ? description : "", path, tools, toolsDeclared);
                 }
             }
             // Fallback: use directory name
-            return new SkillInfo(path.getParent().getFileName().toString(), "", path, List.of());
+            return new SkillInfo(path.getParent().getFileName().toString(), "", path, List.of(), false);
         } catch (IOException e) {
             return null;
         }

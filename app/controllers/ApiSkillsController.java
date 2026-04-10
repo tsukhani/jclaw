@@ -203,14 +203,15 @@ public class ApiSkillsController extends Controller {
 
     /**
      * Resolve the tools a skill needs. Prefers the explicit {@code tools:} frontmatter
-     * (the authoritative declaration) and only falls back to body-text heuristics for
-     * legacy skills that haven't declared dependencies yet.
+     * (the authoritative declaration) whenever the skill has one — even if the declared
+     * list is empty, which is the correct answer for pure-reasoning skills. Falls back
+     * to the body-text heuristic only for legacy skills that predate the declaration.
      */
     private static java.util.List<java.util.Map<String, String>> resolveSkillTools(Path skillDir, String allContent) {
         var skillFile = skillDir.resolve("SKILL.md");
         if (Files.exists(skillFile)) {
             var info = SkillLoader.parseSkillFile(skillFile);
-            if (info != null && info.tools() != null && !info.tools().isEmpty()) {
+            if (info != null && info.toolsDeclared()) {
                 var result = new java.util.ArrayList<java.util.Map<String, String>>();
                 for (var name : info.tools()) {
                     var tool = agents.ToolRegistry.listTools().stream()
