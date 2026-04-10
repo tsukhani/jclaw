@@ -25,12 +25,43 @@ public class SkillLoader {
      * @param toolsDeclared true when the SKILL.md frontmatter contained a {@code tools:} key
      *                      (even if the list was empty). false means the skill predates the
      *                      declaration system and callers should fall back to heuristics.
+     * @param version       semver string from frontmatter ({@code version:}), or {@code "0.0.0"}
+     *                      if the key was absent.
      */
     public record SkillInfo(String name, String description, Path location,
-                            List<String> tools, boolean toolsDeclared) {
+                            List<String> tools, boolean toolsDeclared, String version) {
         public SkillInfo(String name, String description, Path location) {
-            this(name, description, location, List.of(), false);
+            this(name, description, location, List.of(), false, "0.0.0");
         }
+    }
+
+    /** Compare two semver strings ("1.2.3" vs "1.10.0"). Returns negative/0/positive like Comparable. */
+    public static int compareVersions(String a, String b) {
+        var pa = parseVersion(a);
+        var pb = parseVersion(b);
+        for (int i = 0; i < 3; i++) {
+            int cmp = Integer.compare(pa[i], pb[i]);
+            if (cmp != 0) return cmp;
+        }
+        return 0;
+    }
+
+    /** Parse "X.Y.Z" into int[3]. Missing or malformed components default to 0. */
+    public static int[] parseVersion(String v) {
+        var out = new int[]{0, 0, 0};
+        if (v == null) return out;
+        var parts = v.trim().split("\\.");
+        for (int i = 0; i < Math.min(3, parts.length); i++) {
+            try { out[i] = Integer.parseInt(parts[i].replaceAll("[^0-9].*", "")); }
+            catch (NumberFormatException _) {}
+        }
+        return out;
+    }
+
+    /** Bump the patch component of a semver string. "1.2.3" → "1.2.4". */
+    public static String bumpPatch(String v) {
+        var p = parseVersion(v);
+        return "%d.%d.%d".formatted(p[0], p[1], p[2] + 1);
     }
 
     private static final ConcurrentHashMap<String, CachedSkills> skillCache = new ConcurrentHashMap<>();
@@ -128,7 +159,7 @@ public class SkillLoader {
         allSkills.replaceAll(s -> {
             if (s.location() != null && s.location().startsWith(workspaceDir)) {
                 return new SkillInfo(s.name(), s.description(), workspaceDir.relativize(s.location()),
-                        s.tools(), s.toolsDeclared());
+                        s.tools(), s.toolsDeclared(), s.version());
             }
             return s;
         });
@@ -255,12 +286,14 @@ public class SkillLoader {
                 var description = extractYamlValue(frontmatter, "description");
                 var toolsDeclared = TOOLS_KEY_PRESENT.matcher(frontmatter).find();
                 var tools = extractYamlList(frontmatter, "tools");
+                var version = extractYamlValue(frontmatter, "version");
                 if (name != null) {
-                    return new SkillInfo(name, description != null ? description : "", path, tools, toolsDeclared);
+                    return new SkillInfo(name, description != null ? description : "", path,
+                            tools, toolsDeclared, version != null ? version : "0.0.0");
                 }
             }
             // Fallback: use directory name
-            return new SkillInfo(path.getParent().getFileName().toString(), "", path, List.of(), false);
+            return new SkillInfo(path.getParent().getFileName().toString(), "", path, List.of(), false, "0.0.0");
         } catch (IOException e) {
             return null;
         }
@@ -320,6 +353,37 @@ public class SkillLoader {
      * LLM sanitization: the frontmatter is held aside, only the body is sent to the LLM,
      * and the original frontmatter is reinjected afterward.
      */
+    /**
+     * Compute a deterministic SHA-256 hash over every regular file in a skill directory.
+     * Files are visited in sorted relative-path order; each file contributes its relative
+     * path bytes plus a separator plus its content bytes. Used to byte-compare two skill
+     * directories regardless of filesystem iteration order.
+     */
+    public static String hashSkillDirectory(Path skillDir) throws IOException {
+        if (!Files.isDirectory(skillDir)) return "";
+        java.security.MessageDigest digest;
+        try {
+            digest = java.security.MessageDigest.getInstance("SHA-256");
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IOException("SHA-256 not available", e);
+        }
+        try (var walk = Files.walk(skillDir)) {
+            var files = walk.filter(Files::isRegularFile)
+                    .sorted(java.util.Comparator.comparing(p -> skillDir.relativize(p).toString()))
+                    .toList();
+            for (var file : files) {
+                var rel = skillDir.relativize(file).toString();
+                digest.update(rel.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                digest.update((byte) 0);
+                digest.update(Files.readAllBytes(file));
+                digest.update((byte) 0);
+            }
+        }
+        var sb = new StringBuilder();
+        for (var b : digest.digest()) sb.append(String.format("%02x", b));
+        return sb.toString();
+    }
+
     public record FrontmatterSplit(String frontmatter, String body) {}
 
     public static FrontmatterSplit splitFrontmatter(String content) {

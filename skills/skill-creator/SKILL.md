@@ -1,6 +1,7 @@
 ---
 name: skill-creator
 description: Create new skills or refactor existing skills to follow the standard directory structure.
+version: 1.0.0
 tools: [filesystem, web_fetch]
 ---
 
@@ -47,7 +48,7 @@ Every skill MUST declare the exact tools it needs in a `tools:` YAML list in its
    - **If `missing_tools` is non-empty**: STOP. Do not write any files. Tell the user: "Cannot create skill `{name}` for this agent: it requires tools [list] that are disabled. Ask an admin to enable them on the Agents page and try again."
    - **If `missing_tools` is empty (or `required_tools` is empty)**: proceed to step 4.
 4. **Draft** the SKILL.md content:
-   - YAML frontmatter with `name`, `description`, and `tools:` (the exact list from step 2)
+   - YAML frontmatter with `name`, `description`, `version: 1.0.0` (every new skill starts here), and `tools:` (the exact list from step 2)
    - A clear title and purpose
    - Step-by-step instructions the agent should follow
    - Reference each declared tool by name in the body
@@ -73,19 +74,22 @@ Every skill MUST declare the exact tools it needs in a `tools:` YAML list in its
 When asked to refactor or update an existing skill, or when you notice a skill that doesn't follow the standard structure:
 
 1. **Audit** the existing skill directory by listing all files and subfolders.
-2. **Identify violations:**
+2. **Identify violations and changes needed:**
    - Any binary files in the root folder or `credentials/` → must move to `tools/`
    - Any credential/config files in the root folder → must move to `credentials/`
    - Any files other than SKILL.md in the root folder → categorize and move to the correct subfolder
    - Missing YAML frontmatter in SKILL.md → add it
+   - Missing `version:` in frontmatter → add `version: 1.0.0`
    - Non-kebab-case skill name → rename the folder
-3. **Move files** to the correct locations using the filesystem tool:
-   - Move binaries to `tools/`
-   - Move credential/config files to `credentials/`
-   - Create subfolders if they don't exist
+3. **Move files** to the correct locations using the filesystem tool.
 4. **Update SKILL.md** to reference the new file paths (e.g., `tools/wacli` instead of `./wacli`).
-5. **Verify** the final structure matches the standard layout.
-6. **Report** what was changed to the user.
+5. **Bump the version** in the frontmatter. The convention is:
+   - **Patch bump** (e.g., `1.2.3` → `1.2.4`) for any refactor, wording tweak, bug fix, or change to the instructions. This is the default — use it for almost every refactor.
+   - **Minor bump** (e.g., `1.2.3` → `1.3.0`) only if the user explicitly asks for a minor or feature-level change, or if you are adding new steps/capabilities that existing users might want to know about.
+   - **Major bump** (e.g., `1.2.3` → `2.0.0`) only if the user explicitly asks for a breaking change or if the required `tools:` list is changing in a way that would break existing agents.
+   - Never skip the bump. If ANY byte of the skill changes, the version MUST be incremented.
+6. **Verify** the final structure matches the standard layout.
+7. **Report** what was changed and the new version to the user.
 
 ## Example
 
@@ -105,6 +109,7 @@ whatsapp-notifier/
 ---
 name: whatsapp-notifier
 description: Send WhatsApp messages using the wacli tool
+version: 1.0.0
 tools: [exec, filesystem]
 ---
 

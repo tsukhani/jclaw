@@ -294,10 +294,9 @@ public class ApiSkillsController extends Controller {
             error(404, "Global skill '%s' not found".formatted(name));
         }
 
-        var targetDir = AgentService.workspacePath(agent.name).resolve("skills").resolve(name);
-        if (Files.isDirectory(targetDir) && Files.exists(targetDir.resolve("SKILL.md"))) {
-            error(409, "Skill '%s' already exists in agent workspace".formatted(name));
-        }
+        var agentSkillsDir = AgentService.workspacePath(agent.name).resolve("skills");
+        var targetDir = agentSkillsDir.resolve(name);
+        var replacing = Files.isDirectory(targetDir) && Files.exists(targetDir.resolve("SKILL.md"));
 
         // Verify the agent has every tool this skill declares it needs
         var globalSkillFile = globalDir.resolve("SKILL.md");
@@ -319,22 +318,43 @@ public class ApiSkillsController extends Controller {
             }
         }
 
+        // Stage the copy in a sibling directory, then swap in place. Guarantees that a
+        // partial copy can't corrupt an existing agent workspace skill.
+        var stagingDir = agentSkillsDir.resolve(name + ".copying-" + System.currentTimeMillis());
+        var backupDir = agentSkillsDir.resolve(name + ".replacing-" + System.currentTimeMillis());
         try {
-            Files.createDirectories(targetDir);
+            Files.createDirectories(stagingDir);
             try (var walk = Files.walk(globalDir)) {
                 walk.forEach(source -> {
-                    var target = targetDir.resolve(globalDir.relativize(source));
+                    var staged = stagingDir.resolve(globalDir.relativize(source));
                     try {
                         if (Files.isDirectory(source)) {
-                            Files.createDirectories(target);
+                            Files.createDirectories(staged);
                         } else {
-                            Files.copy(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                            Files.createDirectories(staged.getParent());
+                            Files.copy(source, staged, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                         }
                     } catch (IOException ex) {
                         throw new RuntimeException("Failed to copy " + source, ex);
                     }
                 });
             }
+
+            if (replacing) {
+                Files.move(targetDir, backupDir);
+            }
+            try {
+                Files.move(stagingDir, targetDir);
+            } catch (IOException swapEx) {
+                if (replacing && Files.isDirectory(backupDir)) {
+                    try { Files.move(backupDir, targetDir); } catch (IOException _) {}
+                }
+                throw swapEx;
+            }
+            if (replacing && Files.isDirectory(backupDir)) {
+                deleteRecursive(backupDir);
+            }
+
             SkillLoader.clearCache();
 
             // Ensure skill is enabled for this agent
@@ -344,8 +364,15 @@ public class ApiSkillsController extends Controller {
                 config.save();
             }
 
-            renderJSON(gson.toJson(java.util.Map.of("name", name, "status", "ok")));
+            renderJSON(gson.toJson(java.util.Map.of(
+                    "name", name,
+                    "status", "ok",
+                    "replaced", replacing
+            )));
         } catch (IOException e) {
+            if (Files.exists(stagingDir)) {
+                try { deleteRecursive(stagingDir); } catch (IOException _) {}
+            }
             error(500, "Failed to copy skill: " + e.getMessage());
         }
     }
@@ -465,6 +492,47 @@ public class ApiSkillsController extends Controller {
 
     private static void promoteInBackground(Path skillDir, String skillName) {
         services.EventLogger.info("skills", "Starting background promotion of '%s'".formatted(skillName));
+
+        // Early exit: if the workspace copy is byte-identical to the existing global skill,
+        // there's nothing to promote. Publish a noop event so the UI can notify the user.
+        var globalDirCheck = SkillLoader.globalSkillsPath().resolve(skillName);
+        if (Files.isDirectory(globalDirCheck) && Files.exists(globalDirCheck.resolve("SKILL.md"))) {
+            try {
+                var workspaceHash = SkillLoader.hashSkillDirectory(skillDir);
+                var globalHash = SkillLoader.hashSkillDirectory(globalDirCheck);
+                if (workspaceHash.equals(globalHash) && !workspaceHash.isEmpty()) {
+                    services.EventLogger.info("skills", "Promotion of '%s' skipped: workspace copy is identical to global".formatted(skillName));
+                    services.NotificationBus.publish("skill.promote_noop", java.util.Map.of(
+                            "skillName", skillName,
+                            "reason", "Workspace copy is identical to the global skill — nothing to promote."
+                    ));
+                    return;
+                }
+            } catch (IOException e) {
+                services.EventLogger.warn("skills", "Hash check failed for '%s': %s".formatted(skillName, e.getMessage()));
+                // Fall through and attempt promotion anyway
+            }
+
+            // Downgrade protection: if the workspace version is lower than the existing global
+            // version, the agent has an out-of-date copy. Refuse to promote and ask the user
+            // to update the agent copy from global first.
+            var workspaceInfo = SkillLoader.parseSkillFile(skillDir.resolve("SKILL.md"));
+            var globalInfo = SkillLoader.parseSkillFile(globalDirCheck.resolve("SKILL.md"));
+            if (workspaceInfo != null && globalInfo != null) {
+                int cmp = SkillLoader.compareVersions(workspaceInfo.version(), globalInfo.version());
+                if (cmp < 0) {
+                    services.EventLogger.warn("skills", "Promotion of '%s' refused: workspace version %s < global version %s"
+                            .formatted(skillName, workspaceInfo.version(), globalInfo.version()));
+                    services.NotificationBus.publish("skill.promote_failed", java.util.Map.of(
+                            "skillName", skillName,
+                            "error", "Workspace version " + workspaceInfo.version()
+                                    + " is older than the global version " + globalInfo.version()
+                                    + ". Update the agent's copy from the global skill (it will overwrite the workspace copy) before promoting."
+                    ));
+                    return;
+                }
+            }
+        }
 
         // Read all files from the skill folder
         var sourceTextFiles = new LinkedHashMap<String, String>();
@@ -823,6 +891,7 @@ public class ApiSkillsController extends Controller {
         map.put("isGlobal", isGlobal);
         map.put("location", s.location() != null ? s.location().toString() : "");
         map.put("tools", s.tools() != null ? s.tools() : List.of());
+        map.put("version", s.version() != null ? s.version() : "0.0.0");
         // Folder name = parent directory name of the SKILL.md file
         if (s.location() != null && s.location().getParent() != null) {
             map.put("folderName", s.location().getParent().getFileName().toString());

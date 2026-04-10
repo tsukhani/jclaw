@@ -39,6 +39,16 @@ function showDragError(msg: string) {
   if (dragErrorTimer) clearTimeout(dragErrorTimer)
   dragErrorTimer = setTimeout(() => { dragError.value = null }, 8000)
 }
+
+// Info banner for non-error events (e.g. promote no-op when workspace matches global)
+const infoBanner = ref<string | null>(null)
+let infoBannerTimer: ReturnType<typeof setTimeout> | null = null
+function showInfo(msg: string) {
+  infoBanner.value = msg
+  if (infoBannerTimer) clearTimeout(infoBannerTimer)
+  infoBannerTimer = setTimeout(() => { infoBanner.value = null }, 6000)
+}
+
 // Track multiple concurrent promotions by skill name (survives navigation via useState)
 const promotingSkills = useState<Set<string>>('promotingSkills', () => new Set())
 
@@ -46,16 +56,66 @@ const promotingSkills = useState<Set<string>>('promotingSkills', () => new Set()
 const { on } = useEventBus()
 on('skill.promoted', (data: any) => {
   refreshSkills()
+  loadAllAgentSkills()
   const s = new Set(promotingSkills.value)
   s.delete(data.skillName)
   promotingSkills.value = s
 })
 on('skill.promote_failed', (data: any) => {
   console.error('Skill promotion failed:', data.skillName, data.error)
+  showDragError(data.error || `Failed to promote '${data.skillName}'`)
   const s = new Set(promotingSkills.value)
   s.delete(data.skillName)
   promotingSkills.value = s
 })
+on('skill.promote_noop', (data: any) => {
+  showInfo(data.reason || `Nothing to promote for '${data.skillName}'`)
+  const s = new Set(promotingSkills.value)
+  s.delete(data.skillName)
+  promotingSkills.value = s
+})
+
+// Look up the current global version of a skill by folder name
+function globalVersionOf(folderName: string): string | null {
+  const s = skills.value?.find((x: any) => (x.folderName || x.name) === folderName)
+  return s?.version ?? null
+}
+
+// Simple semver compare: returns negative/0/positive
+function compareVersions(a: string, b: string): number {
+  const pa = (a || '0.0.0').split('.').map(n => parseInt(n) || 0)
+  const pb = (b || '0.0.0').split('.').map(n => parseInt(n) || 0)
+  for (let i = 0; i < 3; i++) {
+    const x = pa[i] || 0, y = pb[i] || 0
+    if (x !== y) return x - y
+  }
+  return 0
+}
+
+// Returns the global version if an update is available, else null
+function updateAvailable(skill: any): string | null {
+  const gv = globalVersionOf(skill.folderName || skill.name)
+  if (gv == null) return null
+  return compareVersions(skill.version || '0.0.0', gv) < 0 ? gv : null
+}
+
+async function updateAgentSkillFromGlobal(agentId: number, skill: any) {
+  const skillName = skill.folderName || skill.name
+  try {
+    await $fetch(`/api/agents/${agentId}/skills/${skillName}/copy`, { method: 'POST' })
+    agentSkillsMap.value[agentId] = await $fetch<any[]>(`/api/agents/${agentId}/skills`)
+    showInfo(`Updated '${skillName}' for this agent`)
+  } catch (err: any) {
+    const status = err?.response?.status
+    if (status === 400) {
+      const msg = err?.response?._data || err?.data || err?.message || 'Update failed'
+      showDragError(typeof msg === 'string' ? msg : 'Update failed')
+    } else {
+      console.error('Failed to update skill from global:', err)
+      showDragError('Failed to update skill from global')
+    }
+  }
+}
 
 // --- Global skill → Agent card (copy to workspace) ---
 
@@ -104,28 +164,49 @@ async function onAgentDrop(e: DragEvent, agent: any) {
   if (!dragging.value || dragSource.value !== 'global') return
 
   const skillName = dragging.value.folderName || dragging.value.name
+  const globalVersion = dragging.value.version || '0.0.0'
   const existing = agentSkillsMap.value[agent.id]?.find((s: any) => s.name === dragging.value.name)
 
-  if (existing && existing.enabled) {
-    dragging.value = null
-    return
+  // If the agent already has this skill at the same or newer version, just ensure it's
+  // enabled and move on — no point overwriting identical content.
+  if (existing) {
+    const cmp = compareVersions(existing.version || '0.0.0', globalVersion)
+    if (cmp >= 0) {
+      if (!existing.enabled) {
+        try {
+          await $fetch(`/api/agents/${agent.id}/skills/${skillName}`, {
+            method: 'PUT', body: { enabled: true }
+          })
+          agentSkillsMap.value[agent.id] = await $fetch<any[]>(`/api/agents/${agent.id}/skills`)
+        } catch (err) {
+          console.error('Failed to re-enable skill:', err)
+        }
+      }
+      dragging.value = null
+      return
+    }
+    // Existing is older — confirm replacement
+    const ok = window.confirm(
+      `Agent '${agent.name}' has '${skillName}' at version ${existing.version || '0.0.0'}. ` +
+      `Replace with global version ${globalVersion}?`
+    )
+    if (!ok) {
+      dragging.value = null
+      return
+    }
   }
 
   try {
     await $fetch(`/api/agents/${agent.id}/skills/${skillName}/copy`, { method: 'POST' })
     agentSkillsMap.value[agent.id] = await $fetch<any[]>(`/api/agents/${agent.id}/skills`)
+    if (existing) showInfo(`Updated '${skillName}' on agent '${agent.name}' to version ${globalVersion}`)
   } catch (err: any) {
     const status = err?.response?.status
-    if (status === 409 && existing && !existing.enabled) {
-      await $fetch(`/api/agents/${agent.id}/skills/${skillName}`, {
-        method: 'PUT', body: { enabled: true }
-      })
-      agentSkillsMap.value[agent.id] = await $fetch<any[]>(`/api/agents/${agent.id}/skills`)
-    } else if (status === 400) {
+    if (status === 400) {
       // Missing tools — surface the server's error message to the user
       const msg = err?.response?._data || err?.data || err?.message || 'Cannot add skill to this agent.'
       showDragError(typeof msg === 'string' ? msg : 'Cannot add skill to this agent.')
-    } else if (status !== 409) {
+    } else {
       console.error('Failed to copy skill:', err)
       showDragError('Failed to add skill to agent.')
     }
@@ -387,6 +468,12 @@ function totalSkillCount(agentId: number) {
       <button @click="dragError = null" class="text-red-400 hover:text-red-200 shrink-0" title="Dismiss">×</button>
     </div>
 
+    <div v-if="infoBanner"
+         class="mb-4 px-3 py-2 bg-blue-950/40 border border-blue-900/60 text-blue-300 text-xs flex items-start justify-between gap-3">
+      <span>{{ infoBanner }}</span>
+      <button @click="infoBanner = null" class="text-blue-400 hover:text-blue-200 shrink-0" title="Dismiss">×</button>
+    </div>
+
     <template v-if="!editing">
       <!-- Agent cards with skills -->
       <div class="mb-8">
@@ -426,11 +513,18 @@ function totalSkillCount(agentId: number) {
                    class="flex items-center justify-between px-2 py-1.5 bg-neutral-800/50 cursor-grab active:cursor-grabbing select-none group">
                 <div class="flex items-center gap-2 min-w-0">
                   <span class="text-xs text-white font-mono truncate">{{ skill.name }}</span>
+                  <span class="text-[9px] text-neutral-500 font-mono shrink-0">v{{ skill.version || '0.0.0' }}</span>
+                  <button v-if="updateAvailable(skill)"
+                          @click.stop="updateAgentSkillFromGlobal(agent.id, skill)"
+                          class="text-[9px] text-amber-400 border border-amber-700/40 bg-amber-900/20 px-1.5 py-0.5 font-mono hover:bg-amber-900/40 transition-colors shrink-0"
+                          :title="`Update to v${updateAvailable(skill)}`">
+                    update → v{{ updateAvailable(skill) }}
+                  </button>
                 </div>
                 <div class="flex items-center gap-1 shrink-0">
                   <button @click.stop="editAgentSkill(agent.id, skill)"
-                          class="p-1 text-neutral-600 hover:text-white transition-colors opacity-0 group-hover:opacity-100" title="Edit skill">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                          class="p-1 text-neutral-600 hover:text-white transition-colors opacity-0 group-hover:opacity-100" title="View skill">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
                   </button>
                   <button @click.stop="deleteAgentSkill(agent.id, skill)"
                           class="p-1 text-neutral-600 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100" title="Delete skill">
@@ -490,7 +584,7 @@ function totalSkillCount(agentId: number) {
         </div>
 
         <div v-if="!skills?.length && !promotingSkills.size" class="bg-neutral-900 border border-neutral-800 px-4 py-6 text-center text-sm text-neutral-600">
-          No global skills. Create one to get started.
+          No global skills. Create one via the skill-creator skill in an agent workspace, then drag it here to promote.
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           <div v-for="skill in skills" :key="skill.folderName || skill.name"
@@ -517,7 +611,10 @@ function totalSkillCount(agentId: number) {
                 <span class="text-sm text-white font-mono cursor-text"
                       @dblclick.stop="startRename(skill)">{{ skill.folderName || skill.name }}</span>
               </template>
-              <span class="text-[10px] text-green-400 border border-green-400/30 px-1 shrink-0">global</span>
+              <div class="flex items-center gap-1.5 shrink-0">
+                <span class="text-[10px] text-neutral-500 font-mono">v{{ skill.version || '0.0.0' }}</span>
+                <span class="text-[10px] text-green-400 border border-green-400/30 px-1">global</span>
+              </div>
             </div>
             <div v-if="skill.name !== (skill.folderName || skill.name)"
                  class="text-[10px] text-neutral-600 mb-0.5">name: {{ skill.name }}</div>
@@ -525,13 +622,8 @@ function totalSkillCount(agentId: number) {
             <div class="mt-3 flex items-center justify-end gap-2">
               <button @click.stop="editSkill(skill)"
                       class="p-1.5 text-neutral-500 hover:text-white transition-colors"
-                      :title="(skill.folderName || skill.name) === 'skill-creator' ? 'View skill' : 'Edit skill'">
-                <!-- Eye icon for skill-creator (view-only) -->
-                <svg v-if="(skill.folderName || skill.name) === 'skill-creator'"
-                     class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                <!-- Pencil icon for editable skills -->
-                <svg v-else
-                     class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                      title="View skill">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
               </button>
               <button v-if="(skill.folderName || skill.name) !== 'skill-creator'"
                       @click.stop="deleteSkill(skill)"
