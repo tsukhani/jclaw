@@ -1,5 +1,6 @@
 package tools;
 
+import agents.SkillLoader;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
@@ -83,11 +84,48 @@ public class FileSystemTools implements ToolRegistry.Tool {
     private String writeFile(Path path, String content) {
         try {
             Files.createDirectories(path.getParent());
-            Files.writeString(path, content);
-            return "File written successfully: %s".formatted(path.getFileName());
+
+            // Deterministic version handling for skill definitions: any write to
+            // workspace/{agent}/skills/{skill-name}/SKILL.md is routed through
+            // SkillLoader.finalizeSkillMdWrite, which auto-bumps the patch version on
+            // material changes and ignores whatever the LLM wrote in the version: field.
+            String finalContent = content;
+            String versionNote = "";
+            if (isSkillDefinitionFile(path)) {
+                var previousInfo = Files.exists(path) ? SkillLoader.parseSkillFile(path) : null;
+                finalContent = SkillLoader.finalizeSkillMdWrite(path, content);
+                var newInfo = SkillLoader.parseSkillContent(finalContent, path);
+                if (newInfo != null) {
+                    if (previousInfo == null) {
+                        versionNote = " (new skill at version " + newInfo.version() + ")";
+                    } else if (!previousInfo.version().equals(newInfo.version())) {
+                        versionNote = " (version bumped " + previousInfo.version()
+                                + " → " + newInfo.version() + ")";
+                    } else {
+                        versionNote = " (no material change; version " + newInfo.version() + " preserved)";
+                    }
+                }
+            }
+
+            Files.writeString(path, finalContent);
+            return "File written successfully: " + path.getFileName() + versionNote;
         } catch (IOException e) {
             return "Error writing file: %s".formatted(e.getMessage());
         }
+    }
+
+    /**
+     * True when {@code path} points at a SKILL.md directly inside a skill folder —
+     * i.e., the path ends in {@code .../skills/{skillName}/SKILL.md}. Used to scope
+     * the deterministic version bump logic to actual skill definition writes.
+     */
+    private static boolean isSkillDefinitionFile(Path path) {
+        if (!"SKILL.md".equals(path.getFileName().toString())) return false;
+        var parent = path.getParent();
+        if (parent == null) return false;
+        var grandparent = parent.getParent();
+        if (grandparent == null) return false;
+        return "skills".equals(grandparent.getFileName().toString());
     }
 
     private String listFiles(Path dir) {

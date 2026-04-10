@@ -279,24 +279,35 @@ public class SkillLoader {
     public static SkillInfo parseSkillFile(Path path) {
         try {
             var content = Files.readString(path);
-            var matcher = FRONTMATTER_PATTERN.matcher(content);
-            if (matcher.find()) {
-                var frontmatter = matcher.group(1);
-                var name = extractYamlValue(frontmatter, "name");
-                var description = extractYamlValue(frontmatter, "description");
-                var toolsDeclared = TOOLS_KEY_PRESENT.matcher(frontmatter).find();
-                var tools = extractYamlList(frontmatter, "tools");
-                var version = extractYamlValue(frontmatter, "version");
-                if (name != null) {
-                    return new SkillInfo(name, description != null ? description : "", path,
-                            tools, toolsDeclared, version != null ? version : "0.0.0");
-                }
-            }
+            var info = parseSkillContent(content, path);
+            if (info != null) return info;
             // Fallback: use directory name
             return new SkillInfo(path.getParent().getFileName().toString(), "", path, List.of(), false, "0.0.0");
         } catch (IOException e) {
             return null;
         }
+    }
+
+    /**
+     * Parse a SKILL.md content string without reading from disk. Returns null if no
+     * {@code name:} key is found (caller decides how to handle the fallback).
+     */
+    public static SkillInfo parseSkillContent(String content, Path locationHint) {
+        if (content == null) return null;
+        var matcher = FRONTMATTER_PATTERN.matcher(content);
+        if (matcher.find()) {
+            var frontmatter = matcher.group(1);
+            var name = extractYamlValue(frontmatter, "name");
+            var description = extractYamlValue(frontmatter, "description");
+            var toolsDeclared = TOOLS_KEY_PRESENT.matcher(frontmatter).find();
+            var tools = extractYamlList(frontmatter, "tools");
+            var version = extractYamlValue(frontmatter, "version");
+            if (name != null) {
+                return new SkillInfo(name, description != null ? description : "", locationHint,
+                        tools, toolsDeclared, version != null ? version : "0.0.0");
+            }
+        }
+        return null;
     }
 
     /**
@@ -382,6 +393,114 @@ public class SkillLoader {
         var sb = new StringBuilder();
         for (var b : digest.digest()) sb.append(String.format("%02x", b));
         return sb.toString();
+    }
+
+    /**
+     * Deterministically finalize a SKILL.md write inside a skill directory:
+     *
+     * <ul>
+     *   <li>If no previous file exists → this is a fresh skill. Ensure the frontmatter's
+     *       {@code version:} is present; if missing, inject {@code version: 1.0.0}. The
+     *       LLM's declared version is otherwise preserved (a fresh skill can start at any
+     *       sensible version).</li>
+     *   <li>If a previous file exists and the body or non-version frontmatter fields
+     *       changed → auto-bump the patch component of the PREVIOUS file's version and
+     *       inject it into the new content, ignoring whatever the LLM wrote for
+     *       {@code version:}.</li>
+     *   <li>If nothing material changed (same frontmatter excluding version, same body) →
+     *       write the incoming content with the old version reinstated. This keeps the
+     *       version stable against LLM-initiated no-ops.</li>
+     * </ul>
+     *
+     * The caller is expected to write the returned string to disk.
+     */
+    public static String finalizeSkillMdWrite(Path targetPath, String newContent) {
+        if (newContent == null) newContent = "";
+        try {
+            if (!Files.exists(targetPath)) {
+                // Fresh skill — always start at 1.0.0 regardless of anything the LLM wrote
+                return ensureVersionInFrontmatter(newContent, "1.0.0");
+            }
+            var oldContent = Files.readString(targetPath);
+            var oldInfo = parseFrontmatterStringForVersion(oldContent);
+            var oldVersion = oldInfo != null && oldInfo.length > 0 ? oldInfo[0] : "0.0.0";
+
+            if (contentDiffersIgnoringVersion(oldContent, newContent)) {
+                var bumped = bumpPatch(oldVersion);
+                return ensureVersionInFrontmatter(newContent, bumped);
+            } else {
+                // No material change — reinstate the old version, regardless of what the LLM wrote
+                return ensureVersionInFrontmatter(newContent, oldVersion);
+            }
+        } catch (IOException e) {
+            // If we can't read the old file, fall back to the incoming content unchanged
+            return newContent;
+        }
+    }
+
+    /** Extract just the {@code version:} value from an arbitrary SKILL.md string, or null. */
+    private static String[] parseFrontmatterStringForVersion(String content) {
+        if (content == null) return new String[]{"0.0.0"};
+        var matcher = FRONTMATTER_PATTERN.matcher(content);
+        if (matcher.find() && matcher.start() == 0) {
+            var frontmatter = matcher.group(1);
+            var version = extractYamlValue(frontmatter, "version");
+            return new String[]{version != null ? version : "0.0.0"};
+        }
+        return new String[]{"0.0.0"};
+    }
+
+    /**
+     * True if the two SKILL.md strings differ in any way other than the {@code version:}
+     * frontmatter line. Used by {@link #finalizeSkillMdWrite} to decide whether a bump
+     * is warranted.
+     */
+    private static boolean contentDiffersIgnoringVersion(String a, String b) {
+        return stripVersionLine(a).equals(stripVersionLine(b)) == false;
+    }
+
+    private static final Pattern VERSION_LINE = Pattern.compile("(?m)^version:.*$");
+
+    private static String stripVersionLine(String content) {
+        if (content == null) return "";
+        return VERSION_LINE.matcher(content).replaceAll("").replaceAll("\\n\\n+", "\n\n");
+    }
+
+    /**
+     * Ensure the frontmatter of {@code content} has a {@code version:} line with the given
+     * value. If {@code targetVersion} is null, only adds a line if none exists (defaulting
+     * to {@code 1.0.0}); otherwise overwrites any existing line (or inserts one before the
+     * closing {@code ---}).
+     */
+    private static String ensureVersionInFrontmatter(String content, String targetVersion) {
+        if (content == null) content = "";
+        var matcher = FRONTMATTER_PATTERN.matcher(content);
+        if (!matcher.find() || matcher.start() != 0) {
+            // No frontmatter at all — prepend a minimal one
+            var v = targetVersion != null ? targetVersion : "1.0.0";
+            return "---\nversion: %s\n---\n\n%s".formatted(v, content);
+        }
+        var frontmatter = matcher.group(1);
+        var before = content.substring(0, matcher.start(1));
+        var after = content.substring(matcher.end(1));
+        var hasVersion = VERSION_LINE.matcher(frontmatter).find();
+        String newFrontmatter;
+        if (hasVersion) {
+            if (targetVersion != null) {
+                newFrontmatter = VERSION_LINE.matcher(frontmatter).replaceFirst("version: " + targetVersion);
+            } else {
+                newFrontmatter = frontmatter; // already has a version, caller didn't specify → leave alone
+            }
+        } else {
+            var v = targetVersion != null ? targetVersion : "1.0.0";
+            // Insert version line right after the description: line if present, else at the end
+            if (frontmatter.contains("description:")) {
+                newFrontmatter = frontmatter.replaceFirst("(?m)(^description:.*$)", "$1\nversion: " + v);
+            } else {
+                newFrontmatter = frontmatter.stripTrailing() + "\nversion: " + v;
+            }
+        }
+        return before + newFrontmatter + after;
     }
 
     public record FrontmatterSplit(String frontmatter, String body) {}

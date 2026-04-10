@@ -48,12 +48,13 @@ Every skill MUST declare the exact tools it needs in a `tools:` YAML list in its
    - **If `missing_tools` is non-empty**: STOP. Do not write any files. Tell the user: "Cannot create skill `{name}` for this agent: it requires tools [list] that are disabled. Ask an admin to enable them on the Agents page and try again."
    - **If `missing_tools` is empty (or `required_tools` is empty)**: proceed to step 4.
 4. **Draft** the SKILL.md content:
-   - YAML frontmatter with `name`, `description`, `version: 1.0.0` (every new skill starts here), and `tools:` (the exact list from step 2)
+   - YAML frontmatter with `name`, `description`, and `tools:` (the exact list from step 2)
    - A clear title and purpose
    - Step-by-step instructions the agent should follow
    - Reference each declared tool by name in the body
    - Example inputs and expected outputs
    - Edge cases and error handling
+   - **Do NOT set the `version:` field yourself.** The system sets it automatically when the file is written: new skills start at `1.0.0` and any subsequent material change bumps the patch component. If you include a `version:` line it will be overwritten.
 5. **Create** the skill using the filesystem tool:
    - Create the directory: `skills/{skill-name}/`
    - Write `skills/{skill-name}/SKILL.md`
@@ -79,17 +80,12 @@ When asked to refactor or update an existing skill, or when you notice a skill t
    - Any credential/config files in the root folder → must move to `credentials/`
    - Any files other than SKILL.md in the root folder → categorize and move to the correct subfolder
    - Missing YAML frontmatter in SKILL.md → add it
-   - Missing `version:` in frontmatter → add `version: 1.0.0`
    - Non-kebab-case skill name → rename the folder
 3. **Move files** to the correct locations using the filesystem tool.
 4. **Update SKILL.md** to reference the new file paths (e.g., `tools/wacli` instead of `./wacli`).
-5. **Bump the version** in the frontmatter. The convention is:
-   - **Patch bump** (e.g., `1.2.3` → `1.2.4`) for any refactor, wording tweak, bug fix, or change to the instructions. This is the default — use it for almost every refactor.
-   - **Minor bump** (e.g., `1.2.3` → `1.3.0`) only if the user explicitly asks for a minor or feature-level change, or if you are adding new steps/capabilities that existing users might want to know about.
-   - **Major bump** (e.g., `1.2.3` → `2.0.0`) only if the user explicitly asks for a breaking change or if the required `tools:` list is changing in a way that would break existing agents.
-   - Never skip the bump. If ANY byte of the skill changes, the version MUST be incremented.
+5. **Write the updated SKILL.md.** Do NOT touch the `version:` field yourself — the filesystem tool auto-bumps the patch version on every material write and will ignore any value you put in `version:`. After the write, the response from the filesystem tool will tell you what the new version is.
 6. **Verify** the final structure matches the standard layout.
-7. **Report** what was changed and the new version to the user.
+7. **Report** what was changed and quote the new version as reported by the filesystem tool.
 
 ## Example
 
@@ -105,11 +101,12 @@ whatsapp-notifier/
 
 ### Example SKILL.md
 
+Note: the `version:` line is omitted from the frontmatter you write — the filesystem tool injects it deterministically when the file is saved.
+
 ```markdown
 ---
 name: whatsapp-notifier
 description: Send WhatsApp messages using the wacli tool
-version: 1.0.0
 tools: [exec, filesystem]
 ---
 
