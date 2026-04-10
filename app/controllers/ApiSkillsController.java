@@ -539,28 +539,26 @@ public class ApiSkillsController extends Controller {
             sanitized.put("SKILL.md", originalSplit.frontmatter() + sanitizedBody);
         }
 
-        // Determine target folder name, appending " copy" on conflict
+        // Promote replaces any existing global skill with the same name. We stage the new
+        // contents in a sibling directory first so a partial failure can't destroy the
+        // existing skill: only after the staging dir is fully populated do we swap it in.
         var globalDir = SkillLoader.globalSkillsPath();
-        var targetName = skillName;
-        while (Files.isDirectory(globalDir.resolve(targetName))) {
-            targetName = targetName + " copy";
-        }
+        var targetDir = globalDir.resolve(skillName);
+        var stagingDir = globalDir.resolve(skillName + ".promoting-" + System.currentTimeMillis());
+        var backupDir = globalDir.resolve(skillName + ".replacing-" + System.currentTimeMillis());
+        var replacingExisting = Files.isDirectory(targetDir);
 
-        // Write sanitized text files and copy binary files
-        var targetDir = globalDir.resolve(targetName);
         try {
-            Files.createDirectories(targetDir);
-            Files.createDirectories(targetDir.resolve("credentials"));
-            Files.createDirectories(targetDir.resolve("tools"));
+            Files.createDirectories(stagingDir);
+            Files.createDirectories(stagingDir.resolve("credentials"));
+            Files.createDirectories(stagingDir.resolve("tools"));
 
             for (var entry : sanitized.entrySet()) {
-                var targetFile = targetDir.resolve(entry.getKey());
-                Files.createDirectories(targetFile.getParent());
-                Files.writeString(targetFile, entry.getValue());
+                var stagedFile = stagingDir.resolve(entry.getKey());
+                Files.createDirectories(stagedFile.getParent());
+                Files.writeString(stagedFile, entry.getValue());
             }
             for (int i = 0; i < binaryFiles.size(); i++) {
-                var originalPath = i < binaryFiles.size() ? binaryFiles.get(i) : null;
-                // Find the original source file — check relocated name first, then original
                 var sourceName = binaryFiles.get(i);
                 var source = skillDir.resolve(sourceName);
                 if (!Files.exists(source)) {
@@ -573,33 +571,65 @@ public class ApiSkillsController extends Controller {
                     }
                 }
                 if (source != null && Files.exists(source)) {
-                    var target = targetDir.resolve(sourceName);
-                    Files.createDirectories(target.getParent());
-                    Files.copy(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    var staged = stagingDir.resolve(sourceName);
+                    Files.createDirectories(staged.getParent());
+                    Files.copy(source, staged, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                 }
             }
 
-            // Remove empty subdirectories
+            // Remove empty subdirectories from staging
             for (var subDir : List.of("credentials", "tools")) {
-                var dir = targetDir.resolve(subDir);
+                var dir = stagingDir.resolve(subDir);
                 if (Files.isDirectory(dir) && Files.list(dir).findAny().isEmpty()) {
                     Files.delete(dir);
                 }
             }
 
+            // Swap: move existing → backup, staging → target, delete backup
+            if (replacingExisting) {
+                Files.move(targetDir, backupDir);
+            }
+            try {
+                Files.move(stagingDir, targetDir);
+            } catch (IOException swapEx) {
+                // Roll back: restore the original if we had one
+                if (replacingExisting && Files.isDirectory(backupDir)) {
+                    try { Files.move(backupDir, targetDir); } catch (IOException _) {}
+                }
+                throw swapEx;
+            }
+            if (replacingExisting && Files.isDirectory(backupDir)) {
+                deleteRecursive(backupDir);
+            }
+
             SkillLoader.clearCache();
-            services.EventLogger.info("skills", "Promotion of '%s' completed as '%s'".formatted(skillName, targetName));
+            var action = replacingExisting ? "replaced" : "created";
+            services.EventLogger.info("skills", "Promotion of '%s' completed (%s)".formatted(skillName, action));
 
             services.NotificationBus.publish("skill.promoted", java.util.Map.of(
                     "skillName", skillName,
-                    "folderName", targetName
+                    "folderName", skillName,
+                    "replaced", replacingExisting
             ));
         } catch (IOException e) {
+            // Clean up any stranded staging dir
+            if (Files.exists(stagingDir)) {
+                try { deleteRecursive(stagingDir); } catch (IOException _) {}
+            }
             services.EventLogger.error("skills", "Failed to write promoted skill: " + e.getMessage());
             services.NotificationBus.publish("skill.promote_failed", java.util.Map.of(
                     "skillName", skillName,
                     "error", e.getMessage()
             ));
+        }
+    }
+
+    private static void deleteRecursive(Path dir) throws IOException {
+        if (!Files.exists(dir)) return;
+        try (var walk = Files.walk(dir)) {
+            walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                try { Files.delete(p); } catch (IOException _) {}
+            });
         }
     }
 

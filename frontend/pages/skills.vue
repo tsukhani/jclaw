@@ -158,6 +158,16 @@ async function onGlobalSectionDrop(e: DragEvent) {
   // Skip if already promoting this skill
   if (promotingSkills.value.has(skillName)) return
 
+  // If a global skill with this name already exists, confirm replacement before
+  // firing the promote — the backend will overwrite it in place.
+  const existingGlobal = skills.value?.find((s: any) => (s.folderName || s.name) === skillName)
+  if (existingGlobal) {
+    const ok = window.confirm(
+      `A global skill named '${skillName}' already exists. Promoting will replace it with the sanitized version from the agent workspace. Continue?`
+    )
+    if (!ok) return
+  }
+
   // Add to in-progress set and run in background (non-blocking)
   promotingSkills.value = new Set([...promotingSkills.value, skillName])
 
