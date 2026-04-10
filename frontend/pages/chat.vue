@@ -296,6 +296,13 @@ onUnmounted(() => {
   abortController.value?.abort()
 })
 
+function stopStreaming() {
+  if (!streaming.value) return
+  abortController.value?.abort()
+  streaming.value = false
+  streamStatus.value = ''
+}
+
 // Filter out tool messages and empty assistant messages (tool call records) from display
 // Keep assistant messages that have content, reasoning, or usage metrics
 const displayMessages = computed(() =>
@@ -444,7 +451,17 @@ async function sendMessage() {
       }
     }
   } catch (e: any) {
-    messages.value[assistantIdx].content = 'Error: ' + (e.message || 'Failed to get response')
+    // AbortError is expected when the user clicks Stop — preserve any content
+    // that was already streamed and append a small "(stopped)" marker instead
+    // of replacing the bubble with a scary error.
+    if (e?.name === 'AbortError') {
+      const existing = messages.value[assistantIdx].content || streamContent.value || ''
+      messages.value[assistantIdx].content = existing
+        ? existing.replace(/\s*$/, '') + '\n\n_(stopped)_'
+        : '_(stopped before any response)_'
+    } else {
+      messages.value[assistantIdx].content = 'Error: ' + (e.message || 'Failed to get response')
+    }
   } finally {
     streaming.value = false
     // Check if agent is still processing queued messages
@@ -839,8 +856,18 @@ function exportConversation() {
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
               </button>
               <button
+                v-if="streaming"
+                type="button"
+                @click="stopStreaming"
+                class="p-1.5 text-neutral-400 hover:text-red-400 transition-colors"
+                title="Stop generating"
+              >
+                <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5" /></svg>
+              </button>
+              <button
+                v-else
                 type="submit"
-                :disabled="streaming || (!input.trim() && !attachedFiles.length)"
+                :disabled="!input.trim() && !attachedFiles.length"
                 class="p-1.5 text-neutral-500 hover:text-emerald-400 disabled:text-neutral-700 transition-colors"
                 title="Send"
               >
