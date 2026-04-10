@@ -772,9 +772,19 @@ function exportConversation() {
             </span>
             <span
               v-if="attachError"
-              class="inline-flex items-center px-2 py-1 bg-red-900/30 border border-red-800/50 rounded text-[11px] text-red-300"
+              class="inline-flex items-center gap-1.5 px-2 py-1 bg-red-900/30 border border-red-800/50 rounded text-[11px] text-red-300"
             >
-              {{ attachError }}
+              <span>{{ attachError }}</span>
+              <button
+                type="button"
+                @click="attachError = null"
+                class="text-red-400/70 hover:text-red-200 transition-colors"
+                title="Dismiss"
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </span>
           </div>
           <textarea
