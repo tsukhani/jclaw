@@ -261,6 +261,16 @@ do_start_dev() {
     echo "Stop with: $0 --dev stop"
 }
 
+kill_tree() {
+    local pid=$1
+    local children
+    children=$(pgrep -P "$pid" 2>/dev/null) || true
+    for child in $children; do
+        kill_tree "$child"
+    done
+    kill "$pid" 2>/dev/null || true
+}
+
 do_stop_dev() {
     cd "$JCLAW_DIR"
 
@@ -272,9 +282,7 @@ do_stop_dev() {
         fpid=$(cat "$FRONTEND_PID_FILE")
         if kill -0 "$fpid" 2>/dev/null; then
             echo "==> Stopping Nuxt dev server (pid: $fpid)..."
-            # Kill child processes first (pnpm spawns node), then the parent
-            pkill -P "$fpid" 2>/dev/null || true
-            kill "$fpid" 2>/dev/null || true
+            kill_tree "$fpid"
             rm -f "$FRONTEND_PID_FILE"
             stopped=1
         else
@@ -283,6 +291,14 @@ do_stop_dev() {
         fi
     else
         echo "    No frontend pid file found"
+    fi
+
+    # Clean up any orphan still holding the frontend port
+    local orphan
+    orphan=$(lsof -ti :"$FRONTEND_PORT" 2>/dev/null) || true
+    if [[ -n "$orphan" ]]; then
+        echo "    Cleaning up orphan process on port $FRONTEND_PORT (pid: $orphan)..."
+        kill $orphan 2>/dev/null || true
     fi
 
     # Stop backend (play run — we manage the pid file, not Play)
