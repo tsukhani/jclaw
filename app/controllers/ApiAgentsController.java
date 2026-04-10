@@ -100,40 +100,18 @@ public class ApiAgentsController extends Controller {
         var file = path.toFile();
         if (!file.exists() || !file.isFile()) notFound();
 
-        // Determine content type
-        var contentType = switch (filePath.substring(filePath.lastIndexOf('.') + 1).toLowerCase()) {
-            case "png" -> "image/png";
-            case "jpg", "jpeg" -> "image/jpeg";
-            case "gif" -> "image/gif";
+        // Content type: delegate to Play's MimeTypes database, with overrides for
+        // a couple of types Play's bundled properties file doesn't know about.
+        var ext = filePath.substring(filePath.lastIndexOf('.') + 1).toLowerCase();
+        var contentType = switch (ext) {
             case "webp" -> "image/webp";
-            case "svg" -> "image/svg+xml";
-            case "pdf" -> "application/pdf";
-            case "mp3" -> "audio/mpeg";
-            case "mp4" -> "video/mp4";
-            case "wav" -> "audio/wav";
-            case "json" -> "application/json";
-            case "csv" -> "text/csv";
-            case "txt", "md", "log" -> "text/plain";
-            case "html", "htm" -> "text/html";
-            case "xml" -> "application/xml";
-            case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-            case "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-            case "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation";
-            case "doc" -> "application/msword";
-            case "xls" -> "application/vnd.ms-excel";
-            case "ppt" -> "application/vnd.ms-powerpoint";
-            case "odt" -> "application/vnd.oasis.opendocument.text";
-            case "ods" -> "application/vnd.oasis.opendocument.spreadsheet";
-            case "odp" -> "application/vnd.oasis.opendocument.presentation";
-            case "rtf" -> "application/rtf";
-            case "zip" -> "application/zip";
-            default -> "application/octet-stream";
+            case "md" -> "text/plain";
+            default -> play.libs.MimeTypes.getContentType(filePath);
         };
 
-        response.setHeader("Content-Type", contentType);
         response.setHeader("Cache-Control", "private, max-age=300");
 
-        var inline = contentType.startsWith("image/") || contentType.equals("application/pdf");
+        var inline = contentType.startsWith("image/") || contentType.startsWith("application/pdf");
         try {
             renderBinary(new java.io.FileInputStream(file), file.getName(), file.length(), contentType, inline);
         } catch (java.io.FileNotFoundException e) {
