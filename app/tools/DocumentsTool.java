@@ -10,24 +10,29 @@ import org.apache.tika.parser.ParseContext;
 import org.apache.tika.sax.BodyContentHandler;
 import org.xml.sax.SAXException;
 import services.AgentService;
+import services.DocumentWriter;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
- * Tool for reading and (eventually) writing rich document formats. Uses
- * Apache Tika's {@link AutoDetectParser} to extract text from PDF, DOCX, DOC,
- * XLSX, PPTX, RTF, ODT, HTML, EPUB and more. A future {@code writeDocument}
- * action will produce documents via Apache POI / PDFBox.
+ * Tool for reading and writing rich document formats. Reading uses Apache
+ * Tika's {@link AutoDetectParser} to extract text from PDF, DOCX, DOC, XLSX,
+ * PPTX, RTF, ODT, HTML, EPUB and more. Writing currently supports HTML, PDF,
+ * and DOCX from markdown input via {@link services.DocumentWriter}; XLSX and
+ * PPTX are tracked for a later iteration that takes structured input.
  */
 public class DocumentsTool implements ToolRegistry.Tool {
 
     private static final long MAX_DOCUMENT_READ_BYTES = 25L * 1024 * 1024;
     private static final int MAX_DOCUMENT_TEXT_CHARS = 2_000_000;
+    private static final int MAX_WRITE_MARKDOWN_CHARS = 500_000;
+    private static final List<String> WRITE_FORMATS = List.of("html", "pdf", "docx");
 
     @Override
     public String name() { return "documents"; }
@@ -35,11 +40,12 @@ public class DocumentsTool implements ToolRegistry.Tool {
     @Override
     public String description() {
         return """
-                Read and extract text from rich document formats: PDF, DOCX, DOC, \
-                XLSX, PPTX, RTF, ODT, HTML, EPUB, and more. Uses Apache Tika for \
-                parsing. Paths are relative to the agent's workspace. Use this \
-                tool instead of filesystem.readFile for any non-plaintext document. \
-                Future actions will include writeDocument for authoring documents.""";
+                Read and write rich document formats. \
+                readDocument extracts text from PDF, DOCX, DOC, XLSX, PPTX, RTF, ODT, HTML, EPUB and more via Apache Tika. \
+                writeDocument authors HTML, PDF, or DOCX from markdown input (markdown is the expected 'content' format). \
+                Supports headings, paragraphs, bold/italic/strikethrough, inline and fenced code, bullet and ordered lists, block quotes, tables, and horizontal rules. \
+                All paths are relative to the agent's workspace. \
+                XLSX and PPTX authoring is not yet supported.""";
     }
 
     @Override
@@ -48,10 +54,15 @@ public class DocumentsTool implements ToolRegistry.Tool {
                 "type", "object",
                 "properties", Map.of(
                         "action", Map.of("type", "string",
-                                "enum", List.of("readDocument"),
+                                "enum", List.of("readDocument", "writeDocument"),
                                 "description", "The document operation to perform"),
                         "path", Map.of("type", "string",
-                                "description", "File path relative to the agent workspace")
+                                "description", "File path relative to the agent workspace"),
+                        "content", Map.of("type", "string",
+                                "description", "Markdown content to render (writeDocument only)"),
+                        "format", Map.of("type", "string",
+                                "enum", WRITE_FORMATS,
+                                "description", "Output format for writeDocument: html, pdf, or docx. If omitted, inferred from the path extension.")
                 ),
                 "required", List.of("action", "path")
         );
@@ -70,7 +81,62 @@ public class DocumentsTool implements ToolRegistry.Tool {
 
         return switch (action) {
             case "readDocument" -> readDocument(target);
+            case "writeDocument" -> {
+                var content = args.has("content") && !args.get("content").isJsonNull()
+                        ? args.get("content").getAsString() : "";
+                var format = args.has("format") && !args.get("format").isJsonNull()
+                        ? args.get("format").getAsString() : null;
+                yield writeDocument(target, relativePath, content, format);
+            }
             default -> "Error: Unknown action '%s'".formatted(action);
+        };
+    }
+
+    private String writeDocument(Path target, String relativePath, String content, String format) {
+        if (content == null || content.isEmpty()) {
+            return "Error: writeDocument requires 'content' (markdown).";
+        }
+        if (content.length() > MAX_WRITE_MARKDOWN_CHARS) {
+            return "Error: Markdown content exceeds write limit (%d chars). Content length: %d chars."
+                    .formatted(MAX_WRITE_MARKDOWN_CHARS, content.length());
+        }
+
+        var resolved = resolveFormat(format, relativePath);
+        if (resolved == null) {
+            return "Error: Could not determine output format. Provide 'format' (html, pdf, or docx) or use a matching path extension.";
+        }
+        if (!WRITE_FORMATS.contains(resolved)) {
+            return "Error: Unsupported format '%s'. Supported: %s."
+                    .formatted(resolved, String.join(", ", WRITE_FORMATS));
+        }
+
+        try {
+            switch (resolved) {
+                case "html" -> DocumentWriter.writeHtml(target, content);
+                case "pdf" -> DocumentWriter.writePdf(target, content);
+                case "docx" -> DocumentWriter.writeDocx(target, content);
+            }
+            long size = Files.size(target);
+            return "Document written: %s (%s, %d bytes)".formatted(relativePath, resolved, size);
+        } catch (IOException e) {
+            return "Error writing document: %s".formatted(e.getMessage());
+        } catch (RuntimeException e) {
+            return "Error rendering document: %s".formatted(e.getMessage());
+        }
+    }
+
+    private static String resolveFormat(String explicit, String path) {
+        if (explicit != null && !explicit.isBlank()) {
+            return explicit.toLowerCase(Locale.ROOT);
+        }
+        int dot = path.lastIndexOf('.');
+        if (dot < 0 || dot == path.length() - 1) return null;
+        var ext = path.substring(dot + 1).toLowerCase(Locale.ROOT);
+        return switch (ext) {
+            case "htm", "html" -> "html";
+            case "pdf" -> "pdf";
+            case "docx" -> "docx";
+            default -> null;
         };
     }
 
