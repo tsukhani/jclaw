@@ -311,6 +311,29 @@ public class SkillLoader {
         return List.of();
     }
 
+    /**
+     * Split a SKILL.md content string into its raw frontmatter block (including both
+     * {@code ---} delimiters and the trailing newline) and the remaining body. Returns
+     * {@code null} for either side if no frontmatter is present.
+     *
+     * <p>Used by the promote flow to preserve the frontmatter deterministically across
+     * LLM sanitization: the frontmatter is held aside, only the body is sent to the LLM,
+     * and the original frontmatter is reinjected afterward.
+     */
+    public record FrontmatterSplit(String frontmatter, String body) {}
+
+    public static FrontmatterSplit splitFrontmatter(String content) {
+        if (content == null) return new FrontmatterSplit(null, null);
+        var matcher = FRONTMATTER_PATTERN.matcher(content);
+        if (matcher.find() && matcher.start() == 0) {
+            var end = matcher.end();
+            // Include the trailing newline after the closing --- if present
+            if (end < content.length() && content.charAt(end) == '\n') end++;
+            return new FrontmatterSplit(content.substring(0, end), content.substring(end));
+        }
+        return new FrontmatterSplit(null, content);
+    }
+
     public static String extractYamlValue(String yaml, String key) {
         var pattern = Pattern.compile("^" + Pattern.quote(key) + ":\\s*[\"']?(.*?)[\"']?\\s*$",
                 Pattern.MULTILINE);

@@ -45,20 +45,20 @@ GET     /api/agents/{id}/tools                  ApiToolsController.listForAgent
 PUT     /api/agents/{id}/tools/{name}           ApiToolsController.updateForAgent
 
 # Skills API
+# Skill authoring is read-only from the HTTP API: skills are created/updated only
+# via the skill-creator skill (which uses the filesystem tool directly) or via
+# promotion from an agent workspace. Manual file edits through the API are
+# forbidden — no POST /api/skills, no PUT .../files, no PUT .../{name}.
 GET     /api/skills                             ApiSkillsController.list
-POST    /api/skills                             ApiSkillsController.create
 POST    /api/skills/promote                     ApiSkillsController.promote
 GET     /api/skills/{name}                      ApiSkillsController.get
-PUT     /api/skills/{name}                      ApiSkillsController.update
 PUT     /api/skills/{name}/rename               ApiSkillsController.rename
 GET     /api/skills/{name}/files/{<.+>filePath} ApiSkillsController.readFile
-PUT     /api/skills/{name}/files/{<.+>filePath} ApiSkillsController.writeFile
 GET     /api/skills/{name}/files                 ApiSkillsController.listFiles
 DELETE  /api/skills/{name}                      ApiSkillsController.delete
 GET     /api/agents/{id}/skills                 ApiSkillsController.listForAgent
 PUT     /api/agents/{id}/skills/{name}          ApiSkillsController.updateForAgent
 GET     /api/agents/{id}/skills/{name}/files/{<.+>filePath} ApiSkillsController.readAgentSkillFile
-PUT     /api/agents/{id}/skills/{name}/files/{<.+>filePath} ApiSkillsController.writeAgentSkillFile
 GET     /api/agents/{id}/skills/{name}/files     ApiSkillsController.listAgentSkillFiles
 DELETE  /api/agents/{id}/skills/{name}/delete    ApiSkillsController.deleteAgentSkill
 POST    /api/agents/{id}/skills/{name}/copy     ApiSkillsController.copyToAgent

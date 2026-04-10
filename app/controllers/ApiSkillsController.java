@@ -63,59 +63,6 @@ public class ApiSkillsController extends Controller {
         }
     }
 
-    /** POST /api/skills — Create a new global skill. */
-    public static void create() {
-        var body = readJsonBody();
-        if (body == null || !body.has("name")) badRequest();
-
-        var name = body.get("name").getAsString();
-        var dir = SkillLoader.globalSkillsPath().resolve(name);
-        if (Files.exists(dir.resolve("SKILL.md"))) {
-            error(409, "Skill '%s' already exists".formatted(name));
-        }
-
-        var description = body.has("description") ? body.get("description").getAsString() : "";
-        var content = body.has("content") ? body.get("content").getAsString() : "";
-
-        // If content doesn't have frontmatter, add it
-        if (!content.startsWith("---")) {
-            content = "---\nname: %s\ndescription: %s\n---\n\n%s".formatted(name, description, content);
-        }
-
-        try {
-            Files.createDirectories(dir);
-            Files.writeString(dir.resolve("SKILL.md"), content);
-            SkillLoader.clearCache();
-            var info = SkillLoader.parseSkillFile(dir.resolve("SKILL.md"));
-            var map = skillToMap(info, true);
-            map.put("content", content);
-            renderJSON(gson.toJson(map));
-        } catch (IOException e) {
-            error(500, "Failed to create skill: " + e.getMessage());
-        }
-    }
-
-    /** PUT /api/skills/{name} — Update a global skill. */
-    public static void update(String name) {
-        var path = SkillLoader.globalSkillsPath().resolve(name).resolve("SKILL.md");
-        if (!Files.exists(path)) notFound();
-
-        var body = readJsonBody();
-        if (body == null) badRequest();
-
-        try {
-            var content = body.has("content") ? body.get("content").getAsString() : Files.readString(path);
-            Files.writeString(path, content);
-            SkillLoader.clearCache();
-            var info = SkillLoader.parseSkillFile(path);
-            var map = skillToMap(info, true);
-            map.put("content", content);
-            renderJSON(gson.toJson(map));
-        } catch (IOException e) {
-            error(500, "Failed to update skill: " + e.getMessage());
-        }
-    }
-
     // Aliases for body-text heuristic detection only — maps informal names to canonical tool names.
     // The canonical tool list itself is derived live from ToolRegistry via ToolCatalog.
     private static final java.util.Map<String, String> TOOL_ALIASES = java.util.Map.ofEntries(
@@ -177,27 +124,6 @@ public class ApiSkillsController extends Controller {
             )));
         } catch (IOException e) {
             error(500, "Failed to read file: " + e.getMessage());
-        }
-    }
-
-    /** PUT /api/skills/{name}/files/{<path>filePath} — Write a text file in a skill folder. */
-    public static void writeFile(String name, String filePath) {
-        var dir = SkillLoader.globalSkillsPath().resolve(name);
-        var target = dir.resolve(filePath).normalize();
-        if (!target.startsWith(dir)) { error(403, "Path escapes skill directory"); return; }
-
-        var body = readJsonBody();
-        if (body == null || !body.has("content")) badRequest();
-
-        try {
-            Files.createDirectories(target.getParent());
-            Files.writeString(target, body.get("content").getAsString());
-            if ("SKILL.md".equals(target.getFileName().toString())) {
-                SkillLoader.clearCache();
-            }
-            renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
-        } catch (IOException e) {
-            error(500, "Failed to write file: " + e.getMessage());
         }
     }
 
@@ -478,27 +404,6 @@ public class ApiSkillsController extends Controller {
         }
     }
 
-    /** PUT /api/agents/{id}/skills/{name}/files/{filePath} — Write a text file in an agent skill. */
-    public static void writeAgentSkillFile(Long id, String name, String filePath) {
-        Agent agent = Agent.findById(id);
-        if (agent == null) notFound();
-        var dir = AgentService.workspacePath(agent.name).resolve("skills").resolve(name);
-        var target = dir.resolve(filePath).normalize();
-        if (!target.startsWith(dir)) { error(403, "Path escapes skill directory"); return; }
-
-        var body = readJsonBody();
-        if (body == null || !body.has("content")) badRequest();
-
-        try {
-            Files.createDirectories(target.getParent());
-            Files.writeString(target, body.get("content").getAsString());
-            if ("SKILL.md".equals(target.getFileName().toString())) SkillLoader.clearCache();
-            renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
-        } catch (IOException e) {
-            error(500, "Failed to write file: " + e.getMessage());
-        }
-    }
-
     /** DELETE /api/agents/{id}/skills/{name}/delete — Delete a skill from an agent's workspace. */
     public static void deleteAgentSkill(Long id, String name) {
         Agent agent = Agent.findById(id);
@@ -612,8 +517,27 @@ public class ApiSkillsController extends Controller {
             }
         }
 
+        // Hold SKILL.md frontmatter aside before sanitization so name/description/tools
+        // are preserved bit-for-bit — the LLM only sees and sanitizes the body.
+        SkillLoader.FrontmatterSplit originalSplit = null;
+        if (textFiles.containsKey("SKILL.md")) {
+            originalSplit = SkillLoader.splitFrontmatter(textFiles.get("SKILL.md"));
+            if (originalSplit.frontmatter() != null) {
+                textFiles.put("SKILL.md", originalSplit.body() != null ? originalSplit.body() : "");
+            }
+        }
+
         // Sanitize text files via the default agent's LLM
         var sanitized = sanitizeWithLlm(textFiles);
+
+        // Reinject the original frontmatter onto the sanitized SKILL.md body. Defensive:
+        // if the LLM emitted its own frontmatter, strip it before prepending ours.
+        if (originalSplit != null && originalSplit.frontmatter() != null && sanitized.containsKey("SKILL.md")) {
+            var sanitizedSplit = SkillLoader.splitFrontmatter(sanitized.get("SKILL.md"));
+            var sanitizedBody = sanitizedSplit.frontmatter() != null ? sanitizedSplit.body() : sanitized.get("SKILL.md");
+            if (sanitizedBody == null) sanitizedBody = "";
+            sanitized.put("SKILL.md", originalSplit.frontmatter() + sanitizedBody);
+        }
 
         // Determine target folder name, appending " copy" on conflict
         var globalDir = SkillLoader.globalSkillsPath();
@@ -756,7 +680,7 @@ public class ApiSkillsController extends Controller {
         var systemPrompt = """
                 You are a security reviewer. You will receive text files from an AI agent's skill folder.
                 A skill folder has this structure:
-                - SKILL.md — the main skill instructions (may contain hardcoded secrets, tokens, URLs with keys, PII in examples)
+                - SKILL.md — the main skill instructions, BODY ONLY (the YAML frontmatter has already been extracted and will be reinjected verbatim after your review, so do NOT emit or fabricate frontmatter for SKILL.md)
                 - credentials.json — already pre-stripped, no action needed
                 - tools/ — optional tool scripts that may contain hardcoded secrets or personal data
 

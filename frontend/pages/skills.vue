@@ -224,36 +224,19 @@ async function commitRename(skill: any) {
 // --- Skill editing (create / edit form) ---
 
 const editing = ref<any>(null)
-const creating = ref(false)
-const form = ref({ name: '', content: '' })
-const saving = ref(false)
 
-// File browser state for edit mode
+// File browser state for view mode — skill file contents are read-only; authoring
+// happens exclusively via the skill-creator skill (using the filesystem tool).
 const skillFiles = ref<any[]>([])
 const skillTools = ref<any[]>([])
 const activeFile = ref<string | null>(null)
 const fileContent = ref('')
-const fileDirty = ref(false)
-const fileSaving = ref(false)
 const editingAgentId = ref<number | null>(null)  // null = global skill, number = agent workspace skill
-const isReadOnly = computed(() => (editing.value?.folderName || editing.value?.name) === 'skill-creator')
-
-function newSkill() {
-  form.value = { name: '', content: '---\nname: \ndescription: \n---\n\n' }
-  creating.value = true
-  editing.value = null
-  skillFiles.value = []
-  skillTools.value = []
-  activeFile.value = null
-}
 
 async function editSkill(skill: any) {
   try {
     const folderName = skill.folderName || skill.name
-    const full = await $fetch<any>(`/api/skills/${folderName}`)
-    form.value = { name: full.folderName || full.name, content: full.content || '' }
     editing.value = { ...skill, folderName }
-    creating.value = false
 
     // Load file listing and tool dependencies
     const res = await $fetch<any>(`/api/skills/${folderName}/files`)
@@ -289,48 +272,8 @@ async function selectFile(file: any) {
     const res = await $fetch<any>(`${skillFileApiBase()}/${file.path}`)
     activeFile.value = file.path
     fileContent.value = res.content
-    fileDirty.value = false
   } catch (e) {
     console.error('Failed to read file:', e)
-  }
-}
-
-async function saveFile() {
-  if (!activeFile.value || !editing.value) return
-  fileSaving.value = true
-  try {
-    await $fetch(`${skillFileApiBase()}/${activeFile.value}`, {
-      method: 'PUT',
-      body: { content: fileContent.value }
-    })
-    fileDirty.value = false
-    if (activeFile.value === 'SKILL.md') {
-      form.value.content = fileContent.value
-    }
-    refreshSkills()
-    if (editingAgentId.value != null) loadAllAgentSkills()
-  } catch (e) {
-    console.error('Failed to save file:', e)
-  } finally {
-    fileSaving.value = false
-  }
-}
-
-async function saveSkill() {
-  saving.value = true
-  try {
-    if (creating.value) {
-      await $fetch('/api/skills', { method: 'POST', body: { name: form.value.name, content: form.value.content } })
-    }
-    editing.value = null
-    creating.value = false
-    skillFiles.value = []
-    activeFile.value = null
-    refreshSkills()
-  } catch (e) {
-    console.error('Failed to save skill:', e)
-  } finally {
-    saving.value = false
   }
 }
 
@@ -353,7 +296,6 @@ async function editAgentSkill(agentId: number, skill: any) {
     const name = skill.folderName || skill.name
     editing.value = { ...skill, folderName: name }
     editingAgentId.value = agentId
-    creating.value = false
 
     const res = await $fetch<any>(`/api/agents/${agentId}/skills/${name}/files`)
     skillFiles.value = res.files || []
@@ -391,7 +333,6 @@ async function deleteAgentSkill(agentId: number, skill: any) {
 function cancel() {
   editing.value = null
   editingAgentId.value = null
-  creating.value = false
   skillFiles.value = []
   skillTools.value = []
   activeFile.value = null
@@ -428,10 +369,6 @@ function totalSkillCount(agentId: number) {
   <div>
     <div class="flex items-center justify-between mb-6">
       <h1 class="text-lg font-semibold text-white">Skills</h1>
-      <button v-if="!editing && !creating" @click="newSkill"
-              class="px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 transition-colors">
-        New Skill
-      </button>
     </div>
 
     <div v-if="dragError"
@@ -440,7 +377,7 @@ function totalSkillCount(agentId: number) {
       <button @click="dragError = null" class="text-red-400 hover:text-red-200 shrink-0" title="Dismiss">×</button>
     </div>
 
-    <template v-if="!editing && !creating">
+    <template v-if="!editing">
       <!-- Agent cards with skills -->
       <div class="mb-8">
         <div class="text-xs text-neutral-500 uppercase tracking-wider mb-3">Agents</div>
@@ -597,34 +534,8 @@ function totalSkillCount(agentId: number) {
       </div>
     </template>
 
-    <!-- Create form -->
-    <div v-if="creating" class="space-y-4">
-      <button @click="cancel" class="text-xs text-neutral-500 hover:text-white transition-colors">&larr; Back to skills</button>
-      <div class="bg-neutral-900 border border-neutral-800 p-4">
-        <h2 class="text-sm font-medium text-white mb-4">New Skill</h2>
-        <div class="space-y-3">
-          <div>
-            <label class="block text-xs text-neutral-500 mb-1">Name</label>
-            <input v-model="form.name"
-                   class="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none focus:border-neutral-600" />
-          </div>
-          <div>
-            <label class="block text-xs text-neutral-500 mb-1">Content (SKILL.md)</label>
-            <textarea v-model="form.content" rows="20"
-                      class="w-full px-4 py-3 bg-neutral-800 border border-neutral-700 text-sm text-neutral-300 font-mono resize-y focus:outline-none focus:border-neutral-600" />
-          </div>
-        </div>
-        <div class="flex gap-2 mt-4">
-          <button @click="saveSkill" :disabled="saving || !form.name"
-                  class="px-4 py-1.5 bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 disabled:opacity-40 transition-colors">
-            {{ saving ? 'Saving...' : 'Create' }}
-          </button>
-          <button @click="cancel" class="px-4 py-1.5 text-xs text-neutral-400 hover:text-white transition-colors">Cancel</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Edit form — file browser -->
+    <!-- Skill viewer — read-only file browser. Skills are created and updated via
+         the skill-creator skill, not through this page. -->
     <div v-if="editing" class="space-y-4">
       <div class="flex items-center justify-between">
         <button @click="cancel" class="text-xs text-neutral-500 hover:text-white transition-colors">&larr; Back to skills</button>
@@ -696,27 +607,18 @@ function totalSkillCount(agentId: number) {
         <!-- File editor -->
         <div class="flex-1 flex flex-col bg-neutral-900 border border-neutral-800 min-w-0">
           <template v-if="activeFile">
-            <div class="px-4 py-2 border-b border-neutral-800 flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <span class="text-xs font-mono text-neutral-400">{{ activeFile }}</span>
-                <span v-if="isReadOnly" class="text-[10px] text-neutral-600">(read-only)</span>
-                <span v-else-if="fileDirty" class="text-[10px] text-amber-400">(unsaved)</span>
-              </div>
-              <button v-if="!isReadOnly" @click="saveFile" :disabled="!fileDirty || fileSaving"
-                      class="px-3 py-1 text-xs bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-30 transition-colors">
-                {{ fileSaving ? 'Saving...' : 'Save' }}
-              </button>
+            <div class="px-4 py-2 border-b border-neutral-800 flex items-center gap-2">
+              <span class="text-xs font-mono text-neutral-400">{{ activeFile }}</span>
+              <span class="text-[10px] text-neutral-600">(read-only — edit via skill-creator)</span>
             </div>
-            <textarea v-model="fileContent"
-                      @input="fileDirty = true"
-                      :readonly="isReadOnly"
-                      :class="isReadOnly ? 'cursor-default opacity-70' : ''"
-                      class="flex-1 w-full px-4 py-3 bg-transparent text-sm text-neutral-300 font-mono resize-none focus:outline-none"
+            <textarea :value="fileContent"
+                      readonly
+                      class="flex-1 w-full px-4 py-3 bg-transparent text-sm text-neutral-300 font-mono resize-none focus:outline-none cursor-default opacity-80"
                       spellcheck="false" />
           </template>
           <template v-else>
             <div class="flex-1 flex items-center justify-center text-sm text-neutral-600">
-              Select a file to edit
+              Select a file to view
             </div>
           </template>
         </div>
