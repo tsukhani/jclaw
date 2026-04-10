@@ -1,5 +1,35 @@
 <script setup lang="ts">
-const { data: conversations, refresh } = await useFetch<any[]>('/api/conversations?limit=50')
+const conversations = ref<any[]>([])
+const total = ref(0)
+const page = ref(1)
+const pageSize = 20
+const loading = ref(false)
+
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+const rangeStart = computed(() => total.value === 0 ? 0 : (page.value - 1) * pageSize + 1)
+const rangeEnd = computed(() => Math.min(page.value * pageSize, total.value))
+
+async function load() {
+  loading.value = true
+  try {
+    const offset = (page.value - 1) * pageSize
+    const res = await $fetch.raw<any[]>(`/api/conversations?limit=${pageSize}&offset=${offset}`)
+    conversations.value = res._data ?? []
+    const headerTotal = res.headers.get('x-total-count')
+    total.value = headerTotal ? parseInt(headerTotal, 10) : conversations.value.length
+  } finally {
+    loading.value = false
+  }
+}
+
+await load()
+
+function goto(p: number) {
+  if (p < 1 || p > totalPages.value || p === page.value) return
+  page.value = p
+  load()
+}
+
 const selectedConvo = ref<any>(null)
 const messages = ref<any[]>([])
 
@@ -49,6 +79,29 @@ function back() {
       </table>
       <div v-if="!conversations?.length" class="px-4 py-8 text-center text-sm text-neutral-600">
         No conversations yet
+      </div>
+      <div
+        v-if="total > 0"
+        class="flex items-center justify-between px-4 py-2.5 border-t border-neutral-800 text-xs text-neutral-500"
+      >
+        <span>Showing {{ rangeStart }}–{{ rangeEnd }} of {{ total }}</span>
+        <div class="flex items-center gap-1">
+          <button
+            @click="goto(page - 1)"
+            :disabled="page <= 1 || loading"
+            class="px-2 py-1 border border-neutral-800 rounded hover:text-white hover:border-neutral-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            Prev
+          </button>
+          <span class="px-2">Page {{ page }} of {{ totalPages }}</span>
+          <button
+            @click="goto(page + 1)"
+            :disabled="page >= totalPages || loading"
+            class="px-2 py-1 border border-neutral-800 rounded hover:text-white hover:border-neutral-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            Next
+          </button>
+        </div>
       </div>
     </div>
 

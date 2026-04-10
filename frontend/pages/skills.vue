@@ -439,23 +439,46 @@ function cancel() {
   activeFile.value = null
 }
 
-function fileIcon(file: any) {
-  const name = file.name.toLowerCase()
-  if (name.endsWith('.md')) return 'M'
-  if (name.endsWith('.json')) return '{}'
-  if (name.endsWith('.js') || name.endsWith('.ts')) return 'JS'
-  if (name.endsWith('.py')) return 'PY'
-  if (name.endsWith('.sh')) return 'SH'
-  if (name.endsWith('.yaml') || name.endsWith('.yml')) return 'YL'
-  if (file.isText) return 'TXT'
-  return 'BIN'
+type FileNode = {
+  name: string
+  isDir: boolean
+  path?: string
+  file?: any
+  children?: FileNode[]
 }
 
-function formatSize(bytes: number) {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / 1048576).toFixed(1) + ' MB'
-}
+const fileTree = computed<FileNode[]>(() => {
+  const root: FileNode = { name: '', isDir: true, children: [] }
+  for (const file of skillFiles.value) {
+    const parts = (file.path ?? '').split('/').filter(Boolean)
+    if (!parts.length) continue
+    let node = root
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]
+      const isLast = i === parts.length - 1
+      if (isLast) {
+        node.children!.push({ name: part, isDir: false, path: file.path, file })
+      } else {
+        let dir = node.children!.find(c => c.isDir && c.name === part)
+        if (!dir) {
+          dir = { name: part, isDir: true, children: [] }
+          node.children!.push(dir)
+        }
+        node = dir
+      }
+    }
+  }
+  const sortNode = (n: FileNode) => {
+    if (!n.children) return
+    n.children.sort((a, b) => {
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+    n.children.forEach(sortNode)
+  }
+  sortNode(root)
+  return root.children!
+})
 
 function enabledSkillCount(agentId: number) {
   return agentSkillsMap.value[agentId]?.filter((s: any) => s.enabled).length ?? 0
@@ -679,16 +702,15 @@ function totalSkillCount(agentId: number) {
 
       <!-- Tool dependencies -->
       <div v-if="skillTools.length" class="bg-neutral-900 border border-neutral-800 px-4 py-3">
-        <div class="flex items-center gap-2 mb-2">
+        <div class="flex items-center gap-2 mb-3">
           <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
           <span class="text-xs font-medium text-neutral-400 uppercase tracking-wider">Required Tools</span>
         </div>
         <div class="flex flex-wrap gap-2">
-          <div v-for="tool in skillTools" :key="tool.name"
-               class="flex items-center gap-1.5 px-2.5 py-1 bg-amber-900/20 border border-amber-800/30 rounded">
-            <span class="text-xs font-mono text-amber-300">{{ tool.name }}</span>
-            <span class="text-[10px] text-neutral-500">{{ tool.description }}</span>
-          </div>
+          <span v-for="tool in skillTools" :key="tool.name"
+                class="inline-flex items-center px-2.5 py-1 bg-amber-900/20 border border-amber-800/30 rounded text-xs font-mono text-amber-300 leading-none">
+            {{ tool.name }}
+          </span>
         </div>
       </div>
 
@@ -698,22 +720,11 @@ function totalSkillCount(agentId: number) {
           <div class="px-3 py-2 border-b border-neutral-800">
             <span class="text-[10px] font-medium text-neutral-500 uppercase tracking-wider">Files</span>
           </div>
-          <div v-for="file in skillFiles" :key="file.path"
-               @click="selectFile(file)"
-               :class="[
-                 'px-3 py-2 flex items-center gap-2 transition-colors',
-                 activeFile === file.path ? 'bg-neutral-800 text-white' : 'text-neutral-400 hover:bg-neutral-800/50',
-                 file.isText ? 'cursor-pointer' : 'cursor-default opacity-60'
-               ]">
-            <span class="text-[9px] font-mono px-1 py-0.5 rounded shrink-0"
-                  :class="file.isText ? 'bg-emerald-900/40 text-emerald-400' : 'bg-neutral-700 text-neutral-400'">
-              {{ fileIcon(file) }}
-            </span>
-            <div class="min-w-0">
-              <div class="text-xs truncate">{{ file.path }}</div>
-              <div class="text-[10px] text-neutral-600">{{ formatSize(file.size) }}</div>
-            </div>
-          </div>
+          <SkillFileTree
+            :nodes="fileTree"
+            :active-path="activeFile"
+            @select="selectFile"
+          />
         </div>
 
         <!-- File editor -->

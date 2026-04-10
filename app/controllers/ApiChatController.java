@@ -217,6 +217,17 @@ public class ApiChatController extends Controller {
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 100) : 20;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
 
+        String countJpql = query.isEmpty()
+                ? "SELECT COUNT(c) FROM Conversation c"
+                : "SELECT COUNT(c) FROM Conversation c WHERE " + query;
+        var countQ = JPA.em().createQuery(countJpql, Long.class);
+        for (int i = 0; i < params.size(); i++) {
+            countQ.setParameter(i + 1, params.get(i));
+        }
+        long total = countQ.getSingleResult();
+        response.setHeader("X-Total-Count", String.valueOf(total));
+        response.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
+
         String jpql = query.isEmpty()
                 ? "SELECT c FROM Conversation c JOIN FETCH c.agent ORDER BY c.updatedAt DESC"
                 : "SELECT c FROM Conversation c JOIN FETCH c.agent WHERE " + query + " ORDER BY c.updatedAt DESC";

@@ -86,7 +86,7 @@ const navGroups = [
 </script>
 
 <template>
-  <div class="min-h-screen bg-neutral-950 text-neutral-300 flex">
+  <div class="h-screen bg-neutral-950 text-neutral-300 flex overflow-hidden">
     <!-- Sidebar -->
     <aside
       :class="sidebarOpen ? 'w-52' : 'w-0 -ml-52'"
@@ -180,7 +180,7 @@ const navGroups = [
     <!-- Main -->
     <div class="flex-1 flex flex-col min-w-0">
       <!-- Top bar -->
-      <header class="h-12 flex items-center justify-between px-4 bg-neutral-900/50 border-b border-neutral-800 shrink-0">
+      <header class="h-14 flex items-center justify-between px-4 bg-neutral-900/50 border-b border-neutral-800 shrink-0">
         <!-- Left: hamburger + breadcrumb -->
         <div class="flex items-center gap-3">
           <button
