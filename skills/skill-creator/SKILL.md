@@ -70,6 +70,12 @@ Every skill MUST declare the exact tools it needs in a `tools:` YAML list in its
 - NEVER invent tool names. If a name isn't in the Tool Catalog section of your system prompt, it doesn't exist. Common mistakes: writing `readFile` instead of `filesystem`, `shell` instead of `exec`, `http` instead of `web_fetch`.
 - The declared list must equal the set of tools actually referenced in the skill body — no more, no less.
 
+## Self-modification restriction
+
+**`skill-creator` itself is read-only for every agent except `main`.** Only the `main` agent can modify the skill-creator skill. All other agents can use skill-creator to create or refactor OTHER skills, but cannot alter skill-creator's own SKILL.md or any file inside `skills/skill-creator/`. If a user asks a non-main agent to modify skill-creator, explain: "I cannot modify my own skill-creator — only the main agent can. If you want skill-creator updated, modify it on the main agent and promote it to the global registry, then drag it from global onto my agent card to get the new version."
+
+If the global skill-creator is updated to a newer version, out-of-date copies on non-main agents are automatically hidden from `<available_skills>` — the agent cannot use skill-creator again until the user drags the updated version from global onto the agent card.
+
 ## Refactoring an Existing Skill
 
 When asked to refactor or update an existing skill, or when you notice a skill that doesn't follow the standard structure:

@@ -55,6 +55,21 @@ public class FileSystemTools implements ToolRegistry.Tool {
             return "Error: Path '%s' escapes the workspace directory.".formatted(relativePath);
         }
 
+        // skill-creator is read-only for every agent except 'main'. Only the main agent
+        // may modify the skill-creator skill itself; other agents can use it to create
+        // and refactor OTHER skills but cannot alter skill-creator. To get an updated
+        // skill-creator, drag it from the global skills registry onto the agent card.
+        if ("writeFile".equals(action) && !"main".equalsIgnoreCase(agent.name)) {
+            var skillCreatorDir = workspace.resolve("skills").resolve("skill-creator");
+            if (target.startsWith(skillCreatorDir)) {
+                return "Error: The 'skill-creator' skill is read-only for agent '"
+                        + agent.name
+                        + "'. Only the 'main' agent can modify skill-creator. "
+                        + "To get an updated skill-creator, ask the user to drag skill-creator "
+                        + "from the global skills registry onto this agent's card.";
+            }
+        }
+
         return switch (action) {
             case "readFile" -> readFile(target);
             case "writeFile" -> {

@@ -194,6 +194,31 @@ public class SkillLoader {
             });
         });
 
+        // Non-main agents may not use an out-of-date skill-creator. If the global
+        // skill-creator exists and is newer than this agent's workspace copy, hide the
+        // workspace copy from <available_skills> so the LLM cannot invoke it. The user
+        // must explicitly update by dragging skill-creator from the global registry onto
+        // the agent card.
+        if (!"main".equalsIgnoreCase(agentName)) {
+            var globalSkillCreatorPath = globalSkillsPath().resolve("skill-creator").resolve("SKILL.md");
+            if (Files.exists(globalSkillCreatorPath)) {
+                var globalSkillCreator = parseSkillFile(globalSkillCreatorPath);
+                if (globalSkillCreator != null) {
+                    var globalVersion = globalSkillCreator.version();
+                    allSkills.removeIf(s -> {
+                        if (!"skill-creator".equals(s.name())) return false;
+                        if (compareVersions(s.version(), globalVersion) < 0) {
+                            EventLogger.warn("skills",
+                                    "Excluding out-of-date skill-creator for agent '%s': workspace v%s < global v%s (drag skill-creator from global to update)"
+                                            .formatted(agentName, s.version(), globalVersion));
+                            return true;
+                        }
+                        return false;
+                    });
+                }
+            }
+        }
+
         return allSkills.stream().limit(MAX_SKILLS).toList();
     }
 
