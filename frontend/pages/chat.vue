@@ -305,10 +305,32 @@ async function loadConversation(id: number) {
 }
 
 async function sendMessage() {
-  if (!input.value.trim() || !selectedAgentId.value || streaming.value) return
+  if (streaming.value || !selectedAgentId.value) return
+  const rawText = input.value.trim()
+  if (!rawText && !attachedFiles.value.length) return
 
-  const text = input.value.trim()
+  attachError.value = null
+  const pending = attachedFiles.value.slice()
+  let uploadedPaths: string[] = []
+  if (pending.length) {
+    try {
+      uploadedPaths = await uploadAttachments(selectedAgentId.value)
+    } catch (e: any) {
+      attachError.value = 'Upload failed: ' + (e?.data?.error || e?.message || 'unknown error')
+      return
+    }
+  }
+
+  let text = rawText
+  if (uploadedPaths.length) {
+    const block = '[Attached files in workspace:\n'
+      + uploadedPaths.map(p => `- ${p}`).join('\n')
+      + ']'
+    text = rawText ? `${block}\n\n${rawText}` : block
+  }
+
   input.value = ''
+  attachedFiles.value = []
   if (chatInput.value) chatInput.value.style.height = 'auto'
   messages.value.push({ _key: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString() })
   scrollToBottom()
@@ -430,6 +452,10 @@ function newChat() {
 }
 
 const fileInput = ref<HTMLInputElement | null>(null)
+const attachedFiles = ref<File[]>([])
+const attachError = ref<string | null>(null)
+const MAX_ATTACHMENTS = 5
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 
 function triggerFileUpload() {
   fileInput.value?.click()
@@ -437,16 +463,48 @@ function triggerFileUpload() {
 
 function handleFileUpload(event: Event) {
   const target = event.target as HTMLInputElement
-  const file = target.files?.[0]
-  if (!file) return
-  // Read as text and paste into input
-  const reader = new FileReader()
-  reader.onload = () => {
-    const text = reader.result as string
-    input.value = `[Attached: ${file.name}]\n${text.substring(0, 10000)}`
+  const picked = target.files ? Array.from(target.files) : []
+  addAttachments(picked)
+  target.value = ''
+}
+
+function addAttachments(files: File[]) {
+  attachError.value = null
+  for (const f of files) {
+    if (attachedFiles.value.length >= MAX_ATTACHMENTS) {
+      attachError.value = `Maximum ${MAX_ATTACHMENTS} files per message`
+      break
+    }
+    if (f.size > MAX_ATTACHMENT_BYTES) {
+      attachError.value = `${f.name} exceeds ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB`
+      continue
+    }
+    attachedFiles.value.push(f)
   }
-  reader.readAsText(file)
-  target.value = '' // Reset so same file can be re-uploaded
+}
+
+function removeAttachment(idx: number) {
+  attachedFiles.value.splice(idx, 1)
+}
+
+function formatAttachmentSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+async function uploadAttachments(agentId: number): Promise<string[]> {
+  if (!attachedFiles.value.length) return []
+  const form = new FormData()
+  form.append('agentId', String(agentId))
+  for (const f of attachedFiles.value) {
+    form.append('files', f, f.name)
+  }
+  const res = await $fetch<{ batchId: string; files: Array<{ path: string; name: string; size: number }> }>(
+    '/api/chat/upload',
+    { method: 'POST', body: form }
+  )
+  return res.files.map(f => f.path)
 }
 
 function exportConversation() {
@@ -690,6 +748,35 @@ function exportConversation() {
       <div class="px-4 py-3">
         <form @submit.prevent="sendMessage"
               class="bg-neutral-900 border border-neutral-600/40 rounded-xl overflow-hidden">
+          <div v-if="attachedFiles.length || attachError" class="px-3 pt-2.5 pb-1 flex flex-wrap gap-1.5">
+            <span
+              v-for="(f, idx) in attachedFiles"
+              :key="`${f.name}-${idx}`"
+              class="inline-flex items-center gap-1.5 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-[11px] text-neutral-300"
+            >
+              <svg class="w-3 h-3 text-neutral-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+              </svg>
+              <span class="truncate max-w-[140px]" :title="f.name">{{ f.name }}</span>
+              <span class="text-neutral-500">{{ formatAttachmentSize(f.size) }}</span>
+              <button
+                type="button"
+                @click="removeAttachment(idx)"
+                class="ml-0.5 text-neutral-500 hover:text-white transition-colors"
+                title="Remove"
+              >
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </span>
+            <span
+              v-if="attachError"
+              class="inline-flex items-center px-2 py-1 bg-red-900/30 border border-red-800/50 rounded text-[11px] text-red-300"
+            >
+              {{ attachError }}
+            </span>
+          </div>
           <textarea
             v-model="input"
             placeholder="Type a message..."
@@ -701,7 +788,7 @@ function exportConversation() {
             class="w-full px-4 pt-3 pb-2 bg-transparent text-sm text-white
                    placeholder-neutral-600 focus:outline-none resize-none overflow-hidden"
           />
-          <input ref="fileInput" type="file" class="hidden" @change="handleFileUpload" />
+          <input ref="fileInput" type="file" multiple class="hidden" @change="handleFileUpload" />
           <div class="flex items-center justify-between px-3 pb-2.5">
             <div class="flex items-center gap-1">
               <button type="button" @click="triggerFileUpload" class="p-1.5 text-neutral-500 hover:text-neutral-300 transition-colors" title="Attach file">
@@ -717,7 +804,7 @@ function exportConversation() {
               </button>
               <button
                 type="submit"
-                :disabled="streaming || !input.trim()"
+                :disabled="streaming || (!input.trim() && !attachedFiles.length)"
                 class="p-1.5 text-neutral-500 hover:text-emerald-400 disabled:text-neutral-700 transition-colors"
                 title="Send"
               >

@@ -10,11 +10,19 @@ import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.Http;
 import play.mvc.With;
+import services.AgentService;
 import services.ConversationService;
 import services.EventLogger;
 
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.security.SecureRandom;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -58,6 +66,105 @@ public class ApiChatController extends Controller {
         resp.put("agentId", agent.id);
         resp.put("agentName", agent.name);
         renderJSON(gson.toJson(resp));
+    }
+
+    private static final int MAX_UPLOAD_FILES = 5;
+    private static final long MAX_UPLOAD_FILE_BYTES = 10L * 1024 * 1024;
+    private static final SecureRandom RANDOM = new SecureRandom();
+    private static final char[] ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789".toCharArray();
+
+    /**
+     * POST /api/chat/upload — Multipart upload for chat attachments.
+     *
+     * <p>Writes each file into {@code workspace/{agentName}/uploads/{batchId}/}
+     * where batchId = {@code yyyyMMdd-HHmmss-xxxxxx}. The frontend then sends the
+     * relative paths to {@link #streamChat()} as part of the user's message so the
+     * agent can read them via FileSystemTools.
+     */
+    public static void uploadChatFiles(Long agentId, java.io.File[] files) {
+        if (agentId == null) badRequest();
+        Agent agent = Agent.findById(agentId);
+        if (agent == null) notFound();
+
+        if (files == null || files.length == 0) {
+            error(400, "No files uploaded");
+        }
+        if (files.length > MAX_UPLOAD_FILES) {
+            error(400, "Too many files (max " + MAX_UPLOAD_FILES + ")");
+        }
+        for (var f : files) {
+            if (f == null || !f.exists()) error(400, "Invalid file upload");
+            if (f.length() > MAX_UPLOAD_FILE_BYTES) {
+                error(400, "File too large: " + f.getName()
+                        + " (max " + (MAX_UPLOAD_FILE_BYTES / (1024 * 1024)) + " MB)");
+            }
+        }
+
+        var batchId = "uploads/" + buildBatchId();
+        var workspace = AgentService.workspacePath(agent.name).toAbsolutePath().normalize();
+        var batchDir = workspace.resolve(batchId).normalize();
+        if (!batchDir.startsWith(workspace)) {
+            error(400, "Invalid upload target");
+        }
+
+        var results = new ArrayList<Map<String, Object>>();
+        try {
+            Files.createDirectories(batchDir);
+            for (var f : files) {
+                var safeName = sanitizeFilename(f.getName());
+                if (safeName.isEmpty()) {
+                    error(400, "Invalid filename: " + f.getName());
+                }
+                var target = batchDir.resolve(safeName).normalize();
+                if (!target.startsWith(batchDir)) {
+                    error(400, "Invalid filename: " + f.getName());
+                }
+                Files.copy(f.toPath(), target, StandardCopyOption.REPLACE_EXISTING);
+
+                var entry = new HashMap<String, Object>();
+                entry.put("path", batchId + "/" + safeName);
+                entry.put("name", safeName);
+                entry.put("size", Files.size(target));
+                results.add(entry);
+            }
+        } catch (java.io.IOException e) {
+            EventLogger.error("chat", "Chat upload failed for agent %s: %s"
+                    .formatted(agent.name, e.getMessage()));
+            error(500, "Upload failed: " + e.getMessage());
+        }
+
+        var resp = new HashMap<String, Object>();
+        resp.put("batchId", batchId);
+        resp.put("files", results);
+        renderJSON(gson.toJson(resp));
+    }
+
+    private static String buildBatchId() {
+        var ts = ZonedDateTime.now(ZoneId.systemDefault())
+                .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+        var suffix = new StringBuilder(6);
+        for (int i = 0; i < 6; i++) {
+            suffix.append(ID_ALPHABET[RANDOM.nextInt(ID_ALPHABET.length)]);
+        }
+        return ts + "-" + suffix;
+    }
+
+    /**
+     * Strip directory separators and other unsafe characters. Leading dots are
+     * removed so we never write a dotfile from user input.
+     */
+    private static String sanitizeFilename(String name) {
+        if (name == null) return "";
+        // Use only the basename and strip leading dots / whitespace.
+        var base = name.replace('\\', '/');
+        int slash = base.lastIndexOf('/');
+        if (slash >= 0) base = base.substring(slash + 1);
+        base = base.trim();
+        while (base.startsWith(".")) base = base.substring(1);
+        // Replace anything non-[alnum . _ - space] with '_'.
+        var cleaned = base.replaceAll("[^A-Za-z0-9._\\- ]", "_");
+        if (cleaned.length() > 120) cleaned = cleaned.substring(0, 120);
+        return cleaned;
     }
 
     /**
