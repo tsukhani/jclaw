@@ -1,5 +1,6 @@
 package controllers;
 
+import agents.SkillLoader;
 import agents.ToolRegistry;
 import com.google.gson.Gson;
 import com.google.gson.JsonParser;
@@ -78,6 +79,12 @@ public class ApiToolsController extends Controller {
         }
         config.enabled = enabled;
         config.save();
+
+        // Invalidate the SkillLoader cache so any skill whose tool requirements just became
+        // unmet is excluded from the next request's <available_skills>, and any skill whose
+        // requirements just became met is re-included. Prevents a window where the agent can
+        // still see/invoke a skill that requires a freshly-disabled tool.
+        SkillLoader.clearCache();
 
         var map = new HashMap<String, Object>();
         map.put("name", name);
