@@ -396,6 +396,33 @@ public class SkillLoader {
      * path bytes plus a separator plus its content bytes. Used to byte-compare two skill
      * directories regardless of filesystem iteration order.
      */
+    /** Extensions treated as human-readable text for skill content classification. */
+    private static final java.util.Set<String> TEXT_EXTENSIONS = java.util.Set.of(
+            ".md", ".json", ".txt", ".yaml", ".yml", ".xml", ".sh", ".py", ".js",
+            ".ts", ".java", ".html", ".css", ".toml", ".ini", ".cfg", ".conf", ".env",
+            ".properties", ".rb", ".go", ".rs", ".lua", ".sql"
+    );
+
+    /** Extensionless filenames that are conventionally plain text. */
+    private static final java.util.Set<String> KNOWN_TEXT_FILES = java.util.Set.of(
+            "readme", "makefile", "dockerfile", "license", "changelog",
+            "gemfile", "rakefile", "procfile", "vagrantfile"
+    );
+
+    /**
+     * True when {@code name} (a filename or relative path) should be treated as text.
+     * Used to split skill contents into text files (eligible for LLM sanitization and
+     * content editing) and binaries (eligible for malware scanning).
+     */
+    public static boolean isTextFile(String name) {
+        var lower = name.toLowerCase();
+        for (var ext : TEXT_EXTENSIONS) {
+            if (lower.endsWith(ext)) return true;
+        }
+        var baseName = lower.contains("/") ? lower.substring(lower.lastIndexOf('/') + 1) : lower;
+        return KNOWN_TEXT_FILES.contains(baseName);
+    }
+
     public static String hashSkillDirectory(Path skillDir) throws IOException {
         if (!Files.isDirectory(skillDir)) return "";
         java.security.MessageDigest digest;

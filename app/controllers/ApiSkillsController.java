@@ -197,14 +197,14 @@ public class ApiSkillsController extends Controller {
     }
 
     private static boolean isTextFile(Path p) {
-        var name = p.getFileName().toString().toLowerCase();
-        return name.endsWith(".md") || name.endsWith(".txt") || name.endsWith(".json")
-                || name.endsWith(".yaml") || name.endsWith(".yml") || name.endsWith(".xml")
-                || name.endsWith(".js") || name.endsWith(".ts") || name.endsWith(".py")
-                || name.endsWith(".sh") || name.endsWith(".html") || name.endsWith(".css")
-                || name.endsWith(".csv") || name.endsWith(".toml") || name.endsWith(".ini")
-                || name.endsWith(".cfg") || name.endsWith(".conf") || name.endsWith(".env")
-                || name.endsWith(".log") || name.endsWith(".sql");
+        return SkillLoader.isTextFile(p.getFileName().toString());
+    }
+
+    /** Format a list of scanner violations for user-facing error messages. */
+    private static String formatViolations(java.util.List<services.SkillBinaryScanner.Violation> violations) {
+        return violations.stream()
+                .map(services.SkillBinaryScanner.Violation::describe)
+                .collect(java.util.stream.Collectors.joining("; "));
     }
 
     /** DELETE /api/skills/{name} — Delete a global skill. */
@@ -317,6 +317,15 @@ public class ApiSkillsController extends Controller {
                             .formatted(name, agent.name, String.join("; ", parts)));
                 }
             }
+        }
+
+        // Malware scan of any binaries in the global skill. Runs before staging so
+        // a known-bad binary never even touches the agent's workspace directory tree.
+        var copyViolations = services.SkillBinaryScanner.scan(globalDir);
+        if (!copyViolations.isEmpty()) {
+            response.status = 400;
+            renderText("Cannot add skill '%s' to agent '%s': malware detected — %s"
+                    .formatted(name, agent.name, formatViolations(copyViolations)));
         }
 
         // Stage the copy in a sibling directory, then swap in place. Guarantees that a
@@ -548,6 +557,20 @@ public class ApiSkillsController extends Controller {
             }
         }
 
+        // Malware scan of any binaries in the workspace skill. Runs before sanitization
+        // so a known-bad binary can never reach the global skills registry.
+        var promoteViolations = services.SkillBinaryScanner.scan(skillDir);
+        if (!promoteViolations.isEmpty()) {
+            services.EventLogger.warn("skills", "Promotion of '%s' refused: malware detected in %d file(s)"
+                    .formatted(skillName, promoteViolations.size()));
+            services.NotificationBus.publish("skill.promote_failed", java.util.Map.of(
+                    "skillName", skillName,
+                    "error", "Malware detected — " + formatViolations(promoteViolations)
+                            + ". Remove the flagged file(s) and try again."
+            ));
+            return;
+        }
+
         // Read all files from the skill folder
         var sourceTextFiles = new LinkedHashMap<String, String>();
         var sourceBinaryFiles = new java.util.ArrayList<String>();
@@ -555,7 +578,7 @@ public class ApiSkillsController extends Controller {
             walk.filter(Files::isRegularFile).forEach(file -> {
                 var relName = skillDir.relativize(file).toString();
                 try {
-                    if (isTextFile(relName)) {
+                    if (SkillLoader.isTextFile(relName)) {
                         sourceTextFiles.put(relName, Files.readString(file));
                     } else {
                         sourceBinaryFiles.add(relName);
@@ -873,28 +896,6 @@ public class ApiSkillsController extends Controller {
         }
     }
 
-    /** Check if a file is likely a text file based on extension. */
-    private static final java.util.Set<String> TEXT_EXTENSIONS = java.util.Set.of(
-            ".md", ".json", ".txt", ".yaml", ".yml", ".xml", ".sh", ".py", ".js",
-            ".ts", ".java", ".html", ".css", ".toml", ".ini", ".cfg", ".conf", ".env",
-            ".properties", ".rb", ".go", ".rs", ".lua", ".sql"
-    );
-
-    private static final java.util.Set<String> KNOWN_TEXT_FILES = java.util.Set.of(
-            "readme", "makefile", "dockerfile", "license", "changelog",
-            "gemfile", "rakefile", "procfile", "vagrantfile"
-    );
-
-    private static boolean isTextFile(String name) {
-        var lower = name.toLowerCase();
-        // Check known text extensions
-        for (var ext : TEXT_EXTENSIONS) {
-            if (lower.endsWith(ext)) return true;
-        }
-        // Check known extensionless text files by filename
-        var baseName = lower.contains("/") ? lower.substring(lower.lastIndexOf('/') + 1) : lower;
-        return KNOWN_TEXT_FILES.contains(baseName);
-    }
 
     // --- Helpers ---
 

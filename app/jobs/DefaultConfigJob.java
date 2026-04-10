@@ -57,6 +57,9 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("shell.defaultTimeoutSeconds", "30");
         seedIfAbsent("shell.maxTimeoutSeconds", "300");
         seedIfAbsent("shell.maxOutputBytes", "102400");
+
+        // Skill binary malware scanner — MalwareBazaar Auth-Key (free, from https://auth.abuse.ch/)
+        seedIfAbsent("skills.scanner.malwarebazaar.authKey", "");
     }
 
     private void seedDefaultAgent() {
