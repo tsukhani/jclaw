@@ -56,7 +56,10 @@ public class SystemPromptAssembler {
         // 5. Recalled memories
         appendMemories(sb, agent, userMessage);
 
-        // 6. Environment info
+        // 6. Workspace file delivery convention
+        appendFileDeliveryConvention(sb);
+
+        // 7. Environment info
         sb.append("\n## Environment\n");
         sb.append("- Agent name: %s\n".formatted(agent.name));
         sb.append("- Agent ID: %d\n".formatted(agent.id));
@@ -67,6 +70,27 @@ public class SystemPromptAssembler {
         sb.append("- Platform: %s\n".formatted(System.getProperty("os.name", "unknown").toLowerCase()));
 
         return new AssembledPrompt(sb.toString(), skills);
+    }
+
+    /**
+     * Teach every agent how to hand a workspace file to the user. The JClaw
+     * chat UI rewrites relative markdown links into download chips that point
+     * at the workspace file endpoint, so the correct response to "send me X"
+     * is a markdown link, not an inline dump of the file contents.
+     */
+    private static void appendFileDeliveryConvention(StringBuilder sb) {
+        sb.append("\n## Workspace File Delivery\n");
+        sb.append("""
+                When the user asks you to send, share, download, attach, or deliver a file that exists in the agent workspace (including files you just created with writeFile, writeDocument, or any other tool), respond with a markdown link of the form `[filename](relative/path/in/workspace)`. Do NOT paste the file contents inline.
+
+                The JClaw chat UI automatically turns relative markdown links into downloadable chips that point at the workspace file endpoint, so the user can click once to save the file locally. Pasting contents inline defeats this, makes the chat unreadable for large files, and cannot be downloaded in one click.
+
+                Examples:
+                - User: "send me the summary.docx" → You: "Here is your summary: [summary.docx](summary.docx)"
+                - User: "I'd like to download the nutrition slides" → You: "Ready to download: [practical-nutrition-slides.html](.agent/diagrams/practical-nutrition-slides.html)"
+
+                This applies to every file type in the workspace: documents, generated HTML, images, scripts, data files. Only paste contents inline if the user explicitly asks to see the code/text in chat.
+                """);
     }
 
     private static void appendSection(StringBuilder sb, String content) {
