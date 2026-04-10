@@ -114,6 +114,19 @@ public class ApiAgentsController extends Controller {
             case "json" -> "application/json";
             case "csv" -> "text/csv";
             case "txt", "md", "log" -> "text/plain";
+            case "html", "htm" -> "text/html";
+            case "xml" -> "application/xml";
+            case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            case "xlsx" -> "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            case "pptx" -> "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+            case "doc" -> "application/msword";
+            case "xls" -> "application/vnd.ms-excel";
+            case "ppt" -> "application/vnd.ms-powerpoint";
+            case "odt" -> "application/vnd.oasis.opendocument.text";
+            case "ods" -> "application/vnd.oasis.opendocument.spreadsheet";
+            case "odp" -> "application/vnd.oasis.opendocument.presentation";
+            case "rtf" -> "application/rtf";
+            case "zip" -> "application/zip";
             default -> "application/octet-stream";
         };
 

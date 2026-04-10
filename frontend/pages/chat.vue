@@ -35,13 +35,39 @@ DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
   }
 })
 
-function renderMarkdown(text: string): string {
+function renderMarkdown(text: string, agentId: number | null = null): string {
   if (!text) return ''
   const html = marked.parse(text) as string
-  return DOMPurify.sanitize(html, {
+  const sanitized = DOMPurify.sanitize(html, {
     ADD_TAGS: ['img', 'audio', 'video', 'source'],
     ADD_ATTR: ['src', 'controls', 'autoplay', 'download', 'target']
   })
+  return agentId != null ? rewriteWorkspaceLinks(sanitized, agentId) : sanitized
+}
+
+/**
+ * Rewrite relative anchor hrefs (e.g. "summary.docx" or "uploads/123/report.pdf")
+ * to the workspace file endpoint and mark them as downloads. Absolute URLs,
+ * anchors, and existing /api/ links are left untouched.
+ */
+function rewriteWorkspaceLinks(html: string, agentId: number): string {
+  if (typeof DOMParser === 'undefined') return html
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(`<div id="__root">${html}</div>`, 'text/html')
+  const root = doc.getElementById('__root')
+  if (!root) return html
+  root.querySelectorAll('a[href]').forEach(a => {
+    const href = a.getAttribute('href') || ''
+    if (!href) return
+    if (href.startsWith('/') || href.startsWith('#')) return
+    if (/^(https?|mailto|tel|ftp|data|javascript):/i.test(href)) return
+    const encoded = href.split('/').filter(Boolean).map(encodeURIComponent).join('/')
+    a.setAttribute('href', `/api/agents/${agentId}/files/${encoded}`)
+    a.setAttribute('download', '')
+    a.setAttribute('target', '_blank')
+    a.classList.add('workspace-file')
+  })
+  return root.innerHTML
 }
 
 function formatTimestamp(iso: string): string {
@@ -692,7 +718,7 @@ function exportConversation() {
               <!-- Response content -->
               <div v-if="msg.content"
                    class="prose-chat bg-neutral-800/50 border border-neutral-700/50 rounded-2xl rounded-tl-sm text-neutral-300 px-4 py-2.5 text-sm overflow-x-auto break-words"
-                   v-html="renderMarkdown(msg.content)"
+                   v-html="renderMarkdown(msg.content, selectedAgentId)"
               />
               <div v-else-if="!msg.reasoning"
                    class="bg-neutral-800/50 border border-neutral-700/50 rounded-2xl rounded-tl-sm text-neutral-500 px-4 py-2.5 text-sm italic">
@@ -867,6 +893,29 @@ function exportConversation() {
 .prose-chat h2 { font-size: 1em; }
 .prose-chat h3 { font-size: 0.95em; }
 .prose-chat a { color: #a3a3a3; text-decoration: underline; }
+.prose-chat a.workspace-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.25em 0.6em;
+  margin: 0.15em 0.15em 0.15em 0;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 0.4em;
+  color: #6ee7b7;
+  text-decoration: none;
+  font-size: 0.9em;
+  transition: background 0.15s, border-color 0.15s;
+}
+.prose-chat a.workspace-file:hover {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.55);
+}
+.prose-chat a.workspace-file::before {
+  content: "⬇";
+  font-size: 0.85em;
+  opacity: 0.75;
+}
 .prose-chat blockquote {
   border-left: 2px solid rgba(255,255,255,0.1);
   padding-left: 0.75em;
