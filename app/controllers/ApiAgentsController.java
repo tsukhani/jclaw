@@ -100,14 +100,9 @@ public class ApiAgentsController extends Controller {
         var file = path.toFile();
         if (!file.exists() || !file.isFile()) notFound();
 
-        // Content type: delegate to Play's MimeTypes database, with overrides for
-        // a couple of types Play's bundled properties file doesn't know about.
-        var ext = filePath.substring(filePath.lastIndexOf('.') + 1).toLowerCase();
-        var contentType = switch (ext) {
-            case "webp" -> "image/webp";
-            case "md" -> "text/plain";
-            default -> play.libs.MimeTypes.getContentType(filePath);
-        };
+        // Content type: Play's MimeTypes resolver covers the bundled database plus
+        // any custom mimetype.* entries declared in application.conf.
+        var contentType = play.libs.MimeTypes.getContentType(filePath);
 
         response.setHeader("Cache-Control", "private, max-age=300");
 
