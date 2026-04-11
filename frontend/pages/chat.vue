@@ -125,17 +125,27 @@ const providers = computed(() => {
 // The currently selected agent object
 const selectedAgent = computed(() => agents.value?.find((a: any) => a.id === selectedAgentId.value))
 
-// Available models for the selected agent's provider
-const availableModels = computed(() => {
+// Current model info for the selected agent. Looks up across ALL configured
+// providers — not just the agent's own provider — because the chat dropdown
+// lets the user pick any model from any enabled provider without going back
+// to the Agents page. Encoded provider + id avoids ambiguity when two
+// providers happen to expose the same model id (e.g. "kimi-k2.5").
+const selectedModelInfo = computed(() => {
   const providerName = selectedAgent.value?.modelProvider
-  if (!providerName) return []
-  return providers.value.find(p => p.name === providerName)?.models ?? []
+  const modelId = selectedAgent.value?.modelId
+  if (!providerName || !modelId) return null
+  const provider = providers.value.find(p => p.name === providerName)
+  return provider?.models.find((m: any) => m.id === modelId) ?? null
 })
 
-// Current model info for the selected agent
-const selectedModelInfo = computed(() => {
-  const modelId = selectedAgent.value?.modelId
-  return availableModels.value.find((m: any) => m.id === modelId) ?? null
+// Compound key used as the <option> value so the change handler can read
+// both provider and model from a single DOM value. Must use a separator that
+// can't appear in either side; "::" is safe against every provider name and
+// model id we currently ship.
+const selectedModelKey = computed(() => {
+  const p = selectedAgent.value?.modelProvider
+  const m = selectedAgent.value?.modelId
+  return p && m ? `${p}::${m}` : ''
 })
 
 // Whether the selected model supports thinking
@@ -151,9 +161,17 @@ async function updateAgentSetting(updates: Record<string, any>) {
 }
 
 function onModelChange(event: Event) {
-  const modelId = (event.target as HTMLSelectElement).value
-  const model = availableModels.value.find((m: any) => m.id === modelId)
-  const updates: Record<string, any> = { modelId }
+  const value = (event.target as HTMLSelectElement).value
+  const sepIdx = value.indexOf('::')
+  if (sepIdx < 0) return
+  const modelProvider = value.slice(0, sepIdx)
+  const modelId = value.slice(sepIdx + 2)
+  const provider = providers.value.find(p => p.name === modelProvider)
+  const model = provider?.models.find((m: any) => m.id === modelId)
+  // Send both fields so a cross-provider pick (e.g. ollama-cloud → openrouter)
+  // lands atomically; sending only modelId would leave the agent pointing a
+  // stale modelProvider at a model that doesn't exist there.
+  const updates: Record<string, any> = { modelProvider, modelId }
   // Clear thinking mode if new model doesn't support it
   if (!model?.supportsThinking) {
     updates.thinkingMode = null
@@ -641,14 +659,20 @@ function exportConversation() {
 
         <label class="text-xs text-neutral-500">Model:</label>
         <select
-          :value="selectedAgent?.modelId"
+          :value="selectedModelKey"
           @change="onModelChange"
           class="bg-neutral-800 border border-neutral-700 text-sm text-white px-2 py-1
                  focus:outline-none focus:border-neutral-600"
         >
-          <option v-for="m in availableModels" :key="m.id" :value="m.id">
-            {{ m.name || m.id }}
-          </option>
+          <optgroup v-for="p in providers" :key="p.name" :label="p.name">
+            <option
+              v-for="m in p.models"
+              :key="`${p.name}::${m.id}`"
+              :value="`${p.name}::${m.id}`"
+            >
+              {{ m.name || m.id }}
+            </option>
+          </optgroup>
         </select>
 
         <label class="text-xs text-neutral-500" :class="{ 'opacity-40': !thinkingSupported }">Thinking:</label>
