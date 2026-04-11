@@ -58,6 +58,19 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("shell.maxTimeoutSeconds", "300");
         seedIfAbsent("shell.maxOutputBytes", "102400");
 
+        // Web search providers — independent engines, first enabled + keyed one is used.
+        // All config lives in the Config DB (editable via Settings UI), not application.conf.
+        // See WebSearchTool.SearchProvider for the read paths that consume these values.
+        seedIfAbsent("search.exa.enabled", "true");
+        seedIfAbsent("search.exa.apiKey", "");
+        seedIfAbsent("search.exa.baseUrl", "https://api.exa.ai/search");
+        seedIfAbsent("search.brave.enabled", "true");
+        seedIfAbsent("search.brave.apiKey", "");
+        seedIfAbsent("search.brave.baseUrl", "https://api.search.brave.com/res/v1/web/search");
+        seedIfAbsent("search.tavily.enabled", "true");
+        seedIfAbsent("search.tavily.apiKey", "");
+        seedIfAbsent("search.tavily.baseUrl", "https://api.tavily.com/search");
+
         // Skill binary malware scanners — independent hash-lookup APIs, composed under OR.
         // Keys are seeded empty; each scanner is inert until an operator provides its key.
         // All scanner configuration lives in the Config DB (editable via Settings UI),

@@ -19,8 +19,11 @@ import java.util.Map;
 
 /**
  * Web search tool supporting multiple providers: Exa, Brave, and Tavily.
- * Uses the first provider with a configured API key, or a user-specified provider.
- * API keys stored in Config table (exa.apiKey, brave.apiKey, tavily.apiKey).
+ * Uses the first enabled provider with a configured API key, or a user-specified
+ * provider. All provider config (enabled flag, base URL, API key) lives in the
+ * Config DB under {@code search.{id}.*} and is seeded by {@code DefaultConfigJob}.
+ * A provider is skipped when {@code search.{id}.enabled} is {@code false} or its
+ * API key is blank.
  */
 public class WebSearchTool implements ToolRegistry.Tool {
 
@@ -76,25 +79,27 @@ public class WebSearchTool implements ToolRegistry.Tool {
         String apiKey = null;
 
         if (preferredProvider != null) {
+            SearchProvider match = null;
             for (var p : PROVIDERS) {
-                if (p.id().equals(preferredProvider)) {
-                    apiKey = ConfigService.get(p.configKey());
-                    if (apiKey != null && !apiKey.isBlank()) {
-                        provider = p;
-                    } else {
-                        return "Error: %s API key not configured. Add '%s' in Settings.".formatted(
-                                p.displayName(), p.configKey());
-                    }
-                    break;
-                }
+                if (p.id().equals(preferredProvider)) { match = p; break; }
             }
-            if (provider == null) {
+            if (match == null) {
                 return "Error: Unknown search provider '%s'. Supported: exa, brave, tavily.".formatted(preferredProvider);
             }
+            if (!match.isEnabled()) {
+                return "Error: %s is disabled. Enable it in Settings.".formatted(match.displayName());
+            }
+            apiKey = ConfigService.get(match.apiKeyKey());
+            if (apiKey == null || apiKey.isBlank()) {
+                return "Error: %s API key not configured. Add '%s' in Settings.".formatted(
+                        match.displayName(), match.apiKeyKey());
+            }
+            provider = match;
         } else {
-            // Use first configured provider
+            // Use first enabled provider with a configured key
             for (var p : PROVIDERS) {
-                var key = ConfigService.get(p.configKey());
+                if (!p.isEnabled()) continue;
+                var key = ConfigService.get(p.apiKeyKey());
                 if (key != null && !key.isBlank()) {
                     provider = p;
                     apiKey = key;
@@ -102,7 +107,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
                 }
             }
             if (provider == null) {
-                return "Error: No search provider configured. Add an API key for Exa, Brave, or Tavily in Settings.";
+                return "Error: No search provider configured. Enable one of Exa, Brave, or Tavily and add its API key in Settings.";
             }
         }
 
@@ -139,9 +144,21 @@ public class WebSearchTool implements ToolRegistry.Tool {
     interface SearchProvider {
         String id();
         String displayName();
-        String configKey();
+        String defaultBaseUrl();
         HttpRequest buildRequest(String apiKey, String query, int numResults);
         String formatResults(String responseJson);
+
+        default String apiKeyKey() { return "search." + id() + ".apiKey"; }
+        default String baseUrlKey() { return "search." + id() + ".baseUrl"; }
+        default String enabledKey() { return "search." + id() + ".enabled"; }
+
+        default boolean isEnabled() {
+            return "true".equalsIgnoreCase(ConfigService.get(enabledKey(), "true"));
+        }
+
+        default String baseUrl() {
+            return ConfigService.get(baseUrlKey(), defaultBaseUrl());
+        }
     }
 
     // --- Exa ---
@@ -149,7 +166,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
     static class ExaProvider implements SearchProvider {
         @Override public String id() { return "exa"; }
         @Override public String displayName() { return "Exa"; }
-        @Override public String configKey() { return "exa.apiKey"; }
+        @Override public String defaultBaseUrl() { return "https://api.exa.ai/search"; }
 
         @Override
         public HttpRequest buildRequest(String apiKey, String query, int numResults) {
@@ -158,7 +175,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
             body.put("numResults", numResults);
             body.put("contents", Map.of("highlights", Map.of("maxCharacters", 4000)));
             return HttpRequest.newBuilder()
-                    .uri(URI.create("https://api.exa.ai/search"))
+                    .uri(URI.create(baseUrl()))
                     .header("Content-Type", "application/json")
                     .header("x-api-key", apiKey)
                     .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
@@ -195,13 +212,12 @@ public class WebSearchTool implements ToolRegistry.Tool {
     static class BraveProvider implements SearchProvider {
         @Override public String id() { return "brave"; }
         @Override public String displayName() { return "Brave"; }
-        @Override public String configKey() { return "brave.apiKey"; }
+        @Override public String defaultBaseUrl() { return "https://api.search.brave.com/res/v1/web/search"; }
 
         @Override
         public HttpRequest buildRequest(String apiKey, String query, int numResults) {
             var encodedQuery = java.net.URLEncoder.encode(query, StandardCharsets.UTF_8);
-            var url = "https://api.search.brave.com/res/v1/web/search?q=%s&count=%d".formatted(
-                    encodedQuery, numResults);
+            var url = "%s?q=%s&count=%d".formatted(baseUrl(), encodedQuery, numResults);
             return HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .header("Accept", "application/json")
@@ -239,7 +255,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
     static class TavilyProvider implements SearchProvider {
         @Override public String id() { return "tavily"; }
         @Override public String displayName() { return "Tavily"; }
-        @Override public String configKey() { return "tavily.apiKey"; }
+        @Override public String defaultBaseUrl() { return "https://api.tavily.com/search"; }
 
         @Override
         public HttpRequest buildRequest(String apiKey, String query, int numResults) {
@@ -249,7 +265,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
             body.put("search_depth", "basic");
             body.put("include_answer", false);
             return HttpRequest.newBuilder()
-                    .uri(URI.create("https://api.tavily.com/search"))
+                    .uri(URI.create(baseUrl()))
                     .header("Content-Type", "application/json")
                     .header("Authorization", "Bearer " + apiKey)
                     .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))

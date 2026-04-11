@@ -62,7 +62,12 @@ const MANAGED_CONFIG_KEYS = new Set([
   'jclaw.tools.shell.enabled', 'shell.allowlist', 'shell.defaultTimeoutSeconds',
   'shell.maxTimeoutSeconds', 'shell.maxOutputBytes',
   'skills.scanner.malwarebazaar.enabled', 'skills.scanner.malwarebazaar.authKey',
+  'skills.scanner.malwarebazaar.url', 'skills.scanner.malwarebazaar.timeoutMs',
   'skills.scanner.metadefender.enabled', 'skills.scanner.metadefender.apiKey',
+  'skills.scanner.metadefender.url', 'skills.scanner.metadefender.timeoutMs',
+  'search.exa.enabled', 'search.exa.apiKey', 'search.exa.baseUrl',
+  'search.brave.enabled', 'search.brave.apiKey', 'search.brave.baseUrl',
+  'search.tavily.enabled', 'search.tavily.apiKey', 'search.tavily.baseUrl',
 ])
 
 // Agent config
@@ -160,25 +165,90 @@ async function toggleShellEnabled() {
 }
 
 
-const SEARCH_PROVIDERS: Record<string, { label: string, keys: { key: string, label: string, placeholder: string }[] }> = {
+// --- Search providers ---
+// Display metadata only. All runtime state (enabled, apiKey, baseUrl) lives in the
+// Config DB under `search.{id}.*`, seeded by DefaultConfigJob. A provider is active
+// only when both enabled is on and its API key is configured, matching the
+// isEnabled() contract in WebSearchTool.SearchProvider.
+const SEARCH_PROVIDERS: Record<string, {
+  label: string,
+  description: string,
+  signupUrl: string,
+  signupLabel: string,
+  apiKeyPlaceholder: string,
+}> = {
   exa: {
     label: 'Exa',
-    keys: [
-      { key: 'exa.apiKey', label: 'apiKey', placeholder: 'Your Exa API key from exa.ai' }
-    ]
+    description: 'Neural search engine optimized for research — ranks by semantic similarity and returns highlighted passages rather than blue-link snippets. Strong on recent technical content.',
+    signupUrl: 'https://exa.ai/',
+    signupLabel: 'exa.ai',
+    apiKeyPlaceholder: 'Your Exa API key from exa.ai',
   },
   brave: {
-    label: 'Brave',
-    keys: [
-      { key: 'brave.apiKey', label: 'apiKey', placeholder: 'Your Brave Search API key from brave.com/search/api' }
-    ]
+    label: 'Brave Search',
+    description: 'Independent web index (not a Bing/Google reseller) with a generous free tier. Good general-purpose fallback when Exa misses broad web content.',
+    signupUrl: 'https://brave.com/search/api/',
+    signupLabel: 'brave.com/search/api',
+    apiKeyPlaceholder: 'Your Brave Search API key from brave.com/search/api',
   },
   tavily: {
     label: 'Tavily',
-    keys: [
-      { key: 'tavily.apiKey', label: 'apiKey', placeholder: 'Your Tavily API key from tavily.com' }
-    ]
-  }
+    description: 'LLM-optimized search API that returns cleaned content snippets. Designed for agent workflows; handles rate limits and result normalization server-side.',
+    signupUrl: 'https://tavily.com/',
+    signupLabel: 'tavily.com',
+    apiKeyPlaceholder: 'Your Tavily API key from tavily.com',
+  },
+}
+
+function searchApiKey(providerId: string): string {
+  const entries = configData.value?.entries ?? []
+  return entries.find((e: any) => e.key === `search.${providerId}.apiKey`)?.value ?? ''
+}
+
+function searchBaseUrl(providerId: string): string {
+  const entries = configData.value?.entries ?? []
+  return entries.find((e: any) => e.key === `search.${providerId}.baseUrl`)?.value ?? ''
+}
+
+function searchApiKeyEntry(providerId: string) {
+  const def = SEARCH_PROVIDERS[providerId]
+  const key = `search.${providerId}.apiKey`
+  const entries = configData.value?.entries ?? []
+  const existing = entries.find((e: any) => e.key === key)
+  return existing
+    ? { ...existing, label: 'apiKey', placeholder: def.apiKeyPlaceholder }
+    : { key, value: '', label: 'apiKey', placeholder: def.apiKeyPlaceholder }
+}
+
+function searchBaseUrlEntry(providerId: string) {
+  const key = `search.${providerId}.baseUrl`
+  const entries = configData.value?.entries ?? []
+  const existing = entries.find((e: any) => e.key === key)
+  return existing
+    ? { ...existing, label: 'baseUrl', placeholder: '' }
+    : { key, value: '', label: 'baseUrl', placeholder: '' }
+}
+
+function searchEnabled(providerId: string): boolean {
+  const entries = configData.value?.entries ?? []
+  // Default to true when the key is absent — matches WebSearchTool default.
+  const entry = entries.find((e: any) => e.key === `search.${providerId}.enabled`)
+  return entry ? entry.value === 'true' : true
+}
+
+function searchActive(providerId: string): boolean {
+  // A provider is actually usable only when enabled AND an API key is present.
+  // Matches the isEnabled + apiKey check in WebSearchTool.execute().
+  const key = searchApiKey(providerId)
+  const hasKey = !!key && key !== '(empty)' && !key.startsWith('****')
+  const maskedKeySet = !!key && (key.startsWith('****') || /\*\*\*\*/.test(key))
+  return searchEnabled(providerId) && (hasKey || maskedKeySet)
+}
+
+async function toggleSearchEnabled(providerId: string) {
+  const next = searchEnabled(providerId) ? 'false' : 'true'
+  await $fetch('/api/config', { method: 'POST', body: { key: `search.${providerId}.enabled`, value: next } })
+  refresh()
 }
 
 // --- Malware scanners ---
@@ -497,21 +567,12 @@ function closeDiscovery() {
   discoveryProvider.value = null
 }
 
-// Group config entries by provider
+// Group config entries by LLM provider; everything else (non-managed) falls through
+// to the generic Configuration list.
 const providerEntries = computed(() => {
   const entries = configData.value?.entries ?? []
   const providers = new Map<string, any[]>()
-  const searchEntries = new Map<string, Map<string, any>>()
   const other: any[] = []
-
-  // Initialize search providers with all expected keys
-  for (const [id, def] of Object.entries(SEARCH_PROVIDERS)) {
-    const keyMap = new Map<string, any>()
-    for (const k of def.keys) {
-      keyMap.set(k.key, { key: k.key, value: '', label: k.label, placeholder: k.placeholder })
-    }
-    searchEntries.set(id, keyMap)
-  }
 
   for (const e of entries) {
     if (e.key.startsWith('provider.')) {
@@ -519,21 +580,11 @@ const providerEntries = computed(() => {
       const name = parts[1]
       if (!providers.has(name)) providers.set(name, [])
       providers.get(name)!.push(e)
-    } else {
-      // Check if it belongs to a search provider
-      let matched = false
-      for (const [id, def] of Object.entries(SEARCH_PROVIDERS)) {
-        for (const k of def.keys) {
-          if (e.key === k.key) {
-            searchEntries.get(id)!.set(k.key, { ...e, label: k.label, placeholder: k.placeholder })
-            matched = true
-          }
-        }
-      }
-      if (!matched && !MANAGED_CONFIG_KEYS.has(e.key)) other.push(e)
+    } else if (!MANAGED_CONFIG_KEYS.has(e.key)) {
+      other.push(e)
     }
   }
-  return { providers, searchEntries, other }
+  return { providers, other }
 })
 </script>
 
@@ -841,23 +892,44 @@ const providerEntries = computed(() => {
     <!-- Search Providers -->
     <div class="mb-6 space-y-4">
       <h2 class="text-sm font-medium text-neutral-400">Search Providers</h2>
-      <p class="text-xs text-neutral-600">Configure API keys for web search tools used by agents.</p>
-      <div v-for="[id, keyMap] in providerEntries.searchEntries" :key="id"
+      <p class="text-xs text-neutral-600">
+        Web search engines that agents can call via the <span class="text-neutral-400">web_search</span> tool.
+        Providers run independently; the first enabled provider with a configured API key is used,
+        or the agent can request one explicitly. A provider is only active when both
+        <span class="text-neutral-400">enabled</span> is on and its API key is configured.
+      </p>
+      <div v-for="(def, id) in SEARCH_PROVIDERS" :key="id"
            class="bg-neutral-900 border border-neutral-800">
-        <div class="px-4 py-2.5 border-b border-neutral-800">
-          <span class="text-sm font-medium text-white">{{ SEARCH_PROVIDERS[id].label }}</span>
-          <span v-if="[...keyMap.values()].find(e => e.key.endsWith('apiKey') && e.value && e.value !== '(empty)')"
-                class="ml-2 text-[10px] text-green-400 border border-green-400/30 px-1">configured</span>
+        <div class="px-4 py-2.5 border-b border-neutral-800 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium text-white">{{ def.label }}</span>
+            <span v-if="searchActive(id)" class="text-[10px] text-green-400 border border-green-400/30 px-1">active</span>
+            <span v-else-if="searchEnabled(id)" class="text-[10px] text-amber-400 border border-amber-400/30 px-1">needs API key</span>
+            <span v-else class="text-[10px] text-neutral-500 border border-neutral-700 px-1">disabled</span>
+          </div>
+          <button @click="toggleSearchEnabled(id)"
+                  :class="searchEnabled(id) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-neutral-700 hover:bg-neutral-600'"
+                  class="relative w-9 h-5 rounded-full transition-colors"
+                  :title="searchEnabled(id) ? 'Disable provider' : 'Enable provider'">
+            <span :class="searchEnabled(id) ? 'translate-x-4' : 'translate-x-0.5'"
+                  class="block w-4 h-4 bg-white rounded-full transition-transform" />
+          </button>
+        </div>
+        <div class="px-4 py-2.5 text-xs text-neutral-400 leading-relaxed border-b border-neutral-800/50">
+          {{ def.description }}
+          <a :href="def.signupUrl" target="_blank" rel="noopener"
+             class="text-neutral-300 hover:text-white underline ml-1">Get an API key → {{ def.signupLabel }}</a>
         </div>
         <div class="divide-y divide-neutral-800/50">
-          <div v-for="entry in [...keyMap.values()]" :key="entry.key" class="px-4 py-2 flex items-center gap-3">
-            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">{{ entry.label }}</span>
-            <template v-if="editingKey === entry.key">
+          <!-- apiKey -->
+          <div class="px-4 py-2 flex items-center gap-3">
+            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">apiKey</span>
+            <template v-if="editingKey === `search.${id}.apiKey`">
               <input v-model="editValue"
-                     :type="isSensitive(entry.key) ? 'password' : 'text'"
-                     :placeholder="entry.placeholder"
+                     type="password"
+                     :placeholder="def.apiKeyPlaceholder"
                      class="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none" />
-              <button @click="updateEntry(entry.key)" class="p-1 text-neutral-500 hover:text-emerald-400 transition-colors" title="Save">
+              <button @click="updateEntry(`search.${id}.apiKey`)" class="p-1 text-neutral-500 hover:text-emerald-400 transition-colors" title="Save">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
               </button>
               <button @click="editingKey = null" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Cancel">
@@ -865,8 +937,28 @@ const providerEntries = computed(() => {
               </button>
             </template>
             <template v-else>
-              <span class="flex-1 text-sm text-neutral-300 font-mono truncate">{{ entry.value || '(not set)' }}</span>
-              <button @click="startEdit(entry)" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
+              <span class="flex-1 text-sm text-neutral-300 font-mono truncate">{{ searchApiKeyEntry(id).value || '(not set)' }}</span>
+              <button @click="startEdit(searchApiKeyEntry(id))" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              </button>
+            </template>
+          </div>
+          <!-- baseUrl -->
+          <div class="px-4 py-2 flex items-center gap-3">
+            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">baseUrl</span>
+            <template v-if="editingKey === `search.${id}.baseUrl`">
+              <input v-model="editValue" type="text"
+                     class="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white font-mono focus:outline-none" />
+              <button @click="updateEntry(`search.${id}.baseUrl`)" class="p-1 text-neutral-500 hover:text-emerald-400 transition-colors" title="Save">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              </button>
+              <button @click="editingKey = null" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Cancel">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </template>
+            <template v-else>
+              <span class="flex-1 text-sm text-neutral-300 font-mono truncate">{{ searchBaseUrl(id) || '(not set)' }}</span>
+              <button @click="startEdit(searchBaseUrlEntry(id))" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
               </button>
             </template>
