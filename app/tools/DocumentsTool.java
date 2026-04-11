@@ -45,6 +45,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
                 writeDocument authors HTML, PDF, or DOCX from markdown input (markdown is the expected 'content' format). \
                 Supports headings, paragraphs, bold/italic/strikethrough, inline and fenced code, bullet and ordered lists, block quotes, tables, and horizontal rules. \
                 All paths are relative to the agent's workspace. \
+                If the target path already exists, writeDocument picks a non-conflicting name by appending " (1)", " (2)", … before the extension — the actual written path is reported in the response so you can reference the correct filename in your reply to the user. \
                 XLSX and PPTX authoring is not yet supported.""";
     }
 
@@ -112,6 +113,17 @@ public class DocumentsTool implements ToolRegistry.Tool {
                     .formatted(resolved, String.join(", ", WRITE_FORMATS));
         }
 
+        // Avoid clobbering existing files. If the target exists we pick the next
+        // free " (N).ext" slot in the same parent directory. Both the filesystem
+        // target and the relativePath string we report back must be updated so
+        // the markdown download link the LLM echoes into chat actually resolves
+        // to the file we just wrote.
+        var finalTarget = resolveNonConflicting(target);
+        if (!finalTarget.equals(target)) {
+            relativePath = replaceFinalSegment(relativePath, finalTarget.getFileName().toString());
+            target = finalTarget;
+        }
+
         try {
             switch (resolved) {
                 case "html" -> DocumentWriter.writeHtml(target, content);
@@ -128,6 +140,41 @@ public class DocumentsTool implements ToolRegistry.Tool {
         } catch (RuntimeException e) {
             return "Error rendering document: %s".formatted(e.getMessage());
         }
+    }
+
+    /**
+     * Return {@code desired} if no file sits at that path, otherwise the first
+     * " (N)" sibling that's free. Public so {@code DocumentsToolTest} in the
+     * default test package can exercise it against a tmp dir without going
+     * through Agent/workspace plumbing. The loop cap of 1000 is arbitrarily
+     * high — any legitimate workspace will land well before it, and an
+     * uncapped loop is a footgun if something else is racing writes into the
+     * same directory.
+     */
+    public static Path resolveNonConflicting(Path desired) {
+        if (!Files.exists(desired)) return desired;
+        var parent = desired.getParent();
+        var name = desired.getFileName().toString();
+        int dot = name.lastIndexOf('.');
+        var base = (dot <= 0) ? name : name.substring(0, dot);
+        var ext = (dot <= 0) ? "" : name.substring(dot);
+        for (int i = 1; i < 1000; i++) {
+            var candidate = parent.resolve(base + " (" + i + ")" + ext);
+            if (!Files.exists(candidate)) return candidate;
+        }
+        return desired;
+    }
+
+    /**
+     * Replace the final path segment of a relative path string (slash-separated,
+     * as produced by the LLM). Used to mirror the renamed target filename back
+     * into the relativePath reported to the model and echoed into the download
+     * link in chat. Workspaces are unix-style, so {@code /} is the canonical
+     * separator; no Windows backslash handling is needed.
+     */
+    public static String replaceFinalSegment(String relativePath, String newFileName) {
+        int slash = relativePath.lastIndexOf('/');
+        return slash < 0 ? newFileName : relativePath.substring(0, slash + 1) + newFileName;
     }
 
     private static String resolveFormat(String explicit, String path) {
