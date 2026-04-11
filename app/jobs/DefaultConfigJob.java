@@ -66,6 +66,11 @@ public class DefaultConfigJob extends Job<Void> {
         // Web search providers — independent engines, first enabled + keyed one is used.
         // All config lives in the Config DB (editable via Settings UI), not application.conf.
         // See WebSearchTool.SearchProvider for the read paths that consume these values.
+        // Rename-migrate flat {exa,brave,tavily}.apiKey → search.{id}.apiKey before seeding
+        // so any operator-set keys are preserved across the naming change.
+        renameKeyIfPresent("exa.apiKey", "search.exa.apiKey");
+        renameKeyIfPresent("brave.apiKey", "search.brave.apiKey");
+        renameKeyIfPresent("tavily.apiKey", "search.tavily.apiKey");
         seedIfAbsent("search.exa.enabled", "true");
         seedIfAbsent("search.exa.apiKey", "");
         seedIfAbsent("search.exa.baseUrl", "https://api.exa.ai/search");
