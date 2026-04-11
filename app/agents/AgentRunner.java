@@ -599,8 +599,10 @@ public class AgentRunner {
      * Extract markdown image URLs from tool results and stream them directly to the frontend.
      * This ensures rendered images (screenshots, QR codes, etc.) appear in the chat
      * regardless of whether the LLM includes them in its response.
+     *
+     * <p>Exposed for unit tests; not part of the public runner API.
      */
-    private static void extractImageUrls(String toolResult, List<String> collectedImages) {
+    public static void extractImageUrls(String toolResult, List<String> collectedImages) {
         if (collectedImages == null || toolResult == null) return;
         var pattern = java.util.regex.Pattern.compile("!\\[([^\\]]*)\\]\\((/api/[^)]+)\\)");
         var matcher = pattern.matcher(toolResult);
@@ -610,23 +612,37 @@ public class AgentRunner {
     }
 
     /**
-     * Build a leading image block containing only collected images whose URL is
-     * NOT already present in {@code content}. Prevents double-rendering when the
-     * LLM echoes the markdown image from a tool result (which it commonly does,
-     * because tool results like {@code PlaywrightBrowserTool.screenshot()}
-     * literally include an {@code ![Screenshot](url)} hint).
+     * Build a leading image block containing only collected images whose filename
+     * is NOT already present in {@code content}. Prevents double-rendering when the
+     * LLM echoes (or mis-echoes) the markdown image from a tool result.
      *
-     * <p>When the LLM drops the image from its reply, every collected image
-     * survives the filter and the prefix acts as a safety net.
+     * <p>The dedup matches by <em>filename</em> rather than full URL. Filenames in
+     * JClaw are timestamp-suffixed (e.g. {@code screenshot-1713100000000.png}) so
+     * collisions are effectively impossible, and any LLM reply that references the
+     * filename in any form — the original URL, a rewritten path, a plain-text
+     * mention, or a fabricated {@code <img>} tag — will be caught as "already
+     * rendered" and the prepended copy will be skipped. This is strictly looser
+     * than full-URL substring matching and catches LLM reply drift that the older
+     * exact-URL check missed.
+     *
+     * <p>When the LLM drops the image entirely, every collected image survives
+     * the filter and the prefix acts as a safety net so the user still sees it.
+     *
+     * <p>Exposed for unit tests; not part of the public runner API.
      */
-    private static String buildImagePrefix(List<String> collectedImages, String content) {
+    public static String buildImagePrefix(List<String> collectedImages, String content) {
         if (collectedImages == null || collectedImages.isEmpty()) return "";
         var safeContent = content != null ? content : "";
         var urlPattern = java.util.regex.Pattern.compile("\\(([^)]+)\\)");
         var missing = new ArrayList<String>();
         for (var img : collectedImages) {
             var m = urlPattern.matcher(img);
-            if (m.find() && safeContent.contains(m.group(1))) continue;
+            if (m.find()) {
+                var fullUrl = m.group(1);
+                var slash = fullUrl.lastIndexOf('/');
+                var filename = slash >= 0 ? fullUrl.substring(slash + 1) : fullUrl;
+                if (!filename.isEmpty() && safeContent.contains(filename)) continue;
+            }
             missing.add(img);
         }
         return missing.isEmpty() ? "" : String.join("\n\n", missing) + "\n\n";

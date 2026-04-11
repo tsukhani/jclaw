@@ -94,6 +94,25 @@ public class PlaywrightToolTest extends UnitTest {
         PlaywrightBrowserTool.cleanupIdleSessions();
     }
 
+    @Test
+    public void screenshotResultIncludesDoNotReembedInstruction() {
+        // The tool result MUST contain a markdown image tag (so AgentRunner picks it up)
+        // AND an explicit instruction telling the LLM the image is already displayed,
+        // so the LLM doesn't echo a (potentially broken) duplicate in its reply.
+        // See commit history for the duplicate-screenshot bug report.
+        var url = "/api/agents/1/files/screenshot-1000.png";
+        var result = PlaywrightBrowserTool.formatScreenshotResult(url);
+
+        assertTrue(result.contains("![Screenshot](" + url + ")"),
+                "Result must contain a well-formed markdown image tag for the screenshot URL");
+        assertTrue(result.contains("Do NOT re-embed"),
+                "Result must tell the LLM not to re-embed the image");
+        assertTrue(result.contains("already visible"),
+                "Result must state that the image is already visible to the user");
+        assertFalse(result.contains("Display it with:"),
+                "Result must NOT invite the LLM to display the image (the buggy prior wording)");
+    }
+
     private static void deleteDir(java.nio.file.Path dir) {
         if (!Files.exists(dir)) return;
         try (var walk = Files.walk(dir)) {

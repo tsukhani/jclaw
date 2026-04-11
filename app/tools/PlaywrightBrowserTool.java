@@ -146,9 +146,25 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         var path = AgentService.workspacePath(agentName).resolve(filename);
         page.screenshot(new Page.ScreenshotOptions().setPath(path).setFullPage(true));
 
-        // Return a URL the LLM can embed in its markdown response
         var url = "/api/agents/%d/files/%s".formatted(agentId, filename);
-        return "Screenshot saved. Display it with: ![Screenshot](%s)".formatted(url);
+        return formatScreenshotResult(url);
+    }
+
+    /**
+     * Build the tool-result string for a captured screenshot. The markdown image
+     * tag is included so {@code AgentRunner.extractImageUrls} picks it up and
+     * prepends the rendered screenshot to the assistant message. The instruction
+     * mirrors {@code ShellExecTool}'s QR-code handling and prevents the LLM from
+     * re-embedding the same image in its own reply (which would produce a
+     * duplicate or broken placeholder).
+     *
+     * <p>Exposed for unit tests; not part of the public tool API.
+     */
+    public static String formatScreenshotResult(String url) {
+        return ("![Screenshot](%s)\n"
+                + "[Screenshot captured and displayed above to the user. Do NOT re-embed, "
+                + "re-link, or re-fetch this image in your reply — it is already visible.]")
+                .formatted(url);
     }
 
     private String evaluate(String agentName, String expression) {
