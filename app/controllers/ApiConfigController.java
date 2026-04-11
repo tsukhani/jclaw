@@ -71,7 +71,10 @@ public class ApiConfigController extends Controller {
         if (key.startsWith("provider.")) {
             AgentService.syncEnabledStates();
         }
-        if (key.startsWith("jclaw.tools.")) {
+        // Re-register tools when either enable flag flips. Only the .enabled
+        // keys drive ToolRegistry membership — other shell/playwright settings
+        // (allowlist, headless, timeouts) are read at runtime by the tools.
+        if (key.equals("shell.enabled") || key.equals("playwright.enabled")) {
             jobs.ToolRegistrationJob.registerAll();
         }
 

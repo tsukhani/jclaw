@@ -190,7 +190,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         var playwright = Playwright.create();
         var browser = playwright.chromium().launch(
                 new BrowserType.LaunchOptions().setHeadless(
-                        !"false".equals(services.ConfigService.get("jclaw.tools.playwright.headless", "true"))));
+                        !"false".equals(services.ConfigService.get("playwright.headless", "true"))));
         var page = browser.newPage();
         sessions.put(agentName, new BrowserSession(playwright, browser, page, System.currentTimeMillis()));
         return page;

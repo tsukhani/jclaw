@@ -51,12 +51,17 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("chat.maxToolRounds", "10");
         seedIfAbsent("chat.maxContextMessages", "50");
 
-        // Playwright browser tool
-        seedIfAbsent("jclaw.tools.playwright.enabled", "true");
-        seedIfAbsent("jclaw.tools.playwright.headless", "true");
+        // Playwright browser tool — migrate legacy jclaw.tools.playwright.* → playwright.*
+        // before seeding defaults so any operator-set values are preserved.
+        renameKeyIfPresent("jclaw.tools.playwright.enabled", "playwright.enabled");
+        renameKeyIfPresent("jclaw.tools.playwright.headless", "playwright.headless");
+        seedIfAbsent("playwright.enabled", "true");
+        seedIfAbsent("playwright.headless", "true");
 
-        // Shell execution tool
-        seedIfAbsent("jclaw.tools.shell.enabled", "true");
+        // Shell execution tool — consolidate legacy jclaw.tools.shell.enabled under the
+        // existing shell.* namespace so all shell config lives under one prefix.
+        renameKeyIfPresent("jclaw.tools.shell.enabled", "shell.enabled");
+        seedIfAbsent("shell.enabled", "true");
         seedIfAbsent("shell.allowlist",
                 "git,npm,npx,pnpm,node,python,python3,pip,ls,cat,head,tail,grep,find,wc,sort,uniq,diff,mkdir,cp,mv,echo,curl,wget,jq,tar,zip,unzip");
         seedIfAbsent("shell.defaultTimeoutSeconds", "30");
@@ -81,21 +86,30 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("search.tavily.apiKey", "");
         seedIfAbsent("search.tavily.baseUrl", "https://api.tavily.com/search");
 
-        // Skill binary malware scanners — independent hash-lookup APIs, composed under OR.
+        // Malware scanners — independent hash-lookup APIs, composed under OR.
         // Keys are seeded empty; each scanner is inert until an operator provides its key.
         // All scanner configuration lives in the Config DB (editable via Settings UI),
         // not in application.conf. See MalwareBazaarScanner/MetaDefenderCloudScanner for
         // the read paths that consume these values.
+        // Migrate legacy skills.scanner.* → scanner.* before seeding so operator-set keys survive.
+        renameKeyIfPresent("skills.scanner.malwarebazaar.enabled", "scanner.malwarebazaar.enabled");
+        renameKeyIfPresent("skills.scanner.malwarebazaar.authKey", "scanner.malwarebazaar.authKey");
+        renameKeyIfPresent("skills.scanner.malwarebazaar.url", "scanner.malwarebazaar.url");
+        renameKeyIfPresent("skills.scanner.malwarebazaar.timeoutMs", "scanner.malwarebazaar.timeoutMs");
+        renameKeyIfPresent("skills.scanner.metadefender.enabled", "scanner.metadefender.enabled");
+        renameKeyIfPresent("skills.scanner.metadefender.apiKey", "scanner.metadefender.apiKey");
+        renameKeyIfPresent("skills.scanner.metadefender.url", "scanner.metadefender.url");
+        renameKeyIfPresent("skills.scanner.metadefender.timeoutMs", "scanner.metadefender.timeoutMs");
         // MalwareBazaar Auth-Key: free, from https://auth.abuse.ch/
-        seedIfAbsent("skills.scanner.malwarebazaar.enabled", "true");
-        seedIfAbsent("skills.scanner.malwarebazaar.authKey", "");
-        seedIfAbsent("skills.scanner.malwarebazaar.url", "https://mb-api.abuse.ch/api/v1/");
-        seedIfAbsent("skills.scanner.malwarebazaar.timeoutMs", "5000");
+        seedIfAbsent("scanner.malwarebazaar.enabled", "true");
+        seedIfAbsent("scanner.malwarebazaar.authKey", "");
+        seedIfAbsent("scanner.malwarebazaar.url", "https://mb-api.abuse.ch/api/v1/");
+        seedIfAbsent("scanner.malwarebazaar.timeoutMs", "5000");
         // MetaDefender Cloud API key: free 4,000 req/day, from https://metadefender.opswat.com/
-        seedIfAbsent("skills.scanner.metadefender.enabled", "true");
-        seedIfAbsent("skills.scanner.metadefender.apiKey", "");
-        seedIfAbsent("skills.scanner.metadefender.url", "https://api.metadefender.com/v4/");
-        seedIfAbsent("skills.scanner.metadefender.timeoutMs", "5000");
+        seedIfAbsent("scanner.metadefender.enabled", "true");
+        seedIfAbsent("scanner.metadefender.apiKey", "");
+        seedIfAbsent("scanner.metadefender.url", "https://api.metadefender.com/v4/");
+        seedIfAbsent("scanner.metadefender.timeoutMs", "5000");
     }
 
     private void seedDefaultAgent() {

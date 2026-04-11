@@ -31,7 +31,7 @@ import java.util.ArrayList;
  *
  * <p>Free tier: 4,000 requests/day with no per-minute throttling. Get a key
  * at https://metadefender.opswat.com/ and save it under
- * {@code skills.scanner.metadefender.apiKey}.
+ * {@code scanner.metadefender.apiKey}.
  */
 public class MetaDefenderCloudScanner implements Scanner {
 
@@ -48,9 +48,9 @@ public class MetaDefenderCloudScanner implements Scanner {
     @Override
     public boolean isEnabled() {
         var enabled = "true".equalsIgnoreCase(
-                ConfigService.get("skills.scanner.metadefender.enabled", "true"));
+                ConfigService.get("scanner.metadefender.enabled", "true"));
         if (!enabled) return false;
-        var key = ConfigService.get("skills.scanner.metadefender.apiKey");
+        var key = ConfigService.get("scanner.metadefender.apiKey");
         if (key == null || key.isBlank()) {
             warnMissingKeyOnce();
             return false;
@@ -63,7 +63,7 @@ public class MetaDefenderCloudScanner implements Scanner {
         if (missingKeyWarned) return;
         missingKeyWarned = true;
         EventLogger.warn("scanner",
-                "MetaDefender scanning is enabled but skills.scanner.metadefender.apiKey is not set — "
+                "MetaDefender scanning is enabled but scanner.metadefender.apiKey is not set — "
                         + "this scanner is a no-op. Get a free 4,000 req/day key at "
                         + "https://metadefender.opswat.com/ and save it via the Config table.");
     }
@@ -80,11 +80,11 @@ public class MetaDefenderCloudScanner implements Scanner {
     @Override
     public Verdict lookup(String sha256) {
         var baseUrl = ConfigService.get(
-                "skills.scanner.metadefender.url", "https://api.metadefender.com/v4/");
+                "scanner.metadefender.url", "https://api.metadefender.com/v4/");
         if (!baseUrl.endsWith("/")) baseUrl = baseUrl + "/";
         var timeoutMs = parseInt(ConfigService.get(
-                "skills.scanner.metadefender.timeoutMs", "5000"), 5000);
-        var apiKey = ConfigService.get("skills.scanner.metadefender.apiKey");
+                "scanner.metadefender.timeoutMs", "5000"), 5000);
+        var apiKey = ConfigService.get("scanner.metadefender.apiKey");
 
         try {
             var request = HttpRequest.newBuilder(URI.create(baseUrl + "hash/" + sha256))

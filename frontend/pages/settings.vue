@@ -30,32 +30,22 @@ function isSensitive(key: string) {
   return ['key', 'secret', 'password', 'token'].some(s => lower.includes(s))
 }
 
-// Config keys managed by dedicated UI sections (excluded from the Unmanaged list).
-// Exact matches for fixed keys; see MANAGED_CONFIG_PATTERNS for dynamic per-agent keys.
-const MANAGED_CONFIG_KEYS = new Set([
-  'chat.maxToolRounds', 'chat.maxContextMessages',
-  'jclaw.tools.playwright.enabled', 'jclaw.tools.playwright.headless',
-  'jclaw.tools.shell.enabled', 'shell.allowlist', 'shell.defaultTimeoutSeconds',
-  'shell.maxTimeoutSeconds', 'shell.maxOutputBytes',
-  'skills.scanner.malwarebazaar.enabled', 'skills.scanner.malwarebazaar.authKey',
-  'skills.scanner.malwarebazaar.url', 'skills.scanner.malwarebazaar.timeoutMs',
-  'skills.scanner.metadefender.enabled', 'skills.scanner.metadefender.apiKey',
-  'skills.scanner.metadefender.url', 'skills.scanner.metadefender.timeoutMs',
-  'search.exa.enabled', 'search.exa.apiKey', 'search.exa.baseUrl',
-  'search.brave.enabled', 'search.brave.apiKey', 'search.brave.baseUrl',
-  'search.tavily.enabled', 'search.tavily.apiKey', 'search.tavily.baseUrl',
-])
-
-// Dynamic keys owned by other pages (name part varies). Patterns match the full key.
-// - agent.{name}.shell.* — per-agent shell privileges, owned by the Agents page detail view
-//   (see frontend/pages/agents.vue), gated to the main agent in ApiConfigController.
-const MANAGED_CONFIG_PATTERNS: RegExp[] = [
-  /^agent\.[^.]+\.shell\.(bypassAllowlist|allowGlobalPaths)$/,
+// Top-level Config DB prefixes claimed by a UI domain. Any row whose key starts
+// with one of these is owned somewhere in the app and should not surface in the
+// Unmanaged diagnostic list — regardless of which page actually manages it.
+// Keeps Settings free of exact-key knowledge about other pages' config.
+const MANAGED_PREFIXES = [
+  'provider.',    // LLM providers — Settings
+  'search.',      // Search providers — Settings
+  'scanner.',     // Malware scanners — Settings
+  'chat.',        // Chat settings — Settings
+  'shell.',       // Shell execution defaults + enabled toggle — Settings
+  'playwright.',  // Playwright browser tool — Settings
+  'agent.',       // Per-agent config (shell privileges, queue mode, etc.) — Agents page
 ]
 
 function isManagedKey(key: string): boolean {
-  if (MANAGED_CONFIG_KEYS.has(key)) return true
-  return MANAGED_CONFIG_PATTERNS.some(re => re.test(key))
+  return MANAGED_PREFIXES.some(p => key.startsWith(p))
 }
 
 // Chat config
@@ -86,23 +76,23 @@ async function saveChatField(configKey: string, value: string) {
 // Playwright config
 const playwrightEnabled = computed(() => {
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === 'jclaw.tools.playwright.enabled')?.value === 'true'
+  return entries.find((e: any) => e.key === 'playwright.enabled')?.value === 'true'
 })
 
 const playwrightHeadless = computed(() => {
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === 'jclaw.tools.playwright.headless')?.value !== 'false'
+  return entries.find((e: any) => e.key === 'playwright.headless')?.value !== 'false'
 })
 
 async function togglePlaywrightEnabled() {
   const newVal = playwrightEnabled.value ? 'false' : 'true'
-  await $fetch('/api/config', { method: 'POST', body: { key: 'jclaw.tools.playwright.enabled', value: newVal } })
+  await $fetch('/api/config', { method: 'POST', body: { key: 'playwright.enabled', value: newVal } })
   refresh()
 }
 
 async function togglePlaywrightHeadless() {
   const newVal = playwrightHeadless.value ? 'false' : 'true'
-  await $fetch('/api/config', { method: 'POST', body: { key: 'jclaw.tools.playwright.headless', value: newVal } })
+  await $fetch('/api/config', { method: 'POST', body: { key: 'playwright.headless', value: newVal } })
   refresh()
 }
 
@@ -111,7 +101,7 @@ const SHELL_KEYS = ['shell.allowlist', 'shell.defaultTimeoutSeconds', 'shell.max
 
 const shellEnabled = computed(() => {
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === 'jclaw.tools.shell.enabled')?.value === 'true'
+  return entries.find((e: any) => e.key === 'shell.enabled')?.value === 'true'
 })
 
 const shellConfig = computed(() => {
@@ -153,7 +143,7 @@ async function saveShellField(configKey: string, value: string) {
 
 async function toggleShellEnabled() {
   const newVal = shellEnabled.value ? 'false' : 'true'
-  await $fetch('/api/config', { method: 'POST', body: { key: 'jclaw.tools.shell.enabled', value: newVal } })
+  await $fetch('/api/config', { method: 'POST', body: { key: 'shell.enabled', value: newVal } })
   refresh()
 }
 
@@ -261,9 +251,9 @@ const SCANNER_PROVIDERS: Record<string, {
     description: 'Community malware repository curated by abuse.ch. Returns family labels (e.g. "Mirai", "Emotet") for hashes that have been submitted by researchers. Research-grade coverage — sometimes catches fresh-campaign samples before commercial AV vendors. Free under fair use.',
     signupUrl: 'https://auth.abuse.ch/',
     signupLabel: 'auth.abuse.ch',
-    enabledKey: 'skills.scanner.malwarebazaar.enabled',
+    enabledKey: 'scanner.malwarebazaar.enabled',
     apiKey: {
-      key: 'skills.scanner.malwarebazaar.authKey',
+      key: 'scanner.malwarebazaar.authKey',
       label: 'authKey',
       placeholder: 'Auth-Key from https://auth.abuse.ch/',
     },
@@ -273,9 +263,9 @@ const SCANNER_PROVIDERS: Record<string, {
     description: 'Multi-engine aggregator combining verdicts from dozens of commercial AV engines (ESET, Kaspersky, Sophos, Bitdefender, and more). Broader coverage than any single catalog. Free tier: 4,000 requests/day with no per-minute throttling.',
     signupUrl: 'https://metadefender.opswat.com/',
     signupLabel: 'metadefender.opswat.com',
-    enabledKey: 'skills.scanner.metadefender.enabled',
+    enabledKey: 'scanner.metadefender.enabled',
     apiKey: {
-      key: 'skills.scanner.metadefender.apiKey',
+      key: 'scanner.metadefender.apiKey',
       label: 'apiKey',
       placeholder: 'API key from https://metadefender.opswat.com/',
     },

@@ -23,10 +23,10 @@ public class ToolRegistrationJob extends Job<Void> {
         ToolRegistry.register(new WebFetchTool());
         ToolRegistry.register(new WebSearchTool());
         ToolRegistry.register(new SkillsTool());
-        if (isToolEnabled("jclaw.tools.playwright.enabled")) {
+        if (isToolEnabled("playwright.enabled")) {
             ToolRegistry.register(new PlaywrightBrowserTool());
         }
-        if (isToolEnabled("jclaw.tools.shell.enabled")) {
+        if (isToolEnabled("shell.enabled")) {
             ToolRegistry.register(new ShellExecTool());
         }
         ToolRegistry.publish();

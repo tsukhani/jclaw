@@ -41,11 +41,11 @@ public class SkillBinaryScannerTest extends UnitTest {
         // require live API access skip cleanly when the relevant env var is unset.
         var mbKey = System.getenv("MALWAREBAZAAR_AUTH_KEY");
         if (mbKey != null && !mbKey.isBlank()) {
-            ConfigService.set("skills.scanner.malwarebazaar.authKey", mbKey);
+            ConfigService.set("scanner.malwarebazaar.authKey", mbKey);
         }
         var mdKey = System.getenv("METADEFENDER_API_KEY");
         if (mdKey != null && !mdKey.isBlank()) {
-            ConfigService.set("skills.scanner.metadefender.apiKey", mdKey);
+            ConfigService.set("scanner.metadefender.apiKey", mdKey);
         }
     }
 
@@ -194,38 +194,38 @@ public class SkillBinaryScannerTest extends UnitTest {
         var mdScanner = new MetaDefenderCloudScanner();
 
         // State: both blank → both disabled
-        ConfigService.set("skills.scanner.malwarebazaar.authKey", "");
-        ConfigService.set("skills.scanner.metadefender.apiKey", "");
+        ConfigService.set("scanner.malwarebazaar.authKey", "");
+        ConfigService.set("scanner.metadefender.apiKey", "");
         assertFalse(mbScanner.isEnabled(), "MalwareBazaar must be disabled with no key");
         assertFalse(mdScanner.isEnabled(), "MetaDefender must be disabled with no key");
 
         // State: only MalwareBazaar key set → MB enabled, MD still disabled
-        ConfigService.set("skills.scanner.malwarebazaar.authKey", "test-mb-key");
-        ConfigService.set("skills.scanner.metadefender.apiKey", "");
+        ConfigService.set("scanner.malwarebazaar.authKey", "test-mb-key");
+        ConfigService.set("scanner.metadefender.apiKey", "");
         assertTrue(mbScanner.isEnabled(), "MalwareBazaar must be enabled with key set");
         assertFalse(mdScanner.isEnabled(),
                 "MetaDefender must remain disabled when only MalwareBazaar key is set");
 
         // State: only MetaDefender key set → MD enabled, MB disabled
-        ConfigService.set("skills.scanner.malwarebazaar.authKey", "");
-        ConfigService.set("skills.scanner.metadefender.apiKey", "test-md-key");
+        ConfigService.set("scanner.malwarebazaar.authKey", "");
+        ConfigService.set("scanner.metadefender.apiKey", "test-md-key");
         assertFalse(mbScanner.isEnabled(),
                 "MalwareBazaar must remain disabled when only MetaDefender key is set");
         assertTrue(mdScanner.isEnabled(), "MetaDefender must be enabled with key set");
 
         // State: both keys set → both enabled (OR composition)
-        ConfigService.set("skills.scanner.malwarebazaar.authKey", "test-mb-key");
-        ConfigService.set("skills.scanner.metadefender.apiKey", "test-md-key");
+        ConfigService.set("scanner.malwarebazaar.authKey", "test-mb-key");
+        ConfigService.set("scanner.metadefender.apiKey", "test-md-key");
         assertTrue(mbScanner.isEnabled(), "MalwareBazaar must be enabled");
         assertTrue(mdScanner.isEnabled(), "MetaDefender must be enabled alongside MalwareBazaar");
 
         // Restore real keys from env (or clear) so subsequent tests behave
         // according to what they explicitly expect.
         var mbKey = System.getenv("MALWAREBAZAAR_AUTH_KEY");
-        ConfigService.set("skills.scanner.malwarebazaar.authKey",
+        ConfigService.set("scanner.malwarebazaar.authKey",
                 mbKey != null && !mbKey.isBlank() ? mbKey : "");
         var mdKey = System.getenv("METADEFENDER_API_KEY");
-        ConfigService.set("skills.scanner.metadefender.apiKey",
+        ConfigService.set("scanner.metadefender.apiKey",
                 mdKey != null && !mdKey.isBlank() ? mdKey : "");
     }
 
