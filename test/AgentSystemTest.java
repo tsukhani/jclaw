@@ -19,7 +19,7 @@ public class AgentSystemTest extends UnitTest {
     private static final String[] TEST_AGENTS = {
             "test-agent", "ws-agent", "missing-agent", "enabled-1", "disabled-1",
             "skill-agent", "xml-agent", "convo-agent", "msg-agent", "prompt-agent",
-            "minimal-agent", "no-skills", "main", "window-agent"
+            "minimal-agent", "no-skills", "main", "window-agent", "delete-agent"
     };
 
     @BeforeEach
@@ -268,6 +268,79 @@ public class AgentSystemTest extends UnitTest {
         // Idempotency: a second run is a no-op and doesn't clobber the new value
         rename.invoke(job, "agent.maxToolRounds", "chat.maxToolRounds");
         assertEquals("25", ConfigService.get("chat.maxToolRounds"));
+    }
+
+    // --- Cascade delete ---
+
+    @Test
+    public void deleteAgentCascadesChildRows() throws Exception {
+        // Seed an agent plus one row in every FK-constrained child table so the delete
+        // path has to clear each one. Creation itself writes an AgentToolConfig (the
+        // seeded "browser=disabled" for non-main agents), so that table is pre-populated.
+        var agent = AgentService.create("delete-agent", "openrouter", "gpt-4.1", null);
+
+        var skillConfig = new models.AgentSkillConfig();
+        skillConfig.agent = agent;
+        skillConfig.skillName = "test-skill";
+        skillConfig.enabled = true;
+        skillConfig.save();
+
+        var binding = new models.AgentBinding();
+        binding.agent = agent;
+        binding.channelType = "web";
+        binding.peerId = "test-peer";
+        binding.save();
+
+        var convo = new models.Conversation();
+        convo.agent = agent;
+        convo.channelType = "web";
+        convo.peerId = "test-peer";
+        convo.save();
+
+        var msg = new models.Message();
+        msg.conversation = convo;
+        msg.role = "user";
+        msg.content = "hello";
+        msg.save();
+
+        var task = new models.Task();
+        task.agent = agent;
+        task.name = "test-task";
+        task.type = models.Task.Type.IMMEDIATE;
+        task.save();
+
+        var mem = new models.Memory();
+        mem.agentId = "delete-agent";
+        mem.text = "remember this";
+        mem.save();
+
+        ConfigService.set("agent.delete-agent.shell.bypassAllowlist", "true");
+        ConfigService.set("agent.delete-agent.queue.mode", "queue");
+
+        var workspace = AgentService.workspacePath("delete-agent");
+        assertTrue(Files.exists(workspace), "precondition: workspace directory exists");
+
+        // Capture ids before delete — after AgentService.delete() the Java references are
+        // detached and Hibernate will reject them in parameterized queries. Counting by id
+        // keeps the assertions independent of the now-transient entities.
+        var agentId = agent.id;
+        var convoId = convo.id;
+
+        // Act
+        AgentService.delete(agent);
+
+        // Assert: agent itself and every child row are gone
+        assertNull(Agent.findByName("delete-agent"));
+        assertEquals(0L, models.AgentToolConfig.count("agent.id = ?1", agentId));
+        assertEquals(0L, models.AgentSkillConfig.count("agent.id = ?1", agentId));
+        assertEquals(0L, models.AgentBinding.count("agent.id = ?1", agentId));
+        assertEquals(0L, models.Conversation.count("agent.id = ?1", agentId));
+        assertEquals(0L, models.Message.count("conversation.id = ?1", convoId));
+        assertEquals(0L, models.Task.count("agent.id = ?1", agentId));
+        assertEquals(0L, models.Memory.count("agentId = ?1", "delete-agent"));
+        assertNull(ConfigService.get("agent.delete-agent.shell.bypassAllowlist"));
+        assertNull(ConfigService.get("agent.delete-agent.queue.mode"));
+        assertFalse(Files.exists(workspace), "workspace directory should be removed");
     }
 
     // --- SystemPromptAssembler tests ---

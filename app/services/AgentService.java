@@ -2,12 +2,22 @@ package services;
 
 import llm.ProviderRegistry;
 import models.Agent;
+import models.AgentBinding;
+import models.AgentSkillConfig;
+import models.AgentToolConfig;
+import models.Config;
+import models.Conversation;
+import models.Memory;
+import models.Message;
+import models.Task;
 import play.Play;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Stream;
 
 public class AgentService {
 
@@ -94,9 +104,78 @@ public class AgentService {
         }
     }
 
+    /**
+     * Delete an agent and every child row that references it. Play 1.x has no
+     * JPA cascade configured on the Agent relationships, so each child table
+     * must be swept explicitly — otherwise the parent delete trips an H2
+     * referential-integrity error.
+     *
+     * <p>Order matters: deeper descendants (Message → Conversation → Agent)
+     * must go first. Task.agent is nullable but still FK-constrained, so tasks
+     * tied to this agent are deleted wholesale rather than nulled out (an
+     * orphaned task has no meaning without its agent). Config rows under
+     * {@code agent.{name}.*} and Memory rows keyed by agent name are also
+     * purged to avoid orphaned diagnostic data.
+     *
+     * <p>The on-disk workspace directory is removed last, after DB state is
+     * clean, so a failed delete leaves the filesystem in a recoverable state.
+     */
     public static void delete(Agent agent) {
-        EventLogger.info("agent", agent.name, null, "Agent deleted");
+        var agentId = agent.id;
+        var agentName = agent.name;
+
+        // Iterate + delete each child row individually rather than using bulk HQL
+        // deletes. Play 1.x's Model.delete(hql, params) runs a raw SQL DELETE but
+        // does NOT evict entities from the Hibernate session cache, so any child
+        // entity previously loaded or created in this request (e.g. the
+        // AgentToolConfig for the browser tool, seeded by AgentService.create())
+        // stays in the session pointing at the agent. When the final agent.delete()
+        // triggers a flush, Hibernate walks those stale cached entities and trips a
+        // TransientPropertyValueException. Per-entity deletes keep the session
+        // coherent at the cost of a few extra SQL round-trips — fine here because
+        // row counts per agent are small.
+
+        // Conversations cascade through their messages (Message → Conversation FK optional=false).
+        List<Conversation> conversations = Conversation.find("agent.id = ?1", agentId).fetch();
+        for (Conversation convo : conversations) {
+            List<Message> messages = Message.find("conversation.id = ?1", convo.id).fetch();
+            for (Message msg : messages) msg.delete();
+            convo.delete();
+        }
+
+        List<AgentToolConfig> toolConfigs = AgentToolConfig.find("agent.id = ?1", agentId).fetch();
+        for (AgentToolConfig c : toolConfigs) c.delete();
+
+        List<AgentSkillConfig> skillConfigs = AgentSkillConfig.find("agent.id = ?1", agentId).fetch();
+        for (AgentSkillConfig c : skillConfigs) c.delete();
+
+        List<AgentBinding> bindings = AgentBinding.find("agent.id = ?1", agentId).fetch();
+        for (AgentBinding b : bindings) b.delete();
+
+        List<Task> tasks = Task.find("agent.id = ?1", agentId).fetch();
+        for (Task t : tasks) t.delete();
+
+        // Name-keyed side data (no FK, so no cascade risk — bulk delete is fine).
+        Memory.delete("agentId = ?1", agentName);
+        Config.delete("key LIKE ?1", "agent." + agentName + ".%");
+        ConfigService.clearCache();
+
         agent.delete();
+        deleteWorkspaceDirectory(agentName);
+        EventLogger.info("agent", agentName, null, "Agent deleted");
+    }
+
+    private static void deleteWorkspaceDirectory(String agentName) {
+        var dir = workspacePath(agentName);
+        if (!Files.exists(dir)) return;
+        try (Stream<Path> paths = Files.walk(dir)) {
+            paths.sorted(Comparator.reverseOrder()).forEach(p -> {
+                try { Files.delete(p); } catch (IOException _) { /* best-effort */ }
+            });
+        } catch (IOException e) {
+            EventLogger.warn("agent", "Failed to remove workspace for deleted agent %s: %s"
+                    .formatted(agentName, e.getMessage()));
+        }
     }
 
     public static List<Agent> listAll() {
