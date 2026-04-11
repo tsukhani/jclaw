@@ -23,20 +23,13 @@ public class ToolRegistrationJob extends Job<Void> {
         ToolRegistry.register(new WebFetchTool());
         ToolRegistry.register(new WebSearchTool());
         ToolRegistry.register(new SkillsTool());
-        if (isToolEnabled("playwright.enabled")) {
+        if ("true".equals(services.ConfigService.get("playwright.enabled"))) {
             ToolRegistry.register(new PlaywrightBrowserTool());
         }
-        if (isToolEnabled("shell.enabled")) {
+        if ("true".equals(services.ConfigService.get("shell.enabled"))) {
             ToolRegistry.register(new ShellExecTool());
         }
         ToolRegistry.publish();
         services.EventLogger.info("system", "Registered %d tools".formatted(ToolRegistry.listTools().size()));
-    }
-
-    /** Check Config DB first (set by Settings UI), fall back to application.conf. */
-    private static boolean isToolEnabled(String key) {
-        var dbValue = services.ConfigService.get(key);
-        if (dbValue != null) return "true".equals(dbValue);
-        return "true".equals(play.Play.configuration.getProperty(key, "false"));
     }
 }
