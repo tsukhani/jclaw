@@ -232,6 +232,114 @@ public class ToolSystemTest extends UnitTest {
         assertTrue(result.contains("escapes"));
     }
 
+    @Test
+    public void fileSystemAppendCreatesMissingFile() {
+        // appendFile on a non-existent path should create it, letting the LLM
+        // start a chunked build without first calling writeFile.
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "appendFile", "path": "append-new.txt", "content": "first chunk"}
+                """, agent);
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "readFile", "path": "append-new.txt"}
+                """, agent);
+        assertEquals("first chunk", result);
+    }
+
+    @Test
+    public void fileSystemAppendConcatenates() {
+        // The canonical "chunked build" flow: one writeFile, multiple appends.
+        // The final readFile must return the chunks in call order with no
+        // separator magic — the LLM controls newlines via the content strings.
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "chunks.md", "content": "# Part 1\\n"}
+                """, agent);
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "appendFile", "path": "chunks.md", "content": "# Part 2\\n"}
+                """, agent);
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "appendFile", "path": "chunks.md", "content": "# Part 3\\n"}
+                """, agent);
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "readFile", "path": "chunks.md"}
+                """, agent);
+        assertEquals("# Part 1\n# Part 2\n# Part 3\n", result);
+    }
+
+    @Test
+    public void documentsRenderFromMarkdownSource() throws Exception {
+        // End-to-end of the large-doc authoring pattern: draft markdown in the
+        // workspace via writeFile + appendFile, then render once through the
+        // documents tool. Proves the source path is read, the target is
+        // written, and the non-conflict auto-rename still applies.
+        ToolRegistry.register(new tools.DocumentsTool());
+        ToolRegistry.publish();
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "draft.md", "content": "# Title\\n\\nPart one.\\n"}
+                """, agent);
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "appendFile", "path": "draft.md", "content": "\\nPart two.\\n"}
+                """, agent);
+        var result = ToolRegistry.execute("documents",
+                """
+                {"action": "renderDocument", "sourcePath": "draft.md", "path": "out.html"}
+                """, agent);
+        assertTrue(result.contains("Document written"), "expected success: " + result);
+        assertTrue(result.contains("out.html"));
+        var workspace = AgentService.workspacePath(agent.name);
+        var rendered = workspace.resolve("out.html");
+        assertTrue(Files.exists(rendered), "rendered file should exist on disk");
+        var body = Files.readString(rendered);
+        assertTrue(body.contains("Title"));
+        assertTrue(body.contains("Part one"));
+        assertTrue(body.contains("Part two"));
+    }
+
+    @Test
+    public void documentsRenderMissingSourcePath() {
+        ToolRegistry.register(new tools.DocumentsTool());
+        ToolRegistry.publish();
+        var result = ToolRegistry.execute("documents",
+                """
+                {"action": "renderDocument", "path": "out.docx"}
+                """, agent);
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains("sourcePath"));
+    }
+
+    @Test
+    public void documentsRenderSourcePathNotFound() {
+        ToolRegistry.register(new tools.DocumentsTool());
+        ToolRegistry.publish();
+        var result = ToolRegistry.execute("documents",
+                """
+                {"action": "renderDocument", "sourcePath": "does-not-exist.md", "path": "out.html"}
+                """, agent);
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains("not found"));
+    }
+
+    @Test
+    public void fileSystemAppendRejectsSkillDefinitionFile() {
+        // SKILL.md files route through SkillLoader.finalizeSkillMdWrite for
+        // version bumps — appending bypasses that pipeline, so it's rejected
+        // rather than silently breaking skill versioning.
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "appendFile", "path": "skills/test-skill/SKILL.md", "content": "extra\\n"}
+                """, agent);
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains("SKILL.md"));
+        assertTrue(result.contains("writeFile"));
+    }
+
     // --- Symlink and obfuscated-traversal coverage for the canonical
     //     containment helpers in AgentService. The lexical-only validator
     //     used to allow a workspace-internal symlink whose target was

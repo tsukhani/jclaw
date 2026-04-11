@@ -43,9 +43,10 @@ public class DocumentsTool implements ToolRegistry.Tool {
                 Read and write rich document formats. \
                 readDocument extracts text from PDF, DOCX, DOC, XLSX, PPTX, RTF, ODT, HTML, EPUB and more via Apache Tika. \
                 writeDocument authors HTML, PDF, or DOCX from markdown input (markdown is the expected 'content' format). \
+                renderDocument reads an existing markdown file from the workspace (via 'sourcePath') and renders it to HTML, PDF, or DOCX — use this for large documents: draft the markdown in chunks via filesystem.writeFile + filesystem.appendFile (as many calls as needed), then render once with this action. This avoids hitting your output token budget on a single giant writeDocument call. \
                 Supports headings, paragraphs, bold/italic/strikethrough, inline and fenced code, bullet and ordered lists, block quotes, tables, and horizontal rules. \
                 All paths are relative to the agent's workspace. \
-                If the target path already exists, writeDocument picks a non-conflicting name by appending " (1)", " (2)", … before the extension — the actual written path is reported in the response so you can reference the correct filename in your reply to the user. \
+                If the target path already exists, writeDocument and renderDocument pick a non-conflicting name by appending " (1)", " (2)", … before the extension — the actual written path is reported in the response so you can reference the correct filename in your reply to the user. \
                 XLSX and PPTX authoring is not yet supported.""";
     }
 
@@ -55,15 +56,17 @@ public class DocumentsTool implements ToolRegistry.Tool {
                 "type", "object",
                 "properties", Map.of(
                         "action", Map.of("type", "string",
-                                "enum", List.of("readDocument", "writeDocument"),
+                                "enum", List.of("readDocument", "writeDocument", "renderDocument"),
                                 "description", "The document operation to perform"),
                         "path", Map.of("type", "string",
-                                "description", "File path relative to the agent workspace"),
+                                "description", "File path relative to the agent workspace (target for writeDocument/renderDocument, source for readDocument)"),
+                        "sourcePath", Map.of("type", "string",
+                                "description", "For renderDocument only: workspace-relative path to an existing markdown file whose contents should be rendered to 'path'."),
                         "content", Map.of("type", "string",
                                 "description", "Markdown content to render (writeDocument only)"),
                         "format", Map.of("type", "string",
                                 "enum", WRITE_FORMATS,
-                                "description", "Output format for writeDocument: html, pdf, or docx. If omitted, inferred from the path extension.")
+                                "description", "Output format for writeDocument/renderDocument: html, pdf, or docx. If omitted, inferred from the target path extension.")
                 ),
                 "required", List.of("action", "path")
         );
@@ -87,6 +90,30 @@ public class DocumentsTool implements ToolRegistry.Tool {
             case "writeDocument" -> {
                 var content = args.has("content") && !args.get("content").isJsonNull()
                         ? args.get("content").getAsString() : "";
+                var format = args.has("format") && !args.get("format").isJsonNull()
+                        ? args.get("format").getAsString() : null;
+                yield writeDocument(target, relativePath, content, format);
+            }
+            case "renderDocument" -> {
+                if (!args.has("sourcePath") || args.get("sourcePath").isJsonNull()) {
+                    yield "Error: renderDocument requires 'sourcePath' (workspace-relative markdown file to render).";
+                }
+                var sourceRelative = args.get("sourcePath").getAsString();
+                Path source;
+                try {
+                    source = AgentService.acquireWorkspacePath(agent.name, sourceRelative);
+                } catch (SecurityException e) {
+                    yield "Error: sourcePath '%s' escapes the workspace directory.".formatted(sourceRelative);
+                }
+                if (!Files.exists(source)) {
+                    yield "Error: sourcePath not found: %s".formatted(sourceRelative);
+                }
+                String content;
+                try {
+                    content = Files.readString(source);
+                } catch (IOException e) {
+                    yield "Error reading sourcePath: %s".formatted(e.getMessage());
+                }
                 var format = args.has("format") && !args.get("format").isJsonNull()
                         ? args.get("format").getAsString() : null;
                 yield writeDocument(target, relativePath, content, format);

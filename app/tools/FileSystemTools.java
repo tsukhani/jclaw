@@ -35,10 +35,11 @@ public class FileSystemTools implements ToolRegistry.Tool {
                 Actions: \
                 'readFile' reads a file (1 MB cap; use the 'documents' tool for PDF/DOCX/XLSX/PPTX). \
                 'writeFile' creates or overwrites a file with its full content — use only for brand-new files or wholesale replacement. \
+                'appendFile' appends content to the end of an existing file, or creates it if missing. Use this to build up large files across multiple tool calls when a single writeFile would exceed your output token budget (e.g. long markdown drafts, logs, incremental emission). The LLM picks the chunk size. \
                 'editFile' is the DEFAULT for modifying an existing file: it applies a batch of {oldText, newText} replacements. Each oldText must appear exactly once in the file; include enough surrounding context to disambiguate. Optionally set regex: true on an edit entry to treat oldText as a Java regex (with $1 backreferences in newText). Edits apply atomically — if any entry fails, nothing is written. \
                 'applyPatch' applies a multi-file patch in OpenClaw/unified-diff format (*** Begin Patch / *** Update File: / *** Add File: / *** Delete File: / *** Move to: / *** End of File / *** End Patch). All files are validated before any are written. \
                 'listFiles' lists a directory. \
-                All paths are relative to the workspace. For rich document formats use the 'documents' tool.""";
+                All paths are relative to the workspace. For rich document formats use the 'documents' tool — and for large rich documents, draft the markdown here via writeFile + appendFile, then call documents.renderDocument with the source path.""";
     }
 
     @Override
@@ -50,12 +51,12 @@ public class FileSystemTools implements ToolRegistry.Tool {
                 "type", "object",
                 "properties", Map.of(
                         "action", Map.of("type", "string",
-                                "enum", List.of("readFile", "writeFile", "listFiles", "editFile", "applyPatch"),
+                                "enum", List.of("readFile", "writeFile", "appendFile", "listFiles", "editFile", "applyPatch"),
                                 "description", "The file operation to perform"),
                         "path", Map.of("type", "string",
                                 "description", "File or directory path relative to workspace (required for all actions except applyPatch)"),
                         "content", Map.of("type", "string",
-                                "description", "Content to write (for writeFile action)"),
+                                "description", "Content to write (for writeFile and appendFile actions)"),
                         "edits", Map.of("type", "array",
                                 "description", "List of {oldText, newText, regex?} replacements for editFile action",
                                 "items", Map.of(
@@ -112,6 +113,10 @@ public class FileSystemTools implements ToolRegistry.Tool {
                 var content = args.has("content") ? args.get("content").getAsString() : "";
                 return writeFile(target, content);
             });
+            case "appendFile" -> withLock(target, () -> {
+                var content = args.has("content") ? args.get("content").getAsString() : "";
+                return appendFile(target, content);
+            });
             case "editFile" -> withLock(target, () -> {
                 if (!args.has("edits") || !args.get("edits").isJsonArray()) {
                     return "Error: editFile requires an 'edits' array";
@@ -123,7 +128,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
     }
 
     private static boolean isMutatingAction(String action) {
-        return "writeFile".equals(action) || "editFile".equals(action);
+        return "writeFile".equals(action) || "appendFile".equals(action) || "editFile".equals(action);
     }
 
     /**
@@ -193,6 +198,38 @@ public class FileSystemTools implements ToolRegistry.Tool {
             return "File written successfully: " + path.getFileName() + versionNote;
         } catch (IOException e) {
             return "Error writing file: %s".formatted(e.getMessage());
+        }
+    }
+
+    /**
+     * Append content to the tail of an existing file, or create it if missing.
+     * Primary use case is letting the LLM build up a large file across multiple
+     * tool calls when a single {@code writeFile} would exceed its output token
+     * budget. Skill definition files route through {@code writeFile} for their
+     * version-bump pipeline, so appending to a SKILL.md is explicitly rejected —
+     * an append is ambiguous against the version-management semantics and the
+     * LLM should use writeFile (or editFile) for skill authoring.
+     */
+    private String appendFile(Path path, String content) {
+        try {
+            if (isSkillDefinitionFile(path)) {
+                return "Error: appendFile is not supported for SKILL.md files. "
+                        + "Use writeFile for a full replacement (version bumps are handled automatically) "
+                        + "or editFile to patch specific sections.";
+            }
+            Files.createDirectories(path.getParent());
+            if (Files.exists(path)) {
+                Files.writeString(path, content,
+                        java.nio.file.StandardOpenOption.APPEND);
+                long size = Files.size(path);
+                return "Appended %d chars to %s (total %d bytes)"
+                        .formatted(content.length(), path.getFileName(), size);
+            }
+            Files.writeString(path, content);
+            return "File created (appendFile on missing file): " + path.getFileName()
+                    + " (" + content.length() + " chars)";
+        } catch (IOException e) {
+            return "Error appending to file: %s".formatted(e.getMessage());
         }
     }
 
