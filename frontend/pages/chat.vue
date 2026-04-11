@@ -1,21 +1,13 @@
 <script setup lang="ts">
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { formatUsageCost, formatUsageCostTooltip, type MessageUsage } from '~/utils/usage-cost'
 
 // Configure marked for safe rendering
 marked.setOptions({
   breaks: true,
   gfm: true
 })
-
-function formatUsageCost(usage: MessageUsage): string | null {
-  if (!usage.promptPrice && !usage.completionPrice) return null
-  const inputCost = (usage.prompt / 1_000_000) * (usage.promptPrice || 0)
-  const outputCost = (usage.completion / 1_000_000) * (usage.completionPrice || 0)
-  const total = inputCost + outputCost
-  if (total < 0.0001) return '< $0.0001'
-  return '$' + total.toFixed(4)
-}
 
 function formatTokensPerSec(usage: MessageUsage): string | null {
   if (!usage.durationMs || usage.durationMs <= 0 || !usage.completion) return null
@@ -213,16 +205,6 @@ const streamContent = ref('')
 const streamReasoning = ref('')
 // Default thinking display to match whether the agent has thinking enabled
 const showThinking = ref(false)
-interface MessageUsage {
-  prompt: number
-  completion: number
-  total: number
-  reasoning: number
-  cached: number            // prompt tokens served from provider prompt cache
-  durationMs: number
-  promptPrice?: number      // cost per million tokens (input)
-  completionPrice?: number  // cost per million tokens (output)
-}
 const messagesEl = ref<HTMLElement | null>(null)
 const abortController = ref<AbortController | null>(null)
 const sidebarWidth = ref(224) // 14rem = 224px (matches w-56)
@@ -775,7 +757,7 @@ function exportConversation() {
                 </span>
                 <span v-if="formatUsageCost(msg.usage)"
                       class="text-xs text-amber-500/80 font-medium"
-                      :title="`Input: $${((msg.usage.prompt / 1000000) * (msg.usage.promptPrice || 0)).toFixed(6)} + Output: $${((msg.usage.completion / 1000000) * (msg.usage.completionPrice || 0)).toFixed(6)}`">
+                      :title="formatUsageCostTooltip(msg.usage)">
                   {{ formatUsageCost(msg.usage) }}
                 </span>
               </div>

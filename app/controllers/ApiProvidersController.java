@@ -118,6 +118,8 @@ public class ApiProvidersController extends Controller {
             model.put("thinkingDetectedFromProvider", thinking.fromProvider());
             model.put("promptPrice", inferPrice(obj, "prompt"));
             model.put("completionPrice", inferPrice(obj, "completion"));
+            model.put("cachedReadPrice", inferPrice(obj, "input_cache_read"));
+            model.put("cacheWritePrice", inferPrice(obj, "input_cache_write"));
             model.put("isFree", inferIsFree(obj));
 
             // Skip models with empty IDs
@@ -200,9 +202,21 @@ public class ApiProvidersController extends Controller {
     }
 
     /**
-     * Extract price per token from pricing object.
-     * OpenRouter format: { pricing: { prompt: "0.000001", completion: "0.000002" } }
-     * Returns price per million tokens as a double, or -1 if unavailable.
+     * Extract price per token from a pricing object and convert to per-million-tokens.
+     *
+     * <p>OpenRouter format:
+     * <pre>
+     * pricing: {
+     *   prompt: "0.000003",
+     *   completion: "0.000015",
+     *   input_cache_read: "0.0000003",   // present on cache-capable routes
+     *   input_cache_write: "0.00000375"  // present on cache-capable routes
+     * }
+     * </pre>
+     *
+     * <p>Returns {@code -1} if the requested field is absent or unparseable. The caller
+     * can then apply a sensible default (e.g., {@code 0.1 × prompt} for Anthropic cache
+     * reads when the provider doesn't report them explicitly).
      */
     private static double inferPrice(JsonObject obj, String type) {
         if (obj.has("pricing") && obj.get("pricing").isJsonObject()) {

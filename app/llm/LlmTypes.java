@@ -89,13 +89,37 @@ public final class LlmTypes {
             String finishReason
     ) {}
 
+    /**
+     * Token-count snapshot returned by the provider for a single completion.
+     *
+     * <p>Semantics across OpenAI-compat providers (OpenAI, OpenRouter):
+     * <ul>
+     *   <li>{@code promptTokens} is the <em>total</em> input count — uncached input
+     *       <em>plus</em> cached reads <em>plus</em> cache writes.</li>
+     *   <li>{@code cachedTokens} (cache <em>reads</em>) and {@code cacheCreationTokens}
+     *       (cache <em>writes</em>) are disjoint subsets of {@code promptTokens}.</li>
+     *   <li>{@code uncachedInput = promptTokens - cachedTokens - cacheCreationTokens}.</li>
+     * </ul>
+     *
+     * <p>The three categories are priced differently: uncached input at base rate,
+     * cache reads at ~0.1× (Anthropic) / ~0.5× (OpenAI), cache writes at ~1.25× (Anthropic
+     * 5-min TTL). {@code cacheCreationTokens} is typically {@code 0} for OpenAI routes,
+     * which cache implicitly and don't charge a write premium.
+     */
     public record Usage(
             int promptTokens,
             int completionTokens,
             int totalTokens,
             int reasoningTokens,
-            int cachedTokens
-    ) {}
+            int cachedTokens,
+            int cacheCreationTokens
+    ) {
+        /** Backwards-compatible factory for callers that don't have cache-creation data. */
+        public static Usage of(int promptTokens, int completionTokens, int totalTokens,
+                               int reasoningTokens, int cachedTokens) {
+            return new Usage(promptTokens, completionTokens, totalTokens, reasoningTokens, cachedTokens, 0);
+        }
+    }
 
     // --- Streaming types ---
 

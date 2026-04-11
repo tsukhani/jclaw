@@ -396,6 +396,94 @@ public class AgentSystemTest extends UnitTest {
         assertTrue(assembled.systemPrompt().contains("Environment"));
     }
 
+    @Test
+    public void assembleIncludesSafetyAndExecutionBias() {
+        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1", null);
+        var prompt = SystemPromptAssembler.assemble(agent, "test").systemPrompt();
+        assertTrue(prompt.contains("## Safety"), "must include Safety section");
+        assertTrue(prompt.contains("no self-preservation interest"),
+                "Safety section must cover self-preservation");
+        assertTrue(prompt.contains("## Execution Bias"), "must include Execution Bias section");
+        assertTrue(prompt.contains("Do the work rather than narrating"),
+                "Execution Bias section must carry its core guidance");
+    }
+
+    @Test
+    public void assembleEnvironmentIncludesModelAndRuntime() {
+        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1-new", null);
+        var prompt = SystemPromptAssembler.assemble(agent, "test").systemPrompt();
+        assertTrue(prompt.contains("Model: gpt-4.1-new"), "must expose the agent model id");
+        assertTrue(prompt.contains("JClaw version:"), "must expose the app version");
+        assertTrue(prompt.contains("Runtime: Java"), "must expose the Java runtime version");
+    }
+
+    /**
+     * Sanity check for the Settings UI introspection dialog: the breakdown numbers must
+     * actually match the real assembled prompt. If the build sequence in `buildPrompt`
+     * ever drifts from `assemble`, this test fails — which is the whole point of
+     * routing both through the shared private helper.
+     */
+    @Test
+    public void breakdownMatchesAssembledPrompt() {
+        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1", null);
+        AgentService.writeWorkspaceFile("prompt-agent", "AGENT.md", "# Be helpful");
+
+        var assembled = SystemPromptAssembler.assemble(agent, null).systemPrompt();
+        var breakdown = SystemPromptAssembler.breakdown(agent, null);
+
+        // Sum of section chars equals the real prompt length. If this drifts, the
+        // build sequences have forked.
+        int sectionSum = breakdown.sections().stream().mapToInt(e -> e.chars()).sum();
+        assertEquals(assembled.length(), sectionSum,
+                "sum of per-section chars must equal the full prompt length");
+
+        // Every section name we know must appear. Use a subset to avoid making this
+        // test fragile against future section additions.
+        var names = breakdown.sections().stream().map(SystemPromptAssembler.PromptBreakdown.Entry::name).toList();
+        assertTrue(names.contains("AGENT.md"), "AGENT.md section must be present");
+        assertTrue(names.contains("Environment"), "Environment section must be present");
+        assertTrue(names.contains("Safety"), "Safety section must be present");
+        assertTrue(names.contains("Execution Bias"), "Execution Bias section must be present");
+        assertTrue(names.contains("Cache Boundary"), "Cache Boundary section must be present");
+
+        // Prefix + suffix must span the whole prompt (±the marker length itself).
+        assertEquals(
+                assembled.length(),
+                breakdown.cacheablePrefixChars() + SystemPromptAssembler.CACHE_BOUNDARY_MARKER.length() + breakdown.variableSuffixChars(),
+                "prefix + marker + suffix must equal the full prompt length");
+
+        // Totals are sane: at least as large as the prompt (tool schemas add more).
+        assertTrue(breakdown.totalChars() >= assembled.length(),
+                "total chars must include the prompt");
+        assertTrue(breakdown.totalTokenEstimate() > 0, "token estimate must be positive");
+    }
+
+    /**
+     * The cache-boundary marker separates the byte-stable prefix from the per-turn-variable
+     * tail. This test asserts (1) the marker is present, (2) nothing above it varies even
+     * when the *user message* changes (which triggers different memory recall results), and
+     * (3) the memories section sits below the marker, not above.
+     */
+    @Test
+    public void assembleCacheBoundaryKeepsPrefixStable() {
+        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1", null);
+
+        var first = SystemPromptAssembler.assemble(agent, "first user message").systemPrompt();
+        var second = SystemPromptAssembler.assemble(agent, "entirely different request").systemPrompt();
+
+        var firstIdx = first.indexOf(SystemPromptAssembler.CACHE_BOUNDARY_MARKER);
+        var secondIdx = second.indexOf(SystemPromptAssembler.CACHE_BOUNDARY_MARKER);
+        assertTrue(firstIdx > 0, "cache boundary marker must be present");
+        assertTrue(secondIdx > 0, "cache boundary marker must be present");
+
+        var firstPrefix = first.substring(0, firstIdx);
+        var secondPrefix = second.substring(0, secondIdx);
+        assertEquals(firstPrefix, secondPrefix,
+                "everything above the cache boundary must be byte-identical regardless of "
+                        + "the user message — otherwise the LLM provider prompt cache will miss "
+                        + "on every turn. Something variable was appended above the boundary.");
+    }
+
     // --- Helpers ---
 
     private static void cleanupTestAgents() {

@@ -334,39 +334,75 @@ public class OpenAiCompatibleClient {
 
         Usage usage = null;
         if (obj.has("usage") && !obj.get("usage").isJsonNull()) {
-            var usageObj = obj.getAsJsonObject("usage");
-            int reasoningTokens = 0;
-            // OpenRouter / direct: usage.reasoning_tokens
-            if (usageObj.has("reasoning_tokens") && !usageObj.get("reasoning_tokens").isJsonNull()) {
-                reasoningTokens = usageObj.get("reasoning_tokens").getAsInt();
-            }
-            // OpenAI: usage.completion_tokens_details.reasoning_tokens
-            if (reasoningTokens == 0 && usageObj.has("completion_tokens_details")
-                    && !usageObj.get("completion_tokens_details").isJsonNull()) {
-                var details = usageObj.getAsJsonObject("completion_tokens_details");
-                if (details.has("reasoning_tokens") && !details.get("reasoning_tokens").isJsonNull()) {
-                    reasoningTokens = details.get("reasoning_tokens").getAsInt();
-                }
-            }
-            int cachedTokens = 0;
-            // OpenAI-compat: usage.prompt_tokens_details.cached_tokens
-            if (usageObj.has("prompt_tokens_details")
-                    && !usageObj.get("prompt_tokens_details").isJsonNull()) {
-                var details = usageObj.getAsJsonObject("prompt_tokens_details");
-                if (details.has("cached_tokens") && !details.get("cached_tokens").isJsonNull()) {
-                    cachedTokens = details.get("cached_tokens").getAsInt();
-                }
-            }
-            usage = new Usage(
-                    usageObj.has("prompt_tokens") ? usageObj.get("prompt_tokens").getAsInt() : 0,
-                    usageObj.has("completion_tokens") ? usageObj.get("completion_tokens").getAsInt() : 0,
-                    usageObj.has("total_tokens") ? usageObj.get("total_tokens").getAsInt() : 0,
-                    reasoningTokens,
-                    cachedTokens
-            );
+            usage = parseUsageBlock(obj.getAsJsonObject("usage"));
         }
 
         return new ChatResponse(id, model, choices, usage);
+    }
+
+    /**
+     * Parse an OpenAI-compat {@code usage} block into a {@link Usage} record, handling
+     * all three cache-related subfields alongside the base token counts. Public so tests
+     * can exercise every branch without round-tripping through HTTP.
+     *
+     * <p>Field map across providers:
+     * <ul>
+     *   <li>{@code prompt_tokens} → {@link Usage#promptTokens} (total input)</li>
+     *   <li>{@code completion_tokens} → {@link Usage#completionTokens}</li>
+     *   <li>{@code total_tokens} → {@link Usage#totalTokens}</li>
+     *   <li>{@code reasoning_tokens} (OpenRouter flat) or
+     *       {@code completion_tokens_details.reasoning_tokens} (OpenAI nested) →
+     *       {@link Usage#reasoningTokens}</li>
+     *   <li>{@code prompt_tokens_details.cached_tokens} → {@link Usage#cachedTokens}
+     *       (cache reads; subset of prompt_tokens)</li>
+     *   <li>{@code cache_creation_input_tokens} (top-level on Anthropic routes) or
+     *       {@code prompt_tokens_details.cache_creation_tokens} (rare nested variant) →
+     *       {@link Usage#cacheCreationTokens} (cache writes; disjoint subset of
+     *       prompt_tokens, always 0 on OpenAI routes)</li>
+     * </ul>
+     */
+    public static Usage parseUsageBlock(JsonObject usageObj) {
+        int reasoningTokens = 0;
+        if (usageObj.has("reasoning_tokens") && !usageObj.get("reasoning_tokens").isJsonNull()) {
+            reasoningTokens = usageObj.get("reasoning_tokens").getAsInt();
+        }
+        if (reasoningTokens == 0 && usageObj.has("completion_tokens_details")
+                && !usageObj.get("completion_tokens_details").isJsonNull()) {
+            var details = usageObj.getAsJsonObject("completion_tokens_details");
+            if (details.has("reasoning_tokens") && !details.get("reasoning_tokens").isJsonNull()) {
+                reasoningTokens = details.get("reasoning_tokens").getAsInt();
+            }
+        }
+
+        int cachedTokens = 0;
+        if (usageObj.has("prompt_tokens_details")
+                && !usageObj.get("prompt_tokens_details").isJsonNull()) {
+            var details = usageObj.getAsJsonObject("prompt_tokens_details");
+            if (details.has("cached_tokens") && !details.get("cached_tokens").isJsonNull()) {
+                cachedTokens = details.get("cached_tokens").getAsInt();
+            }
+        }
+
+        int cacheCreationTokens = 0;
+        if (usageObj.has("cache_creation_input_tokens")
+                && !usageObj.get("cache_creation_input_tokens").isJsonNull()) {
+            cacheCreationTokens = usageObj.get("cache_creation_input_tokens").getAsInt();
+        } else if (usageObj.has("prompt_tokens_details")
+                && !usageObj.get("prompt_tokens_details").isJsonNull()) {
+            var details = usageObj.getAsJsonObject("prompt_tokens_details");
+            if (details.has("cache_creation_tokens") && !details.get("cache_creation_tokens").isJsonNull()) {
+                cacheCreationTokens = details.get("cache_creation_tokens").getAsInt();
+            }
+        }
+
+        return new Usage(
+                usageObj.has("prompt_tokens") ? usageObj.get("prompt_tokens").getAsInt() : 0,
+                usageObj.has("completion_tokens") ? usageObj.get("completion_tokens").getAsInt() : 0,
+                usageObj.has("total_tokens") ? usageObj.get("total_tokens").getAsInt() : 0,
+                reasoningTokens,
+                cachedTokens,
+                cacheCreationTokens
+        );
     }
 
     private static ChatMessage deserializeMessage(JsonObject msgObj) {

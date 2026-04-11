@@ -23,6 +23,64 @@ const selectMode = ref(false)
 const selectedIds = ref<Set<number>>(new Set())
 const deletingBulk = ref(false)
 
+// --- System prompt breakdown dialog state ---
+// Scoped to a single agent: opened from a per-row button on the agent list, so
+// there's no picker — the agent is known at open-time. Closing does not reset
+// `promptBreakdownAgent` so re-opening the same agent's dialog feels instant.
+interface PromptBreakdownEntry { name: string; chars: number; tokens: number }
+interface PromptBreakdown {
+  totalChars: number
+  totalTokenEstimate: number
+  cacheBoundaryMarker: string
+  cacheablePrefixChars: number
+  variableSuffixChars: number
+  sections: PromptBreakdownEntry[]
+  skills: PromptBreakdownEntry[]
+  tools: PromptBreakdownEntry[]
+}
+const promptBreakdownOpen = ref(false)
+const promptBreakdownAgent = ref<any>(null)
+const promptBreakdownData = ref<PromptBreakdown | null>(null)
+const promptBreakdownLoading = ref(false)
+const promptBreakdownError = ref('')
+
+async function openPromptBreakdown(agent: any) {
+  promptBreakdownAgent.value = agent
+  promptBreakdownOpen.value = true
+  promptBreakdownData.value = null
+  promptBreakdownError.value = ''
+  promptBreakdownLoading.value = true
+  try {
+    promptBreakdownData.value = await $fetch<PromptBreakdown>(`/api/agents/${agent.id}/prompt-breakdown`)
+  } catch (e: any) {
+    promptBreakdownError.value = e?.message ?? 'Failed to load prompt breakdown'
+  } finally {
+    promptBreakdownLoading.value = false
+  }
+}
+
+function closePromptBreakdown() {
+  promptBreakdownOpen.value = false
+}
+
+function copyPromptBreakdownJson() {
+  if (!promptBreakdownData.value) return
+  navigator.clipboard.writeText(JSON.stringify(promptBreakdownData.value, null, 2))
+}
+
+function formatChars(n: number): string {
+  return n.toLocaleString()
+}
+
+function formatTokens(n: number): string {
+  return n.toLocaleString()
+}
+
+function percentOfTotal(chars: number, total: number): string {
+  if (total === 0) return '0%'
+  return ((chars / total) * 100).toFixed(1) + '%'
+}
+
 // The main agent is a structural singleton (seeded on first boot, cannot be
 // renamed or deleted, always enabled). Splitting it out of the list keeps the
 // Custom Agents section focused on user-created agents and lets the New Agent
@@ -348,7 +406,14 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
             <span class="text-sm text-white">{{ mainAgent.name }}</span>
             <div class="text-xs text-neutral-500 mt-0.5">{{ mainAgent.modelProvider }} / {{ mainAgent.modelId }}</div>
           </div>
-          <span v-if="!mainAgent.providerConfigured" class="text-xs font-mono text-amber-400">provider not configured</span>
+          <div class="flex items-center gap-3 shrink-0">
+            <span v-if="!mainAgent.providerConfigured" class="text-xs font-mono text-amber-400">provider not configured</span>
+            <button @click.stop="openPromptBreakdown(mainAgent)"
+                    class="px-2 py-0.5 text-[10px] text-neutral-400 border border-neutral-700 hover:text-white hover:border-neutral-500 transition-colors"
+                    title="Inspect the system prompt this agent receives — per-section char + token breakdown">
+              Inspect prompt
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -401,6 +466,13 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
           <div class="flex items-center gap-3 shrink-0">
             <span v-if="agent.enabled && !agent.providerConfigured"
                   class="text-[10px] font-mono text-amber-400 border border-amber-400/30 px-1">provider not configured</span>
+            <!-- Inspect system prompt: per-agent diagnostic, hidden in select mode so the row's
+                 click surface is unambiguous (select vs. inspect would be confusing). -->
+            <button v-if="!selectMode" @click.stop="openPromptBreakdown(agent)"
+                    class="px-2 py-0.5 text-[10px] text-neutral-400 border border-neutral-700 hover:text-white hover:border-neutral-500 transition-colors"
+                    title="Inspect the system prompt this agent receives — per-section char + token breakdown">
+              Inspect prompt
+            </button>
             <!-- Enabled toggle (hidden in select mode to keep the row's action surface unambiguous) -->
             <button v-if="!selectMode" @click.stop="toggleAgentEnabled(agent)"
                     :class="agent.enabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-neutral-700 hover:bg-neutral-600'"
@@ -594,6 +666,136 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
                   title="Save file">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 5.25A2.25 2.25 0 015.25 3h10.379a2.25 2.25 0 011.59.659l2.122 2.121a2.25 2.25 0 01.659 1.591V18.75A2.25 2.25 0 0118.75 21H5.25A2.25 2.25 0 013 18.75V5.25z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7.5 3v4.5h7.5V3M7.5 21v-6.75h9V21" /></svg>
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- System prompt breakdown dialog -->
+    <div v-if="promptBreakdownOpen"
+         class="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-6 overflow-y-auto"
+         @click.self="closePromptBreakdown()">
+      <div class="bg-neutral-900 border border-neutral-800 w-full max-w-4xl my-6 text-neutral-200">
+        <div class="px-4 py-3 border-b border-neutral-800 flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h3 class="text-sm font-medium text-white truncate">System prompt — {{ promptBreakdownAgent?.name }}</h3>
+            <p class="text-[10px] text-neutral-500 truncate">{{ promptBreakdownAgent?.modelProvider }} / {{ promptBreakdownAgent?.modelId }}</p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button v-if="promptBreakdownData"
+                    @click="copyPromptBreakdownJson()"
+                    class="px-2 py-1 text-[10px] text-neutral-400 border border-neutral-700 hover:text-white hover:border-neutral-500"
+                    title="Copy the raw breakdown JSON (useful for bug reports)">
+              Copy JSON
+            </button>
+            <button @click="closePromptBreakdown()" class="p-1 text-neutral-500 hover:text-white" title="Close">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+        </div>
+
+        <div v-if="promptBreakdownLoading" class="px-4 py-6 text-sm text-neutral-500">
+          Loading…
+        </div>
+
+        <div v-else-if="promptBreakdownError" class="px-4 py-6 text-sm text-red-400">
+          {{ promptBreakdownError }}
+        </div>
+
+        <div v-else-if="promptBreakdownData" class="px-4 py-4 space-y-5">
+          <!-- Totals strip -->
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+            <div class="bg-neutral-800/60 border border-neutral-800 px-3 py-2">
+              <div class="text-[10px] text-neutral-500 uppercase tracking-wide">Total chars</div>
+              <div class="text-sm font-mono text-white">{{ formatChars(promptBreakdownData.totalChars) }}</div>
+              <div class="text-[10px] text-neutral-500">prompt + tool schemas</div>
+            </div>
+            <div class="bg-neutral-800/60 border border-neutral-800 px-3 py-2">
+              <div class="text-[10px] text-neutral-500 uppercase tracking-wide">≈ tokens</div>
+              <div class="text-sm font-mono text-amber-300">{{ formatTokens(promptBreakdownData.totalTokenEstimate) }}</div>
+              <div class="text-[10px] text-neutral-500">chars/4 heuristic</div>
+            </div>
+            <div class="bg-neutral-800/60 border border-neutral-800 px-3 py-2"
+                 title="Bytes above the cache boundary marker — hash-stable, reused from the provider cache on repeat turns">
+              <div class="text-[10px] text-neutral-500 uppercase tracking-wide">Cacheable prefix</div>
+              <div class="text-sm font-mono text-emerald-400">{{ formatChars(promptBreakdownData.cacheablePrefixChars) }}</div>
+              <div class="text-[10px] text-neutral-500">≈ {{ formatTokens(Math.round(promptBreakdownData.cacheablePrefixChars / 4)) }} tokens</div>
+            </div>
+            <div class="bg-neutral-800/60 border border-neutral-800 px-3 py-2"
+                 title="Bytes after the cache boundary — per-turn-variable content (memories) that never hits the cache">
+              <div class="text-[10px] text-neutral-500 uppercase tracking-wide">Variable suffix</div>
+              <div class="text-sm font-mono text-rose-400">{{ formatChars(promptBreakdownData.variableSuffixChars) }}</div>
+              <div class="text-[10px] text-neutral-500">≈ {{ formatTokens(Math.round(promptBreakdownData.variableSuffixChars / 4)) }} tokens</div>
+            </div>
+          </div>
+
+          <!-- Sections table -->
+          <div>
+            <h4 class="text-[11px] text-neutral-500 uppercase tracking-wide mb-1.5">Prompt sections</h4>
+            <table class="w-full text-xs font-mono">
+              <thead class="text-[10px] text-neutral-500 border-b border-neutral-800">
+                <tr>
+                  <th class="text-left py-1 pr-2">Section</th>
+                  <th class="text-right py-1 px-2">Chars</th>
+                  <th class="text-right py-1 px-2">≈ Tokens</th>
+                  <th class="text-right py-1 pl-2">% of prompt</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="s in promptBreakdownData.sections" :key="'section-' + s.name"
+                    class="border-b border-neutral-900/50">
+                  <td class="py-1 pr-2 text-neutral-300">{{ s.name }}</td>
+                  <td class="py-1 px-2 text-right text-neutral-400">{{ formatChars(s.chars) }}</td>
+                  <td class="py-1 px-2 text-right text-amber-300/80">{{ formatTokens(s.tokens) }}</td>
+                  <td class="py-1 pl-2 text-right text-neutral-500">{{ percentOfTotal(s.chars, promptBreakdownData.cacheablePrefixChars + promptBreakdownData.variableSuffixChars) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Skills table -->
+          <div v-if="promptBreakdownData.skills.length > 0">
+            <h4 class="text-[11px] text-neutral-500 uppercase tracking-wide mb-1.5">Skills included ({{ promptBreakdownData.skills.length }})</h4>
+            <table class="w-full text-xs font-mono">
+              <thead class="text-[10px] text-neutral-500 border-b border-neutral-800">
+                <tr>
+                  <th class="text-left py-1 pr-2">Skill</th>
+                  <th class="text-right py-1 px-2">Chars</th>
+                  <th class="text-right py-1 pl-2">≈ Tokens</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="s in promptBreakdownData.skills" :key="'skill-' + s.name"
+                    class="border-b border-neutral-900/50">
+                  <td class="py-1 pr-2 text-neutral-300">{{ s.name }}</td>
+                  <td class="py-1 px-2 text-right text-neutral-400">{{ formatChars(s.chars) }}</td>
+                  <td class="py-1 pl-2 text-right text-amber-300/80">{{ formatTokens(s.tokens) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Tools table -->
+          <div v-if="promptBreakdownData.tools.length > 0">
+            <h4 class="text-[11px] text-neutral-500 uppercase tracking-wide mb-1.5">Tool schemas ({{ promptBreakdownData.tools.length }})</h4>
+            <p class="text-[10px] text-neutral-600 mb-1">Sent separately as the <code class="text-neutral-500">tools</code> array, not part of the prompt string, but counted as input tokens by every provider.</p>
+            <table class="w-full text-xs font-mono">
+              <thead class="text-[10px] text-neutral-500 border-b border-neutral-800">
+                <tr>
+                  <th class="text-left py-1 pr-2">Tool</th>
+                  <th class="text-right py-1 px-2">Schema chars</th>
+                  <th class="text-right py-1 pl-2">≈ Tokens</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="t in promptBreakdownData.tools" :key="'tool-' + t.name"
+                    class="border-b border-neutral-900/50">
+                  <td class="py-1 pr-2 text-neutral-300">{{ t.name }}</td>
+                  <td class="py-1 px-2 text-right text-neutral-400">{{ formatChars(t.chars) }}</td>
+                  <td class="py-1 pl-2 text-right text-amber-300/80">{{ formatTokens(t.tokens) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>

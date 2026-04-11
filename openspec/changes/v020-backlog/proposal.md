@@ -58,7 +58,8 @@ JClaw v0.1.0 (core platform) and v0.2.0 high-priority features (Playwright brows
 
 ### Agent
 - `agent-heartbeat`: No periodic self-directed agent activity. OpenClaw supports cron-scheduled heartbeats that inject events into sessions for autonomous background work. **Medium complexity.**
-- `sub-agent-spawning`: No sub-agent concept. OpenClaw has full sub-agent lifecycle (spawn, steer, kill, status tracking) via ACP protocol. **Large complexity.**
+- `sub-agent-spawning`: No sub-agent concept. OpenClaw has full sub-agent lifecycle (spawn, steer, kill, status tracking) via ACP protocol. When this lands, the system-prompt assembler must grow a `promptMode` parameter (`full` | `minimal` | `none`) so sub-agents can receive a lean prompt — OpenClaw's assembler drops most sections in `minimal` mode and emits only identity + tools in `none` mode. See `SystemPromptAssembler.assemble` — currently always builds the full prompt. **Large complexity.**
+- `channel-aware-prompt-sections`: System prompt has no per-channel stanzas (voice/TTS, reactions, messaging routing). OpenClaw conditionally injects `## Voice`, `## Reactions`, and `## Messaging` sections based on the active channel so agent behavior adapts to the medium (e.g., short bullet-free responses for Telegram, TTS-friendly phrasing for voice). JClaw's current `SystemPromptAssembler` is channel-agnostic. Low priority until JClaw grows voice or richer reaction UX, but worth adding the `channelType` parameter to `assemble()` so future channels can plug in cleanly. **Small complexity.**
 - `brave-web-search`: No general web search API. Both JavaClaw and OpenClaw have Brave Search integration. **Small complexity.**
 
 ### Infrastructure

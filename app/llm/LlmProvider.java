@@ -67,7 +67,7 @@ public abstract class LlmProvider {
 
     /**
      * Extract the count of prompt tokens that were served from a provider-side
-     * prompt cache. Defaults to the OpenAI-compat path
+     * prompt cache (cache <em>reads</em>). Defaults to the OpenAI-compat path
      * ({@code usage.prompt_tokens_details.cached_tokens}) which is also what
      * OpenRouter emits (with {@code usage: {include: true}}). Providers that
      * report differently — or not at all — override this.
@@ -78,6 +78,33 @@ public abstract class LlmProvider {
             var details = usageObj.getAsJsonObject("prompt_tokens_details");
             if (details.has("cached_tokens") && !details.get("cached_tokens").isJsonNull()) {
                 return details.get("cached_tokens").getAsInt();
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * Extract the count of prompt tokens written to the provider-side prompt cache on
+     * this turn (cache <em>writes</em>). Anthropic routes expose this as
+     * {@code usage.cache_creation_input_tokens} (top-level) and OpenRouter normalizes
+     * the same field through. OpenAI routes have no write concept — cache seeding is
+     * implicit and not billed — so the field is absent and this returns 0.
+     *
+     * <p>Cache writes are a disjoint subset of {@code prompt_tokens}, alongside cache
+     * reads. They are priced at a premium (Anthropic: 1.25× base for 5-min TTL).
+     */
+    protected int extractCacheCreationTokens(JsonObject usageObj) {
+        // Anthropic/OpenRouter: top-level cache_creation_input_tokens.
+        if (usageObj.has("cache_creation_input_tokens")
+                && !usageObj.get("cache_creation_input_tokens").isJsonNull()) {
+            return usageObj.get("cache_creation_input_tokens").getAsInt();
+        }
+        // Some normalizations nest it under prompt_tokens_details.
+        if (usageObj.has("prompt_tokens_details")
+                && !usageObj.get("prompt_tokens_details").isJsonNull()) {
+            var details = usageObj.getAsJsonObject("prompt_tokens_details");
+            if (details.has("cache_creation_tokens") && !details.get("cache_creation_tokens").isJsonNull()) {
+                return details.get("cache_creation_tokens").getAsInt();
             }
         }
         return 0;
@@ -110,7 +137,10 @@ public abstract class LlmProvider {
             var usageObj = root.getAsJsonObject("usage");
             int reasoning = Math.max(chunk.usage().reasoningTokens(), extractReasoningTokens(usageObj));
             int cached = Math.max(chunk.usage().cachedTokens(), extractCachedTokens(usageObj));
-            if (reasoning == chunk.usage().reasoningTokens() && cached == chunk.usage().cachedTokens()) {
+            int cacheCreation = Math.max(chunk.usage().cacheCreationTokens(), extractCacheCreationTokens(usageObj));
+            if (reasoning == chunk.usage().reasoningTokens()
+                    && cached == chunk.usage().cachedTokens()
+                    && cacheCreation == chunk.usage().cacheCreationTokens()) {
                 return chunk;
             }
             var augmented = new Usage(
@@ -118,7 +148,8 @@ public abstract class LlmProvider {
                     chunk.usage().completionTokens(),
                     chunk.usage().totalTokens(),
                     reasoning,
-                    cached);
+                    cached,
+                    cacheCreation);
             return new ChatCompletionChunk(chunk.id(), chunk.model(), chunk.choices(), augmented);
         } catch (Exception _) {
             return chunk;
@@ -341,12 +372,14 @@ public abstract class LlmProvider {
             var usageObj = obj.getAsJsonObject("usage");
             int reasoningTokens = extractReasoningTokens(usageObj);
             int cachedTokens = extractCachedTokens(usageObj);
+            int cacheCreationTokens = extractCacheCreationTokens(usageObj);
             usage = new Usage(
                     usageObj.has("prompt_tokens") ? usageObj.get("prompt_tokens").getAsInt() : 0,
                     usageObj.has("completion_tokens") ? usageObj.get("completion_tokens").getAsInt() : 0,
                     usageObj.has("total_tokens") ? usageObj.get("total_tokens").getAsInt() : 0,
                     reasoningTokens,
-                    cachedTokens
+                    cachedTokens,
+                    cacheCreationTokens
             );
         }
 

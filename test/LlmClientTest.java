@@ -4,6 +4,7 @@ import llm.LlmTypes.*;
 import llm.OpenAiCompatibleClient;
 import llm.ProviderRegistry;
 import services.ConfigService;
+import com.google.gson.JsonParser;
 
 import java.util.List;
 import java.util.Map;
@@ -67,6 +68,83 @@ public class LlmClientTest extends UnitTest {
         assertNull(msg.content());
         assertEquals(1, msg.toolCalls().size());
         assertEquals("web_fetch", msg.toolCalls().getFirst().function().name());
+    }
+
+    // --- Usage parser: verifies every field cache-related field flows from provider JSON ---
+
+    @Test
+    public void parseUsageOpenAiShape() {
+        // Plain OpenAI response: no caching fields at all.
+        var usageObj = JsonParser.parseString("""
+                {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
+                """).getAsJsonObject();
+        var usage = OpenAiCompatibleClient.parseUsageBlock(usageObj);
+        assertEquals(100, usage.promptTokens());
+        assertEquals(50, usage.completionTokens());
+        assertEquals(150, usage.totalTokens());
+        assertEquals(0, usage.cachedTokens());
+        assertEquals(0, usage.cacheCreationTokens());
+        assertEquals(0, usage.reasoningTokens());
+    }
+
+    @Test
+    public void parseUsageOpenAiCacheReadHit() {
+        // OpenAI shape with a 95% cache hit: cached_tokens nested under prompt_tokens_details.
+        var usageObj = JsonParser.parseString("""
+                {"prompt_tokens": 4891, "completion_tokens": 112, "total_tokens": 5003,
+                 "prompt_tokens_details": {"cached_tokens": 4670},
+                 "completion_tokens_details": {"reasoning_tokens": 76}}
+                """).getAsJsonObject();
+        var usage = OpenAiCompatibleClient.parseUsageBlock(usageObj);
+        assertEquals(4891, usage.promptTokens());
+        assertEquals(112, usage.completionTokens());
+        assertEquals(4670, usage.cachedTokens(), "cached reads must flow from prompt_tokens_details");
+        assertEquals(0, usage.cacheCreationTokens(), "OpenAI routes never populate cache_creation");
+        assertEquals(76, usage.reasoningTokens(), "nested reasoning tokens must flow");
+    }
+
+    @Test
+    public void parseUsageAnthropicCacheWriteSeed() {
+        // First turn of a new conversation on an Anthropic route: cache_creation_input_tokens
+        // at the top level of usage; no cached reads yet (cache is being seeded).
+        var usageObj = JsonParser.parseString("""
+                {"prompt_tokens": 5000, "completion_tokens": 200, "total_tokens": 5200,
+                 "cache_creation_input_tokens": 4800,
+                 "prompt_tokens_details": {"cached_tokens": 0}}
+                """).getAsJsonObject();
+        var usage = OpenAiCompatibleClient.parseUsageBlock(usageObj);
+        assertEquals(5000, usage.promptTokens());
+        assertEquals(0, usage.cachedTokens(), "no cache reads on the seeding turn");
+        assertEquals(4800, usage.cacheCreationTokens(), "cache writes must flow from top-level field");
+    }
+
+    @Test
+    public void parseUsageAnthropicCacheMixedReadAndWrite() {
+        // A later turn where some of the prefix is already cached (reads) AND a new
+        // breakpoint was added (writes). Both subsets are disjoint and both count.
+        var usageObj = JsonParser.parseString("""
+                {"prompt_tokens": 6000, "completion_tokens": 150, "total_tokens": 6150,
+                 "cache_creation_input_tokens": 500,
+                 "prompt_tokens_details": {"cached_tokens": 5000}}
+                """).getAsJsonObject();
+        var usage = OpenAiCompatibleClient.parseUsageBlock(usageObj);
+        assertEquals(6000, usage.promptTokens());
+        assertEquals(5000, usage.cachedTokens());
+        assertEquals(500, usage.cacheCreationTokens());
+        // Implicit uncached input = 6000 - 5000 - 500 = 500; the consumer of Usage
+        // computes this (not the parser), so we just sanity-check the invariant.
+        assertTrue(usage.cachedTokens() + usage.cacheCreationTokens() <= usage.promptTokens());
+    }
+
+    @Test
+    public void parseUsageHandlesMissingFields() {
+        // Robustness: empty usage object, shouldn't NPE.
+        var usage = OpenAiCompatibleClient.parseUsageBlock(JsonParser.parseString("{}").getAsJsonObject());
+        assertEquals(0, usage.promptTokens());
+        assertEquals(0, usage.completionTokens());
+        assertEquals(0, usage.totalTokens());
+        assertEquals(0, usage.cachedTokens());
+        assertEquals(0, usage.cacheCreationTokens());
     }
 
     @Test

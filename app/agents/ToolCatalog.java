@@ -29,10 +29,19 @@ public class ToolCatalog {
 
     /**
      * Format the live tool catalog as a markdown table suitable for injection into
-     * a system prompt. Returns empty string if no tools are registered.
+     * an agent's system prompt. Filters out any tool that is disabled for this
+     * specific agent in {@code AgentToolConfig}, so the LLM only sees — and therefore
+     * only declares in skill frontmatter — tools it can actually call. Returns the
+     * empty string if no tools are enabled for the agent.
      */
-    public static String formatCatalogForPrompt() {
-        var tools = ToolRegistry.listTools();
+    public static String formatCatalogForPrompt(Agent agent) {
+        var disabledForAgent = new HashSet<String>();
+        for (var c : AgentToolConfig.findByAgent(agent)) {
+            if (!c.enabled) disabledForAgent.add(c.toolName);
+        }
+        var tools = ToolRegistry.listTools().stream()
+                .filter(t -> !disabledForAgent.contains(t.name()))
+                .toList();
         if (tools.isEmpty()) return "";
         var sb = new StringBuilder();
         sb.append("| Tool | Purpose |\n");

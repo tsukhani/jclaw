@@ -73,6 +73,7 @@ async function saveChatField(configKey: string, value: string) {
   }
 }
 
+
 // Playwright config
 const playwrightEnabled = computed(() => {
   const entries = configData.value?.entries ?? []
@@ -315,7 +316,7 @@ async function toggleScannerEnabled(scannerId: string) {
 // --- Model management ---
 const expandedModelsProvider = ref<string | null>(null)
 const editingModelIdx = ref<number | null>(null)
-const modelForm = ref({ id: '', name: '', contextWindow: 131072, maxTokens: 8192, supportsThinking: false, promptPrice: -1, completionPrice: -1 })
+const modelForm = ref({ id: '', name: '', contextWindow: 131072, maxTokens: 8192, supportsThinking: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 })
 const addingModel = ref(false)
 
 function getProviderModels(providerName: string): any[] {
@@ -365,6 +366,14 @@ async function fetchRanksForProvider(providerName: string) {
           model.completionPrice = discovered.completionPrice
           updated = true
         }
+        if (model.cachedReadPrice == null && discovered.cachedReadPrice >= 0) {
+          model.cachedReadPrice = discovered.cachedReadPrice
+          updated = true
+        }
+        if (model.cacheWritePrice == null && discovered.cacheWritePrice >= 0) {
+          model.cacheWritePrice = discovered.cacheWritePrice
+          updated = true
+        }
       }
     }
     if (updated) await saveModels(providerName, configured)
@@ -387,14 +396,16 @@ function startEditModel(providerName: string, idx: number) {
     maxTokens: m.maxTokens || 8192,
     supportsThinking: m.supportsThinking || false,
     promptPrice: m.promptPrice ?? -1,
-    completionPrice: m.completionPrice ?? -1
+    completionPrice: m.completionPrice ?? -1,
+    cachedReadPrice: m.cachedReadPrice ?? -1,
+    cacheWritePrice: m.cacheWritePrice ?? -1
   }
   editingModelIdx.value = idx
   addingModel.value = false
 }
 
 function startAddModel() {
-  modelForm.value = { id: '', name: '', contextWindow: 131072, maxTokens: 8192, supportsThinking: false, promptPrice: -1, completionPrice: -1 }
+  modelForm.value = { id: '', name: '', contextWindow: 131072, maxTokens: 8192, supportsThinking: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 }
   addingModel.value = true
   editingModelIdx.value = null
 }
@@ -407,10 +418,31 @@ async function saveModels(providerName: string, models: any[]) {
   refresh()
 }
 
+/**
+ * Strip sentinel -1 price values from the form before persisting. -1 means "unset"
+ * for any of the four price fields; letting it reach the saved JSON would confuse
+ * the cost-computation fallbacks on the frontend.
+ */
+function modelFormToSaved(): Record<string, any> {
+  const f = modelForm.value
+  const out: Record<string, any> = {
+    id: f.id,
+    name: f.name,
+    contextWindow: f.contextWindow,
+    maxTokens: f.maxTokens,
+    supportsThinking: f.supportsThinking,
+  }
+  if (f.promptPrice >= 0) out.promptPrice = f.promptPrice
+  if (f.completionPrice >= 0) out.completionPrice = f.completionPrice
+  if (f.cachedReadPrice >= 0) out.cachedReadPrice = f.cachedReadPrice
+  if (f.cacheWritePrice >= 0) out.cacheWritePrice = f.cacheWritePrice
+  return out
+}
+
 async function saveEditedModel(providerName: string) {
   const models = getProviderModels(providerName)
   if (editingModelIdx.value !== null) {
-    models[editingModelIdx.value] = { ...modelForm.value }
+    models[editingModelIdx.value] = modelFormToSaved()
   }
   await saveModels(providerName, models)
   editingModelIdx.value = null
@@ -419,7 +451,7 @@ async function saveEditedModel(providerName: string) {
 async function saveNewModel(providerName: string) {
   if (!modelForm.value.id.trim()) return
   const models = getProviderModels(providerName)
-  models.push({ ...modelForm.value })
+  models.push(modelFormToSaved())
   await saveModels(providerName, models)
   addingModel.value = false
 }
@@ -539,7 +571,9 @@ async function addDiscoveredModels() {
       maxTokens: m.maxTokens,
       supportsThinking: m.thinkingDetectedFromProvider ? m.supportsThinking : false,
       ...(m.promptPrice >= 0 ? { promptPrice: m.promptPrice } : {}),
-      ...(m.completionPrice >= 0 ? { completionPrice: m.completionPrice } : {})
+      ...(m.completionPrice >= 0 ? { completionPrice: m.completionPrice } : {}),
+      ...(m.cachedReadPrice >= 0 ? { cachedReadPrice: m.cachedReadPrice } : {}),
+      ...(m.cacheWritePrice >= 0 ? { cacheWritePrice: m.cacheWritePrice } : {})
     }))
   const merged = [...existing, ...toAdd]
   await saveModels(discoveryProvider.value, merged)
@@ -659,6 +693,14 @@ const providerEntries = computed(() => {
                     <label class="block text-[10px] text-neutral-600 mb-0.5">Output $/M tokens</label>
                     <input v-model.number="modelForm.completionPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-800 border border-neutral-700 text-xs text-white font-mono focus:outline-none" />
                   </div>
+                  <div>
+                    <label class="block text-[10px] text-neutral-600 mb-0.5" title="Anthropic: ~0.1× input. OpenAI: ~0.5× input. Leave -1 to auto-default.">Cache read $/M</label>
+                    <input v-model.number="modelForm.cachedReadPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-800 border border-neutral-700 text-xs text-white font-mono focus:outline-none" />
+                  </div>
+                  <div>
+                    <label class="block text-[10px] text-neutral-600 mb-0.5" title="Anthropic 5-min TTL: ~1.25× input. OpenAI: n/a. Leave -1 to auto-default.">Cache write $/M</label>
+                    <input v-model.number="modelForm.cacheWritePrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-800 border border-neutral-700 text-xs text-white font-mono focus:outline-none" />
+                  </div>
                 </div>
                 <div class="flex items-center justify-between">
                   <label class="flex items-center gap-1.5 text-xs text-neutral-400">
@@ -736,6 +778,14 @@ const providerEntries = computed(() => {
                 <div>
                   <label class="block text-[10px] text-neutral-600 mb-0.5">Output $/M tokens</label>
                   <input v-model.number="modelForm.completionPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-800 border border-neutral-700 text-xs text-white font-mono focus:outline-none" />
+                </div>
+                <div>
+                  <label class="block text-[10px] text-neutral-600 mb-0.5" title="Anthropic: ~0.1× input. OpenAI: ~0.5× input. Leave -1 to auto-default.">Cache read $/M</label>
+                  <input v-model.number="modelForm.cachedReadPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-800 border border-neutral-700 text-xs text-white font-mono focus:outline-none" />
+                </div>
+                <div>
+                  <label class="block text-[10px] text-neutral-600 mb-0.5" title="Anthropic 5-min TTL: ~1.25× input. OpenAI: n/a. Leave -1 to auto-default.">Cache write $/M</label>
+                  <input v-model.number="modelForm.cacheWritePrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-800 border border-neutral-700 text-xs text-white font-mono focus:outline-none" />
                 </div>
               </div>
               <div class="flex items-center justify-between">

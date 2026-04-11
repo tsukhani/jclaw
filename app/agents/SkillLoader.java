@@ -475,25 +475,58 @@ public class SkillLoader {
     public static String finalizeSkillMdWrite(Path targetPath, String newContent) {
         if (newContent == null) newContent = "";
         try {
+            var llmVersion = extractExplicitVersion(newContent);
+
             if (!Files.exists(targetPath)) {
-                // Fresh skill — always start at 1.0.0 regardless of anything the LLM wrote
-                return ensureVersionInFrontmatter(newContent, "1.0.0");
+                // Fresh skill — the floor is 1.0.0. The LLM may jump above the floor
+                // (e.g., porting a skill that's already stable), but cannot start below it.
+                var resolved = resolveVersion(llmVersion, "1.0.0");
+                return ensureVersionInFrontmatter(newContent, resolved);
             }
+
             var oldContent = Files.readString(targetPath);
             var oldInfo = parseFrontmatterStringForVersion(oldContent);
             var oldVersion = oldInfo != null && oldInfo.length > 0 ? oldInfo[0] : "0.0.0";
 
-            if (contentDiffersIgnoringVersion(oldContent, newContent)) {
-                var bumped = bumpPatch(oldVersion);
-                return ensureVersionInFrontmatter(newContent, bumped);
-            } else {
-                // No material change — reinstate the old version, regardless of what the LLM wrote
-                return ensureVersionInFrontmatter(newContent, oldVersion);
-            }
+            // Auto target: bump patch on material change, preserve otherwise. This is the
+            // default the LLM gets when it omits the `version:` field entirely.
+            var autoVersion = contentDiffersIgnoringVersion(oldContent, newContent)
+                    ? bumpPatch(oldVersion)
+                    : oldVersion;
+            var resolved = resolveVersion(llmVersion, autoVersion);
+            return ensureVersionInFrontmatter(newContent, resolved);
         } catch (IOException e) {
             // If we can't read the old file, fall back to the incoming content unchanged
             return newContent;
         }
+    }
+
+    /**
+     * Return the version the LLM wrote in the new content's frontmatter, or {@code null}
+     * if no {@code version:} line is present. Distinct from
+     * {@link #parseFrontmatterStringForVersion}, which coerces a missing line to
+     * {@code "0.0.0"} — {@link #finalizeSkillMdWrite} needs to distinguish "LLM omitted
+     * the version" from "LLM wrote 0.0.0" so the former falls back to the auto-bump path
+     * cleanly.
+     */
+    private static String extractExplicitVersion(String content) {
+        if (content == null) return null;
+        var matcher = FRONTMATTER_PATTERN.matcher(content);
+        if (!matcher.find() || matcher.start() != 0) return null;
+        var frontmatter = matcher.group(1);
+        return extractYamlValue(frontmatter, "version");
+    }
+
+    /**
+     * Choose between an LLM-supplied version and the automatic target. The LLM wins
+     * only when it writes a value that is a <em>strict</em> upgrade over the automatic
+     * target — anything missing, malformed, equal, or lower falls back to the auto path.
+     * The strict-greater-than rule (not {@code >=}) is intentional: ties collapse to the
+     * auto path so the common case takes one branch end-to-end.
+     */
+    private static String resolveVersion(String llmVersion, String autoVersion) {
+        if (llmVersion == null || llmVersion.isBlank()) return autoVersion;
+        return compareVersions(llmVersion, autoVersion) > 0 ? llmVersion : autoVersion;
     }
 
     /** Extract just the {@code version:} value from an arbitrary SKILL.md string, or null. */
@@ -592,7 +625,13 @@ public class SkillLoader {
         return null;
     }
 
-    private static String formatSkillEntry(SkillInfo skill, boolean full) {
+    /**
+     * Format a single skill as the {@code <skill>…</skill>} block embedded inside
+     * {@code <available_skills>}. Package-accessible so {@link SystemPromptAssembler}
+     * can measure per-skill char sizes for its introspection breakdown without
+     * re-implementing the wire format.
+     */
+    static String formatSkillEntry(SkillInfo skill, boolean full) {
         var sb = new StringBuilder();
         sb.append("  <skill>\n");
         sb.append("    <name>").append(skill.name()).append("</name>\n");

@@ -285,6 +285,7 @@ public class AgentRunner {
                     var extras = new StringBuilder();
                     if (u.reasoningTokens() > 0) extras.append(", %d reasoning".formatted(u.reasoningTokens()));
                     if (u.cachedTokens() > 0) extras.append(", %d cached".formatted(u.cachedTokens()));
+                    if (u.cacheCreationTokens() > 0) extras.append(", %d cache-write".formatted(u.cacheCreationTokens()));
                     var usageSummary = " [%d prompt, %d completion, %d total tokens%s, %.1fs]".formatted(
                             u.promptTokens(), u.completionTokens(), u.totalTokens(),
                             extras.toString(),
@@ -294,12 +295,14 @@ public class AgentRunner {
 
                     // Build usage JSON with timing and pricing for the frontend
                     var sb = new StringBuilder("{\"usage\":{");
-                    sb.append("\"prompt\":%d,\"completion\":%d,\"total\":%d,\"reasoning\":%d,\"cached\":%d,\"durationMs\":%d"
-                            .formatted(u.promptTokens(), u.completionTokens(), u.totalTokens(), u.reasoningTokens(), u.cachedTokens(), durationMs));
+                    sb.append("\"prompt\":%d,\"completion\":%d,\"total\":%d,\"reasoning\":%d,\"cached\":%d,\"cacheCreation\":%d,\"durationMs\":%d"
+                            .formatted(u.promptTokens(), u.completionTokens(), u.totalTokens(),
+                                    u.reasoningTokens(), u.cachedTokens(), u.cacheCreationTokens(), durationMs));
 
-                    // Include model pricing if available from provider config
+                    // Include model pricing if available from provider config. All four
+                    // price fields flow through by name — the frontend applies them with
+                    // sensible fallbacks when any are absent.
                     if (modelInfo != null) {
-                        // Look up pricing from the config entries
                         var modelsJson = services.ConfigService.get("provider." + agent.modelProvider + ".models");
                         if (modelsJson != null) {
                             try {
@@ -311,6 +314,10 @@ public class AgentRunner {
                                             sb.append(",\"promptPrice\":").append(mObj.get("promptPrice"));
                                         if (mObj.has("completionPrice"))
                                             sb.append(",\"completionPrice\":").append(mObj.get("completionPrice"));
+                                        if (mObj.has("cachedReadPrice"))
+                                            sb.append(",\"cachedReadPrice\":").append(mObj.get("cachedReadPrice"));
+                                        if (mObj.has("cacheWritePrice"))
+                                            sb.append(",\"cacheWritePrice\":").append(mObj.get("cacheWritePrice"));
                                         break;
                                     }
                                 }
@@ -487,6 +494,23 @@ public class AgentRunner {
         }
 
         if (isCancelled.get()) return priorContent;
+
+        // Truncation guard: if the model hit max_tokens mid-tool-call, the tool arguments
+        // will be an incomplete JSON fragment. Passing that to ToolRegistry.execute causes
+        // a Gson EOFException and the user sees a cryptic "End of input" error. Instead,
+        // surface a clear message so the LLM can retry with a more concise approach.
+        if ("length".equals(accumulator.finishReason) && !accumulator.toolCalls.isEmpty()) {
+            EventLogger.warn("tool", agent.name, null,
+                    "Response truncated (finish_reason=length) with pending tool calls in round %d — skipping execution of incomplete tool arguments"
+                            .formatted(round + 1));
+            var truncMsg = accumulator.content != null && !accumulator.content.isEmpty()
+                    ? accumulator.content + "\n\n*[Response was truncated before the next tool call could complete. Try breaking the task into smaller steps.]*"
+                    : "I tried to use a tool but the response exceeded the token limit before the tool arguments finished. Try breaking the task into smaller steps — for example, write large files in multiple append operations instead of one big write.";
+            onToken.accept(accumulator.content != null && !accumulator.content.isEmpty()
+                    ? "\n\n*[Response was truncated before the next tool call could complete.]*"
+                    : truncMsg);
+            return truncMsg;
+        }
 
         // Recursively handle if more tool calls
         if (!accumulator.toolCalls.isEmpty()) {

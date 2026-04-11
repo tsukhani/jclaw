@@ -30,6 +30,19 @@ public class ApiAgentsController extends Controller {
         renderJSON(gson.toJson(agentToMap(agent)));
     }
 
+    /**
+     * Return a per-section breakdown of the system prompt this agent would receive
+     * on its next turn. Feeds the Settings UI introspection dialog. Memory recall is
+     * skipped (null user message) so the breakdown is deterministic for a given
+     * agent state and doesn't depend on a hypothetical user query.
+     */
+    public static void promptBreakdown(Long id) {
+        var agent = AgentService.findById(id);
+        if (agent == null) notFound();
+        var breakdown = agents.SystemPromptAssembler.breakdown(agent, null);
+        renderJSON(gson.toJson(breakdown));
+    }
+
     public static void create() {
         var body = readJsonBody();
         if (body == null) badRequest();

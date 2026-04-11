@@ -2,6 +2,7 @@ package tools;
 
 import agents.SkillLoader;
 import agents.ToolRegistry;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonParser;
 import models.Agent;
 import services.AgentService;
@@ -9,8 +10,18 @@ import services.AgentService;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Supplier;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 public class FileSystemTools implements ToolRegistry.Tool {
 
@@ -20,25 +31,47 @@ public class FileSystemTools implements ToolRegistry.Tool {
     @Override
     public String description() {
         return """
-                Read, write, and list plain text files in the agent's workspace directory. \
-                Actions: readFile, writeFile, listFiles. All paths are relative to the workspace. \
-                For rich document formats like PDF, DOCX, XLSX or PPTX, use the 'documents' tool instead.""";
+                Read, write, edit, list, and patch plain text files in the agent's workspace. \
+                Actions: \
+                'readFile' reads a file (1 MB cap; use the 'documents' tool for PDF/DOCX/XLSX/PPTX). \
+                'writeFile' creates or overwrites a file with its full content — use only for brand-new files or wholesale replacement. \
+                'editFile' is the DEFAULT for modifying an existing file: it applies a batch of {oldText, newText} replacements. Each oldText must appear exactly once in the file; include enough surrounding context to disambiguate. Optionally set regex: true on an edit entry to treat oldText as a Java regex (with $1 backreferences in newText). Edits apply atomically — if any entry fails, nothing is written. \
+                'applyPatch' applies a multi-file patch in OpenClaw/unified-diff format (*** Begin Patch / *** Update File: / *** Add File: / *** Delete File: / *** Move to: / *** End of File / *** End Patch). All files are validated before any are written. \
+                'listFiles' lists a directory. \
+                All paths are relative to the workspace. For rich document formats use the 'documents' tool.""";
     }
 
     @Override
     public Map<String, Object> parameters() {
+        // `path` is required for every action except applyPatch (which encodes paths in the patch body),
+        // and `edits`/`content`/`patch` are action-specific. JSON Schema's polymorphism is awkward across
+        // providers, so we keep `required` minimal and validate action-specific fields inside execute().
         return Map.of(
                 "type", "object",
                 "properties", Map.of(
                         "action", Map.of("type", "string",
-                                "enum", List.of("readFile", "writeFile", "listFiles"),
+                                "enum", List.of("readFile", "writeFile", "listFiles", "editFile", "applyPatch"),
                                 "description", "The file operation to perform"),
                         "path", Map.of("type", "string",
-                                "description", "File or directory path relative to workspace"),
+                                "description", "File or directory path relative to workspace (required for all actions except applyPatch)"),
                         "content", Map.of("type", "string",
-                                "description", "Content to write (for writeFile action)")
+                                "description", "Content to write (for writeFile action)"),
+                        "edits", Map.of("type", "array",
+                                "description", "List of {oldText, newText, regex?} replacements for editFile action",
+                                "items", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(
+                                                "oldText", Map.of("type", "string"),
+                                                "newText", Map.of("type", "string"),
+                                                "regex", Map.of("type", "boolean",
+                                                        "description", "If true, treat oldText as a Java regex with $N backreferences in newText. Default false.")
+                                        ),
+                                        "required", List.of("oldText", "newText")
+                                )),
+                        "patch", Map.of("type", "string",
+                                "description", "Patch body for applyPatch action, wrapped in *** Begin Patch / *** End Patch")
                 ),
-                "required", List.of("action", "path")
+                "required", List.of("action")
         );
     }
 
@@ -46,6 +79,16 @@ public class FileSystemTools implements ToolRegistry.Tool {
     public String execute(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
         var action = args.get("action").getAsString();
+
+        // applyPatch encodes its paths inside the patch body, so it does not take a top-level `path` field.
+        if ("applyPatch".equals(action)) {
+            var patch = args.has("patch") ? args.get("patch").getAsString() : "";
+            return applyPatch(agent, patch);
+        }
+
+        if (!args.has("path")) {
+            return "Error: action '%s' requires a 'path' field".formatted(action);
+        }
         var relativePath = args.get("path").getAsString();
 
         var workspace = AgentService.workspacePath(agent.name);
@@ -53,41 +96,56 @@ public class FileSystemTools implements ToolRegistry.Tool {
         try {
             target = AgentService.acquireWorkspacePath(agent.name, relativePath);
         } catch (SecurityException e) {
-            // Preserve the helper's specific message (escapes-workspace,
-            // hardlink, TOCTOU divergence) so the agent and tests can
-            // distinguish the failure mode. The existing traversal test asserts
-            // on "escapes" which still appears in the helper's escape message.
             return "Error: " + e.getMessage();
         }
 
-        // skill-creator is read-only for every agent except 'main'. Only the main agent
-        // may modify the skill-creator skill itself; other agents can use it to create
-        // and refactor OTHER skills but cannot alter skill-creator. To get an updated
-        // skill-creator, drag it from the global skills registry onto the agent card.
-        if ("writeFile".equals(action) && !"main".equalsIgnoreCase(agent.name)) {
-            // Canonicalize via resolveContained so the startsWith comparison works
-            // even when the workspace contains symlinks (macOS /var → /private/var).
-            // Both `target` and `skillCreatorDir` are canonical here.
-            var skillCreatorDir = AgentService.resolveContained(workspace, "skills/skill-creator");
-            if (skillCreatorDir != null && target.startsWith(skillCreatorDir)) {
-                return "Error: The 'skill-creator' skill is read-only for agent '"
-                        + agent.name
-                        + "'. Only the 'main' agent can modify skill-creator. "
-                        + "To get an updated skill-creator, ask the user to drag skill-creator "
-                        + "from the global skills registry onto this agent's card.";
-            }
+        // Skill-creator read-only guard for every mutating action.
+        if (isMutatingAction(action)) {
+            var guardError = checkSkillCreatorReadOnly(agent, workspace, target);
+            if (guardError != null) return guardError;
         }
 
         return switch (action) {
             case "readFile" -> readFile(target);
-            case "writeFile" -> {
-                var content = args.has("content") ? args.get("content").getAsString() : "";
-                yield writeFile(target, content);
-            }
             case "listFiles" -> listFiles(target);
+            case "writeFile" -> withLock(target, () -> {
+                var content = args.has("content") ? args.get("content").getAsString() : "";
+                return writeFile(target, content);
+            });
+            case "editFile" -> withLock(target, () -> {
+                if (!args.has("edits") || !args.get("edits").isJsonArray()) {
+                    return "Error: editFile requires an 'edits' array";
+                }
+                return editFile(target, args.getAsJsonArray("edits"));
+            });
             default -> "Error: Unknown action '%s'".formatted(action);
         };
     }
+
+    private static boolean isMutatingAction(String action) {
+        return "writeFile".equals(action) || "editFile".equals(action);
+    }
+
+    /**
+     * Skill-creator is read-only for every agent except 'main'. Only the main agent may
+     * modify the skill-creator skill itself; other agents can use it to create and refactor
+     * OTHER skills but cannot alter skill-creator. Returns an error string if blocked, or
+     * null if the path is OK to mutate.
+     */
+    private static String checkSkillCreatorReadOnly(Agent agent, Path workspace, Path target) {
+        if ("main".equalsIgnoreCase(agent.name)) return null;
+        var skillCreatorDir = AgentService.resolveContained(workspace, "skills/skill-creator");
+        if (skillCreatorDir != null && target.startsWith(skillCreatorDir)) {
+            return "Error: The 'skill-creator' skill is read-only for agent '"
+                    + agent.name
+                    + "'. Only the 'main' agent can modify skill-creator. "
+                    + "To get an updated skill-creator, ask the user to drag skill-creator "
+                    + "from the global skills registry onto this agent's card.";
+        }
+        return null;
+    }
+
+    // === readFile / writeFile / listFiles ===
 
     private static final long MAX_FILE_READ_BYTES = 1_048_576; // 1MB
 
@@ -138,6 +196,21 @@ public class FileSystemTools implements ToolRegistry.Tool {
         }
     }
 
+    private String listFiles(Path dir) {
+        try {
+            if (!Files.isDirectory(dir)) return "Error: Not a directory: %s".formatted(dir.getFileName());
+            try (var stream = Files.list(dir)) {
+                var entries = stream.map(p -> {
+                    var name = p.getFileName().toString();
+                    return Files.isDirectory(p) ? name + "/" : name;
+                }).sorted().toList();
+                return entries.isEmpty() ? "(empty directory)" : String.join("\n", entries);
+            }
+        } catch (IOException e) {
+            return "Error listing directory: %s".formatted(e.getMessage());
+        }
+    }
+
     /**
      * True when {@code path} points at a SKILL.md directly inside a skill folder —
      * i.e., the path ends in {@code .../skills/{skillName}/SKILL.md}. Used to scope
@@ -152,18 +225,699 @@ public class FileSystemTools implements ToolRegistry.Tool {
         return "skills".equals(grandparent.getFileName().toString());
     }
 
-    private String listFiles(Path dir) {
+    // === editFile ===
+
+    private static final int MAX_ERROR_SNIPPET_CHARS = 1500;
+
+    /**
+     * Apply a batch of literal or regex replacements to {@code target}. Each edit must
+     * match its {@code oldText} exactly once against the running working buffer; a miss
+     * or an ambiguous match aborts the whole batch, leaving the file untouched. The
+     * final content is handed to {@link #writeFile} so the SKILL.md version-bump pipeline
+     * fires exactly once against the fully-edited state.
+     */
+    private String editFile(Path target, JsonArray editsJson) {
+        if (editsJson.size() == 0) {
+            return "Error: editFile requires a non-empty 'edits' array";
+        }
+        if (!Files.exists(target)) {
+            return "Error: File not found: %s".formatted(target.getFileName());
+        }
+
+        long size;
         try {
-            if (!Files.isDirectory(dir)) return "Error: Not a directory: %s".formatted(dir.getFileName());
-            try (var stream = Files.list(dir)) {
-                var entries = stream.map(p -> {
-                    var name = p.getFileName().toString();
-                    return Files.isDirectory(p) ? name + "/" : name;
-                }).sorted().toList();
-                return entries.isEmpty() ? "(empty directory)" : String.join("\n", entries);
-            }
+            size = Files.size(target);
         } catch (IOException e) {
-            return "Error listing directory: %s".formatted(e.getMessage());
+            return "Error reading file size: %s".formatted(e.getMessage());
+        }
+        if (size > MAX_FILE_READ_BYTES) {
+            return "Error: File exceeds edit size limit (%d bytes). File size: %d bytes. Consider using writeFile for wholesale replacement instead."
+                    .formatted(MAX_FILE_READ_BYTES, size);
+        }
+
+        String original;
+        try {
+            original = Files.readString(target);
+        } catch (IOException e) {
+            return "Error reading file: %s".formatted(e.getMessage());
+        }
+
+        var working = original;
+        var notes = new ArrayList<String>();
+
+        for (int i = 0; i < editsJson.size(); i++) {
+            if (!editsJson.get(i).isJsonObject()) {
+                return "Error: edit #%d must be an object with oldText and newText fields".formatted(i + 1);
+            }
+            var edit = editsJson.get(i).getAsJsonObject();
+            if (!edit.has("oldText") || !edit.has("newText")) {
+                return "Error: edit #%d must include oldText and newText fields".formatted(i + 1);
+            }
+            var oldText = edit.get("oldText").getAsString();
+            var newText = edit.get("newText").getAsString();
+            var isRegex = edit.has("regex") && edit.get("regex").getAsBoolean();
+
+            if (oldText.isEmpty()) {
+                return "Error: edit #%d has an empty oldText".formatted(i + 1);
+            }
+
+            var applied = applySingleEdit(working, oldText, newText, isRegex, i + 1);
+            if (applied.error != null) {
+                return applied.error;
+            }
+            working = applied.result;
+            if (applied.note != null) {
+                notes.add(applied.note);
+            }
+        }
+
+        if (working.equals(original)) {
+            notes.add("(no material change)");
+        }
+
+        var writeResult = writeFile(target, working);
+        if (writeResult.startsWith("Error")) return writeResult;
+
+        if (notes.isEmpty()) return writeResult;
+        return writeResult + " " + String.join(" ", notes);
+    }
+
+    private record EditResult(String result, String error, String note) {
+        static EditResult ok(String result) { return new EditResult(result, null, null); }
+        static EditResult okWithNote(String result, String note) { return new EditResult(result, null, note); }
+        static EditResult err(String error) { return new EditResult(null, error, null); }
+    }
+
+    private EditResult applySingleEdit(String working, String oldText, String newText, boolean isRegex, int editIndex) {
+        if (isRegex) {
+            Pattern pattern;
+            try {
+                pattern = Pattern.compile(oldText);
+            } catch (PatternSyntaxException e) {
+                return EditResult.err("Error: edit #%d has an invalid regex: %s".formatted(editIndex, e.getMessage()));
+            }
+            var matcher = pattern.matcher(working);
+            var matchStarts = new ArrayList<Integer>();
+            int total = 0;
+            while (matcher.find()) {
+                total++;
+                if (matchStarts.size() < 3) matchStarts.add(matcher.start());
+            }
+            if (total > 1) {
+                var lines = matchStarts.stream()
+                        .map(start -> lineNumberAt(working, start))
+                        .toList();
+                return EditResult.err(("Error: edit #%d regex /%s/ matched %d times (expected exactly one). "
+                        + "First match line numbers: %s. Tighten the regex or include more context.")
+                        .formatted(editIndex, oldText, total, lines));
+            }
+            if (total == 0) {
+                var snippet = capSnippet("regex /%s/ did not match. File begins with:\n%s"
+                        .formatted(oldText, firstNLines(working, 40)));
+                return EditResult.err("Error: edit #%d failed — %s".formatted(editIndex, snippet));
+            }
+            // replaceFirst interprets $1/$2 as backreferences and \$ as a literal $.
+            return EditResult.ok(pattern.matcher(working).replaceFirst(newText));
+        }
+
+        // Literal mode
+        var count = countOccurrences(working, oldText);
+        if (count == 1) {
+            return EditResult.ok(working.replace(oldText, newText));
+        }
+        if (count > 1) {
+            var lines = occurrenceLineNumbers(working, oldText, 3);
+            return EditResult.err(("Error: edit #%d oldText is not unique (found %d occurrences at lines %s). "
+                    + "Include more surrounding context to disambiguate.")
+                    .formatted(editIndex, count, lines));
+        }
+
+        // Zero literal matches — try CRLF → LF normalization once.
+        var normalizedWorking = working.replace("\r\n", "\n");
+        var normalizedOld = oldText.replace("\r\n", "\n");
+        var normalizedCount = countOccurrences(normalizedWorking, normalizedOld);
+        if (normalizedCount == 1) {
+            return EditResult.okWithNote(
+                    normalizedWorking.replace(normalizedOld, newText),
+                    "(edit #%d matched after normalizing CRLF→LF)".formatted(editIndex));
+        }
+        if (normalizedCount > 1) {
+            var lines = occurrenceLineNumbers(normalizedWorking, normalizedOld, 3);
+            return EditResult.err(("Error: edit #%d oldText is not unique after CRLF→LF normalization "
+                    + "(found %d occurrences at lines %s). Include more surrounding context.")
+                    .formatted(editIndex, normalizedCount, lines));
+        }
+
+        // Still zero — produce a diagnostic snippet.
+        var snippet = nearestPartialMatchSnippet(working, oldText);
+        return EditResult.err(capSnippet("Error: edit #%d oldText not found in file.\n%s"
+                .formatted(editIndex, snippet)));
+    }
+
+    private static int countOccurrences(String haystack, String needle) {
+        if (needle.isEmpty()) return 0;
+        int count = 0, idx = 0;
+        while ((idx = haystack.indexOf(needle, idx)) != -1) {
+            count++;
+            idx += needle.length();
+        }
+        return count;
+    }
+
+    private static List<Integer> occurrenceLineNumbers(String haystack, String needle, int max) {
+        var out = new ArrayList<Integer>();
+        int idx = 0;
+        while (out.size() < max && (idx = haystack.indexOf(needle, idx)) != -1) {
+            out.add(lineNumberAt(haystack, idx));
+            idx += needle.length();
+        }
+        return out;
+    }
+
+    private static int lineNumberAt(String text, int charIndex) {
+        int line = 1;
+        for (int i = 0; i < charIndex && i < text.length(); i++) {
+            if (text.charAt(i) == '\n') line++;
+        }
+        return line;
+    }
+
+    /**
+     * Build a helpful snippet for the "oldText not found" error. Walks progressively
+     * shorter prefixes of oldText and shows ±200 chars around the first hit. Falls back
+     * to the first 40 lines of the file if no prefix matches anywhere.
+     */
+    private static String nearestPartialMatchSnippet(String file, String oldText) {
+        int[] prefixLens = {40, 20, 10};
+        for (int len : prefixLens) {
+            if (oldText.length() < len) continue;
+            var prefix = oldText.substring(0, len);
+            var idx = file.indexOf(prefix);
+            if (idx >= 0) {
+                return "Nearest partial match (first %d chars of oldText) at line %d:\n%s"
+                        .formatted(len, lineNumberAt(file, idx), snippetAround(file, idx, 200));
+            }
+        }
+        // First line of oldText as a last-ditch anchor.
+        var firstLine = oldText.split("\n", 2)[0];
+        if (!firstLine.isEmpty() && firstLine.length() < oldText.length()) {
+            var idx = file.indexOf(firstLine);
+            if (idx >= 0) {
+                return "Nearest partial match (first line of oldText) at line %d:\n%s"
+                        .formatted(lineNumberAt(file, idx), snippetAround(file, idx, 200));
+            }
+        }
+        return "No partial match found. File begins with:\n" + firstNLines(file, 40);
+    }
+
+    private static String snippetAround(String text, int centerChar, int radius) {
+        int start = Math.max(0, centerChar - radius);
+        int end = Math.min(text.length(), centerChar + radius);
+        var snippet = text.substring(start, end);
+        return (start > 0 ? "…" : "") + snippet + (end < text.length() ? "…" : "");
+    }
+
+    private static String firstNLines(String text, int n) {
+        var split = text.split("\n", -1);
+        var take = Math.min(n, split.length);
+        var sb = new StringBuilder();
+        for (int i = 0; i < take; i++) {
+            sb.append(i + 1).append(" | ").append(split[i]);
+            if (i < take - 1) sb.append("\n");
+        }
+        if (split.length > take) sb.append("\n… (").append(split.length - take).append(" more lines)");
+        return sb.toString();
+    }
+
+    private static String capSnippet(String snippet) {
+        if (snippet.length() <= MAX_ERROR_SNIPPET_CHARS) return snippet;
+        return snippet.substring(0, MAX_ERROR_SNIPPET_CHARS) + "… (truncated)";
+    }
+
+    // === applyPatch ===
+
+    /**
+     * Apply a multi-file patch in the OpenClaw/unified-diff format:
+     *
+     * <pre>
+     * *** Begin Patch
+     * *** Add File: path/new.txt
+     * +line 1
+     * +line 2
+     * *** End of File
+     * *** Update File: path/existing.md
+     * *** Move to: path/renamed.md
+     * @@ optional anchor @@
+     *  context
+     * -old line
+     * +new line
+     * *** End of File
+     * *** Delete File: path/gone.txt
+     * *** End Patch
+     * </pre>
+     *
+     * All file operations are validated atomically before any write hits disk. On
+     * application IO error, best-effort rollback restores pre-edit content and removes
+     * newly-created files.
+     */
+    private String applyPatch(Agent agent, String patchBody) {
+        if (patchBody == null || patchBody.isBlank()) {
+            return "Error: applyPatch requires a non-empty 'patch' field";
+        }
+
+        List<FileOp> ops;
+        try {
+            ops = PatchParser.parse(patchBody);
+        } catch (PatchParseException e) {
+            return "Error: malformed patch at line %d: %s".formatted(e.line, e.getMessage());
+        }
+
+        if (ops.isEmpty()) {
+            return "Error: patch contains no file operations";
+        }
+
+        var workspace = AgentService.workspacePath(agent.name);
+
+        // Resolve + validate paths and enforce the skill-creator read-only guard for every op.
+        // We build a map of op → resolved (targetPath, optionalMoveTarget) before validation.
+        var resolved = new ArrayList<ResolvedOp>();
+        for (var op : ops) {
+            Path target;
+            try {
+                target = AgentService.acquireWorkspacePath(agent.name, op.path());
+            } catch (SecurityException e) {
+                return "Error: " + e.getMessage();
+            }
+            var guardError = checkSkillCreatorReadOnly(agent, workspace, target);
+            if (guardError != null) return guardError;
+
+            Path moveTarget = null;
+            if (op instanceof FileOp.Update u && u.newPath().isPresent()) {
+                try {
+                    moveTarget = AgentService.acquireWorkspacePath(agent.name, u.newPath().get());
+                } catch (SecurityException e) {
+                    return "Error: " + e.getMessage();
+                }
+                var moveGuard = checkSkillCreatorReadOnly(agent, workspace, moveTarget);
+                if (moveGuard != null) return moveGuard;
+            }
+            resolved.add(new ResolvedOp(op, target, moveTarget));
+        }
+
+        // Collect unique lock keys across every target and moveTarget, sorted lexicographically
+        // to ensure a global lock acquisition order and prevent deadlock when two concurrent
+        // applyPatch calls touch overlapping file sets in opposite orders.
+        var lockKeys = new LinkedHashSet<String>();
+        for (var r : resolved) {
+            lockKeys.add(lockKey(r.target));
+            if (r.moveTarget != null) lockKeys.add(lockKey(r.moveTarget));
+        }
+        var sortedKeys = new ArrayList<>(lockKeys);
+        Collections.sort(sortedKeys);
+
+        var locks = new ArrayList<ReentrantLock>();
+        try {
+            for (var key : sortedKeys) {
+                var lock = FILE_LOCKS.computeIfAbsent(key, k -> new ReentrantLock());
+                lock.lock();
+                locks.add(lock);
+            }
+            return applyPatchLocked(resolved);
+        } finally {
+            for (int i = locks.size() - 1; i >= 0; i--) {
+                locks.get(i).unlock();
+            }
+        }
+    }
+
+    private String applyPatchLocked(List<ResolvedOp> resolved) {
+        // === Phase 1: validate every op and compute the post-patch content for Add/Update ops. ===
+        // We also snapshot pre-edit content for Update/Delete ops so rollback on IO error can restore.
+        var plans = new ArrayList<OpPlan>();
+        for (int i = 0; i < resolved.size(); i++) {
+            var r = resolved.get(i);
+            var op = r.op;
+            var opIndex = i + 1;
+            switch (op) {
+                case FileOp.Add add -> {
+                    if (Files.exists(r.target)) {
+                        return "Error: op #%d Add File '%s' failed — file already exists".formatted(opIndex, add.path());
+                    }
+                    plans.add(new OpPlan(r, add.content(), null));
+                }
+                case FileOp.Delete del -> {
+                    if (!Files.exists(r.target)) {
+                        return "Error: op #%d Delete File '%s' failed — file does not exist".formatted(opIndex, del.path());
+                    }
+                    String snapshot;
+                    try {
+                        snapshot = Files.readString(r.target);
+                    } catch (IOException e) {
+                        return "Error: op #%d Delete File '%s' snapshot failed — %s".formatted(opIndex, del.path(), e.getMessage());
+                    }
+                    plans.add(new OpPlan(r, null, snapshot));
+                }
+                case FileOp.Update upd -> {
+                    if (!Files.exists(r.target)) {
+                        return "Error: op #%d Update File '%s' failed — file does not exist".formatted(opIndex, upd.path());
+                    }
+                    String snapshot;
+                    try {
+                        snapshot = Files.readString(r.target);
+                    } catch (IOException e) {
+                        return "Error: op #%d Update File '%s' read failed — %s".formatted(opIndex, upd.path(), e.getMessage());
+                    }
+                    var applied = applyUpdateChunks(snapshot, upd.chunks(), upd.path(), opIndex);
+                    if (applied.error != null) return applied.error;
+                    plans.add(new OpPlan(r, applied.result, snapshot));
+                }
+            }
+        }
+
+        // === Phase 2: apply. On IO failure mid-application, roll back successful writes. ===
+        var committed = new ArrayList<CommittedOp>();
+        try {
+            for (var plan : plans) {
+                var r = plan.resolved;
+                var op = r.op;
+                switch (op) {
+                    case FileOp.Add add -> {
+                        var result = writeFile(r.target, plan.newContent);
+                        if (result.startsWith("Error")) {
+                            rollback(committed);
+                            return "Error applying Add File '%s': %s".formatted(add.path(), result);
+                        }
+                        committed.add(CommittedOp.added(r.target));
+                    }
+                    case FileOp.Delete del -> {
+                        try {
+                            Files.deleteIfExists(r.target);
+                            committed.add(CommittedOp.deleted(r.target, plan.preSnapshot));
+                        } catch (IOException e) {
+                            rollback(committed);
+                            return "Error applying Delete File '%s': %s".formatted(del.path(), e.getMessage());
+                        }
+                    }
+                    case FileOp.Update upd -> {
+                        if (r.moveTarget != null) {
+                            // Write edited content to new path, then remove original.
+                            var writeResult = writeFile(r.moveTarget, plan.newContent);
+                            if (writeResult.startsWith("Error")) {
+                                rollback(committed);
+                                return "Error applying Update+Move '%s'→'%s': %s"
+                                        .formatted(upd.path(), upd.newPath().orElse(""), writeResult);
+                            }
+                            committed.add(CommittedOp.added(r.moveTarget));
+                            try {
+                                Files.deleteIfExists(r.target);
+                                committed.add(CommittedOp.deleted(r.target, plan.preSnapshot));
+                            } catch (IOException e) {
+                                rollback(committed);
+                                return "Error applying Update+Move '%s'→'%s': %s"
+                                        .formatted(upd.path(), upd.newPath().orElse(""), e.getMessage());
+                            }
+                        } else {
+                            var result = writeFile(r.target, plan.newContent);
+                            if (result.startsWith("Error")) {
+                                rollback(committed);
+                                return "Error applying Update File '%s': %s".formatted(upd.path(), result);
+                            }
+                            committed.add(CommittedOp.updated(r.target, plan.preSnapshot));
+                        }
+                    }
+                }
+            }
+        } catch (RuntimeException rt) {
+            rollback(committed);
+            throw rt;
+        }
+
+        // Summary
+        int added = 0, updated = 0, deleted = 0;
+        for (var c : committed) {
+            switch (c.kind) {
+                case ADDED -> added++;
+                case UPDATED -> updated++;
+                case DELETED -> deleted++;
+            }
+        }
+        var paths = committed.stream().map(c -> c.path.getFileName().toString()).toList();
+        return "Applied patch: %d added, %d updated, %d deleted (files: %s)"
+                .formatted(added, updated, deleted, String.join(", ", paths));
+    }
+
+    private static void rollback(List<CommittedOp> committed) {
+        // Replay in reverse, restoring pre-edit state best-effort. We don't surface rollback
+        // errors to the caller — the primary failure already did — but we do try to avoid
+        // leaving partial writes behind.
+        for (int i = committed.size() - 1; i >= 0; i--) {
+            var c = committed.get(i);
+            try {
+                switch (c.kind) {
+                    case ADDED -> Files.deleteIfExists(c.path);
+                    case UPDATED, DELETED -> Files.writeString(c.path, c.preSnapshot);
+                }
+            } catch (IOException _) {
+                // swallow — best effort.
+            }
+        }
+    }
+
+    /**
+     * Apply a list of patch chunks to the current file content. Each chunk's non-`+` lines
+     * (context + remove) form an oldText block that must appear at least once in the file;
+     * if an @@ anchor is present, the search is restricted to the region after the anchor.
+     * Returns the new file content or an error.
+     */
+    private EditResult applyUpdateChunks(String original, List<PatchChunk> chunks, String path, int opIndex) {
+        var working = original;
+        for (int c = 0; c < chunks.size(); c++) {
+            var chunk = chunks.get(c);
+            var chunkIndex = c + 1;
+
+            var oldBlock = new StringBuilder();
+            var newBlock = new StringBuilder();
+            for (var line : chunk.lines()) {
+                switch (line.kind()) {
+                    case CONTEXT -> {
+                        oldBlock.append(line.text()).append('\n');
+                        newBlock.append(line.text()).append('\n');
+                    }
+                    case REMOVE -> oldBlock.append(line.text()).append('\n');
+                    case ADD -> newBlock.append(line.text()).append('\n');
+                }
+            }
+            var oldText = oldBlock.toString();
+            var newText = newBlock.toString();
+            if (oldText.isEmpty()) {
+                return EditResult.err(("Error: op #%d Update File '%s' chunk #%d has no removal or context lines — "
+                        + "a chunk must include at least one '-' or ' ' line to anchor the edit.")
+                        .formatted(opIndex, path, chunkIndex));
+            }
+
+            int searchStart = 0;
+            if (chunk.anchor().isPresent()) {
+                var anchor = chunk.anchor().get();
+                if (!anchor.isEmpty()) {
+                    var anchorIdx = working.indexOf(anchor);
+                    if (anchorIdx < 0) {
+                        return EditResult.err(("Error: op #%d Update File '%s' chunk #%d anchor '%s' not found in file")
+                                .formatted(opIndex, path, chunkIndex, anchor));
+                    }
+                    searchStart = anchorIdx;
+                }
+            }
+
+            var hit = working.indexOf(oldText, searchStart);
+            if (hit < 0) {
+                return EditResult.err(("Error: op #%d Update File '%s' chunk #%d context did not match the current file content. "
+                        + "Regenerate the chunk against the latest file state.").formatted(opIndex, path, chunkIndex));
+            }
+            // For non-anchored chunks, require uniqueness to avoid accidental mis-apply.
+            if (chunk.anchor().isEmpty()) {
+                var second = working.indexOf(oldText, hit + oldText.length());
+                if (second >= 0) {
+                    return EditResult.err(("Error: op #%d Update File '%s' chunk #%d context is not unique. "
+                            + "Add an @@ anchor @@ line or include more context.").formatted(opIndex, path, chunkIndex));
+                }
+            }
+            working = working.substring(0, hit) + newText + working.substring(hit + oldText.length());
+        }
+        return EditResult.ok(working);
+    }
+
+    // === Patch model ===
+
+    sealed interface FileOp permits FileOp.Add, FileOp.Update, FileOp.Delete {
+        String path();
+        record Add(String path, String content) implements FileOp {}
+        record Update(String path, Optional<String> newPath, List<PatchChunk> chunks) implements FileOp {}
+        record Delete(String path) implements FileOp {}
+    }
+
+    record PatchChunk(Optional<String> anchor, List<PatchLine> lines) {}
+    record PatchLine(PatchLineKind kind, String text) {}
+    enum PatchLineKind { CONTEXT, ADD, REMOVE }
+
+    private record ResolvedOp(FileOp op, Path target, Path moveTarget) {}
+    private record OpPlan(ResolvedOp resolved, String newContent, String preSnapshot) {}
+
+    private static final class CommittedOp {
+        enum Kind { ADDED, UPDATED, DELETED }
+        final Kind kind;
+        final Path path;
+        final String preSnapshot;
+        private CommittedOp(Kind kind, Path path, String preSnapshot) {
+            this.kind = kind; this.path = path; this.preSnapshot = preSnapshot;
+        }
+        static CommittedOp added(Path p) { return new CommittedOp(Kind.ADDED, p, null); }
+        static CommittedOp updated(Path p, String snap) { return new CommittedOp(Kind.UPDATED, p, snap); }
+        static CommittedOp deleted(Path p, String snap) { return new CommittedOp(Kind.DELETED, p, snap); }
+    }
+
+    // === Patch parser ===
+
+    private static final class PatchParseException extends RuntimeException {
+        final int line;
+        PatchParseException(String message, int line) { super(message); this.line = line; }
+    }
+
+    private static final class PatchParser {
+        static List<FileOp> parse(String body) {
+            // Normalize line endings so the parser has one path to worry about.
+            var lines = body.replace("\r\n", "\n").split("\n", -1);
+            int i = 0;
+            // Skip leading blank lines.
+            while (i < lines.length && lines[i].isBlank()) i++;
+            if (i >= lines.length || !lines[i].trim().equals("*** Begin Patch")) {
+                throw new PatchParseException("missing '*** Begin Patch' header", i + 1);
+            }
+            i++;
+
+            var ops = new ArrayList<FileOp>();
+            while (i < lines.length) {
+                var line = lines[i];
+                var trimmed = line.trim();
+                if (trimmed.equals("*** End Patch")) {
+                    return ops;
+                }
+                if (trimmed.isEmpty()) { i++; continue; }
+                if (trimmed.startsWith("*** Add File:")) {
+                    var path = trimmed.substring("*** Add File:".length()).trim();
+                    i++;
+                    var content = new StringBuilder();
+                    boolean firstLine = true;
+                    while (i < lines.length && !lines[i].trim().equals("*** End of File")) {
+                        var addLine = lines[i];
+                        if (addLine.startsWith("+")) {
+                            if (!firstLine) content.append('\n');
+                            content.append(addLine.substring(1));
+                            firstLine = false;
+                        } else if (addLine.isEmpty()) {
+                            // tolerate blank lines inside Add File blocks
+                            if (!firstLine) content.append('\n');
+                            firstLine = false;
+                        } else {
+                            throw new PatchParseException(
+                                    "Add File body lines must start with '+' (got '" + addLine + "')", i + 1);
+                        }
+                        i++;
+                    }
+                    if (i >= lines.length) {
+                        throw new PatchParseException("Add File missing '*** End of File' terminator", i);
+                    }
+                    i++; // consume End of File
+                    ops.add(new FileOp.Add(path, content.toString()));
+                    continue;
+                }
+                if (trimmed.startsWith("*** Delete File:")) {
+                    var path = trimmed.substring("*** Delete File:".length()).trim();
+                    ops.add(new FileOp.Delete(path));
+                    i++;
+                    continue;
+                }
+                if (trimmed.startsWith("*** Update File:")) {
+                    var path = trimmed.substring("*** Update File:".length()).trim();
+                    i++;
+                    Optional<String> newPath = Optional.empty();
+                    if (i < lines.length && lines[i].trim().startsWith("*** Move to:")) {
+                        newPath = Optional.of(lines[i].trim().substring("*** Move to:".length()).trim());
+                        i++;
+                    }
+                    var chunks = new ArrayList<PatchChunk>();
+                    var currentLines = new ArrayList<PatchLine>();
+                    Optional<String> currentAnchor = Optional.empty();
+                    boolean inChunk = false;
+                    while (i < lines.length && !lines[i].trim().equals("*** End of File")) {
+                        var chunkLine = lines[i];
+                        if (chunkLine.startsWith("@@") && chunkLine.trim().endsWith("@@") && chunkLine.trim().length() >= 4) {
+                            // Close previous chunk if any.
+                            if (inChunk && !currentLines.isEmpty()) {
+                                chunks.add(new PatchChunk(currentAnchor, currentLines));
+                            }
+                            currentLines = new ArrayList<>();
+                            var anchorText = chunkLine.trim();
+                            anchorText = anchorText.substring(2, anchorText.length() - 2).trim();
+                            currentAnchor = anchorText.isEmpty() ? Optional.empty() : Optional.of(anchorText);
+                            inChunk = true;
+                        } else if (chunkLine.startsWith("+")) {
+                            if (!inChunk) { inChunk = true; currentLines = new ArrayList<>(); currentAnchor = Optional.empty(); }
+                            currentLines.add(new PatchLine(PatchLineKind.ADD, chunkLine.substring(1)));
+                        } else if (chunkLine.startsWith("-")) {
+                            if (!inChunk) { inChunk = true; currentLines = new ArrayList<>(); currentAnchor = Optional.empty(); }
+                            currentLines.add(new PatchLine(PatchLineKind.REMOVE, chunkLine.substring(1)));
+                        } else if (chunkLine.startsWith(" ") || chunkLine.isEmpty()) {
+                            if (!inChunk) { inChunk = true; currentLines = new ArrayList<>(); currentAnchor = Optional.empty(); }
+                            currentLines.add(new PatchLine(PatchLineKind.CONTEXT,
+                                    chunkLine.isEmpty() ? "" : chunkLine.substring(1)));
+                        } else {
+                            throw new PatchParseException(
+                                    "Update File chunk line must start with ' ', '+', '-', or '@@' (got '" + chunkLine + "')",
+                                    i + 1);
+                        }
+                        i++;
+                    }
+                    if (i >= lines.length) {
+                        throw new PatchParseException("Update File missing '*** End of File' terminator", i);
+                    }
+                    if (inChunk && !currentLines.isEmpty()) {
+                        chunks.add(new PatchChunk(currentAnchor, currentLines));
+                    }
+                    if (chunks.isEmpty()) {
+                        throw new PatchParseException("Update File '" + path + "' has no chunks", i + 1);
+                    }
+                    i++; // consume End of File
+                    ops.add(new FileOp.Update(path, newPath, chunks));
+                    continue;
+                }
+                throw new PatchParseException("Unexpected directive: '" + trimmed + "'", i + 1);
+            }
+            throw new PatchParseException("missing '*** End Patch' footer", i);
+        }
+    }
+
+    // === Locking ===
+
+    /**
+     * Per-file reentrant locks keyed on the canonical absolute-normalized path. Ensures
+     * that two concurrent tool calls on the same file serialize instead of clobbering
+     * each other. The map grows monotonically with unique files seen across the JVM
+     * lifetime; documented and accepted — workspace file counts are small (hundreds,
+     * maybe low thousands).
+     */
+    private static final ConcurrentMap<String, ReentrantLock> FILE_LOCKS = new ConcurrentHashMap<>();
+
+    private static String lockKey(Path target) {
+        return target.toAbsolutePath().normalize().toString();
+    }
+
+    private String withLock(Path target, Supplier<String> block) {
+        var lock = FILE_LOCKS.computeIfAbsent(lockKey(target), k -> new ReentrantLock());
+        lock.lock();
+        try {
+            return block.get();
+        } finally {
+            lock.unlock();
         }
     }
 }

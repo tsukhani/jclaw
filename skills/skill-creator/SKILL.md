@@ -1,8 +1,8 @@
 ---
 name: skill-creator
 description: Create new skills or refactor existing skills to follow the standard directory structure.
-version: 1.0.0
-tools: [filesystem, web_fetch]
+version: 1.0.1
+tools: [filesystem]
 ---
 
 # Skill Creator & Refactorer
@@ -32,35 +32,30 @@ Every skill MUST follow this layout:
 
 ## Tool Catalog (authoritative)
 
-Every skill MUST declare the exact tools it needs in a `tools:` YAML list in its frontmatter. The authoritative list of valid tool names lives in the `## Tool Catalog` section of your system prompt — it is generated live from the running JClaw build, so it always reflects what actually exists. Pick ONLY from the names in that table. If a name isn't in the Tool Catalog section, it is not a real tool.
+Every skill MUST declare the exact tools it needs in a `tools:` YAML list in its frontmatter. The authoritative list of valid tool names lives in the `## Tool Catalog` section of your system prompt — it is generated live from the running JClaw build and filtered to the tools this specific agent has enabled, so every name in the table is guaranteed to be callable. Pick ONLY from the names in that table. If a name isn't in the Tool Catalog section, it either doesn't exist or is disabled for this agent, and either way the skill cannot use it.
 
 ## Creating a New Skill
 
 1. **Ask** the user what the skill should do. Get a clear name and description.
 2. **Determine required tools.** Walk through the steps the skill will perform and pick EVERY tool it will need from the `## Tool Catalog` section of your system prompt. Be exhaustive but exact: do not add tools the skill will not use, and do not omit tools the skill cannot work without. Read each tool's description in the Tool Catalog and match it against what the skill actually does.
    - Only use names that appear verbatim in the Tool Catalog table. If a capability isn't in the catalog, the skill cannot do it.
+   - Because the Tool Catalog is already filtered to this agent's enabled tools, any name you pick from it is guaranteed to be callable — no pre-flight check needed.
    - **Pure reasoning / computation only (no I/O, no external data)** → `tools: []` (empty list). Do NOT invent tools for tasks the LLM can answer on its own. Example: "compute 2+2" or "rephrase this sentence" need zero tools.
-3. **Pre-flight check (mandatory).** Before writing any files, verify the agent actually has every required tool enabled:
-   - Read the `Agent ID` field from the `## Environment` section at the end of the system prompt.
-   - Use `web_fetch` to GET `http://localhost:9000/api/agents/{agent-id}/tools` (substituting the real numeric id).
-   - Parse the JSON response. Each entry has `name` and `enabled` fields. Collect the names where `enabled = true`.
-   - Compute the set difference: `required_tools − enabled_tools = missing_tools`.
-   - **If `missing_tools` is non-empty**: STOP. Do not write any files. Tell the user: "Cannot create skill `{name}` for this agent: it requires tools [list] that are disabled. Ask an admin to enable them on the Agents page and try again."
-   - **If `missing_tools` is empty (or `required_tools` is empty)**: proceed to step 4.
-4. **Draft** the SKILL.md content:
+3. **Draft** the SKILL.md content:
    - YAML frontmatter with `name`, `description`, and `tools:` (the exact list from step 2)
    - A clear title and purpose
    - Step-by-step instructions the agent should follow
    - Reference each declared tool by name in the body
    - Example inputs and expected outputs
    - Edge cases and error handling
-   - **Do NOT set the `version:` field yourself.** The system sets it automatically when the file is written: new skills start at `1.0.0` and any subsequent material change bumps the patch component. If you include a `version:` line it will be overwritten.
-5. **Create** the skill using the filesystem tool:
+   - **Leave the `version:` field out by default.** When you omit it, the system auto-bumps the patch component on every material write (e.g., `1.0.3 → 1.0.4`) and new skills start at `1.0.0`. **Set an explicit `version:` only when the user asks to promote the skill forward** — e.g., "bump to v1.0.0", "promote to 1.1", "this is a breaking change, make it 2.0.0". In that case, add `version: X.Y.Z` to the frontmatter with your intended target. The value MUST be strictly greater than the next auto-bump target; anything lower or invalid is silently ignored and the system uses its auto-bump instead. Patterns: minor bump (new feature) `1.0.3 → 1.1.0`, major bump (breaking change) `1.2.0 → 2.0.0`, stable promotion from alpha `0.0.6 → 1.0.0`. A version-only promotion (no other content changes) can be done with a single `editFile` that replaces the existing `version:` line.
+4. **Create** the skill using the filesystem tool:
    - Create the directory: `skills/{skill-name}/`
-   - Write `skills/{skill-name}/SKILL.md`
+   - Write `skills/{skill-name}/SKILL.md` with `writeFile` (brand-new files use `writeFile`; existing files should use `editFile` — see the Refactoring section).
    - If credentials are needed, create `credentials/` with placeholder files
    - If binary tools are needed, create `tools/` with documentation
-6. **Confirm** creation. Tell the user the declared `tools:` list so they can verify.
+   - **Creating multiple files at once?** Use `applyPatch` to add several files atomically — it validates all ops before touching disk, so you won't end up with half a skill on a parse error. Example: `*** Begin Patch` / `*** Add File: skills/foo/SKILL.md` / `+---` / `+name: foo` / ... / `*** End of File` / `*** Add File: skills/foo/credentials/api.json` / ... / `*** End Patch`.
+5. **Confirm** creation. Tell the user the declared `tools:` list so they can verify.
 
 ### Rules for the `tools:` field
 
@@ -89,7 +84,7 @@ When asked to refactor or update an existing skill, or when you notice a skill t
    - Non-kebab-case skill name → rename the folder
 3. **Move files** to the correct locations using the filesystem tool.
 4. **Update SKILL.md** to reference the new file paths (e.g., `tools/wacli` instead of `./wacli`).
-5. **Write the updated SKILL.md.** Do NOT touch the `version:` field yourself — the filesystem tool auto-bumps the patch version on every material write and will ignore any value you put in `version:`. After the write, the response from the filesystem tool will tell you what the new version is.
+5. **Update the SKILL.md with `editFile`, not `writeFile`.** For any refactor that touches an existing SKILL.md, use `editFile` with a batch of `{oldText, newText}` entries. This is dramatically more efficient than rewriting the whole file and is also the only way to edit a skill body that would exceed your output token budget as a single `writeFile` argument. Each `oldText` must appear exactly once in the file — include enough surrounding context (a surrounding line or two) to guarantee uniqueness. For cross-file refactors (e.g., moving a binary from the skill root into `tools/` AND updating SKILL.md to reference the new path), use `applyPatch` to do both changes atomically in one tool call. Leave the `version:` field alone by default — the filesystem tool auto-bumps the patch component on every material write. **Only set an explicit `version:` when the user asks to promote the skill forward** (e.g., "bump to v1.0.0", "promote to 2.0", "this is a breaking change"); in that case include a `version: X.Y.Z` edit in the same batch, with a value strictly greater than the auto-bump target. The filesystem tool response will quote the final version — report it to the user.
 6. **Verify** the final structure matches the standard layout.
 7. **Report** what was changed and quote the new version as reported by the filesystem tool.
 

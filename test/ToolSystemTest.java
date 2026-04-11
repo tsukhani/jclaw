@@ -11,6 +11,10 @@ import java.nio.file.Path;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class ToolSystemTest extends UnitTest {
 
@@ -264,6 +268,551 @@ public class ToolSystemTest extends UnitTest {
             Files.deleteIfExists(outsideSecret);
             Files.deleteIfExists(sibling);
         }
+    }
+
+    // --- editFile ---
+
+    @Test
+    public void editFileSingleReplacement() {
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "edit.txt", "content": "hello world"}
+                """, agent);
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editFile", "path": "edit.txt",
+                 "edits": [{"oldText": "world", "newText": "there"}]}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+
+        var read = ToolRegistry.execute("filesystem",
+                """
+                {"action": "readFile", "path": "edit.txt"}
+                """, agent);
+        assertEquals("hello there", read);
+    }
+
+    @Test
+    public void editFileBatchAtomic() {
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "atomic.txt", "content": "alpha\\nbeta\\ngamma"}
+                """, agent);
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editFile", "path": "atomic.txt",
+                 "edits": [
+                    {"oldText": "alpha", "newText": "ALPHA"},
+                    {"oldText": "beta", "newText": "BETA"},
+                    {"oldText": "nonexistent", "newText": "nope"}
+                 ]}
+                """, agent);
+        assertTrue(result.startsWith("Error"), "third edit should abort the batch: " + result);
+        assertTrue(result.contains("#3"), "error should name the failing edit index: " + result);
+
+        var read = ToolRegistry.execute("filesystem",
+                """
+                {"action": "readFile", "path": "atomic.txt"}
+                """, agent);
+        assertEquals("alpha\nbeta\ngamma", read, "file must be unchanged on partial failure");
+    }
+
+    @Test
+    public void editFileRequiresUniqueMatch() {
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "dup.txt", "content": "foo\\nfoo\\nfoo"}
+                """, agent);
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editFile", "path": "dup.txt",
+                 "edits": [{"oldText": "foo", "newText": "bar"}]}
+                """, agent);
+        assertTrue(result.contains("not unique"), "got: " + result);
+        assertTrue(result.contains("3"), "should mention the occurrence count");
+    }
+
+    @Test
+    public void editFileDiagnosticSnippetCapped() {
+        var big = "line A\n".repeat(60);
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "missing.txt", "content": "%s"}
+                """.formatted(big.replace("\n", "\\n")), agent);
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editFile", "path": "missing.txt",
+                 "edits": [{"oldText": "a phrase that is definitely not present", "newText": "x"}]}
+                """, agent);
+        assertTrue(result.startsWith("Error"));
+        assertTrue(result.contains("not found") || result.contains("No partial match"));
+        assertTrue(result.length() <= 1600, "error payload must stay under ~1500-char cap: " + result.length());
+    }
+
+    @Test
+    public void editFileCrlfFallback() throws Exception {
+        var workspace = AgentService.workspacePath(agent.name);
+        Files.writeString(workspace.resolve("crlf.txt"), "alpha\r\nbeta\r\ngamma\r\n");
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editFile", "path": "crlf.txt",
+                 "edits": [{"oldText": "alpha\\nbeta", "newText": "ALPHA\\nBETA"}]}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+        assertTrue(result.contains("CRLF"), "should note the CRLF→LF normalization: " + result);
+
+        var read = Files.readString(workspace.resolve("crlf.txt"));
+        assertTrue(read.contains("ALPHA\nBETA"), "edited content: " + read);
+    }
+
+    @Test
+    public void editFileEmptyEditsRejected() {
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "empty-edits.txt", "content": "x"}
+                """, agent);
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editFile", "path": "empty-edits.txt", "edits": []}
+                """, agent);
+        assertTrue(result.startsWith("Error"));
+        assertTrue(result.contains("non-empty"));
+    }
+
+    @Test
+    public void editFileRegexMode() {
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "regex.txt", "content": "version=1.2.3"}
+                """, agent);
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editFile", "path": "regex.txt",
+                 "edits": [{"oldText": "version=(\\\\d+)\\\\.(\\\\d+)\\\\.(\\\\d+)",
+                            "newText": "version=$1.$2.99",
+                            "regex": true}]}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+        var read = ToolRegistry.execute("filesystem",
+                """
+                {"action": "readFile", "path": "regex.txt"}
+                """, agent);
+        assertEquals("version=1.2.99", read);
+    }
+
+    @Test
+    public void editFileRegexUniquenessEnforced() {
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "regex-dup.txt", "content": "foo 1\\nfoo 2\\nfoo 3"}
+                """, agent);
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editFile", "path": "regex-dup.txt",
+                 "edits": [{"oldText": "foo \\\\d", "newText": "bar", "regex": true}]}
+                """, agent);
+        assertTrue(result.contains("matched 3 times") || result.contains("matched 3"),
+                "regex match-count enforcement: " + result);
+    }
+
+    @Test
+    public void editFilePathTraversalBlocked() {
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editFile", "path": "../../etc/passwd",
+                 "edits": [{"oldText": "root", "newText": "nope"}]}
+                """, agent);
+        assertTrue(result.contains("Error"));
+        assertTrue(result.contains("escapes"));
+    }
+
+    @Test
+    public void editFileBumpsSkillMdVersionOnce() throws Exception {
+        // Create a skill via writeFile, then make a material edit via editFile, and
+        // assert the version incremented by exactly one patch level.
+        var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve("bump-test");
+        Files.createDirectories(skillDir);
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "skills/bump-test/SKILL.md",
+                 "content": "---\\nname: bump-test\\ndescription: x\\n---\\n# Title\\nOld body"}
+                """, agent);
+        var v1 = Files.readString(skillDir.resolve("SKILL.md"));
+        assertTrue(v1.contains("version: 1.0.0"), "initial version: " + v1);
+
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editFile", "path": "skills/bump-test/SKILL.md",
+                 "edits": [{"oldText": "Old body", "newText": "New body"}]}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+        assertTrue(result.contains("1.0.0 → 1.0.1"), "exactly one patch bump: " + result);
+
+        var v2 = Files.readString(skillDir.resolve("SKILL.md"));
+        assertTrue(v2.contains("version: 1.0.1"));
+        assertTrue(v2.contains("New body"));
+    }
+
+    // --- Explicit version promotion (LLM-supplied version: in frontmatter) ---
+
+    @Test
+    public void editFilePromotesVersionWhenLlmRequests() throws Exception {
+        // Create a skill, then edit it with an LLM-supplied version that jumps past the
+        // auto-bump target. The explicit value must win.
+        var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve("promote-major");
+        Files.createDirectories(skillDir);
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "skills/promote-major/SKILL.md",
+                 "content": "---\\nname: promote-major\\ndescription: x\\n---\\n# Title\\nOld body"}
+                """, agent);
+        var v1 = Files.readString(skillDir.resolve("SKILL.md"));
+        assertTrue(v1.contains("version: 1.0.0"));
+
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editFile", "path": "skills/promote-major/SKILL.md",
+                 "edits": [
+                    {"oldText": "version: 1.0.0", "newText": "version: 2.0.0"},
+                    {"oldText": "Old body", "newText": "New body"}
+                 ]}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+        assertTrue(result.contains("1.0.0 → 2.0.0"), "should show explicit promotion: " + result);
+
+        var v2 = Files.readString(skillDir.resolve("SKILL.md"));
+        assertTrue(v2.contains("version: 2.0.0"), "on-disk: " + v2);
+        assertTrue(v2.contains("New body"));
+    }
+
+    @Test
+    public void editFileVersionOnlyPromotion() throws Exception {
+        // Edit only the version line — no body change. The auto path would reinstate the
+        // old version because contentDiffersIgnoringVersion returns false. The explicit
+        // LLM version must override that and land as the final value.
+        var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve("version-only");
+        Files.createDirectories(skillDir);
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "skills/version-only/SKILL.md",
+                 "content": "---\\nname: version-only\\ndescription: x\\n---\\n# Title\\nBody"}
+                """, agent);
+        assertTrue(Files.readString(skillDir.resolve("SKILL.md")).contains("version: 1.0.0"));
+
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editFile", "path": "skills/version-only/SKILL.md",
+                 "edits": [{"oldText": "version: 1.0.0", "newText": "version: 1.5.0"}]}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+
+        var v = Files.readString(skillDir.resolve("SKILL.md"));
+        assertTrue(v.contains("version: 1.5.0"), "version-only promotion must land: " + v);
+        assertTrue(v.contains("Body"), "body content preserved");
+    }
+
+    @Test
+    public void editFileRejectsVersionDowngrade() throws Exception {
+        // LLM attempts to downgrade. The auto-bump must win.
+        var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve("no-downgrade");
+        Files.createDirectories(skillDir);
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "skills/no-downgrade/SKILL.md",
+                 "content": "---\\nname: no-downgrade\\ndescription: x\\n---\\n# Title\\nOriginal"}
+                """, agent);
+
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editFile", "path": "skills/no-downgrade/SKILL.md",
+                 "edits": [
+                    {"oldText": "version: 1.0.0", "newText": "version: 0.5.0"},
+                    {"oldText": "Original", "newText": "Updated"}
+                 ]}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+        assertTrue(result.contains("1.0.0 → 1.0.1"), "downgrade must fall back to auto-bump: " + result);
+
+        var v = Files.readString(skillDir.resolve("SKILL.md"));
+        assertTrue(v.contains("version: 1.0.1"), "on-disk must be auto-bumped: " + v);
+        assertFalse(v.contains("0.5.0"), "downgrade must not land");
+    }
+
+    @Test
+    public void editFileRejectsEqualVersionAttempt() throws Exception {
+        // LLM writes a version equal to the auto-bump target. Strict > rule means ties
+        // collapse to the auto path.
+        var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve("equal-version");
+        Files.createDirectories(skillDir);
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "skills/equal-version/SKILL.md",
+                 "content": "---\\nname: equal-version\\ndescription: x\\n---\\n# Title\\nOriginal"}
+                """, agent);
+
+        // Auto bump of 1.0.0 is 1.0.1 — an LLM that writes exactly 1.0.1 should tie and
+        // the auto path takes over (no distinction in the final result).
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editFile", "path": "skills/equal-version/SKILL.md",
+                 "edits": [
+                    {"oldText": "version: 1.0.0", "newText": "version: 1.0.1"},
+                    {"oldText": "Original", "newText": "Updated"}
+                 ]}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+        assertTrue(result.contains("1.0.0 → 1.0.1"));
+        assertTrue(Files.readString(skillDir.resolve("SKILL.md")).contains("version: 1.0.1"));
+    }
+
+    @Test
+    public void editFileIgnoresMalformedExplicitVersion() throws Exception {
+        // Malformed LLM version — parseVersion coerces to 0.0.0, well below the auto
+        // target, so auto wins.
+        var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve("malformed-version");
+        Files.createDirectories(skillDir);
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "skills/malformed-version/SKILL.md",
+                 "content": "---\\nname: malformed-version\\ndescription: x\\n---\\n# Title\\nOriginal"}
+                """, agent);
+
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editFile", "path": "skills/malformed-version/SKILL.md",
+                 "edits": [
+                    {"oldText": "version: 1.0.0", "newText": "version: stable"},
+                    {"oldText": "Original", "newText": "Updated"}
+                 ]}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+        assertTrue(result.contains("1.0.0 → 1.0.1"), "malformed must fall back to auto-bump: " + result);
+        assertTrue(Files.readString(skillDir.resolve("SKILL.md")).contains("version: 1.0.1"));
+    }
+
+    @Test
+    public void writeFileFreshSkillHonorsExplicitHigherVersion() throws Exception {
+        // Fresh-skill branch: LLM supplies version: 2.0.0 in the very first writeFile.
+        // Should land as 2.0.0, not the 1.0.0 floor.
+        var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve("fresh-high");
+        Files.createDirectories(skillDir);
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "skills/fresh-high/SKILL.md",
+                 "content": "---\\nname: fresh-high\\ndescription: x\\nversion: 2.0.0\\n---\\n# Title"}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+        var v = Files.readString(skillDir.resolve("SKILL.md"));
+        assertTrue(v.contains("version: 2.0.0"), "explicit high version on fresh skill: " + v);
+    }
+
+    @Test
+    public void writeFileFreshSkillFloorsAtOneZeroZero() throws Exception {
+        // Fresh-skill floor: LLM writes version: 0.5.0. Must be coerced to 1.0.0.
+        var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve("fresh-low");
+        Files.createDirectories(skillDir);
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "skills/fresh-low/SKILL.md",
+                 "content": "---\\nname: fresh-low\\ndescription: x\\nversion: 0.5.0\\n---\\n# Title"}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+        var v = Files.readString(skillDir.resolve("SKILL.md"));
+        assertTrue(v.contains("version: 1.0.0"), "fresh floor must pin to 1.0.0: " + v);
+        assertFalse(v.contains("0.5.0"));
+    }
+
+    @Test
+    public void editFileMissingFileErrors() {
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editFile", "path": "nonexistent.txt",
+                 "edits": [{"oldText": "x", "newText": "y"}]}
+                """, agent);
+        assertTrue(result.startsWith("Error"));
+        assertTrue(result.contains("not found"));
+    }
+
+    // --- applyPatch ---
+
+    @Test
+    public void applyPatchAddUpdateDelete() throws Exception {
+        var workspace = AgentService.workspacePath(agent.name);
+        Files.writeString(workspace.resolve("to-update.txt"), "hello world\n");
+        Files.writeString(workspace.resolve("to-delete.txt"), "goodbye\n");
+
+        var patch = """
+                *** Begin Patch
+                *** Add File: added.txt
+                +first line
+                +second line
+                *** End of File
+                *** Update File: to-update.txt
+                -hello world
+                +HELLO WORLD
+                *** End of File
+                *** Delete File: to-delete.txt
+                *** End Patch
+                """;
+        var result = ToolRegistry.execute("filesystem",
+                "{\"action\": \"applyPatch\", \"patch\": " + jsonEscape(patch) + "}", agent);
+        assertTrue(result.contains("1 added"), "got: " + result);
+        assertTrue(result.contains("1 updated"));
+        assertTrue(result.contains("1 deleted"));
+
+        assertEquals("first line\nsecond line", Files.readString(workspace.resolve("added.txt")));
+        assertTrue(Files.readString(workspace.resolve("to-update.txt")).contains("HELLO WORLD"));
+        assertFalse(Files.exists(workspace.resolve("to-delete.txt")));
+    }
+
+    @Test
+    public void applyPatchAtomicValidation() throws Exception {
+        var workspace = AgentService.workspacePath(agent.name);
+        var patch = """
+                *** Begin Patch
+                *** Add File: new-atomic.txt
+                +created
+                *** End of File
+                *** Update File: missing.txt
+                -old
+                +new
+                *** End of File
+                *** End Patch
+                """;
+        var result = ToolRegistry.execute("filesystem",
+                "{\"action\": \"applyPatch\", \"patch\": " + jsonEscape(patch) + "}", agent);
+        assertTrue(result.startsWith("Error"), "expected validation error: " + result);
+        assertFalse(Files.exists(workspace.resolve("new-atomic.txt")),
+                "atomicity: first op must not be applied when a later op fails validation");
+    }
+
+    @Test
+    public void applyPatchUpdateContextMismatch() throws Exception {
+        var workspace = AgentService.workspacePath(agent.name);
+        Files.writeString(workspace.resolve("mismatch.txt"), "actual content\n");
+        var patch = """
+                *** Begin Patch
+                *** Update File: mismatch.txt
+                -different content
+                +whatever
+                *** End of File
+                *** End Patch
+                """;
+        var result = ToolRegistry.execute("filesystem",
+                "{\"action\": \"applyPatch\", \"patch\": " + jsonEscape(patch) + "}", agent);
+        assertTrue(result.startsWith("Error"));
+        assertTrue(result.contains("did not match"));
+        assertEquals("actual content\n", Files.readString(workspace.resolve("mismatch.txt")),
+                "file must be unchanged after validation error");
+    }
+
+    @Test
+    public void applyPatchMoveFile() throws Exception {
+        var workspace = AgentService.workspacePath(agent.name);
+        Files.writeString(workspace.resolve("old-name.txt"), "content here\n");
+        var patch = """
+                *** Begin Patch
+                *** Update File: old-name.txt
+                *** Move to: new-name.txt
+                -content here
+                +new content
+                *** End of File
+                *** End Patch
+                """;
+        var result = ToolRegistry.execute("filesystem",
+                "{\"action\": \"applyPatch\", \"patch\": " + jsonEscape(patch) + "}", agent);
+        assertTrue(result.contains("updated"), "got: " + result);
+        assertFalse(Files.exists(workspace.resolve("old-name.txt")),
+                "old path must be gone after move");
+        assertTrue(Files.readString(workspace.resolve("new-name.txt")).contains("new content"));
+    }
+
+    @Test
+    public void applyPatchMalformedFormat() {
+        var patch = """
+                *** Begin Patch
+                *** Update File: x.txt
+                -old
+                +new
+                """; // missing *** End of File AND *** End Patch
+        var result = ToolRegistry.execute("filesystem",
+                "{\"action\": \"applyPatch\", \"patch\": " + jsonEscape(patch) + "}", agent);
+        assertTrue(result.startsWith("Error"));
+        assertTrue(result.contains("malformed") || result.contains("missing"));
+    }
+
+    @Test
+    public void applyPatchEmptyPatchRejected() {
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "applyPatch", "patch": ""}
+                """, agent);
+        assertTrue(result.startsWith("Error"));
+    }
+
+    // --- Concurrency ---
+
+    @Test
+    public void concurrentEditsSerialize() throws Exception {
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "concurrent.txt", "content": "AAA BBB"}
+                """, agent);
+
+        var pool = Executors.newFixedThreadPool(2);
+        var latch = new CountDownLatch(1);
+        try {
+            var f1 = pool.submit(() -> {
+                try { latch.await(); } catch (InterruptedException _) {}
+                return ToolRegistry.execute("filesystem",
+                        """
+                        {"action": "editFile", "path": "concurrent.txt",
+                         "edits": [{"oldText": "AAA", "newText": "aaa"}]}
+                        """, agent);
+            });
+            var f2 = pool.submit(() -> {
+                try { latch.await(); } catch (InterruptedException _) {}
+                return ToolRegistry.execute("filesystem",
+                        """
+                        {"action": "editFile", "path": "concurrent.txt",
+                         "edits": [{"oldText": "BBB", "newText": "bbb"}]}
+                        """, agent);
+            });
+            latch.countDown();
+            var r1 = f1.get(10, TimeUnit.SECONDS);
+            var r2 = f2.get(10, TimeUnit.SECONDS);
+            assertTrue(r1.startsWith("File written"), "r1: " + r1);
+            assertTrue(r2.startsWith("File written"), "r2: " + r2);
+        } finally {
+            pool.shutdown();
+        }
+
+        var read = ToolRegistry.execute("filesystem",
+                """
+                {"action": "readFile", "path": "concurrent.txt"}
+                """, agent);
+        assertEquals("aaa bbb", read, "both edits must land without losing an update");
+    }
+
+    /** JSON-escape a string for embedding in a tool-call arg blob. */
+    private static String jsonEscape(String raw) {
+        var sb = new StringBuilder("\"");
+        for (int i = 0; i < raw.length(); i++) {
+            var c = raw.charAt(i);
+            switch (c) {
+                case '\\' -> sb.append("\\\\");
+                case '"' -> sb.append("\\\"");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
+                    if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
+                    else sb.append(c);
+                }
+            }
+        }
+        sb.append('"');
+        return sb.toString();
     }
 
     // --- SkillsTool ---
