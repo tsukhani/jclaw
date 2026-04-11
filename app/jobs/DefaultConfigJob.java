@@ -81,6 +81,11 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("search.perplexity.enabled", "true");
         seedIfAbsent("search.perplexity.apiKey", "");
         seedIfAbsent("search.perplexity.baseUrl", "https://api.perplexity.ai/search");
+        // Server-side recency filter for Perplexity's /search endpoint. One of
+        // hour|day|week|month|year, or "none" to disable. Defaults to "month"
+        // so "latest X" queries don't return year-old snippets — the LLM will
+        // not reliably add year/month keywords on its own.
+        seedIfAbsent("search.perplexity.recencyFilter", "month");
 
         // Malware scanners — independent hash-lookup APIs, composed under OR.
         // Keys are seeded empty; each scanner is inert until an operator provides its key.

@@ -13,8 +13,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -46,19 +44,11 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
     @Override
     public String description() {
-        // Today's date is interpolated so the LLM sees it at the exact moment it
-        // composes a query. The Environment section of the system prompt already
-        // carries the date, but it's too far upstream — models reliably skim past
-        // it and then ask "latest X" with no year, which returns stale results.
-        // Day-granularity keeps the tool schema stable within the provider prompt
-        // cache's daily window (same boundary the Environment section uses).
-        var today = LocalDate.now(ZoneId.systemDefault());
-        return ("""
+        return """
                 Search the web for current information. \
                 Returns relevant results with titles, URLs, and content snippets. \
                 Supports Exa, Brave, Tavily, and Perplexity search providers (uses first configured, or specify with 'provider' parameter). \
-                Use this to find up-to-date information, research topics, or answer questions about recent events. \
-                Today's date is %s. When searching for current events, recent news, or "latest" anything, include the year (and month if relevant) in your query — search engines return stale results otherwise. Do NOT trust dates in snippets that contradict today's date.""").formatted(today);
+                Use this to find up-to-date information, research topics, or answer questions about recent events.""";
     }
 
     @Override
@@ -142,14 +132,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
             EventLogger.info("search", agent != null ? agent.name : null, null,
                     "%s returned %d chars for \"%s\"".formatted(provider.displayName(), formatted.length(), query));
 
-            // Stamp the result with today's date so the LLM has a hard anchor when
-            // synthesizing its answer. Without this, a search snippet dated "April
-            // 2025" can convince the model it's looking at current info, and the
-            // stale date gets echoed verbatim into the reply. Per-turn content only
-            // — never touches the prompt cache.
-            var today = LocalDate.now(ZoneId.systemDefault());
-            return "Search executed: %s (today). Treat this date as authoritative over any dates in snippets below.\n\n%s"
-                    .formatted(today, formatted);
+            return formatted;
         } catch (Exception e) {
             EventLogger.error("search", agent != null ? agent.name : null, null,
                     "%s search failed: %s".formatted(provider.displayName(), e.getMessage()));
@@ -318,6 +301,16 @@ public class WebSearchTool implements ToolRegistry.Tool {
     // --- Perplexity ---
 
     static class PerplexityProvider implements SearchProvider {
+        /**
+         * Default recency filter sent on every Perplexity /search request. Valid
+         * values are {@code hour|day|week|month|year}. Server-side filtering is
+         * the only reliable fix for "latest X" queries — the LLM will not add
+         * year/month keywords just because the system prompt says today's date,
+         * and stale snippets convince it to echo stale dates in its answer.
+         * Overridable per-install via {@code search.perplexity.recencyFilter}.
+         */
+        private static final String DEFAULT_RECENCY_FILTER = "month";
+
         @Override public String id() { return "perplexity"; }
         @Override public String displayName() { return "Perplexity"; }
         @Override public String defaultBaseUrl() { return "https://api.perplexity.ai/search"; }
@@ -327,6 +320,10 @@ public class WebSearchTool implements ToolRegistry.Tool {
             var body = new java.util.HashMap<String, Object>();
             body.put("query", query);
             body.put("max_results", numResults);
+            var recency = ConfigService.get("search.perplexity.recencyFilter", DEFAULT_RECENCY_FILTER);
+            if (recency != null && !recency.isBlank() && !"none".equalsIgnoreCase(recency)) {
+                body.put("search_recency_filter", recency);
+            }
             return HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl()))
                     .header("Content-Type", "application/json")
