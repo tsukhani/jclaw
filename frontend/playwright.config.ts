@@ -27,6 +27,11 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     // Auth bootstrap — global-setup.ts writes this file once per run.
     storageState: './tests/e2e/.auth/admin.json',
+    // PWSLOWMO=500 ./pnpm test:e2e --headed slows each action so a human can
+    // follow along. Default 0 keeps headless runs at full speed.
+    launchOptions: {
+      slowMo: Number(process.env.PWSLOWMO) || 0,
+    },
   },
 
   globalSetup: './tests/e2e/global-setup.ts',
