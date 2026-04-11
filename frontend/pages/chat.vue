@@ -27,9 +27,22 @@ DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
   }
 })
 
+// Marked (CommonMark) only allows whitespace in link destinations when they
+// are wrapped in angle brackets. LLMs routinely emit bare filenames with
+// spaces like `[file.docx](file.docx)`, which silently fall through as plain
+// text. Wrap such destinations in <...> so they parse into real anchors.
+function normalizeMarkdownLinks(text: string): string {
+  return text.replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (match, label, dest) => {
+    const trimmed = dest.trim()
+    if (trimmed.startsWith('<') && trimmed.endsWith('>')) return match
+    if (!/\s/.test(trimmed)) return match
+    return `[${label}](<${trimmed}>)`
+  })
+}
+
 function renderMarkdown(text: string, agentId: number | null = null): string {
   if (!text) return ''
-  const html = marked.parse(text) as string
+  const html = marked.parse(normalizeMarkdownLinks(text)) as string
   const sanitized = DOMPurify.sanitize(html, {
     ADD_TAGS: ['img', 'audio', 'video', 'source'],
     ADD_ATTR: ['src', 'controls', 'autoplay', 'download', 'target']
