@@ -1,28 +1,8 @@
 <script setup lang="ts">
 const { data: configData, refresh } = await useFetch<{ entries: any[] }>('/api/config')
-const newKey = ref('')
-const newValue = ref('')
 const saving = ref(false)
 const editingKey = ref<string | null>(null)
 const editValue = ref('')
-
-async function saveNew() {
-  if (!newKey.value.trim()) return
-  saving.value = true
-  try {
-    await $fetch('/api/config', {
-      method: 'POST',
-      body: { key: newKey.value, value: newValue.value }
-    })
-    newKey.value = ''
-    newValue.value = ''
-    refresh()
-  } catch (e) {
-    console.error('Failed to save config:', e)
-  } finally {
-    saving.value = false
-  }
-}
 
 async function updateEntry(key: string) {
   saving.value = true
@@ -38,11 +18,6 @@ async function updateEntry(key: string) {
   } finally {
     saving.value = false
   }
-}
-
-async function deleteEntry(key: string) {
-  await $fetch(`/api/config/${encodeURIComponent(key)}`, { method: 'DELETE' })
-  refresh()
 }
 
 function startEdit(entry: any) {
@@ -1175,52 +1150,24 @@ const providerEntries = computed(() => {
       </div>
     </div>
 
-    <!-- Config entries -->
-    <div class="bg-neutral-900 border border-neutral-800">
+    <!-- Unmanaged config entries (diagnostic) -->
+    <!-- Only rendered when the Config DB contains keys not owned by any managed UI
+         section above. Typically shows stale rows from a prior schema or mid-migration
+         state — a signal that something needs cleanup, not a place to add new config. -->
+    <div v-if="providerEntries.other.length" class="bg-neutral-900 border border-neutral-800">
       <div class="px-4 py-3 border-b border-neutral-800">
-        <h2 class="text-sm font-medium text-neutral-300">Configuration</h2>
+        <h2 class="text-sm font-medium text-neutral-300">Unmanaged keys</h2>
+        <p class="text-[11px] text-neutral-600 mt-0.5">
+          Config DB rows not owned by any section above — usually stale keys from a prior
+          version. Safe to ignore; they're shown here so migrations don't hide data.
+        </p>
       </div>
       <div class="divide-y divide-neutral-800/50">
         <div v-for="entry in providerEntries.other" :key="entry.key"
              class="px-4 py-2.5 flex items-center gap-3">
           <span class="text-xs font-mono text-neutral-400 w-64 shrink-0 truncate">{{ entry.key }}</span>
-          <template v-if="editingKey === entry.key">
-            <input v-model="editValue"
-                   :type="isSensitive(entry.key) ? 'password' : 'text'"
-                   class="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none" />
-            <button @click="updateEntry(entry.key)" class="p-1 text-neutral-500 hover:text-emerald-400 transition-colors" title="Save">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
-            </button>
-            <button @click="editingKey = null" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Cancel">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-          </template>
-          <template v-else>
-            <span class="flex-1 text-sm text-neutral-300 font-mono truncate">{{ entry.value }}</span>
-            <button @click="startEdit(entry)" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
-            </button>
-            <button @click="deleteEntry(entry.key)" class="p-1 text-neutral-600 hover:text-red-400 transition-colors" title="Delete">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-            </button>
-          </template>
+          <span class="flex-1 text-sm text-neutral-500 font-mono truncate">{{ entry.value }}</span>
         </div>
-      </div>
-      <div v-if="!configData?.entries?.length" class="px-4 py-8 text-center text-sm text-neutral-600">
-        No configuration entries
-      </div>
-    </div>
-
-    <!-- Add new -->
-    <div class="mt-4 bg-neutral-900 border border-neutral-800 p-4">
-      <h3 class="text-xs font-medium text-neutral-400 mb-3">Add Entry</h3>
-      <div class="flex gap-2">
-        <input v-model="newKey" placeholder="key" class="flex-1 px-2 py-1.5 bg-neutral-800 border border-neutral-700 text-sm text-white font-mono focus:outline-none" />
-        <input v-model="newValue" placeholder="value" class="flex-1 px-2 py-1.5 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none" />
-        <button @click="saveNew" :disabled="saving || !newKey.trim()"
-                class="p-1.5 text-neutral-500 hover:text-emerald-400 disabled:opacity-40 transition-colors" title="Add entry">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
-        </button>
       </div>
     </div>
   </div>

@@ -91,11 +91,13 @@ describe('Settings page', () => {
     expect(component.text()).toContain('ollama-cloud')
   })
 
-  it('shows add entry form', async () => {
+  it('does not expose an add-entry form for ad-hoc config', async () => {
+    // The generic config list is a read-only diagnostic for stale/unmanaged keys,
+    // not a place to create new rows — arbitrary keys aren't read by anything.
     setupMockApi()
     const component = await mountSuspended(Settings)
 
-    expect(component.text()).toContain('Add Entry')
+    expect(component.text()).not.toContain('Add Entry')
   })
 })
 
