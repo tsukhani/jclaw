@@ -357,6 +357,30 @@ public class AgentSystemTest extends UnitTest {
         assertTrue(assembled.systemPrompt().contains("Platform:"));
     }
 
+    /**
+     * Prompt-prefix stability is the precondition for LLM provider prompt caching:
+     * every byte of the system prompt is hashed into the cache key, so any per-request
+     * variance (timestamps, UUIDs, non-deterministic tool/skill ordering, etc.) causes
+     * every turn to miss the cache. This test is the guardrail — it fails the build if
+     * anyone accidentally re-introduces dynamic content into the cacheable region of
+     * the system prompt. Recalled memories legitimately vary per turn and sit at the
+     * tail, so we check stability with the same user message across both calls.
+     */
+    @Test
+    public void assembleIsStableAcrossCallsWithSameInputs() {
+        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1", null);
+        AgentService.writeWorkspaceFile("prompt-agent", "AGENT.md", "# Be stable");
+
+        var first = SystemPromptAssembler.assemble(agent, "same user message");
+        var second = SystemPromptAssembler.assemble(agent, "same user message");
+
+        assertEquals(first.systemPrompt(), second.systemPrompt(),
+                "System prompt must be byte-identical for identical inputs, otherwise "
+                        + "LLM provider prompt caching will miss on every request. "
+                        + "Likely culprit: a timestamp, UUID, or non-deterministic ordering "
+                        + "(tools, skills, memories) was added to the prompt.");
+    }
+
     @Test
     public void assembleSkipsOptionalFiles() {
         var agent = AgentService.create("minimal-agent", "openrouter", "gpt-4.1", null);
