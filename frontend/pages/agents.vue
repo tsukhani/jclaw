@@ -1,4 +1,6 @@
 <script setup lang="ts">
+const { confirm } = useConfirm()
+
 const { data: agents, refresh } = await useFetch<any[]>('/api/agents')
 const { data: configData } = await useFetch<{ entries: any[] }>('/api/config')
 
@@ -239,12 +241,6 @@ async function saveAgent() {
   }
 }
 
-async function deleteAgent(id: number) {
-  await $fetch(`/api/agents/${id}`, { method: 'DELETE' })
-  editing.value = null
-  refresh()
-}
-
 // Toggle a custom agent's enabled flag from the list view without opening the
 // edit form. The PUT endpoint accepts partial updates, so we only send the
 // enabled field — other fields fall through to their existing values.
@@ -279,7 +275,13 @@ function toggleSelection(id: number) {
 async function deleteSelected() {
   if (!selectedIds.value.size) return
   const count = selectedIds.value.size
-  if (!window.confirm(`Delete ${count} custom agent${count === 1 ? '' : 's'}? This cannot be undone.`)) return
+  const ok = await confirm({
+    title: 'Delete custom agents',
+    message: `Delete ${count} custom agent${count === 1 ? '' : 's'}? This cannot be undone.`,
+    confirmText: 'Delete',
+    variant: 'danger',
+  })
+  if (!ok) return
   deletingBulk.value = true
   try {
     // Sequential deletes keep per-row error handling simple and avoid thundering
@@ -456,23 +458,13 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
               <option value="high">High</option>
             </select>
           </div>
-          <div class="flex items-end gap-4">
-            <label v-if="!editing?.isMain" class="flex items-center gap-1.5 text-xs"
-                   :class="providerValid ? 'text-neutral-400' : 'text-neutral-600'">
-              <input type="checkbox" v-model="form.enabled"
-                     :disabled="!providerValid" class="accent-white" /> Enabled
-              <span v-if="!providerValid" class="text-neutral-600 ml-1">(provider not configured)</span>
-            </label>
-          </div>
         </div>
-        <div class="flex gap-2 mt-4">
+        <div class="flex mt-4">
           <button @click="saveAgent" :disabled="saving || !form.name || !form.modelProvider || !form.modelId"
-                  class="px-4 py-1.5 bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 disabled:opacity-40 transition-colors">
-            {{ saving ? 'Saving...' : 'Save' }}
+                  class="p-1.5 text-emerald-400 hover:text-emerald-300 disabled:opacity-40 disabled:hover:text-emerald-400 transition-colors"
+                  :title="saving ? 'Saving...' : 'Save'">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 5.25A2.25 2.25 0 015.25 3h10.379a2.25 2.25 0 011.59.659l2.122 2.121a2.25 2.25 0 01.659 1.591V18.75A2.25 2.25 0 0118.75 21H5.25A2.25 2.25 0 013 18.75V5.25z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7.5 3v4.5h7.5V3M7.5 21v-6.75h9V21" /></svg>
           </button>
-          <button @click="cancel" class="px-4 py-1.5 text-xs text-neutral-400 hover:text-white transition-colors">Cancel</button>
-          <button v-if="editing && !editing.isMain" @click="deleteAgent(editing.id)"
-                  class="px-4 py-1.5 text-xs text-red-400/60 hover:text-red-400 ml-auto transition-colors">Delete</button>
         </div>
       </div>
 
@@ -596,10 +588,11 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
           class="w-full px-4 py-3 bg-transparent text-sm text-neutral-300 font-mono
                  resize-y focus:outline-none"
         />
-        <div class="px-4 py-2 border-t border-neutral-800">
+        <div class="px-4 py-2 border-t border-neutral-800 flex">
           <button @click="saveWorkspaceFile"
-                  class="px-3 py-1 bg-neutral-800 text-xs text-neutral-300 hover:text-white border border-neutral-700 transition-colors">
-            Save file
+                  class="p-1.5 text-emerald-400 hover:text-emerald-300 transition-colors"
+                  title="Save file">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 5.25A2.25 2.25 0 015.25 3h10.379a2.25 2.25 0 011.59.659l2.122 2.121a2.25 2.25 0 01.659 1.591V18.75A2.25 2.25 0 0118.75 21H5.25A2.25 2.25 0 013 18.75V5.25z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7.5 3v4.5h7.5V3M7.5 21v-6.75h9V21" /></svg>
           </button>
         </div>
       </div>

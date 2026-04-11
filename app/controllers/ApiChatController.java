@@ -305,8 +305,18 @@ public class ApiChatController extends Controller {
 
     /**
      * GET /api/conversations — List conversations with optional filters.
+     *
+     * The <code>name</code> filter does word-boundary matching (e.g. "Hi" matches
+     * "Hi there" but not "Hide"). JPQL has no portable regex operator, so when a
+     * name filter is present we: (1) use a SQL LOWER(...) LIKE pre-filter as a
+     * cheap narrowing pass, (2) pull all matching candidates into memory,
+     * (3) apply a Java <code>\b</code> regex for precise word-boundary matching,
+     * and (4) paginate the refined list in-process. Pagination and the
+     * X-Total-Count header therefore reflect the post-regex result set, not the
+     * SQL pre-filter count. Other filters (channel, agentId, peer) stay
+     * SQL-only and paginate at the DB level.
      */
-    public static void listConversations(String channel, Long agentId, Integer limit, Integer offset) {
+    public static void listConversations(String channel, Long agentId, String name, String peer, Integer limit, Integer offset) {
         var query = new StringBuilder();
         var params = new java.util.ArrayList<>();
         int idx = 1;
@@ -320,20 +330,23 @@ public class ApiChatController extends Controller {
             query.append("agent.id = ?%d".formatted(idx++));
             params.add(agentId);
         }
+        boolean hasNameFilter = name != null && !name.isBlank();
+        if (hasNameFilter) {
+            // SQL pre-filter: substring match. Final word-boundary check happens
+            // in Java below. We can't stop here because "%hi%" also matches
+            // "hide", so the SQL pass is a candidate generator, not the answer.
+            if (!query.isEmpty()) query.append(" AND ");
+            query.append("LOWER(preview) LIKE ?%d".formatted(idx++));
+            params.add("%" + name.toLowerCase() + "%");
+        }
+        if (peer != null && !peer.isBlank()) {
+            if (!query.isEmpty()) query.append(" AND ");
+            query.append("LOWER(peerId) LIKE ?%d".formatted(idx++));
+            params.add("%" + peer.toLowerCase() + "%");
+        }
 
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 100) : 20;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
-
-        String countJpql = query.isEmpty()
-                ? "SELECT COUNT(c) FROM Conversation c"
-                : "SELECT COUNT(c) FROM Conversation c WHERE " + query;
-        var countQ = JPA.em().createQuery(countJpql, Long.class);
-        for (int i = 0; i < params.size(); i++) {
-            countQ.setParameter(i + 1, params.get(i));
-        }
-        long total = countQ.getSingleResult();
-        response.setHeader("X-Total-Count", String.valueOf(total));
-        response.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
 
         String jpql = query.isEmpty()
                 ? "SELECT c FROM Conversation c JOIN FETCH c.agent ORDER BY c.updatedAt DESC"
@@ -342,8 +355,44 @@ public class ApiChatController extends Controller {
         for (int i = 0; i < params.size(); i++) {
             q.setParameter(i + 1, params.get(i));
         }
-        List<Conversation> convos = q.setFirstResult(effectiveOffset)
-                .setMaxResults(effectiveLimit).getResultList();
+
+        List<Conversation> convos;
+        long total;
+
+        if (hasNameFilter) {
+            // Fetch all LIKE candidates (scoped by the other filters), narrow
+            // in Java, then paginate. Pattern.quote escapes the user's input so
+            // regex metacharacters like "." or "(" don't explode.
+            List<Conversation> candidates = q.getResultList();
+            var pattern = java.util.regex.Pattern.compile(
+                    "\\b" + java.util.regex.Pattern.quote(name.trim()) + "\\b",
+                    java.util.regex.Pattern.CASE_INSENSITIVE);
+            List<Conversation> refined = new ArrayList<>();
+            for (var c : candidates) {
+                if (c.preview != null && pattern.matcher(c.preview).find()) {
+                    refined.add(c);
+                }
+            }
+            total = refined.size();
+            int from = Math.min(effectiveOffset, refined.size());
+            int to = Math.min(from + effectiveLimit, refined.size());
+            convos = refined.subList(from, to);
+        } else {
+            // Fast path: SQL-side count + LIMIT/OFFSET.
+            String countJpql = query.isEmpty()
+                    ? "SELECT COUNT(c) FROM Conversation c"
+                    : "SELECT COUNT(c) FROM Conversation c WHERE " + query;
+            var countQ = JPA.em().createQuery(countJpql, Long.class);
+            for (int i = 0; i < params.size(); i++) {
+                countQ.setParameter(i + 1, params.get(i));
+            }
+            total = countQ.getSingleResult();
+            convos = q.setFirstResult(effectiveOffset)
+                    .setMaxResults(effectiveLimit).getResultList();
+        }
+
+        response.setHeader("X-Total-Count", String.valueOf(total));
+        response.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
 
         var result = convos.stream().map(c -> {
             var map = new HashMap<String, Object>();
@@ -432,6 +481,17 @@ public class ApiChatController extends Controller {
         }
 
         renderJSON(gson.toJson(Map.of("deleted", deleted)));
+    }
+
+    /**
+     * GET /api/conversations/channels — Distinct channel types currently in use.
+     * Used to populate the channel filter dropdown in the Conversations UI.
+     */
+    public static void listConversationChannels() {
+        List<String> channels = JPA.em()
+                .createQuery("SELECT DISTINCT c.channelType FROM Conversation c ORDER BY c.channelType", String.class)
+                .getResultList();
+        renderJSON(gson.toJson(channels));
     }
 
     /**

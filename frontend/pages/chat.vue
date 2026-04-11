@@ -670,7 +670,7 @@ function exportConversation() {
           <option value="high">High</option>
         </select>
 
-        <button @click="showThinking = !showThinking"
+        <button v-if="thinkingSupported" @click="showThinking = !showThinking"
                 :class="showThinking ? 'text-blue-400' : 'text-neutral-600'"
                 class="p-1 hover:text-blue-300 transition-colors"
                 title="Toggle thinking display">

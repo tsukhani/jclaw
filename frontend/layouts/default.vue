@@ -150,7 +150,7 @@ const navGroups = [
 
       <!-- Version & API Status -->
       <div class="px-4 py-2.5 shrink-0 border-t border-neutral-800">
-        <div class="flex items-center justify-between bg-neutral-900 border border-neutral-600/40 rounded-lg px-3 py-2">
+        <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span class="text-xs text-neutral-500 font-mono uppercase tracking-wider">Version</span>
             <span class="text-sm text-neutral-300 font-mono">{{ apiVersion ? `v${apiVersion}` : '...' }}</span>

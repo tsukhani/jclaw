@@ -113,6 +113,78 @@ public class PerformanceFixesTest extends UnitTest {
     }
 
     @Test
+    public void conversationsFiltersWordBoundaryPeerAndChannels() {
+        // Covers the filter pipeline in ApiChatController.listConversations:
+        // - Peer: case-insensitive LIKE (substring)
+        // - Name: SQL LIKE pre-filter + Java \b regex post-filter (word-boundary)
+        //   so "Hi" matches "Hi there" and "Hi, team" but not "Hide"
+        // - Distinct channels for the channels dropdown
+        var agent = new Agent();
+        agent.name = "filter-test-agent";
+        agent.modelProvider = "openrouter";
+        agent.modelId = "gpt-4.1";
+        agent.enabled = true;
+        agent.save();
+
+        var a = ConversationService.create(agent, "web", "alice");
+        a.preview = "Hi there, welcome";
+        a.save();
+
+        var b = ConversationService.create(agent, "web", "bob");
+        b.preview = "Hide the secrets";
+        b.save();
+
+        var c = ConversationService.create(agent, "slack", "alice-admin");
+        c.preview = "Say hi to the team";
+        c.save();
+
+        var d = ConversationService.create(agent, "slack", "carol");
+        d.preview = "Kubernetes debugging";
+        d.save();
+
+        // --- Peer filter: case-insensitive substring LIKE on peerId ---
+        var byPeer = JPA.em()
+                .createQuery("SELECT c FROM Conversation c JOIN FETCH c.agent WHERE LOWER(peerId) LIKE ?1 ORDER BY c.updatedAt DESC",
+                        Conversation.class)
+                .setParameter(1, "%alice%")
+                .getResultList();
+        assertEquals(2, byPeer.size(), "peer 'alice' should match both 'alice' and 'alice-admin'");
+
+        // --- Name filter: Java-side \b regex, matching the controller logic ---
+        // Stage 1: SQL LIKE pre-filter (returns Hi/Hide/hi candidates).
+        var candidates = JPA.em()
+                .createQuery("SELECT c FROM Conversation c JOIN FETCH c.agent WHERE LOWER(preview) LIKE ?1 ORDER BY c.updatedAt DESC",
+                        Conversation.class)
+                .setParameter(1, "%hi%")
+                .getResultList();
+        assertEquals(3, candidates.size(), "SQL LIKE should pre-match Hi, Hide, and hi (but not Kubernetes)");
+
+        // Stage 2: Java \b word-boundary regex — this is the exact pattern
+        // the controller compiles. "Hide" should drop; "Hi there" and
+        // "Say hi to the team" should remain.
+        var pattern = java.util.regex.Pattern.compile(
+                "\\b" + java.util.regex.Pattern.quote("Hi") + "\\b",
+                java.util.regex.Pattern.CASE_INSENSITIVE);
+        long refined = candidates.stream()
+                .filter(x -> x.preview != null && pattern.matcher(x.preview).find())
+                .count();
+        assertEquals(2, refined, "word-boundary filter should drop 'Hide'");
+
+        // And sanity-check that 'Hide' really is excluded by the regex.
+        assertFalse(pattern.matcher("Hide the secrets").find(), "Hide must not match \\bHi\\b");
+        assertTrue(pattern.matcher("Hi there, welcome").find(), "Hi at start must match");
+        assertTrue(pattern.matcher("Say hi to the team").find(), "lowercase hi as a word must match");
+
+        // --- Distinct channels query (for the channels dropdown endpoint) ---
+        var channels = JPA.em()
+                .createQuery("SELECT DISTINCT c.channelType FROM Conversation c ORDER BY c.channelType", String.class)
+                .getResultList();
+        assertEquals(2, channels.size());
+        assertEquals("slack", channels.get(0));
+        assertEquals("web", channels.get(1));
+    }
+
+    @Test
     public void joinFetchTasksQueryWithLeftJoin() {
         var agent = new Agent();
         agent.name = "task-test-agent";
