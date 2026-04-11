@@ -58,8 +58,12 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("shell.maxTimeoutSeconds", "300");
         seedIfAbsent("shell.maxOutputBytes", "102400");
 
-        // Skill binary malware scanner — MalwareBazaar Auth-Key (free, from https://auth.abuse.ch/)
+        // Skill binary malware scanners — independent hash-lookup APIs, composed under OR.
+        // Keys are seeded empty; each scanner is inert until an operator provides its key.
+        // MalwareBazaar Auth-Key: free, from https://auth.abuse.ch/
         seedIfAbsent("skills.scanner.malwarebazaar.authKey", "");
+        // MetaDefender Cloud API key: free 4,000 req/day, from https://metadefender.opswat.com/
+        seedIfAbsent("skills.scanner.metadefender.apiKey", "");
     }
 
     private void seedDefaultAgent() {

@@ -2,6 +2,8 @@ package services;
 
 import agents.SkillLoader;
 import services.scanners.MalwareBazaarScanner;
+import services.scanners.MetaDefenderCloudScanner;
+import services.scanners.Scanner;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -18,14 +20,34 @@ import java.util.List;
  *
  * <p>Walks a skill folder, identifies binary files via
  * {@link SkillLoader#isTextFile(String)}, hashes each with SHA-256, and dispatches
- * to each enabled scanner backend. Any scanner reporting a positive match
- * produces a {@link Violation} and the caller rejects the operation.
+ * to every enabled {@link Scanner} backend. Scanners are independent and composed
+ * under OR semantics: if any enabled scanner flags a file, a {@link Violation} is
+ * recorded attributing the match to that scanner. A file flagged by multiple
+ * scanners produces one violation per scanner so the audit log shows exactly
+ * which source caught what.
+ *
+ * <p>Each scanner's {@link Scanner#isEnabled()} check decides whether it runs —
+ * a scanner with no API key configured returns false and is silently skipped.
+ * If no scanner is enabled (fresh install with no keys), binary scanning is a
+ * no-op and the skill install proceeds. See the Scanner javadoc for the full
+ * fail-open contract.
  *
  * <p>This class never throws on I/O or scanner errors — scanning failures fail
- * <b>open</b> to preserve availability (abuse.ch outages must not brick skill
- * workflows). Every scan attempt is audit-logged via {@link EventLogger}.
+ * <b>open</b> to preserve availability. Every scan attempt is audit-logged via
+ * {@link EventLogger}.
  */
 public class SkillBinaryScanner {
+
+    /**
+     * All scanners the orchestrator consults. Each one decides whether it is
+     * actually enabled via its own {@link Scanner#isEnabled()} check. Adding a
+     * new scanner is a one-line change here plus a new {@link Scanner}
+     * implementation class.
+     */
+    private static final List<Scanner> SCANNERS = List.of(
+            new MalwareBazaarScanner(),
+            new MetaDefenderCloudScanner()
+    );
 
     public record Violation(String relativePath, String sha256, String scanner, String reason) {
         /** Short, user-facing description suitable for error messages. */
@@ -46,6 +68,13 @@ public class SkillBinaryScanner {
         var skillName = skillDir.getFileName() != null ? skillDir.getFileName().toString() : "?";
         int scanned = 0;
 
+        // Snapshot enabled scanners once per scan so every file is checked by the same set —
+        // avoids weird mid-scan config flips and makes the audit log consistent.
+        var activeScanners = SCANNERS.stream().filter(Scanner::isEnabled).toList();
+        if (activeScanners.isEmpty()) {
+            return violations;
+        }
+
         try (var walk = Files.walk(skillDir)) {
             var binaries = walk.filter(Files::isRegularFile)
                     .filter(p -> !SkillLoader.isTextFile(skillDir.relativize(p).toString()))
@@ -64,22 +93,22 @@ public class SkillBinaryScanner {
                 }
 
                 scanned++;
-
-                if (MalwareBazaarScanner.isEnabled()) {
-                    var verdict = MalwareBazaarScanner.lookup(sha256);
+                boolean flagged = false;
+                for (var scanner : activeScanners) {
+                    var verdict = scanner.lookup(sha256);
                     if (verdict.malicious()) {
+                        flagged = true;
                         EventLogger.warn("scanner",
                                 "Malware detected in skill '%s': %s (%s, %s)".formatted(
-                                        skillName, relName, verdict.reason(),
-                                        MalwareBazaarScanner.NAME));
+                                        skillName, relName, verdict.reason(), scanner.name()));
                         violations.add(new Violation(
-                                relName, sha256, MalwareBazaarScanner.NAME, verdict.reason()));
-                    } else {
-                        EventLogger.info("scanner",
-                                "Scanned '%s' in skill '%s': clean (%s, sha256=%s)".formatted(
-                                        relName, skillName, MalwareBazaarScanner.NAME,
-                                        sha256.substring(0, 12)));
+                                relName, sha256, scanner.name(), verdict.reason()));
                     }
+                }
+                if (!flagged) {
+                    EventLogger.info("scanner",
+                            "Scanned '%s' in skill '%s': clean (%d scanner(s), sha256=%s)".formatted(
+                                    relName, skillName, activeScanners.size(), sha256.substring(0, 12)));
                 }
             }
         } catch (IOException e) {
