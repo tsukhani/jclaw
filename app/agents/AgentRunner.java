@@ -242,8 +242,15 @@ public class AgentRunner {
 
                 var content = accumulator.content;
 
-                // Check for truncated response (max tokens hit mid-tool-call)
-                if ("length".equals(accumulator.finishReason) && !accumulator.toolCalls.isEmpty()) {
+                // Check for truncated response (max tokens hit mid-tool-call).
+                // OpenAI-compatible finish_reason is "length"; Anthropic-native is
+                // "max_tokens" and some providers (OpenRouter Bedrock) pass that
+                // through verbatim. Match both so the truncation path fires
+                // regardless of which upstream route the model is on. Malformed
+                // args that slip past this guard are still caught by ToolRegistry's
+                // JSON pre-validation — this check exists to surface the clearer
+                // "truncated" message to the user before dispatch even runs.
+                if (isTruncationFinish(accumulator.finishReason) && !accumulator.toolCalls.isEmpty()) {
                     EventLogger.warn("llm", agent.name, channelType,
                             "Response truncated (finish_reason=length) with pending tool calls — skipping execution of incomplete tool arguments");
                     var truncMsg = content.isEmpty()
@@ -382,7 +389,7 @@ public class AgentRunner {
             }
 
             // Check for truncated response (max tokens hit mid-tool-call)
-            if ("length".equals(choice.finishReason())) {
+            if (isTruncationFinish(choice.finishReason())) {
                 EventLogger.warn("llm", agent.name, null,
                         "Response truncated (finish_reason=length) with pending tool calls — skipping execution of incomplete tool arguments");
                 return assistantMsg.content() != null ? (String) assistantMsg.content()
@@ -499,10 +506,10 @@ public class AgentRunner {
         // will be an incomplete JSON fragment. Passing that to ToolRegistry.execute causes
         // a Gson EOFException and the user sees a cryptic "End of input" error. Instead,
         // surface a clear message so the LLM can retry with a more concise approach.
-        if ("length".equals(accumulator.finishReason) && !accumulator.toolCalls.isEmpty()) {
+        if (isTruncationFinish(accumulator.finishReason) && !accumulator.toolCalls.isEmpty()) {
             EventLogger.warn("tool", agent.name, null,
-                    "Response truncated (finish_reason=length) with pending tool calls in round %d — skipping execution of incomplete tool arguments"
-                            .formatted(round + 1));
+                    "Response truncated (finish_reason=%s) with pending tool calls in round %d — skipping execution of incomplete tool arguments"
+                            .formatted(accumulator.finishReason, round + 1));
             var truncMsg = accumulator.content != null && !accumulator.content.isEmpty()
                     ? accumulator.content + "\n\n*[Response was truncated before the next tool call could complete. Try breaking the task into smaller steps.]*"
                     : "I tried to use a tool but the response exceeded the token limit before the tool arguments finished. Try breaking the task into smaller steps — for example, write large files in multiple append operations instead of one big write.";
@@ -620,6 +627,21 @@ public class AgentRunner {
             if (msg.content() instanceof String s) chars += s.length();
         }
         return chars / 4; // rough approximation: ~4 chars per token
+    }
+
+    /**
+     * Return {@code true} when a streaming finish_reason signals the model
+     * exhausted its output token budget mid-response. OpenAI-compatible routes
+     * emit {@code "length"}; Anthropic-native (and OpenRouter's Bedrock route
+     * for Anthropic models) emit {@code "max_tokens"}. Both must be treated as
+     * truncation — if only {@code "length"} is matched, Bedrock-routed Claude
+     * tool-call deltas get dispatched with incomplete JSON args and the
+     * downstream tool fails with a cryptic Gson EOFException. Visible for the
+     * {@code AgentRunnerTest} coverage; kept here so the canonical list of
+     * truncation values lives next to the guards that consume it.
+     */
+    public static boolean isTruncationFinish(String finishReason) {
+        return "length".equals(finishReason) || "max_tokens".equals(finishReason);
     }
 
     /**

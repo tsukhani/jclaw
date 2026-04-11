@@ -67,6 +67,61 @@ public class ToolSystemTest extends UnitTest {
         assertTrue(result.contains("boom"));
     }
 
+    /**
+     * Reproduces the "toolu_bdrk_" Bedrock truncation bug: the streaming
+     * accumulator delivered args that were cut off mid-field because the
+     * model hit its output token budget, and the downstream tool blew up
+     * inside Gson with a cryptic EOFException. ToolRegistry now pre-parses
+     * the JSON and returns an actionable, LLM-readable error instead of
+     * dispatching the broken call.
+     */
+    @Test
+    public void executeToolRejectsTruncatedArgsJson() {
+        var sentinel = new boolean[]{false};
+        ToolRegistry.register(new ToolRegistry.Tool() {
+            public String name() { return "never_called_tool"; }
+            public String description() { return "stub"; }
+            public java.util.Map<String, Object> parameters() { return java.util.Map.of(); }
+            public String execute(String args, Agent a) { sentinel[0] = true; return "ok"; }
+        });
+        ToolRegistry.publish();
+        // Args missing the content field and closing brace — same shape the
+        // user's Bedrock log produced.
+        var truncated = "{\"action\":\"writeDocument\",\"path\":\"Shiva Play - ENHANCED VERSION.docx\"";
+        var result = ToolRegistry.execute("never_called_tool", truncated, agent);
+        assertFalse(sentinel[0], "tool must NOT be invoked on malformed JSON");
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains("malformed"), "error should name the failure mode");
+        assertTrue(result.contains("smaller"), "error must include the retry hint so the LLM can self-correct");
+    }
+
+    @Test
+    public void executeToolRejectsEmptyArgsJson() {
+        ToolRegistry.register(new ToolRegistry.Tool() {
+            public String name() { return "empty_args_tool"; }
+            public String description() { return "stub"; }
+            public java.util.Map<String, Object> parameters() { return java.util.Map.of(); }
+            public String execute(String args, Agent a) { return "ok"; }
+        });
+        ToolRegistry.publish();
+        var result = ToolRegistry.execute("empty_args_tool", "", agent);
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains("empty"));
+    }
+
+    @Test
+    public void isTruncationFinishMatchesBothSpellings() {
+        // Guard the finish_reason set. Both OpenAI-compatible "length" and
+        // Anthropic-native "max_tokens" must trip the truncation path — the
+        // second was added to fix OpenRouter's Bedrock route, which passes
+        // the Anthropic spelling through verbatim.
+        assertTrue(agents.AgentRunner.isTruncationFinish("length"));
+        assertTrue(agents.AgentRunner.isTruncationFinish("max_tokens"));
+        assertFalse(agents.AgentRunner.isTruncationFinish("stop"));
+        assertFalse(agents.AgentRunner.isTruncationFinish("tool_calls"));
+        assertFalse(agents.AgentRunner.isTruncationFinish(null));
+    }
+
     // --- TaskTool ---
 
     @Test

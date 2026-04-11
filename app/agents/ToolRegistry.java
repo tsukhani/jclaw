@@ -1,5 +1,7 @@
 package agents;
 
+import com.google.gson.JsonParser;
+import com.google.gson.JsonSyntaxException;
 import llm.LlmTypes.*;
 import models.Agent;
 
@@ -54,6 +56,28 @@ public class ToolRegistry {
         var tool = tools.get(toolName);
         if (tool == null) {
             return "Error: Unknown tool '%s'".formatted(toolName);
+        }
+        // Defense-in-depth: validate the args JSON is parseable BEFORE invoking the
+        // tool. When the LLM hits its output-token budget mid-tool-call, the
+        // streaming accumulator emits a truncated arguments string (e.g. for
+        // writeDocument: "{\"action\":\"writeDocument\",\"path\":\"foo.docx\"" — no
+        // closing brace, no content field). The per-round truncation guards in
+        // AgentRunner catch finish_reason="length"/"max_tokens", but some providers
+        // (notably OpenRouter's Bedrock route for Anthropic models) can end a
+        // stream without a clear finish_reason, letting the malformed call reach
+        // the tool. Gson then throws EOFException deep inside the tool and the LLM
+        // sees a cryptic "End of input at line 1 column N" error that doesn't
+        // teach it to retry with smaller content. Pre-validate here and return a
+        // message the LLM can actually act on.
+        if (argsJson == null || argsJson.isEmpty()) {
+            return "Error: Tool '%s' received empty arguments. The model's response was likely truncated before the tool call completed. Try breaking the task into smaller steps — for example, write large files in multiple smaller operations instead of one big call."
+                    .formatted(toolName);
+        }
+        try {
+            JsonParser.parseString(argsJson);
+        } catch (JsonSyntaxException e) {
+            return "Error: Tool '%s' received malformed arguments (likely truncated by the model's output token limit). Try breaking the task into smaller steps — for example, write large files in multiple smaller operations instead of one big call. Parse error: %s"
+                    .formatted(toolName, e.getMessage());
         }
         try {
             return tool.execute(argsJson, agent);
