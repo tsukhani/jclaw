@@ -25,7 +25,7 @@ public class AgentRunner {
 
     private static int maxToolRounds() {
         try {
-            return Integer.parseInt(services.ConfigService.get("agent.maxToolRounds", "10"));
+            return Integer.parseInt(services.ConfigService.get("chat.maxToolRounds", "10"));
         } catch (NumberFormatException e) {
             return DEFAULT_MAX_TOOL_ROUNDS;
         }

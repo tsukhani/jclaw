@@ -57,7 +57,7 @@ function isSensitive(key: string) {
 
 // Config keys managed by dedicated UI sections (excluded from general Configuration)
 const MANAGED_CONFIG_KEYS = new Set([
-  'agent.maxToolRounds',
+  'chat.maxToolRounds', 'chat.maxContextMessages',
   'jclaw.tools.playwright.enabled', 'jclaw.tools.playwright.headless',
   'jclaw.tools.shell.enabled', 'shell.allowlist', 'shell.defaultTimeoutSeconds',
   'shell.maxTimeoutSeconds', 'shell.maxOutputBytes',
@@ -70,20 +70,25 @@ const MANAGED_CONFIG_KEYS = new Set([
   'search.tavily.enabled', 'search.tavily.apiKey', 'search.tavily.baseUrl',
 ])
 
-// Agent config
-const agentMaxToolRounds = computed(() => {
+// Chat config
+const chatMaxToolRounds = computed(() => {
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === 'agent.maxToolRounds')?.value ?? '10'
+  return entries.find((e: any) => e.key === 'chat.maxToolRounds')?.value ?? '10'
 })
 
-const editingAgentField = ref<string | null>(null)
-const agentFieldEdit = ref('')
+const chatMaxContextMessages = computed(() => {
+  const entries = configData.value?.entries ?? []
+  return entries.find((e: any) => e.key === 'chat.maxContextMessages')?.value ?? '50'
+})
 
-async function saveAgentField(configKey: string, value: string) {
+const editingChatField = ref<string | null>(null)
+const chatFieldEdit = ref('')
+
+async function saveChatField(configKey: string, value: string) {
   saving.value = true
   try {
     await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
-    editingAgentField.value = null
+    editingChatField.value = null
     refresh()
   } finally {
     saving.value = false
@@ -967,27 +972,46 @@ const providerEntries = computed(() => {
       </div>
     </div>
 
-    <!-- Agent Settings -->
+    <!-- Chat Settings -->
     <div class="mb-6 space-y-4">
-      <h2 class="text-sm font-medium text-neutral-400">Agent</h2>
-      <p class="text-xs text-neutral-600">Configure agent behavior limits.</p>
+      <h2 class="text-sm font-medium text-neutral-400">Chat</h2>
+      <p class="text-xs text-neutral-600">Configure chat behavior limits.</p>
       <div class="bg-neutral-900 border border-neutral-800">
         <div class="divide-y divide-neutral-800/50">
           <div class="px-4 py-2.5 flex items-center gap-3">
             <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">maxToolRounds</span>
-            <template v-if="editingAgentField === 'maxToolRounds'">
-              <input v-model="agentFieldEdit" type="number" min="1" max="50"
+            <template v-if="editingChatField === 'maxToolRounds'">
+              <input v-model="chatFieldEdit" type="number" min="1" max="50"
                      class="w-24 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white font-mono focus:outline-none" />
-              <button @click="saveAgentField('agent.maxToolRounds', agentFieldEdit)" class="p-1 text-neutral-500 hover:text-emerald-400 transition-colors" title="Save">
+              <button @click="saveChatField('chat.maxToolRounds', chatFieldEdit)" class="p-1 text-neutral-500 hover:text-emerald-400 transition-colors" title="Save">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
               </button>
-              <button @click="editingAgentField = null" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Cancel">
+              <button @click="editingChatField = null" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Cancel">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </template>
             <template v-else>
-              <span class="flex-1 text-sm text-neutral-300 font-mono">{{ agentMaxToolRounds }} rounds</span>
-              <button @click="editingAgentField = 'maxToolRounds'; agentFieldEdit = agentMaxToolRounds" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
+              <span class="flex-1 text-sm text-neutral-300 font-mono">{{ chatMaxToolRounds }} rounds</span>
+              <button @click="editingChatField = 'maxToolRounds'; chatFieldEdit = chatMaxToolRounds" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              </button>
+            </template>
+          </div>
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">maxContextMessages</span>
+            <template v-if="editingChatField === 'maxContextMessages'">
+              <input v-model="chatFieldEdit" type="number" min="1" max="500"
+                     class="w-24 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white font-mono focus:outline-none" />
+              <button @click="saveChatField('chat.maxContextMessages', chatFieldEdit)" class="p-1 text-neutral-500 hover:text-emerald-400 transition-colors" title="Save">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              </button>
+              <button @click="editingChatField = null" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Cancel">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </template>
+            <template v-else>
+              <span class="flex-1 text-sm text-neutral-300 font-mono">{{ chatMaxContextMessages }} messages</span>
+              <button @click="editingChatField = 'maxContextMessages'; chatFieldEdit = chatMaxContextMessages" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
               </button>
             </template>

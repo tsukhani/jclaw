@@ -2,9 +2,13 @@ import org.junit.jupiter.api.*;
 import play.test.*;
 import agents.SkillLoader;
 import agents.SystemPromptAssembler;
+import jobs.DefaultConfigJob;
 import models.Agent;
+import models.Config;
 import services.AgentService;
+import services.ConfigService;
 import services.ConversationService;
+import services.Tx;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -15,12 +19,13 @@ public class AgentSystemTest extends UnitTest {
     private static final String[] TEST_AGENTS = {
             "test-agent", "ws-agent", "missing-agent", "enabled-1", "disabled-1",
             "skill-agent", "xml-agent", "convo-agent", "msg-agent", "prompt-agent",
-            "minimal-agent", "no-skills", "main"
+            "minimal-agent", "no-skills", "main", "window-agent"
     };
 
     @BeforeEach
     void setup() {
         Fixtures.deleteDatabase();
+        ConfigService.clearCache();
         cleanupTestAgents();
     }
 
@@ -222,6 +227,47 @@ public class AgentSystemTest extends UnitTest {
         assertEquals("Hello", messages.get(0).content);
         assertEquals("assistant", messages.get(1).role);
         assertEquals("user", messages.get(2).role);
+    }
+
+    @Test
+    public void loadRecentMessagesRespectsChatMaxContextMessages() {
+        ConfigService.set("chat.maxContextMessages", "3");
+        var agent = AgentService.create("window-agent", "openrouter", "gpt-4.1", null);
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+
+        for (int i = 1; i <= 5; i++) {
+            ConversationService.appendUserMessage(convo, "msg-" + i);
+        }
+
+        var messages = ConversationService.loadRecentMessages(convo);
+        assertEquals(3, messages.size());
+        // ASC / chronological order — should be the LAST 3
+        assertEquals("msg-3", messages.get(0).content);
+        assertEquals("msg-4", messages.get(1).content);
+        assertEquals("msg-5", messages.get(2).content);
+    }
+
+    // --- DefaultConfigJob rename migration ---
+
+    @Test
+    public void renameMigratesAgentKeyToChatKey() throws Exception {
+        // Pre-seed the legacy key as if an earlier build had written it
+        ConfigService.set("agent.maxToolRounds", "25");
+        ConfigService.clearCache();
+
+        // Invoke the private rename helper reflectively — it's the smallest surface
+        // that exercises the migration without spinning up the full @OnApplicationStart job
+        var job = new DefaultConfigJob();
+        var rename = DefaultConfigJob.class.getDeclaredMethod("renameKeyIfPresent", String.class, String.class);
+        rename.setAccessible(true);
+        rename.invoke(job, "agent.maxToolRounds", "chat.maxToolRounds");
+
+        assertEquals("25", ConfigService.get("chat.maxToolRounds"));
+        Tx.run(() -> assertNull(Config.findByKey("agent.maxToolRounds")));
+
+        // Idempotency: a second run is a no-op and doesn't clobber the new value
+        rename.invoke(job, "agent.maxToolRounds", "chat.maxToolRounds");
+        assertEquals("25", ConfigService.get("chat.maxToolRounds"));
     }
 
     // --- SystemPromptAssembler tests ---

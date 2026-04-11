@@ -1,11 +1,13 @@
 package jobs;
 
 import models.Agent;
+import models.Config;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
+import services.Tx;
 
 /**
  * Seeds default runtime configuration and default agent on first startup.
@@ -43,8 +45,11 @@ public class DefaultConfigJob extends Job<Void> {
     }
 
     private void seedToolConfig() {
-        // Agent settings
-        seedIfAbsent("agent.maxToolRounds", "10");
+        // Chat settings — rename-migrate agent.* → chat.* (idempotent) before seeding defaults
+        // so any operator-customized values are preserved across the rename.
+        renameKeyIfPresent("agent.maxToolRounds", "chat.maxToolRounds");
+        seedIfAbsent("chat.maxToolRounds", "10");
+        seedIfAbsent("chat.maxContextMessages", "50");
 
         // Playwright browser tool
         seedIfAbsent("jclaw.tools.playwright.enabled", "true");
@@ -101,5 +106,23 @@ public class DefaultConfigJob extends Job<Void> {
         if (ConfigService.get(key) == null) {
             ConfigService.set(key, value);
         }
+    }
+
+    /**
+     * One-shot rename: if the old key exists and the new one does not, copy the value
+     * and delete the old row. Safe to run repeatedly — becomes a no-op once migrated.
+     */
+    private void renameKeyIfPresent(String oldKey, String newKey) {
+        Tx.run(() -> {
+            var oldRow = Config.findByKey(oldKey);
+            if (oldRow == null) return;
+            var newRow = Config.findByKey(newKey);
+            if (newRow == null) {
+                Config.upsert(newKey, oldRow.value);
+                EventLogger.info("system", "Config key migrated: %s → %s".formatted(oldKey, newKey));
+            }
+            oldRow.delete();
+        });
+        ConfigService.clearCache();
     }
 }
