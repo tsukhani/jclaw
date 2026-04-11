@@ -242,6 +242,20 @@ async function toggleSearchEnabled(providerId: string) {
   refresh()
 }
 
+// Perplexity-only: server-side recency filter for /search. Valid values are
+// hour|day|week|month|year, or "none" to disable. Defaults to "month" to match
+// the DefaultConfigJob seed. Other providers don't expose a comparable knob,
+// so this UI row is gated to id === 'perplexity'.
+function searchRecencyFilter(providerId: string): string {
+  const entries = configData.value?.entries ?? []
+  return entries.find((e: any) => e.key === `search.${providerId}.recencyFilter`)?.value ?? 'month'
+}
+
+async function updateSearchRecencyFilter(providerId: string, value: string) {
+  await $fetch('/api/config', { method: 'POST', body: { key: `search.${providerId}.recencyFilter`, value } })
+  refresh()
+}
+
 // --- Malware scanners ---
 // Each scanner hashes every binary in a skill install and asks an external reputation
 // service whether that hash is in its catalog. Runs independently; if multiple scanners
@@ -1002,6 +1016,20 @@ const providerEntries = computed(() => {
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
               </button>
             </template>
+          </div>
+          <!-- recencyFilter (Perplexity only) -->
+          <div v-if="id === 'perplexity'" class="px-4 py-2 flex items-center gap-3">
+            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0" title="Server-side recency filter on Perplexity /search. Narrows results to content indexed within the selected window; 'none' disables filtering. Narrower windows prevent the LLM from echoing stale snippets.">recencyFilter</span>
+            <select :value="searchRecencyFilter(id)"
+                    @change="updateSearchRecencyFilter(id, ($event.target as HTMLSelectElement).value)"
+                    class="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white font-mono focus:outline-none">
+              <option value="hour">hour</option>
+              <option value="day">day</option>
+              <option value="week">week</option>
+              <option value="month">month</option>
+              <option value="year">year</option>
+              <option value="none">none (disable filter)</option>
+            </select>
           </div>
         </div>
       </div>
