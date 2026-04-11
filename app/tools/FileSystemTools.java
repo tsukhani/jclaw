@@ -53,7 +53,11 @@ public class FileSystemTools implements ToolRegistry.Tool {
         try {
             target = AgentService.acquireWorkspacePath(agent.name, relativePath);
         } catch (SecurityException e) {
-            return "Error: Path '%s' escapes the workspace directory.".formatted(relativePath);
+            // Preserve the helper's specific message (escapes-workspace,
+            // hardlink, TOCTOU divergence) so the agent and tests can
+            // distinguish the failure mode. The existing traversal test asserts
+            // on "escapes" which still appears in the helper's escape message.
+            return "Error: " + e.getMessage();
         }
 
         // skill-creator is read-only for every agent except 'main'. Only the main agent

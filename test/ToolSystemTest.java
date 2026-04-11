@@ -233,6 +233,39 @@ public class ToolSystemTest extends UnitTest {
         }
     }
 
+    @Test
+    public void fileSystemHardlinkAliasingBlocked() throws Exception {
+        // Hardlinks bypass the symlink check because there's no "link" to
+        // follow — both names point to the same inode at the FS level. The
+        // sandbox detects this via Files.getAttribute("unix:nlink") and
+        // rejects any in-workspace path whose inode has more than one link.
+        //
+        // Setup: a "secret" file lives in a sibling-of-workspace directory
+        // (same filesystem, so Files.createLink works — hardlinks can't cross
+        // mount points). The attacker hardlinks it into the workspace and
+        // tries to read it via FileSystemTools.
+        var workspace = AgentService.workspacePath(agent.name);
+        Files.createDirectories(workspace);
+        var sibling = workspace.getParent().resolve("hardlink-test-outside");
+        Files.createDirectories(sibling);
+        var outsideSecret = sibling.resolve("secret.txt");
+        Files.writeString(outsideSecret, "should not leak");
+        var insideLink = workspace.resolve("escape.txt");
+        try {
+            Files.createLink(insideLink, outsideSecret);
+            var result = ToolRegistry.execute("filesystem",
+                    "{\"action\": \"readFile\", \"path\": \"escape.txt\"}",
+                    agent);
+            assertTrue(result.contains("Error"), "hardlink read must be rejected");
+            assertTrue(result.contains("hardlink") || result.contains("nlink"),
+                    "error must mention hardlink/nlink so the cause is obvious");
+        } finally {
+            Files.deleteIfExists(insideLink);
+            Files.deleteIfExists(outsideSecret);
+            Files.deleteIfExists(sibling);
+        }
+    }
+
     // --- SkillsTool ---
 
     @Test

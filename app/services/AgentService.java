@@ -264,22 +264,39 @@ public class AgentService {
 
     /**
      * Resolve, validate, then re-resolve immediately to confirm the canonical
-     * target hasn't changed between the two resolutions. Returns the canonical
-     * absolute path. Throws {@link SecurityException} on any escape or
-     * mid-resolution divergence.
+     * target hasn't changed between the two resolutions. Additionally rejects
+     * regular files whose inode has more than one hardlink. Returns the
+     * canonical absolute path. Throws {@link SecurityException} on any escape,
+     * mid-resolution divergence, or hardlink violation.
      *
-     * <p>This is the achievable Java equivalent of OpenClaw's "post-open
-     * re-check" pattern: Java NIO can't fstat an open {@code InputStream}, so
-     * we can't truly hold-then-validate. Instead we double-resolve right
-     * before the file op, shrinking the validate→use TOCTOU window from
-     * "unbounded" to "microseconds". Callers should pass the returned path
-     * directly to the file operation with no further work in between.
+     * <p><b>Three layers of defense</b>:
+     * <ol>
+     *   <li><b>Lexical + canonical</b> (via {@link #resolveContained}): rejects
+     *       textual {@code ..} traversal and symlinks whose realpath escapes
+     *       the root.</li>
+     *   <li><b>Double-resolve</b>: re-resolves immediately and asserts the
+     *       canonical target is unchanged. Achievable Java equivalent of
+     *       OpenClaw's post-open re-check (Java NIO can't fstat an open
+     *       {@code InputStream}, so we can't truly hold-then-validate; the
+     *       double-resolve shrinks the validate→use TOCTOU window from
+     *       "unbounded" to "microseconds").</li>
+     *   <li><b>Hardlink rejection</b>: a regular file inside a workspace
+     *       should never have {@code nlink > 1}. jclaw never creates hardlinks
+     *       itself, the default shell allowlist doesn't include {@code ln},
+     *       and pnpm-style hardlink dedup happens in dev trees outside any
+     *       agent workspace. If we see {@code nlink > 1} here, treat it as an
+     *       attempt to read across the sandbox boundary via the inode side
+     *       door — hardlinks bypass the symlink check because there's no
+     *       "link" to follow; both names point to the same inode. Skipped for
+     *       directories (their nlink encodes subdirectory count) and on
+     *       non-POSIX filesystems where {@code unix:nlink} isn't supported.</li>
+     * </ol>
      *
-     * <p>Use from {@code FileSystemTools}, {@code DocumentsTool},
-     * {@code ShellExecTool} (workdir), upload handlers, and
-     * {@code serveWorkspaceFile} — anywhere the result is about to be opened
-     * or executed against. Use {@link #resolveContained} only when you need a
-     * non-throwing yes/no check.
+     * <p>Callers should pass the returned path directly to the file operation
+     * with no further work in between. Use from {@code FileSystemTools},
+     * {@code DocumentsTool}, {@code ShellExecTool} (workdir), upload handlers,
+     * and {@code serveWorkspaceFile}. Use {@link #resolveContained} only when
+     * you need a non-throwing yes/no check.
      */
     public static Path acquireContained(Path root, String relativePath) {
         var first = resolveContained(root, relativePath);
@@ -291,6 +308,25 @@ public class AgentService {
             throw new SecurityException(
                     "Path '%s' resolved to a different target between validations (possible TOCTOU)."
                             .formatted(relativePath));
+        }
+        // Hardlink check: only meaningful for existing regular files. Directories
+        // legitimately have nlink > 1 (each subdir contributes a `..` entry), and
+        // not-yet-created targets have no inode to inspect.
+        try {
+            if (Files.exists(second) && Files.isRegularFile(second)) {
+                var nlink = Files.getAttribute(second, "unix:nlink");
+                if (nlink instanceof Number n && n.intValue() > 1) {
+                    throw new SecurityException(
+                            "Path '%s' is a hardlink (nlink=%d); rejected to prevent cross-sandbox inode aliasing."
+                                    .formatted(relativePath, n.intValue()));
+                }
+            }
+        } catch (UnsupportedOperationException e) {
+            // Non-POSIX filesystem (e.g. Windows / FAT). Lexical and canonical
+            // layers still apply; just degrade the hardlink check.
+        } catch (IOException e) {
+            throw new SecurityException(
+                    "Failed to inspect '%s': %s".formatted(relativePath, e.getMessage()));
         }
         return second;
     }
