@@ -45,22 +45,15 @@ public class DefaultConfigJob extends Job<Void> {
     }
 
     private void seedToolConfig() {
-        // Chat settings — rename-migrate agent.* → chat.* (idempotent) before seeding defaults
-        // so any operator-customized values are preserved across the rename.
-        renameKeyIfPresent("agent.maxToolRounds", "chat.maxToolRounds");
+        // Chat settings
         seedIfAbsent("chat.maxToolRounds", "10");
         seedIfAbsent("chat.maxContextMessages", "50");
 
-        // Playwright browser tool — migrate legacy jclaw.tools.playwright.* → playwright.*
-        // before seeding defaults so any operator-set values are preserved.
-        renameKeyIfPresent("jclaw.tools.playwright.enabled", "playwright.enabled");
-        renameKeyIfPresent("jclaw.tools.playwright.headless", "playwright.headless");
+        // Playwright browser tool
         seedIfAbsent("playwright.enabled", "true");
         seedIfAbsent("playwright.headless", "true");
 
-        // Shell execution tool — consolidate legacy jclaw.tools.shell.enabled under the
-        // existing shell.* namespace so all shell config lives under one prefix.
-        renameKeyIfPresent("jclaw.tools.shell.enabled", "shell.enabled");
+        // Shell execution tool
         seedIfAbsent("shell.enabled", "true");
         seedIfAbsent("shell.allowlist",
                 "git,npm,npx,pnpm,node,python,python3,pip,ls,cat,head,tail,grep,find,wc,sort,uniq,diff,mkdir,cp,mv,echo,curl,wget,jq,tar,zip,unzip");
@@ -71,11 +64,6 @@ public class DefaultConfigJob extends Job<Void> {
         // Web search providers — independent engines, first enabled + keyed one is used.
         // All config lives in the Config DB (editable via Settings UI), not application.conf.
         // See WebSearchTool.SearchProvider for the read paths that consume these values.
-        // Rename-migrate flat {exa,brave,tavily}.apiKey → search.{id}.apiKey before seeding
-        // so any operator-set keys are preserved across the naming change.
-        renameKeyIfPresent("exa.apiKey", "search.exa.apiKey");
-        renameKeyIfPresent("brave.apiKey", "search.brave.apiKey");
-        renameKeyIfPresent("tavily.apiKey", "search.tavily.apiKey");
         seedIfAbsent("search.exa.enabled", "true");
         seedIfAbsent("search.exa.apiKey", "");
         seedIfAbsent("search.exa.baseUrl", "https://api.exa.ai/search");
@@ -91,15 +79,6 @@ public class DefaultConfigJob extends Job<Void> {
         // All scanner configuration lives in the Config DB (editable via Settings UI),
         // not in application.conf. See MalwareBazaarScanner/MetaDefenderCloudScanner for
         // the read paths that consume these values.
-        // Migrate legacy skills.scanner.* → scanner.* before seeding so operator-set keys survive.
-        renameKeyIfPresent("skills.scanner.malwarebazaar.enabled", "scanner.malwarebazaar.enabled");
-        renameKeyIfPresent("skills.scanner.malwarebazaar.authKey", "scanner.malwarebazaar.authKey");
-        renameKeyIfPresent("skills.scanner.malwarebazaar.url", "scanner.malwarebazaar.url");
-        renameKeyIfPresent("skills.scanner.malwarebazaar.timeoutMs", "scanner.malwarebazaar.timeoutMs");
-        renameKeyIfPresent("skills.scanner.metadefender.enabled", "scanner.metadefender.enabled");
-        renameKeyIfPresent("skills.scanner.metadefender.apiKey", "scanner.metadefender.apiKey");
-        renameKeyIfPresent("skills.scanner.metadefender.url", "scanner.metadefender.url");
-        renameKeyIfPresent("skills.scanner.metadefender.timeoutMs", "scanner.metadefender.timeoutMs");
         // MalwareBazaar Auth-Key: free, from https://auth.abuse.ch/
         seedIfAbsent("scanner.malwarebazaar.enabled", "true");
         seedIfAbsent("scanner.malwarebazaar.authKey", "");
@@ -130,7 +109,12 @@ public class DefaultConfigJob extends Job<Void> {
     /**
      * One-shot rename: if the old key exists and the new one does not, copy the value
      * and delete the old row. Safe to run repeatedly — becomes a no-op once migrated.
+     *
+     * <p>Retained even when no call sites exist: this is the standard utility for
+     * any future Config DB key rename, and {@code AgentSystemTest} exercises it
+     * reflectively so the contract stays covered.
      */
+    @SuppressWarnings("unused")
     private void renameKeyIfPresent(String oldKey, String newKey) {
         Tx.run(() -> {
             var oldRow = Config.findByKey(oldKey);
