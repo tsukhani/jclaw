@@ -61,6 +61,8 @@ const MANAGED_CONFIG_KEYS = new Set([
   'jclaw.tools.playwright.enabled', 'jclaw.tools.playwright.headless',
   'jclaw.tools.shell.enabled', 'shell.allowlist', 'shell.defaultTimeoutSeconds',
   'shell.maxTimeoutSeconds', 'shell.maxOutputBytes',
+  'skills.scanner.malwarebazaar.enabled', 'skills.scanner.malwarebazaar.authKey',
+  'skills.scanner.metadefender.enabled', 'skills.scanner.metadefender.apiKey',
 ])
 
 // Agent config
@@ -177,6 +179,84 @@ const SEARCH_PROVIDERS: Record<string, { label: string, keys: { key: string, lab
       { key: 'tavily.apiKey', label: 'apiKey', placeholder: 'Your Tavily API key from tavily.com' }
     ]
   }
+}
+
+// --- Malware scanners ---
+// Each scanner hashes every binary in a skill install and asks an external reputation
+// service whether that hash is in its catalog. Runs independently; if multiple scanners
+// are enabled, a file is rejected when any of them flag it (OR composition).
+const SCANNER_PROVIDERS: Record<string, {
+  label: string,
+  description: string,
+  signupUrl: string,
+  signupLabel: string,
+  enabledKey: string,
+  apiKey: { key: string, label: string, placeholder: string }
+}> = {
+  malwarebazaar: {
+    label: 'MalwareBazaar (abuse.ch)',
+    description: 'Community malware repository curated by abuse.ch. Returns family labels (e.g. "Mirai", "Emotet") for hashes that have been submitted by researchers. Research-grade coverage — sometimes catches fresh-campaign samples before commercial AV vendors. Free under fair use.',
+    signupUrl: 'https://auth.abuse.ch/',
+    signupLabel: 'auth.abuse.ch',
+    enabledKey: 'skills.scanner.malwarebazaar.enabled',
+    apiKey: {
+      key: 'skills.scanner.malwarebazaar.authKey',
+      label: 'authKey',
+      placeholder: 'Auth-Key from https://auth.abuse.ch/',
+    },
+  },
+  metadefender: {
+    label: 'MetaDefender Cloud (OPSWAT)',
+    description: 'Multi-engine aggregator combining verdicts from dozens of commercial AV engines (ESET, Kaspersky, Sophos, Bitdefender, and more). Broader coverage than any single catalog. Free tier: 4,000 requests/day with no per-minute throttling.',
+    signupUrl: 'https://metadefender.opswat.com/',
+    signupLabel: 'metadefender.opswat.com',
+    enabledKey: 'skills.scanner.metadefender.enabled',
+    apiKey: {
+      key: 'skills.scanner.metadefender.apiKey',
+      label: 'apiKey',
+      placeholder: 'API key from https://metadefender.opswat.com/',
+    },
+  },
+}
+
+function scannerApiKeyValue(scannerId: string): string {
+  const def = SCANNER_PROVIDERS[scannerId]
+  const entries = configData.value?.entries ?? []
+  return entries.find((e: any) => e.key === def.apiKey.key)?.value ?? ''
+}
+
+function scannerApiKeyEntry(scannerId: string) {
+  const def = SCANNER_PROVIDERS[scannerId]
+  const entries = configData.value?.entries ?? []
+  const existing = entries.find((e: any) => e.key === def.apiKey.key)
+  return existing
+    ? { ...existing, label: def.apiKey.label, placeholder: def.apiKey.placeholder }
+    : { key: def.apiKey.key, value: '', label: def.apiKey.label, placeholder: def.apiKey.placeholder }
+}
+
+function scannerEnabled(scannerId: string): boolean {
+  const def = SCANNER_PROVIDERS[scannerId]
+  const entries = configData.value?.entries ?? []
+  // Default to true when the key is absent — matches the Play config default.
+  const entry = entries.find((e: any) => e.key === def.enabledKey)
+  return entry ? entry.value === 'true' : true
+}
+
+function scannerActive(scannerId: string): boolean {
+  // A scanner is actually running only when enabled AND an API key is present.
+  // Matches the isEnabled() logic in the Java scanners: blank key → inert.
+  const key = scannerApiKeyValue(scannerId)
+  const hasKey = !!key && key !== '(empty)' && !key.startsWith('****')
+  // Masked values from the backend still indicate a key is set.
+  const maskedKeySet = !!key && (key.startsWith('****') || /\*\*\*\*/.test(key))
+  return scannerEnabled(scannerId) && (hasKey || maskedKeySet)
+}
+
+async function toggleScannerEnabled(scannerId: string) {
+  const def = SCANNER_PROVIDERS[scannerId]
+  const next = scannerEnabled(scannerId) ? 'false' : 'true'
+  await $fetch('/api/config', { method: 'POST', body: { key: def.enabledKey, value: next } })
+  refresh()
 }
 
 // --- Model management ---
@@ -918,6 +998,63 @@ const providerEntries = computed(() => {
               </button>
             </template>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Malware Scanners -->
+    <div class="mb-6 space-y-4">
+      <h2 class="text-sm font-medium text-neutral-400">Malware Scanners</h2>
+      <p class="text-xs text-neutral-600">
+        Hash-based reputation lookups that scan every binary inside a skill before it's installed.
+        Each scanner hashes the file with SHA-256 and asks an external service whether that hash
+        appears in its known-malware catalog — file bytes never leave the host. Multiple scanners
+        run independently and compose under OR: a skill is rejected if any enabled scanner flags
+        any binary. A scanner is only active when both <span class="text-neutral-400">enabled</span>
+        is on and its API key is configured.
+      </p>
+      <div v-for="(def, id) in SCANNER_PROVIDERS" :key="id"
+           class="bg-neutral-900 border border-neutral-800">
+        <div class="px-4 py-2.5 border-b border-neutral-800 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium text-white">{{ def.label }}</span>
+            <span v-if="scannerActive(id)" class="text-[10px] text-green-400 border border-green-400/30 px-1">active</span>
+            <span v-else-if="scannerEnabled(id)" class="text-[10px] text-amber-400 border border-amber-400/30 px-1">needs API key</span>
+            <span v-else class="text-[10px] text-neutral-500 border border-neutral-700 px-1">disabled</span>
+          </div>
+          <button @click="toggleScannerEnabled(id)"
+                  :class="scannerEnabled(id) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-neutral-700 hover:bg-neutral-600'"
+                  class="relative w-9 h-5 rounded-full transition-colors"
+                  :title="scannerEnabled(id) ? 'Disable scanner' : 'Enable scanner'">
+            <span :class="scannerEnabled(id) ? 'translate-x-4' : 'translate-x-0.5'"
+                  class="block w-4 h-4 bg-white rounded-full transition-transform" />
+          </button>
+        </div>
+        <div class="px-4 py-2.5 text-xs text-neutral-400 leading-relaxed border-b border-neutral-800/50">
+          {{ def.description }}
+          <a :href="def.signupUrl" target="_blank" rel="noopener"
+             class="text-neutral-300 hover:text-white underline ml-1">Get a free key → {{ def.signupLabel }}</a>
+        </div>
+        <div class="px-4 py-2 flex items-center gap-3">
+          <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">{{ def.apiKey.label }}</span>
+          <template v-if="editingKey === def.apiKey.key">
+            <input v-model="editValue"
+                   type="password"
+                   :placeholder="def.apiKey.placeholder"
+                   class="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none" />
+            <button @click="updateEntry(def.apiKey.key)" class="p-1 text-neutral-500 hover:text-emerald-400 transition-colors" title="Save">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+            </button>
+            <button @click="editingKey = null" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Cancel">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </template>
+          <template v-else>
+            <span class="flex-1 text-sm text-neutral-300 font-mono truncate">{{ scannerApiKeyEntry(id).value || '(not set)' }}</span>
+            <button @click="startEdit(scannerApiKeyEntry(id))" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+            </button>
+          </template>
         </div>
       </div>
     </div>
