@@ -24,6 +24,7 @@ public class WebSearchToolTest extends UnitTest {
             "search.exa.enabled", "search.exa.apiKey", "search.exa.baseUrl",
             "search.brave.enabled", "search.brave.apiKey", "search.brave.baseUrl",
             "search.tavily.enabled", "search.tavily.apiKey", "search.tavily.baseUrl",
+            "search.perplexity.enabled", "search.perplexity.apiKey", "search.perplexity.baseUrl",
     };
 
     @BeforeEach
@@ -36,6 +37,7 @@ public class WebSearchToolTest extends UnitTest {
         ConfigService.set("search.exa.enabled", "false");
         ConfigService.set("search.brave.enabled", "false");
         ConfigService.set("search.tavily.enabled", "false");
+        ConfigService.set("search.perplexity.enabled", "false");
         ConfigService.clearCache();
     }
 
@@ -84,6 +86,24 @@ public class WebSearchToolTest extends UnitTest {
     public void unknownPreferredProvider_reportsUnknown() {
         var result = tool.execute("{\"query\":\"test\",\"provider\":\"bing\"}", null);
         assertTrue(result.contains("Unknown search provider"));
+    }
+
+    @Test
+    public void perplexityPreferredMissingKey_reportsMissingKey() {
+        ConfigService.set("search.perplexity.enabled", "true");
+        ConfigService.clearCache();
+        var result = tool.execute("{\"query\":\"test\",\"provider\":\"perplexity\"}", null);
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains("search.perplexity.apiKey"));
+    }
+
+    @Test
+    public void perplexityDisabledPreferred_reportsDisabled() {
+        ConfigService.set("search.perplexity.apiKey", "fake-key");
+        ConfigService.clearCache();
+        var result = tool.execute("{\"query\":\"test\",\"provider\":\"perplexity\"}", null);
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains("disabled"));
     }
 
     @Test

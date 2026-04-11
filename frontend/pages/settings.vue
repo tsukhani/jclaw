@@ -182,6 +182,13 @@ const SEARCH_PROVIDERS: Record<string, {
     signupLabel: 'tavily.com',
     apiKeyPlaceholder: 'Your Tavily API key from tavily.com',
   },
+  perplexity: {
+    label: 'Perplexity',
+    description: 'Perplexity\'s own web index via the dedicated /search endpoint. Flat per-request pricing (no token fees), rich snippets, and absolute date-range filters. Good fit when you want recent, citation-ready results without an LLM synthesis step.',
+    signupUrl: 'https://www.perplexity.ai/settings/api',
+    signupLabel: 'perplexity.ai/settings/api',
+    apiKeyPlaceholder: 'Your Perplexity API key from perplexity.ai',
+  },
 }
 
 function searchApiKey(providerId: string): string {

@@ -78,6 +78,9 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("search.tavily.enabled", "true");
         seedIfAbsent("search.tavily.apiKey", "");
         seedIfAbsent("search.tavily.baseUrl", "https://api.tavily.com/search");
+        seedIfAbsent("search.perplexity.enabled", "true");
+        seedIfAbsent("search.perplexity.apiKey", "");
+        seedIfAbsent("search.perplexity.baseUrl", "https://api.perplexity.ai/search");
 
         // Malware scanners — independent hash-lookup APIs, composed under OR.
         // Keys are seeded empty; each scanner is inert until an operator provides its key.
