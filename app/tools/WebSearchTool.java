@@ -13,6 +13,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -44,11 +46,19 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
     @Override
     public String description() {
-        return """
+        // Today's date is interpolated so the LLM sees it at the exact moment it
+        // composes a query. The Environment section of the system prompt already
+        // carries the date, but it's too far upstream — models reliably skim past
+        // it and then ask "latest X" with no year, which returns stale results.
+        // Day-granularity keeps the tool schema stable within the provider prompt
+        // cache's daily window (same boundary the Environment section uses).
+        var today = LocalDate.now(ZoneId.systemDefault());
+        return ("""
                 Search the web for current information. \
                 Returns relevant results with titles, URLs, and content snippets. \
                 Supports Exa, Brave, Tavily, and Perplexity search providers (uses first configured, or specify with 'provider' parameter). \
-                Use this to find up-to-date information, research topics, or answer questions about recent events.""";
+                Use this to find up-to-date information, research topics, or answer questions about recent events. \
+                Today's date is %s. When searching for current events, recent news, or "latest" anything, include the year (and month if relevant) in your query — search engines return stale results otherwise. Do NOT trust dates in snippets that contradict today's date.""").formatted(today);
     }
 
     @Override
@@ -132,7 +142,14 @@ public class WebSearchTool implements ToolRegistry.Tool {
             EventLogger.info("search", agent != null ? agent.name : null, null,
                     "%s returned %d chars for \"%s\"".formatted(provider.displayName(), formatted.length(), query));
 
-            return formatted;
+            // Stamp the result with today's date so the LLM has a hard anchor when
+            // synthesizing its answer. Without this, a search snippet dated "April
+            // 2025" can convince the model it's looking at current info, and the
+            // stale date gets echoed verbatim into the reply. Per-turn content only
+            // — never touches the prompt cache.
+            var today = LocalDate.now(ZoneId.systemDefault());
+            return "Search executed: %s (today). Treat this date as authoritative over any dates in snippets below.\n\n%s"
+                    .formatted(today, formatted);
         } catch (Exception e) {
             EventLogger.error("search", agent != null ? agent.name : null, null,
                     "%s search failed: %s".formatted(provider.displayName(), e.getMessage()));
