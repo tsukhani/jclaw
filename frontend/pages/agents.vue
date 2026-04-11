@@ -14,6 +14,13 @@ const execBypassAllowlist = ref(false)
 const execAllowGlobalPaths = ref(false)
 const saving = ref(false)
 
+// The main agent is a structural singleton (seeded on first boot, cannot be
+// renamed or deleted, always enabled). Splitting it out of the list keeps the
+// Custom Agents section focused on user-created agents and lets the New Agent
+// button sit where it's actually applicable.
+const mainAgent = computed(() => (agents.value ?? []).find((a: any) => a.isMain))
+const customAgents = computed(() => (agents.value ?? []).filter((a: any) => !a.isMain))
+
 // Extract configured providers (those with non-empty API keys)
 const providers = computed(() => {
   const entries = configData.value?.entries ?? []
@@ -262,35 +269,55 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
 
 <template>
   <div>
-    <div class="flex items-center justify-between mb-6">
-      <h1 class="text-lg font-semibold text-white">Agents</h1>
-      <button @click="newAgent" :disabled="!providers.length"
-              class="px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 disabled:opacity-40 transition-colors">
-        New Agent
-      </button>
-    </div>
+    <h1 class="text-lg font-semibold text-white mb-6">Agents</h1>
 
     <div v-if="!providers.length && !editing && !creating"
          class="bg-neutral-900 border border-neutral-800 p-4 mb-4 text-sm text-neutral-400">
       No LLM providers configured. Go to <NuxtLink to="/settings" class="text-white underline">Settings</NuxtLink> and add an API key first.
     </div>
 
-    <!-- Agent list -->
-    <div v-if="!editing && !creating" class="bg-neutral-900 border border-neutral-800">
-      <div v-for="agent in agents" :key="agent.id"
-           @click="editAgent(agent)"
-           class="px-4 py-3 border-b border-neutral-800/50 flex items-center justify-between hover:bg-neutral-800/50 cursor-pointer transition-colors">
-        <div>
-          <span class="text-sm text-white">{{ agent.name }}</span>
-          <span v-if="agent.isMain" class="ml-2 text-[10px] text-neutral-500 border border-neutral-700 px-1">main</span>
-          <div class="text-xs text-neutral-500 mt-0.5">{{ agent.modelProvider }} / {{ agent.modelId }}</div>
+    <!-- Main Agent section -->
+    <div v-if="!editing && !creating" class="mb-6 space-y-2">
+      <h2 class="text-sm font-medium text-neutral-400">Main Agent</h2>
+      <p class="text-xs text-neutral-600">The built-in singleton agent. Always enabled, cannot be renamed or deleted. Handles admin chat and acts as the fallback route for channels without an explicit binding.</p>
+      <div class="bg-neutral-900 border border-neutral-800">
+        <div v-if="mainAgent"
+             @click="editAgent(mainAgent)"
+             class="px-4 py-3 flex items-center justify-between hover:bg-neutral-800/50 cursor-pointer transition-colors">
+          <div>
+            <span class="text-sm text-white">{{ mainAgent.name }}</span>
+            <div class="text-xs text-neutral-500 mt-0.5">{{ mainAgent.modelProvider }} / {{ mainAgent.modelId }}</div>
+          </div>
+          <span v-if="!mainAgent.providerConfigured" class="text-xs font-mono text-amber-400">provider not configured</span>
         </div>
-        <span :class="agent.enabled && agent.providerConfigured ? 'text-green-400' : 'text-neutral-600'" class="text-xs font-mono">
-          {{ agent.enabled && agent.providerConfigured ? 'enabled' : 'disabled' }}
-        </span>
       </div>
-      <div v-if="!agents?.length" class="px-4 py-8 text-center text-sm text-neutral-600">
-        No agents configured
+    </div>
+
+    <!-- Custom Agents section -->
+    <div v-if="!editing && !creating" class="mb-6 space-y-2">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-medium text-neutral-400">Custom Agents</h2>
+        <button @click="newAgent" :disabled="!providers.length"
+                class="px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 disabled:opacity-40 transition-colors">
+          New Agent
+        </button>
+      </div>
+      <p class="text-xs text-neutral-600">Additional agents you create for specific channels, peers, or workflows.</p>
+      <div class="bg-neutral-900 border border-neutral-800">
+        <div v-for="agent in customAgents" :key="agent.id"
+             @click="editAgent(agent)"
+             class="px-4 py-3 border-b border-neutral-800/50 last:border-b-0 flex items-center justify-between hover:bg-neutral-800/50 cursor-pointer transition-colors">
+          <div>
+            <span class="text-sm text-white">{{ agent.name }}</span>
+            <div class="text-xs text-neutral-500 mt-0.5">{{ agent.modelProvider }} / {{ agent.modelId }}</div>
+          </div>
+          <span :class="agent.enabled && agent.providerConfigured ? 'text-green-400' : 'text-neutral-600'" class="text-xs font-mono">
+            {{ agent.enabled && agent.providerConfigured ? 'enabled' : 'disabled' }}
+          </span>
+        </div>
+        <div v-if="!customAgents.length" class="px-4 py-8 text-center text-sm text-neutral-600">
+          No custom agents yet. Click <span class="text-neutral-400">New Agent</span> to create one.
+        </div>
       </div>
     </div>
 
@@ -336,12 +363,11 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
             </select>
           </div>
           <div class="flex items-end gap-4">
-            <label class="flex items-center gap-1.5 text-xs"
-                   :class="(providerValid && !editing?.isMain) ? 'text-neutral-400' : 'text-neutral-600'">
+            <label v-if="!editing?.isMain" class="flex items-center gap-1.5 text-xs"
+                   :class="providerValid ? 'text-neutral-400' : 'text-neutral-600'">
               <input type="checkbox" v-model="form.enabled"
-                     :disabled="!providerValid || editing?.isMain" class="accent-white" /> Enabled
-              <span v-if="editing?.isMain" class="text-neutral-600 ml-1">(main agent is always enabled)</span>
-              <span v-else-if="!providerValid" class="text-neutral-600 ml-1">(provider not configured)</span>
+                     :disabled="!providerValid" class="accent-white" /> Enabled
+              <span v-if="!providerValid" class="text-neutral-600 ml-1">(provider not configured)</span>
             </label>
           </div>
         </div>
