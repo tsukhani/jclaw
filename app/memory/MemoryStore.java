@@ -28,4 +28,12 @@ public interface MemoryStore {
     void delete(String id);
 
     List<MemoryEntry> list(String agentId);
+
+    /**
+     * Bulk-delete every memory belonging to the given agent. Called when an
+     * agent itself is deleted, so per-agent data doesn't outlive its owner.
+     * Returns the number of entries removed (best-effort — backends may
+     * return 0 if they can't cheaply count).
+     */
+    int deleteAll(String agentId);
 }

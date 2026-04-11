@@ -115,4 +115,19 @@ public class MemoryStoreTest extends UnitTest {
         var results = store.search("agent-1", "zzzzz_no_match", 10);
         assertTrue(results.isEmpty());
     }
+
+    @Test
+    public void deleteAllRemovesOnlyTargetAgent() {
+        // Guards the primitive that AgentService.delete() calls during agent cascade.
+        // Must wipe every memory for the target agent while leaving other agents untouched.
+        var store = MemoryStoreFactory.get();
+        store.store("agent-1", "keep-1", "fact");
+        store.store("agent-1", "keep-2", "fact");
+        store.store("agent-2", "drop-1", "fact");
+
+        var removed = store.deleteAll("agent-2");
+        assertEquals(1, removed);
+        assertEquals(2, store.list("agent-1").size());
+        assertEquals(0, store.list("agent-2").size());
+    }
 }

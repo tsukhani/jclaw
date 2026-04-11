@@ -105,6 +105,19 @@ public class Neo4jMemoryStore implements MemoryStore {
     }
 
     @Override
+    public int deleteAll(String agentId) {
+        try (var session = driver.session()) {
+            var result = session.run(
+                    "MATCH (m:Memory {agentId: $agentId}) "
+                            + "WITH collect(m) AS nodes, count(m) AS n "
+                            + "FOREACH (node IN nodes | DETACH DELETE node) "
+                            + "RETURN n",
+                    Map.of("agentId", agentId));
+            return result.single().get("n").asInt();
+        }
+    }
+
+    @Override
     public List<MemoryEntry> list(String agentId) {
         try (var session = driver.session()) {
             var result = session.run("""

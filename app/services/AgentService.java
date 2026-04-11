@@ -1,13 +1,13 @@
 package services;
 
 import llm.ProviderRegistry;
+import memory.MemoryStoreFactory;
 import models.Agent;
 import models.AgentBinding;
 import models.AgentSkillConfig;
 import models.AgentToolConfig;
 import models.Config;
 import models.Conversation;
-import models.Memory;
 import models.Message;
 import models.Task;
 import play.Play;
@@ -155,8 +155,12 @@ public class AgentService {
         List<Task> tasks = Task.find("agent.id = ?1", agentId).fetch();
         for (Task t : tasks) t.delete();
 
-        // Name-keyed side data (no FK, so no cascade risk — bulk delete is fine).
-        Memory.delete("agentId = ?1", agentName);
+        // Name-keyed side data (no FK, so no Hibernate cascade risk).
+        // Memory goes through the MemoryStore abstraction so the cleanup works
+        // regardless of which backend is active — a direct Memory.delete() would
+        // only wipe the JPA table, silently orphaning Neo4j memory nodes if that
+        // backend is ever enabled via memory.backend=neo4j.
+        MemoryStoreFactory.get().deleteAll(agentName);
         Config.delete("key LIKE ?1", "agent." + agentName + ".%");
         ConfigService.clearCache();
 
