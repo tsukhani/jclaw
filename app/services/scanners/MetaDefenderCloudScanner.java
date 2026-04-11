@@ -2,7 +2,6 @@ package services.scanners;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import play.Play;
 import services.ConfigService;
 import services.EventLogger;
 import utils.HttpClients;
@@ -49,7 +48,7 @@ public class MetaDefenderCloudScanner implements Scanner {
     @Override
     public boolean isEnabled() {
         var enabled = "true".equalsIgnoreCase(
-                Play.configuration.getProperty("skills.scanner.metadefender.enabled", "true"));
+                ConfigService.get("skills.scanner.metadefender.enabled", "true"));
         if (!enabled) return false;
         var key = ConfigService.get("skills.scanner.metadefender.apiKey");
         if (key == null || key.isBlank()) {
@@ -80,10 +79,10 @@ public class MetaDefenderCloudScanner implements Scanner {
      */
     @Override
     public Verdict lookup(String sha256) {
-        var baseUrl = Play.configuration.getProperty(
+        var baseUrl = ConfigService.get(
                 "skills.scanner.metadefender.url", "https://api.metadefender.com/v4/");
         if (!baseUrl.endsWith("/")) baseUrl = baseUrl + "/";
-        var timeoutMs = parseInt(Play.configuration.getProperty(
+        var timeoutMs = parseInt(ConfigService.get(
                 "skills.scanner.metadefender.timeoutMs", "5000"), 5000);
         var apiKey = ConfigService.get("skills.scanner.metadefender.apiKey");
 

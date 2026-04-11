@@ -60,10 +60,19 @@ public class DefaultConfigJob extends Job<Void> {
 
         // Skill binary malware scanners — independent hash-lookup APIs, composed under OR.
         // Keys are seeded empty; each scanner is inert until an operator provides its key.
+        // All scanner configuration lives in the Config DB (editable via Settings UI),
+        // not in application.conf. See MalwareBazaarScanner/MetaDefenderCloudScanner for
+        // the read paths that consume these values.
         // MalwareBazaar Auth-Key: free, from https://auth.abuse.ch/
+        seedIfAbsent("skills.scanner.malwarebazaar.enabled", "true");
         seedIfAbsent("skills.scanner.malwarebazaar.authKey", "");
+        seedIfAbsent("skills.scanner.malwarebazaar.url", "https://mb-api.abuse.ch/api/v1/");
+        seedIfAbsent("skills.scanner.malwarebazaar.timeoutMs", "5000");
         // MetaDefender Cloud API key: free 4,000 req/day, from https://metadefender.opswat.com/
+        seedIfAbsent("skills.scanner.metadefender.enabled", "true");
         seedIfAbsent("skills.scanner.metadefender.apiKey", "");
+        seedIfAbsent("skills.scanner.metadefender.url", "https://api.metadefender.com/v4/");
+        seedIfAbsent("skills.scanner.metadefender.timeoutMs", "5000");
     }
 
     private void seedDefaultAgent() {
