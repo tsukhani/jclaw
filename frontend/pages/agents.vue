@@ -14,6 +14,13 @@ const execBypassAllowlist = ref(false)
 const execAllowGlobalPaths = ref(false)
 const saving = ref(false)
 
+// Bulk-delete selection state for the Custom Agents list. When selectMode is on,
+// row clicks toggle selection instead of opening the edit form, and the header
+// shows Cancel + "Delete N" instead of "New Agent" + "Delete".
+const selectMode = ref(false)
+const selectedIds = ref<Set<number>>(new Set())
+const deletingBulk = ref(false)
+
 // The main agent is a structural singleton (seeded on first boot, cannot be
 // renamed or deleted, always enabled). Splitting it out of the list keeps the
 // Custom Agents section focused on user-created agents and lets the New Agent
@@ -238,6 +245,57 @@ async function deleteAgent(id: number) {
   refresh()
 }
 
+// Toggle a custom agent's enabled flag from the list view without opening the
+// edit form. The PUT endpoint accepts partial updates, so we only send the
+// enabled field — other fields fall through to their existing values.
+async function toggleAgentEnabled(agent: any) {
+  try {
+    await $fetch(`/api/agents/${agent.id}`, {
+      method: 'PUT',
+      body: { enabled: !agent.enabled },
+    })
+    refresh()
+  } catch (e) {
+    console.error('Failed to toggle agent enabled:', e)
+  }
+}
+
+function enterSelectMode() {
+  selectMode.value = true
+  selectedIds.value = new Set()
+}
+
+function exitSelectMode() {
+  selectMode.value = false
+  selectedIds.value = new Set()
+}
+
+function toggleSelection(id: number) {
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) next.delete(id); else next.add(id)
+  selectedIds.value = next
+}
+
+async function deleteSelected() {
+  if (!selectedIds.value.size) return
+  const count = selectedIds.value.size
+  if (!window.confirm(`Delete ${count} custom agent${count === 1 ? '' : 's'}? This cannot be undone.`)) return
+  deletingBulk.value = true
+  try {
+    // Sequential deletes keep per-row error handling simple and avoid thundering
+    // the API with parallel DELETEs. The selection is small (user-curated).
+    for (const id of selectedIds.value) {
+      await $fetch(`/api/agents/${id}`, { method: 'DELETE' })
+    }
+    exitSelectMode()
+    refresh()
+  } catch (e) {
+    console.error('Failed to delete selected agents:', e)
+  } finally {
+    deletingBulk.value = false
+  }
+}
+
 async function loadWorkspaceFile(agentId: number, filename: string) {
   workspaceTab.value = filename
   try {
@@ -297,23 +355,59 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
     <div v-if="!editing && !creating" class="mb-6 space-y-2">
       <div class="flex items-center justify-between">
         <h2 class="text-sm font-medium text-neutral-400">Custom Agents</h2>
-        <button @click="newAgent" :disabled="!providers.length"
-                class="px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 disabled:opacity-40 transition-colors">
-          New Agent
-        </button>
+        <div class="flex items-center gap-2">
+          <button @click="newAgent" :disabled="!providers.length || selectMode"
+                  class="px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 disabled:opacity-40 transition-colors">
+            New Agent
+          </button>
+          <!-- Delete affordance: outside select mode, entering it requires at least one custom
+               agent to exist. Inside select mode, the same button becomes "Delete N" and
+               confirms the bulk delete. A Cancel button sits alongside to exit select mode. -->
+          <template v-if="!selectMode">
+            <button @click="enterSelectMode" :disabled="!customAgents.length"
+                    class="px-3 py-1.5 bg-neutral-800 text-neutral-300 text-xs font-medium hover:bg-red-900/40 hover:text-red-300 border border-neutral-700 disabled:opacity-40 disabled:hover:bg-neutral-800 disabled:hover:text-neutral-300 transition-colors">
+              Delete
+            </button>
+          </template>
+          <template v-else>
+            <button @click="exitSelectMode"
+                    class="px-3 py-1.5 bg-neutral-800 text-neutral-300 text-xs font-medium hover:bg-neutral-700 border border-neutral-700 transition-colors">
+              Cancel
+            </button>
+            <button @click="deleteSelected" :disabled="!selectedIds.size || deletingBulk"
+                    class="px-3 py-1.5 bg-red-700 text-white text-xs font-medium hover:bg-red-600 disabled:opacity-40 transition-colors">
+              Delete {{ selectedIds.size || '' }}
+            </button>
+          </template>
+        </div>
       </div>
       <p class="text-xs text-neutral-600">Additional agents you create for specific channels, peers, or workflows.</p>
       <div class="bg-neutral-900 border border-neutral-800">
         <div v-for="agent in customAgents" :key="agent.id"
-             @click="editAgent(agent)"
+             @click="selectMode ? toggleSelection(agent.id) : editAgent(agent)"
              class="px-4 py-3 border-b border-neutral-800/50 last:border-b-0 flex items-center justify-between hover:bg-neutral-800/50 cursor-pointer transition-colors">
-          <div>
-            <span class="text-sm text-white">{{ agent.name }}</span>
-            <div class="text-xs text-neutral-500 mt-0.5">{{ agent.modelProvider }} / {{ agent.modelId }}</div>
+          <div class="flex items-center gap-3 min-w-0">
+            <input v-if="selectMode" type="checkbox"
+                   :checked="selectedIds.has(agent.id)"
+                   @click.stop="toggleSelection(agent.id)"
+                   class="accent-red-500 shrink-0" />
+            <div class="min-w-0">
+              <span class="text-sm text-white">{{ agent.name }}</span>
+              <div class="text-xs text-neutral-500 mt-0.5">{{ agent.modelProvider }} / {{ agent.modelId }}</div>
+            </div>
           </div>
-          <span :class="agent.enabled && agent.providerConfigured ? 'text-green-400' : 'text-neutral-600'" class="text-xs font-mono">
-            {{ agent.enabled && agent.providerConfigured ? 'enabled' : 'disabled' }}
-          </span>
+          <div class="flex items-center gap-3 shrink-0">
+            <span v-if="agent.enabled && !agent.providerConfigured"
+                  class="text-[10px] font-mono text-amber-400 border border-amber-400/30 px-1">provider not configured</span>
+            <!-- Enabled toggle (hidden in select mode to keep the row's action surface unambiguous) -->
+            <button v-if="!selectMode" @click.stop="toggleAgentEnabled(agent)"
+                    :class="agent.enabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-neutral-700 hover:bg-neutral-600'"
+                    class="relative w-9 h-5 rounded-full transition-colors"
+                    :title="agent.enabled ? 'Disable agent' : 'Enable agent'">
+              <span :class="agent.enabled ? 'translate-x-4' : 'translate-x-0.5'"
+                    class="block w-4 h-4 bg-white rounded-full transition-transform" />
+            </button>
+          </div>
         </div>
         <div v-if="!customAgents.length" class="px-4 py-8 text-center text-sm text-neutral-600">
           No custom agents yet. Click <span class="text-neutral-400">New Agent</span> to create one.
