@@ -113,8 +113,13 @@ public class ApiSkillsController extends Controller {
     /** GET /api/skills/{name}/files/{<path>filePath} — Read a text file from a skill folder. */
     public static void readFile(String name, String filePath) {
         var dir = SkillLoader.globalSkillsPath().resolve(name);
-        var target = dir.resolve(filePath).normalize();
-        if (!target.startsWith(dir)) { error(403, "Path escapes skill directory"); return; }
+        java.nio.file.Path target;
+        try {
+            target = AgentService.acquireContained(dir, filePath);
+        } catch (SecurityException e) {
+            error(403, "Path escapes skill directory");
+            return;
+        }
         if (!Files.exists(target)) notFound();
 
         try {
@@ -430,8 +435,13 @@ public class ApiSkillsController extends Controller {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
         var dir = AgentService.workspacePath(agent.name).resolve("skills").resolve(name);
-        var target = dir.resolve(filePath).normalize();
-        if (!target.startsWith(dir)) { error(403, "Path escapes skill directory"); return; }
+        java.nio.file.Path target;
+        try {
+            target = AgentService.acquireContained(dir, filePath);
+        } catch (SecurityException e) {
+            error(403, "Path escapes skill directory");
+            return;
+        }
         if (!Files.exists(target)) notFound();
 
         try {

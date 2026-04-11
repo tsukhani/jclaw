@@ -157,13 +157,16 @@ public class ShellExecTool implements ToolRegistry.Tool {
             return workdirPath;
         }
 
-        // Relative path — resolve within workspace
-        var resolved = workspace.resolve(workdirStr).normalize();
-        if (!resolved.startsWith(workspace)) {
+        // Relative path — resolve within workspace via the canonical helper.
+        // acquireContained does lexical + canonical (realpath) validation plus
+        // a double-resolve, so a symlink inside the workspace pointing outside
+        // is rejected here as well, not just textual `..` traversal.
+        try {
+            return AgentService.acquireContained(workspace, workdirStr);
+        } catch (SecurityException e) {
             throw new IllegalArgumentException(
                     "Working directory must be within the agent workspace.");
         }
-        return resolved;
     }
 
     public Map<String, String> buildEnvironment(JsonObject args) {

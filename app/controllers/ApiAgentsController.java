@@ -100,10 +100,19 @@ public class ApiAgentsController extends Controller {
         var agent = AgentService.findById(id);
         if (agent == null) notFound();
 
-        // Prevent directory traversal
-        if (filePath.contains("..")) forbidden();
-
-        var path = AgentService.workspacePath(agent.name).resolve(filePath);
+        // Two-layer (lexical + canonical) path validation with double-resolve.
+        // The previous substring check (`filePath.contains("..")`) didn't
+        // normalize the path before checking, and never compared against the
+        // workspace root. acquireWorkspacePath does both, plus realpath
+        // resolution so a symlink inside the workspace pointing outside is
+        // also rejected.
+        java.nio.file.Path path;
+        try {
+            path = AgentService.acquireWorkspacePath(agent.name, filePath);
+        } catch (SecurityException e) {
+            forbidden();
+            return;
+        }
         var file = path.toFile();
         if (!file.exists() || !file.isFile()) notFound();
 

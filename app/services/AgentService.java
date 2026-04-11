@@ -210,14 +210,108 @@ public class AgentService {
     }
 
     /**
-     * Resolve a relative path inside an agent's workspace and reject any target
-     * that escapes the workspace root (via {@code ..} or absolute paths). Returns
-     * {@code null} on escape; callers should surface a traversal error.
+     * Resolve {@code relativePath} inside {@code root}, rejecting any target
+     * that would escape the root. Two-layer validation:
+     *
+     * <ol>
+     *   <li><b>Lexical</b>: collapse {@code ..} via {@code normalize()} and
+     *       verify the result starts with {@code root}.</li>
+     *   <li><b>Canonical</b>: realpath the deepest existing ancestor of the
+     *       target (handles writes whose target doesn't exist yet), append the
+     *       missing suffix, and verify the resulting absolute path is still
+     *       inside the canonical root. Catches symlink escapes — a symlink
+     *       inside the root that points to {@code /etc} would pass step 1 but
+     *       fail step 2.</li>
+     * </ol>
+     *
+     * Returns the canonical absolute path on success, or {@code null} on any
+     * escape, missing root, or I/O error. Prefer {@link #acquireContained}
+     * when the result is about to be opened or executed against — it
+     * additionally double-resolves to shrink the validate→use TOCTOU window.
+     */
+    public static Path resolveContained(Path root, String relativePath) {
+        try {
+            // Layer 1: lexical
+            var rootAbs = root.toAbsolutePath().normalize();
+            var target = rootAbs.resolve(relativePath).normalize();
+            if (!target.startsWith(rootAbs)) return null;
+
+            // Make sure the root exists so we can realpath it (idempotent).
+            Files.createDirectories(rootAbs);
+            var rootReal = rootAbs.toRealPath();
+
+            // Layer 2: canonical with missing-suffix walk-up. toRealPath()
+            // throws NoSuchFileException for not-yet-created targets, so for
+            // write paths we walk up to the deepest existing ancestor,
+            // realpath that, then re-attach the missing tail.
+            var existing = target;
+            var missingSuffix = new java.util.ArrayDeque<Path>();
+            while (existing != null && !Files.exists(existing)) {
+                missingSuffix.push(existing.getFileName());
+                existing = existing.getParent();
+            }
+            if (existing == null) return null;
+            var canonical = existing.toRealPath();
+            if (!canonical.startsWith(rootReal)) return null;
+
+            for (var seg : missingSuffix) canonical = canonical.resolve(seg);
+            canonical = canonical.normalize();
+            return canonical.startsWith(rootReal) ? canonical : null;
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Resolve, validate, then re-resolve immediately to confirm the canonical
+     * target hasn't changed between the two resolutions. Returns the canonical
+     * absolute path. Throws {@link SecurityException} on any escape or
+     * mid-resolution divergence.
+     *
+     * <p>This is the achievable Java equivalent of OpenClaw's "post-open
+     * re-check" pattern: Java NIO can't fstat an open {@code InputStream}, so
+     * we can't truly hold-then-validate. Instead we double-resolve right
+     * before the file op, shrinking the validate→use TOCTOU window from
+     * "unbounded" to "microseconds". Callers should pass the returned path
+     * directly to the file operation with no further work in between.
+     *
+     * <p>Use from {@code FileSystemTools}, {@code DocumentsTool},
+     * {@code ShellExecTool} (workdir), upload handlers, and
+     * {@code serveWorkspaceFile} — anywhere the result is about to be opened
+     * or executed against. Use {@link #resolveContained} only when you need a
+     * non-throwing yes/no check.
+     */
+    public static Path acquireContained(Path root, String relativePath) {
+        var first = resolveContained(root, relativePath);
+        if (first == null) {
+            throw new SecurityException("Path '%s' escapes the workspace.".formatted(relativePath));
+        }
+        var second = resolveContained(root, relativePath);
+        if (second == null || !second.equals(first)) {
+            throw new SecurityException(
+                    "Path '%s' resolved to a different target between validations (possible TOCTOU)."
+                            .formatted(relativePath));
+        }
+        return second;
+    }
+
+    /**
+     * Resolve a relative path inside an agent's workspace and reject any
+     * target that escapes the workspace root. Returns {@code null} on escape;
+     * callers should surface a traversal error. Prefer
+     * {@link #acquireWorkspacePath} when the result is about to be used.
      */
     public static Path resolveWorkspacePath(String agentName, String relativePath) {
-        var workspace = workspacePath(agentName).toAbsolutePath().normalize();
-        var target = workspace.resolve(relativePath).normalize();
-        return target.startsWith(workspace) ? target : null;
+        return resolveContained(workspacePath(agentName), relativePath);
+    }
+
+    /**
+     * Resolve and double-validate a path inside an agent's workspace. Throws
+     * {@link SecurityException} on any escape. Use this immediately before
+     * opening, reading, writing, or execing against the returned path.
+     */
+    public static Path acquireWorkspacePath(String agentName, String relativePath) {
+        return acquireContained(workspacePath(agentName), relativePath);
     }
 
     public static void createWorkspace(String agentName) {

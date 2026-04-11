@@ -173,6 +173,66 @@ public class ToolSystemTest extends UnitTest {
         assertTrue(result.contains("escapes"));
     }
 
+    // --- Symlink and obfuscated-traversal coverage for the canonical
+    //     containment helpers in AgentService. The lexical-only validator
+    //     used to allow a workspace-internal symlink whose target was
+    //     outside the workspace; the canonical layer (toRealPath) catches
+    //     it now. ---
+
+    @Test
+    public void fileSystemSymlinkEscapeBlocked() throws Exception {
+        var workspace = AgentService.workspacePath(agent.name);
+        Files.createDirectories(workspace);
+        var outside = Files.createTempDirectory("jclaw-symlink-test-");
+        Files.writeString(outside.resolve("secret.txt"), "should not be readable");
+        var link = workspace.resolve("escape");
+        try {
+            Files.createSymbolicLink(link, outside);
+            var result = ToolRegistry.execute("filesystem",
+                    "{\"action\": \"readFile\", \"path\": \"escape/secret.txt\"}",
+                    agent);
+            assertTrue(result.contains("Error"), "symlink escape must be rejected");
+            assertTrue(result.contains("escapes"), "error must mention escape");
+        } finally {
+            Files.deleteIfExists(link);
+            Files.walk(outside).sorted(java.util.Comparator.reverseOrder())
+                    .forEach(p -> { try { Files.delete(p); } catch (Exception ignored) {} });
+        }
+    }
+
+    @Test
+    public void resolveContainedRejectsObfuscatedTraversal() {
+        // The old serveWorkspaceFile substring check let "./../../etc/passwd"
+        // through because it does contain ".." but the normalized path was
+        // never compared against the workspace root. Pin that down.
+        assertNull(AgentService.resolveWorkspacePath(agent.name, "./../../etc/passwd"));
+        assertNull(AgentService.resolveWorkspacePath(agent.name, "../../etc/passwd"));
+        assertNull(AgentService.resolveWorkspacePath(agent.name, "/etc/passwd"));
+    }
+
+    @Test
+    public void acquireWorkspacePathThrowsOnEscape() {
+        assertThrows(SecurityException.class,
+                () -> AgentService.acquireWorkspacePath(agent.name, "../../etc/passwd"));
+        assertThrows(SecurityException.class,
+                () -> AgentService.acquireWorkspacePath(agent.name, "/etc/passwd"));
+    }
+
+    @Test
+    public void acquireWorkspacePathAcceptsLegitimateRelativePath() throws Exception {
+        var workspace = AgentService.workspacePath(agent.name);
+        Files.createDirectories(workspace);
+        var hello = workspace.resolve("hello.txt");
+        Files.writeString(hello, "world");
+        try {
+            var path = AgentService.acquireWorkspacePath(agent.name, "hello.txt");
+            assertNotNull(path);
+            assertEquals("world", Files.readString(path));
+        } finally {
+            Files.deleteIfExists(hello);
+        }
+    }
+
     // --- SkillsTool ---
 
     @Test

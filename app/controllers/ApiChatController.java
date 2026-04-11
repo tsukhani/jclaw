@@ -101,10 +101,12 @@ public class ApiChatController extends Controller {
         }
 
         var batchId = "uploads/" + buildBatchId();
-        var workspace = AgentService.workspacePath(agent.name).toAbsolutePath().normalize();
-        var batchDir = workspace.resolve(batchId).normalize();
-        if (!batchDir.startsWith(workspace)) {
+        java.nio.file.Path batchDir;
+        try {
+            batchDir = AgentService.acquireWorkspacePath(agent.name, batchId);
+        } catch (SecurityException e) {
             error(400, "Invalid upload target");
+            return;
         }
 
         var results = new ArrayList<Map<String, Object>>();
@@ -115,9 +117,12 @@ public class ApiChatController extends Controller {
                 if (safeName.isEmpty()) {
                     error(400, "Invalid filename: " + f.getName());
                 }
-                var target = batchDir.resolve(safeName).normalize();
-                if (!target.startsWith(batchDir)) {
+                java.nio.file.Path target;
+                try {
+                    target = AgentService.acquireContained(batchDir, safeName);
+                } catch (SecurityException e) {
                     error(400, "Invalid filename: " + f.getName());
+                    return;
                 }
                 Files.copy(f.toPath(), target, StandardCopyOption.REPLACE_EXISTING);
 

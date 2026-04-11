@@ -49,10 +49,10 @@ public class FileSystemTools implements ToolRegistry.Tool {
         var relativePath = args.get("path").getAsString();
 
         var workspace = AgentService.workspacePath(agent.name);
-        var target = workspace.resolve(relativePath).normalize();
-
-        // Path traversal prevention
-        if (!target.startsWith(workspace)) {
+        Path target;
+        try {
+            target = AgentService.acquireWorkspacePath(agent.name, relativePath);
+        } catch (SecurityException e) {
             return "Error: Path '%s' escapes the workspace directory.".formatted(relativePath);
         }
 
@@ -61,8 +61,11 @@ public class FileSystemTools implements ToolRegistry.Tool {
         // and refactor OTHER skills but cannot alter skill-creator. To get an updated
         // skill-creator, drag it from the global skills registry onto the agent card.
         if ("writeFile".equals(action) && !"main".equalsIgnoreCase(agent.name)) {
-            var skillCreatorDir = workspace.resolve("skills").resolve("skill-creator");
-            if (target.startsWith(skillCreatorDir)) {
+            // Canonicalize via resolveContained so the startsWith comparison works
+            // even when the workspace contains symlinks (macOS /var → /private/var).
+            // Both `target` and `skillCreatorDir` are canonical here.
+            var skillCreatorDir = AgentService.resolveContained(workspace, "skills/skill-creator");
+            if (skillCreatorDir != null && target.startsWith(skillCreatorDir)) {
                 return "Error: The 'skill-creator' skill is read-only for agent '"
                         + agent.name
                         + "'. Only the 'main' agent can modify skill-creator. "

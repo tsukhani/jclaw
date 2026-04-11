@@ -74,8 +74,10 @@ public class DocumentsTool implements ToolRegistry.Tool {
         var action = args.get("action").getAsString();
         var relativePath = args.get("path").getAsString();
 
-        var target = AgentService.resolveWorkspacePath(agent.name, relativePath);
-        if (target == null) {
+        Path target;
+        try {
+            target = AgentService.acquireWorkspacePath(agent.name, relativePath);
+        } catch (SecurityException e) {
             return "Error: Path '%s' escapes the workspace directory.".formatted(relativePath);
         }
 

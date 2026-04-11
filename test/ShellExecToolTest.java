@@ -108,6 +108,30 @@ public class ShellExecToolTest extends UnitTest {
         assertThrows(IllegalArgumentException.class, () -> tool.resolveWorkdir(args, workspace, false, agent.name));
     }
 
+    @Test
+    public void shellWorkdirSymlinkEscapeBlocked() throws Exception {
+        // A symlink inside the workspace pointing to an outside directory used
+        // to pass the textual containment check (the symlink's lexical path
+        // stayed inside the workspace) and ProcessBuilder would happily follow
+        // it. The canonical (toRealPath) layer in acquireContained rejects it.
+        var workspace = AgentService.workspacePath(agent.name).toAbsolutePath().normalize();
+        Files.createDirectories(workspace);
+        var outside = Files.createTempDirectory("jclaw-shell-symlink-");
+        var link = workspace.resolve("escape");
+        try {
+            Files.createSymbolicLink(link, outside);
+            var args = com.google.gson.JsonParser.parseString("""
+                    {"workdir": "escape"}
+                    """).getAsJsonObject();
+            assertThrows(IllegalArgumentException.class,
+                    () -> tool.resolveWorkdir(args, workspace, false, agent.name));
+        } finally {
+            Files.deleteIfExists(link);
+            Files.walk(outside).sorted(java.util.Comparator.reverseOrder())
+                    .forEach(p -> { try { Files.delete(p); } catch (Exception ignored) {} });
+        }
+    }
+
     // ==================== Environment Filtering ====================
 
     @Test
