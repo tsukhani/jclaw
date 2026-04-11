@@ -46,7 +46,7 @@ The system SHALL validate all commands against a configurable allowlist before e
 
 ### Requirement: Workspace-scoped working directory
 
-The default working directory SHALL be the agent's workspace directory. If a `workdir` parameter is provided, it SHALL resolve relative to the workspace and MUST NOT escape the workspace boundary (path traversal prevention). A global config `shell.allowGlobalPaths` (default false) SHALL unlock arbitrary absolute working directories.
+The default working directory SHALL be the agent's workspace directory. If a `workdir` parameter is provided, it SHALL resolve relative to the workspace and MUST NOT escape the workspace boundary (path traversal prevention). A per-agent config `agent.{name}.shell.allowGlobalPaths` (default false) SHALL unlock arbitrary absolute working directories, and SHALL only take effect when the named agent is the main agent (i.e., the agent whose name is `main`). All other agents SHALL NOT be able to escape the workspace boundary regardless of config state. See "Main-agent-only privilege escapes" for the full security model.
 
 #### Scenario: Default workspace directory
 - **WHEN** agent calls `{"command": "pwd"}` with no workdir
@@ -57,16 +57,54 @@ The default working directory SHALL be the agent's workspace directory. If a `wo
 - **THEN** working directory resolves to `<workspace>/src/main` and command executes there
 
 #### Scenario: Path traversal blocked
-- **WHEN** `shell.allowGlobalPaths` is false and agent calls `{"command": "ls", "workdir": "../../etc"}`
+- **WHEN** `agent.main.shell.allowGlobalPaths` is false and the main agent calls `{"command": "ls", "workdir": "../../etc"}`
 - **THEN** tool returns error indicating the working directory must be within the agent workspace and no process is spawned
 
 #### Scenario: Absolute path blocked when global paths disabled
-- **WHEN** `shell.allowGlobalPaths` is false and agent calls `{"command": "ls", "workdir": "/tmp"}`
+- **WHEN** `agent.main.shell.allowGlobalPaths` is false and the main agent calls `{"command": "ls", "workdir": "/tmp"}`
 - **THEN** tool returns error indicating the working directory must be within the agent workspace
 
-#### Scenario: Global paths enabled
-- **WHEN** `shell.allowGlobalPaths` is true and agent calls `{"command": "ls", "workdir": "/tmp"}`
+#### Scenario: Global paths enabled for main agent
+- **WHEN** `agent.main.shell.allowGlobalPaths` is true and the main agent calls `{"command": "ls", "workdir": "/tmp"}`
 - **THEN** command executes with `/tmp` as working directory
+
+#### Scenario: Non-main agent cannot escape workspace
+- **WHEN** a non-main agent `foo` calls `{"command": "ls", "workdir": "/tmp"}`
+- **THEN** the tool short-circuits on the identity check before consulting Config at all, returns the workspace-boundary error, and no process is spawned — even if a Config row `agent.foo.shell.allowGlobalPaths=true` exists in the database
+
+### Requirement: Main-agent-only privilege escapes
+
+Two shell-exec privilege escapes SHALL exist as per-agent Config keys: `agent.{name}.shell.bypassAllowlist` (skip the safe-binary allowlist) and `agent.{name}.shell.allowGlobalPaths` (allow absolute working directories outside the workspace). Both SHALL only take effect when the named agent is the main agent — identified by the literal name `main`. Every other agent SHALL NOT be able to use these escapes under any circumstances.
+
+The system SHALL enforce this gate in two layers (defense-in-depth):
+
+- **Write-side guard**: the config save endpoint SHALL reject with HTTP 403 any attempt to set a key matching `agent.{name}.shell.(bypassAllowlist|allowGlobalPaths)` when the named agent does not exist or is not the main agent. This prevents the privilege keys from being created for non-main agents in the first place.
+- **Read-side guard**: the shell exec tool SHALL check whether the calling agent is the main agent at execution time before honoring either config value. The identity check MUST short-circuit before any Config lookup, so an orphaned Config row on a non-main agent has no effect. This ensures that even if a privilege row is inserted out-of-band (DB import, manual SQL, restored backup), non-main agents cannot grant themselves privilege escapes.
+
+Both layers are required: the write-side guard keeps operators from persisting misleading rows for non-main agents via the Settings UI; the read-side guard is the actual enforcement point and MUST NOT depend on the write-side having held.
+
+**Rationale**: the previous design used a mutable `isDefault` boolean column on the `agent` table. That column was removed in favor of name-based identity because main-ness is already structurally enforced — the `main` agent is pre-seeded on first boot (`DefaultConfigJob`), its name is unique at the schema level, the reserved name is blocked at the API layer (`ApiAgentsController` rejects create/rename/delete that would touch `main`), and no API endpoint allows any other agent to become main. A separate `isDefault` flag added a mutation surface without adding any security — it could only ever be `true` for `main` and `false` for everyone else, making it a footgun rather than a control.
+
+#### Scenario: Write-side rejects bypassAllowlist for non-main agent
+- **WHEN** admin POSTs to `/api/config` with `{"key": "agent.helper.shell.bypassAllowlist", "value": "true"}` and agent `helper` is not named `main`
+- **THEN** the endpoint returns HTTP 403 with a message indicating shell exec privileges are restricted to the main agent, and no Config row is written
+
+#### Scenario: Write-side rejects allowGlobalPaths for non-main agent
+- **WHEN** admin POSTs to `/api/config` with `{"key": "agent.helper.shell.allowGlobalPaths", "value": "true"}` and agent `helper` is not named `main`
+- **THEN** the endpoint returns HTTP 403 and no Config row is written
+
+#### Scenario: Write-side accepts privilege escape for main agent
+- **WHEN** admin POSTs to `/api/config` with `{"key": "agent.main.shell.bypassAllowlist", "value": "true"}`
+- **THEN** the row is persisted and subsequent main-agent shell calls bypass the allowlist
+
+#### Scenario: Read-side check is identity-based, not Config-based
+- **GIVEN** a Config row `agent.helper.shell.bypassAllowlist=true` exists (e.g., inserted via SQL or left over from before the write-side guard was added)
+- **WHEN** agent `helper` calls `{"command": "rm -rf /"}`
+- **THEN** the tool checks `helper.name != "main"`, ignores the Config row without reading it, validates `rm` against the allowlist, and rejects the command
+
+#### Scenario: Read-side honors privilege escape for main agent
+- **WHEN** agent `main` has `agent.main.shell.bypassAllowlist=true` and calls `{"command": "rsync -av src dst"}`
+- **THEN** the tool confirms the identity check, reads the Config row, bypasses the allowlist, and executes the command even though `rsync` is not on the default allowlist
 
 ### Requirement: Output size limits
 

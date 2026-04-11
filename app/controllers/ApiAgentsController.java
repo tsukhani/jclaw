@@ -30,23 +30,20 @@ public class ApiAgentsController extends Controller {
         renderJSON(gson.toJson(agentToMap(agent)));
     }
 
-    private static final String RESERVED_AGENT_NAME = "main";
-
     public static void create() {
         var body = readJsonBody();
         if (body == null) badRequest();
 
         var name = body.get("name").getAsString();
-        if (RESERVED_AGENT_NAME.equalsIgnoreCase(name)) {
+        if (Agent.MAIN_AGENT_NAME.equalsIgnoreCase(name)) {
             error(409, "The agent name 'main' is reserved for the built-in agent");
         }
         var modelProvider = body.get("modelProvider").getAsString();
         var modelId = body.get("modelId").getAsString();
-        var isDefault = body.has("isDefault") && body.get("isDefault").getAsBoolean();
         var thinkingMode = body.has("thinkingMode") && !body.get("thinkingMode").isJsonNull()
                 ? body.get("thinkingMode").getAsString() : null;
 
-        var agent = AgentService.create(name, modelProvider, modelId, isDefault, thinkingMode);
+        var agent = AgentService.create(name, modelProvider, modelId, thinkingMode);
         renderJSON(gson.toJson(agentToMap(agent)));
     }
 
@@ -58,25 +55,24 @@ public class ApiAgentsController extends Controller {
         if (body == null) badRequest();
 
         var name = body.has("name") ? body.get("name").getAsString() : agent.name;
-        if (!agent.name.equalsIgnoreCase(RESERVED_AGENT_NAME) && RESERVED_AGENT_NAME.equalsIgnoreCase(name)) {
+        if (!agent.isMain() && Agent.MAIN_AGENT_NAME.equalsIgnoreCase(name)) {
             error(409, "The agent name 'main' is reserved for the built-in agent");
         }
         var modelProvider = body.has("modelProvider") ? body.get("modelProvider").getAsString() : agent.modelProvider;
         var modelId = body.has("modelId") ? body.get("modelId").getAsString() : agent.modelId;
         var enabled = body.has("enabled") ? body.get("enabled").getAsBoolean() : agent.enabled;
-        var isDefault = body.has("isDefault") ? body.get("isDefault").getAsBoolean() : agent.isDefault;
         var thinkingMode = body.has("thinkingMode")
                 ? (body.get("thinkingMode").isJsonNull() ? null : body.get("thinkingMode").getAsString())
                 : agent.thinkingMode;
 
-        agent = AgentService.update(agent, name, modelProvider, modelId, enabled, isDefault, thinkingMode);
+        agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode);
         renderJSON(gson.toJson(agentToMap(agent)));
     }
 
     public static void delete(Long id) {
         var agent = AgentService.findById(id);
         if (agent == null) notFound();
-        if (RESERVED_AGENT_NAME.equalsIgnoreCase(agent.name)) {
+        if (agent.isMain()) {
             error(409, "The built-in 'main' agent cannot be deleted");
         }
         AgentService.delete(agent);
@@ -140,7 +136,7 @@ public class ApiAgentsController extends Controller {
         map.put("modelProvider", a.modelProvider);
         map.put("modelId", a.modelId);
         map.put("enabled", a.enabled);
-        map.put("isDefault", a.isDefault);
+        map.put("isMain", a.isMain());
         map.put("thinkingMode", a.thinkingMode);
         map.put("createdAt", a.createdAt.toString());
         map.put("updatedAt", a.updatedAt.toString());

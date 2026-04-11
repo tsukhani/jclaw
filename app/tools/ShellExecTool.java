@@ -66,21 +66,21 @@ public class ShellExecTool implements ToolRegistry.Tool {
             return "Error: command is required and must not be empty.";
         }
 
-        // Allowlist validation (bypass only for the default/main agent)
-        boolean bypassAllowlist = agent.isDefault && "true".equals(
+        // Allowlist validation (bypass only for the main agent — identity-checked by name, not config)
+        boolean bypassAllowlist = agent.isMain() && "true".equals(
                 ConfigService.get("agent." + agent.name + ".shell.bypassAllowlist", "false"));
         if (!bypassAllowlist) {
             var allowlistError = validateAllowlist(command);
             if (allowlistError != null) return allowlistError;
         }
 
-        // Working directory resolution (allowGlobalPaths only for the default/main agent)
-        boolean agentAllowGlobal = agent.isDefault && "true".equals(
+        // Working directory resolution (allowGlobalPaths only for the main agent)
+        boolean agentAllowGlobal = agent.isMain() && "true".equals(
                 ConfigService.get("agent." + agent.name + ".shell.allowGlobalPaths", "false"));
         var workspace = AgentService.workspacePath(agent.name).toAbsolutePath().normalize();
         Path workdir;
         try {
-            workdir = resolveWorkdir(args, workspace, agentAllowGlobal);
+            workdir = resolveWorkdir(args, workspace, agentAllowGlobal, agent.name);
         } catch (IllegalArgumentException e) {
             return "Error: " + e.getMessage();
         }
@@ -135,7 +135,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
         return idx == -1 ? trimmed : trimmed.substring(0, idx);
     }
 
-    public Path resolveWorkdir(JsonObject args, Path workspace, boolean allowGlobal) {
+    public Path resolveWorkdir(JsonObject args, Path workspace, boolean allowGlobal, String agentName) {
 
         if (!args.has("workdir") || args.get("workdir").getAsString().trim().isEmpty()) {
             if (!Files.isDirectory(workspace)) {
@@ -150,7 +150,9 @@ public class ShellExecTool implements ToolRegistry.Tool {
         if (workdirPath.isAbsolute()) {
             if (!allowGlobal) {
                 throw new IllegalArgumentException(
-                        "Working directory must be within the agent workspace. Absolute paths require shell.allowGlobalPaths=true.");
+                        ("Working directory must be within the agent workspace. Absolute paths require "
+                                + "agent.%s.shell.allowGlobalPaths=true and are only honored for the main agent.")
+                                .formatted(agentName));
             }
             return workdirPath;
         }

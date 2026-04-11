@@ -311,10 +311,10 @@ const displayMessages = computed(() =>
   )
 )
 
-// Set default agent
+// Auto-select the main agent on load
 watch(agents, (val) => {
   if (val?.length && !selectedAgentId.value) {
-    const def = val.find((a: any) => a.isDefault) || val[0]
+    const def = val.find((a: any) => a.isMain) || val[0]
     selectedAgentId.value = def.id
   }
 }, { immediate: true })

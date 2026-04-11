@@ -18,20 +18,19 @@ public class AgentService {
         boolean isExpired() { return System.currentTimeMillis() > expiresAt; }
     }
 
-    public static Agent create(String name, String modelProvider, String modelId, boolean isDefault, String thinkingMode) {
+    public static Agent create(String name, String modelProvider, String modelId, String thinkingMode) {
         var agent = new Agent();
         agent.name = name;
         agent.modelProvider = modelProvider;
         agent.modelId = modelId;
         agent.enabled = isProviderConfigured(modelProvider, modelId);
-        agent.isDefault = isDefault;
         agent.thinkingMode = thinkingMode;
         agent.save();
 
         createWorkspace(name);
 
         // Disable browser tool for non-main agents (security)
-        if (!"main".equalsIgnoreCase(name)) {
+        if (!agent.isMain()) {
             var browserConfig = new models.AgentToolConfig();
             browserConfig.agent = agent;
             browserConfig.toolName = "browser";
@@ -45,12 +44,11 @@ public class AgentService {
     }
 
     public static Agent update(Agent agent, String name, String modelProvider, String modelId,
-                                boolean enabled, boolean isDefault, String thinkingMode) {
+                                boolean enabled, String thinkingMode) {
         agent.name = name;
         agent.modelProvider = modelProvider;
         agent.modelId = modelId;
         agent.enabled = enabled && isProviderConfigured(modelProvider, modelId);
-        agent.isDefault = isDefault;
         agent.thinkingMode = thinkingMode;
         agent.save();
         return agent;

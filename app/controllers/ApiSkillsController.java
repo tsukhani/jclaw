@@ -788,21 +788,21 @@ public class ApiSkillsController extends Controller {
     // --- LLM sanitization ---
 
     private static LinkedHashMap<String, String> sanitizeWithLlm(LinkedHashMap<String, String> fileContents) {
-        // Find the default agent's provider
-        Agent defaultAgent = Agent.findDefault();
-        if (defaultAgent == null) {
-            services.EventLogger.warn("skills", "Sanitization skipped: no default agent configured");
+        // Sanitization uses the main agent's LLM provider
+        Agent mainAgent = Agent.findByName(Agent.MAIN_AGENT_NAME);
+        if (mainAgent == null) {
+            services.EventLogger.warn("skills", "Sanitization skipped: main agent not found");
             return fileContents;
         }
 
-        var provider = ProviderRegistry.get(defaultAgent.modelProvider);
+        var provider = ProviderRegistry.get(mainAgent.modelProvider);
         if (provider == null) {
-            services.EventLogger.warn("skills", "Sanitization skipped: no provider for agent " + defaultAgent.name);
+            services.EventLogger.warn("skills", "Sanitization skipped: no provider for agent " + mainAgent.name);
             return fileContents;
         }
 
         services.EventLogger.info("skills", "Starting LLM sanitization of %d file(s) via %s / %s"
-                .formatted(fileContents.size(), provider.config().name(), defaultAgent.modelId));
+                .formatted(fileContents.size(), provider.config().name(), mainAgent.modelId));
 
         // Build file listing for the prompt
         var sb = new StringBuilder();
@@ -844,7 +844,7 @@ public class ApiSkillsController extends Controller {
                         .formatted(entry.getKey(), entry.getValue().length()));
             }
 
-            var response = provider.chat(defaultAgent.modelId, messages, null, null, null);
+            var response = provider.chat(mainAgent.modelId, messages, null, null, null);
             var text = response.choices().get(0).message().content().toString().trim();
 
             services.EventLogger.info("skills",

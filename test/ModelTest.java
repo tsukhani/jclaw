@@ -13,7 +13,6 @@ public class ModelTest extends UnitTest {
         agent.name = "test-agent";
         agent.modelProvider = "openrouter";
         agent.modelId = "openai/gpt-4.1";
-        agent.isDefault = true;
         agent.save();
 
         assertNotNull(agent.id);
@@ -23,10 +22,21 @@ public class ModelTest extends UnitTest {
         var found = Agent.findByName("test-agent");
         assertNotNull(found);
         assertEquals("openrouter", found.modelProvider);
+        assertFalse(found.isMain());
+    }
 
-        var defaultAgent = Agent.findDefault();
-        assertNotNull(defaultAgent);
-        assertEquals("test-agent", defaultAgent.name);
+    @Test
+    public void mainAgentIdentityByName() {
+        Fixtures.deleteDatabase();
+        var agent = new Agent();
+        agent.name = "main";
+        agent.modelProvider = "openrouter";
+        agent.modelId = "openai/gpt-4.1";
+        agent.save();
+
+        var found = Agent.findByName(Agent.MAIN_AGENT_NAME);
+        assertNotNull(found);
+        assertTrue(found.isMain());
     }
 
     @Test

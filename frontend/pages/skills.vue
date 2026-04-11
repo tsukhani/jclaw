@@ -529,7 +529,7 @@ function totalSkillCount(agentId: number) {
             <div class="flex items-center justify-between mb-3">
               <div>
                 <span class="text-sm font-medium text-white">{{ agent.name }}</span>
-                <span v-if="agent.isDefault" class="ml-2 text-[10px] text-neutral-500 border border-neutral-700 px-1">default</span>
+                <span v-if="agent.isMain" class="ml-2 text-[10px] text-neutral-500 border border-neutral-700 px-1">main</span>
               </div>
               <span class="text-[10px] text-neutral-500">
                 {{ enabledSkillCount(agent.id) }}/{{ totalSkillCount(agent.id) }} skills

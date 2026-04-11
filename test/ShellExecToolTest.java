@@ -19,7 +19,7 @@ public class ShellExecToolTest extends UnitTest {
         Fixtures.deleteDatabase();
         cleanupTestAgent();
         tool = new ShellExecTool();
-        agent = AgentService.create("shell-test-agent", "openrouter", "gpt-4.1", false, null);
+        agent = AgentService.create("shell-test-agent", "openrouter", "gpt-4.1", null);
         // Seed allowlist
         ConfigService.set("shell.allowlist", "echo,ls,cat,git,head,sleep,pwd,printenv,exit,sh,wc,grep");
     }
@@ -27,6 +27,7 @@ public class ShellExecToolTest extends UnitTest {
     @AfterAll
     static void cleanupTestAgent() {
         deleteDir(AgentService.workspacePath("shell-test-agent"));
+        deleteDir(AgentService.workspacePath("main"));
     }
 
     // ==================== Allowlist Validation ====================
@@ -75,7 +76,7 @@ public class ShellExecToolTest extends UnitTest {
     public void defaultWorkspaceDir() {
         var workspace = AgentService.workspacePath(agent.name).toAbsolutePath().normalize();
         var args = com.google.gson.JsonParser.parseString("{}").getAsJsonObject();
-        var resolved = tool.resolveWorkdir(args, workspace, false);
+        var resolved = tool.resolveWorkdir(args, workspace, false, agent.name);
         assertEquals(workspace, resolved);
     }
 
@@ -85,7 +86,7 @@ public class ShellExecToolTest extends UnitTest {
         var args = com.google.gson.JsonParser.parseString("""
                 {"workdir": "skills"}
                 """).getAsJsonObject();
-        var resolved = tool.resolveWorkdir(args, workspace, false);
+        var resolved = tool.resolveWorkdir(args, workspace, false, agent.name);
         assertEquals(workspace.resolve("skills"), resolved);
     }
 
@@ -95,7 +96,7 @@ public class ShellExecToolTest extends UnitTest {
         var args = com.google.gson.JsonParser.parseString("""
                 {"workdir": "../../etc"}
                 """).getAsJsonObject();
-        assertThrows(IllegalArgumentException.class, () -> tool.resolveWorkdir(args, workspace, false));
+        assertThrows(IllegalArgumentException.class, () -> tool.resolveWorkdir(args, workspace, false, agent.name));
     }
 
     @Test
@@ -104,7 +105,7 @@ public class ShellExecToolTest extends UnitTest {
         var args = com.google.gson.JsonParser.parseString("""
                 {"workdir": "/tmp"}
                 """).getAsJsonObject();
-        assertThrows(IllegalArgumentException.class, () -> tool.resolveWorkdir(args, workspace, false));
+        assertThrows(IllegalArgumentException.class, () -> tool.resolveWorkdir(args, workspace, false, agent.name));
     }
 
     // ==================== Environment Filtering ====================
@@ -209,6 +210,70 @@ public class ShellExecToolTest extends UnitTest {
                 {"command": "echo 'line1\\nline2\\nline3' | wc -l"}
                 """, agent);
         assertTrue(result.contains("\"exitCode\":0"));
+    }
+
+    // ==================== Main-Agent Privilege Escapes ====================
+
+    @Test
+    public void mainAgentBypassesAllowlistWhenConfigured() {
+        var mainAgent = AgentService.create("main", "openrouter", "gpt-4.1", null);
+        ConfigService.set("agent.main.shell.bypassAllowlist", "true");
+
+        // whoami is NOT in the allowlist; with bypass on, it must slip past the allowlist check
+        var result = tool.execute("""
+                {"command": "whoami"}
+                """, mainAgent);
+        assertFalse(result.contains("not in the allowed commands list"),
+                "Main agent with bypassAllowlist=true must not hit the allowlist error");
+    }
+
+    @Test
+    public void nonMainAgentIgnoresBypassAllowlistConfigRow() {
+        // An orphaned/out-of-band Config row for a non-main agent must have no effect:
+        // the identity check must short-circuit before the Config is consulted.
+        ConfigService.set("agent.shell-test-agent.shell.bypassAllowlist", "true");
+
+        var result = tool.execute("""
+                {"command": "whoami"}
+                """, agent);
+        assertTrue(result.contains("not in the allowed commands list"),
+                "Non-main agent must be rejected by the allowlist regardless of any Config row");
+    }
+
+    @Test
+    public void mainAgentUsesAbsoluteWorkdirWhenConfigured() {
+        var mainAgent = AgentService.create("main", "openrouter", "gpt-4.1", null);
+        ConfigService.set("agent.main.shell.allowGlobalPaths", "true");
+
+        var result = tool.execute("""
+                {"command": "pwd", "workdir": "/tmp"}
+                """, mainAgent);
+        assertTrue(result.contains("\"exitCode\":0"));
+        // macOS symlinks /tmp to /private/tmp; Linux returns /tmp directly
+        assertTrue(result.contains("/tmp"));
+    }
+
+    @Test
+    public void nonMainAgentIgnoresAllowGlobalPathsConfigRow() {
+        ConfigService.set("agent.shell-test-agent.shell.allowGlobalPaths", "true");
+
+        var result = tool.execute("""
+                {"command": "pwd", "workdir": "/tmp"}
+                """, agent);
+        assertTrue(result.contains("must be within the agent workspace"),
+                "Non-main agent must stay sandboxed regardless of any Config row");
+    }
+
+    @Test
+    public void mainAgentWithoutPrivilegeConfigStillRejected() {
+        // Main agent without the bypass config set: must still hit the allowlist
+        var mainAgent = AgentService.create("main", "openrouter", "gpt-4.1", null);
+
+        var result = tool.execute("""
+                {"command": "whoami"}
+                """, mainAgent);
+        assertTrue(result.contains("not in the allowed commands list"),
+                "Main agent must only bypass when the Config row is actually set to true");
     }
 
     // ==================== Helpers ====================

@@ -16,7 +16,7 @@ public class IntegrationTest extends UnitTest {
 
     private static final String[] TEST_AGENTS = {
             "telegram-bot", "slack-bot", "wa-bot", "web-agent", "tool-agent",
-            "memory-agent", "skill-agent", "test-main", "test-support"
+            "memory-agent", "skill-agent", "main", "test-support"
     };
 
     @BeforeEach
@@ -38,7 +38,7 @@ public class IntegrationTest extends UnitTest {
     @Test
     public void telegramWebhookParsesAndRoutes() {
         // Setup: agent + binding
-        var agent = AgentService.create("telegram-bot", "openrouter", "gpt-4.1", true, null);
+        var agent = AgentService.create("telegram-bot", "openrouter", "gpt-4.1", null);
         agent.enabled = true; agent.save();
         var binding = new AgentBinding();
         binding.agent = agent;
@@ -85,8 +85,13 @@ public class IntegrationTest extends UnitTest {
 
     @Test
     public void slackWebhookVerifiesAndRoutes() {
-        var agent = AgentService.create("slack-bot", "openrouter", "gpt-4.1", true, null);
+        var agent = AgentService.create("slack-bot", "openrouter", "gpt-4.1", null);
         agent.enabled = true; agent.save();
+        var binding = new AgentBinding();
+        binding.agent = agent;
+        binding.channelType = "slack";
+        binding.peerId = null;
+        binding.save();
 
         // Simulate Slack event payload
         var payload = JsonParser.parseString("""
@@ -106,17 +111,22 @@ public class IntegrationTest extends UnitTest {
         assertEquals("C01234567", msg.channelId());
         assertEquals("Hey from Slack", msg.text());
 
-        // Route falls through to default agent
+        // Route via channel-wide binding
         var route = AgentRouter.resolve("slack", msg.channelId());
         assertNotNull(route);
         assertEquals("slack-bot", route.agent().name);
-        assertEquals("default", route.matchedBy());
+        assertEquals("channel", route.matchedBy());
     }
 
     @Test
     public void whatsappWebhookParsesAndRoutes() {
-        var agent = AgentService.create("wa-bot", "ollama-cloud", "qwen3.5", true, null);
+        var agent = AgentService.create("wa-bot", "ollama-cloud", "qwen3.5", null);
         agent.enabled = true; agent.save();
+        var binding = new AgentBinding();
+        binding.agent = agent;
+        binding.channelType = "whatsapp";
+        binding.peerId = null;
+        binding.save();
 
         var payload = JsonParser.parseString("""
                 {
@@ -151,7 +161,7 @@ public class IntegrationTest extends UnitTest {
 
     @Test
     public void webChatCreatesConversationAndStoresMessages() {
-        var agent = AgentService.create("web-agent", "openrouter", "gpt-4.1", true, null);
+        var agent = AgentService.create("web-agent", "openrouter", "gpt-4.1", null);
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
 
         ConversationService.appendUserMessage(convo, "What is JClaw?");
@@ -178,7 +188,7 @@ public class IntegrationTest extends UnitTest {
 
     @Test
     public void toolExecutionInAgentPipeline() {
-        var agent = AgentService.create("tool-agent", "openrouter", "gpt-4.1", true, null);
+        var agent = AgentService.create("tool-agent", "openrouter", "gpt-4.1", null);
 
         // Test TaskTool creates a task
         var result = ToolRegistry.execute("task_manager",
@@ -204,7 +214,7 @@ public class IntegrationTest extends UnitTest {
 
     @Test
     public void memoryRecalledDuringPromptAssembly() {
-        var agent = AgentService.create("memory-agent", "openrouter", "gpt-4.1", true, null);
+        var agent = AgentService.create("memory-agent", "openrouter", "gpt-4.1", null);
 
         // Store a memory
         var store = memory.MemoryStoreFactory.get();
@@ -220,7 +230,7 @@ public class IntegrationTest extends UnitTest {
 
     @Test
     public void skillsLoadedDuringPromptAssembly() {
-        var agent = AgentService.create("skill-agent", "openrouter", "gpt-4.1", true, null);
+        var agent = AgentService.create("skill-agent", "openrouter", "gpt-4.1", null);
 
         // Create a skill file in the agent's workspace
         var skillDir = AgentService.workspacePath("skill-agent").resolve("skills").resolve("coding");
@@ -247,9 +257,9 @@ public class IntegrationTest extends UnitTest {
 
     @Test
     public void multiAgentRoutingFullPipeline() {
-        var mainAgent = AgentService.create("test-main", "openrouter", "gpt-4.1", true, null);
+        var mainAgent = AgentService.create("main", "openrouter", "gpt-4.1", null);
         mainAgent.enabled = true; mainAgent.save();
-        var supportAgent = AgentService.create("test-support", "ollama-cloud", "qwen3.5", false, null);
+        var supportAgent = AgentService.create("test-support", "ollama-cloud", "qwen3.5", null);
         supportAgent.enabled = true; supportAgent.save();
 
         // Bind support agent to specific Telegram user
@@ -265,18 +275,18 @@ public class IntegrationTest extends UnitTest {
         assertEquals("test-support", vipRoute.agent().name);
         assertEquals("peer", vipRoute.matchedBy());
 
-        // Regular user routes to default
+        // Regular user falls through to the main agent
         var regularRoute = AgentRouter.resolve("telegram", "REGULAR_USER");
         assertNotNull(regularRoute);
-        assertEquals("test-main", regularRoute.agent().name);
-        assertEquals("default", regularRoute.matchedBy());
+        assertEquals("main", regularRoute.agent().name);
+        assertEquals("main", regularRoute.matchedBy());
 
         // Each gets their own conversation
         var vipConvo = ConversationService.findOrCreate(vipRoute.agent(), "telegram", "VIP_USER");
         var regularConvo = ConversationService.findOrCreate(regularRoute.agent(), "telegram", "REGULAR_USER");
         assertNotEquals(vipConvo.id, regularConvo.id);
         assertEquals("test-support", vipConvo.agent.name);
-        assertEquals("test-main", regularConvo.agent.name);
+        assertEquals("main", regularConvo.agent.name);
     }
 
     // --- Event logging across pipeline ---

@@ -36,13 +36,13 @@ public class AgentRouter {
             return new RouteResult(channelBinding.agent, "channel");
         }
 
-        // Tier 3: Default agent
-        var defaultAgent = Agent.findDefault();
-        if (defaultAgent != null && defaultAgent.enabled) {
-            return new RouteResult(defaultAgent, "default");
+        // Tier 3: Main agent fallback
+        var mainAgent = Agent.findByName(Agent.MAIN_AGENT_NAME);
+        if (mainAgent != null && mainAgent.enabled) {
+            return new RouteResult(mainAgent, "main");
         }
 
-        EventLogger.error("agent", "No route found for %s/%s and no default agent configured"
+        EventLogger.error("agent", "No route found for %s/%s and main agent unavailable"
                 .formatted(channelType, peerId));
         return null;
     }

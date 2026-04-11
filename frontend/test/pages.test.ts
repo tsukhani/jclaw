@@ -10,7 +10,7 @@ import Conversations from '~/pages/conversations.vue'
 // Register mock API endpoints
 function setupMockApi() {
   registerEndpoint('/api/agents', () => [
-    { id: 1, name: 'test', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true, isDefault: true, providerConfigured: true }
+    { id: 1, name: 'test', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true, isMain: false, providerConfigured: true }
   ])
   registerEndpoint('/api/channels', () => [
     { channelType: 'telegram', enabled: false },

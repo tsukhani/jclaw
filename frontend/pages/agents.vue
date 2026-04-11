@@ -6,7 +6,7 @@ const editing = ref<any>(null)
 const creating = ref(false)
 const workspaceTab = ref('AGENT.md')
 const workspaceContent = ref('')
-const form = ref({ name: '', modelProvider: '', modelId: '', enabled: true, isDefault: false, thinkingMode: '' })
+const form = ref({ name: '', modelProvider: '', modelId: '', enabled: true, thinkingMode: '' })
 const agentTools = ref<any[]>([])
 const agentSkills = ref<any[]>([])
 const queueMode = ref('queue')
@@ -80,7 +80,7 @@ const providerValid = computed(() => {
 function newAgent() {
   const defaultProvider = providers.value[0]?.name ?? ''
   const defaultModel = providers.value[0]?.models?.[0]?.id ?? ''
-  form.value = { name: '', modelProvider: defaultProvider, modelId: defaultModel, enabled: true, isDefault: false, thinkingMode: '' }
+  form.value = { name: '', modelProvider: defaultProvider, modelId: defaultModel, enabled: true, thinkingMode: '' }
   creating.value = true
   editing.value = null
 }
@@ -91,7 +91,6 @@ function editAgent(agent: any) {
     modelProvider: agent.modelProvider,
     modelId: agent.modelId,
     enabled: agent.enabled,
-    isDefault: agent.isDefault,
     thinkingMode: agent.thinkingMode || ''
   }
   editing.value = agent
@@ -283,7 +282,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
            class="px-4 py-3 border-b border-neutral-800/50 flex items-center justify-between hover:bg-neutral-800/50 cursor-pointer transition-colors">
         <div>
           <span class="text-sm text-white">{{ agent.name }}</span>
-          <span v-if="agent.isDefault" class="ml-2 text-[10px] text-neutral-500 border border-neutral-700 px-1">default</span>
+          <span v-if="agent.isMain" class="ml-2 text-[10px] text-neutral-500 border border-neutral-700 px-1">main</span>
           <div class="text-xs text-neutral-500 mt-0.5">{{ agent.modelProvider }} / {{ agent.modelId }}</div>
         </div>
         <span :class="agent.enabled && agent.providerConfigured ? 'text-green-400' : 'text-neutral-600'" class="text-xs font-mono">
@@ -336,9 +335,6 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
             <label class="flex items-center gap-1.5 text-xs" :class="providerValid ? 'text-neutral-400' : 'text-neutral-600'">
               <input type="checkbox" v-model="form.enabled" :disabled="!providerValid" class="accent-white" /> Enabled
               <span v-if="!providerValid" class="text-neutral-600 ml-1">(provider not configured)</span>
-            </label>
-            <label class="flex items-center gap-1.5 text-xs text-neutral-400">
-              <input type="checkbox" v-model="form.isDefault" class="accent-white" /> Default
             </label>
           </div>
         </div>
@@ -397,7 +393,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
       </div>
 
       <!-- Exec privileges (main agent only) -->
-      <div v-if="editing && form.isDefault" class="bg-neutral-900 border border-neutral-800">
+      <div v-if="editing && editing.isMain" class="bg-neutral-900 border border-neutral-800">
         <div class="px-4 py-2.5 border-b border-neutral-800">
           <span class="text-sm font-medium text-white">Shell Exec Privileges</span>
           <span class="ml-2 text-[10px] text-amber-400">main agent only</span>

@@ -10,6 +10,8 @@ import java.util.List;
 @Table(name = "agent")
 public class Agent extends Model {
 
+    public static final String MAIN_AGENT_NAME = "main";
+
     @Column(nullable = false, unique = true)
     public String name;
 
@@ -21,9 +23,6 @@ public class Agent extends Model {
 
     @Column(nullable = false)
     public boolean enabled = true;
-
-    @Column(name = "is_default", nullable = false)
-    public boolean isDefault = false;
 
     @Column(name = "thinking_mode")
     public String thinkingMode;
@@ -53,8 +52,8 @@ public class Agent extends Model {
         return Agent.find("name", name).first();
     }
 
-    public static Agent findDefault() {
-        return Agent.find("isDefault", true).first();
+    public boolean isMain() {
+        return MAIN_AGENT_NAME.equalsIgnoreCase(name);
     }
 
     public static List<Agent> findEnabled() {
