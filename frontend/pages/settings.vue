@@ -30,7 +30,8 @@ function isSensitive(key: string) {
   return ['key', 'secret', 'password', 'token'].some(s => lower.includes(s))
 }
 
-// Config keys managed by dedicated UI sections (excluded from general Configuration)
+// Config keys managed by dedicated UI sections (excluded from the Unmanaged list).
+// Exact matches for fixed keys; see MANAGED_CONFIG_PATTERNS for dynamic per-agent keys.
 const MANAGED_CONFIG_KEYS = new Set([
   'chat.maxToolRounds', 'chat.maxContextMessages',
   'jclaw.tools.playwright.enabled', 'jclaw.tools.playwright.headless',
@@ -44,6 +45,18 @@ const MANAGED_CONFIG_KEYS = new Set([
   'search.brave.enabled', 'search.brave.apiKey', 'search.brave.baseUrl',
   'search.tavily.enabled', 'search.tavily.apiKey', 'search.tavily.baseUrl',
 ])
+
+// Dynamic keys owned by other pages (name part varies). Patterns match the full key.
+// - agent.{name}.shell.* — per-agent shell privileges, owned by the Agents page detail view
+//   (see frontend/pages/agents.vue), gated to the main agent in ApiConfigController.
+const MANAGED_CONFIG_PATTERNS: RegExp[] = [
+  /^agent\.[^.]+\.shell\.(bypassAllowlist|allowGlobalPaths)$/,
+]
+
+function isManagedKey(key: string): boolean {
+  if (MANAGED_CONFIG_KEYS.has(key)) return true
+  return MANAGED_CONFIG_PATTERNS.some(re => re.test(key))
+}
 
 // Chat config
 const chatMaxToolRounds = computed(() => {
@@ -560,7 +573,7 @@ const providerEntries = computed(() => {
       const name = parts[1]
       if (!providers.has(name)) providers.set(name, [])
       providers.get(name)!.push(e)
-    } else if (!MANAGED_CONFIG_KEYS.has(e.key)) {
+    } else if (!isManagedKey(e.key)) {
       other.push(e)
     }
   }
