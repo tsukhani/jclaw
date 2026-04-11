@@ -9,7 +9,9 @@
     "generate": "nuxt generate",
     "preview": "nuxt preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "dompurify": "^3.3.3",
@@ -19,6 +21,7 @@
   "devDependencies": {
     "@nuxt/test-utils": "^4.0.0",
     "@nuxtjs/tailwindcss": "^6.13.0",
+    "@playwright/test": "^1.59.1",
     "@vue/test-utils": "^2.4.6",
     "happy-dom": "^20.8.9",
     "vitest": "^4.1.2"
