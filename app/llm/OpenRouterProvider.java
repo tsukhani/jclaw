@@ -1,5 +1,6 @@
 package llm;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import llm.LlmTypes.*;
 
@@ -76,18 +77,61 @@ public class OpenRouterProvider extends LlmProvider {
         usage.addProperty("include", true);
         request.add("usage", usage);
 
-        // Top-level automatic cache_control: only honored by OpenRouter for Anthropic-
-        // direct and non-2.5 Gemini routes. Anthropic interprets it as "place a
-        // breakpoint on the stable prefix and auto-advance it across turns" — caches
-        // the system message AND growing conversation history without per-block
-        // manipulation. Bedrock/Vertex Anthropic routes silently ignore it and
-        // require per-block breakpoints instead; we accept the miss there.
+        // For providers that need explicit cache_control, walk the already-serialized
+        // messages array and attach a breakpoint to the system message. We used to
+        // send a top-level cache_control: {type: "ephemeral"} as a shortcut, but
+        // OpenRouter returns HTTP 404 ("No endpoints found that support Anthropic
+        // automatic caching (top-level cache_control)") when the routed endpoint does
+        // not support the shortcut — which turns out to be most Anthropic routes, not
+        // just Bedrock/Vertex as the docs suggest. Per-block injection works on every
+        // route.
         //
         // OpenAI/DeepSeek/Grok/Gemini 2.5 cache implicitly and need no directive.
         if (requiresExplicitCacheControl(chatRequest.model())) {
+            injectSystemMessageCacheBreakpoint(request);
+        }
+    }
+
+    /**
+     * Find the first system message in the already-serialized request and attach
+     * {@code cache_control: {type: "ephemeral"}} to its last content block, converting
+     * a string content field into block-array form if necessary. The cache breakpoint
+     * marks the end of the cacheable prefix; everything after the system message
+     * (the conversation history and current user turn) remains fresh input.
+     */
+    private static void injectSystemMessageCacheBreakpoint(JsonObject request) {
+        if (!request.has("messages") || !request.get("messages").isJsonArray()) return;
+        var messages = request.getAsJsonArray("messages");
+        for (var el : messages) {
+            if (!el.isJsonObject()) continue;
+            var msg = el.getAsJsonObject();
+            if (!msg.has("role") || !"system".equals(msg.get("role").getAsString())) continue;
+
+            var content = msg.get("content");
+            if (content == null || content.isJsonNull()) return;
+
+            JsonArray blocks;
+            if (content.isJsonPrimitive()) {
+                // String content: convert to block-array form so we have somewhere to
+                // attach the cache_control directive.
+                blocks = new JsonArray();
+                var block = new JsonObject();
+                block.addProperty("type", "text");
+                block.addProperty("text", content.getAsString());
+                blocks.add(block);
+                msg.add("content", blocks);
+            } else if (content.isJsonArray()) {
+                blocks = content.getAsJsonArray();
+            } else {
+                return;
+            }
+
+            if (blocks.isEmpty()) return;
+            var lastBlock = blocks.get(blocks.size() - 1).getAsJsonObject();
             var cacheControl = new JsonObject();
             cacheControl.addProperty("type", "ephemeral");
-            request.add("cache_control", cacheControl);
+            lastBlock.add("cache_control", cacheControl);
+            return; // Only the first system message gets the breakpoint.
         }
     }
 
