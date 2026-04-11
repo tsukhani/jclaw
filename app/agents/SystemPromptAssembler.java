@@ -5,9 +5,8 @@ import memory.MemoryStoreFactory;
 import models.Agent;
 import services.AgentService;
 
-import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 /**
@@ -53,21 +52,22 @@ public class SystemPromptAssembler {
             }
         }
 
-        // 5. Recalled memories
-        appendMemories(sb, agent, userMessage);
-
-        // 6. Workspace file delivery convention
+        // 5. Workspace file delivery convention
         appendFileDeliveryConvention(sb);
 
-        // 7. Environment info
+        // 6. Environment info — date-only resolution keeps this stable within a day,
+        // so the section does not bust the LLM prompt-prefix cache on every request.
+        // Agents that need a precise timestamp can call a dedicated tool.
         sb.append("\n## Environment\n");
         sb.append("- Agent name: %s\n".formatted(agent.name));
         sb.append("- Agent ID: %d\n".formatted(agent.id));
-        sb.append("- Current time: %s\n".formatted(
-                DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z")
-                        .format(Instant.now().atZone(ZoneId.systemDefault()))));
+        sb.append("- Current date: %s\n".formatted(LocalDate.now(ZoneId.systemDefault())));
         sb.append("- Timezone: %s\n".formatted(ZoneId.systemDefault().getId()));
         sb.append("- Platform: %s\n".formatted(System.getProperty("os.name", "unknown").toLowerCase()));
+
+        // 7. Recalled memories — placed last so they sit past the stable cacheable prefix.
+        // This is the only per-turn-variable section of the system prompt.
+        appendMemories(sb, agent, userMessage);
 
         return new AssembledPrompt(sb.toString(), skills);
     }

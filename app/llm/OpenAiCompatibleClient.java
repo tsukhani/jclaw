@@ -348,11 +348,21 @@ public class OpenAiCompatibleClient {
                     reasoningTokens = details.get("reasoning_tokens").getAsInt();
                 }
             }
+            int cachedTokens = 0;
+            // OpenAI-compat: usage.prompt_tokens_details.cached_tokens
+            if (usageObj.has("prompt_tokens_details")
+                    && !usageObj.get("prompt_tokens_details").isJsonNull()) {
+                var details = usageObj.getAsJsonObject("prompt_tokens_details");
+                if (details.has("cached_tokens") && !details.get("cached_tokens").isJsonNull()) {
+                    cachedTokens = details.get("cached_tokens").getAsInt();
+                }
+            }
             usage = new Usage(
                     usageObj.has("prompt_tokens") ? usageObj.get("prompt_tokens").getAsInt() : 0,
                     usageObj.has("completion_tokens") ? usageObj.get("completion_tokens").getAsInt() : 0,
                     usageObj.has("total_tokens") ? usageObj.get("total_tokens").getAsInt() : 0,
-                    reasoningTokens
+                    reasoningTokens,
+                    cachedTokens
             );
         }
 

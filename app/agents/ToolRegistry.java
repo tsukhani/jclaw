@@ -4,10 +4,10 @@ import llm.LlmTypes.*;
 import models.Agent;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Registry of available tools. Tools are registered at startup and made available
@@ -35,9 +35,13 @@ public class ToolRegistry {
         registrationBuffer.clear();
     }
 
-    /** Called after all tools are registered to publish an immutable snapshot. */
+    /**
+     * Called after all tools are registered to publish an immutable snapshot.
+     * Uses LinkedHashMap to preserve registration order — iteration stability matters
+     * for LLM prompt caching, which hashes the serialized tools array as part of the prefix.
+     */
     public static void publish() {
-        tools = Map.copyOf(registrationBuffer);
+        tools = Collections.unmodifiableMap(new LinkedHashMap<>(registrationBuffer));
     }
 
     public static List<ToolDef> getToolDefs() {

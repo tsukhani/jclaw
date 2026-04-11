@@ -219,7 +219,12 @@ public class SkillLoader {
             }
         }
 
-        return allSkills.stream().limit(MAX_SKILLS).toList();
+        // Sort by name for deterministic ordering — the skills block is part of the
+        // LLM prompt prefix, and filesystem iteration order is not stable.
+        return allSkills.stream()
+                .sorted(java.util.Comparator.comparing(SkillInfo::name))
+                .limit(MAX_SKILLS)
+                .toList();
     }
 
     private static void scanSkillsDirectory(Path skillsDir, List<SkillInfo> skills) {

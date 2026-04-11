@@ -65,6 +65,55 @@ public abstract class LlmProvider {
         return 0;
     }
 
+    /**
+     * Extract the count of prompt tokens that were served from a provider-side
+     * prompt cache. Defaults to the OpenAI-compat path
+     * ({@code usage.prompt_tokens_details.cached_tokens}) which is also what
+     * OpenRouter emits (with {@code usage: {include: true}}). Providers that
+     * report differently — or not at all — override this.
+     */
+    protected int extractCachedTokens(JsonObject usageObj) {
+        if (usageObj.has("prompt_tokens_details")
+                && !usageObj.get("prompt_tokens_details").isJsonNull()) {
+            var details = usageObj.getAsJsonObject("prompt_tokens_details");
+            if (details.has("cached_tokens") && !details.get("cached_tokens").isJsonNull()) {
+                return details.get("cached_tokens").getAsInt();
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * Streaming chunks are Gson-deserialized field-by-field, which only catches
+     * top-level usage fields. Providers report reasoning and cached tokens under
+     * nested paths ({@code completion_tokens_details.reasoning_tokens},
+     * {@code prompt_tokens_details.cached_tokens}), so re-scan the raw chunk JSON
+     * via the template methods and replace Usage if we found more. Cheap — only
+     * runs on the final chunk that carries the usage block.
+     */
+    private ChatCompletionChunk augmentChunkUsage(ChatCompletionChunk chunk, String rawData) {
+        if (chunk.usage() == null) return chunk;
+        try {
+            var root = JsonParser.parseString(rawData).getAsJsonObject();
+            if (!root.has("usage") || root.get("usage").isJsonNull()) return chunk;
+            var usageObj = root.getAsJsonObject("usage");
+            int reasoning = Math.max(chunk.usage().reasoningTokens(), extractReasoningTokens(usageObj));
+            int cached = Math.max(chunk.usage().cachedTokens(), extractCachedTokens(usageObj));
+            if (reasoning == chunk.usage().reasoningTokens() && cached == chunk.usage().cachedTokens()) {
+                return chunk;
+            }
+            var augmented = new Usage(
+                    chunk.usage().promptTokens(),
+                    chunk.usage().completionTokens(),
+                    chunk.usage().totalTokens(),
+                    reasoning,
+                    cached);
+            return new ChatCompletionChunk(chunk.id(), chunk.model(), chunk.choices(), augmented);
+        } catch (Exception _) {
+            return chunk;
+        }
+    }
+
     // ─── Synchronous chat ────────────────────────────────────────────────
 
     public ChatResponse chat(String model, List<ChatMessage> messages, List<ToolDef> tools,
@@ -102,7 +151,7 @@ public abstract class LlmProvider {
                             if ("[DONE]".equals(data)) break;
                             try {
                                 var chunk = gson.fromJson(data, ChatCompletionChunk.class);
-                                if (chunk != null) onChunk.accept(chunk);
+                                if (chunk != null) onChunk.accept(augmentChunkUsage(chunk, data));
                             } catch (JsonSyntaxException _) {
                                 // Skip malformed chunks
                             }
@@ -279,11 +328,13 @@ public abstract class LlmProvider {
         if (obj.has("usage") && !obj.get("usage").isJsonNull()) {
             var usageObj = obj.getAsJsonObject("usage");
             int reasoningTokens = extractReasoningTokens(usageObj);
+            int cachedTokens = extractCachedTokens(usageObj);
             usage = new Usage(
                     usageObj.has("prompt_tokens") ? usageObj.get("prompt_tokens").getAsInt() : 0,
                     usageObj.has("completion_tokens") ? usageObj.get("completion_tokens").getAsInt() : 0,
                     usageObj.has("total_tokens") ? usageObj.get("total_tokens").getAsInt() : 0,
-                    reasoningTokens
+                    reasoningTokens,
+                    cachedTokens
             );
         }
 

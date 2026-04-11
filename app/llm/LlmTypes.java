@@ -93,7 +93,8 @@ public final class LlmTypes {
             int promptTokens,
             int completionTokens,
             int totalTokens,
-            int reasoningTokens
+            int reasoningTokens,
+            int cachedTokens
     ) {}
 
     // --- Streaming types ---

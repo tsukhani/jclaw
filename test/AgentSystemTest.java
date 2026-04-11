@@ -353,7 +353,7 @@ public class AgentSystemTest extends UnitTest {
         var assembled = SystemPromptAssembler.assemble(agent, "test query");
         assertNotNull(assembled.systemPrompt());
         assertTrue(assembled.systemPrompt().contains("Be helpful and concise"));
-        assertTrue(assembled.systemPrompt().contains("Current time:"));
+        assertTrue(assembled.systemPrompt().contains("Current date:"));
         assertTrue(assembled.systemPrompt().contains("Platform:"));
     }
 

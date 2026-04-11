@@ -282,17 +282,20 @@ public class AgentRunner {
                 var durationMs = System.currentTimeMillis() - streamStartMs;
                 if (accumulator.usage != null) {
                     var u = accumulator.usage;
+                    var extras = new StringBuilder();
+                    if (u.reasoningTokens() > 0) extras.append(", %d reasoning".formatted(u.reasoningTokens()));
+                    if (u.cachedTokens() > 0) extras.append(", %d cached".formatted(u.cachedTokens()));
                     var usageSummary = " [%d prompt, %d completion, %d total tokens%s, %.1fs]".formatted(
                             u.promptTokens(), u.completionTokens(), u.totalTokens(),
-                            u.reasoningTokens() > 0 ? ", %d reasoning".formatted(u.reasoningTokens()) : "",
+                            extras.toString(),
                             durationMs / 1000.0);
                     EventLogger.info("llm", agent.name, channelType,
                             "Streaming complete (%d chars)%s".formatted(content.length(), usageSummary));
 
                     // Build usage JSON with timing and pricing for the frontend
                     var sb = new StringBuilder("{\"usage\":{");
-                    sb.append("\"prompt\":%d,\"completion\":%d,\"total\":%d,\"reasoning\":%d,\"durationMs\":%d"
-                            .formatted(u.promptTokens(), u.completionTokens(), u.totalTokens(), u.reasoningTokens(), durationMs));
+                    sb.append("\"prompt\":%d,\"completion\":%d,\"total\":%d,\"reasoning\":%d,\"cached\":%d,\"durationMs\":%d"
+                            .formatted(u.promptTokens(), u.completionTokens(), u.totalTokens(), u.reasoningTokens(), u.cachedTokens(), durationMs));
 
                     // Include model pricing if available from provider config
                     if (modelInfo != null) {

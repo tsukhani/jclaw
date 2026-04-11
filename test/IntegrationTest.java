@@ -170,7 +170,7 @@ public class IntegrationTest extends UnitTest {
         var assembled = SystemPromptAssembler.assemble(agent, "What is JClaw?");
         assertNotNull(assembled.systemPrompt());
         assertTrue(assembled.systemPrompt().contains("Agent Instructions"));
-        assertTrue(assembled.systemPrompt().contains("Current time:"));
+        assertTrue(assembled.systemPrompt().contains("Current date:"));
 
         // Verify conversation persistence
         var messages = ConversationService.loadRecentMessages(convo);
