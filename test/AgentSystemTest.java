@@ -15,7 +15,7 @@ public class AgentSystemTest extends UnitTest {
     private static final String[] TEST_AGENTS = {
             "test-agent", "ws-agent", "missing-agent", "enabled-1", "disabled-1",
             "skill-agent", "xml-agent", "convo-agent", "msg-agent", "prompt-agent",
-            "minimal-agent", "no-skills"
+            "minimal-agent", "no-skills", "main"
     };
 
     @BeforeEach
@@ -75,6 +75,56 @@ public class AgentSystemTest extends UnitTest {
         var enabled = AgentService.listEnabled();
         assertEquals(1, enabled.size());
         assertEquals("enabled-1", enabled.getFirst().name);
+    }
+
+    // --- Main-agent invariants ---
+
+    @Test
+    public void mainAgentIsCreatedEnabledEvenWithUnconfiguredProvider() {
+        // Use a provider that's definitely not configured in tests — main should
+        // still be created as enabled because the invariant is "main is always enabled."
+        var main = AgentService.create("main", "nonexistent-provider", "nonexistent-model", null);
+        assertTrue(main.isMain());
+        assertTrue(main.enabled,
+                "Main agent must be enabled at creation regardless of provider config");
+    }
+
+    @Test
+    public void mainAgentUpdateForcesEnabledTrue() {
+        var main = AgentService.create("main", "openrouter", "gpt-4.1", null);
+        // Simulate a caller passing enabled=false — service layer must override it.
+        var updated = AgentService.update(main, "main", "openrouter", "gpt-4.1", false, null);
+        assertTrue(updated.enabled,
+                "AgentService.update must ignore enabled=false for the main agent");
+    }
+
+    @Test
+    public void mainAgentSurvivesSyncEnabledStatesWithNoProvider() {
+        var main = AgentService.create("main", "nonexistent-provider", "nonexistent-model", null);
+        assertTrue(main.enabled); // created enabled per the invariant above
+
+        // syncEnabledStates would normally disable agents whose provider isn't
+        // configured — it must exempt main.
+        AgentService.syncEnabledStates();
+
+        var refreshed = Agent.findByName("main");
+        assertNotNull(refreshed);
+        assertTrue(refreshed.enabled,
+                "syncEnabledStates must never disable the main agent");
+    }
+
+    @Test
+    public void mainAgentSyncHealsADisabledMainRow() {
+        // If main was ever persisted as disabled (e.g. by a pre-fix boot), sync
+        // must heal it on the next pass rather than leave it broken.
+        var main = AgentService.create("main", "openrouter", "gpt-4.1", null);
+        main.enabled = false;
+        main.save();
+
+        AgentService.syncEnabledStates();
+
+        var refreshed = Agent.findByName("main");
+        assertTrue(refreshed.enabled, "sync must re-enable a rogue disabled main row");
     }
 
     // --- SkillLoader tests ---

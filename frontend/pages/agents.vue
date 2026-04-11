@@ -301,8 +301,12 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
         <h2 class="text-sm font-medium text-white mb-4">{{ creating ? 'New Agent' : 'Edit Agent' }}</h2>
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-xs text-neutral-500 mb-1">Name</label>
-            <input v-model="form.name" class="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none focus:border-neutral-600" />
+            <label class="block text-xs text-neutral-500 mb-1">
+              Name
+              <span v-if="editing?.isMain" class="ml-1 text-neutral-600">(locked)</span>
+            </label>
+            <input v-model="form.name" :disabled="editing?.isMain"
+                   class="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none focus:border-neutral-600 disabled:opacity-50 disabled:cursor-not-allowed" />
           </div>
           <div>
             <label class="block text-xs text-neutral-500 mb-1">Model Provider</label>
@@ -332,9 +336,12 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
             </select>
           </div>
           <div class="flex items-end gap-4">
-            <label class="flex items-center gap-1.5 text-xs" :class="providerValid ? 'text-neutral-400' : 'text-neutral-600'">
-              <input type="checkbox" v-model="form.enabled" :disabled="!providerValid" class="accent-white" /> Enabled
-              <span v-if="!providerValid" class="text-neutral-600 ml-1">(provider not configured)</span>
+            <label class="flex items-center gap-1.5 text-xs"
+                   :class="(providerValid && !editing?.isMain) ? 'text-neutral-400' : 'text-neutral-600'">
+              <input type="checkbox" v-model="form.enabled"
+                     :disabled="!providerValid || editing?.isMain" class="accent-white" /> Enabled
+              <span v-if="editing?.isMain" class="text-neutral-600 ml-1">(main agent is always enabled)</span>
+              <span v-else-if="!providerValid" class="text-neutral-600 ml-1">(provider not configured)</span>
             </label>
           </div>
         </div>
@@ -344,7 +351,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
             {{ saving ? 'Saving...' : 'Save' }}
           </button>
           <button @click="cancel" class="px-4 py-1.5 text-xs text-neutral-400 hover:text-white transition-colors">Cancel</button>
-          <button v-if="editing" @click="deleteAgent(editing.id)"
+          <button v-if="editing && !editing.isMain" @click="deleteAgent(editing.id)"
                   class="px-4 py-1.5 text-xs text-red-400/60 hover:text-red-400 ml-auto transition-colors">Delete</button>
         </div>
       </div>

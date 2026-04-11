@@ -23,7 +23,11 @@ public class AgentService {
         agent.name = name;
         agent.modelProvider = modelProvider;
         agent.modelId = modelId;
-        agent.enabled = isProviderConfigured(modelProvider, modelId);
+        // The main agent is a structural singleton and MUST always be enabled — its
+        // presence is load-bearing for tier-3 routing fallback, LLM sanitization, and
+        // the web chat default selection. Provider misconfiguration will surface as
+        // a runtime error at call time, not as a silent disabled state.
+        agent.enabled = agent.isMain() || isProviderConfigured(modelProvider, modelId);
         agent.thinkingMode = thinkingMode;
         agent.save();
 
@@ -48,7 +52,11 @@ public class AgentService {
         agent.name = name;
         agent.modelProvider = modelProvider;
         agent.modelId = modelId;
-        agent.enabled = enabled && isProviderConfigured(modelProvider, modelId);
+        // The main agent cannot be disabled — see the invariant note in create().
+        // The caller's `enabled` argument is ignored for the main agent; a UI that
+        // tries to toggle it off is either a bug or a pre-guard bypass, and the API
+        // layer additionally rejects such requests with 409 in ApiAgentsController.
+        agent.enabled = agent.isMain() || (enabled && isProviderConfigured(modelProvider, modelId));
         agent.thinkingMode = thinkingMode;
         agent.save();
         return agent;
@@ -63,11 +71,21 @@ public class AgentService {
     /**
      * Syncs the enabled state of all agents based on current provider configuration.
      * Agents whose provider+model are configured get enabled; others get disabled.
+     * The main agent is exempt — it is always enabled regardless of provider state.
      */
     public static void syncEnabledStates() {
         ProviderRegistry.refresh();
         List<Agent> agents = listAll();
         for (var agent : agents) {
+            if (agent.isMain()) {
+                // Main is always enabled. If it was ever persisted as disabled (e.g.
+                // by a pre-fix boot), heal it on the next sync pass.
+                if (!agent.enabled) {
+                    agent.enabled = true;
+                    agent.save();
+                }
+                continue;
+            }
             var shouldBeEnabled = isProviderConfigured(agent.modelProvider, agent.modelId);
             if (agent.enabled != shouldBeEnabled) {
                 agent.enabled = shouldBeEnabled;

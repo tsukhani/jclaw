@@ -55,12 +55,23 @@ public class ApiAgentsController extends Controller {
         if (body == null) badRequest();
 
         var name = body.has("name") ? body.get("name").getAsString() : agent.name;
+        // The reserved name "main" is a singleton: no other agent may take the name,
+        // and the main agent may not be renamed away from it.
         if (!agent.isMain() && Agent.MAIN_AGENT_NAME.equalsIgnoreCase(name)) {
             error(409, "The agent name 'main' is reserved for the built-in agent");
+        }
+        if (agent.isMain() && !Agent.MAIN_AGENT_NAME.equalsIgnoreCase(name)) {
+            error(409, "The main agent cannot be renamed");
         }
         var modelProvider = body.has("modelProvider") ? body.get("modelProvider").getAsString() : agent.modelProvider;
         var modelId = body.has("modelId") ? body.get("modelId").getAsString() : agent.modelId;
         var enabled = body.has("enabled") ? body.get("enabled").getAsBoolean() : agent.enabled;
+        // The main agent cannot be disabled. Service-layer enforcement would also
+        // catch this, but we reject at the API boundary so the operator sees an
+        // explicit error instead of a silently-ignored toggle.
+        if (agent.isMain() && !enabled) {
+            error(409, "The main agent cannot be disabled");
+        }
         var thinkingMode = body.has("thinkingMode")
                 ? (body.get("thinkingMode").isJsonNull() ? null : body.get("thinkingMode").getAsString())
                 : agent.thinkingMode;
