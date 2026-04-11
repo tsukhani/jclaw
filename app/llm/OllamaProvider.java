@@ -45,4 +45,15 @@ public class OllamaProvider extends LlmProvider {
         }
         return 0;
     }
+
+    @Override
+    protected void applyCacheDirectives(JsonObject request, ChatRequest chatRequest) {
+        // Ollama has no OpenAI/Anthropic-style prompt caching — just implicit KV-cache
+        // reuse in the inference engine. The only client-visible knob is keep_alive, which
+        // controls how long the model (and its KV cache) stays resident between requests.
+        // Pass it as an extra top-level field; Ollama's OpenAI-compat shim forwards unknown
+        // fields to the native scheduler.
+        var keepAlive = services.ConfigService.get("ollama.keepAlive");
+        request.addProperty("keep_alive", keepAlive != null && !keepAlive.isBlank() ? keepAlive : "30m");
+    }
 }

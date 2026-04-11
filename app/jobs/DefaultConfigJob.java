@@ -49,6 +49,11 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("chat.maxToolRounds", "10");
         seedIfAbsent("chat.maxContextMessages", "50");
 
+        // Ollama: how long the model + KV cache stays resident between requests.
+        // Passed through as the top-level keep_alive field on every chat request.
+        // Longer values improve prefix-reuse hit rates at the cost of GPU memory.
+        seedIfAbsent("ollama.keepAlive", "30m");
+
         // Playwright browser tool
         seedIfAbsent("playwright.enabled", "true");
         seedIfAbsent("playwright.headless", "true");

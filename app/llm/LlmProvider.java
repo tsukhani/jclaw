@@ -84,6 +84,17 @@ public abstract class LlmProvider {
     }
 
     /**
+     * Add provider-specific prompt-caching directives to the outgoing request JSON.
+     * Called at the end of serializeRequest, after messages and reasoning have been
+     * attached. Subclasses add things like Anthropic's {@code cache_control}
+     * breakpoints (via OpenRouter) or Ollama's {@code keep_alive}. Default is no-op
+     * because OpenAI and most OpenAI-compat providers cache automatically.
+     */
+    protected void applyCacheDirectives(JsonObject request, ChatRequest chatRequest) {
+        // Default: no-op
+    }
+
+    /**
      * Streaming chunks are Gson-deserialized field-by-field, which only catches
      * top-level usage fields. Providers report reasoning and cached tokens under
      * nested paths ({@code completion_tokens_details.reasoning_tokens},
@@ -282,6 +293,7 @@ public abstract class LlmProvider {
         } else {
             disableReasoning(obj);
         }
+        applyCacheDirectives(obj, request);
         return gson.toJson(obj);
     }
 

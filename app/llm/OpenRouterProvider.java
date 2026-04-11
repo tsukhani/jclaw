@@ -66,4 +66,41 @@ public class OpenRouterProvider extends LlmProvider {
         }
         return 0;
     }
+
+    @Override
+    protected void applyCacheDirectives(JsonObject request, ChatRequest chatRequest) {
+        // Opt into usage accounting so the upstream cache-hit fields
+        // (prompt_tokens_details.cached_tokens, cache_discount) come back in the
+        // response. Without this, OpenRouter strips usage details.
+        var usage = new JsonObject();
+        usage.addProperty("include", true);
+        request.add("usage", usage);
+
+        // Top-level automatic cache_control: only honored by OpenRouter for Anthropic-
+        // direct and non-2.5 Gemini routes. Anthropic interprets it as "place a
+        // breakpoint on the stable prefix and auto-advance it across turns" — caches
+        // the system message AND growing conversation history without per-block
+        // manipulation. Bedrock/Vertex Anthropic routes silently ignore it and
+        // require per-block breakpoints instead; we accept the miss there.
+        //
+        // OpenAI/DeepSeek/Grok/Gemini 2.5 cache implicitly and need no directive.
+        if (requiresExplicitCacheControl(chatRequest.model())) {
+            var cacheControl = new JsonObject();
+            cacheControl.addProperty("type", "ephemeral");
+            request.add("cache_control", cacheControl);
+        }
+    }
+
+    /**
+     * Returns true for OpenRouter model IDs whose upstream provider requires explicit
+     * {@code cache_control} to activate prompt caching. Models not listed here either
+     * cache implicitly (OpenAI, DeepSeek, Grok, Gemini 2.5) or have no caching.
+     */
+    private static boolean requiresExplicitCacheControl(String model) {
+        if (model == null) return false;
+        if (model.startsWith("anthropic/")) return true;
+        // Gemini 2.5 Pro/Flash cache implicitly; older Gemini variants need cache_control.
+        if (model.startsWith("google/gemini-") && !model.startsWith("google/gemini-2.5-")) return true;
+        return false;
+    }
 }
