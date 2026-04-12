@@ -38,4 +38,25 @@ public interface Scanner {
         public static Verdict clean() { return new Verdict(false, null); }
         public static Verdict malicious(String reason) { return new Verdict(true, reason); }
     }
+
+    /**
+     * Reusable one-shot warning guard. Ensures a warning message is emitted at
+     * most once per JVM lifetime, with a test hook to reset between test runs.
+     * Eliminates the duplicate volatile-boolean + synchronized pattern that was
+     * independently implemented in each scanner.
+     */
+    class OneShotWarning {
+        private volatile boolean warned = false;
+
+        public synchronized void warnOnce(String message) {
+            if (warned) return;
+            warned = true;
+            services.EventLogger.warn("scanner", message);
+        }
+
+        /** Test-only hook to reset the warning flag between key-toggle tests. */
+        public synchronized void reset() {
+            warned = false;
+        }
+    }
 }

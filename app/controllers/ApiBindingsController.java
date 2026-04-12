@@ -7,7 +7,6 @@ import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
 
-import java.util.HashMap;
 import java.util.Map;
 
 @With(AuthCheck.class)
@@ -15,12 +14,20 @@ public class ApiBindingsController extends Controller {
 
     private static final Gson gson = new Gson();
 
+    private record BindingView(Long id, Long agentId, String agentName,
+                               String channelType, String peerId, int priority) {
+        static BindingView of(AgentBinding b) {
+            return new BindingView(b.id, b.agent.id, b.agent.name,
+                    b.channelType, b.peerId, b.priority);
+        }
+    }
+
     public static void list() {
         java.util.List<AgentBinding> bindings = JPA.em()
                 .createQuery("SELECT b FROM AgentBinding b JOIN FETCH b.agent", AgentBinding.class)
                 .getResultList();
         var result = bindings.stream()
-                .map(ApiBindingsController::bindingToMap)
+                .map(BindingView::of)
                 .toList();
         renderJSON(gson.toJson(result));
     }
@@ -41,7 +48,7 @@ public class ApiBindingsController extends Controller {
         binding.priority = body.has("priority") ? body.get("priority").getAsInt() : 0;
         binding.save();
 
-        renderJSON(gson.toJson(bindingToMap(binding)));
+        renderJSON(gson.toJson(BindingView.of(binding)));
     }
 
     public static void update(Long id) {
@@ -61,7 +68,7 @@ public class ApiBindingsController extends Controller {
         if (body.has("priority")) binding.priority = body.get("priority").getAsInt();
         binding.save();
 
-        renderJSON(gson.toJson(bindingToMap(binding)));
+        renderJSON(gson.toJson(BindingView.of(binding)));
     }
 
     public static void delete(Long id) {
@@ -69,17 +76,6 @@ public class ApiBindingsController extends Controller {
         if (binding == null) notFound();
         binding.delete();
         renderJSON(gson.toJson(Map.of("status", "ok")));
-    }
-
-    private static HashMap<String, Object> bindingToMap(AgentBinding b) {
-        var map = new HashMap<String, Object>();
-        map.put("id", b.id);
-        map.put("agentId", b.agent.id);
-        map.put("agentName", b.agent.name);
-        map.put("channelType", b.channelType);
-        map.put("peerId", b.peerId);
-        map.put("priority", b.priority);
-        return map;
     }
 
 }

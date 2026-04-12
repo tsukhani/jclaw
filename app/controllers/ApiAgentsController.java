@@ -7,23 +7,34 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
 
-import java.util.HashMap;
-
 @With(AuthCheck.class)
 public class ApiAgentsController extends Controller {
 
     private static final Gson gson = new Gson();
 
+    private record AgentView(Long id, String name, String modelProvider, String modelId,
+                             boolean enabled, boolean isMain, String thinkingMode,
+                             String createdAt, String updatedAt, boolean providerConfigured) {
+        static AgentView of(Agent a) {
+            var provider = ProviderRegistry.get(a.modelProvider);
+            var configured = provider != null
+                    && provider.config().models().stream().anyMatch(m -> m.id().equals(a.modelId));
+            return new AgentView(a.id, a.name, a.modelProvider, a.modelId,
+                    a.enabled, a.isMain(), a.thinkingMode,
+                    a.createdAt.toString(), a.updatedAt.toString(), configured);
+        }
+    }
+
     public static void list() {
         var agents = AgentService.listAll();
-        var result = agents.stream().map(a -> agentToMap(a)).toList();
+        var result = agents.stream().map(a -> AgentView.of(a)).toList();
         renderJSON(gson.toJson(result));
     }
 
     public static void get(Long id) {
         var agent = AgentService.findById(id);
         if (agent == null) notFound();
-        renderJSON(gson.toJson(agentToMap(agent)));
+        renderJSON(gson.toJson(AgentView.of(agent)));
     }
 
     /**
@@ -53,7 +64,7 @@ public class ApiAgentsController extends Controller {
                 ? body.get("thinkingMode").getAsString() : null;
 
         var agent = AgentService.create(name, modelProvider, modelId, thinkingMode);
-        renderJSON(gson.toJson(agentToMap(agent)));
+        renderJSON(gson.toJson(AgentView.of(agent)));
     }
 
     public static void update(Long id) {
@@ -86,7 +97,7 @@ public class ApiAgentsController extends Controller {
                 : agent.thinkingMode;
 
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode);
-        renderJSON(gson.toJson(agentToMap(agent)));
+        renderJSON(gson.toJson(AgentView.of(agent)));
     }
 
     public static void delete(Long id) {
@@ -96,7 +107,7 @@ public class ApiAgentsController extends Controller {
             error(409, "The built-in 'main' agent cannot be deleted");
         }
         AgentService.delete(agent);
-        renderJSON(gson.toJson(new HashMap<>(java.util.Map.of("status", "ok"))));
+        renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
     }
 
     // --- Workspace file endpoints ---
@@ -154,28 +165,6 @@ public class ApiAgentsController extends Controller {
         if (body == null || !body.has("content")) badRequest();
         AgentService.writeWorkspaceFile(agent.name, filename, body.get("content").getAsString());
         renderJSON(gson.toJson(java.util.Map.of("status", "ok", "filename", filename)));
-    }
-
-    // --- Helpers ---
-
-    private static HashMap<String, Object> agentToMap(Agent a) {
-        var map = new HashMap<String, Object>();
-        map.put("id", a.id);
-        map.put("name", a.name);
-        map.put("modelProvider", a.modelProvider);
-        map.put("modelId", a.modelId);
-        map.put("enabled", a.enabled);
-        map.put("isMain", a.isMain());
-        map.put("thinkingMode", a.thinkingMode);
-        map.put("createdAt", a.createdAt.toString());
-        map.put("updatedAt", a.updatedAt.toString());
-
-        var provider = ProviderRegistry.get(a.modelProvider);
-        var providerConfigured = provider != null
-                && provider.config().models().stream().anyMatch(m -> m.id().equals(a.modelId));
-        map.put("providerConfigured", providerConfigured);
-
-        return map;
     }
 
 }

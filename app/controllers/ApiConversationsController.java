@@ -7,6 +7,7 @@ import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ConversationService;
+import utils.JpqlFilter;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -27,38 +28,23 @@ public class ApiConversationsController extends Controller {
      * GET /api/conversations — List conversations with optional filters.
      */
     public static void listConversations(String channel, Long agentId, String name, String peer, Integer limit, Integer offset) {
-        var query = new StringBuilder();
-        var params = new ArrayList<>();
-        int idx = 1;
-
-        if (channel != null && !channel.isBlank()) {
-            query.append("channelType = ?%d".formatted(idx++));
-            params.add(channel);
-        }
-        if (agentId != null) {
-            if (!query.isEmpty()) query.append(" AND ");
-            query.append("agent.id = ?%d".formatted(idx++));
-            params.add(agentId);
-        }
         boolean hasNameFilter = name != null && !name.isBlank();
-        if (hasNameFilter) {
-            if (!query.isEmpty()) query.append(" AND ");
-            query.append("LOWER(preview) LIKE ?%d".formatted(idx++));
-            params.add("%" + name.toLowerCase() + "%");
-        }
-        if (peer != null && !peer.isBlank()) {
-            if (!query.isEmpty()) query.append(" AND ");
-            query.append("LOWER(peerId) LIKE ?%d".formatted(idx++));
-            params.add("%" + peer.toLowerCase() + "%");
-        }
+
+        var filter = new JpqlFilter()
+                .eq("channelType", channel)
+                .eq("agent.id", agentId)
+                .like("LOWER(preview)", hasNameFilter ? "%" + name.toLowerCase() + "%" : null)
+                .like("LOWER(peerId)", peer != null && !peer.isBlank() ? "%" + peer.toLowerCase() + "%" : null);
 
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 100) : 20;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
 
-        String jpql = query.isEmpty()
+        var where = filter.toWhereClause();
+        String jpql = where.isEmpty()
                 ? "SELECT c FROM Conversation c JOIN FETCH c.agent ORDER BY c.updatedAt DESC"
-                : "SELECT c FROM Conversation c JOIN FETCH c.agent WHERE " + query + " ORDER BY c.updatedAt DESC";
+                : "SELECT c FROM Conversation c JOIN FETCH c.agent WHERE " + where + " ORDER BY c.updatedAt DESC";
         var q = JPA.em().createQuery(jpql, Conversation.class);
+        var params = filter.paramList();
         for (int i = 0; i < params.size(); i++) {
             q.setParameter(i + 1, params.get(i));
         }
@@ -82,9 +68,9 @@ public class ApiConversationsController extends Controller {
             int to = Math.min(from + effectiveLimit, refined.size());
             convos = refined.subList(from, to);
         } else {
-            String countJpql = query.isEmpty()
+            String countJpql = where.isEmpty()
                     ? "SELECT COUNT(c) FROM Conversation c"
-                    : "SELECT COUNT(c) FROM Conversation c WHERE " + query;
+                    : "SELECT COUNT(c) FROM Conversation c WHERE " + where;
             var countQ = JPA.em().createQuery(countJpql, Long.class);
             for (int i = 0; i < params.size(); i++) {
                 countQ.setParameter(i + 1, params.get(i));

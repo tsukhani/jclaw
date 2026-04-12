@@ -1,12 +1,7 @@
 package controllers;
 
 import agents.SkillLoader;
-import agents.ToolCatalog;
 import com.google.gson.Gson;
-import com.google.gson.JsonParser;
-import llm.LlmTypes.ChatMessage;
-import llm.LlmProvider;
-import llm.ProviderRegistry;
 import models.Agent;
 import models.AgentSkillConfig;
 import play.mvc.Controller;
@@ -17,7 +12,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 
 @With(AuthCheck.class)
@@ -204,9 +198,7 @@ public class ApiSkillsController extends Controller {
 
     /** Format a list of scanner violations for user-facing error messages. */
     private static String formatViolations(java.util.List<services.SkillBinaryScanner.Violation> violations) {
-        return violations.stream()
-                .map(services.SkillBinaryScanner.Violation::describe)
-                .collect(java.util.stream.Collectors.joining("; "));
+        return services.SkillPromotionService.formatViolations(violations);
     }
 
     /** DELETE /api/skills/{name} — Delete a global skill. */
@@ -296,33 +288,14 @@ public class ApiSkillsController extends Controller {
             error(404, "Global skill '%s' not found".formatted(name));
         }
 
-        var agentSkillsDir = AgentService.workspacePath(agent.name).resolve("skills");
-        var targetDir = agentSkillsDir.resolve(name);
-        var replacing = Files.isDirectory(targetDir) && Files.exists(targetDir.resolve("SKILL.md"));
-
         // Verify the agent has every tool this skill declares it needs
-        var globalSkillFile = globalDir.resolve("SKILL.md");
-        if (Files.exists(globalSkillFile)) {
-            var info = SkillLoader.parseSkillFile(globalSkillFile);
-            if (info != null && info.tools() != null && !info.tools().isEmpty()) {
-                var validation = ToolCatalog.validateSkillTools(agent, info.tools());
-                if (!validation.isOk()) {
-                    var parts = new java.util.ArrayList<String>();
-                    if (!validation.disabled().isEmpty()) {
-                        parts.add("disabled: [" + String.join(", ", validation.disabled()) + "]");
-                    }
-                    if (!validation.unknown().isEmpty()) {
-                        parts.add("unknown: [" + String.join(", ", validation.unknown()) + "]");
-                    }
-                    response.status = 400;
-                    renderText("Cannot add skill '%s' to agent '%s': missing tools — %s. Enable the required tools for this agent and try again."
-                            .formatted(name, agent.name, String.join("; ", parts)));
-                }
-            }
+        var toolCheck = services.SkillPromotionService.validateToolRequirements(agent, name);
+        if (!toolCheck.ok()) {
+            response.status = 400;
+            renderText(toolCheck.message());
         }
 
-        // Malware scan of any binaries in the global skill. Runs before staging so
-        // a known-bad binary never even touches the agent's workspace directory tree.
+        // Malware scan before the copy touches the agent workspace
         var copyViolations = services.SkillBinaryScanner.scan(globalDir);
         if (!copyViolations.isEmpty()) {
             response.status = 400;
@@ -330,44 +303,12 @@ public class ApiSkillsController extends Controller {
                     .formatted(name, agent.name, formatViolations(copyViolations)));
         }
 
-        // Stage the copy in a sibling directory, then swap in place. Guarantees that a
-        // partial copy can't corrupt an existing agent workspace skill.
-        var stagingDir = agentSkillsDir.resolve(name + ".copying-" + System.currentTimeMillis());
-        var backupDir = agentSkillsDir.resolve(name + ".replacing-" + System.currentTimeMillis());
+        var agentSkillsDir = AgentService.workspacePath(agent.name).resolve("skills");
+        var targetDir = agentSkillsDir.resolve(name);
+        var replacing = Files.isDirectory(targetDir) && Files.exists(targetDir.resolve("SKILL.md"));
+
         try {
-            Files.createDirectories(stagingDir);
-            try (var walk = Files.walk(globalDir)) {
-                walk.forEach(source -> {
-                    var staged = stagingDir.resolve(globalDir.relativize(source));
-                    try {
-                        if (Files.isDirectory(source)) {
-                            Files.createDirectories(staged);
-                        } else {
-                            Files.createDirectories(staged.getParent());
-                            Files.copy(source, staged, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                        }
-                    } catch (IOException ex) {
-                        throw new RuntimeException("Failed to copy " + source, ex);
-                    }
-                });
-            }
-
-            if (replacing) {
-                Files.move(targetDir, backupDir);
-            }
-            try {
-                Files.move(stagingDir, targetDir);
-            } catch (IOException swapEx) {
-                if (replacing && Files.isDirectory(backupDir)) {
-                    try { Files.move(backupDir, targetDir); } catch (IOException _) {}
-                }
-                throw swapEx;
-            }
-            if (replacing && Files.isDirectory(backupDir)) {
-                deleteRecursive(backupDir);
-            }
-
-            SkillLoader.clearCache();
+            services.SkillPromotionService.copyToAgentWorkspace(agent, name);
 
             // Ensure skill is enabled for this agent
             var config = AgentSkillConfig.findByAgentAndSkill(agent, name);
@@ -382,9 +323,6 @@ public class ApiSkillsController extends Controller {
                     "replaced", replacing
             )));
         } catch (IOException e) {
-            if (Files.exists(stagingDir)) {
-                try { deleteRecursive(stagingDir); } catch (IOException _) {}
-            }
             error(500, "Failed to copy skill: " + e.getMessage());
         }
     }
@@ -492,7 +430,7 @@ public class ApiSkillsController extends Controller {
         // Return immediately — run sanitization in the background
         Thread.ofVirtual().start(() -> {
             try {
-                services.Tx.run(() -> promoteInBackground(skillDir, skillName));
+                services.Tx.run(() -> services.SkillPromotionService.promoteInBackground(skillDir, skillName));
             } catch (Exception e) {
                 play.Logger.error("Background promotion failed for '%s': %s",
                         skillName, e.getMessage());
@@ -500,270 +438,6 @@ public class ApiSkillsController extends Controller {
         });
 
         renderJSON(gson.toJson(java.util.Map.of("status", "promoting", "skillName", skillName)));
-    }
-
-    /** Background promotion: read files, sanitize via LLM, write to global skills directory. */
-    private static final java.util.Set<String> CREDENTIAL_EXTENSIONS = java.util.Set.of(
-            ".json", ".txt", ".env", ".yaml", ".yml", ".properties"
-    );
-
-    private static void promoteInBackground(Path skillDir, String skillName) {
-        services.EventLogger.info("skills", "Starting background promotion of '%s'".formatted(skillName));
-
-        // Early exit: if the workspace copy is byte-identical to the existing global skill,
-        // there's nothing to promote. Publish a noop event so the UI can notify the user.
-        var globalDirCheck = SkillLoader.globalSkillsPath().resolve(skillName);
-        if (Files.isDirectory(globalDirCheck) && Files.exists(globalDirCheck.resolve("SKILL.md"))) {
-            try {
-                var workspaceHash = SkillLoader.hashSkillDirectory(skillDir);
-                var globalHash = SkillLoader.hashSkillDirectory(globalDirCheck);
-                // Diagnostic: capture on-disk versions + hashes so drop 1 vs drop 2 can be
-                // compared side-by-side in the event log.
-                var wsInfoDiag = SkillLoader.parseSkillFile(skillDir.resolve("SKILL.md"));
-                var globalInfoDiag = SkillLoader.parseSkillFile(globalDirCheck.resolve("SKILL.md"));
-                services.EventLogger.info("skills",
-                        "Promote hash-check '%s': workspace[v=%s, hash=%s] global[v=%s, hash=%s] equal=%s"
-                                .formatted(
-                                        skillName,
-                                        wsInfoDiag != null ? wsInfoDiag.version() : "?",
-                                        workspaceHash.isEmpty() ? "EMPTY" : workspaceHash.substring(0, 12),
-                                        globalInfoDiag != null ? globalInfoDiag.version() : "?",
-                                        globalHash.isEmpty() ? "EMPTY" : globalHash.substring(0, 12),
-                                        workspaceHash.equals(globalHash)));
-                if (workspaceHash.equals(globalHash) && !workspaceHash.isEmpty()) {
-                    services.EventLogger.info("skills", "Promotion of '%s' skipped: workspace copy is identical to global".formatted(skillName));
-                    services.NotificationBus.publish("skill.promote_noop", java.util.Map.of(
-                            "skillName", skillName,
-                            "reason", "Workspace copy is identical to the global skill — nothing to promote."
-                    ));
-                    return;
-                }
-            } catch (IOException e) {
-                services.EventLogger.warn("skills", "Hash check failed for '%s': %s".formatted(skillName, e.getMessage()));
-                // Fall through and attempt promotion anyway
-            }
-
-            // Downgrade protection: if the workspace version is lower than the existing global
-            // version, the agent has an out-of-date copy. Refuse to promote and ask the user
-            // to update the agent copy from global first.
-            var workspaceInfo = SkillLoader.parseSkillFile(skillDir.resolve("SKILL.md"));
-            var globalInfo = SkillLoader.parseSkillFile(globalDirCheck.resolve("SKILL.md"));
-            if (workspaceInfo != null && globalInfo != null) {
-                int cmp = SkillLoader.compareVersions(workspaceInfo.version(), globalInfo.version());
-                if (cmp < 0) {
-                    services.EventLogger.warn("skills", "Promotion of '%s' refused: workspace version %s < global version %s"
-                            .formatted(skillName, workspaceInfo.version(), globalInfo.version()));
-                    services.NotificationBus.publish("skill.promote_failed", java.util.Map.of(
-                            "skillName", skillName,
-                            "error", "Workspace version " + workspaceInfo.version()
-                                    + " is older than the global version " + globalInfo.version()
-                                    + ". Update the agent's copy from the global skill (it will overwrite the workspace copy) before promoting."
-                    ));
-                    return;
-                }
-            }
-        }
-
-        // Malware scan of any binaries in the workspace skill. Runs before sanitization
-        // so a known-bad binary can never reach the global skills registry.
-        var promoteViolations = services.SkillBinaryScanner.scan(skillDir);
-        if (!promoteViolations.isEmpty()) {
-            services.EventLogger.warn("skills", "Promotion of '%s' refused: malware detected in %d file(s)"
-                    .formatted(skillName, promoteViolations.size()));
-            services.NotificationBus.publish("skill.promote_failed", java.util.Map.of(
-                    "skillName", skillName,
-                    "error", "Malware detected — " + formatViolations(promoteViolations)
-                            + ". Remove the flagged file(s) and try again."
-            ));
-            return;
-        }
-
-        // Read all files from the skill folder
-        var sourceTextFiles = new LinkedHashMap<String, String>();
-        var sourceBinaryFiles = new java.util.ArrayList<String>();
-        try (var walk = Files.walk(skillDir)) {
-            walk.filter(Files::isRegularFile).forEach(file -> {
-                var relName = skillDir.relativize(file).toString();
-                try {
-                    if (SkillLoader.isTextFile(relName)) {
-                        sourceTextFiles.put(relName, Files.readString(file));
-                    } else {
-                        sourceBinaryFiles.add(relName);
-                    }
-                } catch (IOException _) {}
-            });
-        } catch (IOException e) {
-            services.EventLogger.error("skills", "Failed to read skill files: " + e.getMessage());
-            return;
-        }
-
-        // ── Enforce standard directory structure ──
-        // Relocate files that are not in the correct folder:
-        //   - SKILL.md stays in root
-        //   - Credential text files (json, txt, env, yaml, properties) → credentials/
-        //   - Binary files anywhere → tools/
-        //   - Text files in tools/ stay in tools/
-
-        // Relocate misplaced text files
-        var textFiles = new LinkedHashMap<String, String>();
-        for (var entry : sourceTextFiles.entrySet()) {
-            textFiles.put(enforceTextFilePath(entry.getKey()), entry.getValue());
-        }
-
-        // Relocate misplaced binary files — all binaries must be in tools/
-        var binaryFiles = new java.util.ArrayList<String>();
-        for (var binFile : sourceBinaryFiles) {
-            if (binFile.startsWith("tools/")) {
-                binaryFiles.add(binFile);
-            } else {
-                var fileName = binFile.contains("/") ? binFile.substring(binFile.lastIndexOf('/') + 1) : binFile;
-                binaryFiles.add("tools/" + fileName);
-                services.EventLogger.info("skills", "Relocated binary '%s' → 'tools/%s'".formatted(binFile, fileName));
-            }
-        }
-
-        // Strip credentials deterministically before LLM review
-        for (var key : textFiles.keySet().stream().toList()) {
-            if (key.startsWith("credentials/")) {
-                textFiles.put(key, stripCredentialsJson(textFiles.get(key)));
-            }
-        }
-
-        // Hold SKILL.md frontmatter aside before sanitization so name/description/tools
-        // are preserved bit-for-bit — the LLM only sees and sanitizes the body.
-        SkillLoader.FrontmatterSplit originalSplit = null;
-        if (textFiles.containsKey("SKILL.md")) {
-            originalSplit = SkillLoader.splitFrontmatter(textFiles.get("SKILL.md"));
-            if (originalSplit.frontmatter() != null) {
-                textFiles.put("SKILL.md", originalSplit.body() != null ? originalSplit.body() : "");
-            }
-        }
-
-        // Sanitize text files via the default agent's LLM
-        var sanitized = sanitizeWithLlm(textFiles);
-
-        // Reinject the original frontmatter onto the sanitized SKILL.md body. Defensive:
-        // if the LLM emitted its own frontmatter, strip it before prepending ours.
-        if (originalSplit != null && originalSplit.frontmatter() != null && sanitized.containsKey("SKILL.md")) {
-            var sanitizedSplit = SkillLoader.splitFrontmatter(sanitized.get("SKILL.md"));
-            var sanitizedBody = sanitizedSplit.frontmatter() != null ? sanitizedSplit.body() : sanitized.get("SKILL.md");
-            if (sanitizedBody == null) sanitizedBody = "";
-            sanitized.put("SKILL.md", originalSplit.frontmatter() + sanitizedBody);
-        }
-
-        // Promote replaces any existing global skill with the same name. We stage the new
-        // contents in a sibling directory first so a partial failure can't destroy the
-        // existing skill: only after the staging dir is fully populated do we swap it in.
-        var globalDir = SkillLoader.globalSkillsPath();
-        var targetDir = globalDir.resolve(skillName);
-        var stagingDir = globalDir.resolve(skillName + ".promoting-" + System.currentTimeMillis());
-        var backupDir = globalDir.resolve(skillName + ".replacing-" + System.currentTimeMillis());
-        var replacingExisting = Files.isDirectory(targetDir);
-
-        try {
-            Files.createDirectories(stagingDir);
-            Files.createDirectories(stagingDir.resolve("credentials"));
-            Files.createDirectories(stagingDir.resolve("tools"));
-
-            for (var entry : sanitized.entrySet()) {
-                var stagedFile = stagingDir.resolve(entry.getKey());
-                Files.createDirectories(stagedFile.getParent());
-                Files.writeString(stagedFile, entry.getValue());
-            }
-            for (int i = 0; i < binaryFiles.size(); i++) {
-                var sourceName = binaryFiles.get(i);
-                var source = skillDir.resolve(sourceName);
-                if (!Files.exists(source)) {
-                    // File was relocated — find the original in the source dir
-                    var fileName = sourceName.contains("/") ? sourceName.substring(sourceName.lastIndexOf('/') + 1) : sourceName;
-                    try (var srcWalk = Files.walk(skillDir)) {
-                        source = srcWalk.filter(Files::isRegularFile)
-                                .filter(f -> f.getFileName().toString().equals(fileName))
-                                .findFirst().orElse(null);
-                    }
-                }
-                if (source != null && Files.exists(source)) {
-                    var staged = stagingDir.resolve(sourceName);
-                    Files.createDirectories(staged.getParent());
-                    Files.copy(source, staged, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                }
-            }
-
-            // Remove empty subdirectories from staging
-            for (var subDir : List.of("credentials", "tools")) {
-                var dir = stagingDir.resolve(subDir);
-                if (Files.isDirectory(dir) && Files.list(dir).findAny().isEmpty()) {
-                    Files.delete(dir);
-                }
-            }
-
-            // Swap: move existing → backup, staging → target, delete backup
-            if (replacingExisting) {
-                Files.move(targetDir, backupDir);
-            }
-            try {
-                Files.move(stagingDir, targetDir);
-            } catch (IOException swapEx) {
-                // Roll back: restore the original if we had one
-                if (replacingExisting && Files.isDirectory(backupDir)) {
-                    try { Files.move(backupDir, targetDir); } catch (IOException _) {}
-                }
-                throw swapEx;
-            }
-            if (replacingExisting && Files.isDirectory(backupDir)) {
-                deleteRecursive(backupDir);
-            }
-
-            SkillLoader.clearCache();
-            var action = replacingExisting ? "replaced" : "created";
-            services.EventLogger.info("skills", "Promotion of '%s' completed (%s)".formatted(skillName, action));
-
-            services.NotificationBus.publish("skill.promoted", java.util.Map.of(
-                    "skillName", skillName,
-                    "folderName", skillName,
-                    "replaced", replacingExisting
-            ));
-        } catch (IOException e) {
-            // Clean up any stranded staging dir
-            if (Files.exists(stagingDir)) {
-                try { deleteRecursive(stagingDir); } catch (IOException _) {}
-            }
-            services.EventLogger.error("skills", "Failed to write promoted skill: " + e.getMessage());
-            services.NotificationBus.publish("skill.promote_failed", java.util.Map.of(
-                    "skillName", skillName,
-                    "error", e.getMessage()
-            ));
-        }
-    }
-
-    private static void deleteRecursive(Path dir) throws IOException {
-        if (!Files.exists(dir)) return;
-        try (var walk = Files.walk(dir)) {
-            walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
-                try { Files.delete(p); } catch (IOException _) {}
-            });
-        }
-    }
-
-    /**
-     * Enforce standard skill directory structure for text file paths:
-     * - SKILL.md stays in root
-     * - Credential files (json, txt, env, yaml, properties) in root → credentials/
-     * - Text files in tools/ stay in tools/
-     * - Text files in credentials/ stay in credentials/
-     */
-    private static String enforceTextFilePath(String path) {
-        // Already in a subfolder — keep it
-        if (path.startsWith("tools/") || path.startsWith("credentials/")) return path;
-        // SKILL.md stays in root
-        if (path.equals("SKILL.md")) return path;
-        // Credential-like files in root → move to credentials/
-        var lower = path.toLowerCase();
-        for (var ext : CREDENTIAL_EXTENSIONS) {
-            if (lower.endsWith(ext)) return "credentials/" + path;
-        }
-        // Other text files in root (e.g., README.md) stay in root
-        return path;
     }
 
     /** PUT /api/skills/{name}/rename — Rename a global skill folder. */
@@ -791,118 +465,6 @@ public class ApiSkillsController extends Controller {
             error(500, "Failed to rename skill: " + e.getMessage());
         }
     }
-
-    // --- LLM sanitization ---
-
-    private static LinkedHashMap<String, String> sanitizeWithLlm(LinkedHashMap<String, String> fileContents) {
-        // Sanitization uses the main agent's LLM provider
-        Agent mainAgent = Agent.findByName(Agent.MAIN_AGENT_NAME);
-        if (mainAgent == null) {
-            services.EventLogger.warn("skills", "Sanitization skipped: main agent not found");
-            return fileContents;
-        }
-
-        var provider = ProviderRegistry.get(mainAgent.modelProvider);
-        if (provider == null) {
-            services.EventLogger.warn("skills", "Sanitization skipped: no provider for agent " + mainAgent.name);
-            return fileContents;
-        }
-
-        services.EventLogger.info("skills", "Starting LLM sanitization of %d file(s) via %s / %s"
-                .formatted(fileContents.size(), provider.config().name(), mainAgent.modelId));
-
-        // Build file listing for the prompt
-        var sb = new StringBuilder();
-        for (var entry : fileContents.entrySet()) {
-            sb.append("=== FILE: %s ===\n".formatted(entry.getKey()));
-            sb.append(entry.getValue());
-            sb.append("\n\n");
-        }
-
-        var systemPrompt = """
-                You are a security reviewer. You will receive text files from an AI agent's skill folder.
-                A skill folder has this structure:
-                - SKILL.md — the main skill instructions, BODY ONLY (the YAML frontmatter has already been extracted and will be reinjected verbatim after your review, so do NOT emit or fabricate frontmatter for SKILL.md)
-                - credentials.json — already pre-stripped, no action needed
-                - tools/ — optional tool scripts that may contain hardcoded secrets or personal data
-
-                Your job is to identify and redact any secrets, API keys, tokens, passwords, bearer tokens, \
-                webhook URLs, personal information (names, emails, phone numbers, addresses, usernames), \
-                or other sensitive data that may have been embedded in the files.
-
-                Replace each redacted value with a descriptive placeholder like [API_KEY], [PASSWORD], [EMAIL], \
-                [PHONE_NUMBER], [PERSONAL_NAME], [TOKEN], [WEBHOOK_URL], [USERNAME], etc.
-
-                Return ONLY a valid JSON object mapping each filename to its sanitized content. \
-                Do not include any other text, markdown formatting, or code fences. \
-                Example: {"SKILL.md": "sanitized content here"}
-
-                If no sensitive data is found in a file, return its content unchanged.
-                """;
-
-        var messages = List.of(
-                ChatMessage.system(systemPrompt),
-                ChatMessage.user(sb.toString())
-        );
-
-        try {
-            for (var entry : fileContents.entrySet()) {
-                services.EventLogger.info("skills", "Sanitizing file: %s (%d chars)"
-                        .formatted(entry.getKey(), entry.getValue().length()));
-            }
-
-            var response = provider.chat(mainAgent.modelId, messages, null, null, null);
-            var text = response.choices().get(0).message().content().toString().trim();
-
-            services.EventLogger.info("skills",
-                    "LLM sanitization response (%d chars)".formatted(text.length()),
-                    text);
-
-            // Strip markdown code fences if the LLM wrapped it
-            if (text.startsWith("```")) {
-                text = text.replaceFirst("^```(?:json)?\\s*\\n?", "").replaceFirst("\\n?```$", "").trim();
-            }
-
-            var json = JsonParser.parseString(text).getAsJsonObject();
-            var result = new LinkedHashMap<String, String>();
-            for (var entry : fileContents.entrySet()) {
-                if (json.has(entry.getKey())) {
-                    var sanitized = json.get(entry.getKey()).getAsString();
-                    var changed = !sanitized.equals(entry.getValue());
-                    result.put(entry.getKey(), sanitized);
-                    services.EventLogger.info("skills", "  %s: %s"
-                            .formatted(entry.getKey(), changed ? "REDACTED (content changed)" : "clean (no changes)"));
-                } else {
-                    result.put(entry.getKey(), entry.getValue());
-                    services.EventLogger.info("skills", "  %s: not in LLM response, kept original"
-                            .formatted(entry.getKey()));
-                }
-            }
-
-            services.EventLogger.info("skills", "Sanitization complete");
-            return result;
-        } catch (Exception e) {
-            // If LLM fails, return original content rather than blocking the promotion
-            services.EventLogger.warn("skills", "LLM sanitization failed, using original content: " + e.getMessage());
-            return fileContents;
-        }
-    }
-
-    /** Deterministically strip all values from credentials.json, preserving keys as documentation. */
-    private static String stripCredentialsJson(String content) {
-        try {
-            var json = JsonParser.parseString(content).getAsJsonObject();
-            var stripped = new com.google.gson.JsonObject();
-            for (var entry : json.entrySet()) {
-                stripped.addProperty(entry.getKey(), "[CREDENTIAL]");
-            }
-            return new Gson().newBuilder().setPrettyPrinting().create().toJson(stripped);
-        } catch (Exception _) {
-            // Not valid JSON — return empty object with a comment
-            return "{}";
-        }
-    }
-
 
     // --- Helpers ---
 

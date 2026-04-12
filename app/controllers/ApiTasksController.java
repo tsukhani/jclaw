@@ -5,51 +5,51 @@ import models.Task;
 import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
+import utils.JpqlFilter;
 
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 @With(AuthCheck.class)
 public class ApiTasksController extends Controller {
 
     private static final Gson gson = new Gson();
 
-    public static void list(String status, String type, Long agentId, Integer limit, Integer offset) {
-        var query = new StringBuilder();
-        var params = new java.util.ArrayList<>();
-        int idx = 1;
+    private record TaskView(Long id, String name, String description, String type, String status,
+                            String cronExpression, int retryCount, int maxRetries, String lastError,
+                            String nextRunAt, String createdAt, Long agentId, String agentName) {
+        static TaskView of(Task t) {
+            return new TaskView(t.id, t.name, t.description, t.type.name(), t.status.name(),
+                    t.cronExpression, t.retryCount, t.maxRetries, t.lastError,
+                    t.nextRunAt != null ? t.nextRunAt.toString() : null,
+                    t.createdAt.toString(),
+                    t.agent != null ? t.agent.id : null,
+                    t.agent != null ? t.agent.name : null);
+        }
+    }
 
-        if (status != null && !status.isBlank()) {
-            query.append("status = ?%d".formatted(idx++));
-            params.add(Task.Status.valueOf(status.toUpperCase()));
-        }
-        if (type != null && !type.isBlank()) {
-            if (!query.isEmpty()) query.append(" AND ");
-            query.append("type = ?%d".formatted(idx++));
-            params.add(Task.Type.valueOf(type.toUpperCase()));
-        }
-        if (agentId != null) {
-            if (!query.isEmpty()) query.append(" AND ");
-            query.append("agent.id = ?%d".formatted(idx++));
-            params.add(agentId);
-        }
+    public static void list(String status, String type, Long agentId, Integer limit, Integer offset) {
+        var filter = new JpqlFilter()
+                .eq("status", status != null && !status.isBlank() ? Task.Status.valueOf(status.toUpperCase()) : null)
+                .eq("type", type != null && !type.isBlank() ? Task.Type.valueOf(type.toUpperCase()) : null)
+                .eq("agent.id", agentId);
 
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 200) : 50;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
 
-        String jpql = query.isEmpty()
+        var where = filter.toWhereClause();
+        String jpql = where.isEmpty()
                 ? "SELECT t FROM Task t LEFT JOIN FETCH t.agent ORDER BY t.createdAt DESC"
-                : "SELECT t FROM Task t LEFT JOIN FETCH t.agent WHERE " + query + " ORDER BY t.createdAt DESC";
+                : "SELECT t FROM Task t LEFT JOIN FETCH t.agent WHERE " + where + " ORDER BY t.createdAt DESC";
         var q = JPA.em().createQuery(jpql, Task.class);
+        var params = filter.paramList();
         for (int i = 0; i < params.size(); i++) {
             q.setParameter(i + 1, params.get(i));
         }
         List<Task> tasks = q.setFirstResult(effectiveOffset)
                 .setMaxResults(effectiveLimit).getResultList();
 
-        renderJSON(gson.toJson(tasks.stream().map(ApiTasksController::taskToMap).toList()));
+        renderJSON(gson.toJson(tasks.stream().map(TaskView::of).toList()));
     }
 
     public static void cancel(Long id) {
@@ -60,7 +60,7 @@ public class ApiTasksController extends Controller {
         }
         task.status = Task.Status.CANCELLED;
         task.save();
-        renderJSON(gson.toJson(taskToMap(task)));
+        renderJSON(gson.toJson(TaskView.of(task)));
     }
 
     public static void retry(Long id) {
@@ -74,26 +74,7 @@ public class ApiTasksController extends Controller {
         task.nextRunAt = Instant.now();
         task.lastError = null;
         task.save();
-        renderJSON(gson.toJson(taskToMap(task)));
+        renderJSON(gson.toJson(TaskView.of(task)));
     }
 
-    private static Map<String, Object> taskToMap(Task t) {
-        var map = new HashMap<String, Object>();
-        map.put("id", t.id);
-        map.put("name", t.name);
-        map.put("description", t.description);
-        map.put("type", t.type.name());
-        map.put("status", t.status.name());
-        map.put("cronExpression", t.cronExpression);
-        map.put("retryCount", t.retryCount);
-        map.put("maxRetries", t.maxRetries);
-        map.put("lastError", t.lastError);
-        map.put("nextRunAt", t.nextRunAt != null ? t.nextRunAt.toString() : null);
-        map.put("createdAt", t.createdAt.toString());
-        if (t.agent != null) {
-            map.put("agentId", t.agent.id);
-            map.put("agentName", t.agent.name);
-        }
-        return map;
-    }
 }

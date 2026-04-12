@@ -40,7 +40,11 @@ public class Memory extends Model {
     }
 
     public static List<Memory> findByAgent(String agentId) {
-        return Memory.find("agentId = ?1 ORDER BY updatedAt DESC", agentId).fetch(1000);
+        return findByAgent(agentId, 200);
+    }
+
+    public static List<Memory> findByAgent(String agentId, int limit) {
+        return Memory.find("agentId = ?1 ORDER BY updatedAt DESC", agentId).fetch(limit);
     }
 
     public static List<Memory> searchByText(String agentId, String query, int limit) {

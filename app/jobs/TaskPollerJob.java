@@ -9,20 +9,59 @@ import services.EventLogger;
 import services.Tx;
 
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 @Every("30s")
 public class TaskPollerJob extends Job<Void> {
 
     private static final long BASE_BACKOFF_SECONDS = 30;
 
+    /**
+     * The currently active executor, if any. Exposed so {@link ShutdownJob} can
+     * call {@link #shutdownGracefully()} to interrupt in-flight tasks and wait
+     * for them to finish before the JVM exits.
+     */
+    private static volatile ExecutorService activeExecutor;
+
     @Override
     public void doJob() {
         var pendingTasks = Task.findPendingDue();
         if (pendingTasks.isEmpty()) return;
 
-        for (var task : pendingTasks) {
-            Thread.ofVirtual().start(() -> executeTask(task));
+        var callables = pendingTasks.stream()
+                .<Callable<Void>>map(task -> () -> {
+                    executeTask(task);
+                    return null;
+                })
+                .toList();
+
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            activeExecutor = executor;
+            executor.invokeAll(callables);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            EventLogger.warn("task", "Task poller interrupted during execution");
+        } finally {
+            activeExecutor = null;
+        }
+    }
+
+    /**
+     * Interrupt all in-flight tasks and wait for them to finish.
+     * Called by {@link ShutdownJob} during application shutdown.
+     */
+    public static void shutdownGracefully() {
+        var executor = activeExecutor;
+        if (executor != null) {
+            executor.shutdownNow();
+            try {
+                executor.awaitTermination(30, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
 

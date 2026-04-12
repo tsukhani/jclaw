@@ -169,6 +169,19 @@ public class DocumentWriter {
      * or list-numbering styles.
      */
     private static class DocxVisitor {
+        // Font sizes in half-points (DOCX native unit)
+        private static final int BODY_FONT_SIZE = 11;
+        private static final int CODE_FONT_SIZE = 10;
+        // Spacing in twips (1/20 of a point, DOCX native unit)
+        private static final int HEADING_SPACING_BEFORE = 240;
+        private static final int HEADING_SPACING_AFTER = 120;
+        private static final int CODE_BLOCK_SPACING = 120;
+        private static final int CODE_BLOCK_INDENT = 200;
+        private static final int LIST_INDENT_PER_LEVEL = 360;
+        private static final int BLOCKQUOTE_INDENT = 360;
+        // Table width in DXA (~6.25" of Letter/A4 content area at 1440 DXA/inch)
+        private static final int TABLE_TOTAL_WIDTH = 9000;
+
         private final XWPFDocument doc;
         private XWPFParagraph currentParagraph;
         private int listDepth;
@@ -184,23 +197,25 @@ public class DocumentWriter {
         }
 
         void visit(Node node) {
-            if (node instanceof Heading h) visitHeading(h);
-            else if (node instanceof Paragraph p) visitParagraph(p);
-            else if (node instanceof BulletList b) visitBulletList(b);
-            else if (node instanceof OrderedList o) visitOrderedList(o);
-            else if (node instanceof FencedCodeBlock f) visitCodeBlock(f.getContentChars().toString());
-            else if (node instanceof IndentedCodeBlock i) visitCodeBlock(i.getContentChars().toString());
-            else if (node instanceof BlockQuote q) visitBlockQuote(q);
-            else if (node instanceof ThematicBreak) visitHorizontalRule();
-            else if (node instanceof TableBlock t) visitTable(t);
-            else if (node instanceof HtmlBlock hb) visitParagraphWithText(hb.getChars().toString());
-            else visitChildren(node);
+            switch (node) {
+                case Heading h            -> visitHeading(h);
+                case Paragraph p          -> visitParagraph(p);
+                case BulletList b         -> visitBulletList(b);
+                case OrderedList o        -> visitOrderedList(o);
+                case FencedCodeBlock f    -> visitCodeBlock(f.getContentChars().toString());
+                case IndentedCodeBlock i  -> visitCodeBlock(i.getContentChars().toString());
+                case BlockQuote q         -> visitBlockQuote(q);
+                case ThematicBreak _      -> visitHorizontalRule();
+                case TableBlock t         -> visitTable(t);
+                case HtmlBlock hb         -> visitParagraphWithText(hb.getChars().toString());
+                default                   -> visitChildren(node);
+            }
         }
 
         private void visitHeading(Heading node) {
             var p = doc.createParagraph();
-            p.setSpacingBefore(240);
-            p.setSpacingAfter(120);
+            p.setSpacingBefore(HEADING_SPACING_BEFORE);
+            p.setSpacingAfter(HEADING_SPACING_AFTER);
             currentParagraph = p;
             int level = Math.min(Math.max(node.getLevel(), 1), 6);
             int fontSize = switch (level) {
@@ -221,11 +236,11 @@ public class DocumentWriter {
             boolean inListItem = parent instanceof BulletListItem || parent instanceof OrderedListItem;
             if (inListItem) {
                 // Reuse the list item's current paragraph.
-                emitInline(node, false, false, false, false, 11, null);
+                emitInline(node, false, false, false, false, BODY_FONT_SIZE, null);
             } else {
                 var p = doc.createParagraph();
                 currentParagraph = p;
-                emitInline(node, false, false, false, false, 11, null);
+                emitInline(node, false, false, false, false, BODY_FONT_SIZE, null);
                 currentParagraph = null;
             }
         }
@@ -264,14 +279,14 @@ public class DocumentWriter {
 
         private void visitListItem(Node item, String marker) {
             var p = doc.createParagraph();
-            p.setIndentationLeft(360 * listDepth);
+            p.setIndentationLeft(LIST_INDENT_PER_LEVEL * listDepth);
             currentParagraph = p;
             var markerRun = p.createRun();
             markerRun.setText(marker);
             // Render the item's inline content.
             for (Node child = item.getFirstChild(); child != null; child = child.getNext()) {
                 if (child instanceof Paragraph para) {
-                    emitInline(para, false, false, false, false, 11, null);
+                    emitInline(para, false, false, false, false, BODY_FONT_SIZE, null);
                 } else if (child instanceof BulletList || child instanceof OrderedList) {
                     currentParagraph = null;
                     visit(child);
@@ -280,7 +295,7 @@ public class DocumentWriter {
                     cont.setIndentationLeft(360 * listDepth);
                     currentParagraph = cont;
                 } else {
-                    emitInline(child, false, false, false, false, 11, null);
+                    emitInline(child, false, false, false, false, BODY_FONT_SIZE, null);
                 }
             }
             currentParagraph = null;
@@ -288,14 +303,14 @@ public class DocumentWriter {
 
         private void visitCodeBlock(String content) {
             var p = doc.createParagraph();
-            p.setSpacingBefore(120);
-            p.setSpacingAfter(120);
-            p.setIndentationLeft(200);
+            p.setSpacingBefore(CODE_BLOCK_SPACING);
+            p.setSpacingAfter(CODE_BLOCK_SPACING);
+            p.setIndentationLeft(CODE_BLOCK_INDENT);
             var lines = content.split("\n", -1);
             for (int i = 0; i < lines.length; i++) {
                 var r = p.createRun();
                 r.setFontFamily("Courier New");
-                r.setFontSize(10);
+                r.setFontSize(CODE_FONT_SIZE);
                 r.setText(lines[i]);
                 if (i < lines.length - 1) r.addBreak();
             }
@@ -303,12 +318,12 @@ public class DocumentWriter {
 
         private void visitBlockQuote(BlockQuote node) {
             var p = doc.createParagraph();
-            p.setIndentationLeft(360);
+            p.setIndentationLeft(BLOCKQUOTE_INDENT);
             p.setAlignment(ParagraphAlignment.LEFT);
             currentParagraph = p;
             for (Node child = node.getFirstChild(); child != null; child = child.getNext()) {
                 if (child instanceof Paragraph para) {
-                    emitInline(para, false, true, false, false, 11, null);
+                    emitInline(para, false, true, false, false, BODY_FONT_SIZE, null);
                     var br = p.createRun();
                     br.addBreak();
                 } else {
@@ -351,7 +366,7 @@ public class DocumentWriter {
             // up wrapping one character per line. Pin a sensible total width
             // (~6.25" of Letter/A4 content area at 1440 DXA/inch) and distribute
             // evenly across columns in both tblGrid and per-cell tcW.
-            final int totalWidth = 9000;
+            final int totalWidth = TABLE_TOTAL_WIDTH;
             final int colWidth = totalWidth / cols;
             xwpfTable.setWidth(String.valueOf(totalWidth));
             var ctTbl = xwpfTable.getCTTbl();
@@ -384,7 +399,7 @@ public class DocumentWriter {
                             xwpfCell.removeParagraph(0);
                             var cellP = xwpfCell.addParagraph();
                             currentParagraph = cellP;
-                            emitInline(cell, isHeader, false, false, false, 11, null);
+                            emitInline(cell, isHeader, false, false, false, BODY_FONT_SIZE, null);
                             currentParagraph = null;
                             colIdx++;
                         }
@@ -400,30 +415,31 @@ public class DocumentWriter {
         private void emitInline(Node node, boolean bold, boolean italic, boolean code, boolean strike,
                                 int fontSize, String color) {
             for (Node child = node.getFirstChild(); child != null; child = child.getNext()) {
-                if (child instanceof Text t) {
-                    addRun(t.getChars().toString(), bold, italic, code, strike, fontSize, color);
-                } else if (child instanceof StrongEmphasis) {
-                    emitInline(child, true, italic, code, strike, fontSize, color);
-                } else if (child instanceof Emphasis) {
-                    emitInline(child, bold, true, code, strike, fontSize, color);
-                } else if (child instanceof Code c) {
-                    addRun(c.getText().toString(), bold, italic, true, strike, fontSize, color);
-                } else if (child instanceof Strikethrough) {
-                    emitInline(child, bold, italic, code, true, fontSize, color);
-                } else if (child instanceof Link l) {
-                    // Render link text inline; hyperlink chrome is omitted for simplicity.
-                    emitInline(child, bold, italic, code, strike, fontSize, "0563C1");
-                    addRun(" (" + l.getUrl() + ")", bold, italic, code, strike, fontSize, "888888");
-                } else if (child instanceof SoftLineBreak || child instanceof HardLineBreak) {
-                    if (currentParagraph != null) {
-                        var r = currentParagraph.createRun();
-                        if (child instanceof HardLineBreak) r.addBreak();
-                        else r.setText(" ");
+                switch (child) {
+                    case Text t ->
+                            addRun(t.getChars().toString(), bold, italic, code, strike, fontSize, color);
+                    case StrongEmphasis _ ->
+                            emitInline(child, true, italic, code, strike, fontSize, color);
+                    case Emphasis _ ->
+                            emitInline(child, bold, true, code, strike, fontSize, color);
+                    case Code c ->
+                            addRun(c.getText().toString(), bold, italic, true, strike, fontSize, color);
+                    case Strikethrough _ ->
+                            emitInline(child, bold, italic, code, true, fontSize, color);
+                    case Link l -> {
+                        emitInline(child, bold, italic, code, strike, fontSize, "0563C1");
+                        addRun(" (" + l.getUrl() + ")", bold, italic, code, strike, fontSize, "888888");
                     }
-                } else if (child instanceof HtmlInline inline) {
-                    addRun(inline.getChars().toString(), bold, italic, code, strike, fontSize, color);
-                } else {
-                    emitInline(child, bold, italic, code, strike, fontSize, color);
+                    case SoftLineBreak _ -> {
+                        if (currentParagraph != null) currentParagraph.createRun().setText(" ");
+                    }
+                    case HardLineBreak _ -> {
+                        if (currentParagraph != null) currentParagraph.createRun().addBreak();
+                    }
+                    case HtmlInline inline ->
+                            addRun(inline.getChars().toString(), bold, italic, code, strike, fontSize, color);
+                    default ->
+                            emitInline(child, bold, italic, code, strike, fontSize, color);
                 }
             }
         }
@@ -438,7 +454,7 @@ public class DocumentWriter {
             if (strike) run.setStrikeThrough(true);
             if (code) {
                 run.setFontFamily("Courier New");
-                run.setFontSize(10);
+                run.setFontSize(CODE_FONT_SIZE);
             } else {
                 run.setFontSize(fontSize);
             }

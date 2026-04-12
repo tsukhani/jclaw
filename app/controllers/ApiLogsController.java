@@ -4,9 +4,9 @@ import com.google.gson.Gson;
 import models.EventLog;
 import play.mvc.Controller;
 import play.mvc.With;
+import utils.JpqlFilter;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
@@ -18,46 +18,22 @@ public class ApiLogsController extends Controller {
     public static void list(String category, String level, String agentId, String channel,
                             String since, String until, String search,
                             Integer limit, Integer offset) {
-        var queryParts = new ArrayList<String>();
-        var params = new ArrayList<Object>();
-        int paramIdx = 1;
+        var filter = new JpqlFilter()
+                .eq("category", category)
+                .eq("level", level)
+                .eq("agentId", agentId)
+                .eq("channel", channel)
+                .gte("timestamp", since != null && !since.isBlank() ? Instant.parse(since) : null)
+                .lte("timestamp", until != null && !until.isBlank() ? Instant.parse(until) : null)
+                .like("LOWER(message)", search != null && !search.isBlank() ? "%" + search.toLowerCase() + "%" : null);
 
-        if (category != null && !category.isBlank()) {
-            queryParts.add("category = ?" + paramIdx++);
-            params.add(category);
-        }
-        if (level != null && !level.isBlank()) {
-            queryParts.add("level = ?" + paramIdx++);
-            params.add(level);
-        }
-        if (agentId != null && !agentId.isBlank()) {
-            queryParts.add("agentId = ?" + paramIdx++);
-            params.add(agentId);
-        }
-        if (channel != null && !channel.isBlank()) {
-            queryParts.add("channel = ?" + paramIdx++);
-            params.add(channel);
-        }
-        if (since != null && !since.isBlank()) {
-            queryParts.add("timestamp >= ?" + paramIdx++);
-            params.add(Instant.parse(since));
-        }
-        if (until != null && !until.isBlank()) {
-            queryParts.add("timestamp <= ?" + paramIdx++);
-            params.add(Instant.parse(until));
-        }
-        if (search != null && !search.isBlank()) {
-            queryParts.add("LOWER(message) LIKE ?" + paramIdx++);
-            params.add("%" + search.toLowerCase() + "%");
-        }
-
-        var where = queryParts.isEmpty() ? "" : String.join(" AND ", queryParts);
+        var where = filter.toWhereClause();
         var query = where.isEmpty() ? "ORDER BY timestamp DESC" : where + " ORDER BY timestamp DESC";
 
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 500) : 100;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
 
-        var jpql = EventLog.find(query, params.toArray());
+        var jpql = EventLog.find(query, filter.params());
         List<EventLog> events = jpql.from(effectiveOffset).fetch(effectiveLimit);
 
         var result = new HashMap<String, Object>();

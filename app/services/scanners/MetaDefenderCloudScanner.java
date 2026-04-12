@@ -45,6 +45,8 @@ public class MetaDefenderCloudScanner implements Scanner {
      * Matches the MalwareBazaar pattern: "enabled but no key" is treated as
      * disabled, with a one-shot warning on first check.
      */
+    private static final OneShotWarning MISSING_KEY_WARNING = new OneShotWarning();
+
     @Override
     public boolean isEnabled() {
         var enabled = "true".equalsIgnoreCase(
@@ -52,25 +54,18 @@ public class MetaDefenderCloudScanner implements Scanner {
         if (!enabled) return false;
         var key = ConfigService.get("scanner.metadefender.apiKey");
         if (key == null || key.isBlank()) {
-            warnMissingKeyOnce();
+            MISSING_KEY_WARNING.warnOnce(
+                    "MetaDefender scanning is enabled but scanner.metadefender.apiKey is not set — "
+                            + "this scanner is a no-op. Get a free 4,000 req/day key at "
+                            + "https://metadefender.opswat.com/ and save it via the Config table.");
             return false;
         }
         return true;
     }
 
-    private static volatile boolean missingKeyWarned = false;
-    private static synchronized void warnMissingKeyOnce() {
-        if (missingKeyWarned) return;
-        missingKeyWarned = true;
-        EventLogger.warn("scanner",
-                "MetaDefender scanning is enabled but scanner.metadefender.apiKey is not set — "
-                        + "this scanner is a no-op. Get a free 4,000 req/day key at "
-                        + "https://metadefender.opswat.com/ and save it via the Config table.");
-    }
-
     /** Test-only hook to reset the one-shot warning between key-toggle tests. */
-    static synchronized void resetMissingKeyWarning() {
-        missingKeyWarned = false;
+    static void resetMissingKeyWarning() {
+        MISSING_KEY_WARNING.reset();
     }
 
     /**

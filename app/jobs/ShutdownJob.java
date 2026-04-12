@@ -9,6 +9,7 @@ public class ShutdownJob extends Job<Void> {
 
     @Override
     public void doJob() {
+        TaskPollerJob.shutdownGracefully();
         PlaywrightBrowserTool.closeAllSessions();
     }
 }

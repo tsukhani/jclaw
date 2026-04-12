@@ -86,7 +86,7 @@ public class JpaMemoryStore implements MemoryStore {
         // Per-agent row counts are small enough that the extra round-trips
         // don't matter. See the FK cascade fix in AgentService for the same
         // pattern and rationale.
-        List<Memory> rows = Memory.findByAgent(agentId);
+        List<Memory> rows = Memory.findByAgent(agentId, Integer.MAX_VALUE);
         for (Memory m : rows) m.delete();
         return rows.size();
     }
