@@ -644,12 +644,12 @@ public class FileSystemTools implements ToolRegistry.Tool {
                             rollback(committed);
                             return "Error applying Add File '%s': %s".formatted(add.path(), result);
                         }
-                        committed.add(CommittedOp.added(r.target));
+                        committed.add(new CommittedOp.Added(r.target));
                     }
                     case FileOp.Delete del -> {
                         try {
                             Files.deleteIfExists(r.target);
-                            committed.add(CommittedOp.deleted(r.target, plan.preSnapshot));
+                            committed.add(new CommittedOp.Deleted(r.target, plan.preSnapshot));
                         } catch (IOException e) {
                             rollback(committed);
                             return "Error applying Delete File '%s': %s".formatted(del.path(), e.getMessage());
@@ -664,10 +664,10 @@ public class FileSystemTools implements ToolRegistry.Tool {
                                 return "Error applying Update+Move '%s'→'%s': %s"
                                         .formatted(upd.path(), upd.newPath().orElse(""), writeResult);
                             }
-                            committed.add(CommittedOp.added(r.moveTarget));
+                            committed.add(new CommittedOp.Added(r.moveTarget));
                             try {
                                 Files.deleteIfExists(r.target);
-                                committed.add(CommittedOp.deleted(r.target, plan.preSnapshot));
+                                committed.add(new CommittedOp.Deleted(r.target, plan.preSnapshot));
                             } catch (IOException e) {
                                 rollback(committed);
                                 return "Error applying Update+Move '%s'→'%s': %s"
@@ -679,7 +679,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
                                 rollback(committed);
                                 return "Error applying Update File '%s': %s".formatted(upd.path(), result);
                             }
-                            committed.add(CommittedOp.updated(r.target, plan.preSnapshot));
+                            committed.add(new CommittedOp.Updated(r.target, plan.preSnapshot));
                         }
                     }
                 }
@@ -692,13 +692,13 @@ public class FileSystemTools implements ToolRegistry.Tool {
         // Summary
         int added = 0, updated = 0, deleted = 0;
         for (var c : committed) {
-            switch (c.kind) {
-                case ADDED -> added++;
-                case UPDATED -> updated++;
-                case DELETED -> deleted++;
+            switch (c) {
+                case CommittedOp.Added _ -> added++;
+                case CommittedOp.Updated _ -> updated++;
+                case CommittedOp.Deleted _ -> deleted++;
             }
         }
-        var paths = committed.stream().map(c -> c.path.getFileName().toString()).toList();
+        var paths = committed.stream().map(c -> c.path().getFileName().toString()).toList();
         return "Applied patch: %d added, %d updated, %d deleted (files: %s)"
                 .formatted(added, updated, deleted, String.join(", ", paths));
     }
@@ -710,9 +710,10 @@ public class FileSystemTools implements ToolRegistry.Tool {
         for (int i = committed.size() - 1; i >= 0; i--) {
             var c = committed.get(i);
             try {
-                switch (c.kind) {
-                    case ADDED -> Files.deleteIfExists(c.path);
-                    case UPDATED, DELETED -> Files.writeString(c.path, c.preSnapshot);
+                switch (c) {
+                    case CommittedOp.Added a -> Files.deleteIfExists(a.path());
+                    case CommittedOp.Updated u -> Files.writeString(u.path(), u.preSnapshot());
+                    case CommittedOp.Deleted d -> Files.writeString(d.path(), d.preSnapshot());
                 }
             } catch (IOException _) {
                 // swallow — best effort.
@@ -799,17 +800,11 @@ public class FileSystemTools implements ToolRegistry.Tool {
     private record ResolvedOp(FileOp op, Path target, Path moveTarget) {}
     private record OpPlan(ResolvedOp resolved, String newContent, String preSnapshot) {}
 
-    private static final class CommittedOp {
-        enum Kind { ADDED, UPDATED, DELETED }
-        final Kind kind;
-        final Path path;
-        final String preSnapshot;
-        private CommittedOp(Kind kind, Path path, String preSnapshot) {
-            this.kind = kind; this.path = path; this.preSnapshot = preSnapshot;
-        }
-        static CommittedOp added(Path p) { return new CommittedOp(Kind.ADDED, p, null); }
-        static CommittedOp updated(Path p, String snap) { return new CommittedOp(Kind.UPDATED, p, snap); }
-        static CommittedOp deleted(Path p, String snap) { return new CommittedOp(Kind.DELETED, p, snap); }
+    private sealed interface CommittedOp {
+        Path path();
+        record Added(Path path) implements CommittedOp {}
+        record Updated(Path path, String preSnapshot) implements CommittedOp {}
+        record Deleted(Path path, String preSnapshot) implements CommittedOp {}
     }
 
     // === Patch parser ===
