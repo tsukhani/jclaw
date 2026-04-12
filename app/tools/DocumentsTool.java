@@ -166,7 +166,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
             long size = Files.size(target);
             var fileName = target.getFileName().toString();
             return ("Document written: %s (%s, %d bytes). "
-                    + "IMPORTANT: in your reply to the user, include this markdown link so they can download the file directly from chat: [%s](%s)")
+                    + "IMPORTANT: in your reply to the user, include this markdown link so they can download the file directly from chat: [%s](<%s>)")
                     .formatted(relativePath, resolved, size, fileName, relativePath);
         } catch (IOException e) {
             return "Error writing document: %s".formatted(e.getMessage());

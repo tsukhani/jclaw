@@ -261,13 +261,13 @@ public class SystemPromptAssembler {
     private static void appendFileDeliveryConvention(StringBuilder sb) {
         sb.append("\n## Workspace File Delivery\n");
         sb.append("""
-                When the user asks you to send, share, download, attach, or deliver a file that exists in the agent workspace (including files you just created with writeFile, writeDocument, or any other tool), respond with a markdown link of the form `[filename](relative/path/in/workspace)`. Do NOT paste the file contents inline.
+                When the user asks you to send, share, download, attach, or deliver a file that exists in the agent workspace (including files you just created with writeFile, writeDocument, or any other tool), respond with a markdown link of the form `[filename](<relative/path/in/workspace>)`. ALWAYS use angle-bracket `<>` delimiters around the URL — this prevents filenames with spaces or parentheses from breaking the link syntax. Do NOT paste the file contents inline.
 
                 The JClaw chat UI automatically turns relative markdown links into downloadable chips that point at the workspace file endpoint, so the user can click once to save the file locally. Pasting contents inline defeats this, makes the chat unreadable for large files, and cannot be downloaded in one click.
 
                 Examples:
-                - User: "send me the summary.docx" → You: "Here is your summary: [summary.docx](summary.docx)"
-                - User: "I'd like to download the nutrition slides" → You: "Ready to download: [practical-nutrition-slides.html](.agent/diagrams/practical-nutrition-slides.html)"
+                - User: "send me the summary.docx" → You: "Here is your summary: [summary.docx](<summary.docx>)"
+                - User: "I'd like to download the nutrition slides" → You: "Ready to download: [practical-nutrition-slides.html](<.agent/diagrams/practical-nutrition-slides.html>)"
 
                 This applies to every file type in the workspace: documents, generated HTML, images, scripts, data files. Only paste contents inline if the user explicitly asks to see the code/text in chat.
                 """);
