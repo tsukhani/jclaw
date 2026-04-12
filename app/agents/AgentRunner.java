@@ -624,7 +624,28 @@ public class AgentRunner {
     private static int estimateTokens(List<ChatMessage> messages) {
         int chars = 0;
         for (var msg : messages) {
-            if (msg.content() instanceof String s) chars += s.length();
+            if (msg.content() instanceof String s) {
+                chars += s.length();
+            } else if (msg.content() instanceof List<?> parts) {
+                // Multi-part content (vision/image blocks): sum text parts only.
+                // Image data is base64 and doesn't meaningfully correspond to
+                // chars/4 token estimation — providers count image tokens separately.
+                for (var part : parts) {
+                    if (part instanceof java.util.Map<?,?> m) {
+                        var text = m.get("text");
+                        if (text instanceof String t) chars += t.length();
+                    }
+                }
+            }
+            // Tool call names + arguments also consume input tokens.
+            if (msg.toolCalls() != null) {
+                for (var tc : msg.toolCalls()) {
+                    if (tc.function() != null) {
+                        if (tc.function().name() != null) chars += tc.function().name().length();
+                        if (tc.function().arguments() != null) chars += tc.function().arguments().length();
+                    }
+                }
+            }
         }
         return chars / 4; // rough approximation: ~4 chars per token
     }

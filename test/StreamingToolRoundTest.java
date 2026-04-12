@@ -47,14 +47,17 @@ public class StreamingToolRoundTest extends UnitTest {
         var method = AgentRunner.class.getDeclaredMethod("estimateTokens", List.class);
         method.setAccessible(true);
 
-        // Assistant message with null content (tool call record)
+        // Assistant message with null content (tool call record). The tool call
+        // name ("test" = 4 chars) and arguments ("{}" = 2 chars) still count
+        // toward the estimate because they consume input tokens when replayed.
         var messages = List.of(
                 ChatMessage.assistant(null, List.of(
                         new ToolCall("call-1", "function", new FunctionCall("test", "{}"))
                 ))
         );
         var tokens = (int) method.invoke(null, messages);
-        assertEquals(0, tokens);
+        // 6 chars / 4 = 1 token
+        assertEquals(1, tokens);
     }
 
     @Test

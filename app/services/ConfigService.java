@@ -25,14 +25,18 @@ public class ConfigService {
         if (cached != null && !cached.isExpired()) {
             return cached.value();
         }
-        var config = Tx.run(() -> Config.findByKey(key));
-        if (config != null) {
-            cache.put(key, new CachedValue(config.value, System.currentTimeMillis() + CACHE_TTL_MS));
-            return config.value;
-        }
-        // Cache negative hit to avoid repeated DB lookups for absent keys
-        cache.put(key, new CachedValue(null, System.currentTimeMillis() + CACHE_TTL_MS));
-        return null;
+        // Use compute() to restrict to one DB call per key per TTL window.
+        // Without this, N concurrent virtual threads all see isExpired()=true
+        // and each independently call Config.findByKey — a cache stampede that
+        // multiplies DB reads by the concurrency level on every 60-second expiry.
+        var entry = cache.compute(key, (k, existing) -> {
+            // Re-check inside the lock: another thread may have refreshed while we waited.
+            if (existing != null && !existing.isExpired()) return existing;
+            var config = Tx.run(() -> Config.findByKey(k));
+            var value = config != null ? config.value : null;
+            return new CachedValue(value, System.currentTimeMillis() + CACHE_TTL_MS);
+        });
+        return entry.value();
     }
 
     public static String get(String key, String defaultValue) {
