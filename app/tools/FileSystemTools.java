@@ -736,13 +736,13 @@ public class FileSystemTools implements ToolRegistry.Tool {
             var oldBlock = new StringBuilder();
             var newBlock = new StringBuilder();
             for (var line : chunk.lines()) {
-                switch (line.kind()) {
-                    case CONTEXT -> {
-                        oldBlock.append(line.text()).append('\n');
-                        newBlock.append(line.text()).append('\n');
+                switch (line) {
+                    case PatchLine.ContextLine ctx -> {
+                        oldBlock.append(ctx.text()).append('\n');
+                        newBlock.append(ctx.text()).append('\n');
                     }
-                    case REMOVE -> oldBlock.append(line.text()).append('\n');
-                    case ADD -> newBlock.append(line.text()).append('\n');
+                    case PatchLine.RemoveLine r -> oldBlock.append(r.text()).append('\n');
+                    case PatchLine.AddLine a -> newBlock.append(a.text()).append('\n');
                 }
             }
             var oldText = oldBlock.toString();
@@ -794,8 +794,12 @@ public class FileSystemTools implements ToolRegistry.Tool {
     }
 
     record PatchChunk(Optional<String> anchor, List<PatchLine> lines) {}
-    record PatchLine(PatchLineKind kind, String text) {}
-    enum PatchLineKind { CONTEXT, ADD, REMOVE }
+    sealed interface PatchLine {
+        String text();
+        record ContextLine(String text) implements PatchLine {}
+        record AddLine(String text) implements PatchLine {}
+        record RemoveLine(String text) implements PatchLine {}
+    }
 
     private record ResolvedOp(FileOp op, Path target, Path moveTarget) {}
     private record OpPlan(ResolvedOp resolved, String newContent, String preSnapshot) {}
@@ -894,13 +898,13 @@ public class FileSystemTools implements ToolRegistry.Tool {
                             inChunk = true;
                         } else if (chunkLine.startsWith("+")) {
                             if (!inChunk) { inChunk = true; currentLines = new ArrayList<>(); currentAnchor = Optional.empty(); }
-                            currentLines.add(new PatchLine(PatchLineKind.ADD, chunkLine.substring(1)));
+                            currentLines.add(new PatchLine.AddLine( chunkLine.substring(1)));
                         } else if (chunkLine.startsWith("-")) {
                             if (!inChunk) { inChunk = true; currentLines = new ArrayList<>(); currentAnchor = Optional.empty(); }
-                            currentLines.add(new PatchLine(PatchLineKind.REMOVE, chunkLine.substring(1)));
+                            currentLines.add(new PatchLine.RemoveLine( chunkLine.substring(1)));
                         } else if (chunkLine.startsWith(" ") || chunkLine.isEmpty()) {
                             if (!inChunk) { inChunk = true; currentLines = new ArrayList<>(); currentAnchor = Optional.empty(); }
-                            currentLines.add(new PatchLine(PatchLineKind.CONTEXT,
+                            currentLines.add(new PatchLine.ContextLine(
                                     chunkLine.isEmpty() ? "" : chunkLine.substring(1)));
                         } else {
                             throw new PatchParseException(
