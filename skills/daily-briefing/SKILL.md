@@ -1,7 +1,7 @@
 ---
 name: daily-briefing
 description: Generate a daily briefing with tech news, business news, world news, local weather, and upcoming events based on user's city, including the generation time
-version: 1.1.0
+version: 1.1.1
 tools: [datetime, web_search, web_fetch]
 ---
 # Daily Briefing
@@ -61,9 +61,9 @@ When asked to generate a daily briefing, follow these steps to produce a structu
 ## Output Format
 
 ```
-# 📋 Daily Briefing — [Day, Date] at [Time]
+# 📋 Daily Briefing — Monday, April 13, 2026 at 12:39 AM
 
-*Generated: [Day, Date] at [Time:XX (Timezone)]*
+*Generated: Monday, April 13, 2026 at 12:39 AM (GMT+8, Asia/Kuala_Lumpur)*
 
 ---
 
