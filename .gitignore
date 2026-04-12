@@ -111,9 +111,8 @@ openspec/archive/
 # BMAD method output (generated artifacts, not source)
 _bmad-output/
 
-# Global skills (only track built-in skill-creator)
-skills/*
-!skills/skill-creator/
+# Global skills (track all skills in the registry)
+# Agent workspace copies are excluded via the workspace/* rule below.
 
 # Agent workspaces (only track the default main agent's core files)
 workspace/*
