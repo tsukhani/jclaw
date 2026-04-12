@@ -9,6 +9,7 @@ import services.EventLogger;
 
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.HashMap;
 
 public class ApiAuthController extends Controller {
@@ -26,7 +27,7 @@ public class ApiAuthController extends Controller {
             var expectedUser = Play.configuration.getProperty("jclaw.admin.username", "admin");
             var expectedPass = Play.configuration.getProperty("jclaw.admin.password", "changeme");
 
-            if (expectedUser.equals(username) && expectedPass.equals(password)) {
+            if (constantTimeEquals(expectedUser, username) && constantTimeEquals(expectedPass, password)) {
                 session.put("authenticated", "true");
                 session.put("username", username);
                 EventLogger.info("auth", "Admin login successful");
@@ -50,5 +51,11 @@ public class ApiAuthController extends Controller {
         var result = new HashMap<String, Object>();
         result.put("status", "ok");
         renderJSON(gson.toJson(result));
+    }
+
+    private static boolean constantTimeEquals(String expected, String actual) {
+        return MessageDigest.isEqual(
+                expected.getBytes(StandardCharsets.UTF_8),
+                actual.getBytes(StandardCharsets.UTF_8));
     }
 }

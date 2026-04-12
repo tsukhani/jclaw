@@ -404,13 +404,16 @@ public class AgentService {
         if (cached != null && !cached.isExpired()) {
             return cached.content();
         }
-        var path = workspacePath(agentName).resolve(filename);
         try {
+            var path = acquireWorkspacePath(agentName, filename);
             if (Files.exists(path)) {
                 var content = Files.readString(path);
                 fileCache.put(cacheKey, new CachedFile(content, System.currentTimeMillis() + FILE_CACHE_TTL_MS));
                 return content;
             }
+        } catch (SecurityException e) {
+            EventLogger.warn("agent", "Path traversal blocked for %s/%s: %s"
+                    .formatted(agentName, filename, e.getMessage()));
         } catch (IOException e) {
             EventLogger.warn("agent", "Failed to read workspace file %s/%s: %s"
                     .formatted(agentName, filename, e.getMessage()));
@@ -419,11 +422,14 @@ public class AgentService {
     }
 
     public static void writeWorkspaceFile(String agentName, String filename, String content) {
-        var path = workspacePath(agentName).resolve(filename);
         try {
+            var path = acquireWorkspacePath(agentName, filename);
             Files.createDirectories(path.getParent());
             Files.writeString(path, content);
             fileCache.remove(agentName + "/" + filename);
+        } catch (SecurityException e) {
+            EventLogger.warn("agent", "Path traversal blocked for %s/%s: %s"
+                    .formatted(agentName, filename, e.getMessage()));
         } catch (IOException e) {
             EventLogger.error("agent", "Failed to write workspace file %s/%s: %s"
                     .formatted(agentName, filename, e.getMessage()));
