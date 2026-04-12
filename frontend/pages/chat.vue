@@ -317,12 +317,18 @@ function stopStreaming() {
   streamStatus.value = ''
 }
 
-// Filter out tool messages and empty assistant messages (tool call records) from display
-// Keep assistant messages that have content, reasoning, or usage metrics
+// Filter out tool messages and empty assistant messages (tool call records) from display.
+// During streaming, suppress the placeholder until it has visible content — reasoning-only
+// or usage-only messages flash briefly as empty blocks before content tokens arrive,
+// producing a jarring "two blocks collapsing into one" visual artifact. The placeholder
+// is identified by having a _key (frontend-created) but no id (not yet DB-persisted).
+// Once streaming ends, the suppression lifts so genuinely empty responses still render.
 const displayMessages = computed(() =>
-  messages.value.filter(m =>
-    m.role !== 'tool' && (m.content || m.reasoning || m.usage)
-  )
+  messages.value.filter(m => {
+    if (m.role === 'tool') return false
+    if (m._key && !m.id && streaming.value && !m.content) return false
+    return m.content || m.reasoning || m.usage
+  })
 )
 
 // Auto-select the main agent on load
