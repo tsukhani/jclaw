@@ -607,12 +607,15 @@ public class AgentRunner {
 
         if (estimatedTokens <= maxTokens) return messages;
 
-        // Trim oldest non-system messages until we fit
+        // Trim oldest non-system messages until we fit.
+        // Track the running total incrementally to avoid re-scanning the entire list each iteration.
         var trimmed = new ArrayList<>(messages);
+        int total = estimatedTokens;
         int removed = 0;
-        while (estimateTokens(trimmed) > maxTokens && trimmed.size() > 2) {
+        while (total > maxTokens && trimmed.size() > 2) {
             // Remove the second message (first after system prompt) — oldest history
-            trimmed.remove(1);
+            var dropped = trimmed.remove(1);
+            total -= estimateTokens(List.of(dropped));
             removed++;
         }
         if (removed > 0) {

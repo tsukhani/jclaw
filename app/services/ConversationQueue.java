@@ -50,27 +50,24 @@ public class ConversationQueue {
     public static boolean tryAcquire(Long conversationId, QueuedMessage message) {
         var state = queues.computeIfAbsent(conversationId, _ -> new QueueState());
 
-        // Snapshot mode under the monitor to prevent races between concurrent tryAcquire() calls
-        String mode;
+        // All mode-read + processing-flag + queue decisions must be atomic to prevent
+        // TOCTOU races where two threads both believe they acquired the conversation.
         synchronized (state) {
-            mode = ConfigService.get("agent." + message.agent().name + ".queue.mode", "queue");
+            var mode = ConfigService.get("agent." + message.agent().name + ".queue.mode", "queue");
             state.mode = mode;
-        }
 
-        if (state.tryStartProcessing()) {
-            return true; // Caller should process this message
-        }
-
-        // Agent is busy -- handle based on mode
-        if ("interrupt".equals(mode)) {
-            synchronized (state) {
-                state.pending.clear();
+            if (!state.processing) {
+                state.processing = true;
+                return true; // Caller should process this message
             }
-            return true;
-        }
 
-        // Queue the message (queue and collect modes)
-        synchronized (state) {
+            // Agent is busy -- handle based on mode
+            if ("interrupt".equals(mode)) {
+                state.pending.clear();
+                return true;
+            }
+
+            // Queue the message (queue and collect modes)
             if (state.pending.size() >= MAX_QUEUE_SIZE) {
                 state.pending.pollFirst(); // Drop oldest
                 EventLogger.warn("queue", message.agent().name, message.channelType(),

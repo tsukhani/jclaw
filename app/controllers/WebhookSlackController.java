@@ -16,6 +16,11 @@ public class WebhookSlackController extends Controller {
 
     public static void webhook() {
         var config = SlackChannel.SlackConfig.load();
+        if (config == null) {
+            EventLogger.warn("channel", null, "slack", "Webhook received but Slack not configured");
+            ok();
+            return;
+        }
 
         // Read raw body for signature verification
         String rawBody;
@@ -38,22 +43,20 @@ public class WebhookSlackController extends Controller {
         }
 
         // Verify signature
-        if (config != null) {
-            var timestamp = Http.Request.current().headers.get("x-slack-request-timestamp");
-            var signature = Http.Request.current().headers.get("x-slack-signature");
+        var timestamp = Http.Request.current().headers.get("x-slack-request-timestamp");
+        var signature = Http.Request.current().headers.get("x-slack-signature");
 
-            if (timestamp == null || signature == null) {
-                EventLogger.warn("channel", null, "slack", "Missing signature headers");
-                unauthorized("Missing signature");
-                return;
-            }
+        if (timestamp == null || signature == null) {
+            EventLogger.warn("channel", null, "slack", "Missing signature headers");
+            unauthorized("Missing signature");
+            return;
+        }
 
-            if (!SlackChannel.verifySignature(config.signingSecret(),
-                    timestamp.value(), rawBody, signature.value())) {
-                EventLogger.warn("channel", null, "slack", "Invalid signature");
-                unauthorized("Invalid signature");
-                return;
-            }
+        if (!SlackChannel.verifySignature(config.signingSecret(),
+                timestamp.value(), rawBody, signature.value())) {
+            EventLogger.warn("channel", null, "slack", "Invalid signature");
+            unauthorized("Invalid signature");
+            return;
         }
 
         // Parse event
