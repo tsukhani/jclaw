@@ -1,12 +1,10 @@
 package controllers;
 
-import agents.AgentRouter;
 import agents.AgentRunner;
 import channels.TelegramChannel;
 import com.google.gson.JsonParser;
 import play.mvc.Controller;
 import play.mvc.Http;
-import services.ConversationService;
 import services.EventLogger;
 
 import java.io.InputStreamReader;
@@ -67,19 +65,9 @@ public class WebhookTelegramController extends Controller {
     private static void processMessage(TelegramChannel.TelegramConfig config,
                                         TelegramChannel.InboundMessage message) {
         try {
-            var route = services.Tx.run(() -> AgentRouter.resolve("telegram", message.chatId()));
-            if (route == null) {
-                TelegramChannel.sendMessage(config, message.chatId(),
-                        "No agent configured for this chat.");
-                return;
-            }
-
-            var conversation = services.Tx.run(() ->
-                    ConversationService.findOrCreate(route.agent(), "telegram", message.chatId()));
-            var result = AgentRunner.run(route.agent(), conversation, message.text());
-
-            TelegramChannel.sendMessage(config, message.chatId(), result.response());
-
+            AgentRunner.processWebhookMessage("telegram", message.chatId(), message.text(),
+                    (peerId, response) -> TelegramChannel.sendMessage(config, peerId, response),
+                    peerId -> TelegramChannel.sendMessage(config, peerId, "No agent configured for this chat."));
         } catch (Exception e) {
             EventLogger.error("channel", null, "telegram",
                     "Error processing message: %s".formatted(e.getMessage()));

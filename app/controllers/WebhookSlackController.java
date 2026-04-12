@@ -1,12 +1,10 @@
 package controllers;
 
-import agents.AgentRouter;
 import agents.AgentRunner;
 import channels.SlackChannel;
 import com.google.gson.JsonParser;
 import play.mvc.Controller;
 import play.mvc.Http;
-import services.ConversationService;
 import services.EventLogger;
 
 import java.io.InputStreamReader;
@@ -78,19 +76,9 @@ public class WebhookSlackController extends Controller {
     private static void processMessage(SlackChannel.SlackConfig config,
                                         SlackChannel.InboundMessage message) {
         try {
-            var route = services.Tx.run(() -> AgentRouter.resolve("slack", message.channelId()));
-            if (route == null) {
-                SlackChannel.sendMessage(config, message.channelId(),
-                        "No agent configured for this channel.");
-                return;
-            }
-
-            var conversation = services.Tx.run(() ->
-                    ConversationService.findOrCreate(route.agent(), "slack", message.channelId()));
-            var result = AgentRunner.run(route.agent(), conversation, message.text());
-
-            SlackChannel.sendMessage(config, message.channelId(), result.response());
-
+            AgentRunner.processWebhookMessage("slack", message.channelId(), message.text(),
+                    (peerId, response) -> SlackChannel.sendMessage(config, peerId, response),
+                    peerId -> SlackChannel.sendMessage(config, peerId, "No agent configured for this channel."));
         } catch (Exception e) {
             EventLogger.error("channel", null, "slack",
                     "Error processing message: %s".formatted(e.getMessage()));

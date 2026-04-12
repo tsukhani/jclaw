@@ -1,12 +1,10 @@
 package controllers;
 
-import agents.AgentRouter;
 import agents.AgentRunner;
 import channels.WhatsAppChannel;
 import com.google.gson.JsonParser;
 import play.mvc.Controller;
 import play.mvc.Http;
-import services.ConversationService;
 import services.EventLogger;
 
 import java.nio.charset.StandardCharsets;
@@ -90,23 +88,9 @@ public class WebhookWhatsAppController extends Controller {
     private static void processMessage(WhatsAppChannel.WhatsAppConfig config,
                                         WhatsAppChannel.InboundMessage message) {
         try {
-            var route = services.Tx.run(() -> AgentRouter.resolve("whatsapp", message.from()));
-            if (route == null) {
-                if (config != null) {
-                    WhatsAppChannel.sendMessage(config, message.from(),
-                            "No agent configured for this number.");
-                }
-                return;
-            }
-
-            var conversation = services.Tx.run(() ->
-                    ConversationService.findOrCreate(route.agent(), "whatsapp", message.from()));
-            var result = AgentRunner.run(route.agent(), conversation, message.text());
-
-            if (config != null) {
-                WhatsAppChannel.sendMessage(config, message.from(), result.response());
-            }
-
+            AgentRunner.processWebhookMessage("whatsapp", message.from(), message.text(),
+                    (peerId, response) -> { if (config != null) WhatsAppChannel.sendMessage(config, peerId, response); },
+                    peerId -> { if (config != null) WhatsAppChannel.sendMessage(config, peerId, "No agent configured for this number."); });
         } catch (Exception e) {
             EventLogger.error("channel", null, "whatsapp",
                     "Error processing message: %s".formatted(e.getMessage()));

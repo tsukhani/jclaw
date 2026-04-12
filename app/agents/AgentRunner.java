@@ -33,6 +33,19 @@ public class AgentRunner {
 
     public record RunResult(String response, Conversation conversation) {}
 
+    /**
+     * Callbacks for streaming mode. Groups the 6 event handlers that
+     * {@link #runStreaming} pushes SSE data through.
+     */
+    public record StreamingCallbacks(
+        Consumer<Conversation> onInit,
+        Consumer<String> onToken,
+        Consumer<String> onReasoning,
+        Consumer<String> onStatus,
+        Consumer<String> onComplete,
+        Consumer<Exception> onError
+    ) {}
+
     private record PreparedData(
         List<ChatMessage> messages,
         LlmProvider primary,
@@ -116,12 +129,7 @@ public class AgentRunner {
     public static void runStreaming(Agent agent, Long conversationId, String channelType, String peerId,
                                     String userMessage,
                                     AtomicBoolean isCancelled,
-                                    Consumer<Conversation> onInit,
-                                    Consumer<String> onToken,
-                                    Consumer<String> onReasoning,
-                                    Consumer<String> onStatus,
-                                    Consumer<String> onComplete,
-                                    Consumer<Exception> onError) {
+                                    StreamingCallbacks cb) {
         Thread.ofVirtual().start(() -> {
             final Long[] conversationIdRef = {null};
             try {
@@ -140,7 +148,7 @@ public class AgentRunner {
                 });
 
                 if (conversation == null) {
-                    onError.accept(new RuntimeException("Conversation not found"));
+                    cb.onError().accept(new RuntimeException("Conversation not found"));
                     return;
                 }
                 conversationIdRef[0] = conversation.id;
@@ -149,8 +157,8 @@ public class AgentRunner {
                 var queueMsg = new services.ConversationQueue.QueuedMessage(
                         userMessage, channelType, peerId, agent);
                 if (!services.ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
-                    onInit.accept(conversation);
-                    onComplete.accept("Your message has been queued and will be processed shortly.");
+                    cb.onInit().accept(conversation);
+                    cb.onComplete().accept("Your message has been queued and will be processed shortly.");
                     return;
                 }
 
@@ -161,7 +169,7 @@ public class AgentRunner {
                 });
 
                 // Notify caller (e.g., send SSE init event with conversation ID)
-                onInit.accept(conversation);
+                cb.onInit().accept(conversation);
 
                 if (isCancelled.get()) {
                     EventLogger.info("llm", agent.name, channelType, "Stream cancelled by client disconnect");
@@ -186,7 +194,7 @@ public class AgentRunner {
                 var primary = agentProvider != null ? agentProvider : services.Tx.run(ProviderRegistry::getPrimary);
                 if (primary == null) {
                     EventLogger.error("llm", agent.name, channelType, "No LLM provider configured");
-                    onError.accept(new RuntimeException("No LLM provider configured"));
+                    cb.onError().accept(new RuntimeException("No LLM provider configured"));
                     return;
                 }
 
@@ -211,7 +219,7 @@ public class AgentRunner {
                 // Stream with tool call handling (HTTP, no JPA)
                 var streamStartMs = System.currentTimeMillis();
                 var accumulator = primary.chatStreamAccumulate(
-                        agent.modelId, messages, tools, onToken, onReasoning, maxTokens, agent.thinkingMode);
+                        agent.modelId, messages, tools, cb.onToken(), cb.onReasoning(), maxTokens, agent.thinkingMode);
 
                 while (!accumulator.awaitCompletion(5000)) {
                     if (isCancelled.get()) {
@@ -225,7 +233,7 @@ public class AgentRunner {
                         && accumulator.error.getMessage().contains("HTTP 5")) {
                     EventLogger.warn("llm", agent.name, null, "Retrying streaming after transient error");
                     accumulator = primary.chatStreamAccumulate(
-                            agent.modelId, messages, tools, onToken, onReasoning, maxTokens, agent.thinkingMode);
+                            agent.modelId, messages, tools, cb.onToken(), cb.onReasoning(), maxTokens, agent.thinkingMode);
                     while (!accumulator.awaitCompletion(5000)) {
                         if (isCancelled.get()) {
                             EventLogger.info("llm", agent.name, channelType, "Stream cancelled by client disconnect");
@@ -240,7 +248,7 @@ public class AgentRunner {
                 }
 
                 if (accumulator.error != null) {
-                    onError.accept(accumulator.error);
+                    cb.onError().accept(accumulator.error);
                     return;
                 }
 
@@ -260,21 +268,21 @@ public class AgentRunner {
                     var truncMsg = content.isEmpty()
                             ? "I tried to use a tool but my response was too long and got cut off. Let me try a more concise approach."
                             : content;
-                    onToken.accept(truncMsg.equals(content) ? "" : "\n\n*[Response was truncated — retrying with a simpler approach]*");
+                    cb.onToken().accept(truncMsg.equals(content) ? "" : "\n\n*[Response was truncated — retrying with a simpler approach]*");
                     // Persist and complete with the truncation notice
                     var finalContent = truncMsg;
                     services.Tx.run(() -> {
                         var conv = ConversationService.findById(conversation.id);
                         ConversationService.appendAssistantMessage(conv, finalContent, null);
                     });
-                    onComplete.accept(finalContent);
+                    cb.onComplete().accept(finalContent);
                     return;
                 }
 
                 // Handle tool calls if present
                 if (!accumulator.toolCalls.isEmpty()) {
                     content = handleToolCallsStreaming(agent, conversation.id, messages, tools,
-                            accumulator.toolCalls, content, primary, onToken, onReasoning, onStatus, maxTokens, 0, isCancelled);
+                            accumulator.toolCalls, content, primary, cb, maxTokens, 0, isCancelled);
                 }
 
                 if (isCancelled.get()) {
@@ -336,19 +344,19 @@ public class AgentRunner {
                         }
                     }
                     sb.append("}}");
-                    onStatus.accept(sb.toString());
+                    cb.onStatus().accept(sb.toString());
                 } else {
                     EventLogger.info("llm", agent.name, channelType,
                             "Streaming complete (%d chars, %.1fs)".formatted(content.length(), durationMs / 1000.0));
                     // Emit timing even without usage data
-                    onStatus.accept("{\"usage\":{\"durationMs\":%d}}".formatted(durationMs));
+                    cb.onStatus().accept("{\"usage\":{\"durationMs\":%d}}".formatted(durationMs));
                 }
-                onComplete.accept(content);
+                cb.onComplete().accept(content);
 
             } catch (Exception e) {
                 EventLogger.error("llm", agent.name, channelType,
                         "Streaming error: %s".formatted(e.getMessage()));
-                onError.accept(e);
+                cb.onError().accept(e);
             } finally {
                 EventLogger.flush();
                 if (conversationIdRef[0] != null) {
@@ -406,27 +414,7 @@ public class AgentRunner {
                     "Round %d: executing %d tool call(s)".formatted(round + 1, assistantMsg.toolCalls().size()));
 
             for (var toolCall : assistantMsg.toolCalls()) {
-                EventLogger.info("tool", agent.name, null,
-                        "Executing tool '%s' (id: %s, args: %s)"
-                                .formatted(toolCall.function().name(), toolCall.id(),
-                                        toolCall.function().arguments().length() > 200
-                                                ? toolCall.function().arguments().substring(0, 200) + "..."
-                                                : toolCall.function().arguments()));
-                var result = ToolRegistry.execute(toolCall.function().name(),
-                        toolCall.function().arguments(), agent);
-                var resultPreview = result.length() > 200 ? result.substring(0, 200) + "... (%d chars)".formatted(result.length()) : result;
-                EventLogger.info("tool", agent.name, null,
-                        "Tool '%s' returned: %s".formatted(toolCall.function().name(), resultPreview));
-                currentMessages.add(ChatMessage.toolResult(toolCall.id(), result));
-
-                // Persist tool interaction in a short transaction
-                services.Tx.run(() -> {
-                    var conv = ConversationService.findById(conversationId);
-                    ConversationService.appendAssistantMessage(conv,
-                            null, gson.toJson(toolCall));
-                    ConversationService.appendToolResult(conv,
-                            toolCall.id(), result);
-                });
+                executeToolCall(toolCall, agent, conversationId, currentMessages, null, null);
             }
         }
 
@@ -437,8 +425,7 @@ public class AgentRunner {
                                                     List<ChatMessage> messages, List<ToolDef> tools,
                                                     List<ToolCall> toolCalls, String priorContent,
                                                     LlmProvider provider,
-                                                    Consumer<String> onToken, Consumer<String> onReasoning,
-                                                    Consumer<String> onStatus,
+                                                    StreamingCallbacks cb,
                                                     Integer maxTokens,
                                                     int round, AtomicBoolean isCancelled) {
         if (round >= maxToolRounds()) {
@@ -456,39 +443,19 @@ public class AgentRunner {
 
         for (var toolCall : toolCalls) {
             if (isCancelled.get()) return priorContent;
-            onStatus.accept("Using tool: " + toolCall.function().name());
-            EventLogger.info("tool", agent.name, null,
-                    "Executing tool '%s' (id: %s, args: %s)"
-                            .formatted(toolCall.function().name(), toolCall.id(),
-                                    toolCall.function().arguments().length() > 200
-                                            ? toolCall.function().arguments().substring(0, 200) + "..."
-                                            : toolCall.function().arguments()));
-            var result = ToolRegistry.execute(toolCall.function().name(),
-                    toolCall.function().arguments(), agent);
-            var resultPreview = result.length() > 200 ? result.substring(0, 200) + "... (%d chars)".formatted(result.length()) : result;
-            EventLogger.info("tool", agent.name, null,
-                    "Tool '%s' returned: %s".formatted(toolCall.function().name(), resultPreview));
-            currentMessages.add(ChatMessage.toolResult(toolCall.id(), result));
-
-            // Collect rendered image URLs to prepend to the final response
-            extractImageUrls(result, collectedImages);
-
-            services.Tx.run(() -> {
-                var conv = ConversationService.findById(conversationId);
-                ConversationService.appendAssistantMessage(conv, null, gson.toJson(toolCall));
-                ConversationService.appendToolResult(conv, toolCall.id(), result);
-            });
+            executeToolCall(toolCall, agent, conversationId, currentMessages,
+                    cb.onStatus(), collectedImages);
         }
 
         if (isCancelled.get()) return priorContent;
 
-        onStatus.accept("Processing results (round %d)...".formatted(round + 1));
+        cb.onStatus().accept("Processing results (round %d)...".formatted(round + 1));
         EventLogger.info("llm", agent.name, null,
                 "Streaming round %d: continuing LLM call after tool results".formatted(round + 1));
 
         // Continue with streaming after tool results
         var accumulator = provider.chatStreamAccumulate(
-                agent.modelId, currentMessages, tools, onToken, onReasoning, maxTokens, agent.thinkingMode);
+                agent.modelId, currentMessages, tools, cb.onToken(), cb.onReasoning(), maxTokens, agent.thinkingMode);
 
         try {
             // Poll with timeout so we can detect client disconnect
@@ -517,7 +484,7 @@ public class AgentRunner {
             var truncMsg = accumulator.content != null && !accumulator.content.isEmpty()
                     ? accumulator.content + "\n\n*[Response was truncated before the next tool call could complete. Try breaking the task into smaller steps.]*"
                     : "I tried to use a tool but the response exceeded the token limit before the tool arguments finished. Try breaking the task into smaller steps — for example, write large files in multiple append operations instead of one big write.";
-            onToken.accept(accumulator.content != null && !accumulator.content.isEmpty()
+            cb.onToken().accept(accumulator.content != null && !accumulator.content.isEmpty()
                     ? "\n\n*[Response was truncated before the next tool call could complete.]*"
                     : truncMsg);
             return truncMsg;
@@ -526,7 +493,7 @@ public class AgentRunner {
         // Recursively handle if more tool calls
         if (!accumulator.toolCalls.isEmpty()) {
             return handleToolCallsStreaming(agent, conversationId, currentMessages, tools,
-                    accumulator.toolCalls, accumulator.content, provider, onToken, onReasoning, onStatus, maxTokens, round + 1, isCancelled);
+                    accumulator.toolCalls, accumulator.content, provider, cb, maxTokens, round + 1, isCancelled);
         }
 
         // Some models (especially smaller/distilled ones) occasionally return zero tokens
@@ -537,7 +504,7 @@ public class AgentRunner {
             EventLogger.warn("llm", agent.name, null,
                     "Empty continuation after tool calls in round %d — retrying with synthesis nudge"
                             .formatted(round + 1));
-            onStatus.accept("Synthesizing response (retry)...");
+            cb.onStatus().accept("Synthesizing response (retry)...");
 
             var retryMessages = new ArrayList<>(currentMessages);
             retryMessages.add(ChatMessage.user(
@@ -545,7 +512,7 @@ public class AgentRunner {
                             + "Do not call any more tools. Write the full answer as markdown."));
 
             var retry = provider.chatStreamAccumulate(
-                    agent.modelId, retryMessages, tools, onToken, onReasoning, maxTokens, agent.thinkingMode);
+                    agent.modelId, retryMessages, tools, cb.onToken(), cb.onReasoning(), maxTokens, agent.thinkingMode);
             try {
                 while (!retry.awaitCompletion(5000)) {
                     if (isCancelled.get()) return priorContent;
@@ -567,11 +534,47 @@ public class AgentRunner {
                     : String.join("\n\n", collectedImages) + "\n\n";
             var fallback = fallbackPrefix
                     + "*[The model returned no synthesis after tool calls. Tool results are in the conversation history above — try rephrasing your request or switching to a larger model.]*";
-            onToken.accept(fallback);
+            cb.onToken().accept(fallback);
             return fallback;
         }
 
         return buildImagePrefix(collectedImages, accumulator.content) + accumulator.content;
+    }
+
+    /**
+     * Execute a single tool call: log, dispatch, log result, persist, and append
+     * the tool-result message to {@code currentMessages}. Streaming-specific
+     * hooks (status callback, image collection) are applied when non-null.
+     */
+    private static void executeToolCall(ToolCall toolCall, Agent agent, Long conversationId,
+                                         List<ChatMessage> currentMessages,
+                                         Consumer<String> onStatus, List<String> imageCollector) {
+        if (onStatus != null) {
+            onStatus.accept("Using tool: " + toolCall.function().name());
+        }
+        EventLogger.info("tool", agent.name, null,
+                "Executing tool '%s' (id: %s, args: %s)"
+                        .formatted(toolCall.function().name(), toolCall.id(),
+                                toolCall.function().arguments().length() > 200
+                                        ? toolCall.function().arguments().substring(0, 200) + "..."
+                                        : toolCall.function().arguments()));
+        var result = ToolRegistry.execute(toolCall.function().name(),
+                toolCall.function().arguments(), agent);
+        var resultPreview = result.length() > 200
+                ? result.substring(0, 200) + "... (%d chars)".formatted(result.length()) : result;
+        EventLogger.info("tool", agent.name, null,
+                "Tool '%s' returned: %s".formatted(toolCall.function().name(), resultPreview));
+        currentMessages.add(ChatMessage.toolResult(toolCall.id(), result));
+
+        if (imageCollector != null) {
+            extractImageUrls(result, imageCollector);
+        }
+
+        services.Tx.run(() -> {
+            var conv = ConversationService.findById(conversationId);
+            ConversationService.appendAssistantMessage(conv, null, gson.toJson(toolCall));
+            ConversationService.appendToolResult(conv, toolCall.id(), result);
+        });
     }
 
     private static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation) {
@@ -688,6 +691,32 @@ public class AgentRunner {
                         "Failed to process queued message: %s".formatted(e.getMessage()));
             }
         });
+    }
+
+    /**
+     * Shared webhook message handler: resolve agent route, find/create conversation,
+     * run the agent synchronously, and send the response via the provided sender.
+     * Used by Slack, Telegram, and WhatsApp webhook controllers.
+     *
+     * @param channelType  channel identifier ("slack", "telegram", "whatsapp")
+     * @param peerId       channel-specific peer/chat ID
+     * @param text         inbound message text
+     * @param sendResponse callback to deliver the response (receives peerId and response text)
+     * @param sendNoRoute  callback when no agent is routed (receives peerId); may be null to silently drop
+     */
+    public static void processWebhookMessage(String channelType, String peerId, String text,
+                                              java.util.function.BiConsumer<String, String> sendResponse,
+                                              Consumer<String> sendNoRoute) {
+        var route = services.Tx.run(() -> AgentRouter.resolve(channelType, peerId));
+        if (route == null) {
+            if (sendNoRoute != null) sendNoRoute.accept(peerId);
+            return;
+        }
+
+        var conversation = services.Tx.run(() ->
+                ConversationService.findOrCreate(route.agent(), channelType, peerId));
+        var result = run(route.agent(), conversation, text);
+        sendResponse.accept(peerId, result.response());
     }
 
     /**

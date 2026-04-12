@@ -201,8 +201,8 @@ public class ApiChatController extends Controller {
             }
         }, 30, 30, TimeUnit.SECONDS);
 
-        AgentRunner.runStreaming(agent, conversationId, "web", username, messageText,
-                cancelled,
+        var firstToken = new java.util.concurrent.atomic.AtomicBoolean(true);
+        var callbacks = new AgentRunner.StreamingCallbacks(
                 conversation -> {
                     try {
                         var initData = new java.util.HashMap<>(Map.of("type", "init", "conversationId", conversation.id));
@@ -215,20 +215,16 @@ public class ApiChatController extends Controller {
                         latch.countDown();
                     }
                 },
-                new Consumer<String>() {
-                    private boolean first = true;
-                    @Override public void accept(String token) {
+                token -> {
                     try {
                         Map<String, Object> data = new java.util.HashMap<>(Map.of("type", "token", "content", token));
-                        if (first) {
+                        if (firstToken.compareAndSet(true, false)) {
                             data.put("timestamp", java.time.Instant.now().toString());
-                            first = false;
                         }
                         res.writeChunk("data: %s\n\n".formatted(gson.toJson(data)).getBytes(StandardCharsets.UTF_8));
                     } catch (Exception e) {
                         cancelled.set(true);
                         latch.countDown();
-                    }
                     }
                 },
                 reasoning -> {
@@ -265,6 +261,8 @@ public class ApiChatController extends Controller {
                     }
                 }
         );
+        AgentRunner.runStreaming(agent, conversationId, "web", username, messageText,
+                cancelled, callbacks);
 
         try {
             if (!latch.await(600, TimeUnit.SECONDS)) {
