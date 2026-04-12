@@ -293,11 +293,13 @@ public class IntegrationTest extends UnitTest {
 
     @Test
     public void eventLogCapturesActivity() {
+        EventLogger.clear();
         Fixtures.deleteDatabase();
         EventLogger.info("system", "Application started");
         EventLogger.info("agent", "main", null, "Agent created");
         EventLogger.warn("channel", null, "telegram", "Delivery retry");
         EventLogger.error("llm", "Provider timeout");
+        EventLogger.flush();
 
         var events = EventLog.findRecent(10);
         assertEquals(4, events.size());

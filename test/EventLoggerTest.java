@@ -7,12 +7,14 @@ public class EventLoggerTest extends UnitTest {
 
     @BeforeEach
     void setup() {
+        EventLogger.clear();
         Fixtures.deleteDatabase();
     }
 
     @Test
     public void recordCreatesEventLog() {
         EventLogger.record("INFO", "system", "Test message", "{\"key\":\"value\"}");
+        EventLogger.flush();
 
         var events = EventLog.findRecent(10);
         assertEquals(1, events.size());
@@ -25,6 +27,7 @@ public class EventLoggerTest extends UnitTest {
     @Test
     public void recordWithAgentAndChannel() {
         EventLogger.record("WARN", "channel", "agent-1", "telegram", "Delivery failed", null);
+        EventLogger.flush();
 
         var events = EventLog.findRecent(10);
         assertEquals(1, events.size());
@@ -35,6 +38,7 @@ public class EventLoggerTest extends UnitTest {
     @Test
     public void infoConvenienceMethod() {
         EventLogger.info("llm", "Request sent");
+        EventLogger.flush();
 
         var events = EventLog.findRecent(10);
         assertEquals(1, events.size());
@@ -45,6 +49,7 @@ public class EventLoggerTest extends UnitTest {
     @Test
     public void warnConvenienceMethod() {
         EventLogger.warn("channel", "Retry triggered", "attempt 2");
+        EventLogger.flush();
 
         var events = EventLog.findRecent(10);
         assertEquals(1, events.size());
@@ -55,6 +60,7 @@ public class EventLoggerTest extends UnitTest {
     @Test
     public void errorConvenienceMethod() {
         EventLogger.error("tool", "Tool execution failed");
+        EventLogger.flush();
 
         var events = EventLog.findRecent(10);
         assertEquals(1, events.size());
@@ -64,6 +70,7 @@ public class EventLoggerTest extends UnitTest {
     @Test
     public void errorWithThrowable() {
         EventLogger.error("system", "Unhandled exception", new RuntimeException("test error"));
+        EventLogger.flush();
 
         var events = EventLog.findRecent(10);
         assertEquals(1, events.size());

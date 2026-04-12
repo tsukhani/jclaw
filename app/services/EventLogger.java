@@ -3,7 +3,13 @@ package services;
 import models.EventLog;
 import play.Logger;
 
+import java.util.ArrayList;
+import java.util.concurrent.ConcurrentLinkedQueue;
+
 public class EventLogger {
+
+    private static final ConcurrentLinkedQueue<EventLog> pending = new ConcurrentLinkedQueue<>();
+    private static final int BATCH_SIZE = 20;
 
     public static void record(String level, String category, String message, String details) {
         record(level, category, null, null, message, details);
@@ -19,21 +25,45 @@ public class EventLogger {
             default -> Logger.info(logMessage);
         }
 
-        // Persist to DB — use Tx.run for virtual thread safety
+        // Queue for batch persistence — avoids opening a new transaction per log entry
+        // when called from virtual threads (e.g., during tool-execution loops).
+        var event = new EventLog();
+        event.level = level;
+        event.category = category;
+        event.agentId = agentId;
+        event.channel = channel;
+        event.message = message != null && message.length() > 500
+                ? message.substring(0, 497) + "..." : message;
+        event.details = details;
+        pending.add(event);
+
+        if (pending.size() >= BATCH_SIZE) {
+            flush();
+        }
+    }
+
+    /**
+     * Discard all queued events without persisting. For test isolation only.
+     */
+    public static void clear() {
+        pending.clear();
+    }
+
+    /**
+     * Persist all queued events in a single transaction. Call at natural
+     * boundaries (end of agent turn, end of request) or when the batch
+     * threshold is reached.
+     */
+    public static void flush() {
+        var batch = new ArrayList<EventLog>();
+        EventLog e;
+        while ((e = pending.poll()) != null) batch.add(e);
+        if (batch.isEmpty()) return;
+
         try {
-            Tx.run(() -> {
-                var event = new EventLog();
-                event.level = level;
-                event.category = category;
-                event.agentId = agentId;
-                event.channel = channel;
-                event.message = message != null && message.length() > 500
-                        ? message.substring(0, 497) + "..." : message;
-                event.details = details;
-                event.save();
-            });
-        } catch (Exception e) {
-            Logger.warn("Failed to persist event log: %s", e.getMessage());
+            Tx.run(() -> { for (var ev : batch) ev.save(); });
+        } catch (Exception ex) {
+            Logger.warn("Failed to flush %d event logs: %s", batch.size(), ex.getMessage());
         }
     }
 

@@ -11,6 +11,7 @@ import models.Conversation;
 import models.Message;
 import models.Task;
 import play.Play;
+import play.db.jpa.JPA;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -124,36 +125,29 @@ public class AgentService {
         var agentId = agent.id;
         var agentName = agent.name;
 
-        // Iterate + delete each child row individually rather than using bulk HQL
-        // deletes. Play 1.x's Model.delete(hql, params) runs a raw SQL DELETE but
-        // does NOT evict entities from the Hibernate session cache, so any child
-        // entity previously loaded or created in this request (e.g. the
-        // AgentToolConfig for the browser tool, seeded by AgentService.create())
-        // stays in the session pointing at the agent. When the final agent.delete()
-        // triggers a flush, Hibernate walks those stale cached entities and trips a
-        // TransientPropertyValueException. Per-entity deletes keep the session
-        // coherent at the cost of a few extra SQL round-trips — fine here because
-        // row counts per agent are small.
+        // Bulk-delete messages and conversations (the high-volume tables) via JPQL,
+        // then clear the Hibernate session to evict stale references. This replaces
+        // the O(N) per-entity loop with 2 queries regardless of row count.
+        // Session clear is necessary because JPQL DELETE bypasses Hibernate's cache.
+        var em = JPA.em();
+        em.createQuery("DELETE FROM Message m WHERE m.conversation.id IN " +
+                        "(SELECT c.id FROM Conversation c WHERE c.agent.id = :agentId)")
+                .setParameter("agentId", agentId).executeUpdate();
+        em.createQuery("DELETE FROM Conversation c WHERE c.agent.id = :agentId")
+                .setParameter("agentId", agentId).executeUpdate();
+        em.createQuery("DELETE FROM AgentToolConfig t WHERE t.agent.id = :agentId")
+                .setParameter("agentId", agentId).executeUpdate();
+        em.createQuery("DELETE FROM AgentSkillConfig s WHERE s.agent.id = :agentId")
+                .setParameter("agentId", agentId).executeUpdate();
+        em.createQuery("DELETE FROM AgentBinding b WHERE b.agent.id = :agentId")
+                .setParameter("agentId", agentId).executeUpdate();
+        em.createQuery("DELETE FROM Task t WHERE t.agent.id = :agentId")
+                .setParameter("agentId", agentId).executeUpdate();
+        em.flush();
+        em.clear();
 
-        // Conversations cascade through their messages (Message → Conversation FK optional=false).
-        List<Conversation> conversations = Conversation.find("agent.id = ?1", agentId).fetch();
-        for (Conversation convo : conversations) {
-            List<Message> messages = Message.find("conversation.id = ?1", convo.id).fetch();
-            for (Message msg : messages) msg.delete();
-            convo.delete();
-        }
-
-        List<AgentToolConfig> toolConfigs = AgentToolConfig.find("agent.id = ?1", agentId).fetch();
-        for (AgentToolConfig c : toolConfigs) c.delete();
-
-        List<AgentSkillConfig> skillConfigs = AgentSkillConfig.find("agent.id = ?1", agentId).fetch();
-        for (AgentSkillConfig c : skillConfigs) c.delete();
-
-        List<AgentBinding> bindings = AgentBinding.find("agent.id = ?1", agentId).fetch();
-        for (AgentBinding b : bindings) b.delete();
-
-        List<Task> tasks = Task.find("agent.id = ?1", agentId).fetch();
-        for (Task t : tasks) t.delete();
+        // Re-fetch agent after session clear (it was detached by em.clear)
+        agent = Agent.findById(agentId);
 
         // Name-keyed side data (no FK, so no Hibernate cascade risk).
         // Memory goes through the MemoryStore abstraction so the cleanup works

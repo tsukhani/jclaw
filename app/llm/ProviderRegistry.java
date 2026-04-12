@@ -6,6 +6,9 @@ import llm.LlmTypes.*;
 import services.ConfigService;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -53,44 +56,47 @@ public class ProviderRegistry {
 
     private static void refreshIfNeeded() {
         if (System.currentTimeMillis() - lastRefresh > REFRESH_INTERVAL_MS) {
-            synchronized (refreshLock) {
-                if (System.currentTimeMillis() - lastRefresh > REFRESH_INTERVAL_MS) {
-                    refresh();
-                }
-            }
+            refresh();
         }
     }
 
     public static void refresh() {
-        synchronized (refreshLock) {
-            var newCache = new java.util.HashMap<String, LlmProvider>();
-            var allConfigs = ConfigService.listAll();
-            var providerNames = allConfigs.stream()
-                    .map(c -> c.key)
-                    .filter(k -> k.startsWith("provider.") && k.endsWith(".baseUrl"))
-                    .map(k -> k.substring("provider.".length(), k.lastIndexOf(".")))
-                    .distinct()
-                    .toList();
+        // Snapshot all config in one DB roundtrip — no lock held during IO,
+        // so concurrent get() calls are not blocked by the DB read.
+        var allConfigs = ConfigService.listAll();
+        var configMap = new HashMap<String, String>();
+        for (var c : allConfigs) configMap.put(c.key, c.value);
 
-            for (var name : providerNames) {
-                var baseUrl = ConfigService.get("provider." + name + ".baseUrl");
-                var apiKey = ConfigService.get("provider." + name + ".apiKey");
-                if (baseUrl == null || baseUrl.isBlank() || apiKey == null || apiKey.isBlank()) continue;
+        var providerNames = configMap.keySet().stream()
+                .filter(k -> k.startsWith("provider.") && k.endsWith(".baseUrl"))
+                .map(k -> k.substring("provider.".length(), k.lastIndexOf(".")))
+                .distinct()
+                .toList();
 
-                var modelsJson = ConfigService.get("provider." + name + ".models");
-                List<ModelInfo> models = List.of();
-                if (modelsJson != null && !modelsJson.isBlank()) {
-                    try {
-                        models = gson.fromJson(modelsJson, new TypeToken<List<ModelInfo>>() {}.getType());
-                    } catch (Exception _) {
-                        // Skip malformed model JSON
-                    }
+        // LinkedHashMap preserves insertion order so getPrimary()/getSecondary() are deterministic.
+        var newCache = new LinkedHashMap<String, LlmProvider>();
+        for (var name : providerNames) {
+            var baseUrl = configMap.get("provider." + name + ".baseUrl");
+            var apiKey = configMap.get("provider." + name + ".apiKey");
+            if (baseUrl == null || baseUrl.isBlank() || apiKey == null || apiKey.isBlank()) continue;
+
+            var modelsJson = configMap.get("provider." + name + ".models");
+            List<ModelInfo> models = List.of();
+            if (modelsJson != null && !modelsJson.isBlank()) {
+                try {
+                    models = gson.fromJson(modelsJson, new TypeToken<List<ModelInfo>>() {}.getType());
+                } catch (Exception _) {
+                    // Skip malformed model JSON
                 }
-
-                var config = new ProviderConfig(name, baseUrl, apiKey, models);
-                newCache.put(name, createProvider(name, config));
             }
-            cache = Map.copyOf(newCache);
+
+            var config = new ProviderConfig(name, baseUrl, apiKey, models);
+            newCache.put(name, createProvider(name, config));
+        }
+
+        // Only hold the lock for the atomic pointer swap
+        synchronized (refreshLock) {
+            cache = Collections.unmodifiableMap(newCache);
             lastRefresh = System.currentTimeMillis();
         }
     }

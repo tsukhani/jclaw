@@ -104,6 +104,7 @@ public class AgentRunner {
             var updatedConversation = services.Tx.run(() -> ConversationService.findById(conversationId));
             return new RunResult(response, updatedConversation);
         } finally {
+            EventLogger.flush();
             processQueueDrain(conversationId);
         }
     }
@@ -349,6 +350,7 @@ public class AgentRunner {
                         "Streaming error: %s".formatted(e.getMessage()));
                 onError.accept(e);
             } finally {
+                EventLogger.flush();
                 if (conversationIdRef[0] != null) {
                     processQueueDrain(conversationIdRef[0]);
                 }
