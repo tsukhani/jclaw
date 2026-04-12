@@ -256,6 +256,66 @@ async function updateSearchRecencyFilter(providerId: string, value: string) {
   refresh()
 }
 
+function searchPriority(providerId: string): number {
+  const entries = configData.value?.entries ?? []
+  const entry = entries.find((e: any) => e.key === `search.${providerId}.priority`)
+  return entry ? parseInt(entry.value, 10) : 99
+}
+
+/** Provider IDs sorted by their configured priority. */
+const sortedSearchProviderIds = computed(() => {
+  return Object.keys(SEARCH_PROVIDERS).sort((a, b) => searchPriority(a) - searchPriority(b))
+})
+
+// --- Search provider drag-and-drop reordering ---
+const dragSearchProvider = ref<string | null>(null)
+const dropSearchTarget = ref<string | null>(null)
+
+function onSearchDragStart(ev: DragEvent, id: string) {
+  dragSearchProvider.value = id
+  if (ev.dataTransfer) {
+    ev.dataTransfer.effectAllowed = 'move'
+    ev.dataTransfer.setData('text/plain', id)
+  }
+}
+
+function onSearchDragOver(ev: DragEvent, id: string) {
+  ev.preventDefault()
+  if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move'
+  dropSearchTarget.value = id
+}
+
+function onSearchDragLeave() {
+  dropSearchTarget.value = null
+}
+
+async function onSearchDrop(ev: DragEvent, targetId: string) {
+  ev.preventDefault()
+  dropSearchTarget.value = null
+  const sourceId = dragSearchProvider.value
+  dragSearchProvider.value = null
+  if (!sourceId || sourceId === targetId) return
+
+  // Reorder: move source to target's position in the sorted list
+  const ids = [...sortedSearchProviderIds.value]
+  const fromIdx = ids.indexOf(sourceId)
+  const toIdx = ids.indexOf(targetId)
+  if (fromIdx < 0 || toIdx < 0) return
+  ids.splice(fromIdx, 1)
+  ids.splice(toIdx, 0, sourceId)
+
+  // Persist new priorities
+  await Promise.all(ids.map((id, i) =>
+    $fetch('/api/config', { method: 'POST', body: { key: `search.${id}.priority`, value: String(i) } })
+  ))
+  refresh()
+}
+
+function onSearchDragEnd() {
+  dragSearchProvider.value = null
+  dropSearchTarget.value = null
+}
+
 // --- Malware scanners ---
 // Each scanner hashes every binary in a skill install and asks an external reputation
 // service whether that hash is in its catalog. Runs independently; if multiple scanners
@@ -948,15 +1008,28 @@ const providerEntries = computed(() => {
       <h2 class="text-sm font-medium text-neutral-400">Search Providers</h2>
       <p class="text-xs text-neutral-600">
         Web search engines that agents can call via the <span class="text-neutral-400">web_search</span> tool.
-        Providers run independently; the first enabled provider with a configured API key is used,
-        or the agent can request one explicitly. A provider is only active when both
-        <span class="text-neutral-400">enabled</span> is on and its API key is configured.
+        Providers are tried in order — drag to reorder. If a provider fails, the next one is tried automatically.
+        A provider is only active when both <span class="text-neutral-400">enabled</span> is on and its API key is configured.
       </p>
-      <div v-for="(def, id) in SEARCH_PROVIDERS" :key="id"
-           class="bg-neutral-900 border border-neutral-800">
+      <div v-for="id in sortedSearchProviderIds" :key="id"
+           draggable="true"
+           @dragstart="onSearchDragStart($event, id)"
+           @dragover="onSearchDragOver($event, id)"
+           @dragleave="onSearchDragLeave()"
+           @drop="onSearchDrop($event, id)"
+           @dragend="onSearchDragEnd()"
+           :class="[
+             'bg-neutral-900 border transition-colors',
+             dropSearchTarget === id && dragSearchProvider !== id
+               ? 'border-emerald-500/50'
+               : dragSearchProvider === id
+                 ? 'border-neutral-700 opacity-50'
+                 : 'border-neutral-800'
+           ]">
         <div class="px-4 py-2.5 border-b border-neutral-800 flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <span class="text-sm font-medium text-white">{{ def.label }}</span>
+            <span class="cursor-grab active:cursor-grabbing text-neutral-600 hover:text-neutral-400 select-none" title="Drag to reorder priority">⠿</span>
+            <span class="text-sm font-medium text-white">{{ SEARCH_PROVIDERS[id].label }}</span>
             <span v-if="searchActive(id)" class="text-[10px] text-green-400 border border-green-400/30 px-1">active</span>
             <span v-else-if="searchEnabled(id)" class="text-[10px] text-amber-400 border border-amber-400/30 px-1">needs API key</span>
             <span v-else class="text-[10px] text-neutral-500 border border-neutral-700 px-1">disabled</span>
@@ -970,9 +1043,9 @@ const providerEntries = computed(() => {
           </button>
         </div>
         <div class="px-4 py-2.5 text-xs text-neutral-400 leading-relaxed border-b border-neutral-800/50">
-          {{ def.description }}
-          <a :href="def.signupUrl" target="_blank" rel="noopener"
-             class="text-neutral-300 hover:text-white underline ml-1">Get an API key → {{ def.signupLabel }}</a>
+          {{ SEARCH_PROVIDERS[id].description }}
+          <a :href="SEARCH_PROVIDERS[id].signupUrl" target="_blank" rel="noopener"
+             class="text-neutral-300 hover:text-white underline ml-1">Get an API key → {{ SEARCH_PROVIDERS[id].signupLabel }}</a>
         </div>
         <div class="divide-y divide-neutral-800/50">
           <!-- apiKey -->
@@ -981,7 +1054,7 @@ const providerEntries = computed(() => {
             <template v-if="editingKey === `search.${id}.apiKey`">
               <input v-model="editValue"
                      type="password"
-                     :placeholder="def.apiKeyPlaceholder"
+                     :placeholder="SEARCH_PROVIDERS[id].apiKeyPlaceholder"
                      class="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none" />
               <button @click="updateEntry(`search.${id}.apiKey`)" class="p-1 text-neutral-500 hover:text-emerald-400 transition-colors" title="Save">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>

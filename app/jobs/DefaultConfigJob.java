@@ -72,15 +72,19 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("search.exa.enabled", "true");
         seedIfAbsent("search.exa.apiKey", "");
         seedIfAbsent("search.exa.baseUrl", "https://api.exa.ai/search");
+        seedIfAbsent("search.exa.priority", "0");
         seedIfAbsent("search.brave.enabled", "true");
         seedIfAbsent("search.brave.apiKey", "");
         seedIfAbsent("search.brave.baseUrl", "https://api.search.brave.com/res/v1/web/search");
+        seedIfAbsent("search.brave.priority", "1");
         seedIfAbsent("search.tavily.enabled", "true");
         seedIfAbsent("search.tavily.apiKey", "");
         seedIfAbsent("search.tavily.baseUrl", "https://api.tavily.com/search");
+        seedIfAbsent("search.tavily.priority", "2");
         seedIfAbsent("search.perplexity.enabled", "true");
         seedIfAbsent("search.perplexity.apiKey", "");
         seedIfAbsent("search.perplexity.baseUrl", "https://api.perplexity.ai/search");
+        seedIfAbsent("search.perplexity.priority", "3");
         // Server-side recency filter for Perplexity's /search endpoint. One of
         // hour|day|week|month|year, or "none" to disable. Defaults to "month"
         // so "latest X" queries don't return year-old snippets — the LLM will

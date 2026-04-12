@@ -75,43 +75,74 @@ public class WebSearchTool implements ToolRegistry.Tool {
                 ? Math.min(args.get("numResults").getAsInt(), MAX_NUM_RESULTS) : DEFAULT_NUM_RESULTS;
         var preferredProvider = args.has("provider") ? args.get("provider").getAsString() : null;
 
-        // Resolve provider
-        SearchProvider provider = null;
-        String apiKey = null;
-
         if (preferredProvider != null) {
-            SearchProvider match = null;
-            for (var p : PROVIDERS) {
-                if (p.id().equals(preferredProvider)) { match = p; break; }
-            }
-            if (match == null) {
-                return "Error: Unknown search provider '%s'. Supported: exa, brave, tavily, perplexity.".formatted(preferredProvider);
-            }
-            if (!match.isEnabled()) {
-                return "Error: %s is disabled. Enable it in Settings.".formatted(match.displayName());
-            }
-            apiKey = ConfigService.get(match.apiKeyKey());
-            if (apiKey == null || apiKey.isBlank()) {
-                return "Error: %s API key not configured. Add '%s' in Settings.".formatted(
-                        match.displayName(), match.apiKeyKey());
-            }
-            provider = match;
-        } else {
-            // Use first enabled provider with a configured key
-            for (var p : PROVIDERS) {
-                if (!p.isEnabled()) continue;
-                var key = ConfigService.get(p.apiKeyKey());
-                if (key != null && !key.isBlank()) {
-                    provider = p;
-                    apiKey = key;
-                    break;
-                }
-            }
-            if (provider == null) {
-                return "Error: No search provider configured. Enable one of Exa, Brave, Tavily, or Perplexity and add its API key in Settings.";
-            }
+            return executeWithExplicitProvider(preferredProvider, query, numResults, agent);
+        }
+        return executeWithFallback(query, numResults, agent);
+    }
+
+    /** Explicit provider: no fallback, clear error if misconfigured. */
+    private String executeWithExplicitProvider(String providerId, String query, int numResults, Agent agent) {
+        SearchProvider match = null;
+        for (var p : PROVIDERS) {
+            if (p.id().equals(providerId)) { match = p; break; }
+        }
+        if (match == null) {
+            return "Error: Unknown search provider '%s'. Supported: exa, brave, tavily, perplexity.".formatted(providerId);
+        }
+        if (!match.isEnabled()) {
+            return "Error: %s is disabled. Enable it in Settings.".formatted(match.displayName());
+        }
+        var apiKey = ConfigService.get(match.apiKeyKey());
+        if (apiKey == null || apiKey.isBlank()) {
+            return "Error: %s API key not configured. Add '%s' in Settings.".formatted(
+                    match.displayName(), match.apiKeyKey());
+        }
+        return doSearch(match, apiKey, query, numResults, agent);
+    }
+
+    /**
+     * Automatic provider selection: try each enabled provider in priority order,
+     * falling back to the next on failure (HTTP error or exception).
+     */
+    private String executeWithFallback(String query, int numResults, Agent agent) {
+        var candidates = resolveProvidersByPriority();
+        if (candidates.isEmpty()) {
+            return "Error: No search provider configured. Enable one of Exa, Brave, Tavily, or Perplexity and add its API key in Settings.";
         }
 
+        String lastError = null;
+        for (var entry : candidates) {
+            var result = doSearch(entry.provider(), entry.apiKey(), query, numResults, agent);
+            if (!result.startsWith("Error:")) {
+                return result;
+            }
+            lastError = result;
+            EventLogger.warn("search", agent != null ? agent.name : null, null,
+                    "%s failed, trying next provider. Error: %s".formatted(
+                            entry.provider().displayName(), result));
+        }
+        return lastError;
+    }
+
+    private record ProviderEntry(SearchProvider provider, String apiKey) {}
+
+    /** Return enabled providers with valid API keys, sorted by their configured priority. */
+    private List<ProviderEntry> resolveProvidersByPriority() {
+        var candidates = new ArrayList<ProviderEntry>();
+        for (var p : PROVIDERS) {
+            if (!p.isEnabled()) continue;
+            var key = ConfigService.get(p.apiKeyKey());
+            if (key != null && !key.isBlank()) {
+                candidates.add(new ProviderEntry(p, key));
+            }
+        }
+        candidates.sort(java.util.Comparator.comparingInt(e ->
+                parseInt(ConfigService.get("search." + e.provider().id() + ".priority", "99"), 99)));
+        return candidates;
+    }
+
+    private String doSearch(SearchProvider provider, String apiKey, String query, int numResults, Agent agent) {
         try {
             EventLogger.info("search", agent != null ? agent.name : null, null,
                     "Searching via %s: \"%s\" (numResults=%d)".formatted(provider.displayName(), query, numResults));
@@ -136,8 +167,12 @@ public class WebSearchTool implements ToolRegistry.Tool {
         } catch (Exception e) {
             EventLogger.error("search", agent != null ? agent.name : null, null,
                     "%s search failed: %s".formatted(provider.displayName(), e.getMessage()));
-            return "Error searching with %s: %s".formatted(provider.displayName(), e.getMessage());
+            return "Error: searching with %s: %s".formatted(provider.displayName(), e.getMessage());
         }
+    }
+
+    private static int parseInt(String s, int fallback) {
+        try { return Integer.parseInt(s); } catch (NumberFormatException _) { return fallback; }
     }
 
     // --- Provider interface ---
