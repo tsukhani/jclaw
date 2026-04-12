@@ -126,8 +126,6 @@ public class SkillBinaryScanner {
     private static String sha256Of(Path file) throws IOException, NoSuchAlgorithmException {
         var digest = MessageDigest.getInstance("SHA-256");
         digest.update(Files.readAllBytes(file));
-        var sb = new StringBuilder(64);
-        for (var b : digest.digest()) sb.append(String.format("%02x", b));
-        return sb.toString();
+        return java.util.HexFormat.of().formatHex(digest.digest());
     }
 }

@@ -34,7 +34,7 @@ public class Application extends Controller {
                     renderBinary(staticFile);
                 }
             }
-        } catch (IOException ignored) {}
+        } catch (IOException _) {}
 
 
         // Fall back to index.html for client-side routing

@@ -137,8 +137,13 @@ public class WebSearchTool implements ToolRegistry.Tool {
                 candidates.add(new ProviderEntry(p, key));
             }
         }
-        candidates.sort(java.util.Comparator.comparingInt(e ->
-                parseInt(ConfigService.get("search." + e.provider().id() + ".priority", "99"), 99)));
+        // Pre-compute priorities to avoid ConfigService lookups inside the sort comparator
+        var priorities = new java.util.HashMap<String, Integer>();
+        for (var e : candidates) {
+            priorities.put(e.provider().id(),
+                    parseInt(ConfigService.get("search." + e.provider().id() + ".priority", "99"), 99));
+        }
+        candidates.sort(java.util.Comparator.comparingInt(e -> priorities.get(e.provider().id())));
         return candidates;
     }
 

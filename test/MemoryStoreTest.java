@@ -14,7 +14,7 @@ public class MemoryStoreTest extends UnitTest {
     public void factoryReturnsJpaByDefault() {
         var store = MemoryStoreFactory.get();
         assertNotNull(store);
-        assertTrue(store instanceof JpaMemoryStore);
+        assertInstanceOf(JpaMemoryStore.class, store);
     }
 
     @Test

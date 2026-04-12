@@ -151,16 +151,18 @@ public class ApiConversationsController extends Controller {
         if (body == null || !body.has("ids")) badRequest();
 
         var ids = body.getAsJsonArray("ids");
-        int deleted = 0;
-        for (var elem : ids) {
-            var convoId = elem.getAsLong();
-            Conversation convo = Conversation.findById(convoId);
-            if (convo != null) {
-                Message.delete("conversation = ?1", convo);
-                convo.delete();
-                deleted++;
-            }
+        var idList = new ArrayList<Long>();
+        for (var elem : ids) idList.add(elem.getAsLong());
+        if (idList.isEmpty()) {
+            renderJSON(gson.toJson(Map.of("deleted", 0)));
+            return;
         }
+
+        var em = JPA.em();
+        em.createQuery("DELETE FROM Message m WHERE m.conversation.id IN :ids")
+                .setParameter("ids", idList).executeUpdate();
+        int deleted = em.createQuery("DELETE FROM Conversation c WHERE c.id IN :ids")
+                .setParameter("ids", idList).executeUpdate();
         renderJSON(gson.toJson(Map.of("deleted", deleted)));
     }
 

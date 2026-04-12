@@ -37,21 +37,27 @@ public class ApiEventsController extends Controller {
             }
         });
 
-        // Send heartbeat every 30 seconds to keep the connection alive
+        // Send heartbeat every 30 seconds to keep the connection alive.
+        // When the heartbeat write fails (client disconnected), resolve the
+        // promise immediately so the executor is released instead of leaking
+        // for up to 24 hours.
+        var promise = new F.Promise<Void>();
         var heartbeat = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(
                 r -> Thread.ofVirtual().unstarted(r));
         heartbeat.scheduleAtFixedRate(() -> {
-            if (disconnected.get()) return;
+            if (disconnected.get()) {
+                promise.invoke(null);
+                return;
+            }
             try {
                 res.writeChunk(": heartbeat\n\n".getBytes(StandardCharsets.UTF_8));
             } catch (Exception _) {
                 disconnected.set(true);
+                promise.invoke(null);
             }
         }, 30, 30, TimeUnit.SECONDS);
 
-        // Use Play's async continuation — releases the thread back to the pool
-        // and resumes when the promise completes (client disconnect or timeout)
-        var promise = new F.Promise<Void>();
+        // Timeout fallback — resolves after 24 hours if still connected
         heartbeat.schedule((Runnable) () -> promise.invoke(null), 24, TimeUnit.HOURS);
 
         await(promise);

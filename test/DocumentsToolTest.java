@@ -24,7 +24,7 @@ public class DocumentsToolTest extends UnitTest {
         if (tmp != null) {
             try (var walk = Files.walk(tmp)) {
                 walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
-                    try { Files.deleteIfExists(p); } catch (Exception ignored) {}
+                    try { Files.deleteIfExists(p); } catch (Exception _) {}
                 });
             }
         }

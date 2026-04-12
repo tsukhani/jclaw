@@ -139,7 +139,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
         if (!args.has("workdir") || args.get("workdir").getAsString().trim().isEmpty()) {
             if (!Files.isDirectory(workspace)) {
-                try { Files.createDirectories(workspace); } catch (IOException ignored) {}
+                try { Files.createDirectories(workspace); } catch (IOException _) {}
             }
             return workspace;
         }

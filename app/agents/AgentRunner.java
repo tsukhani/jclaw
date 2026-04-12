@@ -313,14 +313,16 @@ public class AgentRunner {
                             "Streaming complete (%d chars)%s".formatted(content.length(), usageSummary));
 
                     // Build usage JSON with timing and pricing for the frontend
-                    var sb = new StringBuilder("{\"usage\":{");
-                    sb.append("\"prompt\":%d,\"completion\":%d,\"total\":%d,\"reasoning\":%d,\"cached\":%d,\"cacheCreation\":%d,\"durationMs\":%d"
-                            .formatted(u.promptTokens(), u.completionTokens(), u.totalTokens(),
-                                    u.reasoningTokens(), u.cachedTokens(), u.cacheCreationTokens(), durationMs));
+                    var usageMap = new com.google.gson.JsonObject();
+                    usageMap.addProperty("prompt", u.promptTokens());
+                    usageMap.addProperty("completion", u.completionTokens());
+                    usageMap.addProperty("total", u.totalTokens());
+                    usageMap.addProperty("reasoning", u.reasoningTokens());
+                    usageMap.addProperty("cached", u.cachedTokens());
+                    usageMap.addProperty("cacheCreation", u.cacheCreationTokens());
+                    usageMap.addProperty("durationMs", durationMs);
 
-                    // Include model pricing if available from provider config. All four
-                    // price fields flow through by name — the frontend applies them with
-                    // sensible fallbacks when any are absent.
+                    // Include model pricing if available from provider config
                     if (modelInfo != null) {
                         var modelsJson = services.ConfigService.get("provider." + agent.modelProvider + ".models");
                         if (modelsJson != null) {
@@ -329,22 +331,18 @@ public class AgentRunner {
                                 for (var el : modelsArray) {
                                     var mObj = el.getAsJsonObject();
                                     if (mObj.has("id") && mObj.get("id").getAsString().equals(agent.modelId)) {
-                                        if (mObj.has("promptPrice"))
-                                            sb.append(",\"promptPrice\":").append(mObj.get("promptPrice"));
-                                        if (mObj.has("completionPrice"))
-                                            sb.append(",\"completionPrice\":").append(mObj.get("completionPrice"));
-                                        if (mObj.has("cachedReadPrice"))
-                                            sb.append(",\"cachedReadPrice\":").append(mObj.get("cachedReadPrice"));
-                                        if (mObj.has("cacheWritePrice"))
-                                            sb.append(",\"cacheWritePrice\":").append(mObj.get("cacheWritePrice"));
+                                        for (var priceKey : List.of("promptPrice", "completionPrice", "cachedReadPrice", "cacheWritePrice")) {
+                                            if (mObj.has(priceKey)) usageMap.add(priceKey, mObj.get(priceKey));
+                                        }
                                         break;
                                     }
                                 }
                             } catch (Exception _) { /* skip pricing if parse fails */ }
                         }
                     }
-                    sb.append("}}");
-                    cb.onStatus().accept(sb.toString());
+                    var wrapper = new com.google.gson.JsonObject();
+                    wrapper.add("usage", usageMap);
+                    cb.onStatus().accept(gson.toJson(wrapper));
                 } else {
                     EventLogger.info("llm", agent.name, channelType,
                             "Streaming complete (%d chars, %.1fs)".formatted(content.length(), durationMs / 1000.0));

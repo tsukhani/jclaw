@@ -98,7 +98,7 @@ public class SkillLoader {
                         if (info != null) existingSkills.add(info.name());
                     }
                 });
-            } catch (IOException ignored) {}
+            } catch (IOException _) {}
         }
 
         // Agent workspace skills
@@ -115,10 +115,10 @@ public class SkillLoader {
                                     if (info != null) existingSkills.add(info.name());
                                 }
                             });
-                        } catch (IOException ignored) {}
+                        } catch (IOException _) {}
                     }
                 });
-            } catch (IOException ignored) {}
+            } catch (IOException _) {}
         }
 
         // Remove orphaned configs
@@ -449,8 +449,7 @@ public class SkillLoader {
             }
         }
         var sb = new StringBuilder();
-        for (var b : digest.digest()) sb.append(String.format("%02x", b));
-        return sb.toString();
+        return java.util.HexFormat.of().formatHex(digest.digest());
     }
 
     /**
@@ -547,7 +546,7 @@ public class SkillLoader {
      * is warranted.
      */
     private static boolean contentDiffersIgnoringVersion(String a, String b) {
-        return stripVersionLine(a).equals(stripVersionLine(b)) == false;
+        return !stripVersionLine(a).equals(stripVersionLine(b));
     }
 
     private static final Pattern VERSION_LINE = Pattern.compile("(?m)^version:.*$");

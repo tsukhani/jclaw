@@ -128,7 +128,7 @@ public class ShellExecToolTest extends UnitTest {
         } finally {
             Files.deleteIfExists(link);
             Files.walk(outside).sorted(java.util.Comparator.reverseOrder())
-                    .forEach(p -> { try { Files.delete(p); } catch (Exception ignored) {} });
+                    .forEach(p -> { try { Files.delete(p); } catch (Exception _) {} });
         }
     }
 

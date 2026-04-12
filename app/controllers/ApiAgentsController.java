@@ -27,7 +27,7 @@ public class ApiAgentsController extends Controller {
 
     public static void list() {
         var agents = AgentService.listAll();
-        var result = agents.stream().map(a -> AgentView.of(a)).toList();
+        var result = agents.stream().map(AgentView::of).toList();
         renderJSON(gson.toJson(result));
     }
 
