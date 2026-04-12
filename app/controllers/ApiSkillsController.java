@@ -10,13 +10,10 @@ import llm.ProviderRegistry;
 import models.Agent;
 import models.AgentSkillConfig;
 import play.mvc.Controller;
-import play.mvc.Http;
 import play.mvc.With;
 import services.AgentService;
 
-import java.io.InputStreamReader;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
@@ -273,7 +270,7 @@ public class ApiSkillsController extends Controller {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
 
-        var body = readJsonBody();
+        var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("enabled")) badRequest();
         var enabled = body.get("enabled").getAsBoolean();
 
@@ -477,7 +474,7 @@ public class ApiSkillsController extends Controller {
      * The frontend polls the skills list to detect completion.
      */
     public static void promote() {
-        var body = readJsonBody();
+        var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("agentId") || !body.has("skillName")) badRequest();
 
         var agentId = body.get("agentId").getAsLong();
@@ -771,7 +768,7 @@ public class ApiSkillsController extends Controller {
 
     /** PUT /api/skills/{name}/rename — Rename a global skill folder. */
     public static void rename(String name) {
-        var body = readJsonBody();
+        var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("newName")) badRequest();
 
         var newName = body.get("newName").getAsString().trim();
@@ -926,12 +923,4 @@ public class ApiSkillsController extends Controller {
         return map;
     }
 
-    private static com.google.gson.JsonObject readJsonBody() {
-        try {
-            var reader = new InputStreamReader(Http.Request.current().body, StandardCharsets.UTF_8);
-            return JsonParser.parseReader(reader).getAsJsonObject();
-        } catch (Exception _) {
-            return null;
-        }
-    }
 }

@@ -1,16 +1,12 @@
 package controllers;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonParser;
 import llm.ProviderRegistry;
 import models.Agent;
 import play.mvc.Controller;
-import play.mvc.Http;
 import play.mvc.With;
 import services.AgentService;
 
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 
 @With(AuthCheck.class)
@@ -44,7 +40,7 @@ public class ApiAgentsController extends Controller {
     }
 
     public static void create() {
-        var body = readJsonBody();
+        var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
         var name = body.get("name").getAsString();
@@ -64,7 +60,7 @@ public class ApiAgentsController extends Controller {
         var agent = AgentService.findById(id);
         if (agent == null) notFound();
 
-        var body = readJsonBody();
+        var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
         var name = body.has("name") ? body.get("name").getAsString() : agent.name;
@@ -154,7 +150,7 @@ public class ApiAgentsController extends Controller {
     public static void saveWorkspaceFile(Long id, String filename) {
         var agent = AgentService.findById(id);
         if (agent == null) notFound();
-        var body = readJsonBody();
+        var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("content")) badRequest();
         AgentService.writeWorkspaceFile(agent.name, filename, body.get("content").getAsString());
         renderJSON(gson.toJson(java.util.Map.of("status", "ok", "filename", filename)));
@@ -182,12 +178,4 @@ public class ApiAgentsController extends Controller {
         return map;
     }
 
-    private static com.google.gson.JsonObject readJsonBody() {
-        try {
-            var reader = new InputStreamReader(Http.Request.current().body, StandardCharsets.UTF_8);
-            return JsonParser.parseReader(reader).getAsJsonObject();
-        } catch (Exception _) {
-            return null;
-        }
-    }
 }

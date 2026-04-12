@@ -4,11 +4,8 @@ import com.google.gson.Gson;
 import com.google.gson.JsonParser;
 import models.ChannelConfig;
 import play.mvc.Controller;
-import play.mvc.Http;
 import play.mvc.With;
 
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,7 +28,7 @@ public class ApiChannelsController extends Controller {
     }
 
     public static void save(String channelType) {
-        var body = readJsonBody();
+        var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
         var config = ChannelConfig.findByType(channelType);
@@ -63,12 +60,4 @@ public class ApiChannelsController extends Controller {
         return map;
     }
 
-    private static com.google.gson.JsonObject readJsonBody() {
-        try {
-            var reader = new InputStreamReader(Http.Request.current().body, StandardCharsets.UTF_8);
-            return JsonParser.parseReader(reader).getAsJsonObject();
-        } catch (Exception _) {
-            return null;
-        }
-    }
 }

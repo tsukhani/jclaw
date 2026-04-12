@@ -1,16 +1,12 @@
 package controllers;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonParser;
 import models.Agent;
 import models.AgentBinding;
 import play.db.jpa.JPA;
 import play.mvc.Controller;
-import play.mvc.Http;
 import play.mvc.With;
 
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -30,7 +26,7 @@ public class ApiBindingsController extends Controller {
     }
 
     public static void create() {
-        var body = readJsonBody();
+        var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
         var agentId = body.get("agentId").getAsLong();
@@ -52,7 +48,7 @@ public class ApiBindingsController extends Controller {
         var binding = (AgentBinding) AgentBinding.findById(id);
         if (binding == null) notFound();
 
-        var body = readJsonBody();
+        var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
         if (body.has("agentId")) {
@@ -86,12 +82,4 @@ public class ApiBindingsController extends Controller {
         return map;
     }
 
-    private static com.google.gson.JsonObject readJsonBody() {
-        try {
-            var reader = new InputStreamReader(Http.Request.current().body, StandardCharsets.UTF_8);
-            return JsonParser.parseReader(reader).getAsJsonObject();
-        } catch (Exception _) {
-            return null;
-        }
-    }
 }

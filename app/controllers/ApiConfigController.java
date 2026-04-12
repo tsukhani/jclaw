@@ -1,16 +1,11 @@
 package controllers;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import play.mvc.Controller;
-import play.mvc.Http;
 import play.mvc.With;
 import services.AgentService;
 import services.ConfigService;
 
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 
 @With(AuthCheck.class)
@@ -46,7 +41,7 @@ public class ApiConfigController extends Controller {
     }
 
     public static void save() {
-        var body = readJsonBody();
+        var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("key") || !body.has("value")) {
             badRequest();
         }
@@ -98,12 +93,4 @@ public class ApiConfigController extends Controller {
         renderJSON(gson.toJson(map));
     }
 
-    static JsonObject readJsonBody() {
-        try {
-            var reader = new InputStreamReader(Http.Request.current().body, StandardCharsets.UTF_8);
-            return JsonParser.parseReader(reader).getAsJsonObject();
-        } catch (Exception e) {
-            return null;
-        }
-    }
 }

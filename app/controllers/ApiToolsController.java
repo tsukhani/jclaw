@@ -3,16 +3,12 @@ package controllers;
 import agents.SkillLoader;
 import agents.ToolRegistry;
 import com.google.gson.Gson;
-import com.google.gson.JsonParser;
 import models.Agent;
 import models.AgentToolConfig;
 import play.mvc.Controller;
-import play.mvc.Http;
 import play.mvc.With;
 import services.AgentService;
 
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 
@@ -67,7 +63,7 @@ public class ApiToolsController extends Controller {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
 
-        var body = readJsonBody();
+        var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("enabled")) badRequest();
         var enabled = body.get("enabled").getAsBoolean();
 
@@ -93,12 +89,4 @@ public class ApiToolsController extends Controller {
         renderJSON(gson.toJson(map));
     }
 
-    private static com.google.gson.JsonObject readJsonBody() {
-        try {
-            var reader = new InputStreamReader(Http.Request.current().body, StandardCharsets.UTF_8);
-            return JsonParser.parseReader(reader).getAsJsonObject();
-        } catch (Exception _) {
-            return null;
-        }
-    }
 }
