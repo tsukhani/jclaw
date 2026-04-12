@@ -17,6 +17,7 @@ public class ToolRegistrationJob extends Job<Void> {
     public static void registerAll() {
         ToolRegistry.clear();
         ToolRegistry.register(new TaskTool());
+        ToolRegistry.register(new DateTimeTool());
         ToolRegistry.register(new CheckListTool());
         ToolRegistry.register(new FileSystemTools());
         ToolRegistry.register(new DocumentsTool());
