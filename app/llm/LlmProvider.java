@@ -20,7 +20,7 @@ import java.util.function.Consumer;
  * HTTP, retry, streaming, and serialization logic. Subclasses override template methods
  * to handle provider-specific differences (reasoning params, response parsing, etc.).
  */
-public abstract class LlmProvider {
+public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider, OpenRouterProvider {
 
     protected static final Gson gson = new GsonBuilder()
             .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)

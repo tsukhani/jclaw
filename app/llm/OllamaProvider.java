@@ -12,7 +12,7 @@ import llm.LlmTypes.*;
  *
  * @see <a href="https://docs.ollama.com/capabilities/thinking">Ollama Thinking Docs</a>
  */
-public class OllamaProvider extends LlmProvider {
+public final class OllamaProvider extends LlmProvider {
 
     public OllamaProvider(ProviderConfig config) {
         super(config);

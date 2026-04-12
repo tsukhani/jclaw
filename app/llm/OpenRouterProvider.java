@@ -12,7 +12,7 @@ import llm.LlmTypes.*;
  *
  * @see <a href="https://openrouter.ai/docs/guides/best-practices/reasoning-tokens">OpenRouter Reasoning Docs</a>
  */
-public class OpenRouterProvider extends LlmProvider {
+public final class OpenRouterProvider extends LlmProvider {
 
     public OpenRouterProvider(ProviderConfig config) {
         super(config);

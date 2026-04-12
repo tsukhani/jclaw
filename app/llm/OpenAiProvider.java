@@ -10,7 +10,7 @@ import llm.LlmTypes.*;
  * Reasoning: sends {@code reasoning_effort} as a top-level request parameter.
  * Usage: reads {@code completion_tokens_details.reasoning_tokens} from the response.
  */
-public class OpenAiProvider extends LlmProvider {
+public final class OpenAiProvider extends LlmProvider {
 
     public OpenAiProvider(ProviderConfig config) {
         super(config);

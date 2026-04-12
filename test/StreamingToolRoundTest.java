@@ -2,6 +2,7 @@ import org.junit.jupiter.api.*;
 import play.test.*;
 import agents.AgentRunner;
 import llm.LlmProvider;
+import llm.OpenAiProvider;
 import llm.LlmTypes.*;
 
 import java.util.ArrayList;
@@ -11,11 +12,6 @@ import java.util.List;
  * Tests that streaming tool call recursion is capped at MAX_TOOL_ROUNDS.
  */
 public class StreamingToolRoundTest extends UnitTest {
-
-    /** Minimal concrete LlmProvider for testing reflection-based methods. */
-    static class TestProvider extends LlmProvider {
-        TestProvider(ProviderConfig config) { super(config); }
-    }
 
     @Test
     public void estimateTokensCalculatesApproximately() throws Exception {
@@ -67,7 +63,7 @@ public class StreamingToolRoundTest extends UnitTest {
         method.setAccessible(true);
 
         // Create a provider with a very small context window
-        var provider = new TestProvider(new ProviderConfig("test", "http://test", "key",
+        var provider = new OpenAiProvider(new ProviderConfig("test", "http://test", "key",
                 List.of(new ModelInfo("model-1", "Model 1", 10, 100, false)))); // 10 tokens max
 
         var agent = new models.Agent();
@@ -96,7 +92,7 @@ public class StreamingToolRoundTest extends UnitTest {
         method.setAccessible(true);
 
         // Large context window — nothing should be trimmed
-        var provider = new TestProvider(new ProviderConfig("test", "http://test", "key",
+        var provider = new OpenAiProvider(new ProviderConfig("test", "http://test", "key",
                 List.of(new ModelInfo("model-1", "Model 1", 100000, 100, false))));
 
         var agent = new models.Agent();
