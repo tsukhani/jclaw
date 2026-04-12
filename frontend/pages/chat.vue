@@ -66,10 +66,12 @@ function rewriteWorkspaceLinks(html: string, agentId: number): string {
     if (!href) return
     if (href.startsWith('/') || href.startsWith('#')) return
     if (/^(https?|mailto|tel|ftp|data|javascript):/i.test(href)) return
-    const encoded = href.split('/').filter(Boolean).map(encodeURIComponent).join('/')
+    // Decode first: marked.parse already URL-encodes the href (spaces → %20),
+    // so a raw encodeURIComponent would double-encode (%20 → %2520), producing
+    // a URL that 404s because the filename on disk has real spaces, not "%20".
+    const encoded = href.split('/').filter(Boolean).map(s => encodeURIComponent(decodeURIComponent(s))).join('/')
     a.setAttribute('href', `/api/agents/${agentId}/files/${encoded}`)
     a.setAttribute('download', '')
-    a.setAttribute('target', '_blank')
     a.classList.add('workspace-file')
   })
   return root.innerHTML
