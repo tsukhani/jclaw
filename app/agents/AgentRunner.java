@@ -104,8 +104,7 @@ public class AgentRunner {
             var updatedConversation = services.Tx.run(() -> ConversationService.findById(conversationId));
             return new RunResult(response, updatedConversation);
         } finally {
-            // Always release the queue to prevent deadlock
-            services.ConversationQueue.drain(conversationId);
+            processQueueDrain(conversationId);
         }
     }
 
@@ -125,20 +124,18 @@ public class AgentRunner {
         Thread.ofVirtual().start(() -> {
             final Long[] conversationIdRef = {null};
             try {
-                // 1. Resolve conversation and persist user message in one transaction
+                // 1. Resolve or create the conversation — but do NOT persist the
+                // user message yet. Message persistence must happen after tryAcquire
+                // so that queued messages (tryAcquire=false) don't leave phantom
+                // entries in the DB that get re-persisted when the queue drains.
                 Conversation conversation = services.Tx.run(() -> {
-                    Conversation convo;
                     if (conversationId != null) {
-                        convo = ConversationService.findById(conversationId);
+                        return ConversationService.findById(conversationId);
                     } else if ("web".equals(channelType)) {
-                        convo = ConversationService.create(agent, channelType, peerId);
+                        return ConversationService.create(agent, channelType, peerId);
                     } else {
-                        convo = ConversationService.findOrCreate(agent, channelType, peerId);
+                        return ConversationService.findOrCreate(agent, channelType, peerId);
                     }
-                    if (convo != null) {
-                        ConversationService.appendUserMessage(convo, userMessage);
-                    }
-                    return convo;
                 });
 
                 if (conversation == null) {
@@ -155,6 +152,12 @@ public class AgentRunner {
                     onComplete.accept("Your message has been queued and will be processed shortly.");
                     return;
                 }
+
+                // 2. Now that we hold the lock, persist the user message.
+                services.Tx.run(() -> {
+                    var convo = ConversationService.findById(conversation.id);
+                    ConversationService.appendUserMessage(convo, userMessage);
+                });
 
                 // Notify caller (e.g., send SSE init event with conversation ID)
                 onInit.accept(conversation);
@@ -346,9 +349,8 @@ public class AgentRunner {
                         "Streaming error: %s".formatted(e.getMessage()));
                 onError.accept(e);
             } finally {
-                // Always release the queue to prevent deadlock
                 if (conversationIdRef[0] != null) {
-                    services.ConversationQueue.drain(conversationIdRef[0]);
+                    processQueueDrain(conversationIdRef[0]);
                 }
             }
         });
@@ -648,6 +650,61 @@ public class AgentRunner {
             }
         }
         return chars / 4; // rough approximation: ~4 chars per token
+    }
+
+    /**
+     * Drain the conversation queue after processing completes, then re-process
+     * any waiting messages on a virtual thread. Each drained message gets a
+     * full {@link #run} invocation (which handles its own queue acquisition,
+     * user-message persistence, LLM call, and response persistence). For
+     * external channels (Telegram, Slack, WhatsApp), the response is dispatched
+     * back through the channel. For web, the response is persisted to the DB
+     * and the user sees it on next conversation load.
+     *
+     * <p>Called from the {@code finally} block of both {@link #run} and
+     * {@link #runStreaming}. Failures are logged but never propagated — the
+     * primary request must not fail because a queued message's re-processing
+     * fails.
+     */
+    private static void processQueueDrain(Long conversationId) {
+        var drained = services.ConversationQueue.drain(conversationId);
+        if (drained.isEmpty()) return;
+
+        Thread.ofVirtual().start(() -> {
+            var combined = services.ConversationQueue.formatCollectedMessages(drained);
+            var msg = drained.getFirst(); // channel info is the same for all queued messages
+            try {
+                var conversation = services.Tx.run(() -> ConversationService.findById(conversationId));
+                if (conversation == null) return;
+                var result = run(msg.agent(), conversation, combined);
+                dispatchToChannel(msg.channelType(), msg.peerId(), result.response());
+            } catch (Exception e) {
+                EventLogger.error("queue", msg.agent().name, msg.channelType(),
+                        "Failed to process queued message: %s".formatted(e.getMessage()));
+            }
+        });
+    }
+
+    /**
+     * Best-effort delivery of a response to an external channel. Web channel
+     * responses are already persisted to the DB by {@link #run} — the user sees
+     * them on next conversation load or refresh. External channels need explicit
+     * dispatch because there is no persistent connection to push through.
+     */
+    private static void dispatchToChannel(String channelType, String peerId, String text) {
+        if (peerId == null || text == null) return;
+        try {
+            switch (channelType) {
+                case "telegram" -> channels.TelegramChannel.sendMessage(peerId, text);
+                case "slack" -> channels.SlackChannel.sendMessage(peerId, text);
+                case "whatsapp" -> channels.WhatsAppChannel.sendMessage(peerId, text);
+                default -> {} // web + unknown: response is DB-persisted, no push needed
+            }
+        } catch (Exception e) {
+            EventLogger.error("channel", null, channelType,
+                    "Failed to dispatch queued response to %s/%s: %s"
+                            .formatted(channelType, peerId, e.getMessage()));
+        }
     }
 
     /**

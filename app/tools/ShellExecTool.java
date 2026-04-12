@@ -216,89 +216,79 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
             var process = pb.start();
 
-            // Read output incrementally with two early-return mechanisms:
-            // 1. Terminal image detected (QR code) → return immediately so user sees it,
-            //    but leave process running for the full timeout (user needs to interact).
-            // 2. Idle timeout (5s of silence after output) → return for non-interactive commands.
+            // Read output with blocking reads and a watchdog thread that
+            // enforces the overall deadline. Previous approach used
+            // is.available() polling + 100ms sleep (busy-wait) and a 5-second
+            // idle timeout that prematurely cut off slow commands (npm install,
+            // long builds) that simply paused between writes. Blocking is.read()
+            // on a virtual thread is free (no platform thread consumed during
+            // the block) and returns naturally when the process writes or exits.
             var is = process.getInputStream();
             var buf = new byte[8192];
             var out = new StringBuilder();
             int totalRead = 0;
             boolean truncated = false;
-            long deadline = System.currentTimeMillis() + (timeoutSec * 1000L);
-            long lastOutputAt = 0;
             boolean foundTerminalImage = false;
-            long IDLE_TIMEOUT_MS = 5000;
 
-            while (System.currentTimeMillis() < deadline) {
-                if (is.available() > 0) {
-                    int n = is.read(buf);
-                    if (n == -1) break;
-                    totalRead += n;
-                    lastOutputAt = System.currentTimeMillis();
-                    if (!truncated) {
-                        int remaining = maxOutputBytes - out.length();
-                        if (remaining <= 0) {
-                            truncated = true;
-                        } else if (n > remaining) {
-                            out.append(new String(buf, 0, remaining));
-                            truncated = true;
-                        } else {
-                            out.append(new String(buf, 0, n));
-                        }
+            // Watchdog: destroy the process after the configured timeout.
+            // When destroyed, is.read() in the main loop returns -1 or throws,
+            // breaking the loop cleanly. The flag distinguishes a watchdog kill
+            // from a normal exit — process.isAlive() is false in both cases
+            // after the loop, but only a watchdog kill should produce the
+            // "timed out" markers in the result.
+            var timedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
+            Thread.startVirtualThread(() -> {
+                try {
+                    if (!process.waitFor(timeoutSec, TimeUnit.SECONDS)) {
+                        timedOut.set(true);
+                        process.destroyForcibly();
                     }
+                } catch (InterruptedException _) {}
+            });
 
-                    // Check for terminal image — if found, return early but keep process alive
-                    if (!foundTerminalImage && hasTerminalImage(out.toString())) {
-                        foundTerminalImage = true;
-                        var processedOutput = replaceTerminalImagesInOutput(out.toString(), agent);
-                        long durationMs = System.currentTimeMillis() - startTime;
-
-                        // Keep the process running in the background for the full timeout
-                        // so the user can interact (e.g., scan QR code, wait for sync)
-                        Thread.startVirtualThread(() -> {
-                            try {
-                                process.waitFor(timeoutSec, TimeUnit.SECONDS);
-                            } catch (InterruptedException _) {}
-                            finally {
-                                if (process.isAlive()) process.destroyForcibly();
-                            }
-                        });
-
-                        var result = new JsonObject();
-                        result.addProperty("exitCode", -1);
-                        result.addProperty("output", processedOutput
-                                + "\n[Process still running in background — waiting for user interaction. Will timeout after %d seconds."
-                                        .formatted(timeoutSec)
-                                + " The image above is already visible to the user in the chat. Do NOT try to read or fetch it.]");
-                        result.addProperty("durationMs", durationMs);
-                        result.addProperty("truncated", truncated);
-                        result.addProperty("timedOut", false);
-                        return result.toString();
-                    }
-                } else if (!process.isAlive()) {
-                    break;
-                } else if (lastOutputAt > 0 && (System.currentTimeMillis() - lastOutputAt) > IDLE_TIMEOUT_MS) {
-                    break; // Non-interactive idle — return early
-                } else {
-                    Thread.sleep(100);
-                }
-            }
-
-            // Drain remaining output
-            while (is.available() > 0) {
-                int n = is.read(buf);
-                if (n == -1) break;
+            // Blocking read loop — is.read() blocks until data arrives or the
+            // stream is closed (process exit, watchdog kill, or normal EOF).
+            int n;
+            while ((n = is.read(buf)) != -1) {
                 totalRead += n;
-                if (!truncated && out.length() < maxOutputBytes) {
-                    out.append(new String(buf, 0, Math.min(n, maxOutputBytes - out.length())));
+                if (!truncated) {
+                    int remaining = maxOutputBytes - out.length();
+                    if (remaining <= 0) {
+                        truncated = true;
+                    } else if (n > remaining) {
+                        out.append(new String(buf, 0, remaining));
+                        truncated = true;
+                    } else {
+                        out.append(new String(buf, 0, n));
+                    }
+                }
+
+                // Check for terminal image — if found, return early but keep process alive
+                if (!foundTerminalImage && hasTerminalImage(out.toString())) {
+                    foundTerminalImage = true;
+                    var processedOutput = replaceTerminalImagesInOutput(out.toString(), agent);
+                    long durationMs = System.currentTimeMillis() - startTime;
+
+                    // The watchdog thread already babysits the process for the
+                    // full timeout. We just return; the process stays alive so
+                    // the user can interact (e.g., scan QR code).
+                    var result = new JsonObject();
+                    result.addProperty("exitCode", -1);
+                    result.addProperty("output", processedOutput
+                            + "\n[Process still running in background — waiting for user interaction. Will timeout after %d seconds."
+                                    .formatted(timeoutSec)
+                            + " The image above is already visible to the user in the chat. Do NOT try to read or fetch it.]");
+                    result.addProperty("durationMs", durationMs);
+                    result.addProperty("truncated", truncated);
+                    result.addProperty("timedOut", false);
+                    return result.toString();
                 }
             }
 
-            boolean completed = !process.isAlive();
-            if (!completed) {
+            // Ensure process is fully dead before collecting exit code.
+            if (!process.waitFor(1, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
-                process.waitFor(5, TimeUnit.SECONDS);
+                process.waitFor(1, TimeUnit.SECONDS);
             }
 
             if (truncated) {
@@ -310,11 +300,11 @@ public class ShellExecTool implements ToolRegistry.Tool {
             var processedOutput = replaceTerminalImagesInOutput(out.toString(), agent);
 
             var result = new JsonObject();
-            result.addProperty("exitCode", completed ? process.exitValue() : -1);
-            result.addProperty("output", processedOutput + (!completed ? "\n[Process killed: timeout after %d seconds]".formatted(timeoutSec) : ""));
+            result.addProperty("exitCode", timedOut.get() ? -1 : process.exitValue());
+            result.addProperty("output", processedOutput + (timedOut.get() ? "\n[Process killed: timeout after %d seconds]".formatted(timeoutSec) : ""));
             result.addProperty("durationMs", durationMs);
             result.addProperty("truncated", truncated);
-            result.addProperty("timedOut", !completed);
+            result.addProperty("timedOut", timedOut.get());
             return result.toString();
 
         } catch (IOException e) {

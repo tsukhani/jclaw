@@ -1,7 +1,7 @@
 import org.junit.jupiter.api.*;
 import play.test.*;
 import llm.LlmTypes.*;
-import llm.OpenAiCompatibleClient;
+import llm.LlmProvider;
 import llm.ProviderRegistry;
 import services.ConfigService;
 import com.google.gson.JsonParser;
@@ -78,7 +78,7 @@ public class LlmClientTest extends UnitTest {
         var usageObj = JsonParser.parseString("""
                 {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
                 """).getAsJsonObject();
-        var usage = OpenAiCompatibleClient.parseUsageBlock(usageObj);
+        var usage = LlmProvider.parseUsageBlock(usageObj);
         assertEquals(100, usage.promptTokens());
         assertEquals(50, usage.completionTokens());
         assertEquals(150, usage.totalTokens());
@@ -95,7 +95,7 @@ public class LlmClientTest extends UnitTest {
                  "prompt_tokens_details": {"cached_tokens": 4670},
                  "completion_tokens_details": {"reasoning_tokens": 76}}
                 """).getAsJsonObject();
-        var usage = OpenAiCompatibleClient.parseUsageBlock(usageObj);
+        var usage = LlmProvider.parseUsageBlock(usageObj);
         assertEquals(4891, usage.promptTokens());
         assertEquals(112, usage.completionTokens());
         assertEquals(4670, usage.cachedTokens(), "cached reads must flow from prompt_tokens_details");
@@ -112,7 +112,7 @@ public class LlmClientTest extends UnitTest {
                  "cache_creation_input_tokens": 4800,
                  "prompt_tokens_details": {"cached_tokens": 0}}
                 """).getAsJsonObject();
-        var usage = OpenAiCompatibleClient.parseUsageBlock(usageObj);
+        var usage = LlmProvider.parseUsageBlock(usageObj);
         assertEquals(5000, usage.promptTokens());
         assertEquals(0, usage.cachedTokens(), "no cache reads on the seeding turn");
         assertEquals(4800, usage.cacheCreationTokens(), "cache writes must flow from top-level field");
@@ -127,7 +127,7 @@ public class LlmClientTest extends UnitTest {
                  "cache_creation_input_tokens": 500,
                  "prompt_tokens_details": {"cached_tokens": 5000}}
                 """).getAsJsonObject();
-        var usage = OpenAiCompatibleClient.parseUsageBlock(usageObj);
+        var usage = LlmProvider.parseUsageBlock(usageObj);
         assertEquals(6000, usage.promptTokens());
         assertEquals(5000, usage.cachedTokens());
         assertEquals(500, usage.cacheCreationTokens());
@@ -139,7 +139,7 @@ public class LlmClientTest extends UnitTest {
     @Test
     public void parseUsageHandlesMissingFields() {
         // Robustness: empty usage object, shouldn't NPE.
-        var usage = OpenAiCompatibleClient.parseUsageBlock(JsonParser.parseString("{}").getAsJsonObject());
+        var usage = LlmProvider.parseUsageBlock(JsonParser.parseString("{}").getAsJsonObject());
         assertEquals(0, usage.promptTokens());
         assertEquals(0, usage.completionTokens());
         assertEquals(0, usage.totalTokens());
@@ -149,7 +149,7 @@ public class LlmClientTest extends UnitTest {
 
     @Test
     public void streamAccumulatorStartsEmpty() {
-        var acc = new OpenAiCompatibleClient.StreamAccumulator();
+        var acc = new LlmProvider.StreamAccumulator();
         assertFalse(acc.complete);
         assertEquals("", acc.content);
         assertTrue(acc.toolCalls.isEmpty());
@@ -158,10 +158,10 @@ public class LlmClientTest extends UnitTest {
 
     @Test
     public void llmExceptionPreservesMessage() {
-        var ex = new OpenAiCompatibleClient.LlmException("Provider down");
+        var ex = new LlmProvider.LlmException("Provider down");
         assertEquals("Provider down", ex.getMessage());
 
-        var caused = new OpenAiCompatibleClient.LlmException("Retry failed", new RuntimeException("network"));
+        var caused = new LlmProvider.LlmException("Retry failed", new RuntimeException("network"));
         assertEquals("Retry failed", caused.getMessage());
         assertNotNull(caused.getCause());
     }

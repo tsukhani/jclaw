@@ -479,6 +479,63 @@ public abstract class LlmProvider {
         throw new LlmException("All retries exhausted for " + config.name(), lastException);
     }
 
+    // ─── Static usage parser (for tests and non-subclass callers) ────────
+
+    /**
+     * Parse an OpenAI-compatible {@code usage} JSON object into a {@link Usage}
+     * record. Handles all known provider shapes:
+     * <ul>
+     *   <li>OpenAI: {@code prompt_tokens_details.cached_tokens},
+     *       {@code completion_tokens_details.reasoning_tokens}</li>
+     *   <li>Anthropic/OpenRouter: {@code cache_creation_input_tokens} (top-level),
+     *       {@code prompt_tokens_details.cache_creation_tokens} (nested fallback)</li>
+     * </ul>
+     * <p>This is a <em>static</em> convenience method that uses the base-class
+     * extraction logic. Subclass-specific overrides (e.g. OpenRouterProvider's
+     * reasoning extraction from a different JSON path) go through the instance
+     * {@code extract*} methods called by {@link #deserializeResponse} instead.
+     */
+    public static Usage parseUsageBlock(JsonObject usageObj) {
+        int reasoningTokens = 0;
+        if (usageObj.has("reasoning_tokens") && !usageObj.get("reasoning_tokens").isJsonNull()) {
+            reasoningTokens = usageObj.get("reasoning_tokens").getAsInt();
+        }
+        if (reasoningTokens == 0 && usageObj.has("completion_tokens_details")
+                && !usageObj.get("completion_tokens_details").isJsonNull()) {
+            var details = usageObj.getAsJsonObject("completion_tokens_details");
+            if (details.has("reasoning_tokens") && !details.get("reasoning_tokens").isJsonNull()) {
+                reasoningTokens = details.get("reasoning_tokens").getAsInt();
+            }
+        }
+
+        int cachedTokens = 0;
+        if (usageObj.has("prompt_tokens_details")
+                && !usageObj.get("prompt_tokens_details").isJsonNull()) {
+            var details = usageObj.getAsJsonObject("prompt_tokens_details");
+            if (details.has("cached_tokens") && !details.get("cached_tokens").isJsonNull()) {
+                cachedTokens = details.get("cached_tokens").getAsInt();
+            }
+        }
+
+        int cacheCreationTokens = 0;
+        if (usageObj.has("cache_creation_input_tokens")
+                && !usageObj.get("cache_creation_input_tokens").isJsonNull()) {
+            cacheCreationTokens = usageObj.get("cache_creation_input_tokens").getAsInt();
+        } else if (usageObj.has("prompt_tokens_details")
+                && !usageObj.get("prompt_tokens_details").isJsonNull()) {
+            var details = usageObj.getAsJsonObject("prompt_tokens_details");
+            if (details.has("cache_creation_tokens") && !details.get("cache_creation_tokens").isJsonNull()) {
+                cacheCreationTokens = details.get("cache_creation_tokens").getAsInt();
+            }
+        }
+
+        return new Usage(
+                usageObj.has("prompt_tokens") ? usageObj.get("prompt_tokens").getAsInt() : 0,
+                usageObj.has("completion_tokens") ? usageObj.get("completion_tokens").getAsInt() : 0,
+                usageObj.has("total_tokens") ? usageObj.get("total_tokens").getAsInt() : 0,
+                reasoningTokens, cachedTokens, cacheCreationTokens);
+    }
+
     // ─── Shared helper classes ───────────────────────────────────────────
 
     public static class StreamAccumulator {
