@@ -19,21 +19,23 @@ public class ConfigService {
     private static final ConcurrentHashMap<String, CachedValue> cache = new ConcurrentHashMap<>();
 
     public static String get(String key) {
+        // Fast path: read without any lock.
         var cached = cache.get(key);
         if (cached != null && !cached.isExpired()) {
             return cached.value();
         }
-        // Use compute() to restrict to one DB call per key per TTL window.
-        // Without this, N concurrent virtual threads all see isExpired()=true
-        // and each independently call Config.findByKey — a cache stampede that
-        // multiplies DB reads by the concurrency level on every 60-second expiry.
-        var entry = cache.compute(key, (k, existing) -> {
-            // Re-check inside the lock: another thread may have refreshed while we waited.
-            if (existing != null && !existing.isExpired()) return existing;
-            var config = Tx.run(() -> Config.findByKey(k));
-            var value = config != null ? config.value : null;
-            return new CachedValue(value, System.currentTimeMillis() + CACHE_TTL_MS);
-        });
+        // Slow path: do the DB call outside any CHM lock to avoid holding a
+        // per-bucket lock during I/O (which serializes unrelated keys in the
+        // same bucket and can cascade into thread starvation under load).
+        // Two threads may both execute the query for the same key — that is
+        // acceptable (idempotent read) and far cheaper than the contention.
+        var config = Tx.run(() -> Config.findByKey(key));
+        var value = config != null ? config.value : null;
+        var fresh = new CachedValue(value, System.currentTimeMillis() + CACHE_TTL_MS);
+        // Install only if no other thread refreshed with a newer value while
+        // we were querying. merge() holds the bucket lock briefly (no I/O).
+        var entry = cache.merge(key, fresh, (existing, candidate) ->
+                existing.isExpired() ? candidate : existing);
         return entry.value();
     }
 

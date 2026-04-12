@@ -7,7 +7,6 @@ import models.Agent;
 import models.Conversation;
 import models.Message;
 
-import java.util.Collections;
 import java.util.List;
 
 public class ConversationService {
@@ -73,11 +72,9 @@ public class ConversationService {
     public static List<Message> loadRecentMessages(Conversation conversation) {
         var maxMessages = Integer.parseInt(
                 ConfigService.get("chat.maxContextMessages", "50"));
-        // findRecent returns DESC order, we need ASC for the LLM
-        var messages = Message.findRecent(conversation, maxMessages);
-        var reversed = new java.util.ArrayList<>(messages);
-        Collections.reverse(reversed);
-        return reversed;
+        // findRecent returns DESC order; reversed() returns a read-only ASC view
+        // without copying — uses JDK 21 SequencedCollection.
+        return Message.findRecent(conversation, maxMessages).reversed();
     }
 
     public static Conversation findById(Long id) {

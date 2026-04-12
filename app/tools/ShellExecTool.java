@@ -224,7 +224,6 @@ public class ShellExecTool implements ToolRegistry.Tool {
             // on a virtual thread is free (no platform thread consumed during
             // the block) and returns naturally when the process writes or exits.
             var is = process.getInputStream();
-            var buf = new byte[8192];
             var out = new StringBuilder();
             int totalRead = 0;
             boolean truncated = false;
@@ -246,20 +245,23 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 } catch (InterruptedException _) {}
             });
 
-            // Blocking read loop — is.read() blocks until data arrives or the
-            // stream is closed (process exit, watchdog kill, or normal EOF).
+            // Blocking read loop — wrap in InputStreamReader with explicit UTF-8
+            // so multi-byte characters split across read() boundaries are decoded
+            // correctly (raw new String(byte[]) corrupts partial sequences).
+            var reader = new java.io.InputStreamReader(is, java.nio.charset.StandardCharsets.UTF_8);
+            var cbuf = new char[4096];
             int n;
-            while ((n = is.read(buf)) != -1) {
+            while ((n = reader.read(cbuf)) != -1) {
                 totalRead += n;
                 if (!truncated) {
                     int remaining = maxOutputBytes - out.length();
                     if (remaining <= 0) {
                         truncated = true;
                     } else if (n > remaining) {
-                        out.append(new String(buf, 0, remaining));
+                        out.append(cbuf, 0, remaining);
                         truncated = true;
                     } else {
-                        out.append(new String(buf, 0, n));
+                        out.append(cbuf, 0, n);
                     }
                 }
 

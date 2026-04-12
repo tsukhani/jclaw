@@ -53,5 +53,17 @@ export function useEventBus() {
     handlers.get(type)?.delete(handler)
   }
 
-  return { on, off }
+  /**
+   * Register a handler that is automatically removed when the calling
+   * component unmounts. Prevents handler accumulation on page navigation
+   * (e.g., visiting Skills 3 times no longer fires the handler 3 times).
+   */
+  function onEvent(type: string, handler: EventHandler) {
+    on(type, handler)
+    if (getCurrentInstance()) {
+      onUnmounted(() => off(type, handler))
+    }
+  }
+
+  return { on, off, onEvent }
 }

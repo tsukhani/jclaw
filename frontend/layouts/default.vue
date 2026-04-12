@@ -23,25 +23,28 @@ async function checkStatus() {
   }
 }
 
+let statusInterval: ReturnType<typeof setInterval>
+
+function handleKeydown(e: KeyboardEvent) {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault()
+    searchInput.value?.focus()
+  }
+  if (e.key === 'Escape' && document.activeElement === searchInput.value) {
+    searchInput.value?.blur()
+  }
+}
+
 onMounted(() => {
   checkStatus()
-  setInterval(checkStatus, 30_000)
-})
-
-onMounted(() => {
+  statusInterval = setInterval(checkStatus, 30_000)
   isMac.value = navigator.platform.includes('Mac') || navigator.userAgent.includes('Mac')
+  document.addEventListener('keydown', handleKeydown)
 })
 
-onMounted(() => {
-  document.addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-      e.preventDefault()
-      searchInput.value?.focus()
-    }
-    if (e.key === 'Escape' && document.activeElement === searchInput.value) {
-      searchInput.value?.blur()
-    }
-  })
+onUnmounted(() => {
+  clearInterval(statusInterval)
+  document.removeEventListener('keydown', handleKeydown)
 })
 
 const route = useRoute()

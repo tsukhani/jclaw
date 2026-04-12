@@ -103,11 +103,19 @@ public class ApiConversationsController extends Controller {
     /**
      * GET /api/conversations/{id}/messages
      */
-    public static void getMessages(Long id) {
+    public static void getMessages(Long id, Integer limit, Integer offset) {
         Conversation conversation = Conversation.findById(id);
         if (conversation == null) notFound();
 
-        List<Message> messages = Message.find("conversation = ?1 ORDER BY createdAt ASC", conversation).fetch();
+        int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
+        int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
+
+        long total = Message.count("conversation = ?1", conversation);
+        var query = Message.find("conversation = ?1 ORDER BY createdAt ASC", conversation);
+        List<Message> messages = query.from(effectiveOffset).fetch(effectiveLimit);
+
+        response.setHeader("X-Total-Count", String.valueOf(total));
+        response.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
 
         var result = messages.stream().map(m -> {
             var map = new HashMap<String, Object>();

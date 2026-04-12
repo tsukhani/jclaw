@@ -56,22 +56,22 @@ function showInfo(msg: string) {
 const promotingSkills = useState<Set<string>>('promotingSkills', () => new Set())
 
 // Listen for promotion completion via SSE
-const { on } = useEventBus()
-on('skill.promoted', (data: any) => {
+const { onEvent } = useEventBus()
+onEvent('skill.promoted', (data: any) => {
   refreshSkills()
   loadAllAgentSkills()
   const s = new Set(promotingSkills.value)
   s.delete(data.skillName)
   promotingSkills.value = s
 })
-on('skill.promote_failed', (data: any) => {
+onEvent('skill.promote_failed', (data: any) => {
   console.error('Skill promotion failed:', data.skillName, data.error)
   showDragError(data.error || `Failed to promote '${data.skillName}'`)
   const s = new Set(promotingSkills.value)
   s.delete(data.skillName)
   promotingSkills.value = s
 })
-on('skill.promote_noop', (data: any) => {
+onEvent('skill.promote_noop', (data: any) => {
   showInfo(data.reason || `Nothing to promote for '${data.skillName}'`)
   const s = new Set(promotingSkills.value)
   s.delete(data.skillName)

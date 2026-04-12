@@ -78,17 +78,14 @@ public class JpaMemoryStore implements MemoryStore {
 
     @Override
     public int deleteAll(String agentId) {
-        // Iterate + per-entity delete rather than bulk HQL: when called from
-        // AgentService.delete(), the Hibernate session may still hold Memory
-        // entities cached from earlier in the request, and a bulk HQL delete
-        // would leave those cached entries pointing at rows that no longer
-        // exist, tripping a TransientPropertyValueException on the next flush.
-        // Per-agent row counts are small enough that the extra round-trips
-        // don't matter. See the FK cascade fix in AgentService for the same
-        // pattern and rationale.
-        List<Memory> rows = Memory.findByAgent(agentId, Integer.MAX_VALUE);
-        for (Memory m : rows) m.delete();
-        return rows.size();
+        // Bulk JPQL delete. The caller (AgentService.delete) calls em.clear()
+        // before invoking us, so there are no stale Memory entities in the
+        // Hibernate session that could conflict. We intentionally do NOT call
+        // em.clear() here — the caller may still hold re-fetched entities
+        // (e.g. the Agent itself) that must remain attached for subsequent ops.
+        return JPA.em().createQuery("DELETE FROM Memory m WHERE m.agentId = :agentId")
+                .setParameter("agentId", agentId)
+                .executeUpdate();
     }
 
     // --- Search strategies ---
