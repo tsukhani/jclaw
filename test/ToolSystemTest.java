@@ -303,6 +303,54 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
+    public void documentsAppendBuildsDraft() {
+        ToolRegistry.register(new tools.DocumentsTool());
+        ToolRegistry.publish();
+        var r1 = ToolRegistry.execute("documents",
+                """
+                {"action": "appendDocument", "path": "play.md", "content": "# Act 1\\n"}
+                """, agent);
+        assertTrue(r1.contains("Draft created"), "expected creation: " + r1);
+        var r2 = ToolRegistry.execute("documents",
+                """
+                {"action": "appendDocument", "path": "play.md", "content": "# Act 2\\n"}
+                """, agent);
+        assertTrue(r2.contains("Appended"), "expected append: " + r2);
+        // Now render the accumulated draft
+        var r3 = ToolRegistry.execute("documents",
+                """
+                {"action": "renderDocument", "sourcePath": "play.md", "path": "play.html"}
+                """, agent);
+        assertTrue(r3.contains("Document written"), "expected render success: " + r3);
+    }
+
+    @Test
+    public void documentsAppendRejectsBinaryExtension() {
+        ToolRegistry.register(new tools.DocumentsTool());
+        ToolRegistry.publish();
+        var result = ToolRegistry.execute("documents",
+                """
+                {"action": "appendDocument", "path": "Shiva Play.docx", "content": "text"}
+                """, agent);
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains(".md"), "error should suggest a .md draft path");
+        assertTrue(result.contains("renderDocument"));
+    }
+
+    @Test
+    public void documentsAppendFileAliasWorks() {
+        // The LLM sent "appendFile" to the documents tool in the real failure.
+        // Verify the alias routes to the same appendDocument handler.
+        ToolRegistry.register(new tools.DocumentsTool());
+        ToolRegistry.publish();
+        var result = ToolRegistry.execute("documents",
+                """
+                {"action": "appendFile", "path": "notes.md", "content": "hello"}
+                """, agent);
+        assertTrue(result.contains("Draft created"), "appendFile alias should work: " + result);
+    }
+
+    @Test
     public void documentsRenderMissingSourcePath() {
         ToolRegistry.register(new tools.DocumentsTool());
         ToolRegistry.publish();

@@ -43,7 +43,8 @@ public class DocumentsTool implements ToolRegistry.Tool {
                 Read and write rich document formats. \
                 readDocument extracts text from PDF, DOCX, DOC, XLSX, PPTX, RTF, ODT, HTML, EPUB and more via Apache Tika. \
                 writeDocument authors HTML, PDF, or DOCX from markdown input (markdown is the expected 'content' format). \
-                renderDocument reads an existing markdown file from the workspace (via 'sourcePath') and renders it to HTML, PDF, or DOCX — use this for large documents: draft the markdown in chunks via filesystem.writeFile + filesystem.appendFile (as many calls as needed), then render once with this action. This avoids hitting your output token budget on a single giant writeDocument call. \
+                appendDocument appends markdown to a draft file in the workspace — use this for large documents that would exceed your output token budget in a single writeDocument call. Call appendDocument repeatedly with the SAME path (use a .md extension, NOT .docx/.pdf — appending text to a binary format is not supported), then call renderDocument to convert the accumulated draft to the target format. \
+                renderDocument reads an existing markdown file from the workspace (via 'sourcePath') and renders it to HTML, PDF, or DOCX. \
                 Supports headings, paragraphs, bold/italic/strikethrough, inline and fenced code, bullet and ordered lists, block quotes, tables, and horizontal rules. \
                 All paths are relative to the agent's workspace. \
                 If the target path already exists, writeDocument and renderDocument pick a non-conflicting name by appending " (1)", " (2)", … before the extension — the actual written path is reported in the response so you can reference the correct filename in your reply to the user. \
@@ -56,14 +57,14 @@ public class DocumentsTool implements ToolRegistry.Tool {
                 "type", "object",
                 "properties", Map.of(
                         "action", Map.of("type", "string",
-                                "enum", List.of("readDocument", "writeDocument", "renderDocument"),
+                                "enum", List.of("readDocument", "writeDocument", "appendDocument", "renderDocument"),
                                 "description", "The document operation to perform"),
                         "path", Map.of("type", "string",
                                 "description", "File path relative to the agent workspace (target for writeDocument/renderDocument, source for readDocument)"),
                         "sourcePath", Map.of("type", "string",
                                 "description", "For renderDocument only: workspace-relative path to an existing markdown file whose contents should be rendered to 'path'."),
                         "content", Map.of("type", "string",
-                                "description", "Markdown content to render (writeDocument only)"),
+                                "description", "Markdown content (for writeDocument and appendDocument)"),
                         "format", Map.of("type", "string",
                                 "enum", WRITE_FORMATS,
                                 "description", "Output format for writeDocument/renderDocument: html, pdf, or docx. If omitted, inferred from the target path extension.")
@@ -87,6 +88,11 @@ public class DocumentsTool implements ToolRegistry.Tool {
 
         return switch (action) {
             case "readDocument" -> readDocument(target);
+            case "appendDocument", "appendFile" -> {
+                var content = args.has("content") && !args.get("content").isJsonNull()
+                        ? args.get("content").getAsString() : "";
+                yield appendDocument(target, relativePath, content);
+            }
             case "writeDocument" -> {
                 var content = args.has("content") && !args.get("content").isJsonNull()
                         ? args.get("content").getAsString() : "";
@@ -166,6 +172,43 @@ public class DocumentsTool implements ToolRegistry.Tool {
             return "Error writing document: %s".formatted(e.getMessage());
         } catch (RuntimeException e) {
             return "Error rendering document: %s".formatted(e.getMessage());
+        }
+    }
+
+    private static final List<String> BINARY_EXTENSIONS = List.of("docx", "pdf", "xlsx", "pptx");
+
+    private String appendDocument(Path target, String relativePath, String content) {
+        if (content == null || content.isEmpty()) {
+            return "Error: appendDocument requires 'content' (markdown to append).";
+        }
+        // Reject binary-format targets. The LLM sometimes tries to append text
+        // directly to a .docx/.pdf path — that produces a corrupt binary. Point
+        // it at a .md draft file instead.
+        int dot = relativePath.lastIndexOf('.');
+        if (dot >= 0) {
+            var ext = relativePath.substring(dot + 1).toLowerCase(Locale.ROOT);
+            if (BINARY_EXTENSIONS.contains(ext)) {
+                var stem = relativePath.substring(0, dot);
+                return ("Error: Cannot append text to a binary format (.%s). "
+                        + "Use a .md draft file instead: appendDocument(path=\"%s.md\", content=...), "
+                        + "then renderDocument(sourcePath=\"%s.md\", path=\"%s\") to produce the final .%s.")
+                        .formatted(ext, stem, stem, relativePath, ext);
+            }
+        }
+        try {
+            Files.createDirectories(target.getParent());
+            if (Files.exists(target)) {
+                Files.writeString(target, content,
+                        java.nio.file.StandardOpenOption.APPEND);
+                long size = Files.size(target);
+                return "Appended %d chars to %s (total %d bytes). Call renderDocument when all chunks are added."
+                        .formatted(content.length(), relativePath, size);
+            }
+            Files.writeString(target, content);
+            return "Draft created: %s (%d chars). Use appendDocument for more chunks, then renderDocument to produce the final document."
+                    .formatted(relativePath, content.length());
+        } catch (IOException e) {
+            return "Error appending to draft: %s".formatted(e.getMessage());
         }
     }
 
