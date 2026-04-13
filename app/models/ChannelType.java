@@ -1,5 +1,10 @@
 package models;
 
+import channels.Channel;
+import channels.SlackChannel;
+import channels.TelegramChannel;
+import channels.WhatsAppChannel;
+
 /**
  * Enum for the {@code channel_type} column on {@link Conversation}. Values are
  * stored as lowercase strings in the database so JPA {@code @Enumerated} is
@@ -17,6 +22,20 @@ public enum ChannelType {
 
     ChannelType(String value) {
         this.value = value;
+    }
+
+    /**
+     * Return a {@link Channel} implementation for this type, or {@code null}
+     * for types that don't support outbound push (e.g. WEB — responses are
+     * DB-persisted and fetched by the frontend on refresh).
+     */
+    public Channel resolve() {
+        return switch (this) {
+            case TELEGRAM -> new TelegramChannel();
+            case SLACK -> new SlackChannel();
+            case WHATSAPP -> new WhatsAppChannel();
+            case WEB -> null;
+        };
     }
 
     /**

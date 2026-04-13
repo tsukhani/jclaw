@@ -13,24 +13,24 @@ public class ToolRegistrationJob extends Job<Void> {
         registerAll();
     }
 
-    /** Re-run tool registration. Safe to call at runtime — the volatile map swap in publish() is atomic for readers. */
+    /** Re-run tool registration. Thread-safe: builds a local list and publishes atomically. */
     public static void registerAll() {
-        ToolRegistry.clear();
-        ToolRegistry.register(new TaskTool());
-        ToolRegistry.register(new DateTimeTool());
-        ToolRegistry.register(new CheckListTool());
-        ToolRegistry.register(new FileSystemTools());
-        ToolRegistry.register(new DocumentsTool());
-        ToolRegistry.register(new WebFetchTool());
-        ToolRegistry.register(new WebSearchTool());
-        ToolRegistry.register(new SkillsTool());
+        var toolList = new java.util.ArrayList<ToolRegistry.Tool>();
+        toolList.add(new TaskTool());
+        toolList.add(new DateTimeTool());
+        toolList.add(new CheckListTool());
+        toolList.add(new FileSystemTools());
+        toolList.add(new DocumentsTool());
+        toolList.add(new WebFetchTool());
+        toolList.add(new WebSearchTool());
+        toolList.add(new SkillsTool());
         if ("true".equals(services.ConfigService.get("playwright.enabled"))) {
-            ToolRegistry.register(new PlaywrightBrowserTool());
+            toolList.add(new PlaywrightBrowserTool());
         }
         if ("true".equals(services.ConfigService.get("shell.enabled"))) {
-            ToolRegistry.register(new ShellExecTool());
+            toolList.add(new ShellExecTool());
         }
-        ToolRegistry.publish();
+        ToolRegistry.publish(toolList);
         services.EventLogger.info("system", "Registered %d tools".formatted(ToolRegistry.listTools().size()));
     }
 }

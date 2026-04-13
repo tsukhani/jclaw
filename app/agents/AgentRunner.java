@@ -13,9 +13,12 @@ import services.EventLogger;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.regex.Pattern;
 
 /**
  * Core agent pipeline: receive message → load conversation → assemble prompt →
@@ -25,10 +28,10 @@ public class AgentRunner {
 
     private static final Gson gson = new Gson();
     private static final int DEFAULT_MAX_TOOL_ROUNDS = 10;
-    private static final java.util.regex.Pattern IMAGE_URL_PATTERN =
-            java.util.regex.Pattern.compile("!\\[([^\\]]*)\\]\\((/api/[^)]+)\\)");
-    private static final java.util.regex.Pattern PAREN_URL_PATTERN =
-            java.util.regex.Pattern.compile("\\(([^)]+)\\)");
+    private static final Pattern IMAGE_URL_PATTERN =
+            Pattern.compile("!\\[([^\\]]*)\\]\\((/api/[^)]+)\\)");
+    private static final Pattern PAREN_URL_PATTERN =
+            Pattern.compile("\\(([^)]+)\\)");
 
     private static int maxToolRounds() {
         return services.ConfigService.getInt("chat.maxToolRounds", DEFAULT_MAX_TOOL_ROUNDS);
@@ -688,7 +691,7 @@ public class AgentRunner {
                 // Image data is base64 and doesn't meaningfully correspond to
                 // chars/4 token estimation — providers count image tokens separately.
                 for (var part : parts) {
-                    if (part instanceof java.util.Map<?,?> m) {
+                    if (part instanceof Map<?,?> m) {
                         var text = m.get("text");
                         if (text instanceof String t) chars += t.length();
                     }
@@ -752,7 +755,7 @@ public class AgentRunner {
      * @param sendNoRoute  callback when no agent is routed (receives peerId); may be null to silently drop
      */
     public static void processWebhookMessage(String channelType, String peerId, String text,
-                                              java.util.function.BiConsumer<String, String> sendResponse,
+                                              BiConsumer<String, String> sendResponse,
                                               Consumer<String> sendNoRoute) {
         var route = services.Tx.run(() -> AgentRouter.resolve(channelType, peerId));
         if (route == null) {
@@ -775,14 +778,11 @@ public class AgentRunner {
     private static void dispatchToChannel(String channelType, String peerId, String text) {
         if (peerId == null || text == null) return;
         try {
-            var channel = ChannelType.fromValue(channelType);
+            var type = ChannelType.fromValue(channelType);
+            if (type == null) return;
+            var channel = type.resolve();
             if (channel != null) {
-                switch (channel) {
-                    case TELEGRAM -> channels.TelegramChannel.sendMessage(peerId, text);
-                    case SLACK -> channels.SlackChannel.sendMessage(peerId, text);
-                    case WHATSAPP -> channels.WhatsAppChannel.sendMessage(peerId, text);
-                    case WEB -> {} // response is DB-persisted, no push needed
-                }
+                channel.sendWithRetry(peerId, text);
             }
         } catch (Exception e) {
             EventLogger.error("channel", null, channelType,

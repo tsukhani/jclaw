@@ -20,7 +20,7 @@ import java.util.Map;
 /**
  * Slack Web API + Events API client via raw HTTP.
  */
-public class SlackChannel {
+public class SlackChannel implements Channel {
 
     private static final Gson gson = new Gson();
     private static final long MAX_TIMESTAMP_AGE_SECONDS = 300; // 5 minutes
@@ -37,55 +37,53 @@ public class SlackChannel {
         }
     }
 
+    @Override
+    public String channelName() { return "slack"; }
+
     public static boolean sendMessage(String channelId, String text) {
         var config = SlackConfig.load();
         if (config == null) {
             EventLogger.error("channel", null, "slack", "Slack not configured");
             return false;
         }
-        return sendMessage(config, channelId, text);
+        return new SlackChannel().sendWithRetry(channelId, text);
     }
 
-    public static boolean sendMessage(SlackConfig config, String channelId, String text) {
+    @Override
+    public boolean trySend(String peerId, String text) {
+        var config = SlackConfig.load();
+        if (config == null) return false;
+        return trySend(config, peerId, text);
+    }
+
+    private boolean trySend(SlackConfig config, String channelId, String text) {
         var body = gson.toJson(Map.of("channel", channelId, "text", text));
+        try {
+            var request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://slack.com/api/chat.postMessage"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + config.botToken())
+                    .timeout(Duration.ofSeconds(15))
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
 
-        for (int attempt = 0; attempt < 2; attempt++) {
-            try {
-                var request = HttpRequest.newBuilder()
-                        .uri(URI.create("https://slack.com/api/chat.postMessage"))
-                        .header("Content-Type", "application/json")
-                        .header("Authorization", "Bearer " + config.botToken())
-                        .timeout(Duration.ofSeconds(15))
-                        .POST(HttpRequest.BodyPublishers.ofString(body))
-                        .build();
+            var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
+            var result = JsonParser.parseString(response.body()).getAsJsonObject();
 
-                var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
-                var result = JsonParser.parseString(response.body()).getAsJsonObject();
-
-                if (result.get("ok").getAsBoolean()) {
-                    EventLogger.info("channel", null, "slack",
-                            "Message sent to channel %s".formatted(channelId));
-                    return true;
-                }
-
-                EventLogger.warn("channel", null, "slack",
-                        "Slack API error: %s".formatted(result.has("error") ? result.get("error").getAsString() : response.body()));
-
-            } catch (Exception e) {
-                EventLogger.warn("channel", null, "slack",
-                        "Send attempt %d failed: %s".formatted(attempt + 1, e.getMessage()));
-                if (attempt == 0) {
-                    try { Thread.sleep(1000); } catch (InterruptedException _) {
-                        Thread.currentThread().interrupt();
-                        return false;
-                    }
-                }
+            if (result.get("ok").getAsBoolean()) {
+                EventLogger.info("channel", null, "slack",
+                        "Message sent to channel %s".formatted(channelId));
+                return true;
             }
-        }
 
-        EventLogger.error("channel", null, "slack",
-                "Failed to send message to channel %s after retries".formatted(channelId));
-        return false;
+            EventLogger.warn("channel", null, "slack",
+                    "Slack API error: %s".formatted(result.has("error") ? result.get("error").getAsString() : response.body()));
+            return false;
+        } catch (Exception e) {
+            EventLogger.warn("channel", null, "slack",
+                    "Send failed: %s".formatted(e.getMessage()));
+            return false;
+        }
     }
 
     // --- HMAC-SHA256 signature verification ---

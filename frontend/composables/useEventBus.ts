@@ -7,7 +7,7 @@
  *   on('skill.promoted', (data) => { ... })
  */
 
-type EventHandler = (data: any) => void
+type EventHandler = (data: unknown) => void
 
 const handlers = new Map<string, Set<EventHandler>>()
 let eventSource: EventSource | null = null
@@ -15,6 +15,12 @@ let connected = false
 
 function connect() {
   if (connected || typeof window === 'undefined') return
+
+  // Guard: don't open SSE connection if not authenticated (prevents
+  // infinite 5s reconnect loop when the backend returns 401/403).
+  const auth = useState<boolean>('auth:authenticated')
+  if (!auth.value) return
+
   connected = true
 
   eventSource = new EventSource('/api/events')

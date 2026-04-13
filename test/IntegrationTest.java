@@ -24,7 +24,6 @@ public class IntegrationTest extends UnitTest {
         Fixtures.deleteDatabase();
         cleanupTestAgents();
         ConfigService.clearCache();
-        ToolRegistry.clear();
         new jobs.ToolRegistrationJob().doJob();
     }
 

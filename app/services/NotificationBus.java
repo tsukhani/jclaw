@@ -29,14 +29,15 @@ public class NotificationBus {
     public static void publish(String type, Map<String, Object> data) {
         var event = gson.toJson(Map.of("type", type, "data", data));
         var ssePayload = "data: %s\n\n".formatted(event);
+        var failed = new java.util.ArrayList<Consumer<String>>();
         for (var listener : listeners) {
             try {
                 listener.accept(ssePayload);
             } catch (Exception _) {
-                // Listener disconnected — will be cleaned up on next write failure
-                listeners.remove(listener);
+                failed.add(listener);
             }
         }
+        if (!failed.isEmpty()) listeners.removeAll(failed);
     }
 
     /** Convenience: publish a simple event with a message. */

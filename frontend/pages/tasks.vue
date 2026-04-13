@@ -11,14 +11,15 @@ const url = computed(() => {
 })
 
 const { data: tasks, refresh } = await useFetch<any[]>(url)
+const { mutate } = useApiMutation()
 
 async function cancelTask(id: number) {
-  await $fetch(`/api/tasks/${id}/cancel`, { method: 'POST' })
+  await mutate(`/api/tasks/${id}/cancel`, { method: 'POST' })
   refresh()
 }
 
 async function retryTask(id: number) {
-  await $fetch(`/api/tasks/${id}/retry`, { method: 'POST' })
+  await mutate(`/api/tasks/${id}/retry`, { method: 'POST' })
   refresh()
 }
 

@@ -16,7 +16,7 @@ import java.util.Map;
 /**
  * Telegram Bot API client. Sends messages via HTTP POST and registers webhooks.
  */
-public class TelegramChannel {
+public class TelegramChannel implements Channel {
 
     private static final Gson gson = new Gson();
     private static final String API_BASE = "https://api.telegram.org/bot";
@@ -34,55 +34,49 @@ public class TelegramChannel {
         }
     }
 
+    @Override
+    public String channelName() { return "telegram"; }
+
     public static boolean sendMessage(String chatId, String text) {
         var config = TelegramConfig.load();
         if (config == null) {
             EventLogger.error("channel", null, "telegram", "Telegram not configured");
             return false;
         }
-        return sendMessage(config, chatId, text);
+        return new TelegramChannel().sendWithRetry(chatId, text);
     }
 
-    public static boolean sendMessage(TelegramConfig config, String chatId, String text) {
+    @Override
+    public boolean trySend(String peerId, String text) {
+        var config = TelegramConfig.load();
+        if (config == null) return false;
         var url = API_BASE + config.botToken() + "/sendMessage";
-        var body = gson.toJson(Map.of("chat_id", chatId, "text", text, "parse_mode", "Markdown"));
+        var body = gson.toJson(Map.of("chat_id", peerId, "text", text, "parse_mode", "Markdown"));
+        try {
+            var request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(15))
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
 
-        for (int attempt = 0; attempt < 2; attempt++) {
-            try {
-                var request = HttpRequest.newBuilder()
-                        .uri(URI.create(url))
-                        .header("Content-Type", "application/json")
-                        .timeout(Duration.ofSeconds(15))
-                        .POST(HttpRequest.BodyPublishers.ofString(body))
-                        .build();
+            var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
+            var result = JsonParser.parseString(response.body()).getAsJsonObject();
 
-                var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
-                var result = JsonParser.parseString(response.body()).getAsJsonObject();
-
-                if (result.get("ok").getAsBoolean()) {
-                    EventLogger.info("channel", null, "telegram",
-                            "Message sent to chat %s".formatted(chatId));
-                    return true;
-                }
-
-                EventLogger.warn("channel", null, "telegram",
-                        "Telegram API error: %s".formatted(response.body()));
-
-            } catch (Exception e) {
-                EventLogger.warn("channel", null, "telegram",
-                        "Send attempt %d failed: %s".formatted(attempt + 1, e.getMessage()));
-                if (attempt == 0) {
-                    try { Thread.sleep(1000); } catch (InterruptedException _) {
-                        Thread.currentThread().interrupt();
-                        return false;
-                    }
-                }
+            if (result.get("ok").getAsBoolean()) {
+                EventLogger.info("channel", null, "telegram",
+                        "Message sent to chat %s".formatted(peerId));
+                return true;
             }
-        }
 
-        EventLogger.error("channel", null, "telegram",
-                "Failed to send message to chat %s after retries".formatted(chatId));
-        return false;
+            EventLogger.warn("channel", null, "telegram",
+                    "Telegram API error: %s".formatted(response.body()));
+            return false;
+        } catch (Exception e) {
+            EventLogger.warn("channel", null, "telegram",
+                    "Send failed: %s".formatted(e.getMessage()));
+            return false;
+        }
     }
 
     public static boolean setWebhook(TelegramConfig config) {

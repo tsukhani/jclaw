@@ -33,7 +33,7 @@ public class ProviderRegistry {
     private static volatile long lastRefresh = 0;
     private static final long REFRESH_INTERVAL_MS = 60_000;
     private static final Object refreshLock = new Object();
-    private static volatile boolean refreshing = false;
+    private static final java.util.concurrent.atomic.AtomicBoolean refreshing = new java.util.concurrent.atomic.AtomicBoolean(false);
 
     public static LlmProvider get(String name) {
         refreshIfNeeded();
@@ -56,19 +56,19 @@ public class ProviderRegistry {
     }
 
     private static void refreshIfNeeded() {
-        if (System.currentTimeMillis() - lastRefresh > REFRESH_INTERVAL_MS && !refreshing) {
+        if (System.currentTimeMillis() - lastRefresh > REFRESH_INTERVAL_MS) {
             refresh();
         }
     }
 
     public static void refresh() {
-        // Optimistically mark as refreshing to prevent thundering herd —
-        // concurrent callers see the flag and skip, using the stale cache.
-        refreshing = true;
+        // Atomic compare-and-set prevents thundering herd — only one thread
+        // enters refreshInner(), concurrent callers skip and use the stale cache.
+        if (!refreshing.compareAndSet(false, true)) return;
         try {
             refreshInner();
         } finally {
-            refreshing = false;
+            refreshing.set(false);
         }
     }
 

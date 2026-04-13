@@ -7,13 +7,19 @@ const channelTypes = [
   { type: 'whatsapp', label: 'WhatsApp', fields: ['phoneNumberId', 'accessToken', 'appSecret', 'verifyToken'] },
 ]
 
+interface ChannelInfo {
+  channelType: string
+  enabled: boolean
+  config: Record<string, string>
+}
+
 const editing = ref<string | null>(null)
 const form = ref<Record<string, string>>({})
 const enabled = ref(false)
-const saving = ref(false)
+const { mutate, loading: saving } = useApiMutation()
 
 function editChannel(type: string) {
-  const existing = channels.value?.find((c: any) => c.channelType === type)
+  const existing = channels.value?.find((c: ChannelInfo) => c.channelType === type)
   if (existing) {
     form.value = { ...existing.config }
     enabled.value = existing.enabled
@@ -26,23 +32,18 @@ function editChannel(type: string) {
 
 async function saveChannel() {
   if (!editing.value) return
-  saving.value = true
-  try {
-    await $fetch(`/api/channels/${editing.value}`, {
-      method: 'PUT',
-      body: { config: form.value, enabled: enabled.value }
-    })
+  const result = await mutate(`/api/channels/${editing.value}`, {
+    method: 'PUT',
+    body: { config: form.value, enabled: enabled.value }
+  })
+  if (result !== null) {
     editing.value = null
     refresh()
-  } catch (e) {
-    console.error('Failed to save channel:', e)
-  } finally {
-    saving.value = false
   }
 }
 
 function getChannelStatus(type: string) {
-  const ch = channels.value?.find((c: any) => c.channelType === type)
+  const ch = channels.value?.find((c: ChannelInfo) => c.channelType === type)
   return ch?.enabled ? 'active' : 'inactive'
 }
 </script>

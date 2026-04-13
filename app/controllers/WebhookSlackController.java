@@ -75,8 +75,8 @@ public class WebhookSlackController extends Controller {
                                         SlackChannel.InboundMessage message) {
         try {
             AgentRunner.processWebhookMessage("slack", message.channelId(), message.text(),
-                    (peerId, response) -> SlackChannel.sendMessage(config, peerId, response),
-                    peerId -> SlackChannel.sendMessage(config, peerId, "No agent configured for this channel."));
+                    (peerId, response) -> SlackChannel.sendMessage(peerId, response),
+                    peerId -> SlackChannel.sendMessage(peerId, "No agent configured for this channel."));
         } catch (Exception e) {
             EventLogger.error("channel", null, "slack",
                     "Error processing message: %s".formatted(e.getMessage()));

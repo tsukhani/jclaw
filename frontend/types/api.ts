@@ -54,6 +54,20 @@ export interface Skill {
   [key: string]: unknown
 }
 
+/** A file in a skill's file tree. */
+export interface SkillFile {
+  path: string
+  size: number
+  isText: boolean
+}
+
+/** A channel configuration status. */
+export interface ChannelStatus {
+  channelType: string
+  enabled: boolean
+  config: Record<string, string>
+}
+
 /** A log event from /api/logs. */
 export interface LogEvent {
   id: number

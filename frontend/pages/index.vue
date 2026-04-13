@@ -1,15 +1,22 @@
 <script setup lang="ts">
+import type { Agent, LogEvent } from '~/types/api'
+
+interface ChannelStatus {
+  channelType: string
+  enabled: boolean
+}
+
 const [{ data: agents }, { data: channels }, { data: tasks }, { data: logs }] = await Promise.all([
-  useFetch('/api/agents'),
-  useFetch('/api/channels'),
-  useFetch('/api/tasks?status=PENDING&limit=5'),
-  useFetch<{ events: any[] }>('/api/logs?limit=10'),
+  useFetch<Agent[]>('/api/agents'),
+  useFetch<ChannelStatus[]>('/api/channels'),
+  useFetch<unknown[]>('/api/tasks?status=PENDING&limit=5'),
+  useFetch<{ events: LogEvent[] }>('/api/logs?limit=10'),
 ])
 
-const agentCount = computed(() => (agents.value as any[])?.length ?? 0)
-const enabledAgents = computed(() => (agents.value as any[])?.filter((a: any) => a.enabled).length ?? 0)
-const channelCount = computed(() => (channels.value as any[])?.filter((c: any) => c.enabled).length ?? 0)
-const pendingTasks = computed(() => (tasks.value as any[])?.length ?? 0)
+const agentCount = computed(() => agents.value?.length ?? 0)
+const enabledAgents = computed(() => agents.value?.filter(a => a.enabled).length ?? 0)
+const channelCount = computed(() => channels.value?.filter(c => c.enabled).length ?? 0)
+const pendingTasks = computed(() => tasks.value?.length ?? 0)
 </script>
 
 <template>

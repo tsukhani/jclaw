@@ -2,6 +2,7 @@
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { formatUsageCost, formatUsageCostTooltip, type MessageUsage } from '~/utils/usage-cost'
+import { formatSize } from '~/utils/format'
 
 // Configure marked for safe rendering
 marked.setOptions({
@@ -530,11 +531,7 @@ function removeAttachment(idx: number) {
   attachedFiles.value.splice(idx, 1)
 }
 
-function formatAttachmentSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
+const formatAttachmentSize = formatSize
 
 async function uploadAttachments(agentId: number): Promise<string[]> {
   if (!attachedFiles.value.length) return []

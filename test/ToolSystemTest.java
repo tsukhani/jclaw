@@ -24,14 +24,21 @@ public class ToolSystemTest extends UnitTest {
     void setup() {
         Fixtures.deleteDatabase();
         cleanupTestAgent();
-        ToolRegistry.clear();
-        ToolRegistry.register(new TaskTool());
-        ToolRegistry.register(new CheckListTool());
-        ToolRegistry.register(new FileSystemTools());
-        ToolRegistry.register(new WebFetchTool());
-        ToolRegistry.register(new SkillsTool());
-        ToolRegistry.publish();
+        ToolRegistry.publish(java.util.List.of(
+                new TaskTool(), new CheckListTool(), new FileSystemTools(),
+                new WebFetchTool(), new SkillsTool()
+        ));
         agent = AgentService.create("tool-test-agent", "openrouter", "gpt-4.1", null);
+    }
+
+    /** Publish the base tools plus additional ones for tests that need them. */
+    private static void publishWithExtras(ToolRegistry.Tool... extras) {
+        var tools = new java.util.ArrayList<ToolRegistry.Tool>(java.util.List.of(
+                new TaskTool(), new CheckListTool(), new FileSystemTools(),
+                new WebFetchTool(), new SkillsTool()
+        ));
+        java.util.Collections.addAll(tools, extras);
+        ToolRegistry.publish(tools);
     }
 
     @AfterAll
@@ -55,13 +62,12 @@ public class ToolSystemTest extends UnitTest {
 
     @Test
     public void executeToolCatchesExceptions() {
-        ToolRegistry.register(new ToolRegistry.Tool() {
+        ToolRegistry.publish(java.util.List.of(new ToolRegistry.Tool() {
             public String name() { return "throwing_tool"; }
             public String description() { return "Throws"; }
             public java.util.Map<String, Object> parameters() { return java.util.Map.of(); }
             public String execute(String args, Agent a) { throw new RuntimeException("boom"); }
-        });
-        ToolRegistry.publish();
+        }));
         var result = ToolRegistry.execute("throwing_tool", "{}", agent);
         assertTrue(result.contains("Error executing tool"));
         assertTrue(result.contains("boom"));
@@ -78,13 +84,12 @@ public class ToolSystemTest extends UnitTest {
     @Test
     public void executeToolRejectsTruncatedArgsJson() {
         var sentinel = new boolean[]{false};
-        ToolRegistry.register(new ToolRegistry.Tool() {
+        ToolRegistry.publish(java.util.List.of(new ToolRegistry.Tool() {
             public String name() { return "never_called_tool"; }
             public String description() { return "stub"; }
             public java.util.Map<String, Object> parameters() { return java.util.Map.of(); }
             public String execute(String args, Agent a) { sentinel[0] = true; return "ok"; }
-        });
-        ToolRegistry.publish();
+        }));
         // Args missing the content field and closing brace — same shape the
         // user's Bedrock log produced.
         var truncated = "{\"action\":\"writeDocument\",\"path\":\"Shiva Play - ENHANCED VERSION.docx\"";
@@ -97,13 +102,12 @@ public class ToolSystemTest extends UnitTest {
 
     @Test
     public void executeToolRejectsEmptyArgsJson() {
-        ToolRegistry.register(new ToolRegistry.Tool() {
+        ToolRegistry.publish(java.util.List.of(new ToolRegistry.Tool() {
             public String name() { return "empty_args_tool"; }
             public String description() { return "stub"; }
             public java.util.Map<String, Object> parameters() { return java.util.Map.of(); }
             public String execute(String args, Agent a) { return "ok"; }
-        });
-        ToolRegistry.publish();
+        }));
         var result = ToolRegistry.execute("empty_args_tool", "", agent);
         assertTrue(result.startsWith("Error:"));
         assertTrue(result.contains("empty"));
@@ -277,8 +281,7 @@ public class ToolSystemTest extends UnitTest {
         // workspace via writeFile + appendFile, then render once through the
         // documents tool. Proves the source path is read, the target is
         // written, and the non-conflict auto-rename still applies.
-        ToolRegistry.register(new tools.DocumentsTool());
-        ToolRegistry.publish();
+        publishWithExtras(new tools.DocumentsTool());
         ToolRegistry.execute("filesystem",
                 """
                 {"action": "writeFile", "path": "draft.md", "content": "# Title\\n\\nPart one.\\n"}
@@ -304,8 +307,7 @@ public class ToolSystemTest extends UnitTest {
 
     @Test
     public void documentsAppendBuildsDraft() {
-        ToolRegistry.register(new tools.DocumentsTool());
-        ToolRegistry.publish();
+        publishWithExtras(new tools.DocumentsTool());
         var r1 = ToolRegistry.execute("documents",
                 """
                 {"action": "appendDocument", "path": "play.md", "content": "# Act 1\\n"}
@@ -326,8 +328,7 @@ public class ToolSystemTest extends UnitTest {
 
     @Test
     public void documentsAppendRejectsBinaryExtension() {
-        ToolRegistry.register(new tools.DocumentsTool());
-        ToolRegistry.publish();
+        publishWithExtras(new tools.DocumentsTool());
         var result = ToolRegistry.execute("documents",
                 """
                 {"action": "appendDocument", "path": "Shiva Play.docx", "content": "text"}
@@ -341,8 +342,7 @@ public class ToolSystemTest extends UnitTest {
     public void documentsAppendFileAliasWorks() {
         // The LLM sent "appendFile" to the documents tool in the real failure.
         // Verify the alias routes to the same appendDocument handler.
-        ToolRegistry.register(new tools.DocumentsTool());
-        ToolRegistry.publish();
+        publishWithExtras(new tools.DocumentsTool());
         var result = ToolRegistry.execute("documents",
                 """
                 {"action": "appendFile", "path": "notes.md", "content": "hello"}
@@ -352,8 +352,7 @@ public class ToolSystemTest extends UnitTest {
 
     @Test
     public void documentsRenderMissingSourcePath() {
-        ToolRegistry.register(new tools.DocumentsTool());
-        ToolRegistry.publish();
+        publishWithExtras(new tools.DocumentsTool());
         var result = ToolRegistry.execute("documents",
                 """
                 {"action": "renderDocument", "path": "out.docx"}
@@ -364,8 +363,7 @@ public class ToolSystemTest extends UnitTest {
 
     @Test
     public void documentsRenderSourcePathNotFound() {
-        ToolRegistry.register(new tools.DocumentsTool());
-        ToolRegistry.publish();
+        publishWithExtras(new tools.DocumentsTool());
         var result = ToolRegistry.execute("documents",
                 """
                 {"action": "renderDocument", "sourcePath": "does-not-exist.md", "path": "out.html"}

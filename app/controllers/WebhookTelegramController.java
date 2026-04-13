@@ -63,12 +63,12 @@ public class WebhookTelegramController extends Controller {
                                         TelegramChannel.InboundMessage message) {
         try {
             AgentRunner.processWebhookMessage("telegram", message.chatId(), message.text(),
-                    (peerId, response) -> TelegramChannel.sendMessage(config, peerId, response),
-                    peerId -> TelegramChannel.sendMessage(config, peerId, "No agent configured for this chat."));
+                    (peerId, response) -> TelegramChannel.sendMessage(peerId, response),
+                    peerId -> TelegramChannel.sendMessage(peerId, "No agent configured for this chat."));
         } catch (Exception e) {
             EventLogger.error("channel", null, "telegram",
                     "Error processing message: %s".formatted(e.getMessage()));
-            TelegramChannel.sendMessage(config, message.chatId(),
+            TelegramChannel.sendMessage(message.chatId(),
                     "Sorry, an error occurred processing your message.");
         }
     }

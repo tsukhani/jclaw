@@ -13,11 +13,14 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import static java.util.stream.Collectors.joining;
 
 /**
  * Domain logic for promoting agent workspace skills to the global registry
@@ -62,7 +65,7 @@ public class SkillPromotionService {
         var validation = ToolCatalog.validateSkillTools(agent, info.tools());
         if (validation.isOk()) return new ToolValidationResult(true, null);
 
-        var parts = new java.util.ArrayList<String>();
+        var parts = new ArrayList<String>();
         if (!validation.disabled().isEmpty()) {
             parts.add("disabled: [" + String.join(", ", validation.disabled()) + "]");
         }
@@ -146,7 +149,7 @@ public class SkillPromotionService {
 
         // ── Read source files ──
         var sourceTextFiles = new LinkedHashMap<String, String>();
-        var sourceBinaryFiles = new java.util.ArrayList<String>();
+        var sourceBinaryFiles = new ArrayList<String>();
         try (var walk = Files.walk(skillDir)) {
             walk.filter(Files::isRegularFile).forEach(file -> {
                 var relName = skillDir.relativize(file).toString();
@@ -169,7 +172,7 @@ public class SkillPromotionService {
             textFiles.put(enforceTextFilePath(entry.getKey()), entry.getValue());
         }
 
-        var binaryFiles = new java.util.ArrayList<String>();
+        var binaryFiles = new ArrayList<String>();
         for (var binFile : sourceBinaryFiles) {
             if (binFile.startsWith("tools/")) {
                 binaryFiles.add(binFile);
@@ -388,7 +391,7 @@ public class SkillPromotionService {
     public static String formatViolations(List<SkillBinaryScanner.Violation> violations) {
         return violations.stream()
                 .map(SkillBinaryScanner.Violation::describe)
-                .collect(java.util.stream.Collectors.joining("; "));
+                .collect(joining("; "));
     }
 
     private static final int DEFAULT_BATCH_KB = 100;
@@ -422,7 +425,7 @@ public class SkillPromotionService {
         int batchKb = ConfigService.getInt("skillsPromotion.batchSizeKb", DEFAULT_BATCH_KB);
         int timeoutSeconds = ConfigService.getInt("skillsPromotion.timeoutSeconds", DEFAULT_TIMEOUT_SECONDS);
 
-        llm.LlmProvider provider = null;
+        LlmProvider provider = null;
         String modelId = null;
 
         if (configProvider != null && !configProvider.isBlank()) {
@@ -470,11 +473,11 @@ public class SkillPromotionService {
         return result;
     }
 
-    private static java.util.List<java.util.List<java.util.Map.Entry<String, String>>> buildBatchesBySize(
+    private static List<List<Map.Entry<String, String>>> buildBatchesBySize(
             LinkedHashMap<String, String> fileContents, int maxBatchBytes) {
 
-        var batches = new java.util.ArrayList<java.util.List<java.util.Map.Entry<String, String>>>();
-        var currentBatch = new java.util.ArrayList<java.util.Map.Entry<String, String>>();
+        var batches = new ArrayList<List<Map.Entry<String, String>>>();
+        var currentBatch = new ArrayList<Map.Entry<String, String>>();
         int currentSize = 0;
 
         for (var entry : fileContents.entrySet()) {
@@ -482,7 +485,7 @@ public class SkillPromotionService {
             // If this single file exceeds the limit, send it alone
             if (!currentBatch.isEmpty() && currentSize + entrySize > maxBatchBytes) {
                 batches.add(currentBatch);
-                currentBatch = new java.util.ArrayList<>();
+                currentBatch = new ArrayList<>();
                 currentSize = 0;
             }
             currentBatch.add(entry);
@@ -493,8 +496,8 @@ public class SkillPromotionService {
     }
 
     private static LinkedHashMap<String, String> sanitizeBatch(
-            llm.LlmProvider provider, String modelId,
-            java.util.List<java.util.Map.Entry<String, String>> batch,
+            LlmProvider provider, String modelId,
+            List<Map.Entry<String, String>> batch,
             LinkedHashMap<String, String> originals, int timeoutSeconds) {
 
         var sb = new StringBuilder();
@@ -504,7 +507,7 @@ public class SkillPromotionService {
             sb.append("\n\n");
         }
 
-        var messages = java.util.List.of(
+        var messages = List.of(
                 ChatMessage.system(SANITIZE_SYSTEM_PROMPT),
                 ChatMessage.user(sb.toString())
         );

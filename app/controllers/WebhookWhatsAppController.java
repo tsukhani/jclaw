@@ -88,8 +88,8 @@ public class WebhookWhatsAppController extends Controller {
                                         WhatsAppChannel.InboundMessage message) {
         try {
             AgentRunner.processWebhookMessage("whatsapp", message.from(), message.text(),
-                    (peerId, response) -> { if (config != null) WhatsAppChannel.sendMessage(config, peerId, response); },
-                    peerId -> { if (config != null) WhatsAppChannel.sendMessage(config, peerId, "No agent configured for this number."); });
+                    (peerId, response) -> WhatsAppChannel.sendMessage(peerId, response),
+                    peerId -> WhatsAppChannel.sendMessage(peerId, "No agent configured for this number."));
         } catch (Exception e) {
             EventLogger.error("channel", null, "whatsapp",
                     "Error processing message: %s".formatted(e.getMessage()));

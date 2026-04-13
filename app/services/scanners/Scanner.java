@@ -45,6 +45,11 @@ public interface Scanner {
      * Eliminates the duplicate volatile-boolean + synchronized pattern that was
      * independently implemented in each scanner.
      */
+    /** Parse an integer from a config string, falling back to the default on failure. */
+    static int parseInt(String s, int fallback) {
+        try { return Integer.parseInt(s); } catch (NumberFormatException _) { return fallback; }
+    }
+
     class OneShotWarning {
         private volatile boolean warned = false;
 

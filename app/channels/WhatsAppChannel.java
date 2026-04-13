@@ -19,7 +19,7 @@ import java.util.Map;
 /**
  * WhatsApp Cloud API (Meta) client via raw HTTP.
  */
-public class WhatsAppChannel {
+public class WhatsAppChannel implements Channel {
 
     private static final Gson gson = new Gson();
     private static final String API_BASE = "https://graph.facebook.com/v21.0/";
@@ -38,59 +38,53 @@ public class WhatsAppChannel {
         }
     }
 
+    @Override
+    public String channelName() { return "whatsapp"; }
+
     public static boolean sendMessage(String to, String text) {
         var config = WhatsAppConfig.load();
         if (config == null) {
             EventLogger.error("channel", null, "whatsapp", "WhatsApp not configured");
             return false;
         }
-        return sendMessage(config, to, text);
+        return new WhatsAppChannel().sendWithRetry(to, text);
     }
 
-    public static boolean sendMessage(WhatsAppConfig config, String to, String text) {
+    @Override
+    public boolean trySend(String peerId, String text) {
+        var config = WhatsAppConfig.load();
+        if (config == null) return false;
         var url = API_BASE + config.phoneNumberId() + "/messages";
         var body = gson.toJson(Map.of(
                 "messaging_product", "whatsapp",
-                "to", to,
+                "to", peerId,
                 "type", "text",
                 "text", Map.of("body", text)
         ));
+        try {
+            var request = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + config.accessToken())
+                    .timeout(Duration.ofSeconds(15))
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
 
-        for (int attempt = 0; attempt < 2; attempt++) {
-            try {
-                var request = HttpRequest.newBuilder()
-                        .uri(URI.create(url))
-                        .header("Content-Type", "application/json")
-                        .header("Authorization", "Bearer " + config.accessToken())
-                        .timeout(Duration.ofSeconds(15))
-                        .POST(HttpRequest.BodyPublishers.ofString(body))
-                        .build();
-
-                var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
-                if (response.statusCode() == 200) {
-                    EventLogger.info("channel", null, "whatsapp",
-                            "Message sent to %s".formatted(to));
-                    return true;
-                }
-
-                EventLogger.warn("channel", null, "whatsapp",
-                        "WhatsApp API error (HTTP %d): %s".formatted(response.statusCode(), response.body()));
-
-            } catch (Exception e) {
-                EventLogger.warn("channel", null, "whatsapp",
-                        "Send attempt %d failed: %s".formatted(attempt + 1, e.getMessage()));
-                if (attempt == 0) {
-                    try { Thread.sleep(1000); } catch (InterruptedException _) {
-                        Thread.currentThread().interrupt();
-                        return false;
-                    }
-                }
+            var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200) {
+                EventLogger.info("channel", null, "whatsapp",
+                        "Message sent to %s".formatted(peerId));
+                return true;
             }
-        }
 
-        EventLogger.error("channel", null, "whatsapp",
-                "Failed to send message to %s after retries".formatted(to));
-        return false;
+            EventLogger.warn("channel", null, "whatsapp",
+                    "WhatsApp API error (HTTP %d): %s".formatted(response.statusCode(), response.body()));
+            return false;
+        } catch (Exception e) {
+            EventLogger.warn("channel", null, "whatsapp",
+                    "Send failed: %s".formatted(e.getMessage()));
+            return false;
+        }
     }
 
     public static void markAsRead(WhatsAppConfig config, String messageId) {

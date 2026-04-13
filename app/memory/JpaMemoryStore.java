@@ -5,6 +5,9 @@ import play.Play;
 import play.db.jpa.JPA;
 import services.EventLogger;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 
 /**
@@ -120,19 +123,20 @@ public class JpaMemoryStore implements MemoryStore {
             stmt.setString(2, query);
             stmt.setString(3, query);
             stmt.setInt(4, limit);
-            var rs = stmt.executeQuery();
-            var ids = new java.util.ArrayList<Long>();
-            while (rs.next()) {
-                ids.add(rs.getLong("id"));
+            try (var rs = stmt.executeQuery()) {
+                var ids = new ArrayList<Long>();
+                while (rs.next()) {
+                    ids.add(rs.getLong("id"));
+                }
+                if (ids.isEmpty()) return List.of();
+                List<Memory> memories = Memory.<Memory>find("id IN (?1)", ids).fetch();
+                var idRank = new HashMap<Long, Integer>();
+                for (int i = 0; i < ids.size(); i++) idRank.put(ids.get(i), i);
+                return memories.stream()
+                        .sorted(Comparator.comparingInt(m -> idRank.getOrDefault((Long) m.id, Integer.MAX_VALUE)))
+                        .map(this::toEntry)
+                        .toList();
             }
-            if (ids.isEmpty()) return List.of();
-            List<Memory> memories = Memory.<Memory>find("id IN (?1)", ids).fetch();
-            var idRank = new java.util.HashMap<Long, Integer>();
-            for (int i = 0; i < ids.size(); i++) idRank.put(ids.get(i), i);
-            return memories.stream()
-                    .sorted(java.util.Comparator.comparingInt(m -> idRank.getOrDefault((Long) m.id, Integer.MAX_VALUE)))
-                    .map(this::toEntry)
-                    .toList();
         } catch (Exception e) {
             EventLogger.warn("memory", "PG FTS failed, falling back to LIKE search: %s".formatted(e.getMessage()));
             return likeSearch(agentId, query, limit);
@@ -168,19 +172,20 @@ public class JpaMemoryStore implements MemoryStore {
                 stmt.setString(4, query);
                 stmt.setString(5, embeddingStr);
                 stmt.setInt(6, limit);
-                var rs = stmt.executeQuery();
-                var ids = new java.util.ArrayList<Long>();
-                while (rs.next()) {
-                    ids.add(rs.getLong("id"));
+                try (var rs = stmt.executeQuery()) {
+                    var ids = new ArrayList<Long>();
+                    while (rs.next()) {
+                        ids.add(rs.getLong("id"));
+                    }
+                    if (ids.isEmpty()) return List.of();
+                    List<Memory> memories = Memory.<Memory>find("id IN (?1)", ids).fetch();
+                    var idRank = new HashMap<Long, Integer>();
+                    for (int i = 0; i < ids.size(); i++) idRank.put(ids.get(i), i);
+                    return memories.stream()
+                            .sorted(Comparator.comparingInt(m -> idRank.getOrDefault((Long) m.id, Integer.MAX_VALUE)))
+                            .map(this::toEntry)
+                            .toList();
                 }
-                if (ids.isEmpty()) return List.of();
-                List<Memory> memories = Memory.<Memory>find("id IN (?1)", ids).fetch();
-                var idRank = new java.util.HashMap<Long, Integer>();
-                for (int i = 0; i < ids.size(); i++) idRank.put(ids.get(i), i);
-                return memories.stream()
-                        .sorted(java.util.Comparator.comparingInt(m -> idRank.getOrDefault((Long) m.id, Integer.MAX_VALUE)))
-                        .map(this::toEntry)
-                        .toList();
             }
         } catch (Exception e) {
             EventLogger.warn("memory", "Hybrid search failed, falling back to FTS: %s".formatted(e.getMessage()));

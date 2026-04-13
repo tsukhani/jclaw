@@ -10,7 +10,7 @@ import com.google.gson.JsonObject;
 public class ApiController extends Controller {
 
     public static void status() {
-        JsonObject json = new JsonObject();
+        var json = new JsonObject();
         json.addProperty("status", "ok");
         json.addProperty("application", play.Play.configuration.getProperty("application.name"));
         json.addProperty("mode", play.Play.mode.toString());

@@ -77,7 +77,7 @@ public class MetaDefenderCloudScanner implements Scanner {
         var baseUrl = ConfigService.get(
                 "scanner.metadefender.url", "https://api.metadefender.com/v4/");
         if (!baseUrl.endsWith("/")) baseUrl = baseUrl + "/";
-        var timeoutMs = parseInt(ConfigService.get(
+        var timeoutMs = Scanner.parseInt(ConfigService.get(
                 "scanner.metadefender.timeoutMs", "5000"), 5000);
         var apiKey = ConfigService.get("scanner.metadefender.apiKey");
 
@@ -170,7 +170,4 @@ public class MetaDefenderCloudScanner implements Scanner {
         return Verdict.malicious(reason);
     }
 
-    private static int parseInt(String s, int fallback) {
-        try { return Integer.parseInt(s); } catch (NumberFormatException _) { return fallback; }
-    }
 }

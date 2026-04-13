@@ -142,11 +142,11 @@ public class ApiAgentsController extends Controller {
         response.setHeader("Cache-Control", "private, max-age=300");
 
         var inline = contentType.startsWith("image/") || contentType.startsWith("application/pdf");
-        try {
-            renderBinary(new java.io.FileInputStream(file), file.getName(), file.length(), contentType, inline);
-        } catch (java.io.FileNotFoundException e) {
-            notFound();
+        response.setHeader("Content-Type", contentType);
+        if (inline) {
+            response.setHeader("Content-Disposition", "inline; filename=\"%s\"".formatted(file.getName()));
         }
+        renderBinary(file);
     }
 
     public static void getWorkspaceFile(Long id, String filename) {

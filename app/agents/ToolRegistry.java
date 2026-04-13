@@ -4,18 +4,22 @@ import com.google.gson.JsonParser;
 import com.google.gson.JsonSyntaxException;
 import llm.LlmTypes.*;
 import models.Agent;
+import models.AgentToolConfig;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Registry of available tools. Tools are registered at startup and made available
  * to agents. Handles tool execution with error catching.
  * <p>
- * Fully implemented in Group 9 (Tool System). This provides the interface.
+ * Thread-safe: callers build a list of tools locally and publish atomically
+ * via {@link #publish(List)}. No shared mutable buffer is needed.
  */
 public class ToolRegistry {
 
@@ -27,23 +31,18 @@ public class ToolRegistry {
     }
 
     private static volatile Map<String, Tool> tools = Map.of();
-    private static final Map<String, Tool> registrationBuffer = new LinkedHashMap<>();
-
-    public static void register(Tool tool) {
-        registrationBuffer.put(tool.name(), tool);
-    }
-
-    public static void clear() {
-        registrationBuffer.clear();
-    }
 
     /**
-     * Called after all tools are registered to publish an immutable snapshot.
-     * Uses LinkedHashMap to preserve registration order — iteration stability matters
-     * for LLM prompt caching, which hashes the serialized tools array as part of the prefix.
+     * Atomically publish a new tool set built by the caller. Uses LinkedHashMap
+     * to preserve registration order — iteration stability matters for LLM
+     * prompt caching, which hashes the serialized tools array as part of the prefix.
      */
-    public static void publish() {
-        tools = Collections.unmodifiableMap(new LinkedHashMap<>(registrationBuffer));
+    public static void publish(List<Tool> toolList) {
+        var map = new LinkedHashMap<String, Tool>();
+        for (var tool : toolList) {
+            map.put(tool.name(), tool);
+        }
+        tools = Collections.unmodifiableMap(map);
     }
 
     public static List<ToolDef> getToolDefs() {
@@ -87,12 +86,12 @@ public class ToolRegistry {
     }
 
     /** Get tool definitions filtered by agent's tool configuration. */
-    public static List<ToolDef> getToolDefsForAgent(models.Agent agent) {
+    public static List<ToolDef> getToolDefsForAgent(Agent agent) {
         return getToolDefsForAgent(loadDisabledTools(agent));
     }
 
     /** Get tool definitions filtered by a pre-loaded set of disabled tool names. */
-    public static List<ToolDef> getToolDefsForAgent(java.util.Set<String> disabledTools) {
+    public static List<ToolDef> getToolDefsForAgent(Set<String> disabledTools) {
         if (disabledTools.isEmpty()) return getToolDefs();
         return tools.values().stream()
                 .filter(t -> !disabledTools.contains(t.name()))
@@ -101,9 +100,9 @@ public class ToolRegistry {
     }
 
     /** Load the set of disabled tool names for an agent (single DB query). */
-    public static java.util.Set<String> loadDisabledTools(models.Agent agent) {
-        var configs = models.AgentToolConfig.findByAgent(agent);
-        var disabled = new java.util.HashSet<String>();
+    public static Set<String> loadDisabledTools(Agent agent) {
+        var configs = AgentToolConfig.findByAgent(agent);
+        var disabled = new HashSet<String>();
         for (var c : configs) {
             if (!c.enabled) disabled.add(c.toolName);
         }

@@ -86,16 +86,16 @@ public class ShellExecTool implements ToolRegistry.Tool {
         }
 
         // Timeout
-        int defaultTimeout = Integer.parseInt(ConfigService.get("shell.defaultTimeoutSeconds", "30"));
-        int maxTimeout = Integer.parseInt(ConfigService.get("shell.maxTimeoutSeconds", "300"));
-        int timeout = defaultTimeout;
+        var defaultTimeout = ConfigService.getInt("shell.defaultTimeoutSeconds", 30);
+        var maxTimeout = ConfigService.getInt("shell.maxTimeoutSeconds", 300);
+        var timeout = defaultTimeout;
         if (args.has("timeout")) {
             timeout = Math.min(args.get("timeout").getAsInt(), maxTimeout);
             if (timeout <= 0) timeout = defaultTimeout;
         }
 
         // Max output
-        int maxOutputBytes = Integer.parseInt(ConfigService.get("shell.maxOutputBytes", "102400"));
+        var maxOutputBytes = ConfigService.getInt("shell.maxOutputBytes", 102400);
 
         // Build environment
         var env = buildEnvironment(args);

@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import type { SkillFile } from '~/types/api'
+import { formatSize } from '~/utils/format'
+
 export type SkillFileNode = {
   name: string
   isDir: boolean
   path?: string
-  file?: any
+  file?: SkillFile
   children?: SkillFileNode[]
 }
 
@@ -14,7 +17,7 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'select', file: any): void
+  (e: 'select', file: SkillFile): void
 }>()
 
 const openDirs = ref<Record<string, boolean>>({})
@@ -27,7 +30,7 @@ function isOpen(key: string) {
   return openDirs.value[key] !== false
 }
 
-function iconFor(file: any) {
+function iconFor(file: SkillFile | undefined) {
   const p = (file?.path ?? '').toLowerCase()
   if (p.endsWith('.md')) return 'MD'
   if (p.endsWith('.py')) return 'PY'
@@ -36,12 +39,6 @@ function iconFor(file: any) {
   if (p.endsWith('.sh') || p.endsWith('.bash')) return 'SH'
   if (p.endsWith('.yml') || p.endsWith('.yaml')) return 'YML'
   return file?.isText ? 'TXT' : 'BIN'
-}
-
-function formatSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 </script>
 
@@ -82,7 +79,7 @@ function formatSize(bytes: number) {
       <!-- File row -->
       <div
         v-else-if="!node.isDir"
-        @click="emit('select', node.file)"
+        @click="node.file ? emit('select', node.file) : undefined"
         :class="[
           'flex items-center gap-2 px-3 py-1.5 transition-colors',
           activePath === node.path ? 'bg-neutral-800 text-white' : 'text-neutral-400 hover:bg-neutral-800/50',

@@ -20,6 +20,8 @@ function applyTheme(mode: ThemeMode) {
 }
 
 export function useTheme() {
+  let cleanup: (() => void) | null = null
+
   onMounted(() => {
     const saved = localStorage.getItem('jclaw-theme') as ThemeMode | null
     if (saved) themeMode.value = saved
@@ -29,8 +31,10 @@ export function useTheme() {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
     const handler = () => { if (themeMode.value === 'system') applyTheme('system') }
     mq.addEventListener('change', handler)
-    onUnmounted(() => mq.removeEventListener('change', handler))
+    cleanup = () => mq.removeEventListener('change', handler)
   })
+
+  onUnmounted(() => cleanup?.())
 
   function setTheme(mode: ThemeMode) {
     themeMode.value = mode

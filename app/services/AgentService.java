@@ -16,13 +16,16 @@ import play.db.jpa.JPA;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 public class AgentService {
 
-    private static final java.util.concurrent.ConcurrentHashMap<String, CachedFile> fileCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, CachedFile> fileCache = new ConcurrentHashMap<>();
     private static final long FILE_CACHE_TTL_MS = 30_000;
 
     private record CachedFile(String content, long expiresAt) {
@@ -88,22 +91,34 @@ public class AgentService {
     public static void syncEnabledStates() {
         ProviderRegistry.refresh();
         List<Agent> agents = listAll();
+
+        var toEnable = new ArrayList<Long>();
+        var toDisable = new ArrayList<Long>();
+
         for (var agent : agents) {
             if (agent.isMain()) {
-                // Main is always enabled. If it was ever persisted as disabled (e.g.
-                // by a pre-fix boot), heal it on the next sync pass.
-                if (!agent.enabled) {
-                    agent.enabled = true;
-                    agent.save();
-                }
+                if (!agent.enabled) toEnable.add(agent.id);
                 continue;
             }
             var shouldBeEnabled = isProviderConfigured(agent.modelProvider, agent.modelId);
             if (agent.enabled != shouldBeEnabled) {
-                agent.enabled = shouldBeEnabled;
-                agent.save();
+                (shouldBeEnabled ? toEnable : toDisable).add(agent.id);
             }
         }
+
+        if (toEnable.isEmpty() && toDisable.isEmpty()) return;
+        var em = JPA.em();
+        if (!toEnable.isEmpty()) {
+            em.createQuery("UPDATE Agent SET enabled = true WHERE id IN :ids")
+                    .setParameter("ids", toEnable).executeUpdate();
+        }
+        if (!toDisable.isEmpty()) {
+            em.createQuery("UPDATE Agent SET enabled = false WHERE id IN :ids")
+                    .setParameter("ids", toDisable).executeUpdate();
+        }
+        // JPQL UPDATE bypasses Hibernate's entity cache — clear stale entries
+        // so subsequent findByName/findById calls see the updated values.
+        em.clear();
     }
 
     /**
@@ -240,7 +255,7 @@ public class AgentService {
             // write paths we walk up to the deepest existing ancestor,
             // realpath that, then re-attach the missing tail.
             var existing = target;
-            var missingSuffix = new java.util.ArrayDeque<Path>();
+            var missingSuffix = new ArrayDeque<Path>();
             while (existing != null && !Files.exists(existing)) {
                 missingSuffix.push(existing.getFileName());
                 existing = existing.getParent();
