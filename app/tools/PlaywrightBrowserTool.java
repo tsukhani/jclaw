@@ -187,7 +187,12 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         }
 
         EventLogger.info("tool", agentName, null, "Launching headless browser");
-        var playwright = Playwright.create();
+        ensureBrowserInstalled();
+        // CreateOptions env is passed to the Playwright server subprocess.
+        // PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD prevents the driver from
+        // auto-downloading all browsers — we already installed Chromium above.
+        var playwright = Playwright.create(new Playwright.CreateOptions()
+                .setEnv(Map.of("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")));
         var browser = playwright.chromium().launch(
                 new BrowserType.LaunchOptions().setHeadless(
                         !"false".equals(services.ConfigService.get("playwright.headless", "true"))));
@@ -219,5 +224,45 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     /** Close all sessions — called on application shutdown. */
     public static void closeAllSessions() {
         sessions.keySet().forEach(PlaywrightBrowserTool::closeSession);
+    }
+
+    /**
+     * Ensure only Chromium is installed. Playwright's driver auto-install
+     * downloads ALL browsers (Chromium, Firefox, WebKit) by default. This
+     * invokes the CLI with {@code install chromium} once per JVM lifetime
+     * so only Chromium (+ headless shell + ffmpeg) are fetched. Subsequent
+     * calls are no-ops — the CLI detects the browser is already present.
+     *
+     * <p>Uses ProcessBuilder instead of {@code CLI.main()} directly because
+     * the CLI calls {@code System.exit()} on some error paths, which would
+     * kill the application server.
+     */
+    private static volatile boolean browserInstalled = false;
+
+    private static void ensureBrowserInstalled() {
+        if (browserInstalled) return;
+        synchronized (PlaywrightBrowserTool.class) {
+            if (browserInstalled) return;
+            try {
+                EventLogger.info("tool", "Installing Chromium browser (skipping Firefox/WebKit)");
+                // Build classpath from the same JARs the server uses
+                var cp = System.getProperty("java.class.path");
+                var pb = new ProcessBuilder(
+                        ProcessHandle.current().info().command().orElse("java"),
+                        "-cp", cp,
+                        "com.microsoft.playwright.CLI",
+                        "install", "chromium");
+                pb.inheritIO();
+                var proc = pb.start();
+                var exitCode = proc.waitFor();
+                if (exitCode != 0) {
+                    EventLogger.warn("tool", "Playwright chromium install exited with code %d".formatted(exitCode));
+                }
+                browserInstalled = true;
+            } catch (Exception e) {
+                browserInstalled = true; // don't retry on every session
+                EventLogger.warn("tool", "Playwright chromium install failed: %s".formatted(e.getMessage()));
+            }
+        }
     }
 }
