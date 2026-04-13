@@ -18,11 +18,26 @@ public class DefaultConfigJob extends Job<Void> {
 
     @Override
     public void doJob() {
+        dropOrphanedColumns();
         seedProviders();
         seedToolConfig();
         seedDefaultAgent();
         agents.SkillLoader.syncSkillConfigs();
         EventLogger.info("system", "Default configuration seeded");
+    }
+
+    /**
+     * Drop columns left behind by previous model versions. Hibernate's
+     * {@code jpa.ddl=update} adds columns but never drops them; stale
+     * NOT NULL columns break inserts when the model no longer sets them.
+     */
+    private void dropOrphanedColumns() {
+        try (var conn = play.db.DB.getDataSource("default").getConnection()) {
+            conn.createStatement().execute(
+                    "ALTER TABLE agent DROP COLUMN IF EXISTS is_default");
+        } catch (Exception e) {
+            play.Logger.warn("Schema migration: %s", e.getMessage());
+        }
     }
 
     private void seedProviders() {
