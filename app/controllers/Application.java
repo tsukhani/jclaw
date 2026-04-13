@@ -8,13 +8,15 @@ import java.io.*;
 public class Application extends Controller {
 
     public static void index() {
-        // In production, serve the SPA if it's been built
+        // Serve the SPA if it's been built
         File spaIndex = Play.getFile("public/spa/index.html");
         if (spaIndex.exists()) {
             response.setContentTypeIfNotSet("text/html");
             renderBinary(spaIndex);
         }
-        render();
+        // SPA not built — return a simple HTML page instead of the legacy Groovy template
+        response.setContentTypeIfNotSet("text/html; charset=" + play.Play.defaultWebEncoding);
+        renderHtml("<html><body><h1>JClaw</h1><p>SPA not built. Run: cd frontend &amp;&amp; pnpm generate</p></body></html>");
     }
 
     /**
