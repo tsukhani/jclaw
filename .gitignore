@@ -123,6 +123,9 @@ workspace/main/*
 !workspace/main/IDENTITY.md
 !workspace/main/USER.md
 
+# Test workspaces (ephemeral, created by integration tests)
+workspace-test/
+
 # Ignore but keep empty directories
 !.gitkeep
 
