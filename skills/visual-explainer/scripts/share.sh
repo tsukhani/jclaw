@@ -26,7 +26,7 @@ fi
 
 # Find vercel-deploy skill
 VERCEL_SCRIPT=""
-for dir in ~/.pi/agent/skills/vercel-deploy/scripts /mnt/skills/user/vercel-deploy/scripts; do
+for dir in [USERNAME]/.pi/agent/skills/vercel-deploy/scripts /mnt/skills/user/vercel-deploy/scripts; do
     if [ -f "$dir/deploy.sh" ]; then
         VERCEL_SCRIPT="$dir/deploy.sh"
         break

@@ -1,10 +1,9 @@
 ---
 name: skill-creator
 description: Create new skills or refactor existing skills to follow the standard directory structure.
-version: 1.0.1
+version: 1.0.4
 tools: [filesystem]
 ---
-
 # Skill Creator & Refactorer
 
 You help the user create new skills or refactor existing skills in your workspace to follow the standard directory structure.
@@ -48,6 +47,7 @@ Every skill MUST declare the exact tools it needs in a `tools:` YAML list in its
    - Reference each declared tool by name in the body
    - Example inputs and expected outputs
    - Edge cases and error handling
+   - **Output Location:** If this skill generates files (HTML diagrams, documents, etc.), include: `Outputs are written to \`workspace/{agent-name}/{skill-name}\` (e.g., \`workspace/main/my-skill/\`).`
    - **Leave the `version:` field out by default.** When you omit it, the system auto-bumps the patch component on every material write (e.g., `1.0.3 → 1.0.4`) and new skills start at `1.0.0`. **Set an explicit `version:` only when the user asks to promote the skill forward** — e.g., "bump to v1.0.0", "promote to 1.1", "this is a breaking change, make it 2.0.0". In that case, add `version: X.Y.Z` to the frontmatter with your intended target. The value MUST be strictly greater than the next auto-bump target; anything lower or invalid is silently ignored and the system uses its auto-bump instead. Patterns: minor bump (new feature) `1.0.3 → 1.1.0`, major bump (breaking change) `1.2.0 → 2.0.0`, stable promotion from alpha `0.0.6 → 1.0.0`. A version-only promotion (no other content changes) can be done with a single `editFile` that replaces the existing `version:` line.
 4. **Create** the skill using the filesystem tool:
    - Create the directory: `skills/{skill-name}/`
@@ -104,6 +104,8 @@ whatsapp-notifier/
 
 Note: the `version:` line is omitted from the frontmatter you write — the filesystem tool injects it deterministically when the file is saved.
 
+**Output Location:** If this skill generates files (HTML, documents, etc.), store them in `workspace/{agent-name}/{skill-name}/` so users can easily find and download them.
+
 ```markdown
 ---
 name: whatsapp-notifier
@@ -118,6 +120,34 @@ When asked to send a WhatsApp message:
 1. Read credentials from `credentials/api-config.json` using the `filesystem` tool
 2. Use the `exec` tool to run `tools/wacli` to send the message
 3. Confirm delivery status to the user
+```
+
+## Output File Locations
+
+Skills that generate files (HTML diagrams, courses, reports, etc.) MUST store output in the user's workspace under a directory matching the skill name:
+
+```
+workspace/
+└── {agent-name}/
+    └── {skill-name}/           # e.g., visual-explainer/
+        └── {output-files}      # e.g., jclaw-architecture.html
+```
+
+### Rules
+
+1. **Destination:** All output files go to `workspace/<agent-name>/<skill-name>/`
+2. **Create if missing:** Use `filesystem` tool to create the directory if it doesn't exist
+3. **Filenames:** Use descriptive, kebab-case filenames (e.g., `jclaw-architecture.html`)
+4. **No .agent directory:** Do NOT put skill outputs in `.agent/` or other hidden directories
+5. **Delivery:** After writing the file, provide a markdown link: `[filename](<relative/path>)` so the user can download it
+
+### Example
+
+A visual-explainer skill generating an architecture diagram:
+```markdown
+1. Create directory `workspace/main/visual-explainer/` if it doesn't exist
+2. Write the HTML file to `workspace/main/visual-explainer/jclaw-architecture.html`
+3. Report: `[jclaw-architecture.html](workspace/main/visual-explainer/jclaw-architecture.html)`
 ```
 
 ## Guidelines
