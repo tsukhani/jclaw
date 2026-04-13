@@ -107,6 +107,9 @@ fi
 do_deploy() {
     echo "==> Packaging application..."
     cd "$SCRIPT_DIR"
+    # Remove any locally-scoped pnpm store before packaging — play dist bundles
+    # the working directory verbatim and doesn't respect .gitignore.
+    rm -rf "$SCRIPT_DIR/.pnpm-store"
     play dist
 
     local zip_file="$SCRIPT_DIR/dist/jclaw.zip"
