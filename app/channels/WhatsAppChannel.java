@@ -1,6 +1,5 @@
 package channels;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.ChannelConfig;
@@ -21,7 +20,7 @@ import java.util.Map;
  */
 public class WhatsAppChannel implements Channel {
 
-    private static final Gson gson = new Gson();
+    private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
     private static final String API_BASE = "https://graph.facebook.com/v21.0/";
 
     public record WhatsAppConfig(String phoneNumberId, String accessToken, String appSecret, String verifyToken) {

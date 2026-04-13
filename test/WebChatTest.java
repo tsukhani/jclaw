@@ -37,7 +37,7 @@ public class WebChatTest extends UnitTest {
 
         var messages = ConversationService.loadRecentMessages(convo);
         assertEquals(2, messages.size());
-        assertEquals("user", messages.get(0).role);
+        assertEquals("user", messages.getFirst().role);
         assertEquals("assistant", messages.get(1).role);
     }
 

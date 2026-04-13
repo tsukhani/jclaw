@@ -45,7 +45,7 @@ public class ApiSkillsController extends Controller {
 
     /** GET /api/skills/{name} — Get a global skill with full content. */
     public static void get(String name) {
-        var path = SkillLoader.globalSkillsPath().resolve(name).resolve("SKILL.md");
+        var path = resolveSkillName(SkillLoader.globalSkillsPath(), name).resolve("SKILL.md");
         if (!Files.exists(path)) notFound();
         try {
             var info = SkillLoader.parseSkillFile(path);
@@ -68,14 +68,14 @@ public class ApiSkillsController extends Controller {
 
     /** GET /api/skills/{name}/files — List all files in a skill folder with metadata and detected tool dependencies. */
     public static void listFiles(String name) {
-        var dir = SkillLoader.globalSkillsPath().resolve(name);
+        var dir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         if (!Files.isDirectory(dir)) notFound();
         listSkillFilesFrom(dir);
     }
 
     /** GET /api/skills/{name}/files/{<path>filePath} — Read a text file from a skill folder. */
     public static void readFile(String name, String filePath) {
-        var dir = SkillLoader.globalSkillsPath().resolve(name);
+        var dir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         readSkillFileFrom(dir, filePath);
     }
 
@@ -163,7 +163,7 @@ public class ApiSkillsController extends Controller {
             error(403, "The skill-creator skill is a built-in skill and cannot be deleted.");
             return;
         }
-        var dir = SkillLoader.globalSkillsPath().resolve(name);
+        var dir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         if (!Files.isDirectory(dir)) notFound();
         deleteSkillDir(dir);
     }
@@ -227,7 +227,7 @@ public class ApiSkillsController extends Controller {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
 
-        var globalDir = SkillLoader.globalSkillsPath().resolve(name);
+        var globalDir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         if (!Files.isDirectory(globalDir)) {
             error(404, "Global skill '%s' not found".formatted(name));
         }
@@ -248,7 +248,7 @@ public class ApiSkillsController extends Controller {
         }
 
         var agentSkillsDir = AgentService.workspacePath(agent.name).resolve("skills");
-        var targetDir = agentSkillsDir.resolve(name);
+        var targetDir = resolveSkillName(agentSkillsDir, name);
         var replacing = Files.isDirectory(targetDir) && Files.exists(targetDir.resolve("SKILL.md"));
 
         try {
@@ -275,7 +275,7 @@ public class ApiSkillsController extends Controller {
     public static void listAgentSkillFiles(Long id, String name) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
-        var dir = AgentService.workspacePath(agent.name).resolve("skills").resolve(name);
+        var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve("skills"), name);
         if (!Files.isDirectory(dir)) notFound();
         listSkillFilesFrom(dir);
     }
@@ -284,7 +284,7 @@ public class ApiSkillsController extends Controller {
     public static void readAgentSkillFile(Long id, String name, String filePath) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
-        var dir = AgentService.workspacePath(agent.name).resolve("skills").resolve(name);
+        var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve("skills"), name);
         readSkillFileFrom(dir, filePath);
     }
 
@@ -292,7 +292,7 @@ public class ApiSkillsController extends Controller {
     public static void deleteAgentSkill(Long id, String name) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
-        var dir = AgentService.workspacePath(agent.name).resolve("skills").resolve(name);
+        var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve("skills"), name);
         if (!Files.isDirectory(dir)) notFound();
         deleteSkillDir(dir);
     }
@@ -340,10 +340,10 @@ public class ApiSkillsController extends Controller {
         if (newName.isEmpty()) badRequest();
 
         var globalDir = SkillLoader.globalSkillsPath();
-        var sourceDir = globalDir.resolve(name);
+        var sourceDir = resolveSkillName(globalDir, name);
         if (!Files.isDirectory(sourceDir)) notFound();
 
-        var targetDir = globalDir.resolve(newName);
+        var targetDir = resolveSkillName(globalDir, newName);
         if (Files.exists(targetDir)) {
             error(409, "A skill with folder name '%s' already exists".formatted(newName));
         }
@@ -427,6 +427,19 @@ public class ApiSkillsController extends Controller {
     }
 
     // --- Helpers ---
+
+    /**
+     * Resolve a skill name to a contained path inside the given root, rejecting
+     * any name that escapes (e.g. "../../../etc"). Calls {@code notFound()} on
+     * escape so callers never see a null return.
+     */
+    private static Path resolveSkillName(Path root, String name) {
+        var resolved = AgentService.resolveContained(root, name);
+        if (resolved == null) {
+            notFound();
+        }
+        return resolved;
+    }
 
     private static HashMap<String, Object> skillToMap(SkillLoader.SkillInfo s, boolean isGlobal) {
         var map = new HashMap<String, Object>();

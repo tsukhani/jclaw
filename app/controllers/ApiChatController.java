@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import static utils.GsonHolder.INSTANCE;
@@ -210,64 +211,33 @@ public class ApiChatController extends Controller {
             }
         }, 30, 30, TimeUnit.SECONDS);
 
-        var firstToken = new java.util.concurrent.atomic.AtomicBoolean(true);
+        var firstToken = new AtomicBoolean(true);
         var callbacks = new AgentRunner.StreamingCallbacks(
                 conversation -> {
-                    try {
-                        var initData = new java.util.HashMap<>(Map.of("type", "init", "conversationId", conversation.id));
-                        if (agent.thinkingMode != null && !agent.thinkingMode.isBlank()) {
-                            initData.put("thinkingMode", agent.thinkingMode);
-                        }
-                        res.writeChunk("data: %s\n\n".formatted(gson.toJson(initData)).getBytes(StandardCharsets.UTF_8));
-                    } catch (Exception e) {
-                        cancelled.set(true);
-                        latch.countDown();
+                    var initData = new java.util.HashMap<>(Map.of("type", "init", "conversationId", conversation.id));
+                    if (agent.thinkingMode != null && !agent.thinkingMode.isBlank()) {
+                        initData.put("thinkingMode", agent.thinkingMode);
                     }
+                    writeSse(res, cancelled, latch, initData, false);
                 },
                 token -> {
-                    try {
-                        Map<String, Object> data = new java.util.HashMap<>(Map.of("type", "token", "content", token));
-                        if (firstToken.compareAndSet(true, false)) {
-                            data.put("timestamp", java.time.Instant.now().toString());
-                        }
-                        res.writeChunk("data: %s\n\n".formatted(gson.toJson(data)).getBytes(StandardCharsets.UTF_8));
-                    } catch (Exception e) {
-                        cancelled.set(true);
-                        latch.countDown();
+                    Map<String, Object> data = new java.util.HashMap<>(Map.of("type", "token", "content", token));
+                    if (firstToken.compareAndSet(true, false)) {
+                        data.put("timestamp", java.time.Instant.now().toString());
                     }
+                    writeSse(res, cancelled, latch, data, false);
                 },
-                reasoning -> {
-                    try {
-                        res.writeChunk("data: %s\n\n".formatted(gson.toJson(Map.of("type", "reasoning", "content", reasoning))).getBytes(StandardCharsets.UTF_8));
-                    } catch (Exception e) {
-                        cancelled.set(true);
-                        latch.countDown();
-                    }
-                },
-                status -> {
-                    try {
-                        res.writeChunk("data: %s\n\n".formatted(gson.toJson(Map.of("type", "status", "content", status))).getBytes(StandardCharsets.UTF_8));
-                    } catch (Exception e) {
-                        cancelled.set(true);
-                        latch.countDown();
-                    }
-                },
-                content -> {
-                    try {
-                        res.writeChunk("data: %s\n\n".formatted(gson.toJson(Map.of("type", "complete", "content", content))).getBytes(StandardCharsets.UTF_8));
-                    } finally {
-                        latch.countDown();
-                    }
-                },
+                reasoning -> writeSse(res, cancelled, latch,
+                        Map.of("type", "reasoning", "content", reasoning), false),
+                status -> writeSse(res, cancelled, latch,
+                        Map.of("type", "status", "content", status), false),
+                content -> writeSse(res, cancelled, latch,
+                        Map.of("type", "complete", "content", content), true),
                 error -> {
-                    try {
-                        res.writeChunk("data: %s\n\n".formatted(gson.toJson(Map.of("type", "error",
-                                "content", "An error occurred: " + error.getMessage()))).getBytes(StandardCharsets.UTF_8));
-                        EventLogger.error("channel", agent.name, "web",
-                                "SSE stream error: %s".formatted(error.getMessage()));
-                    } finally {
-                        latch.countDown();
-                    }
+                    writeSse(res, cancelled, latch,
+                            Map.of("type", "error", "content", "An error occurred: " + error.getMessage()), true);
+                    EventLogger.error("channel", agent.name, "web",
+                            "SSE stream error: %s".formatted(error.getMessage()));
                 }
         );
         AgentRunner.runStreaming(agent, conversationId, "web", username, messageText,
@@ -276,14 +246,31 @@ public class ApiChatController extends Controller {
         try {
             if (!latch.await(600, TimeUnit.SECONDS)) {
                 cancelled.set(true);
-                try {
-                    res.writeChunk("data: %s\n\n".formatted(gson.toJson(Map.of("type", "error", "content", "Request timed out"))).getBytes(StandardCharsets.UTF_8));
-                } catch (Exception e) { /* Client already disconnected */ }
+                writeSse(res, cancelled, latch, Map.of("type", "error", "content", "Request timed out"), false);
             }
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         } finally {
             heartbeatExecutor.shutdownNow();
         }
+    }
+
+    /**
+     * Write a single SSE frame to the response. On write failure, marks the
+     * stream as cancelled. If {@code terminal} is true, always counts down
+     * the latch (signalling stream completion).
+     */
+    private static void writeSse(Http.Response res, AtomicBoolean cancelled,
+                                 CountDownLatch latch, Map<String, ?> data, boolean terminal) {
+        try {
+            res.writeChunk("data: %s\n\n".formatted(gson.toJson(data)).getBytes(StandardCharsets.UTF_8));
+        } catch (Exception _) {
+            cancelled.set(true);
+            if (!terminal) {
+                latch.countDown();
+                return;
+            }
+        }
+        if (terminal) latch.countDown();
     }
 }

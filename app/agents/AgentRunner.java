@@ -1,6 +1,7 @@
 package agents;
 
 import com.google.gson.Gson;
+import static utils.GsonHolder.INSTANCE;
 import llm.LlmProvider;
 import llm.LlmTypes.*;
 import llm.ProviderRegistry;
@@ -26,7 +27,7 @@ import java.util.regex.Pattern;
  */
 public class AgentRunner {
 
-    private static final Gson gson = new Gson();
+    private static final Gson gson = INSTANCE;
     private static final int DEFAULT_MAX_TOOL_ROUNDS = 10;
     private static final Pattern IMAGE_URL_PATTERN =
             Pattern.compile("!\\[([^\\]]*)\\]\\((/api/[^)]+)\\)");

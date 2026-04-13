@@ -114,7 +114,7 @@ public class JpqlFilterTest extends UnitTest {
                 .eq("y", "two");
         var list = filter.paramList();
         assertEquals(2, list.size());
-        assertEquals("one", list.get(0));
+        assertEquals("one", list.getFirst());
         assertEquals("two", list.get(1));
     }
 

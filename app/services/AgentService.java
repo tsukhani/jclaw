@@ -20,12 +20,19 @@ import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 public class AgentService {
 
-    private static final ConcurrentHashMap<String, CachedFile> fileCache = new ConcurrentHashMap<>();
+    private static final int FILE_CACHE_MAX_SIZE = 500;
+    @SuppressWarnings("serial")
+    private static final java.util.Map<String, CachedFile> fileCache =
+            java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<>(64, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(java.util.Map.Entry<String, CachedFile> eldest) {
+                    return size() > FILE_CACHE_MAX_SIZE;
+                }
+            });
     private static final long FILE_CACHE_TTL_MS = 30_000;
 
     private record CachedFile(String content, long expiresAt) {

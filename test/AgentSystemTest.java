@@ -223,8 +223,8 @@ public class AgentSystemTest extends UnitTest {
 
         var messages = ConversationService.loadRecentMessages(convo);
         assertEquals(3, messages.size());
-        assertEquals("user", messages.get(0).role);
-        assertEquals("Hello", messages.get(0).content);
+        assertEquals("user", messages.getFirst().role);
+        assertEquals("Hello", messages.getFirst().content);
         assertEquals("assistant", messages.get(1).role);
         assertEquals("user", messages.get(2).role);
     }
@@ -242,7 +242,7 @@ public class AgentSystemTest extends UnitTest {
         var messages = ConversationService.loadRecentMessages(convo);
         assertEquals(3, messages.size());
         // ASC / chronological order — should be the LAST 3
-        assertEquals("msg-3", messages.get(0).content);
+        assertEquals("msg-3", messages.getFirst().content);
         assertEquals("msg-4", messages.get(1).content);
         assertEquals("msg-5", messages.get(2).content);
     }

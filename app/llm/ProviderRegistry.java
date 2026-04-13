@@ -1,6 +1,5 @@
 package llm;
 
-import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import llm.LlmTypes.*;
 import services.ConfigService;
@@ -28,7 +27,7 @@ import java.util.Map;
  */
 public class ProviderRegistry {
 
-    private static final Gson gson = new Gson();
+    private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
     private static volatile Map<String, LlmProvider> cache = Map.of();
     private static volatile long lastRefresh = 0;
     private static final long REFRESH_INTERVAL_MS = 60_000;

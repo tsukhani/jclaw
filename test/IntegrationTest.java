@@ -302,8 +302,8 @@ public class IntegrationTest extends UnitTest {
 
         var events = EventLog.findRecent(10);
         assertEquals(4, events.size());
-        assertEquals("ERROR", events.get(0).level);
-        assertEquals("llm", events.get(0).category);
+        assertEquals("ERROR", events.getFirst().level);
+        assertEquals("llm", events.getFirst().category);
     }
 
     // --- Helpers ---

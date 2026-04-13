@@ -1,7 +1,6 @@
 package tools;
 
 import agents.ToolRegistry;
-import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
@@ -16,7 +15,7 @@ import java.util.Map;
 
 public class TaskTool implements ToolRegistry.Tool {
 
-    private static final Gson gson = new Gson();
+    private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
 
     @Override
     public String name() { return "task_manager"; }

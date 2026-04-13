@@ -19,6 +19,22 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
     private static final String DEFAULT_ALLOWLIST = "git,npm,npx,pnpm,node,python,python3,pip,ls,cat,head,tail,grep,find,wc,sort,uniq,diff,mkdir,cp,mv,echo,curl,wget,jq,tar,zip,unzip";
 
+    /** Cached parsed allowlist: invalidated when the raw config string changes. */
+    private static volatile String cachedAllowlistRaw;
+    private static volatile Set<String> cachedAllowlistSet = Set.of();
+
+    private static Set<String> parsedAllowlist() {
+        var raw = ConfigService.get("shell.allowlist", DEFAULT_ALLOWLIST);
+        if (!raw.equals(cachedAllowlistRaw)) {
+            cachedAllowlistSet = Arrays.stream(raw.split(","))
+                    .map(String::strip)
+                    .filter(s -> !s.isEmpty())
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+            cachedAllowlistRaw = raw;
+        }
+        return cachedAllowlistSet;
+    }
+
     private static final Set<String> SENSITIVE_NAME_PATTERNS = Set.of(
             "key", "secret", "token", "password", "credential"
     );
@@ -110,12 +126,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
             return "Error: command is required and must not be empty.";
         }
 
-        var allowlistStr = ConfigService.get("shell.allowlist", DEFAULT_ALLOWLIST);
-        var allowed = Arrays.stream(allowlistStr.split(","))
-                .map(String::strip)
-                .filter(s -> !s.isEmpty())
-                .toList();
-
+        var allowed = parsedAllowlist();
         if (allowed.isEmpty() || !allowed.contains(firstToken)) {
             return "Error: Command '%s' is not in the allowed commands list. Allowed: %s"
                     .formatted(firstToken, String.join(", ", allowed));

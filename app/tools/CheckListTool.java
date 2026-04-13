@@ -1,7 +1,6 @@
 package tools;
 
 import agents.ToolRegistry;
-import com.google.gson.Gson;
 import com.google.gson.JsonParser;
 import models.Agent;
 
@@ -10,7 +9,7 @@ import java.util.Map;
 
 public class CheckListTool implements ToolRegistry.Tool {
 
-    private static final Gson gson = new Gson();
+    private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
 
     public record CheckListItem(String content, String status, String activeForm) {}
 

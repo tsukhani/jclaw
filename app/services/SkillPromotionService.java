@@ -515,7 +515,7 @@ public class SkillPromotionService {
         try {
             // No reasoning (null thinkingMode) — sanitization is classification, not reasoning.
             var response = provider.chat(modelId, messages, null, null, null, timeoutSeconds);
-            var text = response.choices().get(0).message().content().toString().strip();
+            var text = response.choices().getFirst().message().content().toString().strip();
 
             EventLogger.info("skills",
                     "LLM sanitization batch response (%d chars)".formatted(text.length()));

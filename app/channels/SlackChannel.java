@@ -1,6 +1,5 @@
 package channels;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.ChannelConfig;
@@ -22,7 +21,7 @@ import java.util.Map;
  */
 public class SlackChannel implements Channel {
 
-    private static final Gson gson = new Gson();
+    private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
     private static final long MAX_TIMESTAMP_AGE_SECONDS = 300; // 5 minutes
 
     public record SlackConfig(String botToken, String signingSecret) {

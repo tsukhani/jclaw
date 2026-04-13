@@ -1,7 +1,6 @@
 package tools;
 
 import agents.ToolRegistry;
-import com.google.gson.Gson;
 import com.google.gson.JsonParser;
 import models.Agent;
 import services.ConfigService;
@@ -27,7 +26,7 @@ import java.util.Map;
  */
 public class WebSearchTool implements ToolRegistry.Tool {
 
-    private static final Gson gson = new Gson();
+    private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
     private static final int TIMEOUT_SECONDS = 30;
     private static final int DEFAULT_NUM_RESULTS = 5;
     private static final int MAX_NUM_RESULTS = 10;

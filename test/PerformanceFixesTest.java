@@ -184,7 +184,7 @@ public class PerformanceFixesTest extends UnitTest {
                 .createQuery("SELECT DISTINCT c.channelType FROM Conversation c ORDER BY c.channelType", String.class)
                 .getResultList();
         assertEquals(2, channels.size());
-        assertEquals("slack", channels.get(0));
+        assertEquals("slack", channels.getFirst());
         assertEquals("web", channels.get(1));
     }
 

@@ -1,6 +1,7 @@
 package services;
 
 import com.google.gson.Gson;
+import static utils.GsonHolder.INSTANCE;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -16,7 +17,7 @@ import java.util.function.Consumer;
  */
 public class NotificationBus {
 
-    private static final Gson gson = new Gson();
+    private static final Gson gson = INSTANCE;
     private static final CopyOnWriteArrayList<Consumer<String>> listeners = new CopyOnWriteArrayList<>();
 
     /** Subscribe to receive SSE-formatted event strings. Returns an unsubscribe handle. */

@@ -1,6 +1,5 @@
 package channels;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.ChannelConfig;
@@ -18,7 +17,7 @@ import java.util.Map;
  */
 public class TelegramChannel implements Channel {
 
-    private static final Gson gson = new Gson();
+    private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
     private static final String API_BASE = "https://api.telegram.org/bot";
 
     public record TelegramConfig(String botToken, String webhookSecret, String webhookUrl) {
