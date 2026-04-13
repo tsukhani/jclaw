@@ -115,12 +115,16 @@ const spAvailableModels = computed(() => {
   return getProviderModels(name)
 })
 
+// Whether an explicit (non-default) provider is selected
+const spHasExplicitProvider = computed(() => !!spProviderRaw.value)
+
 async function saveSPField(configKey: string, value: string) {
   saving.value = true
   try {
     await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
-    // When provider changes to default, also clear the model so it falls back to main agent's
-    if (configKey === 'skillsPromotion.provider' && !value) {
+    // When provider changes, also clear the saved model — the old model likely
+    // belongs to the previous provider and would be invalid for the new one.
+    if (configKey === 'skillsPromotion.provider') {
       await $fetch('/api/config', { method: 'POST', body: { key: 'skillsPromotion.model', value: '' } })
     }
     editingSPField.value = null
@@ -1250,7 +1254,7 @@ const providerEntries = computed(() => {
               <select v-if="spAvailableModels.length"
                       v-model="spFieldEdit"
                       class="w-64 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white font-mono focus:outline-none">
-                <option value="">Default (main agent)</option>
+                <option v-if="!spHasExplicitProvider" value="">Default (main agent)</option>
                 <option v-for="m in spAvailableModels" :key="m.id" :value="m.id">{{ m.name || m.id }}</option>
               </select>
               <input v-else v-model="spFieldEdit" type="text" placeholder="model-id"
@@ -1263,10 +1267,10 @@ const providerEntries = computed(() => {
               </button>
             </template>
             <template v-else>
-              <span class="flex-1 text-sm text-neutral-300 font-mono">
-                {{ spModelRaw ? spModelRaw : spEffectiveModel ? spEffectiveModel + ' (from main agent)' : 'Not configured' }}
+              <span class="flex-1 text-sm font-mono" :class="spModelRaw || !spHasExplicitProvider ? 'text-neutral-300' : 'text-amber-500'">
+                {{ spModelRaw ? spModelRaw : spHasExplicitProvider ? 'Select a model' : spEffectiveModel ? spEffectiveModel + ' (from main agent)' : 'Not configured' }}
               </span>
-              <button @click="editingSPField = 'model'; spFieldEdit = spModelRaw" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
+              <button @click="editingSPField = 'model'; spFieldEdit = spModelRaw || (spHasExplicitProvider && spAvailableModels.length ? spAvailableModels[0].id : '')" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
               </button>
             </template>
