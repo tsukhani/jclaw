@@ -57,6 +57,20 @@ onUnmounted(() => { if (dragErrorTimer) clearTimeout(dragErrorTimer); if (infoBa
 // Track multiple concurrent promotions by skill name (survives navigation via useState)
 const promotingSkills = useState<Set<string>>('promotingSkills', () => new Set())
 
+// Reconcile: clear any "promoting" indicators for skills that already exist globally.
+// Handles SSE events missed due to timing, reconnect, or component remount.
+watch(skills, (globalSkills) => {
+  if (!globalSkills || promotingSkills.value.size === 0) return
+  const globalNames = new Set(globalSkills.map((s: any) => s.folderName || s.name))
+  const stillPromoting = new Set<string>()
+  for (const name of promotingSkills.value) {
+    if (!globalNames.has(name)) stillPromoting.add(name)
+  }
+  if (stillPromoting.size !== promotingSkills.value.size) {
+    promotingSkills.value = stillPromoting
+  }
+}, { immediate: true })
+
 // Listen for promotion completion via SSE
 const { onEvent } = useEventBus()
 onEvent('skill.promoted', (data: any) => {
