@@ -1,3 +1,0 @@
-# Identity
-
-Name: crud-agent
