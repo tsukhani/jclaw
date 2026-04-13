@@ -188,9 +188,18 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
     public ChatResponse chat(String model, List<ChatMessage> messages, List<ToolDef> tools,
                              Integer maxTokens, String thinkingMode) {
+        return chat(model, messages, tools, maxTokens, thinkingMode, null);
+    }
+
+    /**
+     * Synchronous chat with an optional custom timeout (seconds).
+     * Pass null for the default 180s timeout.
+     */
+    public ChatResponse chat(String model, List<ChatMessage> messages, List<ToolDef> tools,
+                             Integer maxTokens, String thinkingMode, Integer timeoutSeconds) {
         var request = new ChatRequest(model, messages, tools, false, maxTokens, thinkingMode);
         var json = serializeRequest(request);
-        var responseBody = executeWithRetry("/chat/completions", json);
+        var responseBody = executeWithRetry("/chat/completions", json, timeoutSeconds);
         return deserializeResponse(responseBody);
     }
 
@@ -433,6 +442,10 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
     }
 
     protected HttpRequest buildRequest(String path, String json) {
+        return buildRequest(path, json, null);
+    }
+
+    protected HttpRequest buildRequest(String path, String json, Integer timeoutSeconds) {
         var url = config.baseUrl().endsWith("/")
                 ? config.baseUrl() + path.substring(1)
                 : config.baseUrl() + path;
@@ -441,17 +454,21 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                 .uri(URI.create(url))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer " + config.apiKey())
-                .timeout(Duration.ofSeconds(180))
+                .timeout(Duration.ofSeconds(timeoutSeconds != null ? timeoutSeconds : 180))
                 .POST(HttpRequest.BodyPublishers.ofString(json))
                 .build();
     }
 
     protected String executeWithRetry(String path, String json) {
+        return executeWithRetry(path, json, null);
+    }
+
+    protected String executeWithRetry(String path, String json, Integer timeoutSeconds) {
         Exception lastException = null;
 
         for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             try {
-                var httpReq = buildRequest(path, json);
+                var httpReq = buildRequest(path, json, timeoutSeconds);
                 var response = utils.HttpClients.LLM.send(httpReq, HttpResponse.BodyHandlers.ofString());
 
                 if (response.statusCode() == 200) return response.body();

@@ -391,6 +391,30 @@ public class SkillPromotionService {
                 .collect(java.util.stream.Collectors.joining("; "));
     }
 
+    private static final int SANITIZE_BATCH_SIZE = 5;
+    private static final int SANITIZE_TIMEOUT_SECONDS = 300;
+
+    private static final String SANITIZE_SYSTEM_PROMPT = """
+            You are a security reviewer. You will receive text files from an AI agent's skill folder.
+            A skill folder has this structure:
+            - SKILL.md — the main skill instructions, BODY ONLY (the YAML frontmatter has already been extracted and will be reinjected verbatim after your review, so do NOT emit or fabricate frontmatter for SKILL.md)
+            - credentials.json — already pre-stripped, no action needed
+            - tools/ — optional tool scripts that may contain hardcoded secrets or personal data
+
+            Your job is to identify and redact any secrets, API keys, tokens, passwords, bearer tokens, \
+            webhook URLs, personal information (names, emails, phone numbers, addresses, usernames), \
+            or other sensitive data that may have been embedded in the files.
+
+            Replace each redacted value with a descriptive placeholder like [API_KEY], [PASSWORD], [EMAIL], \
+            [PHONE_NUMBER], [PERSONAL_NAME], [TOKEN], [WEBHOOK_URL], [USERNAME], etc.
+
+            Return ONLY a valid JSON object mapping each filename to its sanitized content. \
+            Do not include any other text, markdown formatting, or code fences. \
+            Example: {"SKILL.md": "sanitized content here"}
+
+            If no sensitive data is found in a file, return its content unchanged.
+            """;
+
     static LinkedHashMap<String, String> sanitizeWithLlm(LinkedHashMap<String, String> fileContents) {
         Agent mainAgent = Agent.findByName(Agent.MAIN_AGENT_NAME);
         if (mainAgent == null) {
@@ -407,50 +431,56 @@ public class SkillPromotionService {
         EventLogger.info("skills", "Starting LLM sanitization of %d file(s) via %s / %s"
                 .formatted(fileContents.size(), provider.config().name(), mainAgent.modelId));
 
-        var sb = new StringBuilder();
         for (var entry : fileContents.entrySet()) {
+            EventLogger.info("skills", "Sanitizing file: %s (%d chars)"
+                    .formatted(entry.getKey(), entry.getValue().length()));
+        }
+
+        // Batch files to avoid overwhelming the model with a single massive payload
+        var entries = new java.util.ArrayList<>(fileContents.entrySet());
+        var result = new LinkedHashMap<String, String>();
+        int batchCount = (entries.size() + SANITIZE_BATCH_SIZE - 1) / SANITIZE_BATCH_SIZE;
+
+        for (int i = 0; i < entries.size(); i += SANITIZE_BATCH_SIZE) {
+            var batch = entries.subList(i, Math.min(i + SANITIZE_BATCH_SIZE, entries.size()));
+            int batchNum = (i / SANITIZE_BATCH_SIZE) + 1;
+
+            EventLogger.info("skills", "Sending batch %d/%d (%d files)"
+                    .formatted(batchNum, batchCount, batch.size()));
+
+            var batchResult = sanitizeBatch(provider, mainAgent.modelId, batch, fileContents);
+            result.putAll(batchResult);
+        }
+
+        EventLogger.info("skills", "Sanitization complete");
+        return result;
+    }
+
+    private static LinkedHashMap<String, String> sanitizeBatch(
+            llm.LlmProvider provider, String modelId,
+            java.util.List<java.util.Map.Entry<String, String>> batch,
+            LinkedHashMap<String, String> originals) {
+
+        var sb = new StringBuilder();
+        for (var entry : batch) {
             sb.append("=== FILE: %s ===\n".formatted(entry.getKey()));
             sb.append(entry.getValue());
             sb.append("\n\n");
         }
 
-        var systemPrompt = """
-                You are a security reviewer. You will receive text files from an AI agent's skill folder.
-                A skill folder has this structure:
-                - SKILL.md — the main skill instructions, BODY ONLY (the YAML frontmatter has already been extracted and will be reinjected verbatim after your review, so do NOT emit or fabricate frontmatter for SKILL.md)
-                - credentials.json — already pre-stripped, no action needed
-                - tools/ — optional tool scripts that may contain hardcoded secrets or personal data
-
-                Your job is to identify and redact any secrets, API keys, tokens, passwords, bearer tokens, \
-                webhook URLs, personal information (names, emails, phone numbers, addresses, usernames), \
-                or other sensitive data that may have been embedded in the files.
-
-                Replace each redacted value with a descriptive placeholder like [API_KEY], [PASSWORD], [EMAIL], \
-                [PHONE_NUMBER], [PERSONAL_NAME], [TOKEN], [WEBHOOK_URL], [USERNAME], etc.
-
-                Return ONLY a valid JSON object mapping each filename to its sanitized content. \
-                Do not include any other text, markdown formatting, or code fences. \
-                Example: {"SKILL.md": "sanitized content here"}
-
-                If no sensitive data is found in a file, return its content unchanged.
-                """;
-
-        var messages = List.of(
-                ChatMessage.system(systemPrompt),
+        var messages = java.util.List.of(
+                ChatMessage.system(SANITIZE_SYSTEM_PROMPT),
                 ChatMessage.user(sb.toString())
         );
 
         try {
-            for (var entry : fileContents.entrySet()) {
-                EventLogger.info("skills", "Sanitizing file: %s (%d chars)"
-                        .formatted(entry.getKey(), entry.getValue().length()));
-            }
-
-            var response = provider.chat(mainAgent.modelId, messages, null, null, null);
+            // No reasoning (null thinkingMode) — sanitization is classification, not reasoning.
+            // Extended timeout — large payloads need more time to process.
+            var response = provider.chat(modelId, messages, null, null, null, SANITIZE_TIMEOUT_SECONDS);
             var text = response.choices().get(0).message().content().toString().strip();
 
             EventLogger.info("skills",
-                    "LLM sanitization response (%d chars)".formatted(text.length()), text);
+                    "LLM sanitization batch response (%d chars)".formatted(text.length()));
 
             if (text.startsWith("```")) {
                 text = text.replaceFirst("^```(?:json)?\\s*\\n?", "").replaceFirst("\\n?```$", "").strip();
@@ -458,7 +488,7 @@ public class SkillPromotionService {
 
             var json = JsonParser.parseString(text).getAsJsonObject();
             var result = new LinkedHashMap<String, String>();
-            for (var entry : fileContents.entrySet()) {
+            for (var entry : batch) {
                 if (json.has(entry.getKey())) {
                     var sanitized = json.get(entry.getKey()).getAsString();
                     var changed = !sanitized.equals(entry.getValue());
@@ -466,17 +496,19 @@ public class SkillPromotionService {
                     EventLogger.info("skills", "  %s: %s"
                             .formatted(entry.getKey(), changed ? "REDACTED (content changed)" : "clean (no changes)"));
                 } else {
-                    result.put(entry.getKey(), entry.getValue());
+                    result.put(entry.getKey(), originals.get(entry.getKey()));
                     EventLogger.info("skills", "  %s: not in LLM response, kept original"
                             .formatted(entry.getKey()));
                 }
             }
-
-            EventLogger.info("skills", "Sanitization complete");
             return result;
         } catch (Exception e) {
-            EventLogger.warn("skills", "LLM sanitization failed, using original content: " + e.getMessage());
-            return fileContents;
+            EventLogger.warn("skills", "LLM sanitization batch failed, using originals: " + e.getMessage());
+            var result = new LinkedHashMap<String, String>();
+            for (var entry : batch) {
+                result.put(entry.getKey(), originals.get(entry.getKey()));
+            }
+            return result;
         }
     }
 }
