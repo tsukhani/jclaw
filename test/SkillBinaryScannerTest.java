@@ -73,7 +73,7 @@ public class SkillBinaryScannerTest extends UnitTest {
     public void malwareBazaarLookupFlagsKnownMalwareHash() {
         // Proves the HTTP integration end-to-end: hashing, Auth-Key header,
         // POST body encoding, and JSON parsing all work against the real API.
-        if (!hasMalwareBazaarKey()) return; // Play 1.x runner treats JUnit 5 assumptions as errors
+        Assumptions.assumeTrue(hasMalwareBazaarKey(), "Skipping: MALWAREBAZAAR_AUTH_KEY not configured");
 
         var verdict = new MalwareBazaarScanner().lookup(KNOWN_MALICIOUS_SHA256);
 
@@ -88,7 +88,7 @@ public class SkillBinaryScannerTest extends UnitTest {
     @Test
     public void malwareBazaarLookupReturnsCleanForUnknownHash() {
         // Any random SHA-256 (e.g. hash of the empty string) should come back clean.
-        if (!hasMalwareBazaarKey()) return; // Play 1.x runner treats JUnit 5 assumptions as errors
+        Assumptions.assumeTrue(hasMalwareBazaarKey(), "Skipping: MALWAREBAZAAR_AUTH_KEY not configured");
 
         // SHA-256 of the empty string — guaranteed not to be in any malware DB
         var emptyHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
@@ -143,7 +143,7 @@ public class SkillBinaryScannerTest extends UnitTest {
     public void metaDefenderLookupFlagsKnownMalwareHash() {
         // Live lookup: confirms HTTP integration, apikey header, JSON parsing,
         // and scan_all_result_i → Verdict translation against the real API.
-        if (!hasMetaDefenderKey()) return; // Play 1.x runner treats JUnit 5 assumptions as errors
+        Assumptions.assumeTrue(hasMetaDefenderKey(), "Skipping: METADEFENDER_API_KEY not configured");
 
         var verdict = new MetaDefenderCloudScanner().lookup(KNOWN_MALICIOUS_SHA256);
 
@@ -156,7 +156,7 @@ public class SkillBinaryScannerTest extends UnitTest {
 
     @Test
     public void metaDefenderLookupReturnsCleanForUnknownHash() {
-        if (!hasMetaDefenderKey()) return; // Play 1.x runner treats JUnit 5 assumptions as errors
+        Assumptions.assumeTrue(hasMetaDefenderKey(), "Skipping: METADEFENDER_API_KEY not configured");
 
         // SHA-256 of the empty string — MetaDefender returns 404 for hashes it has never seen
         var emptyHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
@@ -230,7 +230,8 @@ public class SkillBinaryScannerTest extends UnitTest {
      */
     @Test
     public void scanAggregatesViolationsFromBothScannersForSameFile() throws Exception {
-        if (!hasMalwareBazaarKey() || !hasMetaDefenderKey()) return; // Play 1.x runner treats JUnit 5 assumptions as errors
+        Assumptions.assumeTrue(hasMalwareBazaarKey() && hasMetaDefenderKey(),
+                "Skipping: both MALWAREBAZAAR_AUTH_KEY and METADEFENDER_API_KEY required");
 
         // We need a file whose SHA-256 is KNOWN_MALICIOUS_SHA256. Since we can't
         // ship malware bytes, construct a fixture file whose hash we compute and
