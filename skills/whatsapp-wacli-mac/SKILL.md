@@ -7,9 +7,46 @@ tools: [exec]
 
 # WhatsApp wacli Skill
 
-Binary location: `./skills/whatsapp-wacli/tools/wacli`
+Binary location: `./skills/whatsapp-wacli-mac/tools/wacli`
 
 Always use this path when invoking commands.
+
+---
+
+## Bootstrap (First-time setup)
+
+**Before running any wacli command**, check whether the binary is present:
+
+```bash
+test -x ./skills/whatsapp-wacli-mac/tools/wacli && echo "ready" || echo "needs install"
+```
+
+If it prints `needs install`, build or install it using **one** of the methods below, then proceed.
+
+### Option A: Homebrew (recommended — no Go toolchain required)
+
+```bash
+brew install steipete/tap/wacli
+cp "$(brew --prefix)/bin/wacli" ./skills/whatsapp-wacli-mac/tools/wacli
+chmod +x ./skills/whatsapp-wacli-mac/tools/wacli
+```
+
+### Option B: Build from source (requires Go 1.25+ with CGO enabled)
+
+```bash
+git clone --depth 1 https://github.com/steipete/wacli /tmp/wacli-src \
+  && cd /tmp/wacli-src \
+  && CGO_ENABLED=1 go build -tags sqlite_fts5 -o /tmp/wacli-bin ./cmd/wacli \
+  && cp /tmp/wacli-bin ./skills/whatsapp-wacli-mac/tools/wacli \
+  && chmod +x ./skills/whatsapp-wacli-mac/tools/wacli \
+  && rm -rf /tmp/wacli-src /tmp/wacli-bin
+```
+
+> Note: builds natively for the current architecture (darwin/arm64 on Apple Silicon).
+
+Once the binary is present, proceed to Authentication below.
+
+---
 
 ## CRITICAL: Phone Number Format
 

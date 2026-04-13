@@ -7,9 +7,40 @@ tools: [exec]
 
 # WhatsApp wacli Skill
 
-Binary location: `./skills/whatsapp-wacli/tools/wacli`
+Binary location: `./skills/whatsapp-wacli-linux/tools/wacli`
 
 Always use this path when invoking commands.
+
+---
+
+## Bootstrap (First-time setup)
+
+**Before running any wacli command**, check whether the binary is present:
+
+```bash
+test -x ./skills/whatsapp-wacli-linux/tools/wacli && echo "ready" || echo "needs install"
+```
+
+If it prints `needs install`, build it from source:
+
+```bash
+# Ensure build dependencies are available
+which go || (echo "Go 1.25+ is required — install from https://go.dev/dl/" && exit 1)
+which gcc || apt-get install -y gcc 2>/dev/null || yum install -y gcc 2>/dev/null
+
+git clone --depth 1 https://github.com/steipete/wacli /tmp/wacli-src \
+  && cd /tmp/wacli-src \
+  && CGO_ENABLED=1 go build -tags sqlite_fts5 -o /tmp/wacli-bin ./cmd/wacli \
+  && cp /tmp/wacli-bin ./skills/whatsapp-wacli-linux/tools/wacli \
+  && chmod +x ./skills/whatsapp-wacli-linux/tools/wacli \
+  && rm -rf /tmp/wacli-src /tmp/wacli-bin
+```
+
+> Note: CGO is required (SQLite dependency). `gcc` must be present. Builds natively for linux/amd64.
+
+Once the binary is present, proceed to Authentication below.
+
+---
 
 ## CRITICAL: Phone Number Format
 
