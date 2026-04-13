@@ -28,6 +28,9 @@ public class ToolRegistry {
         String description();
         Map<String, Object> parameters();
         String execute(String argsJson, Agent agent);
+
+        /** System tools are always available and cannot be disabled by users. */
+        default boolean isSystem() { return false; }
     }
 
     private static volatile Map<String, Tool> tools = Map.of();

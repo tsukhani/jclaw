@@ -17,8 +17,11 @@ public class SkillsTool implements ToolRegistry.Tool {
     public String name() { return "skills"; }
 
     @Override
+    public boolean isSystem() { return true; }
+
+    @Override
     public String description() {
-        return "List available skills or read a skill's full content. Actions: listSkills, readSkill.";
+        return "Runtime introspection: discover which tools and skills are currently available to this agent. Actions: listTools, listSkills, readSkill.";
     }
 
     @Override
@@ -27,7 +30,7 @@ public class SkillsTool implements ToolRegistry.Tool {
                 "type", "object",
                 "properties", Map.of(
                         "action", Map.of("type", "string",
-                                "enum", List.of("listSkills", "readSkill"),
+                                "enum", List.of("listTools", "listSkills", "readSkill"),
                                 "description", "The action to perform"),
                         "name", Map.of("type", "string",
                                 "description", "Skill name (for readSkill)")
@@ -42,11 +45,23 @@ public class SkillsTool implements ToolRegistry.Tool {
         var action = args.get("action").getAsString();
 
         return switch (action) {
+            case "listTools" -> {
+                // loadDisabledTools queries the DB — needs a transaction context.
+                // Exclude this tool itself (skills) — it is always available and listing it would be reflexive.
+                var toolDefs = services.Tx.run(() -> agents.ToolRegistry.getToolDefsForAgent(agent))
+                        .stream().filter(d -> !d.function().name().equals(name())).toList();
+                if (toolDefs.isEmpty()) yield "No other tools are currently enabled for this agent.";
+                var sb = new StringBuilder("Available tools (%d):\n".formatted(toolDefs.size()));
+                for (var def : toolDefs) {
+                    sb.append("- **%s**: %s\n".formatted(def.function().name(), def.function().description()));
+                }
+                yield sb.toString();
+            }
             case "listSkills" -> {
                 SkillLoader.clearCache();
                 var skills = SkillLoader.loadSkills(agent.name);
-                if (skills.isEmpty()) yield "No skills available.";
-                var sb = new StringBuilder("Available skills:\n");
+                if (skills.isEmpty()) yield "No skills are currently available for this agent.";
+                var sb = new StringBuilder("Available skills (%d):\n".formatted(skills.size()));
                 for (var skill : skills) {
                     sb.append("- **%s**: %s\n".formatted(skill.name(), skill.description()));
                 }

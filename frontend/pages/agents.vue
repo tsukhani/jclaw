@@ -6,13 +6,41 @@ const { confirm } = useConfirm()
 const { data: agents, refresh } = await useFetch<Agent[]>('/api/agents')
 const { data: configData } = await useFetch<ConfigResponse>('/api/config')
 
-const editing = ref<any>(null)
+const editing = ref<Agent | null>(null)
 const creating = ref(false)
 const workspaceTab = ref('AGENT.md')
 const workspaceContent = ref('')
 const form = ref({ name: '', modelProvider: '', modelId: '', enabled: true, thinkingMode: '' })
 const agentTools = ref<any[]>([])
 const agentSkills = ref<any[]>([])
+
+// Group agentTools by category, in the canonical order from useToolMeta.
+// Each entry is { category, tools[] } — empty categories are omitted.
+const { TOOL_META, getToolMeta, getPillClass } = useToolMeta()
+const toolsByCategory = computed(() => {
+  const categories = ['System', 'Files', 'Web', 'Utilities'] as const
+  const orderedNames = [
+    'exec',
+    'filesystem', 'documents',
+    'web_fetch', 'web_search', 'browser',
+    'datetime', 'checklist', 'task_manager', 'skills',
+  ]
+  // Build a lookup from tool name → its position in the canonical order
+  const posOf = (name: string) => {
+    const i = orderedNames.indexOf(name)
+    return i === -1 ? 999 : i
+  }
+  return categories
+    .map(category => ({
+      category,
+      tools: agentTools.value
+        .filter(t => !TOOL_META[t.name]?.system)
+        .filter(t => (TOOL_META[t.name]?.category ?? 'Utilities') === category)
+        .sort((a, b) => posOf(a.name) - posOf(b.name)),
+    }))
+    .filter(g => g.tools.length > 0)
+})
+
 const queueMode = ref('queue')
 const execBypassAllowlist = ref(false)
 const execAllowGlobalPaths = ref(false)
@@ -41,12 +69,12 @@ interface PromptBreakdown {
   tools: PromptBreakdownEntry[]
 }
 const promptBreakdownOpen = ref(false)
-const promptBreakdownAgent = ref<any>(null)
+const promptBreakdownAgent = ref<Agent | null>(null)
 const promptBreakdownData = ref<PromptBreakdown | null>(null)
 const promptBreakdownLoading = ref(false)
 const promptBreakdownError = ref('')
 
-async function openPromptBreakdown(agent: any) {
+async function openPromptBreakdown(agent: Agent) {
   promptBreakdownAgent.value = agent
   promptBreakdownOpen.value = true
   promptBreakdownData.value = null
@@ -156,6 +184,28 @@ async function toggleTool(toolName: string, enabled: boolean) {
   } catch (e) {
     console.error('Failed to toggle tool:', e)
   }
+}
+
+const toggleableAgentTools = computed(() =>
+  agentTools.value.filter((t: any) => !TOOL_META[t.name]?.system)
+)
+
+const allAgentToolsEnabled = computed(() =>
+  toggleableAgentTools.value.length > 0 && toggleableAgentTools.value.every((t: any) => t.enabled)
+)
+
+async function toggleAllAgentTools() {
+  const next = !allAgentToolsEnabled.value
+  toggleableAgentTools.value.forEach((t: any) => { t.enabled = next })
+  await Promise.all(toggleableAgentTools.value.map((t: any) => toggleTool(t.name, next)))
+}
+
+// Returns the tool names that a skill depends on but are currently disabled for this agent.
+// Only flags tools that are registered (present in agentTools) — unknown tools are ignored.
+function skillDisabledTools(skill: any): string[] {
+  if (!skill.tools?.length) return []
+  const toolMap = new Map(agentTools.value.map((t: any) => [t.name, t.enabled as boolean]))
+  return (skill.tools as string[]).filter(name => toolMap.has(name) && !toolMap.get(name))
 }
 
 async function loadAgentSkills(agentId: number) {
@@ -349,7 +399,33 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
 
 <template>
   <div>
-    <h1 class="text-lg font-semibold text-white mb-6">Agents</h1>
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-lg font-semibold text-white">Agents</h1>
+      <div v-if="!editing && !creating" class="flex items-center gap-2">
+        <template v-if="!selectMode">
+          <button @click="newAgent" :disabled="!providers.length"
+                  class="p-2 border border-neutral-700 text-neutral-400 hover:text-emerald-400 hover:border-emerald-600/50 disabled:opacity-40 disabled:hover:text-neutral-400 disabled:hover:border-neutral-700 transition-colors"
+                  title="New Agent">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M12 4.5v15m7.5-7.5h-15" /></svg>
+          </button>
+          <button @click="enterSelectMode" :disabled="!customAgents.length"
+                  class="p-2 border border-neutral-700 text-neutral-400 hover:text-red-400 hover:border-red-700/50 disabled:opacity-40 disabled:hover:text-neutral-400 disabled:hover:border-neutral-700 transition-colors"
+                  title="Delete an agent">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+          </button>
+        </template>
+        <template v-else>
+          <button @click="exitSelectMode"
+                  class="px-3 py-1.5 border border-neutral-700 text-neutral-400 text-xs hover:text-white hover:border-neutral-500 transition-colors">
+            Cancel
+          </button>
+          <button @click="deleteSelected" :disabled="!selectedIds.size || deletingBulk"
+                  class="px-3 py-1.5 bg-red-700 text-white text-xs font-medium hover:bg-red-600 disabled:opacity-40 transition-colors">
+            Delete {{ selectedIds.size || '' }}
+          </button>
+        </template>
+      </div>
+    </div>
 
     <div v-if="!providers.length && !editing && !creating"
          class="bg-neutral-900 border border-neutral-800 p-4 mb-4 text-sm text-neutral-400">
@@ -367,14 +443,14 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
           <div>
             <span class="text-sm text-white">{{ mainAgent.name }}</span>
             <div class="text-xs text-neutral-500 mt-0.5">{{ mainAgent.modelProvider }} / {{ mainAgent.modelId }}</div>
-          </div>
-          <div class="flex items-center gap-3 shrink-0">
-            <span v-if="!mainAgent.providerConfigured" class="text-xs font-mono text-amber-400">provider not configured</span>
             <button @click.stop="openPromptBreakdown(mainAgent)"
-                    class="px-2 py-0.5 text-[10px] text-neutral-400 border border-neutral-700 hover:text-white hover:border-neutral-500 transition-colors"
+                    class="mt-2 px-2.5 py-1 text-[11px] font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-600/30 hover:bg-emerald-500/20 hover:text-emerald-300 hover:border-emerald-500/50 transition-colors"
                     title="Inspect the system prompt this agent receives — per-section char + token breakdown">
               Inspect prompt
             </button>
+          </div>
+          <div class="flex items-center gap-3 shrink-0">
+            <span v-if="!mainAgent.providerConfigured" class="text-xs font-mono text-amber-400">provider not configured</span>
           </div>
         </div>
       </div>
@@ -382,34 +458,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
 
     <!-- Custom Agents section -->
     <div v-if="!editing && !creating" class="mb-6 space-y-2">
-      <div class="flex items-center justify-between">
-        <h2 class="text-sm font-medium text-neutral-400">Custom Agents</h2>
-        <div class="flex items-center gap-2">
-          <button @click="newAgent" :disabled="!providers.length || selectMode"
-                  class="px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-500 disabled:opacity-40 transition-colors">
-            New Agent
-          </button>
-          <!-- Delete affordance: outside select mode, entering it requires at least one custom
-               agent to exist. Inside select mode, the same button becomes "Delete N" and
-               confirms the bulk delete. A Cancel button sits alongside to exit select mode. -->
-          <template v-if="!selectMode">
-            <button @click="enterSelectMode" :disabled="!customAgents.length"
-                    class="px-3 py-1.5 bg-neutral-800 text-neutral-300 text-xs font-medium hover:bg-red-900/40 hover:text-red-300 border border-neutral-700 disabled:opacity-40 disabled:hover:bg-neutral-800 disabled:hover:text-neutral-300 transition-colors">
-              Delete
-            </button>
-          </template>
-          <template v-else>
-            <button @click="exitSelectMode"
-                    class="px-3 py-1.5 bg-neutral-800 text-neutral-300 text-xs font-medium hover:bg-neutral-700 border border-neutral-700 transition-colors">
-              Cancel
-            </button>
-            <button @click="deleteSelected" :disabled="!selectedIds.size || deletingBulk"
-                    class="px-3 py-1.5 bg-red-700 text-white text-xs font-medium hover:bg-red-600 disabled:opacity-40 transition-colors">
-              Delete {{ selectedIds.size || '' }}
-            </button>
-          </template>
-        </div>
-      </div>
+      <h2 class="text-sm font-medium text-neutral-400">Custom Agents</h2>
       <p class="text-xs text-neutral-600">Additional agents you create for specific channels, peers, or workflows.</p>
       <div class="bg-neutral-900 border border-neutral-800">
         <div v-for="agent in customAgents" :key="agent.id"
@@ -423,18 +472,17 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
             <div class="min-w-0">
               <span class="text-sm text-white">{{ agent.name }}</span>
               <div class="text-xs text-neutral-500 mt-0.5">{{ agent.modelProvider }} / {{ agent.modelId }}</div>
+              <!-- Inspect prompt: below model line, hidden in select mode -->
+              <button v-if="!selectMode" @click.stop="openPromptBreakdown(agent)"
+                      class="mt-2 px-2.5 py-1 text-[11px] font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-600/30 hover:bg-emerald-500/20 hover:text-emerald-300 hover:border-emerald-500/50 transition-colors"
+                      title="Inspect the system prompt this agent receives — per-section char + token breakdown">
+                Inspect prompt
+              </button>
             </div>
           </div>
           <div class="flex items-center gap-3 shrink-0">
             <span v-if="agent.enabled && !agent.providerConfigured"
                   class="text-[10px] font-mono text-amber-400 border border-amber-400/30 px-1">provider not configured</span>
-            <!-- Inspect system prompt: per-agent diagnostic, hidden in select mode so the row's
-                 click surface is unambiguous (select vs. inspect would be confusing). -->
-            <button v-if="!selectMode" @click.stop="openPromptBreakdown(agent)"
-                    class="px-2 py-0.5 text-[10px] text-neutral-400 border border-neutral-700 hover:text-white hover:border-neutral-500 transition-colors"
-                    title="Inspect the system prompt this agent receives — per-section char + token breakdown">
-              Inspect prompt
-            </button>
             <!-- Enabled toggle (hidden in select mode to keep the row's action surface unambiguous) -->
             <button v-if="!selectMode" @click.stop="toggleAgentEnabled(agent)"
                     :class="agent.enabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-neutral-700 hover:bg-neutral-600'"
@@ -522,23 +570,80 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
 
       <!-- Tools -->
       <div v-if="editing" class="bg-neutral-900 border border-neutral-800">
-        <div class="px-4 py-2.5 border-b border-neutral-800">
-          <span class="text-sm font-medium text-white">Tools</span>
-          <span class="ml-2 text-xs text-neutral-500">{{ agentTools.filter(t => t.enabled).length }}/{{ agentTools.length }} enabled</span>
-        </div>
-        <div class="divide-y divide-neutral-800/50">
-          <div v-for="tool in agentTools" :key="tool.name"
-               class="px-4 py-2 flex items-center justify-between">
-            <div>
-              <span class="text-sm text-white font-mono">{{ tool.name }}</span>
-              <div class="text-xs text-neutral-500 mt-0.5">{{ tool.description }}</div>
-            </div>
-            <label class="flex items-center gap-1.5 shrink-0">
-              <input type="checkbox" :checked="tool.enabled"
-                     @change="(e: Event) => { tool.enabled = (e.target as HTMLInputElement).checked; toggleTool(tool.name, tool.enabled) }"
-                     class="accent-white" />
-            </label>
+        <div class="px-4 py-2.5 border-b border-neutral-800 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium text-white">Tools</span>
+            <span class="text-xs text-neutral-500">{{ toggleableAgentTools.filter((t: any) => t.enabled).length }}/{{ toggleableAgentTools.length }} enabled</span>
           </div>
+          <button v-if="toggleableAgentTools.length"
+                  @click="toggleAllAgentTools()"
+                  :title="allAgentToolsEnabled ? 'Disable all tools for this agent' : 'Enable all tools for this agent'"
+                  class="shrink-0">
+            <div class="relative w-9 h-5 rounded-full transition-colors duration-200"
+                 :class="allAgentToolsEnabled ? 'bg-emerald-500' : 'bg-neutral-700'">
+              <div class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+                   :class="allAgentToolsEnabled ? 'left-[18px]' : 'left-0.5'" />
+            </div>
+          </button>
+        </div>
+        <div>
+          <template v-for="group in toolsByCategory" :key="group.category">
+            <!-- Category header row -->
+            <div class="px-4 py-1.5 border-b border-neutral-800/50 bg-neutral-900/60">
+              <span class="text-[10px] font-semibold uppercase tracking-widest"
+                    :class="{
+                      'text-neutral-500':   group.category === 'System',
+                      'text-amber-500/70':  group.category === 'Files',
+                      'text-blue-500/70':   group.category === 'Web',
+                      'text-emerald-500/70':group.category === 'Utilities',
+                    }">
+                {{ group.category }}
+              </span>
+            </div>
+            <div class="divide-y divide-neutral-800/50">
+              <div v-for="tool in group.tools" :key="tool.name"
+                   class="px-4 py-3 flex items-center gap-3">
+                <!-- Colored icon matching the Tools page -->
+                <div class="w-8 h-8 rounded flex items-center justify-center shrink-0"
+                     :class="getToolMeta(tool.name)?.iconBg ?? 'bg-neutral-800'">
+                  <svg class="w-4 h-4" :class="getToolMeta(tool.name)?.iconColor ?? 'text-neutral-400'"
+                       fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path v-if="getToolMeta(tool.name)?.icon === 'terminal'"  stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    <path v-if="getToolMeta(tool.name)?.icon === 'folder'"    stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                    <path v-if="getToolMeta(tool.name)?.icon === 'document'"  stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    <path v-if="getToolMeta(tool.name)?.icon === 'globe'"     stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
+                    <path v-if="getToolMeta(tool.name)?.icon === 'search'"    stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    <path v-if="getToolMeta(tool.name)?.icon === 'browser'"   stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    <path v-if="getToolMeta(tool.name)?.icon === 'clock'"     stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <path v-if="getToolMeta(tool.name)?.icon === 'check'"     stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <path v-if="getToolMeta(tool.name)?.icon === 'tasks'"     stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                    <path v-if="getToolMeta(tool.name)?.icon === 'skills'"    stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+                <!-- Name + function pills -->
+                <div class="flex-1 min-w-0">
+                  <span class="text-sm text-white font-mono">{{ tool.name }}</span>
+                  <div class="flex flex-wrap gap-1 mt-1.5">
+                    <span v-for="fn in (getToolMeta(tool.name)?.functions ?? [])" :key="fn.name"
+                          class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm"
+                          :class="getPillClass(tool.name)">
+                      {{ fn.name }}
+                    </span>
+                  </div>
+                </div>
+                <!-- Pill toggle -->
+                <button @click="tool.enabled = !tool.enabled; toggleTool(tool.name, tool.enabled)"
+                        :title="tool.enabled ? 'Disable tool for this agent' : 'Enable tool for this agent'"
+                        class="shrink-0">
+                  <div class="relative w-9 h-5 rounded-full transition-colors duration-200"
+                       :class="tool.enabled ? 'bg-emerald-500' : 'bg-neutral-700'">
+                    <div class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+                         :class="tool.enabled ? 'left-[18px]' : 'left-0.5'" />
+                  </div>
+                </button>
+              </div>
+            </div>
+          </template>
         </div>
         <div v-if="!agentTools.length" class="px-4 py-4 text-xs text-neutral-600 text-center">
           No tools registered
@@ -587,18 +692,39 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
         </div>
         <div class="divide-y divide-neutral-800/50">
           <div v-for="skill in agentSkills" :key="skill.name"
-               class="px-4 py-2 flex items-center justify-between">
-            <div>
-              <span class="text-sm text-white font-mono">{{ skill.name }}</span>
-              <span v-if="skill.isGlobal" class="ml-2 text-[10px] text-green-400 border border-green-400/30 px-1">global</span>
-              <span v-else class="ml-2 text-[10px] text-neutral-500 border border-neutral-700 px-1">workspace</span>
-              <div class="text-xs text-neutral-500 mt-0.5">{{ skill.description || '' }}</div>
+               class="px-4 py-2.5 flex items-start justify-between gap-3 transition-opacity"
+               :class="skillDisabledTools(skill).length ? 'opacity-45' : ''">
+            <div class="flex-1 min-w-0 transition-[filter]"
+                 :class="skillDisabledTools(skill).length ? 'blur-[0.4px]' : ''">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-sm text-white font-mono">{{ skill.name }}</span>
+                <span v-if="skill.isGlobal" class="text-[10px] text-green-400 border border-green-400/30 px-1">global</span>
+              </div>
+              <div v-if="skill.tools?.length" class="flex flex-wrap gap-1 mt-1.5">
+                <span v-for="tool in skill.tools" :key="tool"
+                      class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm"
+                      :class="getPillClass(tool)">
+                  {{ tool }}
+                </span>
+              </div>
+              <div v-if="skillDisabledTools(skill).length"
+                   class="text-[10px] text-amber-500/70 mt-1.5">
+                requires {{ skillDisabledTools(skill).join(', ') }}
+              </div>
+              <div v-else-if="skill.description" class="text-xs text-neutral-500 mt-1.5">{{ skill.description }}</div>
             </div>
-            <label class="flex items-center shrink-0">
-              <input type="checkbox" :checked="skill.enabled"
-                     @change="(e: Event) => { skill.enabled = (e.target as HTMLInputElement).checked; toggleSkill(skill.name, skill.enabled) }"
-                     class="accent-white" />
-            </label>
+            <button @click="if (!skillDisabledTools(skill).length) { skill.enabled = !skill.enabled; toggleSkill(skill.name, skill.enabled) }"
+                    :title="skillDisabledTools(skill).length
+                      ? 'Enable ' + skillDisabledTools(skill).join(', ') + ' to use this skill'
+                      : skill.enabled ? 'Disable skill' : 'Enable skill'"
+                    class="shrink-0 pt-0.5"
+                    :class="skillDisabledTools(skill).length ? 'cursor-not-allowed' : ''">
+              <div class="relative w-9 h-5 rounded-full transition-colors duration-200"
+                   :class="(!skillDisabledTools(skill).length && skill.enabled) ? 'bg-emerald-500' : 'bg-neutral-700'">
+                <div class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+                     :class="(!skillDisabledTools(skill).length && skill.enabled) ? 'left-[18px]' : 'left-0.5'" />
+              </div>
+            </button>
           </div>
         </div>
         <div v-if="!agentSkills.length" class="px-4 py-4 text-xs text-neutral-600 text-center">

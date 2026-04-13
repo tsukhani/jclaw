@@ -43,6 +43,7 @@ const MANAGED_PREFIXES = [
   'playwright.',         // Playwright browser tool — Settings
   'skillsPromotion.',    // Skills promotion sanitization — Settings
   'agent.',              // Per-agent config (shell privileges, queue mode, etc.) — Agents page
+  'ollama.',             // Ollama provider-specific settings — Settings
 ]
 
 function isManagedKey(key: string): boolean {
@@ -99,6 +100,12 @@ const spTimeout = computed(() => {
 const spBatchKb = computed(() => {
   const entries = configData.value?.entries ?? []
   return entries.find((e: any) => e.key === 'skillsPromotion.batchSizeKb')?.value ?? '100'
+})
+
+// Ollama-specific settings (rendered inside the provider section when provider name contains "ollama")
+const ollamaKeepAlive = computed(() => {
+  const entries = configData.value?.entries ?? []
+  return entries.find((e: any) => e.key === 'ollama.keepAlive')?.value ?? '30m'
 })
 
 const editingSPField = ref<string | null>(null)
@@ -783,6 +790,34 @@ const providerEntries = computed(() => {
               </button>
             </template>
           </div>
+          <!-- Ollama-specific: keepAlive setting -->
+          <div v-if="name.toLowerCase().includes('ollama')" class="px-4 py-2 flex items-center gap-3">
+            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0 flex items-center gap-1.5">
+              keepAlive
+              <span class="relative group/tip">
+                <svg class="w-3 h-3 text-neutral-700 group-hover/tip:text-neutral-400 cursor-help transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2"/><path stroke-linecap="round" stroke-width="2" d="M12 16v-4m0-4h.01"/></svg>
+                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-56 px-2.5 py-2 bg-neutral-800 border border-neutral-700 text-[10px] text-neutral-400 leading-relaxed shadow-xl pointer-events-none">
+                  How long the model stays loaded between requests. Use <code class="font-mono text-neutral-300">30m</code> for 30 minutes, <code class="font-mono text-neutral-300">-1</code> to keep forever.
+                </span>
+              </span>
+            </span>
+            <template v-if="editingKey === 'ollama.keepAlive'">
+              <input v-model="editValue"
+                     class="flex-1 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none" />
+              <button @click="updateEntry('ollama.keepAlive')" class="p-1 text-neutral-500 hover:text-emerald-400 transition-colors" title="Save">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              </button>
+              <button @click="editingKey = null" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Cancel">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </template>
+            <template v-else>
+              <span class="flex-1 text-sm text-neutral-300 font-mono truncate">{{ ollamaKeepAlive }}</span>
+              <button @click="editingKey = 'ollama.keepAlive'; editValue = ollamaKeepAlive" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              </button>
+            </template>
+          </div>
           <!-- Models row -->
           <div class="px-4 py-2 flex items-center gap-3">
             <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">models</span>
@@ -1175,7 +1210,15 @@ const providerEntries = computed(() => {
       <div class="bg-neutral-900 border border-neutral-800">
         <div class="divide-y divide-neutral-800/50">
           <div class="px-4 py-2.5 flex items-center gap-3">
-            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">maxToolRounds</span>
+            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0 flex items-center gap-1.5">
+              maxToolRounds
+              <span class="relative group/tip">
+                <svg class="w-3 h-3 text-neutral-700 group-hover/tip:text-neutral-400 cursor-help transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2"/><path stroke-linecap="round" stroke-width="2" d="M12 16v-4m0-4h.01"/></svg>
+                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-56 px-2.5 py-2 bg-neutral-800 border border-neutral-700 text-[10px] text-neutral-400 leading-relaxed shadow-xl pointer-events-none">
+                  Max tool calls the agent can make per turn. Once reached, it must give a final answer without calling more tools.
+                </span>
+              </span>
+            </span>
             <template v-if="editingChatField === 'maxToolRounds'">
               <input v-model="chatFieldEdit" type="number" min="1" max="50"
                      class="w-24 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white font-mono focus:outline-none" />
@@ -1194,7 +1237,15 @@ const providerEntries = computed(() => {
             </template>
           </div>
           <div class="px-4 py-2.5 flex items-center gap-3">
-            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">maxContextMessages</span>
+            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0 flex items-center gap-1.5">
+              maxContextMessages
+              <span class="relative group/tip">
+                <svg class="w-3 h-3 text-neutral-700 group-hover/tip:text-neutral-400 cursor-help transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2"/><path stroke-linecap="round" stroke-width="2" d="M12 16v-4m0-4h.01"/></svg>
+                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-neutral-800 border border-neutral-700 text-[10px] text-neutral-400 leading-relaxed shadow-xl pointer-events-none">
+                  How many recent messages are sent with each LLM request. Older messages are dropped when the limit is reached to stay within the context window.
+                </span>
+              </span>
+            </span>
             <template v-if="editingChatField === 'maxContextMessages'">
               <input v-model="chatFieldEdit" type="number" min="1" max="500"
                      class="w-24 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white font-mono focus:outline-none" />

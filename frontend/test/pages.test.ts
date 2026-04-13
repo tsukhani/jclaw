@@ -77,8 +77,9 @@ describe('Agents page', () => {
     setupMockApi()
     const component = await mountSuspended(Agents)
 
-    const button = component.find('button')
-    expect(button.text()).toContain('New Agent')
+    // New Agent is now an icon-only button identified by its title attribute
+    const button = component.find('button[title="New Agent"]')
+    expect(button.exists()).toBe(true)
   })
 
   it('renders agent cards with model info', async () => {
@@ -88,8 +89,9 @@ describe('Agents page', () => {
     // Verify structural elements exist beyond just text content
     const buttons = component.findAll('button')
     expect(buttons.length).toBeGreaterThanOrEqual(1)
-    // The first button should be "New Agent"
-    expect(buttons[0].text()).toContain('New Agent')
+    // New Agent is an icon-only button with a title attribute
+    const newAgentBtn = component.find('button[title="New Agent"]')
+    expect(newAgentBtn.exists()).toBe(true)
   })
 })
 

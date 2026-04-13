@@ -28,6 +28,7 @@ public class ApiToolsController extends Controller {
             var map = new HashMap<String, Object>();
             map.put("name", t.name());
             map.put("description", t.description());
+            map.put("system", t.isSystem());
             return map;
         }).toList();
         renderJSON(gson.toJson(result));
@@ -51,8 +52,9 @@ public class ApiToolsController extends Controller {
             var map = new HashMap<String, Object>();
             map.put("name", t.name());
             map.put("description", t.description());
-            // Default to enabled if no config exists
-            map.put("enabled", configMap.getOrDefault(t.name(), true));
+            map.put("system", t.isSystem());
+            // System tools are always enabled; user config is ignored for them
+            map.put("enabled", t.isSystem() || configMap.getOrDefault(t.name(), true));
             return map;
         }).toList();
         renderJSON(gson.toJson(result));
@@ -68,6 +70,12 @@ public class ApiToolsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("enabled")) badRequest();
         var enabled = body.get("enabled").getAsBoolean();
+
+        // System tools cannot be disabled — they are always available to the agent.
+        var tool = ToolRegistry.listTools().stream().filter(t -> t.name().equals(name)).findFirst();
+        if (tool.isPresent() && tool.get().isSystem() && !enabled) {
+            error(403, "System tool '%s' cannot be disabled.".formatted(name));
+        }
 
         var config = AgentToolConfig.findByAgentAndTool(agent, name);
         if (config == null) {
