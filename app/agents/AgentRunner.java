@@ -110,19 +110,24 @@ public class AgentRunner {
         final Long conversationId = conversation.id;
 
         try {
-            // Short setup transaction: persist user message, assemble prompt, resolve provider
+            // Short setup transaction: persist user message, assemble prompt, resolve provider.
+            // Re-fetch the conversation by ID so it is managed in this persistence context.
+            // Callers on virtual threads (TaskPollerJob, webhooks) pass entities that were
+            // loaded in a separate, already-committed Tx.run() — those are detached and
+            // would throw PersistentObjectException on save().
             var prepared = services.Tx.run(() -> {
-                ConversationService.appendUserMessage(conversation, userMessage);
+                var conv = ConversationService.findById(conversationId);
+                ConversationService.appendUserMessage(conv, userMessage);
 
                 var assembled = SystemPromptAssembler.assemble(agent, userMessage);
-                var messages = buildMessages(assembled.systemPrompt(), conversation);
+                var messages = buildMessages(assembled.systemPrompt(), conv);
 
                 var agentProvider = ProviderRegistry.get(agent.modelProvider);
                 var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
                 if (primary == null) {
                     var error = "No LLM provider configured. Add provider config via Settings.";
                     EventLogger.error("llm", agent.name, null, error);
-                    ConversationService.appendAssistantMessage(conversation, error, null);
+                    ConversationService.appendAssistantMessage(conv, error, null);
                     return null;
                 }
                 var secondary = ProviderRegistry.getSecondary();
@@ -130,7 +135,7 @@ public class AgentRunner {
                 var trimmed = trimToContextWindow(messages, agent, primary);
                 var tools = ToolRegistry.getToolDefsForAgent(agent);
 
-                EventLogger.info("llm", agent.name, conversation.channelType,
+                EventLogger.info("llm", agent.name, conv.channelType,
                         "Calling %s / %s".formatted(primary.config().name(), agent.modelId));
 
                 return new PreparedData(trimmed, primary, secondary, tools);

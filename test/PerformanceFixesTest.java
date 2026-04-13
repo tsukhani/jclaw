@@ -18,7 +18,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class PerformanceFixesTest extends UnitTest {
 
     @BeforeEach
-    void setup() {
+    void setup() throws InterruptedException {
+        // Let background virtual threads (processQueueDrain, title generation)
+        // spawned by prior AgentRunner.run() calls settle before wiping the DB.
+        Thread.sleep(200);
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
         llm.ProviderRegistry.refresh(); // clear stale provider cache from prior tests
@@ -254,37 +257,120 @@ public class PerformanceFixesTest extends UnitTest {
         assertTrue(messages.size() >= 1, "User message should have been persisted");
     }
 
+    /**
+     * Verifies that {@code AgentRunner.run()}, when called from a virtual
+     * thread (the webhook/queue-drain code path), does NOT hold a JDBC
+     * connection during the LLM HTTP call.
+     *
+     * <p>On a virtual thread there is no Play request transaction, so each
+     * {@code Tx.run()} block opens and commits its own short transaction.
+     * Between the setup Tx.run() and the persistence Tx.run(), the LLM HTTP
+     * call runs with no active transaction — verified by inspecting
+     * HikariCP's active connection count from inside a mock HTTP server.
+     *
+     * <p>Note: when run() is called from a Play request thread, the
+     * request transaction IS held across the full call (Tx.run piggybacks).
+     * This test covers the virtual-thread path, which is the one that
+     * matters for connection pool exhaustion under concurrent webhook load.
+     */
     @Test
-    public void syncRunWithProviderCompletesToolLoop() {
-        // Verify the full run() path works with scoped transactions.
-        // Without an actual LLM, this tests the transaction scoping is correct
-        // by running to the "no response" path.
+    public void syncRunReleasesConnectionDuringLlmCall() throws Throwable {
+        var llmHit = new CountDownLatch(1);
+        var llmGate = new CountDownLatch(1);
+        var activeConnectionsDuringLlm = new AtomicInteger(-1);
+
+        var server = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/chat/completions", exchange -> {
+            var ds = play.db.DB.getDataSource("default");
+            if (ds instanceof com.zaxxer.hikari.HikariDataSource hds) {
+                activeConnectionsDuringLlm.set(hds.getHikariPoolMXBean().getActiveConnections());
+            }
+            llmHit.countDown();
+            try { llmGate.await(10, TimeUnit.SECONDS); } catch (InterruptedException _) {}
+            var body = """
+                    {"choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],
+                     "usage":{"prompt_tokens":1,"completion_tokens":1}}""";
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length());
+            exchange.getResponseBody().write(body.getBytes());
+            exchange.close();
+        });
+        server.start();
+        var port = server.getAddress().getPort();
+
+        // Set up provider config from the test thread (ConfigService.set uses
+        // its own Tx.run internally, so these commit independently).
+        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:" + port);
+        ConfigService.set("provider.test-provider.apiKey", "sk-test");
+        ConfigService.set("provider.test-provider.models",
+                "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":4096}]");
+        llm.ProviderRegistry.refresh();
+
+        // Create agent + conversation in the test thread's Play-managed transaction.
         var agent = new Agent();
         agent.name = "tx-scope-agent";
         agent.modelProvider = "test-provider";
         agent.modelId = "test-model";
         agent.enabled = true;
         agent.save();
-
-        // Set up a provider so run() gets past the null check
-        // 127.0.0.1:1 gives instant "connection refused" instead of a 10s connect
-        // timeout to a non-existent host — the retry backoffs (1s+2s+4s) still
-        // exercise the full error-handling path but without the dead wait.
-        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:1");
-        ConfigService.set("provider.test-provider.apiKey", "sk-test");
-        ConfigService.set("provider.test-provider.models",
-                "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":4096}]");
-        llm.ProviderRegistry.refresh();
-
         var convo = ConversationService.create(agent, "web", "user1");
 
-        // run() will attempt an actual LLM call which will fail (no real endpoint),
-        // but the transaction scoping is exercised: setup in Tx.run(), LLM call outside,
-        // error handling doesn't hold a connection.
-        var result = agents.AgentRunner.run(agent, convo, "Hello");
-        assertNotNull(result);
-        assertNotNull(result.response());
-        // The LLM call will fail with a connection error — that's expected
-        // What matters is no JPA/pool exception occurred during the transaction scoping
+        // Commit and restart the Play request transaction so the virtual thread's
+        // independent Tx.run() blocks can see the rows. Without this, H2's
+        // snapshot isolation hides uncommitted rows from other connections.
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        // Record the IDs, then run on a virtual thread (simulating webhook path).
+        // The virtual thread re-fetches by ID in its own transactions.
+        var agentId = agent.id;
+        var convoId = convo.id;
+
+        try {
+            var testError = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+            var testThread = Thread.ofVirtual().start(() -> {
+                try {
+                    // Re-fetch in an independent transaction (simulates the
+                    // webhook path where entities come from their own Tx.run)
+                    var a = Tx.run(() -> (Agent) Agent.findById(agentId));
+                    var c = Tx.run(() -> (Conversation) Conversation.findById(convoId));
+
+                    var result = agents.AgentRunner.run(a, c, "Hello");
+                    assertNotNull(result, "run() should return a result");
+                    assertEquals("pong", result.response());
+                } catch (Throwable t) {
+                    testError.set(t);
+                    llmHit.countDown();
+                } finally {
+                    llmGate.countDown();
+                }
+            });
+
+            assertTrue(llmHit.await(10, TimeUnit.SECONDS), "LLM request should arrive within 10s");
+            if (testError.get() != null) throw testError.get();
+
+            // --- THE KEY ASSERTION ---
+            // The test thread's Play request transaction holds 1 connection.
+            // If run()'s Tx.run() scoping is correct, the virtual thread has
+            // released its connection before the HTTP call, so we see exactly 1.
+            // If run() leaked a connection, we'd see 2.
+            var ds = play.db.DB.getDataSource("default");
+            if (ds instanceof com.zaxxer.hikari.HikariDataSource hds) {
+                var active = activeConnectionsDuringLlm.get();
+                assertTrue(active <= 1,
+                        "Expected at most 1 active connection (test thread's Play tx) during the LLM call, " +
+                        "but found %d — run() is leaking a JDBC connection".formatted(active));
+            }
+
+            llmGate.countDown();
+            testThread.join(10_000);
+            assertFalse(testThread.isAlive(), "run() should complete after LLM response");
+            if (testError.get() != null) throw testError.get();
+
+            Thread.sleep(300);
+        } finally {
+            server.stop(0);
+        }
     }
 }
