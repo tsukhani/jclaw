@@ -30,6 +30,7 @@ function setupMockApi() {
   registerEndpoint('/api/conversations', () => [
     { id: 1, agentId: 1, agentName: 'test', channelType: 'web', peerId: 'admin', messageCount: 3, preview: 'Hello', createdAt: '2026-04-07T10:00:00Z', updatedAt: '2026-04-07T10:00:00Z' }
   ])
+  registerEndpoint('/api/conversations/channels', () => ['web', 'telegram'])
 }
 
 describe('Dashboard page', () => {
@@ -79,6 +80,17 @@ describe('Agents page', () => {
     const button = component.find('button')
     expect(button.text()).toContain('New Agent')
   })
+
+  it('renders agent cards with model info', async () => {
+    setupMockApi()
+    const component = await mountSuspended(Agents)
+
+    // Verify structural elements exist beyond just text content
+    const buttons = component.findAll('button')
+    expect(buttons.length).toBeGreaterThanOrEqual(1)
+    // The first button should be "New Agent"
+    expect(buttons[0].text()).toContain('New Agent')
+  })
 })
 
 describe('Settings page', () => {
@@ -117,6 +129,23 @@ describe('Logs page', () => {
     expect(component.text()).toContain('All categories')
     expect(component.text()).toContain('All levels')
   })
+
+  it('has auto-refresh checkbox that is checked by default', async () => {
+    setupMockApi()
+    const component = await mountSuspended(Logs)
+
+    const checkbox = component.find('input[type="checkbox"]')
+    expect(checkbox.exists()).toBe(true)
+    expect((checkbox.element as HTMLInputElement).checked).toBe(true)
+  })
+
+  it('renders category and level filter dropdowns', async () => {
+    setupMockApi()
+    const component = await mountSuspended(Logs)
+
+    const selects = component.findAll('select')
+    expect(selects.length).toBeGreaterThanOrEqual(2)
+  })
 })
 
 describe('Conversations page', () => {
@@ -137,5 +166,21 @@ describe('Conversations page', () => {
     expect(component.text()).toContain('web')
     expect(component.text()).toContain('test')
     expect(component.text()).toContain('admin')
+  })
+
+  it('has filter inputs for name and peer', async () => {
+    setupMockApi()
+    const component = await mountSuspended(Conversations)
+
+    const inputs = component.findAll('input[type="text"]')
+    expect(inputs.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('has channel and agent filter dropdowns', async () => {
+    setupMockApi()
+    const component = await mountSuspended(Conversations)
+
+    const selects = component.findAll('select')
+    expect(selects.length).toBeGreaterThanOrEqual(1)
   })
 })

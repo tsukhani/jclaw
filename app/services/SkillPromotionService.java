@@ -331,7 +331,7 @@ public class SkillPromotionService {
      * Atomically swap a staging directory into the target location, backing up
      * any existing target first. On failure, the backup is restored.
      */
-    static void atomicSwap(Path targetDir, Path stagingDir, Path backupDir,
+    public static void atomicSwap(Path targetDir, Path stagingDir, Path backupDir,
                             boolean replacing) throws IOException {
         if (replacing) {
             Files.move(targetDir, backupDir);
@@ -362,7 +362,7 @@ public class SkillPromotionService {
             ".json", ".txt", ".env", ".yaml", ".yml", ".properties"
     );
 
-    static String enforceTextFilePath(String path) {
+    public static String enforceTextFilePath(String path) {
         if (path.startsWith("tools/") || path.startsWith("credentials/")) return path;
         if (path.equals("SKILL.md")) return path;
         var lower = path.toLowerCase();
@@ -372,7 +372,7 @@ public class SkillPromotionService {
         return path;
     }
 
-    static String stripCredentialsJson(String content) {
+    public static String stripCredentialsJson(String content) {
         try {
             var json = JsonParser.parseString(content).getAsJsonObject();
             var stripped = new com.google.gson.JsonObject();
