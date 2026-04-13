@@ -129,21 +129,6 @@ do_deploy() {
     unzip -q jclaw.zip
     rm -f jclaw.zip
 
-    echo "==> Installing frontend dependencies..."
-    cd "$JCLAW_DIR/frontend"
-    pnpm install --frozen-lockfile 2>/dev/null || pnpm install
-
-    echo "==> Generating static SPA..."
-    npx nuxi generate
-
-    echo "==> Copying SPA build to public/spa/..."
-    rm -rf "$JCLAW_DIR/public/spa"
-    cp -r .output/public "$JCLAW_DIR/public/spa"
-
-    echo "==> Resolving backend dependencies..."
-    cd "$JCLAW_DIR"
-    play deps --sync
-
     echo "==> Deployment ready at $JCLAW_DIR"
 }
 
@@ -158,21 +143,29 @@ do_start_prod() {
         exit 1
     fi
 
-    # Check if already running
+    # Stop any running instance before rebuilding
     if [[ -f "server.pid" ]] && kill -0 "$(cat server.pid)" 2>/dev/null; then
-        echo "Error: Play backend is already running (pid: $(cat server.pid))"
-        exit 1
+        echo "==> Stopping running instance (pid: $(cat server.pid))..."
+        play stop
     fi
 
-    # Verify SPA has been built
-    if [[ ! -f "$JCLAW_DIR/public/spa/index.html" ]]; then
-        echo "Error: SPA not built. Run with --deploy or manually:"
-        echo "       cd frontend && npx nuxi generate && cp -r .output/public ../public/spa"
-        exit 1
-    fi
+    echo "==> Resolving backend dependencies..."
+    play deps --sync
+
+    echo "==> Installing frontend dependencies..."
+    cd "$JCLAW_DIR/frontend"
+    pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+
+    echo "==> Generating static SPA..."
+    npx nuxi generate
+
+    echo "==> Copying SPA build to public/spa/..."
+    rm -rf "$JCLAW_DIR/public/spa"
+    cp -r .output/public "$JCLAW_DIR/public/spa"
+
+    cd "$JCLAW_DIR"
 
     echo "==> Starting Play backend on port $BACKEND_PORT (prod)..."
-    echo "    (Frontend SPA served from public/spa/ — no separate Node process needed)"
     play start --%prod --http.port="$BACKEND_PORT"
 
     echo ""
