@@ -19,6 +19,7 @@ const pages = [
   { path: '/tasks', breadcrumb: 'Tasks' },
   { path: '/agents', breadcrumb: 'Agents' },
   { path: '/skills', breadcrumb: 'Skills' },
+  { path: '/tools', breadcrumb: 'Tools' },
   { path: '/settings', breadcrumb: 'Settings' },
   { path: '/logs', breadcrumb: 'Logs' },
 ]
