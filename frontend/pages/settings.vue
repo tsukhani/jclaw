@@ -76,14 +76,22 @@ async function saveChatField(configKey: string, value: string) {
 
 
 // Skills Promotion config
-const spProvider = computed(() => {
+const { data: agentsList } = await useFetch<any[]>('/api/agents')
+const mainAgent = computed(() => agentsList.value?.find((a: any) => a.name === 'main') ?? null)
+
+const spProviderRaw = computed(() => {
   const entries = configData.value?.entries ?? []
   return entries.find((e: any) => e.key === 'skillsPromotion.provider')?.value ?? ''
 })
-const spModel = computed(() => {
+const spModelRaw = computed(() => {
   const entries = configData.value?.entries ?? []
   return entries.find((e: any) => e.key === 'skillsPromotion.model')?.value ?? ''
 })
+
+// Effective provider/model — resolve defaults from main agent
+const spEffectiveProvider = computed(() => spProviderRaw.value || mainAgent.value?.modelProvider || '')
+const spEffectiveModel = computed(() => spModelRaw.value || mainAgent.value?.modelId || '')
+
 const spTimeout = computed(() => {
   const entries = configData.value?.entries ?? []
   return entries.find((e: any) => e.key === 'skillsPromotion.timeoutSeconds')?.value ?? '300'
@@ -101,7 +109,8 @@ const availableProviderNames = computed(() => {
 })
 
 const spAvailableModels = computed(() => {
-  const name = editingSPField.value === 'provider' ? spFieldEdit.value : spProvider.value
+  // When editing provider, use the edit value; otherwise use the effective provider
+  const name = editingSPField.value === 'provider' ? spFieldEdit.value : spEffectiveProvider.value
   if (!name) return []
   return getProviderModels(name)
 })
@@ -110,6 +119,10 @@ async function saveSPField(configKey: string, value: string) {
   saving.value = true
   try {
     await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
+    // When provider changes to default, also clear the model so it falls back to main agent's
+    if (configKey === 'skillsPromotion.provider' && !value) {
+      await $fetch('/api/config', { method: 'POST', body: { key: 'skillsPromotion.model', value: '' } })
+    }
     editingSPField.value = null
     refresh()
   } finally {
@@ -1222,8 +1235,10 @@ const providerEntries = computed(() => {
               </button>
             </template>
             <template v-else>
-              <span class="flex-1 text-sm text-neutral-300 font-mono">{{ spProvider || 'Default (main agent)' }}</span>
-              <button @click="editingSPField = 'provider'; spFieldEdit = spProvider" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
+              <span class="flex-1 text-sm text-neutral-300 font-mono">
+                {{ spProviderRaw ? spProviderRaw : spEffectiveProvider ? spEffectiveProvider + ' (from main agent)' : 'Not configured' }}
+              </span>
+              <button @click="editingSPField = 'provider'; spFieldEdit = spProviderRaw" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
               </button>
             </template>
@@ -1248,8 +1263,10 @@ const providerEntries = computed(() => {
               </button>
             </template>
             <template v-else>
-              <span class="flex-1 text-sm text-neutral-300 font-mono">{{ spModel || 'Default (main agent)' }}</span>
-              <button @click="editingSPField = 'model'; spFieldEdit = spModel" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
+              <span class="flex-1 text-sm text-neutral-300 font-mono">
+                {{ spModelRaw ? spModelRaw : spEffectiveModel ? spEffectiveModel + ' (from main agent)' : 'Not configured' }}
+              </span>
+              <button @click="editingSPField = 'model'; spFieldEdit = spModelRaw" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
               </button>
             </template>
