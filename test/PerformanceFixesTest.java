@@ -21,6 +21,7 @@ public class PerformanceFixesTest extends UnitTest {
     void setup() {
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
+        llm.ProviderRegistry.refresh(); // clear stale provider cache from prior tests
     }
 
     // --- Task 5.10: JOIN FETCH query returns correct agent data ---
@@ -266,7 +267,10 @@ public class PerformanceFixesTest extends UnitTest {
         agent.save();
 
         // Set up a provider so run() gets past the null check
-        ConfigService.set("provider.test-provider.baseUrl", "https://test.ai/v1");
+        // 127.0.0.1:1 gives instant "connection refused" instead of a 10s connect
+        // timeout to a non-existent host — the retry backoffs (1s+2s+4s) still
+        // exercise the full error-handling path but without the dead wait.
+        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:1");
         ConfigService.set("provider.test-provider.apiKey", "sk-test");
         ConfigService.set("provider.test-provider.models",
                 "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":4096}]");
