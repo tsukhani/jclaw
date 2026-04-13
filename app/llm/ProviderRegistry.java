@@ -29,7 +29,7 @@ public class ProviderRegistry {
 
     private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
     private static volatile Map<String, LlmProvider> cache = Map.of();
-    private static volatile long lastRefresh = 0;
+    private static volatile long lastRefresh;
     private static final long REFRESH_INTERVAL_MS = 60_000;
     private static final Object refreshLock = new Object();
     private static final java.util.concurrent.atomic.AtomicBoolean refreshing = new java.util.concurrent.atomic.AtomicBoolean(false);

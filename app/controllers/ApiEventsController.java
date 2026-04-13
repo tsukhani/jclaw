@@ -60,9 +60,11 @@ public class ApiEventsController extends Controller {
         // Timeout fallback — resolves after 24 hours if still connected
         heartbeat.schedule((Runnable) () -> promise.invoke(null), 24, TimeUnit.HOURS);
 
-        await(promise);
-
-        unsubscribe.run();
-        heartbeat.shutdownNow();
+        try {
+            await(promise);
+        } finally {
+            unsubscribe.run();
+            heartbeat.shutdownNow();
+        }
     }
 }

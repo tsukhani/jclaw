@@ -5,9 +5,6 @@ import play.Play;
 import play.db.jpa.JPA;
 import services.EventLogger;
 
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 
 /**
@@ -108,43 +105,32 @@ public class JpaMemoryStore implements MemoryStore {
                 .toList();
     }
 
+    @SuppressWarnings("unchecked")
     private List<MemoryEntry> fullTextSearch(String agentId, String query, int limit) {
-        // PostgreSQL full-text search using to_tsvector/to_tsquery
+        // Single native query returning full Memory entities ranked by FTS score.
+        // Avoids the prior two-query pattern (IDs then re-fetch) and the in-memory re-sort.
         var sql = """
-                SELECT m.id FROM memory m
-                WHERE m.agent_id = ?
-                AND to_tsvector('english', m.text) @@ plainto_tsquery('english', ?)
-                ORDER BY ts_rank(to_tsvector('english', m.text), plainto_tsquery('english', ?)) DESC
-                LIMIT ?
+                SELECT m.* FROM memory m
+                WHERE m.agent_id = ?1
+                AND to_tsvector('english', m.text) @@ plainto_tsquery('english', ?2)
+                ORDER BY ts_rank(to_tsvector('english', m.text), plainto_tsquery('english', ?2)) DESC
                 """;
-        var conn = JPA.em().unwrap(java.sql.Connection.class);
-        try (var stmt = conn.prepareStatement(sql)) {
-            stmt.setString(1, agentId);
-            stmt.setString(2, query);
-            stmt.setString(3, query);
-            stmt.setInt(4, limit);
-            try (var rs = stmt.executeQuery()) {
-                var ids = new ArrayList<Long>();
-                while (rs.next()) {
-                    ids.add(rs.getLong("id"));
-                }
-                if (ids.isEmpty()) return List.of();
-                List<Memory> memories = Memory.<Memory>find("id IN (?1)", ids).fetch();
-                var idRank = new HashMap<Long, Integer>();
-                for (int i = 0; i < ids.size(); i++) idRank.put(ids.get(i), i);
-                return memories.stream()
-                        .sorted(Comparator.comparingInt(m -> idRank.getOrDefault((Long) m.id, Integer.MAX_VALUE)))
-                        .map(this::toEntry)
-                        .toList();
-            }
+        try {
+            List<Memory> memories = JPA.em().createNativeQuery(sql, Memory.class)
+                    .setParameter(1, agentId)
+                    .setParameter(2, query)
+                    .setMaxResults(limit)
+                    .getResultList();
+            return memories.stream().map(this::toEntry).toList();
         } catch (Exception e) {
             EventLogger.warn("memory", "PG FTS failed, falling back to LIKE search: %s".formatted(e.getMessage()));
             return likeSearch(agentId, query, limit);
         }
     }
 
+    @SuppressWarnings("unchecked")
     private List<MemoryEntry> hybridSearch(String agentId, String query, int limit) {
-        // Combine PG full-text search + pgvector cosine similarity
+        // Combine PG full-text search + pgvector cosine similarity in a single query.
         try {
             var embedding = generateEmbedding(query);
             if (embedding == null) {
@@ -153,40 +139,20 @@ public class JpaMemoryStore implements MemoryStore {
 
             var embeddingStr = toVectorLiteral(embedding);
             var sql = """
-                    SELECT m.id,
-                           ts_rank(to_tsvector('english', m.text), plainto_tsquery('english', ?)) AS text_rank,
-                           1 - (m.embedding <=> ?::text::vector) AS vector_score
-                    FROM memory m
-                    WHERE m.agent_id = ?
+                    SELECT m.* FROM memory m
+                    WHERE m.agent_id = ?1
                     AND m.embedding IS NOT NULL
-                    ORDER BY (COALESCE(ts_rank(to_tsvector('english', m.text), plainto_tsquery('english', ?)), 0) * 0.3
-                             + (1 - (m.embedding <=> ?::text::vector)) * 0.7) DESC
-                    LIMIT ?
+                    ORDER BY (COALESCE(ts_rank(to_tsvector('english', m.text), plainto_tsquery('english', ?2)), 0) * 0.3
+                             + (1 - (m.embedding <=> ?3::text::vector)) * 0.7) DESC
                     """;
 
-            var conn = JPA.em().unwrap(java.sql.Connection.class);
-            try (var stmt = conn.prepareStatement(sql)) {
-                stmt.setString(1, query);
-                stmt.setString(2, embeddingStr);
-                stmt.setString(3, agentId);
-                stmt.setString(4, query);
-                stmt.setString(5, embeddingStr);
-                stmt.setInt(6, limit);
-                try (var rs = stmt.executeQuery()) {
-                    var ids = new ArrayList<Long>();
-                    while (rs.next()) {
-                        ids.add(rs.getLong("id"));
-                    }
-                    if (ids.isEmpty()) return List.of();
-                    List<Memory> memories = Memory.<Memory>find("id IN (?1)", ids).fetch();
-                    var idRank = new HashMap<Long, Integer>();
-                    for (int i = 0; i < ids.size(); i++) idRank.put(ids.get(i), i);
-                    return memories.stream()
-                            .sorted(Comparator.comparingInt(m -> idRank.getOrDefault((Long) m.id, Integer.MAX_VALUE)))
-                            .map(this::toEntry)
-                            .toList();
-                }
-            }
+            List<Memory> memories = JPA.em().createNativeQuery(sql, Memory.class)
+                    .setParameter(1, agentId)
+                    .setParameter(2, query)
+                    .setParameter(3, embeddingStr)
+                    .setMaxResults(limit)
+                    .getResultList();
+            return memories.stream().map(this::toEntry).toList();
         } catch (Exception e) {
             EventLogger.warn("memory", "Hybrid search failed, falling back to FTS: %s".formatted(e.getMessage()));
             return fullTextSearch(agentId, query, limit);

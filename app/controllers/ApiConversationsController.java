@@ -13,6 +13,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -25,6 +27,18 @@ import static utils.GsonHolder.INSTANCE;
 public class ApiConversationsController extends Controller {
 
     private static final Gson gson = INSTANCE;
+
+    /** Small LRU cache of compiled word-boundary patterns keyed by the search string. */
+    private static final int PATTERN_CACHE_MAX = 64;
+    private static final ConcurrentHashMap<String, Pattern> patternCache = new ConcurrentHashMap<>();
+
+    private static Pattern wordBoundaryPattern(String name) {
+        var key = name.strip().toLowerCase();
+        return patternCache.computeIfAbsent(key, k -> {
+            if (patternCache.size() > PATTERN_CACHE_MAX) patternCache.clear();
+            return Pattern.compile("\\b" + Pattern.quote(name.strip()) + "\\b", Pattern.CASE_INSENSITIVE);
+        });
+    }
 
     /**
      * GET /api/conversations — List conversations with optional filters.
@@ -56,9 +70,7 @@ public class ApiConversationsController extends Controller {
 
         if (hasNameFilter) {
             List<Conversation> candidates = q.getResultList();
-            var pattern = java.util.regex.Pattern.compile(
-                    "\\b" + java.util.regex.Pattern.quote(name.strip()) + "\\b",
-                    java.util.regex.Pattern.CASE_INSENSITIVE);
+            var pattern = wordBoundaryPattern(name);
             List<Conversation> refined = new ArrayList<>();
             for (var c : candidates) {
                 if (c.preview != null && pattern.matcher(c.preview).find()) {

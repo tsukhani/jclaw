@@ -3,7 +3,6 @@ package controllers;
 import com.google.gson.Gson;
 import play.mvc.Controller;
 import play.mvc.With;
-import services.AgentService;
 import services.ConfigService;
 
 import java.util.HashMap;
@@ -67,11 +66,7 @@ public class ApiConfigController extends Controller {
     }
 
     public static void delete(String key) {
-        ConfigService.delete(key);
-
-        if (key.startsWith("provider.")) {
-            AgentService.syncEnabledStates();
-        }
+        ConfigService.deleteWithSideEffects(key);
 
         var map = new HashMap<String, Object>();
         map.put("status", "ok");

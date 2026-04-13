@@ -25,18 +25,23 @@ import java.util.stream.Stream;
 public class AgentService {
 
     private static final int FILE_CACHE_MAX_SIZE = 500;
-    @SuppressWarnings("serial")
-    private static final java.util.Map<String, CachedFile> fileCache =
-            java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<>(64, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(java.util.Map.Entry<String, CachedFile> eldest) {
-                    return size() > FILE_CACHE_MAX_SIZE;
-                }
-            });
+    private static final java.util.concurrent.ConcurrentHashMap<String, CachedFile> fileCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
     private static final long FILE_CACHE_TTL_MS = 30_000;
 
     private record CachedFile(String content, long expiresAt) {
         boolean isExpired() { return System.currentTimeMillis() > expiresAt; }
+    }
+
+    /** Evict expired entries and trim to max size. Called opportunistically on put. */
+    private static void evictFileCache() {
+        fileCache.entrySet().removeIf(e -> e.getValue().isExpired());
+        while (fileCache.size() > FILE_CACHE_MAX_SIZE) {
+            var oldest = fileCache.entrySet().iterator();
+            if (oldest.hasNext()) oldest.next(); // skip first
+            if (oldest.hasNext()) oldest.remove(); // remove second-oldest
+            else break;
+        }
     }
 
     public static Agent create(String name, String modelProvider, String modelId, String thinkingMode) {
@@ -426,6 +431,7 @@ public class AgentService {
             if (Files.exists(path)) {
                 var content = Files.readString(path);
                 fileCache.put(cacheKey, new CachedFile(content, System.currentTimeMillis() + FILE_CACHE_TTL_MS));
+                if (fileCache.size() > FILE_CACHE_MAX_SIZE) evictFileCache();
                 return content;
             }
         } catch (SecurityException e) {

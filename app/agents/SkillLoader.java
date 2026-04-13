@@ -50,18 +50,22 @@ public class SkillLoader {
     }
 
     private static final int SKILL_CACHE_MAX_SIZE = 100;
-    @SuppressWarnings("serial")
-    private static final java.util.Map<String, CachedSkills> skillCache =
-            java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<>(32, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(java.util.Map.Entry<String, CachedSkills> eldest) {
-                    return size() > SKILL_CACHE_MAX_SIZE;
-                }
-            });
+    private static final java.util.concurrent.ConcurrentHashMap<String, CachedSkills> skillCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
     private static final long CACHE_TTL_MS = 30_000;
 
     private record CachedSkills(List<SkillInfo> skills, long expiresAt) {
         boolean isExpired() { return System.currentTimeMillis() > expiresAt; }
+    }
+
+    /** Evict expired entries and trim to max size. */
+    private static void evictSkillCache() {
+        skillCache.entrySet().removeIf(e -> e.getValue().isExpired());
+        while (skillCache.size() > SKILL_CACHE_MAX_SIZE) {
+            var it = skillCache.entrySet().iterator();
+            if (it.hasNext()) { it.next(); it.remove(); }
+            else break;
+        }
     }
 
     private static final int MAX_SKILLS = 150;
@@ -91,7 +95,10 @@ public class SkillLoader {
                         if (info != null) existingSkills.add(info.name());
                     }
                 });
-            } catch (IOException _) {}
+            } catch (IOException e) {
+                EventLogger.warn("skills", "Failed to scan global skills directory %s: %s"
+                        .formatted(globalDir, e.getMessage()));
+            }
         }
 
         // Agent workspace skills
@@ -108,10 +115,16 @@ public class SkillLoader {
                                     if (info != null) existingSkills.add(info.name());
                                 }
                             });
-                        } catch (IOException _) {}
+                        } catch (IOException e) {
+                            EventLogger.warn("skills", "Failed to scan agent skills directory %s: %s"
+                                    .formatted(skillsDir, e.getMessage()));
+                        }
                     }
                 });
-            } catch (IOException _) {}
+            } catch (IOException e) {
+                EventLogger.warn("skills", "Failed to scan workspace root %s: %s"
+                        .formatted(workspaceRoot, e.getMessage()));
+            }
         }
 
         // Remove orphaned configs
@@ -137,6 +150,7 @@ public class SkillLoader {
         }
         var skills = loadSkillsFromDisk(agentName);
         skillCache.put(agentName, new CachedSkills(skills, System.currentTimeMillis() + CACHE_TTL_MS));
+        if (skillCache.size() > SKILL_CACHE_MAX_SIZE) evictSkillCache();
         return skills;
     }
 

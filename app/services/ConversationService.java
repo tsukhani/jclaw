@@ -14,6 +14,9 @@ import java.util.List;
 
 public class ConversationService {
 
+    private static final int TITLE_CONTEXT_MESSAGES = 10;
+    private static final int TITLE_TIMEOUT_SECONDS = 15;
+
     public static Conversation findOrCreate(Agent agent, String channelType, String peerId) {
         var existing = Conversation.findByAgentChannelPeer(agent, channelType, peerId);
         if (existing != null) return existing;
@@ -103,7 +106,7 @@ public class ConversationService {
      * caller should fall back to the existing preview).
      */
     public static boolean requestTitleGeneration(Conversation conversation) {
-        List<Message> msgs = Message.find("conversation = ?1 ORDER BY createdAt ASC", conversation).fetch(10);
+        List<Message> msgs = Message.find("conversation = ?1 ORDER BY createdAt ASC", conversation).fetch(TITLE_CONTEXT_MESSAGES);
         var userParts = new StringBuilder();
         var assistantParts = new StringBuilder();
         for (var m : msgs) {
@@ -146,10 +149,11 @@ public class ConversationService {
                                 userContext, assistantContext))
                 );
 
-                var response = provider.chat(modelId, messages, List.of(), null, null);
+                var response = provider.chat(modelId, messages, List.of(), null, null, TITLE_TIMEOUT_SECONDS);
                 if (response.choices() == null || response.choices().isEmpty()) return;
 
-                var title = ((String) response.choices().getFirst().message().content()).strip();
+                var rawContent = response.choices().getFirst().message().content();
+                var title = (rawContent instanceof String s ? s : "").strip();
                 if (title.isEmpty() || title.length() > 100) return;
 
                 Tx.run(() -> {

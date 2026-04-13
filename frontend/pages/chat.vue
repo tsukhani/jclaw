@@ -278,6 +278,7 @@ function exitSelectMode() {
 }
 
 let scrollRaf: number | null = null
+let titleRefreshTimeout: ReturnType<typeof setTimeout> | null = null
 function scrollToBottom() {
   if (scrollRaf) return
   scrollRaf = requestAnimationFrame(() => {
@@ -289,6 +290,8 @@ function scrollToBottom() {
 onUnmounted(() => {
   abortController.value?.abort()
   cleanupResize?.()
+  if (scrollRaf) cancelAnimationFrame(scrollRaf)
+  if (titleRefreshTimeout) clearTimeout(titleRefreshTimeout)
 })
 
 function stopStreaming() {
@@ -480,7 +483,8 @@ async function generateTitleForConversation(convoId: number) {
   try {
     await $fetch(`/api/conversations/${convoId}/generate-title`, { method: 'POST' })
     // Refresh after a delay to pick up the async-generated title
-    setTimeout(() => refreshConversations(), 3000)
+    if (titleRefreshTimeout) clearTimeout(titleRefreshTimeout)
+    titleRefreshTimeout = setTimeout(() => refreshConversations(), 3000)
   } catch {
     // Best-effort — ignore failures
   }

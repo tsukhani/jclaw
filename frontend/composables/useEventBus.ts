@@ -12,12 +12,13 @@ type EventHandler = (data: unknown) => void
 const handlers = new Map<string, Set<EventHandler>>()
 let eventSource: EventSource | null = null
 let connected = false
+let reconnectAttempts = 0
 
 function connect() {
   if (connected || typeof window === 'undefined') return
 
   // Guard: don't open SSE connection if not authenticated (prevents
-  // infinite 5s reconnect loop when the backend returns 401/403).
+  // infinite reconnect loop when the backend returns 401/403).
   const auth = useState<boolean>('auth:authenticated')
   if (!auth.value) return
 
@@ -26,6 +27,8 @@ function connect() {
   eventSource = new EventSource('/api/events')
 
   eventSource.onmessage = (e) => {
+    // Successful message — reset backoff counter
+    reconnectAttempts = 0
     try {
       const event = JSON.parse(e.data)
       const typeHandlers = handlers.get(event.type)
@@ -38,11 +41,17 @@ function connect() {
   }
 
   eventSource.onerror = () => {
-    // Reconnect after a delay
     connected = false
     eventSource?.close()
     eventSource = null
-    setTimeout(connect, 5000)
+
+    // Stop retrying after 10 consecutive failures
+    if (reconnectAttempts >= 10) return
+
+    // Exponential backoff: 5s, 10s, 20s, 40s, 60s (capped)
+    const delay = Math.min(5000 * Math.pow(2, reconnectAttempts), 60000)
+    reconnectAttempts++
+    setTimeout(connect, delay)
   }
 }
 

@@ -32,6 +32,8 @@ import static java.util.stream.Collectors.joining;
  */
 public class SkillPromotionService {
 
+    private static final Gson PRETTY_GSON = new Gson().newBuilder().setPrettyPrinting().create();
+
     private SkillPromotionService() {}
 
     // --- Result types ---
@@ -382,7 +384,7 @@ public class SkillPromotionService {
             for (var entry : json.entrySet()) {
                 stripped.addProperty(entry.getKey(), "[CREDENTIAL]");
             }
-            return new Gson().newBuilder().setPrettyPrinting().create().toJson(stripped);
+            return PRETTY_GSON.toJson(stripped);
         } catch (Exception _) {
             return "{}";
         }

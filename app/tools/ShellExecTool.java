@@ -17,22 +17,23 @@ import java.util.regex.Pattern;
 
 public class ShellExecTool implements ToolRegistry.Tool {
 
-    private static final String DEFAULT_ALLOWLIST = "git,npm,npx,pnpm,node,python,python3,pip,ls,cat,head,tail,grep,find,wc,sort,uniq,diff,mkdir,cp,mv,echo,curl,wget,jq,tar,zip,unzip";
+    public static final String DEFAULT_ALLOWLIST = "git,npm,npx,pnpm,node,python,python3,pip,ls,cat,head,tail,grep,find,wc,sort,uniq,diff,mkdir,cp,mv,echo,curl,wget,jq,tar,zip,unzip";
 
-    /** Cached parsed allowlist: invalidated when the raw config string changes. */
-    private static volatile String cachedAllowlistRaw;
-    private static volatile Set<String> cachedAllowlistSet = Set.of();
+    /** Atomically cached parsed allowlist: invalidated when the raw config string changes. */
+    private record AllowlistCache(String raw, Set<String> set) {}
+    private static final java.util.concurrent.atomic.AtomicReference<AllowlistCache> cachedAllowlist =
+            new java.util.concurrent.atomic.AtomicReference<>(new AllowlistCache("", Set.of()));
 
     private static Set<String> parsedAllowlist() {
         var raw = ConfigService.get("shell.allowlist", DEFAULT_ALLOWLIST);
-        if (!raw.equals(cachedAllowlistRaw)) {
-            cachedAllowlistSet = Arrays.stream(raw.split(","))
-                    .map(String::strip)
-                    .filter(s -> !s.isEmpty())
-                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
-            cachedAllowlistRaw = raw;
-        }
-        return cachedAllowlistSet;
+        var current = cachedAllowlist.get();
+        if (raw.equals(current.raw())) return current.set();
+        var newSet = Arrays.stream(raw.split(","))
+                .map(String::strip)
+                .filter(s -> !s.isEmpty())
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        cachedAllowlist.set(new AllowlistCache(raw, newSet));
+        return newSet;
     }
 
     private static final Set<String> SENSITIVE_NAME_PATTERNS = Set.of(
@@ -247,7 +248,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
             // after the loop, but only a watchdog kill should produce the
             // "timed out" markers in the result.
             var timedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
-            Thread.startVirtualThread(() -> {
+            Thread.ofVirtual().start(() -> {
                 try {
                     if (!process.waitFor(timeoutSec, TimeUnit.SECONDS)) {
                         timedOut.set(true);

@@ -32,7 +32,7 @@ public class Application extends Controller {
             if (path != null && !path.contains("..")) {
                 File staticFile = new File(spaRoot, path);
                 if (staticFile.exists() && staticFile.isFile()
-                        && staticFile.getCanonicalPath().startsWith(spaRoot.getCanonicalPath())) {
+                        && staticFile.getCanonicalPath().startsWith(spaRoot.getCanonicalPath() + File.separator)) {
                     renderBinary(staticFile);
                 }
             }

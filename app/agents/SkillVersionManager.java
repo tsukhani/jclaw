@@ -164,7 +164,7 @@ public final class SkillVersionManager {
      * True if the two SKILL.md strings differ in any way other than the {@code version:}
      * frontmatter line.
      */
-    static boolean contentDiffersIgnoringVersion(String a, String b) {
+    public static boolean contentDiffersIgnoringVersion(String a, String b) {
         return !stripVersionLine(a).equals(stripVersionLine(b));
     }
 

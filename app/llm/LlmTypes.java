@@ -184,11 +184,25 @@ public final class LlmTypes {
             List<ModelInfo> models
     ) {}
 
+    /**
+     * Model metadata including pricing. Pricing fields use {@code double} defaults
+     * of {@code -1} to distinguish "not provided" from "free" ({@code 0.0}).
+     * Values are per-million tokens, matching the convention in provider config JSON.
+     */
     public record ModelInfo(
             String id,
             String name,
             int contextWindow,
             int maxTokens,
-            boolean supportsThinking
-    ) {}
+            boolean supportsThinking,
+            double promptPrice,
+            double completionPrice,
+            double cachedReadPrice,
+            double cacheWritePrice
+    ) {
+        /** Backwards-compatible factory for callers that don't have pricing data. */
+        public ModelInfo(String id, String name, int contextWindow, int maxTokens, boolean supportsThinking) {
+            this(id, name, contextWindow, maxTokens, supportsThinking, -1, -1, -1, -1);
+        }
+    }
 }

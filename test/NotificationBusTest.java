@@ -1,0 +1,132 @@
+import org.junit.jupiter.api.*;
+import play.test.*;
+import services.NotificationBus;
+
+import java.util.ArrayList;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+
+/**
+ * Tests for the in-memory pub/sub NotificationBus.
+ * Pure in-memory — no DB needed.
+ */
+public class NotificationBusTest extends UnitTest {
+
+    private final java.util.List<Runnable> unsubscribers = new ArrayList<>();
+
+    @AfterEach
+    void cleanup() {
+        // Unsubscribe all listeners added during the test
+        for (var unsub : unsubscribers) {
+            unsub.run();
+        }
+        unsubscribers.clear();
+    }
+
+    private Runnable subscribe(java.util.function.Consumer<String> listener) {
+        var unsub = NotificationBus.subscribe(listener);
+        unsubscribers.add(unsub);
+        return unsub;
+    }
+
+    // --- subscribe / unsubscribe lifecycle ---
+
+    @Test
+    public void subscribeIncreasesListenerCount() {
+        int before = NotificationBus.listenerCount();
+        var unsub = subscribe(msg -> {});
+        assertEquals(before + 1, NotificationBus.listenerCount());
+        unsub.run();
+        assertEquals(before, NotificationBus.listenerCount());
+    }
+
+    @Test
+    public void unsubscribeRemovesListener() {
+        int before = NotificationBus.listenerCount();
+        var unsub = subscribe(msg -> {});
+        unsub.run();
+        // Remove from our cleanup list too since already unsubscribed
+        unsubscribers.remove(unsub);
+        assertEquals(before, NotificationBus.listenerCount());
+    }
+
+    // --- publish delivers to subscribers ---
+
+    @Test
+    public void publishDeliversToSubscriber() {
+        var received = new ArrayList<String>();
+        subscribe(received::add);
+
+        NotificationBus.publish("test.event", Map.of("key", "value"));
+
+        assertEquals(1, received.size());
+        assertTrue(received.getFirst().contains("test.event"));
+        assertTrue(received.getFirst().contains("value"));
+    }
+
+    @Test
+    public void publishDeliversToMultipleSubscribers() {
+        var received1 = new ArrayList<String>();
+        var received2 = new ArrayList<String>();
+        subscribe(received1::add);
+        subscribe(received2::add);
+
+        NotificationBus.publish("multi.event", "msg", "hello");
+
+        assertEquals(1, received1.size());
+        assertEquals(1, received2.size());
+    }
+
+    @Test
+    public void publishFormatsAsSsePayload() {
+        var received = new ArrayList<String>();
+        subscribe(received::add);
+
+        NotificationBus.publish("sse.test", Map.of("data", "payload"));
+
+        var payload = received.getFirst();
+        assertTrue(payload.startsWith("data: "), "SSE payload should start with 'data: '");
+        assertTrue(payload.endsWith("\n\n"), "SSE payload should end with double newline");
+    }
+
+    // --- failed listener is auto-removed ---
+
+    @Test
+    public void failedListenerIsAutoRemoved() {
+        int before = NotificationBus.listenerCount();
+        // Subscribe a listener that always throws
+        NotificationBus.subscribe(msg -> { throw new RuntimeException("boom"); });
+
+        // Publish to trigger the failure
+        NotificationBus.publish("fail.event", Map.of("x", "y"));
+
+        // The failed listener should have been removed
+        assertEquals(before, NotificationBus.listenerCount());
+    }
+
+    // --- listenerCount ---
+
+    @Test
+    public void listenerCountReturnsCorrectCount() {
+        int before = NotificationBus.listenerCount();
+        var unsub1 = subscribe(msg -> {});
+        var unsub2 = subscribe(msg -> {});
+
+        assertEquals(before + 2, NotificationBus.listenerCount());
+
+        unsub1.run();
+        assertEquals(before + 1, NotificationBus.listenerCount());
+
+        unsub2.run();
+        assertEquals(before, NotificationBus.listenerCount());
+        // Remove from cleanup since already unsubscribed
+        unsubscribers.remove(unsub1);
+        unsubscribers.remove(unsub2);
+    }
+
+    @Test
+    public void publishWithNoSubscribersDoesNotThrow() {
+        // Should complete without error even if no subscribers exist
+        NotificationBus.publish("orphan.event", Map.of("lonely", "true"));
+    }
+}

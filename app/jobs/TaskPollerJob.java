@@ -91,35 +91,46 @@ public class TaskPollerJob extends Job<Void> {
     }
 
     private void onSuccess(Task task) {
-        task.status = Task.Status.COMPLETED;
-        task.save();
-        EventLogger.info("task", task.agent != null ? task.agent.name : null, null,
-                "Task completed: %s".formatted(task.name));
+        // Re-fetch by ID to get a managed entity — the passed-in task may be
+        // detached after AgentRunner.run() opened and committed its own Tx.run() blocks.
+        var fresh = Task.<Task>findById(task.id);
+        if (fresh == null) return;
+        fresh.status = Task.Status.COMPLETED;
+        fresh.save();
+        EventLogger.info("task", fresh.agent != null ? fresh.agent.name : null, null,
+                "Task completed: %s".formatted(fresh.name));
 
         // CRON re-scheduling
-        if (task.type == Task.Type.CRON && task.cronExpression != null) {
-            scheduleCronNext(task);
+        if (fresh.type == Task.Type.CRON && fresh.cronExpression != null) {
+            scheduleCronNext(fresh);
         }
     }
 
-    private void onFailure(Task task, Exception e) {
-        task.retryCount++;
-        task.lastError = e.getMessage();
+    /** Maximum bit-shift for exponential backoff — caps at ~12 days (30 * 2^20 seconds). */
+    private static final int MAX_BACKOFF_SHIFT = 20;
 
-        if (task.retryCount >= task.maxRetries) {
-            task.status = Task.Status.FAILED;
-            EventLogger.error("task", task.agent != null ? task.agent.name : null, null,
+    private void onFailure(Task task, Exception e) {
+        // Re-fetch by ID to get a managed entity with the current DB state.
+        var fresh = Task.<Task>findById(task.id);
+        if (fresh == null) return;
+        fresh.retryCount++;
+        fresh.lastError = e.getMessage();
+
+        if (fresh.retryCount >= fresh.maxRetries) {
+            fresh.status = Task.Status.FAILED;
+            EventLogger.error("task", fresh.agent != null ? fresh.agent.name : null, null,
                     "Task permanently failed after %d retries: %s — %s"
-                            .formatted(task.retryCount, task.name, e.getMessage()));
+                            .formatted(fresh.retryCount, fresh.name, e.getMessage()));
         } else {
-            task.status = Task.Status.PENDING;
-            var backoffSeconds = BASE_BACKOFF_SECONDS * (1L << (task.retryCount - 1));
-            task.nextRunAt = Instant.now().plusSeconds(backoffSeconds);
-            EventLogger.warn("task", task.agent != null ? task.agent.name : null, null,
+            fresh.status = Task.Status.PENDING;
+            var shift = Math.min(fresh.retryCount - 1, MAX_BACKOFF_SHIFT);
+            var backoffSeconds = BASE_BACKOFF_SECONDS * (1L << shift);
+            fresh.nextRunAt = Instant.now().plusSeconds(backoffSeconds);
+            EventLogger.warn("task", fresh.agent != null ? fresh.agent.name : null, null,
                     "Task retry %d/%d for '%s' in %ds"
-                            .formatted(task.retryCount, task.maxRetries, task.name, backoffSeconds));
+                            .formatted(fresh.retryCount, fresh.maxRetries, fresh.name, backoffSeconds));
         }
-        task.save();
+        fresh.save();
     }
 
     private void scheduleCronNext(Task completedTask) {

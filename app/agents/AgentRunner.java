@@ -28,7 +28,7 @@ import java.util.regex.Pattern;
 public class AgentRunner {
 
     private static final Gson gson = INSTANCE;
-    private static final int DEFAULT_MAX_TOOL_ROUNDS = 10;
+    public static final int DEFAULT_MAX_TOOL_ROUNDS = 10;
     private static final Pattern IMAGE_URL_PATTERN =
             Pattern.compile("!\\[([^\\]]*)\\]\\((/api/[^)]+)\\)");
     private static final Pattern PAREN_URL_PATTERN =
@@ -396,23 +396,12 @@ public class AgentRunner {
             usageMap.addProperty("cacheCreation", u.cacheCreationTokens());
             usageMap.addProperty("durationMs", durationMs);
 
-            // Include model pricing if available from provider config
+            // Include model pricing if available from the resolved ModelInfo
             if (modelInfo != null) {
-                var modelsJson = services.ConfigService.get("provider." + agent.modelProvider + ".models");
-                if (modelsJson != null) {
-                    try {
-                        var modelsArray = com.google.gson.JsonParser.parseString(modelsJson).getAsJsonArray();
-                        for (var el : modelsArray) {
-                            var mObj = el.getAsJsonObject();
-                            if (mObj.has("id") && mObj.get("id").getAsString().equals(agent.modelId)) {
-                                for (var priceKey : List.of("promptPrice", "completionPrice", "cachedReadPrice", "cacheWritePrice")) {
-                                    if (mObj.has(priceKey)) usageMap.add(priceKey, mObj.get(priceKey));
-                                }
-                                break;
-                            }
-                        }
-                    } catch (Exception _) { /* skip pricing if parse fails */ }
-                }
+                if (modelInfo.promptPrice() >= 0) usageMap.addProperty("promptPrice", modelInfo.promptPrice());
+                if (modelInfo.completionPrice() >= 0) usageMap.addProperty("completionPrice", modelInfo.completionPrice());
+                if (modelInfo.cachedReadPrice() >= 0) usageMap.addProperty("cachedReadPrice", modelInfo.cachedReadPrice());
+                if (modelInfo.cacheWritePrice() >= 0) usageMap.addProperty("cacheWritePrice", modelInfo.cacheWritePrice());
             }
             var wrapper = new com.google.gson.JsonObject();
             wrapper.add("usage", usageMap);
@@ -453,7 +442,7 @@ public class AgentRunner {
 
             // No tool calls — return the content
             if (assistantMsg.toolCalls() == null || assistantMsg.toolCalls().isEmpty()) {
-                return assistantMsg.content() != null ? (String) assistantMsg.content() : "";
+                return contentAsString(assistantMsg.content());
             }
 
             // Check for truncated response (max tokens hit mid-tool-call)
@@ -514,14 +503,7 @@ public class AgentRunner {
                 agent.modelId, currentMessages, tools, cb.onToken(), cb.onReasoning(), maxTokens, agent.thinkingMode);
 
         try {
-            // Poll with timeout so we can detect client disconnect
-            while (!accumulator.awaitCompletion(5000)) {
-                if (isCancelled.get()) {
-                    EventLogger.info("llm", agent.name, null,
-                            "Aborting streaming tool round — client disconnected");
-                    return priorContent;
-                }
-            }
+            if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, null)) return priorContent;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return priorContent;
@@ -570,9 +552,7 @@ public class AgentRunner {
             var retry = provider.chatStreamAccumulate(
                     agent.modelId, retryMessages, tools, cb.onToken(), cb.onReasoning(), maxTokens, agent.thinkingMode);
             try {
-                while (!retry.awaitCompletion(5000)) {
-                    if (isCancelled.get()) return priorContent;
-                }
+                if (!awaitAccumulatorOrCancel(retry, isCancelled, agent, null)) return priorContent;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return priorContent;
@@ -861,6 +841,27 @@ public class AgentRunner {
             missing.add(img);
         }
         return missing.isEmpty() ? "" : String.join("\n\n", missing) + "\n\n";
+    }
+
+    /**
+     * Safely extract string content from a {@link ChatMessage#content()} which may
+     * be a {@code String} or a multi-part content array (vision). Returns empty
+     * string if content is null or a non-string type that can't be converted.
+     */
+    private static String contentAsString(Object content) {
+        if (content instanceof String s) return s;
+        if (content == null) return "";
+        // Multi-part content (e.g. vision blocks): extract text parts
+        if (content instanceof List<?> parts) {
+            var sb = new StringBuilder();
+            for (var part : parts) {
+                if (part instanceof Map<?,?> m && m.get("text") instanceof String t) {
+                    sb.append(t);
+                }
+            }
+            return sb.toString();
+        }
+        return content.toString();
     }
 
     private static List<ToolCall> parseToolCalls(String json) {

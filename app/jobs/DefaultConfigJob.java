@@ -60,8 +60,8 @@ public class DefaultConfigJob extends Job<Void> {
     }
 
     private void seedToolConfig() {
-        // Chat settings
-        seedIfAbsent("chat.maxToolRounds", "10");
+        // Chat settings — values reference the source constants to stay in sync
+        seedIfAbsent("chat.maxToolRounds", String.valueOf(agents.AgentRunner.DEFAULT_MAX_TOOL_ROUNDS));
         seedIfAbsent("chat.maxContextMessages", "50");
 
         // Ollama: how long the model + KV cache stays resident between requests.
@@ -75,8 +75,7 @@ public class DefaultConfigJob extends Job<Void> {
 
         // Shell execution tool
         seedIfAbsent("shell.enabled", "true");
-        seedIfAbsent("shell.allowlist",
-                "git,npm,npx,pnpm,node,python,python3,pip,ls,cat,head,tail,grep,find,wc,sort,uniq,diff,mkdir,cp,mv,echo,curl,wget,jq,tar,zip,unzip");
+        seedIfAbsent("shell.allowlist", tools.ShellExecTool.DEFAULT_ALLOWLIST);
         seedIfAbsent("shell.defaultTimeoutSeconds", "30");
         seedIfAbsent("shell.maxTimeoutSeconds", "300");
         seedIfAbsent("shell.maxOutputBytes", "102400");

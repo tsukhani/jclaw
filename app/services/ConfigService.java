@@ -107,6 +107,20 @@ public class ConfigService {
         cache.remove(key);
     }
 
+    /**
+     * Delete a config key and trigger the same side effects as {@link #setWithSideEffects}.
+     * Mirrors save-with-side-effects so controller delete and save stay in sync.
+     */
+    public static void deleteWithSideEffects(String key) {
+        delete(key);
+        if (key.startsWith("provider.")) {
+            AgentService.syncEnabledStates();
+        }
+        if (key.equals("shell.enabled") || key.equals("playwright.enabled")) {
+            jobs.ToolRegistrationJob.registerAll();
+        }
+    }
+
     public static List<Config> listAll() {
         return Tx.run(() -> Config.<Config>findAll());
     }

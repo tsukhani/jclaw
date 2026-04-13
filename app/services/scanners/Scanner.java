@@ -51,17 +51,17 @@ public interface Scanner {
     }
 
     class OneShotWarning {
-        private volatile boolean warned = false;
+        private final java.util.concurrent.atomic.AtomicBoolean warned = new java.util.concurrent.atomic.AtomicBoolean(false);
 
-        public synchronized void warnOnce(String message) {
-            if (warned) return;
-            warned = true;
-            services.EventLogger.warn("scanner", message);
+        public void warnOnce(String message) {
+            if (warned.compareAndSet(false, true)) {
+                services.EventLogger.warn("scanner", message);
+            }
         }
 
         /** Test-only hook to reset the warning flag between key-toggle tests. */
-        public synchronized void reset() {
-            warned = false;
+        public void reset() {
+            warned.set(false);
         }
     }
 }

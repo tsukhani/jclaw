@@ -124,7 +124,7 @@ public class SystemPromptAssembler {
                 toolEntries);
     }
 
-    private static final Gson TOOL_GSON = new Gson();
+    private static final Gson TOOL_GSON = utils.GsonHolder.INSTANCE;
 
     /**
      * Identical to the existing chars/4 estimate used by the context-window trimmer

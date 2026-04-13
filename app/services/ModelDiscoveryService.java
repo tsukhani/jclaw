@@ -87,7 +87,7 @@ public class ModelDiscoveryService {
 
     // --- Model parsing ---
 
-    static List<Map<String, Object>> parseModels(JsonObject body) {
+    public static List<Map<String, Object>> parseModels(JsonObject body) {
         var result = new ArrayList<Map<String, Object>>();
         JsonArray dataArray = null;
 
@@ -162,9 +162,9 @@ public class ModelDiscoveryService {
         return 0;
     }
 
-    record ThinkingDetection(boolean confirmed, boolean fromProvider) {}
+    public record ThinkingDetection(boolean confirmed, boolean fromProvider) {}
 
-    static ThinkingDetection detectThinkingSupport(JsonObject obj) {
+    public static ThinkingDetection detectThinkingSupport(JsonObject obj) {
         if (obj.has("supported_parameters") && obj.get("supported_parameters").isJsonArray()) {
             for (var param : obj.getAsJsonArray("supported_parameters")) {
                 if (param.isJsonPrimitive()) {
@@ -186,7 +186,7 @@ public class ModelDiscoveryService {
         return new ThinkingDetection(false, false);
     }
 
-    static double inferPrice(JsonObject obj, String type) {
+    public static double inferPrice(JsonObject obj, String type) {
         if (obj.has("pricing") && obj.get("pricing").isJsonObject()) {
             var pricing = obj.getAsJsonObject("pricing");
             if (pricing.has(type) && !pricing.get(type).isJsonNull()) {
@@ -311,12 +311,12 @@ public class ModelDiscoveryService {
         }
     }
 
-    static String stripVariant(String id) {
+    public static String stripVariant(String id) {
         int idx = id.indexOf(':');
         return idx >= 0 ? id.substring(0, idx) : id;
     }
 
-    static String stripVersionSuffix(String id) {
+    public static String stripVersionSuffix(String id) {
         return id.replaceAll("-\\d{6,}$", "").replaceAll("-\\d{3,4}$", "");
     }
 

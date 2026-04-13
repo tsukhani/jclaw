@@ -6,6 +6,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Per-conversation message queue that serializes agent processing.
@@ -14,7 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Three modes:
  * - "queue" (default): FIFO, process one at a time
  * - "collect": Batch pending messages into a single prompt
- * - "interrupt": Cancel in-flight, process new message immediately
+ * - "interrupt": Cancel in-flight via {@link #isCancelled}, queue new message for drain
  */
 public class ConversationQueue {
 
@@ -25,8 +26,10 @@ public class ConversationQueue {
 
     static class QueueState {
         final ArrayDeque<QueuedMessage> pending = new ArrayDeque<>();
-        volatile boolean processing = false;
-        String mode = "queue"; // all reads/writes guarded by synchronized(this)
+        boolean processing = false; // all reads/writes guarded by synchronized(this)
+        String mode = "queue";
+        /** Signals in-flight processing to cancel. Set by interrupt mode, cleared on drain. */
+        final AtomicBoolean cancelled = new AtomicBoolean(false);
 
         synchronized boolean tryStartProcessing() {
             if (processing) return false;
@@ -66,8 +69,15 @@ public class ConversationQueue {
 
             // Agent is busy -- handle based on mode
             if ("interrupt".equals(mode)) {
+                // Signal the in-flight processor to cancel, then queue this message
+                // so drain() will pick it up after the current run finishes.
+                state.cancelled.set(true);
                 state.pending.clear();
-                return true;
+                state.pending.addLast(message);
+                EventLogger.info("queue", message.agent().name, message.channelType(),
+                        "Interrupt mode: signalled cancellation for conversation %d, queued new message"
+                                .formatted(conversationId));
+                return false;
             }
 
             // Queue the message (queue and collect modes)
@@ -87,11 +97,26 @@ public class ConversationQueue {
     }
 
     /**
+     * Returns an {@link AtomicBoolean} that becomes {@code true} when interrupt
+     * mode signals that the in-flight processor should cancel. Callers (e.g.
+     * {@link agents.AgentRunner}) should poll this in their processing loops.
+     */
+    public static AtomicBoolean cancellationFlag(Long conversationId) {
+        var state = queues.get(conversationId);
+        return state != null ? state.cancelled : new AtomicBoolean(false);
+    }
+
+    /**
      * Called after processing completes. Returns the next message(s) to process,
      * or empty list if queue is empty.
      *
      * In "collect" mode, returns all pending messages combined.
      * In "queue" mode, returns just the next message.
+     *
+     * Does NOT remove the QueueState from the map — avoids a race between
+     * {@code remove()} and a concurrent {@code computeIfAbsent()} that would
+     * permanently orphan the conversation. Idle entries are harmless (empty
+     * deque + processing=false) and will be reused on the next message.
      */
     public static List<QueuedMessage> drain(Long conversationId) {
         var state = queues.get(conversationId);
@@ -99,9 +124,9 @@ public class ConversationQueue {
 
         synchronized (state) {
             state.finishProcessing();
+            state.cancelled.set(false);
 
             if (state.pending.isEmpty()) {
-                queues.remove(conversationId);
                 return List.of();
             }
 

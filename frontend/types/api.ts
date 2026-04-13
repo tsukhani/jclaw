@@ -76,4 +76,5 @@ export interface LogEvent {
   message: string
   details: string | null
   timestamp: string
+  agentId?: number | null
 }
