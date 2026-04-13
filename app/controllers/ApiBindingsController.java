@@ -3,6 +3,8 @@ package controllers;
 import com.google.gson.Gson;
 import models.Agent;
 import models.AgentBinding;
+
+import static utils.GsonHolder.INSTANCE;
 import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
@@ -12,7 +14,7 @@ import java.util.Map;
 @With(AuthCheck.class)
 public class ApiBindingsController extends Controller {
 
-    private static final Gson gson = new Gson();
+    private static final Gson gson = INSTANCE;
 
     private record BindingView(Long id, Long agentId, String agentName,
                                String channelType, String peerId, int priority) {

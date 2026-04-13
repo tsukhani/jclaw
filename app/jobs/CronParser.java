@@ -15,7 +15,7 @@ public class CronParser {
     }
 
     public static Instant nextExecution(String cron, Instant after) {
-        var parts = cron.trim().split("\\s+");
+        var parts = cron.strip().split("\\s+");
         if (parts.length < 5) return null;
 
         var minuteSpec = parts[0];

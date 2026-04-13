@@ -29,6 +29,12 @@ public interface MemoryStore {
 
     List<MemoryEntry> list(String agentId);
 
+    default List<MemoryEntry> list(String agentId, int limit, int offset) {
+        var all = list(agentId);
+        if (offset >= all.size()) return List.of();
+        return all.subList(offset, Math.min(offset + limit, all.size()));
+    }
+
     /**
      * Bulk-delete every memory belonging to the given agent. Called when an
      * agent itself is deleted, so per-agent data doesn't outlive its owner.

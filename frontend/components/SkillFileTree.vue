@@ -51,13 +51,13 @@ function formatSize(bytes: number) {
       <!-- Directory row -->
       <div
         v-if="node.isDir"
-        @click="toggle(node.name + (depth ?? 0))"
+        @click="toggle(node.path ?? (node.name + (depth ?? 0)))"
         class="flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-neutral-400 hover:bg-neutral-800/50 transition-colors select-none"
         :style="{ paddingLeft: `${12 + (depth ?? 0) * 12}px` }"
       >
         <svg
           class="w-3 h-3 shrink-0 transition-transform"
-          :class="isOpen(node.name + (depth ?? 0)) ? 'rotate-90' : ''"
+          :class="isOpen(node.path ?? (node.name + (depth ?? 0))) ? 'rotate-90' : ''"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -72,7 +72,7 @@ function formatSize(bytes: number) {
 
       <!-- Children -->
       <SkillFileTree
-        v-if="node.isDir && isOpen(node.name + (depth ?? 0))"
+        v-if="node.isDir && isOpen(node.path ?? (node.name + (depth ?? 0)))"
         :nodes="node.children ?? []"
         :active-path="activePath"
         :depth="(depth ?? 0) + 1"

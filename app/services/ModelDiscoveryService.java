@@ -7,6 +7,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.*;
+import java.util.regex.Pattern;
 
 /**
  * Model catalog discovery from LLM provider APIs. Handles fetching, parsing,
@@ -18,6 +19,11 @@ import java.util.*;
 public class ModelDiscoveryService {
 
     private ModelDiscoveryService() {}
+
+    private static final Pattern HREF_PATTERN = Pattern.compile(
+            "href=\"/([a-zA-Z0-9][-a-zA-Z0-9._]*/[a-zA-Z0-9][-a-zA-Z0-9._:]*?)\"");
+    private static final Pattern USAGE_PATTERN = Pattern.compile(
+            "\"([a-zA-Z0-9_-]+/[a-zA-Z0-9._:-]+)\"\\s*:\\s*\\d");
 
     private static final int DISCOVER_TIMEOUT_SECONDS = 15;
     private static final int LEADERBOARD_TIMEOUT_SECONDS = 10;
@@ -258,9 +264,7 @@ public class ModelDiscoveryService {
         var result = new ArrayList<String>();
         var seen = new HashSet<String>();
 
-        var hrefPattern = java.util.regex.Pattern.compile(
-                "href=\"/([a-zA-Z0-9][-a-zA-Z0-9._]*/[a-zA-Z0-9][-a-zA-Z0-9._:]*?)\"");
-        var hrefMatcher = hrefPattern.matcher(html);
+        var hrefMatcher = HREF_PATTERN.matcher(html);
         while (hrefMatcher.find()) {
             var slug = hrefMatcher.group(1).toLowerCase();
             if (slug.startsWith("docs/") || slug.startsWith("api/") || slug.startsWith("_next/")
@@ -272,9 +276,7 @@ public class ModelDiscoveryService {
         }
 
         if (result.isEmpty()) {
-            var usagePattern = java.util.regex.Pattern.compile(
-                    "\"([a-zA-Z0-9_-]+/[a-zA-Z0-9._:-]+)\"\\s*:\\s*\\d");
-            var usageMatcher = usagePattern.matcher(html);
+            var usageMatcher = USAGE_PATTERN.matcher(html);
             while (usageMatcher.find()) {
                 var slug = usageMatcher.group(1).toLowerCase();
                 var baseSlug = slug.contains(":") ? slug.substring(0, slug.indexOf(':')) : slug;

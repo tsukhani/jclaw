@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { LogEvent } from '~/types/api'
+
 const categoryFilter = ref('')
 const levelFilter = ref('')
 const searchFilter = ref('')
@@ -12,11 +14,11 @@ const url = computed(() => {
   return `/api/logs?${params}`
 })
 
-const { data: logs, refresh } = await useFetch<{ events: any[] }>(url)
+const { data: logs, refresh } = await useFetch<{ events: LogEvent[] }>(url)
 
 // Auto-refresh every 5 seconds
 const autoRefresh = ref(true)
-let interval: ReturnType<typeof setInterval>
+let interval: ReturnType<typeof setInterval> | undefined
 
 onMounted(() => {
   interval = setInterval(() => {

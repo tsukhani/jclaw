@@ -5,12 +5,15 @@ import llm.LlmProvider;
 import llm.LlmTypes.*;
 import llm.ProviderRegistry;
 import models.Agent;
+import models.ChannelType;
 import models.Conversation;
+import models.MessageRole;
 import services.ConversationService;
 import services.EventLogger;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -22,13 +25,13 @@ public class AgentRunner {
 
     private static final Gson gson = new Gson();
     private static final int DEFAULT_MAX_TOOL_ROUNDS = 10;
+    private static final java.util.regex.Pattern IMAGE_URL_PATTERN =
+            java.util.regex.Pattern.compile("!\\[([^\\]]*)\\]\\((/api/[^)]+)\\)");
+    private static final java.util.regex.Pattern PAREN_URL_PATTERN =
+            java.util.regex.Pattern.compile("\\(([^)]+)\\)");
 
     private static int maxToolRounds() {
-        try {
-            return Integer.parseInt(services.ConfigService.get("chat.maxToolRounds", "10"));
-        } catch (NumberFormatException e) {
-            return DEFAULT_MAX_TOOL_ROUNDS;
-        }
+        return services.ConfigService.getInt("chat.maxToolRounds", DEFAULT_MAX_TOOL_ROUNDS);
     }
 
     public record RunResult(String response, Conversation conversation) {}
@@ -52,6 +55,41 @@ public class AgentRunner {
         LlmProvider secondary,
         List<ToolDef> tools
     ) {}
+
+    private static final String STREAM_CANCELLED_MSG = "Stream cancelled by client disconnect";
+
+    /**
+     * Check whether the streaming client has disconnected. Logs the cancellation
+     * when detected and returns {@code true} so the caller can short-circuit.
+     */
+    private static boolean checkCancelled(AtomicBoolean isCancelled, Agent agent, String channelType) {
+        if (isCancelled.get()) {
+            EventLogger.info("llm", agent.name, channelType, STREAM_CANCELLED_MSG);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Resolve the model's {@link ModelInfo} from the provider's configured model list.
+     * Used by {@link #callWithToolLoop}, {@link #runStreaming}, and {@link #trimToContextWindow}.
+     */
+    private static Optional<ModelInfo> resolveModelInfo(Agent agent, LlmProvider provider) {
+        return provider.config().models().stream()
+                .filter(m -> m.id().equals(agent.modelId))
+                .findFirst();
+    }
+
+    /**
+     * Derive the effective max-tokens limit from the resolved model info.
+     * Returns {@code null} when the model has no configured limit.
+     */
+    private static Integer effectiveMaxTokens(Agent agent, LlmProvider provider) {
+        return resolveModelInfo(agent, provider)
+                .filter(m -> m.maxTokens() > 0)
+                .map(ModelInfo::maxTokens)
+                .orElse(null);
+    }
 
     /**
      * Run the agent synchronously. Returns the final assistant response.
@@ -133,223 +171,16 @@ public class AgentRunner {
         Thread.ofVirtual().start(() -> {
             final Long[] conversationIdRef = {null};
             try {
-                // 1. Resolve or create the conversation — but do NOT persist the
-                // user message yet. Message persistence must happen after tryAcquire
-                // so that queued messages (tryAcquire=false) don't leave phantom
-                // entries in the DB that get re-persisted when the queue drains.
-                Conversation conversation = services.Tx.run(() -> {
-                    if (conversationId != null) {
-                        return ConversationService.findById(conversationId);
-                    } else if ("web".equals(channelType)) {
-                        return ConversationService.create(agent, channelType, peerId);
-                    } else {
-                        return ConversationService.findOrCreate(agent, channelType, peerId);
-                    }
-                });
-
-                if (conversation == null) {
-                    cb.onError().accept(new RuntimeException("Conversation not found"));
-                    return;
-                }
+                // Phase 1: Resolve conversation, acquire queue, persist user message
+                var conversation = resolveConversationAndAcquireQueue(
+                        agent, conversationId, channelType, peerId, userMessage, cb);
+                if (conversation == null) return; // queued, not-found, or error — already handled
                 conversationIdRef[0] = conversation.id;
 
-                // Acquire conversation queue — prevents concurrent message corruption
-                var queueMsg = new services.ConversationQueue.QueuedMessage(
-                        userMessage, channelType, peerId, agent);
-                if (!services.ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
-                    cb.onInit().accept(conversation);
-                    cb.onComplete().accept("Your message has been queued and will be processed shortly.");
-                    return;
-                }
+                if (checkCancelled(isCancelled, agent, channelType)) return;
 
-                // 2. Now that we hold the lock, persist the user message.
-                services.Tx.run(() -> {
-                    var convo = ConversationService.findById(conversation.id);
-                    ConversationService.appendUserMessage(convo, userMessage);
-                });
-
-                // Notify caller (e.g., send SSE init event with conversation ID)
-                cb.onInit().accept(conversation);
-
-                if (isCancelled.get()) {
-                    EventLogger.info("llm", agent.name, channelType, "Stream cancelled by client disconnect");
-                    return;
-                }
-
-                EventLogger.info("llm", agent.name, channelType,
-                        "Streaming: assembling prompt for conversation %d".formatted(conversation.id));
-
-                var assembled = services.Tx.run(() ->
-                        SystemPromptAssembler.assemble(agent, userMessage));
-
-                if (isCancelled.get()) {
-                    EventLogger.info("llm", agent.name, channelType, "Stream cancelled by client disconnect");
-                    return;
-                }
-
-                var messages = services.Tx.run(() ->
-                        buildMessages(assembled.systemPrompt(), ConversationService.findById(conversation.id)));
-
-                var agentProvider = services.Tx.run(() -> ProviderRegistry.get(agent.modelProvider));
-                var primary = agentProvider != null ? agentProvider : services.Tx.run(ProviderRegistry::getPrimary);
-                if (primary == null) {
-                    EventLogger.error("llm", agent.name, channelType, "No LLM provider configured");
-                    cb.onError().accept(new RuntimeException("No LLM provider configured"));
-                    return;
-                }
-
-                if (isCancelled.get()) {
-                    EventLogger.info("llm", agent.name, channelType, "Stream cancelled by client disconnect");
-                    return;
-                }
-
-                messages = trimToContextWindow(messages, agent, primary);
-
-                var tools = services.Tx.run(() -> ToolRegistry.getToolDefsForAgent(agent));
-                EventLogger.info("llm", agent.name, channelType,
-                        "Streaming: calling %s / %s (%d messages, %d tools, %d skills%s)"
-                                .formatted(primary.config().name(), agent.modelId,
-                                        messages.size(), tools.size(), assembled.skills().size(),
-                                        agent.thinkingMode != null ? ", thinking=" + agent.thinkingMode : ""));
-                var modelInfo = primary.config().models().stream()
-                        .filter(m -> m.id().equals(agent.modelId))
-                        .findFirst().orElse(null);
-                var maxTokens = modelInfo != null && modelInfo.maxTokens() > 0 ? modelInfo.maxTokens() : null;
-
-                // Stream with tool call handling (HTTP, no JPA)
-                var streamStartMs = System.currentTimeMillis();
-                var accumulator = primary.chatStreamAccumulate(
-                        agent.modelId, messages, tools, cb.onToken(), cb.onReasoning(), maxTokens, agent.thinkingMode);
-
-                while (!accumulator.awaitCompletion(5000)) {
-                    if (isCancelled.get()) {
-                        EventLogger.info("llm", agent.name, channelType, "Stream cancelled by client disconnect");
-                        return;
-                    }
-                }
-
-                // Retry once on transient 5xx errors
-                if (accumulator.error != null && accumulator.error.getMessage() != null
-                        && accumulator.error.getMessage().contains("HTTP 5")) {
-                    EventLogger.warn("llm", agent.name, null, "Retrying streaming after transient error");
-                    accumulator = primary.chatStreamAccumulate(
-                            agent.modelId, messages, tools, cb.onToken(), cb.onReasoning(), maxTokens, agent.thinkingMode);
-                    while (!accumulator.awaitCompletion(5000)) {
-                        if (isCancelled.get()) {
-                            EventLogger.info("llm", agent.name, channelType, "Stream cancelled by client disconnect");
-                            return;
-                        }
-                    }
-                }
-
-                if (isCancelled.get()) {
-                    EventLogger.info("llm", agent.name, channelType, "Stream cancelled by client disconnect");
-                    return;
-                }
-
-                if (accumulator.error != null) {
-                    cb.onError().accept(accumulator.error);
-                    return;
-                }
-
-                var content = accumulator.content;
-
-                // Check for truncated response (max tokens hit mid-tool-call).
-                // OpenAI-compatible finish_reason is "length"; Anthropic-native is
-                // "max_tokens" and some providers (OpenRouter Bedrock) pass that
-                // through verbatim. Match both so the truncation path fires
-                // regardless of which upstream route the model is on. Malformed
-                // args that slip past this guard are still caught by ToolRegistry's
-                // JSON pre-validation — this check exists to surface the clearer
-                // "truncated" message to the user before dispatch even runs.
-                if (isTruncationFinish(accumulator.finishReason) && !accumulator.toolCalls.isEmpty()) {
-                    EventLogger.warn("llm", agent.name, channelType,
-                            "Response truncated (finish_reason=length) with pending tool calls — skipping execution of incomplete tool arguments");
-                    var truncMsg = content.isEmpty()
-                            ? "I tried to use a tool but my response was too long and got cut off. Let me try a more concise approach."
-                            : content;
-                    cb.onToken().accept(truncMsg.equals(content) ? "" : "\n\n*[Response was truncated — retrying with a simpler approach]*");
-                    // Persist and complete with the truncation notice
-                    var finalContent = truncMsg;
-                    services.Tx.run(() -> {
-                        var conv = ConversationService.findById(conversation.id);
-                        ConversationService.appendAssistantMessage(conv, finalContent, null);
-                    });
-                    cb.onComplete().accept(finalContent);
-                    return;
-                }
-
-                // Handle tool calls if present
-                if (!accumulator.toolCalls.isEmpty()) {
-                    content = handleToolCallsStreaming(agent, conversation.id, messages, tools,
-                            accumulator.toolCalls, content, primary, cb, maxTokens, 0, isCancelled);
-                }
-
-                if (isCancelled.get()) {
-                    EventLogger.info("llm", agent.name, channelType, "Stream cancelled by client disconnect");
-                    return;
-                }
-
-                // Persist and complete
-                var finalContent = content;
-                services.Tx.run(() -> {
-                    var conv = ConversationService.findById(conversation.id);
-                    ConversationService.appendAssistantMessage(conv, finalContent, null);
-                });
-
-                // Log and emit usage including reasoning tokens, timing, and pricing
-                var durationMs = System.currentTimeMillis() - streamStartMs;
-                if (accumulator.usage != null) {
-                    var u = accumulator.usage;
-                    var extras = new StringBuilder();
-                    if (u.reasoningTokens() > 0) extras.append(", %d reasoning".formatted(u.reasoningTokens()));
-                    if (u.cachedTokens() > 0) extras.append(", %d cached".formatted(u.cachedTokens()));
-                    if (u.cacheCreationTokens() > 0) extras.append(", %d cache-write".formatted(u.cacheCreationTokens()));
-                    var usageSummary = " [%d prompt, %d completion, %d total tokens%s, %.1fs]".formatted(
-                            u.promptTokens(), u.completionTokens(), u.totalTokens(),
-                            extras.toString(),
-                            durationMs / 1000.0);
-                    EventLogger.info("llm", agent.name, channelType,
-                            "Streaming complete (%d chars)%s".formatted(content.length(), usageSummary));
-
-                    // Build usage JSON with timing and pricing for the frontend
-                    var usageMap = new com.google.gson.JsonObject();
-                    usageMap.addProperty("prompt", u.promptTokens());
-                    usageMap.addProperty("completion", u.completionTokens());
-                    usageMap.addProperty("total", u.totalTokens());
-                    usageMap.addProperty("reasoning", u.reasoningTokens());
-                    usageMap.addProperty("cached", u.cachedTokens());
-                    usageMap.addProperty("cacheCreation", u.cacheCreationTokens());
-                    usageMap.addProperty("durationMs", durationMs);
-
-                    // Include model pricing if available from provider config
-                    if (modelInfo != null) {
-                        var modelsJson = services.ConfigService.get("provider." + agent.modelProvider + ".models");
-                        if (modelsJson != null) {
-                            try {
-                                var modelsArray = com.google.gson.JsonParser.parseString(modelsJson).getAsJsonArray();
-                                for (var el : modelsArray) {
-                                    var mObj = el.getAsJsonObject();
-                                    if (mObj.has("id") && mObj.get("id").getAsString().equals(agent.modelId)) {
-                                        for (var priceKey : List.of("promptPrice", "completionPrice", "cachedReadPrice", "cacheWritePrice")) {
-                                            if (mObj.has(priceKey)) usageMap.add(priceKey, mObj.get(priceKey));
-                                        }
-                                        break;
-                                    }
-                                }
-                            } catch (Exception _) { /* skip pricing if parse fails */ }
-                        }
-                    }
-                    var wrapper = new com.google.gson.JsonObject();
-                    wrapper.add("usage", usageMap);
-                    cb.onStatus().accept(gson.toJson(wrapper));
-                } else {
-                    EventLogger.info("llm", agent.name, channelType,
-                            "Streaming complete (%d chars, %.1fs)".formatted(content.length(), durationMs / 1000.0));
-                    // Emit timing even without usage data
-                    cb.onStatus().accept("{\"usage\":{\"durationMs\":%d}}".formatted(durationMs));
-                }
-                cb.onComplete().accept(content);
+                // Phase 2: Assemble prompt, resolve provider, call LLM in streaming loop
+                streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb);
 
             } catch (Exception e) {
                 EventLogger.error("llm", agent.name, channelType,
@@ -364,16 +195,234 @@ public class AgentRunner {
         });
     }
 
+    /**
+     * Phase 1 of streaming: resolve or create conversation, acquire the
+     * conversation queue, and persist the user message. Returns the conversation
+     * or {@code null} if the request was queued, not found, or errored (in which
+     * case callbacks have already been invoked).
+     */
+    private static Conversation resolveConversationAndAcquireQueue(
+            Agent agent, Long conversationId, String channelType, String peerId,
+            String userMessage, StreamingCallbacks cb) {
+
+        Conversation conversation = services.Tx.run(() -> {
+            if (conversationId != null) {
+                return ConversationService.findById(conversationId);
+            } else if (ChannelType.WEB.value.equals(channelType)) {
+                return ConversationService.create(agent, channelType, peerId);
+            } else {
+                return ConversationService.findOrCreate(agent, channelType, peerId);
+            }
+        });
+
+        if (conversation == null) {
+            cb.onError().accept(new RuntimeException("Conversation not found"));
+            return null;
+        }
+
+        var queueMsg = new services.ConversationQueue.QueuedMessage(
+                userMessage, channelType, peerId, agent);
+        if (!services.ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
+            cb.onInit().accept(conversation);
+            cb.onComplete().accept("Your message has been queued and will be processed shortly.");
+            return null;
+        }
+
+        // Now that we hold the lock, persist the user message.
+        services.Tx.run(() -> {
+            var convo = ConversationService.findById(conversation.id);
+            ConversationService.appendUserMessage(convo, userMessage);
+        });
+
+        cb.onInit().accept(conversation);
+        return conversation;
+    }
+
+    /**
+     * Phase 2 of streaming: assemble the prompt, resolve the provider, and run
+     * the streaming LLM call loop (including tool-call continuation, retry on
+     * transient errors, truncation handling, and usage reporting).
+     */
+    private static void streamLlmLoop(Agent agent, Conversation conversation,
+                                       String channelType, String userMessage,
+                                       AtomicBoolean isCancelled, StreamingCallbacks cb)
+            throws InterruptedException {
+
+        EventLogger.info("llm", agent.name, channelType,
+                "Streaming: assembling prompt for conversation %d".formatted(conversation.id));
+
+        var assembled = services.Tx.run(() ->
+                SystemPromptAssembler.assemble(agent, userMessage));
+
+        if (checkCancelled(isCancelled, agent, channelType)) return;
+
+        var messages = services.Tx.run(() ->
+                buildMessages(assembled.systemPrompt(), ConversationService.findById(conversation.id)));
+
+        var agentProvider = services.Tx.run(() -> ProviderRegistry.get(agent.modelProvider));
+        var primary = agentProvider != null ? agentProvider : services.Tx.run(ProviderRegistry::getPrimary);
+        if (primary == null) {
+            EventLogger.error("llm", agent.name, channelType, "No LLM provider configured");
+            cb.onError().accept(new RuntimeException("No LLM provider configured"));
+            return;
+        }
+
+        if (checkCancelled(isCancelled, agent, channelType)) return;
+
+        messages = trimToContextWindow(messages, agent, primary);
+
+        var tools = services.Tx.run(() -> ToolRegistry.getToolDefsForAgent(agent));
+        EventLogger.info("llm", agent.name, channelType,
+                "Streaming: calling %s / %s (%d messages, %d tools, %d skills%s)"
+                        .formatted(primary.config().name(), agent.modelId,
+                                messages.size(), tools.size(), assembled.skills().size(),
+                                agent.thinkingMode != null ? ", thinking=" + agent.thinkingMode : ""));
+        var maxTokens = effectiveMaxTokens(agent, primary);
+        var modelInfo = resolveModelInfo(agent, primary).orElse(null);
+
+        // Stream with tool call handling (HTTP, no JPA)
+        var streamStartMs = System.currentTimeMillis();
+        var accumulator = primary.chatStreamAccumulate(
+                agent.modelId, messages, tools, cb.onToken(), cb.onReasoning(), maxTokens, agent.thinkingMode);
+
+        if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType)) return;
+
+        // Retry once on transient 5xx errors
+        if (accumulator.error != null && accumulator.error.getMessage() != null
+                && accumulator.error.getMessage().contains("HTTP 5")) {
+            EventLogger.warn("llm", agent.name, null, "Retrying streaming after transient error");
+            accumulator = primary.chatStreamAccumulate(
+                    agent.modelId, messages, tools, cb.onToken(), cb.onReasoning(), maxTokens, agent.thinkingMode);
+            if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType)) return;
+        }
+
+        if (checkCancelled(isCancelled, agent, channelType)) return;
+
+        if (accumulator.error != null) {
+            cb.onError().accept(accumulator.error);
+            return;
+        }
+
+        var content = accumulator.content;
+
+        // Check for truncated response (max tokens hit mid-tool-call)
+        if (isTruncationFinish(accumulator.finishReason) && !accumulator.toolCalls.isEmpty()) {
+            EventLogger.warn("llm", agent.name, channelType,
+                    "Response truncated (finish_reason=length) with pending tool calls — skipping execution of incomplete tool arguments");
+            var truncMsg = content.isEmpty()
+                    ? "I tried to use a tool but my response was too long and got cut off. Let me try a more concise approach."
+                    : content;
+            cb.onToken().accept(truncMsg.equals(content) ? "" : "\n\n*[Response was truncated — retrying with a simpler approach]*");
+            var finalContent = truncMsg;
+            services.Tx.run(() -> {
+                var conv = ConversationService.findById(conversation.id);
+                ConversationService.appendAssistantMessage(conv, finalContent, null);
+            });
+            cb.onComplete().accept(finalContent);
+            return;
+        }
+
+        // Handle tool calls if present
+        if (!accumulator.toolCalls.isEmpty()) {
+            content = handleToolCallsStreaming(agent, conversation.id, messages, tools,
+                    accumulator.toolCalls, content, primary, cb, maxTokens, 0, isCancelled);
+        }
+
+        if (checkCancelled(isCancelled, agent, channelType)) return;
+
+        // Persist and complete
+        var finalContent = content;
+        services.Tx.run(() -> {
+            var conv = ConversationService.findById(conversation.id);
+            ConversationService.appendAssistantMessage(conv, finalContent, null);
+        });
+
+        emitUsageAndComplete(agent, channelType, content, accumulator, modelInfo, streamStartMs, cb);
+    }
+
+    /**
+     * Poll an accumulator for completion, checking for cancellation every 5 s.
+     * Returns {@code true} if the accumulator completed, {@code false} if
+     * cancelled (in which case the cancellation has already been logged).
+     */
+    private static boolean awaitAccumulatorOrCancel(LlmProvider.StreamAccumulator accumulator,
+                                                     AtomicBoolean isCancelled,
+                                                     Agent agent, String channelType)
+            throws InterruptedException {
+        while (!accumulator.awaitCompletion(5000)) {
+            if (checkCancelled(isCancelled, agent, channelType)) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Log usage, build the usage JSON payload (including pricing), and invoke
+     * the status + complete callbacks.
+     */
+    private static void emitUsageAndComplete(Agent agent, String channelType, String content,
+                                              LlmProvider.StreamAccumulator accumulator,
+                                              ModelInfo modelInfo,
+                                              long streamStartMs, StreamingCallbacks cb) {
+        var durationMs = System.currentTimeMillis() - streamStartMs;
+        if (accumulator.usage != null) {
+            var u = accumulator.usage;
+            var extras = new StringBuilder();
+            if (u.reasoningTokens() > 0) extras.append(", %d reasoning".formatted(u.reasoningTokens()));
+            if (u.cachedTokens() > 0) extras.append(", %d cached".formatted(u.cachedTokens()));
+            if (u.cacheCreationTokens() > 0) extras.append(", %d cache-write".formatted(u.cacheCreationTokens()));
+            var usageSummary = " [%d prompt, %d completion, %d total tokens%s, %.1fs]".formatted(
+                    u.promptTokens(), u.completionTokens(), u.totalTokens(),
+                    extras.toString(),
+                    durationMs / 1000.0);
+            EventLogger.info("llm", agent.name, channelType,
+                    "Streaming complete (%d chars)%s".formatted(content.length(), usageSummary));
+
+            // Build usage JSON with timing and pricing for the frontend
+            var usageMap = new com.google.gson.JsonObject();
+            usageMap.addProperty("prompt", u.promptTokens());
+            usageMap.addProperty("completion", u.completionTokens());
+            usageMap.addProperty("total", u.totalTokens());
+            usageMap.addProperty("reasoning", u.reasoningTokens());
+            usageMap.addProperty("cached", u.cachedTokens());
+            usageMap.addProperty("cacheCreation", u.cacheCreationTokens());
+            usageMap.addProperty("durationMs", durationMs);
+
+            // Include model pricing if available from provider config
+            if (modelInfo != null) {
+                var modelsJson = services.ConfigService.get("provider." + agent.modelProvider + ".models");
+                if (modelsJson != null) {
+                    try {
+                        var modelsArray = com.google.gson.JsonParser.parseString(modelsJson).getAsJsonArray();
+                        for (var el : modelsArray) {
+                            var mObj = el.getAsJsonObject();
+                            if (mObj.has("id") && mObj.get("id").getAsString().equals(agent.modelId)) {
+                                for (var priceKey : List.of("promptPrice", "completionPrice", "cachedReadPrice", "cacheWritePrice")) {
+                                    if (mObj.has(priceKey)) usageMap.add(priceKey, mObj.get(priceKey));
+                                }
+                                break;
+                            }
+                        }
+                    } catch (Exception _) { /* skip pricing if parse fails */ }
+                }
+            }
+            var wrapper = new com.google.gson.JsonObject();
+            wrapper.add("usage", usageMap);
+            cb.onStatus().accept(gson.toJson(wrapper));
+        } else {
+            EventLogger.info("llm", agent.name, channelType,
+                    "Streaming complete (%d chars, %.1fs)".formatted(content.length(), durationMs / 1000.0));
+            cb.onStatus().accept("{\"usage\":{\"durationMs\":%d}}".formatted(durationMs));
+        }
+        cb.onComplete().accept(content);
+    }
+
     // --- Internal ---
 
     private static String callWithToolLoop(Agent agent, Long conversationId,
                                             List<ChatMessage> messages, List<ToolDef> tools,
                                             LlmProvider primary, LlmProvider secondary) {
         var currentMessages = new ArrayList<>(messages);
-        var modelInfo = primary.config().models().stream()
-                .filter(m -> m.id().equals(agent.modelId))
-                .findFirst().orElse(null);
-        var maxTokens = modelInfo != null && modelInfo.maxTokens() > 0 ? modelInfo.maxTokens() : null;
+        var maxTokens = effectiveMaxTokens(agent, primary);
 
         for (int round = 0; round < maxToolRounds(); round++) {
             ChatResponse response;
@@ -581,17 +630,18 @@ public class AgentRunner {
 
         var history = ConversationService.loadRecentMessages(conversation);
         for (var msg : history) {
-            messages.add(switch (msg.role) {
-                case "user" -> ChatMessage.user(msg.content);
-                case "assistant" -> {
+            var role = MessageRole.fromValue(msg.role);
+            messages.add(switch (role != null ? role : MessageRole.USER) {
+                case USER -> ChatMessage.user(msg.content);
+                case ASSISTANT -> {
                     if (msg.toolCalls != null && !msg.toolCalls.isBlank()) {
                         var toolCalls = parseToolCalls(msg.toolCalls);
                         yield ChatMessage.assistant(msg.content, toolCalls);
                     }
                     yield ChatMessage.assistant(msg.content != null ? msg.content : "");
                 }
-                case "tool" -> ChatMessage.toolResult(msg.toolResults, msg.content);
-                default -> ChatMessage.user(msg.content);
+                case TOOL -> ChatMessage.toolResult(msg.toolResults, msg.content);
+                case SYSTEM -> ChatMessage.system(msg.content);
             });
         }
 
@@ -599,10 +649,7 @@ public class AgentRunner {
     }
 
     private static List<ChatMessage> trimToContextWindow(List<ChatMessage> messages, Agent agent, LlmProvider provider) {
-        // Find the model's context window
-        var modelInfo = provider.config().models().stream()
-                .filter(m -> m.id().equals(agent.modelId))
-                .findFirst().orElse(null);
+        var modelInfo = resolveModelInfo(agent, provider).orElse(null);
         if (modelInfo == null || modelInfo.contextWindow() <= 0) return messages;
 
         int maxTokens = modelInfo.contextWindow();
@@ -610,23 +657,25 @@ public class AgentRunner {
 
         if (estimatedTokens <= maxTokens) return messages;
 
-        // Trim oldest non-system messages until we fit.
-        // Track the running total incrementally to avoid re-scanning the entire list each iteration.
-        var trimmed = new ArrayList<>(messages);
+        // Find how many oldest non-system messages to drop. Scan forward from index 1
+        // (first after system prompt) and accumulate tokens to remove until we fit.
         int total = estimatedTokens;
-        int removed = 0;
-        while (total > maxTokens && trimmed.size() > 2) {
-            // Remove the second message (first after system prompt) — oldest history
-            var dropped = trimmed.remove(1);
-            total -= estimateTokens(List.of(dropped));
-            removed++;
+        int dropCount = 0;
+        for (int i = 1; i < messages.size() - 1 && total > maxTokens; i++) {
+            total -= estimateTokens(List.of(messages.get(i)));
+            dropCount++;
         }
-        if (removed > 0) {
+        if (dropCount > 0) {
             EventLogger.warn("llm", agent.name, null,
                     "Trimmed %d messages to fit context window (%d tokens max, estimated %d)"
-                            .formatted(removed, maxTokens, estimatedTokens));
+                            .formatted(dropCount, maxTokens, estimatedTokens));
+            // Build result: system message + surviving history (skip dropped range)
+            var trimmed = new ArrayList<ChatMessage>(messages.size() - dropCount);
+            trimmed.add(messages.getFirst());
+            trimmed.addAll(messages.subList(1 + dropCount, messages.size()));
+            return trimmed;
         }
-        return trimmed;
+        return messages;
     }
 
     private static int estimateTokens(List<ChatMessage> messages) {
@@ -726,11 +775,14 @@ public class AgentRunner {
     private static void dispatchToChannel(String channelType, String peerId, String text) {
         if (peerId == null || text == null) return;
         try {
-            switch (channelType) {
-                case "telegram" -> channels.TelegramChannel.sendMessage(peerId, text);
-                case "slack" -> channels.SlackChannel.sendMessage(peerId, text);
-                case "whatsapp" -> channels.WhatsAppChannel.sendMessage(peerId, text);
-                default -> {} // web + unknown: response is DB-persisted, no push needed
+            var channel = ChannelType.fromValue(channelType);
+            if (channel != null) {
+                switch (channel) {
+                    case TELEGRAM -> channels.TelegramChannel.sendMessage(peerId, text);
+                    case SLACK -> channels.SlackChannel.sendMessage(peerId, text);
+                    case WHATSAPP -> channels.WhatsAppChannel.sendMessage(peerId, text);
+                    case WEB -> {} // response is DB-persisted, no push needed
+                }
             }
         } catch (Exception e) {
             EventLogger.error("channel", null, channelType,
@@ -763,8 +815,7 @@ public class AgentRunner {
      */
     public static void extractImageUrls(String toolResult, List<String> collectedImages) {
         if (collectedImages == null || toolResult == null) return;
-        var pattern = java.util.regex.Pattern.compile("!\\[([^\\]]*)\\]\\((/api/[^)]+)\\)");
-        var matcher = pattern.matcher(toolResult);
+        var matcher = IMAGE_URL_PATTERN.matcher(toolResult);
         while (matcher.find()) {
             collectedImages.add(matcher.group(0));
         }
@@ -792,10 +843,9 @@ public class AgentRunner {
     public static String buildImagePrefix(List<String> collectedImages, String content) {
         if (collectedImages == null || collectedImages.isEmpty()) return "";
         var safeContent = content != null ? content : "";
-        var urlPattern = java.util.regex.Pattern.compile("\\(([^)]+)\\)");
         var missing = new ArrayList<String>();
         for (var img : collectedImages) {
-            var m = urlPattern.matcher(img);
+            var m = PAREN_URL_PATTERN.matcher(img);
             if (m.find()) {
                 var fullUrl = m.group(1);
                 var slash = fullUrl.lastIndexOf('/');

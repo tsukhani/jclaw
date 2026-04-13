@@ -6,9 +6,7 @@ import com.google.gson.JsonParser;
 import play.mvc.Controller;
 import play.mvc.Http;
 import services.EventLogger;
-
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
+import utils.WebhookUtil;
 
 public class WebhookSlackController extends Controller {
 
@@ -23,7 +21,7 @@ public class WebhookSlackController extends Controller {
         // Read raw body for signature verification
         String rawBody;
         try {
-            rawBody = new String(Http.Request.current().body.readAllBytes(), StandardCharsets.UTF_8);
+            rawBody = WebhookUtil.readRawBody();
         } catch (Exception e) {
             EventLogger.error("channel", null, "slack", "Failed to read request body");
             error();

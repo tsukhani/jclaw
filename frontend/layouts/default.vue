@@ -38,7 +38,7 @@ function handleKeydown(e: KeyboardEvent) {
 onMounted(() => {
   checkStatus()
   statusInterval = setInterval(checkStatus, 30_000)
-  isMac.value = navigator.platform.includes('Mac') || navigator.userAgent.includes('Mac')
+  isMac.value = ((navigator as any).userAgentData?.platform ?? navigator.userAgent).includes('Mac')
   document.addEventListener('keydown', handleKeydown)
 })
 

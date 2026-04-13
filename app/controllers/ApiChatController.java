@@ -2,6 +2,7 @@ package controllers;
 
 import agents.AgentRunner;
 import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import models.Agent;
 import models.Conversation;
 import play.mvc.Controller;
@@ -10,6 +11,7 @@ import play.mvc.With;
 import services.AgentService;
 import services.ConversationService;
 import services.EventLogger;
+import utils.VirtualThreads;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -25,6 +27,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
+import static utils.GsonHolder.INSTANCE;
+
 /**
  * Chat dispatch endpoints: sync send, SSE streaming, and file upload.
  * Conversation management (list, get messages, delete, title gen) lives
@@ -33,13 +37,17 @@ import java.util.function.Consumer;
 @With(AuthCheck.class)
 public class ApiChatController extends Controller {
 
-    private static final Gson gson = new Gson();
+    private static final Gson gson = INSTANCE;
+
+    /** Validated prologue shared by send() and streamChat(). */
+    private record ChatContext(Agent agent, String message, Long conversationId, String username) {}
 
     /**
-     * POST /api/chat/send — Send a message and get a synchronous response.
+     * Parse and validate the common fields from a chat request body.
+     * Calls {@code badRequest()} / {@code notFound()} (which throw) on invalid input,
+     * so the return value is always non-null when control returns to the caller.
      */
-    public static void send() {
-        var body = JsonBodyReader.readJsonBody();
+    private static ChatContext resolveChatContext(JsonObject body) {
         if (body == null || !body.has("message") || !body.has("agentId")) {
             badRequest();
         }
@@ -49,22 +57,33 @@ public class ApiChatController extends Controller {
         if (agent == null) notFound();
 
         var messageText = body.get("message").getAsString();
+        Long conversationId = (body.has("conversationId") && !body.get("conversationId").isJsonNull())
+                ? body.get("conversationId").getAsLong() : null;
+
+        return new ChatContext(agent, messageText, conversationId, session.get("username"));
+    }
+
+    /**
+     * POST /api/chat/send — Send a message and get a synchronous response.
+     */
+    public static void send() {
+        var ctx = resolveChatContext(JsonBodyReader.readJsonBody());
 
         Conversation conversation;
-        if (body.has("conversationId") && !body.get("conversationId").isJsonNull()) {
-            conversation = ConversationService.findById(body.get("conversationId").getAsLong());
+        if (ctx.conversationId() != null) {
+            conversation = ConversationService.findById(ctx.conversationId());
             if (conversation == null) notFound();
         } else {
-            conversation = ConversationService.findOrCreate(agent, "web", session.get("username"));
+            conversation = ConversationService.findOrCreate(ctx.agent(), "web", ctx.username());
         }
 
-        var result = AgentRunner.run(agent, conversation, messageText);
+        var result = AgentRunner.run(ctx.agent(), conversation, ctx.message());
 
         var resp = new HashMap<String, Object>();
         resp.put("conversationId", conversation.id);
         resp.put("response", result.response());
-        resp.put("agentId", agent.id);
-        resp.put("agentName", agent.name);
+        resp.put("agentId", ctx.agent().id);
+        resp.put("agentName", ctx.agent().name);
         renderJSON(gson.toJson(resp));
     }
 
@@ -154,7 +173,7 @@ public class ApiChatController extends Controller {
         var base = name.replace('\\', '/');
         int slash = base.lastIndexOf('/');
         if (slash >= 0) base = base.substring(slash + 1);
-        base = base.trim();
+        base = base.strip();
         while (base.startsWith(".")) base = base.substring(1);
         var cleaned = base.replaceAll("[^A-Za-z0-9._\\- ]", "_");
         if (cleaned.length() > 120) cleaned = cleaned.substring(0, 120);
@@ -165,20 +184,11 @@ public class ApiChatController extends Controller {
      * POST /api/chat/stream — Send a message and stream the response as SSE.
      */
     public static void streamChat() {
-        var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has("message") || !body.has("agentId")) {
-            badRequest();
-        }
-
-        var agentId = body.get("agentId").getAsLong();
-        Agent agent = Agent.findById(agentId);
-        if (agent == null) notFound();
-
-        var messageText = body.get("message").getAsString();
-
-        Long conversationId = (body.has("conversationId") && !body.get("conversationId").isJsonNull())
-                ? body.get("conversationId").getAsLong() : null;
-        String username = session.get("username");
+        var ctx = resolveChatContext(JsonBodyReader.readJsonBody());
+        var agent = ctx.agent();
+        var messageText = ctx.message();
+        var conversationId = ctx.conversationId();
+        var username = ctx.username();
 
         var res = Http.Response.current();
         res.contentType = "text/event-stream";
@@ -189,8 +199,7 @@ public class ApiChatController extends Controller {
         var latch = new CountDownLatch(1);
         var cancelled = new java.util.concurrent.atomic.AtomicBoolean(false);
 
-        var heartbeatExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(
-                r -> Thread.ofVirtual().unstarted(r));
+        var heartbeatExecutor = VirtualThreads.newSingleThreadScheduledExecutor();
         heartbeatExecutor.scheduleAtFixedRate(() -> {
             if (cancelled.get()) return;
             try {

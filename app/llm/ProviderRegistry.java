@@ -33,6 +33,7 @@ public class ProviderRegistry {
     private static volatile long lastRefresh = 0;
     private static final long REFRESH_INTERVAL_MS = 60_000;
     private static final Object refreshLock = new Object();
+    private static volatile boolean refreshing = false;
 
     public static LlmProvider get(String name) {
         refreshIfNeeded();
@@ -55,12 +56,23 @@ public class ProviderRegistry {
     }
 
     private static void refreshIfNeeded() {
-        if (System.currentTimeMillis() - lastRefresh > REFRESH_INTERVAL_MS) {
+        if (System.currentTimeMillis() - lastRefresh > REFRESH_INTERVAL_MS && !refreshing) {
             refresh();
         }
     }
 
     public static void refresh() {
+        // Optimistically mark as refreshing to prevent thundering herd —
+        // concurrent callers see the flag and skip, using the stale cache.
+        refreshing = true;
+        try {
+            refreshInner();
+        } finally {
+            refreshing = false;
+        }
+    }
+
+    private static void refreshInner() {
         // Snapshot all config in one DB roundtrip — no lock held during IO,
         // so concurrent get() calls are not blocked by the DB read.
         var allConfigs = ConfigService.listAll();
@@ -91,7 +103,7 @@ public class ProviderRegistry {
             }
 
             var config = new ProviderConfig(name, baseUrl, apiKey, models);
-            newCache.put(name, createProvider(name, config));
+            newCache.put(name, LlmProvider.forConfig(config));
         }
 
         // Only hold the lock for the atomic pointer swap
@@ -101,18 +113,5 @@ public class ProviderRegistry {
         }
     }
 
-    /**
-     * Factory method: creates the right LlmProvider subclass based on provider name.
-     */
-    private static LlmProvider createProvider(String name, ProviderConfig config) {
-        var lowerName = name.toLowerCase();
-        if (lowerName.contains("openrouter")) {
-            return new OpenRouterProvider(config);
-        }
-        if (lowerName.contains("ollama")) {
-            return new OllamaProvider(config);
-        }
-        // Default: standard OpenAI-compatible
-        return new OpenAiProvider(config);
-    }
+    // Provider instantiation delegated to LlmProvider.forConfig() — see Fix 4 (OCP).
 }

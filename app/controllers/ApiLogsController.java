@@ -3,6 +3,8 @@ package controllers;
 import com.google.gson.Gson;
 import models.EventLog;
 import play.mvc.Controller;
+
+import static utils.GsonHolder.INSTANCE;
 import play.mvc.With;
 import utils.JpqlFilter;
 
@@ -13,7 +15,7 @@ import java.util.List;
 @With(AuthCheck.class)
 public class ApiLogsController extends Controller {
 
-    private static final Gson gson = new Gson();
+    private static final Gson gson = INSTANCE;
 
     public static void list(String category, String level, String agentId, String channel,
                             String since, String until, String search,

@@ -88,16 +88,26 @@ public class ToolRegistry {
 
     /** Get tool definitions filtered by agent's tool configuration. */
     public static List<ToolDef> getToolDefsForAgent(models.Agent agent) {
-        var configs = models.AgentToolConfig.findByAgent(agent);
-        var disabledTools = new java.util.HashSet<String>();
-        for (var c : configs) {
-            if (!c.enabled) disabledTools.add(c.toolName);
-        }
+        return getToolDefsForAgent(loadDisabledTools(agent));
+    }
+
+    /** Get tool definitions filtered by a pre-loaded set of disabled tool names. */
+    public static List<ToolDef> getToolDefsForAgent(java.util.Set<String> disabledTools) {
         if (disabledTools.isEmpty()) return getToolDefs();
         return tools.values().stream()
                 .filter(t -> !disabledTools.contains(t.name()))
                 .map(t -> ToolDef.of(t.name(), t.description(), t.parameters()))
                 .toList();
+    }
+
+    /** Load the set of disabled tool names for an agent (single DB query). */
+    public static java.util.Set<String> loadDisabledTools(models.Agent agent) {
+        var configs = models.AgentToolConfig.findByAgent(agent);
+        var disabled = new java.util.HashSet<String>();
+        for (var c : configs) {
+            if (!c.enabled) disabled.add(c.toolName);
+        }
+        return disabled;
     }
 
     public static List<Tool> listTools() {

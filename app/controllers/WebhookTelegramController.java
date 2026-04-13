@@ -6,9 +6,7 @@ import com.google.gson.JsonParser;
 import play.mvc.Controller;
 import play.mvc.Http;
 import services.EventLogger;
-
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
+import utils.WebhookUtil;
 
 public class WebhookTelegramController extends Controller {
 
@@ -38,8 +36,7 @@ public class WebhookTelegramController extends Controller {
 
         // Parse update
         try {
-            var reader = new InputStreamReader(Http.Request.current().body, StandardCharsets.UTF_8);
-            var update = JsonParser.parseReader(reader).getAsJsonObject();
+            var update = JsonParser.parseString(WebhookUtil.readRawBody()).getAsJsonObject();
             var message = TelegramChannel.parseUpdate(update);
 
             if (message == null) {

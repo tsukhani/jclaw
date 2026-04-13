@@ -3,6 +3,8 @@ package controllers;
 import com.google.gson.Gson;
 import models.Task;
 import play.db.jpa.JPA;
+
+import static utils.GsonHolder.INSTANCE;
 import play.mvc.Controller;
 import play.mvc.With;
 import utils.JpqlFilter;
@@ -13,7 +15,7 @@ import java.util.List;
 @With(AuthCheck.class)
 public class ApiTasksController extends Controller {
 
-    private static final Gson gson = new Gson();
+    private static final Gson gson = INSTANCE;
 
     private record TaskView(Long id, String name, String description, String type, String status,
                             String cronExpression, int retryCount, int maxRetries, String lastError,

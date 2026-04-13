@@ -60,6 +60,10 @@ public class Conversation extends Model {
     }
 
     public static List<Conversation> findByChannel(String channelType) {
-        return Conversation.find("channelType", channelType).fetch();
+        return findByChannel(channelType, 100);
+    }
+
+    public static List<Conversation> findByChannel(String channelType, int limit) {
+        return Conversation.find("channelType = ?1 ORDER BY updatedAt DESC", channelType).fetch(limit);
     }
 }

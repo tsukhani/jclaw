@@ -1,10 +1,8 @@
 package agents;
 
 import models.Agent;
-import models.AgentToolConfig;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -35,10 +33,10 @@ public class ToolCatalog {
      * empty string if no tools are enabled for the agent.
      */
     public static String formatCatalogForPrompt(Agent agent) {
-        var disabledForAgent = new HashSet<String>();
-        for (var c : AgentToolConfig.findByAgent(agent)) {
-            if (!c.enabled) disabledForAgent.add(c.toolName);
-        }
+        return formatCatalogForPrompt(ToolRegistry.loadDisabledTools(agent));
+    }
+
+    public static String formatCatalogForPrompt(Set<String> disabledForAgent) {
         var tools = ToolRegistry.listTools().stream()
                 .filter(t -> !disabledForAgent.contains(t.name()))
                 .toList();
@@ -69,6 +67,10 @@ public class ToolCatalog {
      * Returns the lists of unknown (typo/invalid) and disabled-for-this-agent tool names.
      */
     public static ValidationResult validateSkillTools(Agent agent, List<String> requiredTools) {
+        return validateSkillTools(ToolRegistry.loadDisabledTools(agent), requiredTools);
+    }
+
+    public static ValidationResult validateSkillTools(Set<String> disabledForAgent, List<String> requiredTools) {
         if (requiredTools == null || requiredTools.isEmpty()) {
             return new ValidationResult(List.of(), List.of());
         }
@@ -78,7 +80,7 @@ public class ToolCatalog {
         var knownRequired = new ArrayList<String>();
         for (var t : requiredTools) {
             if (t == null || t.isBlank()) continue;
-            var name = t.trim();
+            var name = t.strip();
             if (!knownToolSet.contains(name)) {
                 unknown.add(name);
             } else {
@@ -88,11 +90,6 @@ public class ToolCatalog {
 
         if (knownRequired.isEmpty()) {
             return new ValidationResult(unknown, List.of());
-        }
-
-        var disabledForAgent = new HashSet<String>();
-        for (var c : AgentToolConfig.findByAgent(agent)) {
-            if (!c.enabled) disabledForAgent.add(c.toolName);
         }
 
         var disabled = new ArrayList<String>();

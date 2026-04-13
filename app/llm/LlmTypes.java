@@ -1,5 +1,7 @@
 package llm;
 
+import models.MessageRole;
+
 import java.util.List;
 import java.util.Map;
 
@@ -28,23 +30,23 @@ public final class LlmTypes {
             String toolCallId
     ) {
         public static ChatMessage system(String text) {
-            return new ChatMessage("system", text, null, null);
+            return new ChatMessage(MessageRole.SYSTEM.value, text, null, null);
         }
 
         public static ChatMessage user(String text) {
-            return new ChatMessage("user", text, null, null);
+            return new ChatMessage(MessageRole.USER.value, text, null, null);
         }
 
         public static ChatMessage assistant(String text) {
-            return new ChatMessage("assistant", text, null, null);
+            return new ChatMessage(MessageRole.ASSISTANT.value, text, null, null);
         }
 
         public static ChatMessage assistant(String text, List<ToolCall> toolCalls) {
-            return new ChatMessage("assistant", text, toolCalls, null);
+            return new ChatMessage(MessageRole.ASSISTANT.value, text, toolCalls, null);
         }
 
         public static ChatMessage toolResult(String toolCallId, String content) {
-            return new ChatMessage("tool", content, null, toolCallId);
+            return new ChatMessage(MessageRole.TOOL.value, content, null, toolCallId);
         }
     }
 

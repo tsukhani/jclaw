@@ -1,5 +1,6 @@
 package services;
 
+import models.Agent;
 import models.Config;
 
 import java.util.List;
@@ -44,9 +45,56 @@ public class ConfigService {
         return value != null ? value : defaultValue;
     }
 
+    private static final ConcurrentHashMap<String, CachedInt> intCache = new ConcurrentHashMap<>();
+
+    private record CachedInt(int value, String rawValue) {}
+
+    public static int getInt(String key, int defaultValue) {
+        var raw = get(key);
+        if (raw == null) return defaultValue;
+        var cached = intCache.get(key);
+        if (cached != null && cached.rawValue().equals(raw)) return cached.value();
+        try {
+            int parsed = Integer.parseInt(raw);
+            intCache.put(key, new CachedInt(parsed, raw));
+            return parsed;
+        } catch (NumberFormatException _) {
+            return defaultValue;
+        }
+    }
+
     public static void set(String key, String value) {
         Tx.run(() -> Config.upsert(key, value));
         cache.put(key, new CachedValue(value, System.currentTimeMillis() + CACHE_TTL_MS));
+    }
+
+    /**
+     * Validate, persist, and trigger side effects for a config key/value.
+     * Encapsulates the shell-privilege guard, provider sync, and tool re-registration
+     * that were previously spread across the controller.
+     *
+     * @return an error message if the key is rejected, or {@code null} on success
+     */
+    public static String setWithSideEffects(String key, String value) {
+        // Shell exec privileges are restricted to the main agent
+        if (key.matches("agent\\..+\\.shell\\.(bypassAllowlist|allowGlobalPaths)")) {
+            var agentName = key.split("\\.")[1];
+            var agent = Agent.findByName(agentName);
+            if (agent == null || !agent.isMain()) {
+                return "Shell exec privileges can only be set for the main agent.";
+            }
+        }
+
+        set(key, value);
+
+        if (key.startsWith("provider.")) {
+            AgentService.syncEnabledStates();
+        }
+        if (key.equals("shell.enabled") || key.equals("playwright.enabled")) {
+            jobs.ToolRegistrationJob.registerAll();
+        }
+
+        return null;
     }
 
     public static void delete(String key) {

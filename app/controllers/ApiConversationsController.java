@@ -14,6 +14,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static utils.GsonHolder.INSTANCE;
+
 /**
  * CRUD and query endpoints for conversations. Extracted from ApiChatController
  * (which retains sync chat dispatch, SSE streaming, and file upload) to keep
@@ -22,7 +24,7 @@ import java.util.Map;
 @With(AuthCheck.class)
 public class ApiConversationsController extends Controller {
 
-    private static final Gson gson = new Gson();
+    private static final Gson gson = INSTANCE;
 
     /**
      * GET /api/conversations — List conversations with optional filters.
@@ -55,7 +57,7 @@ public class ApiConversationsController extends Controller {
         if (hasNameFilter) {
             List<Conversation> candidates = q.getResultList();
             var pattern = java.util.regex.Pattern.compile(
-                    "\\b" + java.util.regex.Pattern.quote(name.trim()) + "\\b",
+                    "\\b" + java.util.regex.Pattern.quote(name.strip()) + "\\b",
                     java.util.regex.Pattern.CASE_INSENSITIVE);
             List<Conversation> refined = new ArrayList<>();
             for (var c : candidates) {
@@ -80,8 +82,7 @@ public class ApiConversationsController extends Controller {
                     .setMaxResults(effectiveLimit).getResultList();
         }
 
-        response.setHeader("X-Total-Count", String.valueOf(total));
-        response.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
+        setPaginationHeaders(total);
 
         var result = convos.stream().map(c -> {
             var map = new HashMap<String, Object>();
@@ -114,8 +115,7 @@ public class ApiConversationsController extends Controller {
         var query = Message.find("conversation = ?1 ORDER BY createdAt ASC", conversation);
         List<Message> messages = query.from(effectiveOffset).fetch(effectiveLimit);
 
-        response.setHeader("X-Total-Count", String.valueOf(total));
-        response.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
+        setPaginationHeaders(total);
 
         var result = messages.stream().map(m -> {
             var map = new HashMap<String, Object>();
@@ -146,8 +146,7 @@ public class ApiConversationsController extends Controller {
     public static void deleteConversation(Long id) {
         Conversation conversation = Conversation.findById(id);
         if (conversation == null) notFound();
-        Message.delete("conversation = ?1", conversation);
-        conversation.delete();
+        ConversationService.deleteByIds(List.of(id));
         renderJSON(gson.toJson(Map.of("status", "deleted")));
     }
 
@@ -166,11 +165,7 @@ public class ApiConversationsController extends Controller {
             return;
         }
 
-        var em = JPA.em();
-        em.createQuery("DELETE FROM Message m WHERE m.conversation.id IN :ids")
-                .setParameter("ids", idList).executeUpdate();
-        int deleted = em.createQuery("DELETE FROM Conversation c WHERE c.id IN :ids")
-                .setParameter("ids", idList).executeUpdate();
+        int deleted = ConversationService.deleteByIds(idList);
         renderJSON(gson.toJson(Map.of("deleted", deleted)));
     }
 
@@ -191,28 +186,17 @@ public class ApiConversationsController extends Controller {
         Conversation conversation = Conversation.findById(id);
         if (conversation == null) notFound();
 
-        List<Message> msgs = Message.find("conversation = ?1 ORDER BY createdAt ASC", conversation).fetch(10);
-        var userParts = new StringBuilder();
-        var assistantParts = new StringBuilder();
-        for (var m : msgs) {
-            if ("user".equals(m.role) && m.content != null) {
-                if (!userParts.isEmpty()) userParts.append("\n");
-                userParts.append(m.content);
-            } else if ("assistant".equals(m.role) && m.content != null) {
-                if (!assistantParts.isEmpty()) assistantParts.append("\n");
-                assistantParts.append(m.content);
-            }
-        }
-
-        if (userParts.isEmpty()) {
+        if (!ConversationService.requestTitleGeneration(conversation)) {
             renderJSON(gson.toJson(Map.of("title", conversation.preview != null ? conversation.preview : "")));
             return;
         }
-
-        ConversationService.generateTitleAsync(id,
-                userParts.substring(0, Math.min(userParts.length(), 500)),
-                assistantParts.substring(0, Math.min(assistantParts.length(), 500)));
-
         renderJSON(gson.toJson(Map.of("status", "generating")));
+    }
+
+    // --- Helpers ---
+
+    private static void setPaginationHeaders(long total) {
+        response.setHeader("X-Total-Count", String.valueOf(total));
+        response.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
     }
 }

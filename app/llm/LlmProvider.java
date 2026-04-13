@@ -13,7 +13,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * Abstract base for LLM provider integrations. Implements shared OpenAI-compatible
@@ -31,11 +33,37 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
     protected final ProviderConfig config;
 
+    /**
+     * Declarative mapping from provider-name substring to constructor.
+     * Adding a new provider is a single-line entry here instead of
+     * modifying a conditional chain in {@code ProviderRegistry}.
+     */
+    private static final Map<String, Function<ProviderConfig, LlmProvider>> PROVIDER_FACTORIES = Map.of(
+            "openrouter", OpenRouterProvider::new,
+            "ollama", OllamaProvider::new
+    );
+
     protected LlmProvider(ProviderConfig config) {
         this.config = config;
     }
 
     public ProviderConfig config() { return config; }
+
+    /**
+     * Factory method: creates the right {@link LlmProvider} subclass based on
+     * the provider name in the config. Matches against known substrings
+     * declaratively via {@link #PROVIDER_FACTORIES}; falls back to
+     * {@link OpenAiProvider} for unknown/standard OpenAI-compatible providers.
+     */
+    public static LlmProvider forConfig(ProviderConfig config) {
+        var lowerName = config.name().toLowerCase();
+        for (var entry : PROVIDER_FACTORIES.entrySet()) {
+            if (lowerName.contains(entry.getKey())) {
+                return entry.getValue().apply(config);
+            }
+        }
+        return new OpenAiProvider(config);
+    }
 
     // ─── Template methods (override in subclasses) ───────────────────────
 
@@ -189,7 +217,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                     String line;
                     while ((line = reader.readLine()) != null) {
                         if (line.startsWith("data: ")) {
-                            var data = line.substring(6).trim();
+                            var data = line.substring(6).strip();
                             if ("[DONE]".equals(data)) break;
                             try {
                                 var chunk = gson.fromJson(data, ChatCompletionChunk.class);
@@ -369,18 +397,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
         Usage usage = null;
         if (obj.has("usage") && !obj.get("usage").isJsonNull()) {
-            var usageObj = obj.getAsJsonObject("usage");
-            int reasoningTokens = extractReasoningTokens(usageObj);
-            int cachedTokens = extractCachedTokens(usageObj);
-            int cacheCreationTokens = extractCacheCreationTokens(usageObj);
-            usage = new Usage(
-                    usageObj.has("prompt_tokens") ? usageObj.get("prompt_tokens").getAsInt() : 0,
-                    usageObj.has("completion_tokens") ? usageObj.get("completion_tokens").getAsInt() : 0,
-                    usageObj.has("total_tokens") ? usageObj.get("total_tokens").getAsInt() : 0,
-                    reasoningTokens,
-                    cachedTokens,
-                    cacheCreationTokens
-            );
+            usage = parseUsage(obj.getAsJsonObject("usage"));
         }
 
         return new ChatResponse(id, model, choices, usage);
@@ -479,23 +496,42 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         throw new LlmException("All retries exhausted for " + config.name(), lastException);
     }
 
-    // ─── Static usage parser (for tests and non-subclass callers) ────────
+    // ─── Usage parsing ────────────────────────────────────────────────────
 
     /**
-     * Parse an OpenAI-compatible {@code usage} JSON object into a {@link Usage}
-     * record. Handles all known provider shapes:
+     * Instance method: parse a usage JSON object using this provider's template
+     * methods ({@link #extractReasoningTokens}, {@link #extractCachedTokens},
+     * {@link #extractCacheCreationTokens}). Subclass overrides are honoured,
+     * so provider-specific JSON paths are handled correctly.
+     */
+    public Usage parseUsage(JsonObject usageObj) {
+        return new Usage(
+                usageObj.has("prompt_tokens") ? usageObj.get("prompt_tokens").getAsInt() : 0,
+                usageObj.has("completion_tokens") ? usageObj.get("completion_tokens").getAsInt() : 0,
+                usageObj.has("total_tokens") ? usageObj.get("total_tokens").getAsInt() : 0,
+                extractReasoningTokens(usageObj),
+                extractCachedTokens(usageObj),
+                extractCacheCreationTokens(usageObj));
+    }
+
+    /**
+     * Static convenience method for callers that don't have a provider instance
+     * (e.g. tests). Uses the base-class extraction logic — equivalent to
+     * calling {@link #parseUsage} on a vanilla {@link OpenAiProvider}.
+     *
+     * <p>Handles all known provider shapes:
      * <ul>
      *   <li>OpenAI: {@code prompt_tokens_details.cached_tokens},
      *       {@code completion_tokens_details.reasoning_tokens}</li>
      *   <li>Anthropic/OpenRouter: {@code cache_creation_input_tokens} (top-level),
      *       {@code prompt_tokens_details.cache_creation_tokens} (nested fallback)</li>
      * </ul>
-     * <p>This is a <em>static</em> convenience method that uses the base-class
-     * extraction logic. Subclass-specific overrides (e.g. OpenRouterProvider's
-     * reasoning extraction from a different JSON path) go through the instance
-     * {@code extract*} methods called by {@link #deserializeResponse} instead.
      */
     public static Usage parseUsageBlock(JsonObject usageObj) {
+        // Base-class extractReasoningTokens returns 0, so replicate the extended
+        // static extraction that also checks completion_tokens_details. This keeps
+        // the static path backward-compatible with tests while the instance path
+        // is the preferred entry point for production code.
         int reasoningTokens = 0;
         if (usageObj.has("reasoning_tokens") && !usageObj.get("reasoning_tokens").isJsonNull()) {
             reasoningTokens = usageObj.get("reasoning_tokens").getAsInt();
@@ -508,26 +544,12 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
             }
         }
 
-        int cachedTokens = 0;
-        if (usageObj.has("prompt_tokens_details")
-                && !usageObj.get("prompt_tokens_details").isJsonNull()) {
-            var details = usageObj.getAsJsonObject("prompt_tokens_details");
-            if (details.has("cached_tokens") && !details.get("cached_tokens").isJsonNull()) {
-                cachedTokens = details.get("cached_tokens").getAsInt();
-            }
-        }
-
-        int cacheCreationTokens = 0;
-        if (usageObj.has("cache_creation_input_tokens")
-                && !usageObj.get("cache_creation_input_tokens").isJsonNull()) {
-            cacheCreationTokens = usageObj.get("cache_creation_input_tokens").getAsInt();
-        } else if (usageObj.has("prompt_tokens_details")
-                && !usageObj.get("prompt_tokens_details").isJsonNull()) {
-            var details = usageObj.getAsJsonObject("prompt_tokens_details");
-            if (details.has("cache_creation_tokens") && !details.get("cache_creation_tokens").isJsonNull()) {
-                cacheCreationTokens = details.get("cache_creation_tokens").getAsInt();
-            }
-        }
+        // For cached and cache-creation tokens, instantiate a temporary base provider
+        // to reuse the template methods without duplicating their logic.
+        var baseConfig = new ProviderConfig("_static", "", "", List.of());
+        var base = new OpenAiProvider(baseConfig);
+        int cachedTokens = base.extractCachedTokens(usageObj);
+        int cacheCreationTokens = base.extractCacheCreationTokens(usageObj);
 
         return new Usage(
                 usageObj.has("prompt_tokens") ? usageObj.get("prompt_tokens").getAsInt() : 0,

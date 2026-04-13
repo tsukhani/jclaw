@@ -110,7 +110,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
         }
 
         // Text mode — extract readable content
-        var contentType = body.trim().startsWith("<") ? "html" : "text";
+        var contentType = body.strip().startsWith("<") ? "html" : "text";
         if ("html".equals(contentType)) {
             return extractText(body, url);
         }

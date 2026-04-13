@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import type { Agent, ConfigResponse } from '~/types/api'
+
 const { confirm } = useConfirm()
 
-const { data: agents, refresh } = await useFetch<any[]>('/api/agents')
-const { data: configData } = await useFetch<{ entries: any[] }>('/api/config')
+const { data: agents, refresh } = await useFetch<Agent[]>('/api/agents')
+const { data: configData } = await useFetch<ConfigResponse>('/api/config')
 
 const editing = ref<any>(null)
 const creating = ref(false)
@@ -89,47 +91,7 @@ const mainAgent = computed(() => (agents.value ?? []).find((a: any) => a.isMain)
 const customAgents = computed(() => (agents.value ?? []).filter((a: any) => !a.isMain))
 
 // Extract configured providers (those with non-empty API keys)
-const providers = computed(() => {
-  const entries = configData.value?.entries ?? []
-  const providerMap = new Map<string, { name: string, models: any[] }>()
-
-  for (const e of entries) {
-    if (!e.key.startsWith('provider.')) continue
-    const parts = e.key.split('.')
-    const name = parts[1]
-    if (!providerMap.has(name)) {
-      providerMap.set(name, { name, models: [] })
-    }
-  }
-
-  // Filter to providers that have a non-empty API key
-  for (const e of entries) {
-    if (e.key.endsWith('.apiKey') && e.key.startsWith('provider.')) {
-      const name = e.key.split('.')[1]
-      // Masked keys show as "xxxx****" — if it has **** it means a key was set
-      if (!e.value || e.value === '(empty)') {
-        providerMap.delete(name)
-      }
-    }
-  }
-
-  // Parse models for each remaining provider
-  for (const e of entries) {
-    if (e.key.endsWith('.models') && e.key.startsWith('provider.')) {
-      const name = e.key.split('.')[1]
-      const provider = providerMap.get(name)
-      if (provider) {
-        try {
-          provider.models = JSON.parse(e.value)
-        } catch {
-          provider.models = []
-        }
-      }
-    }
-  }
-
-  return Array.from(providerMap.values())
-})
+const { providers } = useProviders(configData)
 
 // Models for the currently selected provider
 const availableModels = computed(() => {

@@ -1,24 +1,23 @@
 package controllers;
 
 import com.google.gson.Gson;
-import llm.ProviderRegistry;
 import models.Agent;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
 
+import static utils.GsonHolder.INSTANCE;
+
 @With(AuthCheck.class)
 public class ApiAgentsController extends Controller {
 
-    private static final Gson gson = new Gson();
+    private static final Gson gson = INSTANCE;
 
     private record AgentView(Long id, String name, String modelProvider, String modelId,
                              boolean enabled, boolean isMain, String thinkingMode,
                              String createdAt, String updatedAt, boolean providerConfigured) {
         static AgentView of(Agent a) {
-            var provider = ProviderRegistry.get(a.modelProvider);
-            var configured = provider != null
-                    && provider.config().models().stream().anyMatch(m -> m.id().equals(a.modelId));
+            var configured = AgentService.isProviderConfigured(a.modelProvider, a.modelId);
             return new AgentView(a.id, a.name, a.modelProvider, a.modelId,
                     a.enabled, a.isMain(), a.thinkingMode,
                     a.createdAt.toString(), a.updatedAt.toString(), configured);

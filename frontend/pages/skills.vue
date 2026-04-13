@@ -52,6 +52,8 @@ function showInfo(msg: string) {
   infoBannerTimer = setTimeout(() => { infoBanner.value = null }, 6000)
 }
 
+onUnmounted(() => { if (dragErrorTimer) clearTimeout(dragErrorTimer); if (infoBannerTimer) clearTimeout(infoBannerTimer) })
+
 // Track multiple concurrent promotions by skill name (survives navigation via useState)
 const promotingSkills = useState<Set<string>>('promotingSkills', () => new Set())
 

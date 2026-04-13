@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import type { Agent, Conversation, Message } from '~/types/api'
+
 const { confirm } = useConfirm()
 
-const conversations = ref<any[]>([])
+const conversations = ref<Conversation[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = 20
@@ -13,7 +15,7 @@ const filterAgentId = ref('')
 const filterPeer = ref('')
 
 const { data: channelList } = await useFetch<string[]>('/api/conversations/channels', { default: () => [] })
-const { data: agentList } = await useFetch<any[]>('/api/agents', { default: () => [] })
+const { data: agentList } = await useFetch<Agent[]>('/api/agents', { default: () => [] })
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const rangeStart = computed(() => total.value === 0 ? 0 : (page.value - 1) * pageSize + 1)
@@ -30,7 +32,7 @@ async function load() {
     if (filterChannel.value) params.set('channel', filterChannel.value)
     if (filterAgentId.value) params.set('agentId', filterAgentId.value)
     if (filterPeer.value.trim()) params.set('peer', filterPeer.value.trim())
-    const res = await $fetch.raw<any[]>(`/api/conversations?${params.toString()}`)
+    const res = await $fetch.raw<Conversation[]>(`/api/conversations?${params.toString()}`)
     conversations.value = res._data ?? []
     const headerTotal = res.headers.get('x-total-count')
     total.value = headerTotal ? parseInt(headerTotal, 10) : conversations.value.length
@@ -59,6 +61,8 @@ function onFilterChange(debounce: boolean) {
   }
 }
 
+onUnmounted(() => { if (filterDebounce) clearTimeout(filterDebounce) })
+
 function goto(p: number) {
   if (p < 1 || p > totalPages.value || p === page.value) return
   page.value = p
@@ -66,8 +70,8 @@ function goto(p: number) {
   load()
 }
 
-const selectedConvo = ref<any>(null)
-const messages = ref<any[]>([])
+const selectedConvo = ref<Conversation | null>(null)
+const messages = ref<Message[]>([])
 
 const selectedIds = ref<Set<number>>(new Set())
 const deletingBulk = ref(false)
@@ -118,9 +122,9 @@ async function deleteSelected() {
   }
 }
 
-async function selectConversation(convo: any) {
+async function selectConversation(convo: Conversation) {
   selectedConvo.value = convo
-  messages.value = await $fetch<any[]>(`/api/conversations/${convo.id}/messages`) ?? []
+  messages.value = await $fetch<Message[]>(`/api/conversations/${convo.id}/messages`) ?? []
 }
 
 function back() {

@@ -347,10 +347,10 @@ public class DocumentWriter {
             for (Node section = table.getFirstChild(); section != null; section = section.getNext()) {
                 if (section instanceof TableHead || section instanceof TableBody) {
                     for (Node row = section.getFirstChild(); row != null; row = row.getNext()) {
-                        if (row instanceof TableRow) {
+                        if (row instanceof TableRow tr) {
                             rows++;
                             int c = 0;
-                            for (Node cell = row.getFirstChild(); cell != null; cell = cell.getNext()) {
+                            for (Node cell = tr.getFirstChild(); cell != null; cell = cell.getNext()) {
                                 if (cell instanceof TableCell) c++;
                             }
                             cols = Math.max(cols, c);
@@ -381,11 +381,11 @@ public class DocumentWriter {
                 boolean isHeader = section instanceof TableHead;
                 if (section instanceof TableHead || section instanceof TableBody) {
                     for (Node row = section.getFirstChild(); row != null; row = row.getNext()) {
-                        if (!(row instanceof TableRow)) continue;
+                        if (!(row instanceof TableRow tr)) continue;
                         int colIdx = 0;
                         XWPFTableRow xwpfRow = xwpfTable.getRow(rowIdx);
-                        for (Node cell = row.getFirstChild(); cell != null; cell = cell.getNext()) {
-                            if (!(cell instanceof TableCell)) continue;
+                        for (Node cell = tr.getFirstChild(); cell != null; cell = cell.getNext()) {
+                            if (!(cell instanceof TableCell tc)) continue;
                             XWPFTableCell xwpfCell = xwpfRow.getCell(colIdx);
                             // Fix the cell width too (tcW) — some viewers ignore
                             // tblGrid unless individual cells also declare a width.
@@ -399,7 +399,7 @@ public class DocumentWriter {
                             xwpfCell.removeParagraph(0);
                             var cellP = xwpfCell.addParagraph();
                             currentParagraph = cellP;
-                            emitInline(cell, isHeader, false, false, false, BODY_FONT_SIZE, null);
+                            emitInline(tc, isHeader, false, false, false, BODY_FONT_SIZE, null);
                             currentParagraph = null;
                             colIdx++;
                         }

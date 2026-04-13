@@ -3,6 +3,7 @@ package llm;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import llm.LlmTypes.*;
+import models.MessageRole;
 
 /**
  * OpenRouter provider. Extends OpenAI-compatible behavior with:
@@ -105,7 +106,7 @@ public final class OpenRouterProvider extends LlmProvider {
         for (var el : messages) {
             if (!el.isJsonObject()) continue;
             var msg = el.getAsJsonObject();
-            if (!msg.has("role") || !"system".equals(msg.get("role").getAsString())) continue;
+            if (!msg.has("role") || !MessageRole.SYSTEM.value.equals(msg.get("role").getAsString())) continue;
 
             var content = msg.get("content");
             if (content == null || content.isJsonNull()) return;

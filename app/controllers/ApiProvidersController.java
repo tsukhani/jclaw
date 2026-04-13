@@ -3,6 +3,8 @@ package controllers;
 import com.google.gson.Gson;
 import play.mvc.Controller;
 import play.mvc.With;
+
+import static utils.GsonHolder.INSTANCE;
 import services.ConfigService;
 import services.ModelDiscoveryService;
 import services.ModelDiscoveryService.DiscoveryResult;
@@ -15,7 +17,7 @@ import java.util.Map;
 @With(AuthCheck.class)
 public class ApiProvidersController extends Controller {
 
-    private static final Gson gson = new Gson();
+    private static final Gson gson = INSTANCE;
 
     /**
      * POST /api/providers/{name}/discover-models

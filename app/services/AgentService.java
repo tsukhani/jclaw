@@ -73,7 +73,8 @@ public class AgentService {
         return agent;
     }
 
-    private static boolean isProviderConfigured(String providerName, String modelId) {
+    /** Check whether the given provider+model combination is currently configured and available. */
+    public static boolean isProviderConfigured(String providerName, String modelId) {
         var provider = ProviderRegistry.get(providerName);
         return provider != null
                 && provider.config().models().stream().anyMatch(m -> m.id().equals(modelId));

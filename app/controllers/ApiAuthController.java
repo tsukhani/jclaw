@@ -3,6 +3,8 @@ package controllers;
 import com.google.gson.Gson;
 import com.google.gson.JsonParser;
 import play.Play;
+
+import static utils.GsonHolder.INSTANCE;
 import play.mvc.Controller;
 import play.mvc.Http;
 import services.EventLogger;
@@ -14,7 +16,7 @@ import java.util.HashMap;
 
 public class ApiAuthController extends Controller {
 
-    private static final Gson gson = new Gson();
+    private static final Gson gson = INSTANCE;
 
     public static void login() {
         try {

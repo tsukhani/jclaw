@@ -349,7 +349,7 @@ public class SkillPromotionService {
         }
     }
 
-    static void deleteRecursive(Path dir) throws IOException {
+    public static void deleteRecursive(Path dir) throws IOException {
         if (!Files.exists(dir)) return;
         try (var walk = Files.walk(dir)) {
             walk.sorted(Comparator.reverseOrder()).forEach(p -> {
@@ -447,13 +447,13 @@ public class SkillPromotionService {
             }
 
             var response = provider.chat(mainAgent.modelId, messages, null, null, null);
-            var text = response.choices().get(0).message().content().toString().trim();
+            var text = response.choices().get(0).message().content().toString().strip();
 
             EventLogger.info("skills",
                     "LLM sanitization response (%d chars)".formatted(text.length()), text);
 
             if (text.startsWith("```")) {
-                text = text.replaceFirst("^```(?:json)?\\s*\\n?", "").replaceFirst("\\n?```$", "").trim();
+                text = text.replaceFirst("^```(?:json)?\\s*\\n?", "").replaceFirst("\\n?```$", "").strip();
             }
 
             var json = JsonParser.parseString(text).getAsJsonObject();

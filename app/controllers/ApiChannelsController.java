@@ -3,6 +3,8 @@ package controllers;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
+
+import static utils.GsonHolder.INSTANCE;
 import models.ChannelConfig;
 import play.mvc.Controller;
 import play.mvc.With;
@@ -13,7 +15,7 @@ import java.util.Map;
 @With(AuthCheck.class)
 public class ApiChannelsController extends Controller {
 
-    private static final Gson gson = new Gson();
+    private static final Gson gson = INSTANCE;
 
     private record ChannelView(Long id, String channelType, JsonElement config,
                                boolean enabled, String createdAt, String updatedAt) {

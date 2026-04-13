@@ -88,41 +88,15 @@ function formatTimestamp(iso: string): string {
   })
 }
 
-const { data: agents, refresh: refreshAgents } = await useFetch<any[]>('/api/agents')
-const { data: configData } = await useFetch<{ entries: any[] }>('/api/config')
+import type { Agent, Conversation, Message, ConfigResponse } from '~/types/api'
+
+const { data: agents, refresh: refreshAgents } = await useFetch<Agent[]>('/api/agents')
+const { data: configData } = await useFetch<ConfigResponse>('/api/config')
 
 const selectedAgentId = ref<number | null>(null)
 
 // Extract configured providers and their models from config
-const providers = computed(() => {
-  const entries = configData.value?.entries ?? []
-  const providerMap = new Map<string, { name: string, models: any[] }>()
-
-  for (const e of entries) {
-    if (!e.key.startsWith('provider.')) continue
-    const name = e.key.split('.')[1]
-    if (!providerMap.has(name)) providerMap.set(name, { name, models: [] })
-  }
-
-  for (const e of entries) {
-    if (e.key.endsWith('.apiKey') && e.key.startsWith('provider.')) {
-      const name = e.key.split('.')[1]
-      if (!e.value || e.value === '(empty)') providerMap.delete(name)
-    }
-  }
-
-  for (const e of entries) {
-    if (e.key.endsWith('.models') && e.key.startsWith('provider.')) {
-      const name = e.key.split('.')[1]
-      const provider = providerMap.get(name)
-      if (provider) {
-        try { provider.models = JSON.parse(e.value) } catch { provider.models = [] }
-      }
-    }
-  }
-
-  return Array.from(providerMap.values())
-})
+const { providers } = useProviders(configData)
 
 // The currently selected agent object
 const selectedAgent = computed(() => agents.value?.find((a: any) => a.id === selectedAgentId.value))
@@ -193,9 +167,9 @@ const conversationsUrl = computed(() =>
     ? `/api/conversations?channel=web&agentId=${selectedAgentId.value}&limit=50`
     : null
 )
-const { data: conversations, refresh: refreshConversations } = await useFetch<any[]>(conversationsUrl)
+const { data: conversations, refresh: refreshConversations } = await useFetch<Conversation[]>(conversationsUrl)
 const selectedConvoId = ref<number | null>(null)
-const messages = ref<any[]>([])
+const messages = ref<Message[]>([])
 const input = ref('')
 const streaming = ref(false)
 const streamStatus = ref('')
@@ -242,6 +216,7 @@ const messagesEl = ref<HTMLElement | null>(null)
 const abortController = ref<AbortController | null>(null)
 const sidebarWidth = ref(224) // 14rem = 224px (matches w-56)
 const isResizing = ref(false)
+let cleanupResize: (() => void) | null = null
 
 function startResize(e: MouseEvent) {
   isResizing.value = true
@@ -256,9 +231,11 @@ function startResize(e: MouseEvent) {
     isResizing.value = false
     document.removeEventListener('mousemove', onMove)
     document.removeEventListener('mouseup', onUp)
+    cleanupResize = null
   }
   document.addEventListener('mousemove', onMove)
   document.addEventListener('mouseup', onUp)
+  cleanupResize = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
 }
 
 const selectMode = ref(false)
@@ -310,6 +287,7 @@ function scrollToBottom() {
 
 onUnmounted(() => {
   abortController.value?.abort()
+  cleanupResize?.()
 })
 
 function stopStreaming() {
@@ -355,7 +333,7 @@ async function loadConversation(id: number) {
     generateTitleForConversation(selectedConvoId.value)
   }
   selectedConvoId.value = id
-  messages.value = await $fetch<any[]>(`/api/conversations/${id}/messages`) ?? []
+  messages.value = await $fetch<Message[]>(`/api/conversations/${id}/messages`) ?? []
   scrollToBottom()
 }
 
@@ -589,7 +567,9 @@ function exportConversation() {
   const a = document.createElement('a')
   a.href = url
   a.download = `${title.replace(/[^a-zA-Z0-9 ]/g, '').replace(/\s+/g, '-').toLowerCase()}.md`
+  document.body.appendChild(a)
   a.click()
+  document.body.removeChild(a)
   URL.revokeObjectURL(url)
 }
 </script>

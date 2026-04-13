@@ -825,7 +825,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
             int i = 0;
             // Skip leading blank lines.
             while (i < lines.length && lines[i].isBlank()) i++;
-            if (i >= lines.length || !lines[i].trim().equals("*** Begin Patch")) {
+            if (i >= lines.length || !lines[i].strip().equals("*** Begin Patch")) {
                 throw new PatchParseException("missing '*** Begin Patch' header", i + 1);
             }
             i++;
@@ -833,17 +833,17 @@ public class FileSystemTools implements ToolRegistry.Tool {
             var ops = new ArrayList<FileOp>();
             while (i < lines.length) {
                 var line = lines[i];
-                var trimmed = line.trim();
+                var trimmed = line.strip();
                 if (trimmed.equals("*** End Patch")) {
                     return ops;
                 }
                 if (trimmed.isEmpty()) { i++; continue; }
                 if (trimmed.startsWith("*** Add File:")) {
-                    var path = trimmed.substring("*** Add File:".length()).trim();
+                    var path = trimmed.substring("*** Add File:".length()).strip();
                     i++;
                     var content = new StringBuilder();
                     boolean firstLine = true;
-                    while (i < lines.length && !lines[i].trim().equals("*** End of File")) {
+                    while (i < lines.length && !lines[i].strip().equals("*** End of File")) {
                         var addLine = lines[i];
                         if (addLine.startsWith("+")) {
                             if (!firstLine) content.append('\n');
@@ -867,33 +867,33 @@ public class FileSystemTools implements ToolRegistry.Tool {
                     continue;
                 }
                 if (trimmed.startsWith("*** Delete File:")) {
-                    var path = trimmed.substring("*** Delete File:".length()).trim();
+                    var path = trimmed.substring("*** Delete File:".length()).strip();
                     ops.add(new FileOp.Delete(path));
                     i++;
                     continue;
                 }
                 if (trimmed.startsWith("*** Update File:")) {
-                    var path = trimmed.substring("*** Update File:".length()).trim();
+                    var path = trimmed.substring("*** Update File:".length()).strip();
                     i++;
                     Optional<String> newPath = Optional.empty();
-                    if (i < lines.length && lines[i].trim().startsWith("*** Move to:")) {
-                        newPath = Optional.of(lines[i].trim().substring("*** Move to:".length()).trim());
+                    if (i < lines.length && lines[i].strip().startsWith("*** Move to:")) {
+                        newPath = Optional.of(lines[i].strip().substring("*** Move to:".length()).strip());
                         i++;
                     }
                     var chunks = new ArrayList<PatchChunk>();
                     var currentLines = new ArrayList<PatchLine>();
                     Optional<String> currentAnchor = Optional.empty();
                     boolean inChunk = false;
-                    while (i < lines.length && !lines[i].trim().equals("*** End of File")) {
+                    while (i < lines.length && !lines[i].strip().equals("*** End of File")) {
                         var chunkLine = lines[i];
-                        if (chunkLine.startsWith("@@") && chunkLine.trim().endsWith("@@") && chunkLine.trim().length() >= 4) {
+                        if (chunkLine.startsWith("@@") && chunkLine.strip().endsWith("@@") && chunkLine.strip().length() >= 4) {
                             // Close previous chunk if any.
                             if (inChunk && !currentLines.isEmpty()) {
                                 chunks.add(new PatchChunk(currentAnchor, currentLines));
                             }
                             currentLines = new ArrayList<>();
-                            var anchorText = chunkLine.trim();
-                            anchorText = anchorText.substring(2, anchorText.length() - 2).trim();
+                            var anchorText = chunkLine.strip();
+                            anchorText = anchorText.substring(2, anchorText.length() - 2).strip();
                             currentAnchor = anchorText.isEmpty() ? Optional.empty() : Optional.of(anchorText);
                             inChunk = true;
                         } else if (chunkLine.startsWith("+")) {

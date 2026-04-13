@@ -6,8 +6,7 @@ import com.google.gson.JsonParser;
 import play.mvc.Controller;
 import play.mvc.Http;
 import services.EventLogger;
-
-import java.nio.charset.StandardCharsets;
+import utils.WebhookUtil;
 
 public class WebhookWhatsAppController extends Controller {
 
@@ -44,7 +43,7 @@ public class WebhookWhatsAppController extends Controller {
 
         String rawBody;
         try {
-            rawBody = new String(Http.Request.current().body.readAllBytes(), StandardCharsets.UTF_8);
+            rawBody = WebhookUtil.readRawBody();
         } catch (Exception e) {
             EventLogger.error("channel", null, "whatsapp", "Failed to read request body");
             error();

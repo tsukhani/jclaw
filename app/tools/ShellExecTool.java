@@ -61,7 +61,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
         long startTime = System.currentTimeMillis();
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
 
-        var command = args.has("command") ? args.get("command").getAsString().trim() : "";
+        var command = args.has("command") ? args.get("command").getAsString().strip() : "";
         if (command.isEmpty()) {
             return "Error: command is required and must not be empty.";
         }
@@ -112,7 +112,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
         var allowlistStr = ConfigService.get("shell.allowlist", DEFAULT_ALLOWLIST);
         var allowed = Arrays.stream(allowlistStr.split(","))
-                .map(String::trim)
+                .map(String::strip)
                 .filter(s -> !s.isEmpty())
                 .toList();
 
@@ -124,7 +124,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
     }
 
     static String extractFirstToken(String command) {
-        var trimmed = command.trim();
+        var trimmed = command.strip();
         var idx = -1;
         for (int i = 0; i < trimmed.length(); i++) {
             if (Character.isWhitespace(trimmed.charAt(i))) {
@@ -137,14 +137,14 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
     public Path resolveWorkdir(JsonObject args, Path workspace, boolean allowGlobal, String agentName) {
 
-        if (!args.has("workdir") || args.get("workdir").getAsString().trim().isEmpty()) {
+        if (!args.has("workdir") || args.get("workdir").getAsString().strip().isEmpty()) {
             if (!Files.isDirectory(workspace)) {
                 try { Files.createDirectories(workspace); } catch (IOException _) {}
             }
             return workspace;
         }
 
-        var workdirStr = args.get("workdir").getAsString().trim();
+        var workdirStr = args.get("workdir").getAsString().strip();
         var workdirPath = Path.of(workdirStr);
 
         if (workdirPath.isAbsolute()) {
@@ -370,15 +370,21 @@ public class ShellExecTool implements ToolRegistry.Tool {
         return result.toString().stripTrailing();
     }
 
-    /** Quick check if the output contains enough block art lines to constitute a terminal image. */
+    /** Quick check if the output contains enough consecutive block art lines to constitute a terminal image. */
     private boolean hasTerminalImage(String output) {
         int blockLines = 0;
-        for (var line : output.split("\n")) {
-            if (isBlockArtLine(line)) {
-                blockLines++;
-                if (blockLines >= 5) return true;
-            } else {
-                blockLines = 0;
+        int lineStart = 0;
+        int len = output.length();
+        for (int i = 0; i <= len; i++) {
+            if (i == len || output.charAt(i) == '\n') {
+                var line = output.substring(lineStart, i);
+                if (isBlockArtLine(line)) {
+                    blockLines++;
+                    if (blockLines >= 5) return true;
+                } else {
+                    blockLines = 0;
+                }
+                lineStart = i + 1;
             }
         }
         return false;

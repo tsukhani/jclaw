@@ -8,10 +8,12 @@ import services.ConfigService;
 
 import java.util.HashMap;
 
+import static utils.GsonHolder.INSTANCE;
+
 @With(AuthCheck.class)
 public class ApiConfigController extends Controller {
 
-    private static final Gson gson = new Gson();
+    private static final Gson gson = INSTANCE;
 
     public static void list() {
         var configs = ConfigService.listAll();
@@ -51,26 +53,10 @@ public class ApiConfigController extends Controller {
             badRequest();
         }
 
-        // Shell exec privileges (bypassAllowlist, allowGlobalPaths) are restricted to the main agent
-        if (key.matches("agent\\..+\\.shell\\.(bypassAllowlist|allowGlobalPaths)")) {
-            var agentName = key.split("\\.")[1];
-            var agent = models.Agent.findByName(agentName);
-            if (agent == null || !agent.isMain()) {
-                error(403, "Shell exec privileges can only be set for the main agent.");
-                return;
-            }
-        }
-
-        ConfigService.set(key, value);
-
-        if (key.startsWith("provider.")) {
-            AgentService.syncEnabledStates();
-        }
-        // Re-register tools when either enable flag flips. Only the .enabled
-        // keys drive ToolRegistry membership — other shell/playwright settings
-        // (allowlist, headless, timeouts) are read at runtime by the tools.
-        if (key.equals("shell.enabled") || key.equals("playwright.enabled")) {
-            jobs.ToolRegistrationJob.registerAll();
+        var rejection = ConfigService.setWithSideEffects(key, value);
+        if (rejection != null) {
+            error(403, rejection);
+            return;
         }
 
         var map = new HashMap<String, Object>();

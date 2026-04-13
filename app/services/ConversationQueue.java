@@ -50,10 +50,13 @@ public class ConversationQueue {
     public static boolean tryAcquire(Long conversationId, QueuedMessage message) {
         var state = queues.computeIfAbsent(conversationId, _ -> new QueueState());
 
+        // Read config BEFORE entering the synchronized block — ConfigService.get()
+        // may hit the DB, and we don't want to hold the state lock during I/O.
+        var mode = ConfigService.get("agent." + message.agent().name + ".queue.mode", "queue");
+
         // All mode-read + processing-flag + queue decisions must be atomic to prevent
         // TOCTOU races where two threads both believe they acquired the conversation.
         synchronized (state) {
-            var mode = ConfigService.get("agent." + message.agent().name + ".queue.mode", "queue");
             state.mode = mode;
 
             if (!state.processing) {

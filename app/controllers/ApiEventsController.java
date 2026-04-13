@@ -5,6 +5,7 @@ import play.mvc.Controller;
 import play.mvc.Http;
 import play.mvc.With;
 import services.NotificationBus;
+import utils.VirtualThreads;
 
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeUnit;
@@ -42,8 +43,7 @@ public class ApiEventsController extends Controller {
         // promise immediately so the executor is released instead of leaking
         // for up to 24 hours.
         var promise = new F.Promise<Void>();
-        var heartbeat = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(
-                r -> Thread.ofVirtual().unstarted(r));
+        var heartbeat = VirtualThreads.newSingleThreadScheduledExecutor();
         heartbeat.scheduleAtFixedRate(() -> {
             if (disconnected.get()) {
                 promise.invoke(null);

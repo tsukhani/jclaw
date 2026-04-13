@@ -3,6 +3,8 @@ package controllers;
 import agents.SkillLoader;
 import agents.ToolRegistry;
 import com.google.gson.Gson;
+
+import static utils.GsonHolder.INSTANCE;
 import models.Agent;
 import models.AgentToolConfig;
 import play.mvc.Controller;
@@ -15,7 +17,7 @@ import java.util.List;
 @With(AuthCheck.class)
 public class ApiToolsController extends Controller {
 
-    private static final Gson gson = new Gson();
+    private static final Gson gson = INSTANCE;
 
     /**
      * GET /api/tools — List all registered tools (global catalog).

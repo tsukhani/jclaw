@@ -95,7 +95,7 @@ public class SystemPromptAssembler {
         // counted as input tokens by every provider, so the breakdown surfaces them
         // alongside the prompt sections for a realistic total-token picture.
         var toolEntries = new ArrayList<PromptBreakdown.Entry>();
-        var toolDefs = ToolRegistry.getToolDefsForAgent(agent);
+        var toolDefs = ToolRegistry.getToolDefsForAgent(ToolRegistry.loadDisabledTools(agent));
         for (var tool : toolDefs) {
             var json = TOOL_GSON.toJson(tool);
             toolEntries.add(new PromptBreakdown.Entry(
@@ -167,7 +167,7 @@ public class SystemPromptAssembler {
             // the authoritative set of tool names instead of hardcoding them in SKILL.md files.
             // Filtered per-agent so the LLM never sees (and therefore never picks) tools that
             // are disabled for this specific agent — skill-creator can trust every name here.
-            var catalog = ToolCatalog.formatCatalogForPrompt(agent);
+            var catalog = ToolCatalog.formatCatalogForPrompt(ToolRegistry.loadDisabledTools(agent));
             if (!catalog.isEmpty()) {
                 b.startSection("Tool Catalog");
                 b.sb.append("\n## Tool Catalog\n");

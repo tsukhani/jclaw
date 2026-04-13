@@ -77,6 +77,15 @@ public class JpaMemoryStore implements MemoryStore {
     }
 
     @Override
+    public List<MemoryEntry> list(String agentId, int limit, int offset) {
+        List<Memory> memories = Memory.find("agentId = ?1 ORDER BY updatedAt DESC", agentId)
+                .from(offset).fetch(limit);
+        return memories.stream()
+                .map(this::toEntry)
+                .toList();
+    }
+
+    @Override
     public int deleteAll(String agentId) {
         // Bulk JPQL delete. The caller (AgentService.delete) calls em.clear()
         // before invoking us, so there are no stale Memory entities in the

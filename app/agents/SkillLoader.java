@@ -50,7 +50,7 @@ public class SkillLoader {
     public static int[] parseVersion(String v) {
         var out = new int[]{0, 0, 0};
         if (v == null) return out;
-        var parts = v.trim().split("\\.");
+        var parts = v.strip().split("\\.");
         for (int i = 0; i < Math.min(3, parts.length); i++) {
             try { out[i] = Integer.parseInt(parts[i].replaceAll("[^0-9].*", "")); }
             catch (NumberFormatException _) {}
@@ -182,9 +182,10 @@ public class SkillLoader {
             // Defense-in-depth: exclude any skill whose declared tools are not all available to this agent
             // (catches skills authored outside the drag-drop API flow, e.g. by skill-creator writing files
             // directly).
+            var disabledTools = ToolRegistry.loadDisabledTools(agent);
             allSkills.removeIf(s -> {
                 if (s.tools() == null || s.tools().isEmpty()) return false;
-                var result = ToolCatalog.validateSkillTools(agent, s.tools());
+                var result = ToolCatalog.validateSkillTools(disabledTools, s.tools());
                 if (!result.isOk()) {
                     EventLogger.warn("skills", "Excluding skill '%s' from agent '%s': missing tools %s"
                             .formatted(s.name(), agentName, result.missing()));
@@ -307,6 +308,18 @@ public class SkillLoader {
     /** Matches a top-level {@code tools:} key in YAML frontmatter (inline or block form). */
     private static final Pattern TOOLS_KEY_PRESENT = Pattern.compile("(?m)^tools:");
 
+    // Pre-compiled YAML extraction patterns — keys come from a closed set
+    private static final Pattern NAME_VALUE = Pattern.compile("^name:\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
+    private static final Pattern DESCRIPTION_VALUE = Pattern.compile("^description:\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
+    private static final Pattern TOOLS_VALUE = Pattern.compile("^tools:\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
+    private static final Pattern VERSION_VALUE = Pattern.compile("^version:\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
+    private static final Pattern NAME_MULTI = Pattern.compile("^name:\\s*[|>]\\s*\\n((?:  .*\\n?)+)", Pattern.MULTILINE);
+    private static final Pattern DESCRIPTION_MULTI = Pattern.compile("^description:\\s*[|>]\\s*\\n((?:  .*\\n?)+)", Pattern.MULTILINE);
+    private static final Pattern TOOLS_MULTI = Pattern.compile("^tools:\\s*[|>]\\s*\\n((?:  .*\\n?)+)", Pattern.MULTILINE);
+    private static final Pattern VERSION_MULTI = Pattern.compile("^version:\\s*[|>]\\s*\\n((?:  .*\\n?)+)", Pattern.MULTILINE);
+    private static final Pattern TOOLS_INLINE_LIST = Pattern.compile("^tools:\\s*\\[(.*?)\\]\\s*$", Pattern.MULTILINE);
+    private static final Pattern TOOLS_BLOCK_LIST = Pattern.compile("^tools:\\s*\\n((?:\\s*-\\s*.*\\n?)+)", Pattern.MULTILINE);
+
     public static SkillInfo parseSkillFile(Path path) {
         try {
             var content = Files.readString(path);
@@ -352,31 +365,31 @@ public class SkillLoader {
      */
     public static List<String> extractYamlList(String yaml, String key) {
         // Inline form: key: [a, b, c]
-        var inlinePattern = Pattern.compile("^" + Pattern.quote(key) + ":\\s*\\[(.*?)\\]\\s*$",
-                Pattern.MULTILINE);
+        var inlinePattern = "tools".equals(key) ? TOOLS_INLINE_LIST
+                : Pattern.compile("^" + Pattern.quote(key) + ":\\s*\\[(.*?)\\]\\s*$", Pattern.MULTILINE);
         var inlineMatcher = inlinePattern.matcher(yaml);
         if (inlineMatcher.find()) {
-            var items = inlineMatcher.group(1).trim();
+            var items = inlineMatcher.group(1).strip();
             if (items.isEmpty()) return List.of();
             var result = new ArrayList<String>();
             for (var part : items.split(",")) {
-                var cleaned = part.trim().replaceAll("^[\"']|[\"']$", "");
+                var cleaned = part.strip().replaceAll("^[\"']|[\"']$", "");
                 if (!cleaned.isEmpty()) result.add(cleaned);
             }
             return result;
         }
 
         // Block form: key:\n  - a\n  - b
-        var blockPattern = Pattern.compile("^" + Pattern.quote(key) + ":\\s*\\n((?:\\s*-\\s*.*\\n?)+)",
-                Pattern.MULTILINE);
+        var blockPattern = "tools".equals(key) ? TOOLS_BLOCK_LIST
+                : Pattern.compile("^" + Pattern.quote(key) + ":\\s*\\n((?:\\s*-\\s*.*\\n?)+)", Pattern.MULTILINE);
         var blockMatcher = blockPattern.matcher(yaml);
         if (blockMatcher.find()) {
             var body = blockMatcher.group(1);
             var result = new ArrayList<String>();
             for (var line : body.split("\\n")) {
-                var trimmed = line.trim();
+                var trimmed = line.strip();
                 if (trimmed.startsWith("-")) {
-                    var item = trimmed.substring(1).trim().replaceAll("^[\"']|[\"']$", "");
+                    var item = trimmed.substring(1).strip().replaceAll("^[\"']|[\"']$", "");
                     if (!item.isEmpty()) result.add(item);
                 }
             }
@@ -608,18 +621,28 @@ public class SkillLoader {
     }
 
     public static String extractYamlValue(String yaml, String key) {
-        var pattern = Pattern.compile("^" + Pattern.quote(key) + ":\\s*[\"']?(.*?)[\"']?\\s*$",
-                Pattern.MULTILINE);
-        var matcher = pattern.matcher(yaml);
+        var valuePattern = switch (key) {
+            case "name" -> NAME_VALUE;
+            case "description" -> DESCRIPTION_VALUE;
+            case "tools" -> TOOLS_VALUE;
+            case "version" -> VERSION_VALUE;
+            default -> Pattern.compile("^" + Pattern.quote(key) + ":\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
+        };
+        var matcher = valuePattern.matcher(yaml);
         if (matcher.find()) {
-            var value = matcher.group(1).trim();
+            var value = matcher.group(1).strip();
             return value.isEmpty() ? null : value;
         }
-        var multiPattern = Pattern.compile("^" + Pattern.quote(key) + ":\\s*[|>]\\s*\\n((?:  .*\\n?)+)",
-                Pattern.MULTILINE);
+        var multiPattern = switch (key) {
+            case "name" -> NAME_MULTI;
+            case "description" -> DESCRIPTION_MULTI;
+            case "tools" -> TOOLS_MULTI;
+            case "version" -> VERSION_MULTI;
+            default -> Pattern.compile("^" + Pattern.quote(key) + ":\\s*[|>]\\s*\\n((?:  .*\\n?)+)", Pattern.MULTILINE);
+        };
         var multiMatcher = multiPattern.matcher(yaml);
         if (multiMatcher.find()) {
-            return multiMatcher.group(1).replaceAll("(?m)^  ", "").trim();
+            return multiMatcher.group(1).replaceAll("(?m)^  ", "").strip();
         }
         return null;
     }

@@ -26,9 +26,10 @@ export function useTheme() {
     applyTheme(themeMode.value)
 
     // Listen for system theme changes when in system mode
-    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-      if (themeMode.value === 'system') applyTheme('system')
-    })
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const handler = () => { if (themeMode.value === 'system') applyTheme('system') }
+    mq.addEventListener('change', handler)
+    onUnmounted(() => mq.removeEventListener('change', handler))
   })
 
   function setTheme(mode: ThemeMode) {
@@ -37,5 +38,5 @@ export function useTheme() {
     applyTheme(mode)
   }
 
-  return { themeMode, setTheme }
+  return { themeMode: readonly(themeMode), setTheme }
 }

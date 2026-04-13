@@ -7,6 +7,7 @@ import models.AgentSkillConfig;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
+import services.SkillPromotionService;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -14,10 +15,12 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 
+import static utils.GsonHolder.INSTANCE;
+
 @With(AuthCheck.class)
 public class ApiSkillsController extends Controller {
 
-    private static final Gson gson = new Gson();
+    private static final Gson gson = INSTANCE;
 
     /** GET /api/skills — List all global skills. */
     public static void list() {
@@ -67,60 +70,13 @@ public class ApiSkillsController extends Controller {
     public static void listFiles(String name) {
         var dir = SkillLoader.globalSkillsPath().resolve(name);
         if (!Files.isDirectory(dir)) notFound();
-
-        try {
-            var files = new java.util.ArrayList<java.util.Map<String, Object>>();
-            var allTextContent = new StringBuilder();
-            try (var walk = Files.walk(dir)) {
-                walk.filter(Files::isRegularFile)
-                    .sorted()
-                    .forEach(p -> {
-                        var rel = dir.relativize(p).toString();
-                        var map = new java.util.HashMap<String, Object>();
-                        map.put("path", rel);
-                        map.put("name", p.getFileName().toString());
-                        try { map.put("size", Files.size(p)); } catch (IOException _) { map.put("size", 0); }
-                        var text = isTextFile(p);
-                        map.put("isText", text);
-                        files.add(map);
-                        if (text) {
-                            try { allTextContent.append(Files.readString(p)).append("\n"); } catch (IOException _) {}
-                        }
-                    });
-            }
-
-            var content = allTextContent.toString();
-            var detectedTools = resolveSkillTools(dir, content);
-
-            var result = new java.util.HashMap<String, Object>();
-            result.put("files", files);
-            result.put("tools", detectedTools);
-            renderJSON(gson.toJson(result));
-        } catch (IOException e) {
-            error(500, "Failed to list skill files: " + e.getMessage());
-        }
+        listSkillFilesFrom(dir);
     }
 
     /** GET /api/skills/{name}/files/{<path>filePath} — Read a text file from a skill folder. */
     public static void readFile(String name, String filePath) {
         var dir = SkillLoader.globalSkillsPath().resolve(name);
-        java.nio.file.Path target;
-        try {
-            target = AgentService.acquireContained(dir, filePath);
-        } catch (SecurityException e) {
-            error(403, "Path escapes skill directory");
-            return;
-        }
-        if (!Files.exists(target)) notFound();
-
-        try {
-            renderJSON(gson.toJson(java.util.Map.of(
-                    "path", filePath,
-                    "content", Files.readString(target)
-            )));
-        } catch (IOException e) {
-            error(500, "Failed to read file: " + e.getMessage());
-        }
+        readSkillFileFrom(dir, filePath);
     }
 
     /**
@@ -209,19 +165,7 @@ public class ApiSkillsController extends Controller {
         }
         var dir = SkillLoader.globalSkillsPath().resolve(name);
         if (!Files.isDirectory(dir)) notFound();
-
-        try {
-            // Delete all files in the skill directory
-            try (var walk = Files.walk(dir)) {
-                walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
-                    try { Files.delete(p); } catch (IOException _) {}
-                });
-            }
-            SkillLoader.clearCache();
-            renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
-        } catch (IOException e) {
-            error(500, "Failed to delete skill: " + e.getMessage());
-        }
+        deleteSkillDir(dir);
     }
 
     /** GET /api/agents/{id}/skills — List workspace skills for an agent with enabled status. */
@@ -333,36 +277,7 @@ public class ApiSkillsController extends Controller {
         if (agent == null) notFound();
         var dir = AgentService.workspacePath(agent.name).resolve("skills").resolve(name);
         if (!Files.isDirectory(dir)) notFound();
-
-        try {
-            var files = new java.util.ArrayList<java.util.Map<String, Object>>();
-            var allTextContent = new StringBuilder();
-            try (var walk = Files.walk(dir)) {
-                walk.filter(Files::isRegularFile).sorted().forEach(p -> {
-                    var rel = dir.relativize(p).toString();
-                    var map = new java.util.HashMap<String, Object>();
-                    map.put("path", rel);
-                    map.put("name", p.getFileName().toString());
-                    try { map.put("size", Files.size(p)); } catch (IOException _) { map.put("size", 0); }
-                    var text = isTextFile(p);
-                    map.put("isText", text);
-                    files.add(map);
-                    if (text) {
-                        try { allTextContent.append(Files.readString(p)).append("\n"); } catch (IOException _) {}
-                    }
-                });
-            }
-
-            var content = allTextContent.toString();
-            var detectedTools = resolveSkillTools(dir, content);
-
-            var result = new java.util.HashMap<String, Object>();
-            result.put("files", files);
-            result.put("tools", detectedTools);
-            renderJSON(gson.toJson(result));
-        } catch (IOException e) {
-            error(500, "Failed to list agent skill files: " + e.getMessage());
-        }
+        listSkillFilesFrom(dir);
     }
 
     /** GET /api/agents/{id}/skills/{name}/files/{filePath} — Read a text file from an agent skill. */
@@ -370,20 +285,7 @@ public class ApiSkillsController extends Controller {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
         var dir = AgentService.workspacePath(agent.name).resolve("skills").resolve(name);
-        java.nio.file.Path target;
-        try {
-            target = AgentService.acquireContained(dir, filePath);
-        } catch (SecurityException e) {
-            error(403, "Path escapes skill directory");
-            return;
-        }
-        if (!Files.exists(target)) notFound();
-
-        try {
-            renderJSON(gson.toJson(java.util.Map.of("path", filePath, "content", Files.readString(target))));
-        } catch (IOException e) {
-            error(500, "Failed to read file: " + e.getMessage());
-        }
+        readSkillFileFrom(dir, filePath);
     }
 
     /** DELETE /api/agents/{id}/skills/{name}/delete — Delete a skill from an agent's workspace. */
@@ -392,18 +294,7 @@ public class ApiSkillsController extends Controller {
         if (agent == null) notFound();
         var dir = AgentService.workspacePath(agent.name).resolve("skills").resolve(name);
         if (!Files.isDirectory(dir)) notFound();
-
-        try {
-            try (var walk = Files.walk(dir)) {
-                walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
-                    try { Files.delete(p); } catch (IOException _) {}
-                });
-            }
-            SkillLoader.clearCache();
-            renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
-        } catch (IOException e) {
-            error(500, "Failed to delete agent skill: " + e.getMessage());
-        }
+        deleteSkillDir(dir);
     }
 
     /**
@@ -445,7 +336,7 @@ public class ApiSkillsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("newName")) badRequest();
 
-        var newName = body.get("newName").getAsString().trim();
+        var newName = body.get("newName").getAsString().strip();
         if (newName.isEmpty()) badRequest();
 
         var globalDir = SkillLoader.globalSkillsPath();
@@ -463,6 +354,75 @@ public class ApiSkillsController extends Controller {
             renderJSON(gson.toJson(java.util.Map.of("oldName", name, "newName", newName, "status", "ok")));
         } catch (IOException e) {
             error(500, "Failed to rename skill: " + e.getMessage());
+        }
+    }
+
+    // --- Shared helpers for global / agent-workspace skill operations ---
+
+    /** Walk a skill directory and render files + detected tools as JSON. */
+    private static void listSkillFilesFrom(Path dir) {
+        try {
+            var files = new java.util.ArrayList<java.util.Map<String, Object>>();
+            var allTextContent = new StringBuilder();
+            try (var walk = Files.walk(dir)) {
+                walk.filter(Files::isRegularFile)
+                    .sorted()
+                    .forEach(p -> {
+                        var rel = dir.relativize(p).toString();
+                        var map = new java.util.HashMap<String, Object>();
+                        map.put("path", rel);
+                        map.put("name", p.getFileName().toString());
+                        try { map.put("size", Files.size(p)); } catch (IOException _) { map.put("size", 0); }
+                        var text = isTextFile(p);
+                        map.put("isText", text);
+                        files.add(map);
+                        if (text) {
+                            try { allTextContent.append(Files.readString(p)).append("\n"); } catch (IOException _) {}
+                        }
+                    });
+            }
+
+            var content = allTextContent.toString();
+            var detectedTools = resolveSkillTools(dir, content);
+
+            var result = new java.util.HashMap<String, Object>();
+            result.put("files", files);
+            result.put("tools", detectedTools);
+            renderJSON(gson.toJson(result));
+        } catch (IOException e) {
+            error(500, "Failed to list skill files: " + e.getMessage());
+        }
+    }
+
+    /** Read a single file from a skill directory, with path-traversal protection. */
+    private static void readSkillFileFrom(Path dir, String filePath) {
+        Path target;
+        try {
+            target = AgentService.acquireContained(dir, filePath);
+        } catch (SecurityException e) {
+            error(403, "Path escapes skill directory");
+            return;
+        }
+        if (!Files.exists(target)) notFound();
+
+        try {
+            renderJSON(gson.toJson(java.util.Map.of(
+                    "path", filePath,
+                    "content", Files.readString(target)
+            )));
+        } catch (IOException e) {
+            error(500, "Failed to read file: " + e.getMessage());
+        }
+    }
+
+    /** Recursively delete a skill directory and clear the loader cache. */
+    private static void deleteSkillDir(Path dir) {
+        try {
+            SkillPromotionService.deleteRecursive(dir);
+            SkillLoader.clearCache();
+            renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
+        } catch (IOException e) {
+            error(500, "Failed to delete skill: " + e.getMessage());
         }
     }
 

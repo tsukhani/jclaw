@@ -4,8 +4,11 @@ import llm.LlmTypes.*;
 import llm.LlmProvider;
 import llm.ProviderRegistry;
 import models.Agent;
+import models.ChannelType;
 import models.Conversation;
 import models.Message;
+import models.MessageRole;
+import play.db.jpa.JPA;
 
 import java.util.List;
 
@@ -29,24 +32,24 @@ public class ConversationService {
         return convo;
     }
 
-    public static Message appendMessage(Conversation conversation, String role, String content,
+    public static Message appendMessage(Conversation conversation, MessageRole role, String content,
                                          String toolCalls, String toolResults) {
         var msg = new Message();
         msg.conversation = conversation;
-        msg.role = role;
+        msg.role = role.value;
         msg.content = content;
         msg.toolCalls = toolCalls;
         msg.toolResults = toolResults;
         msg.save();
 
         conversation.messageCount++;
-        if ("user".equals(role) && content != null && conversation.preview == null) {
+        if (role == MessageRole.USER && content != null && conversation.preview == null) {
             conversation.preview = content.substring(0, Math.min(content.length(), 100));
         }
 
         // Only save conversation for user/final-assistant messages to avoid redundant
         // UPDATEs during tool call rounds. @PreUpdate handles updatedAt automatically.
-        if ("user".equals(role) || ("assistant".equals(role) && content != null)) {
+        if (role == MessageRole.USER || (role == MessageRole.ASSISTANT && content != null)) {
             conversation.save();
         }
 
@@ -54,24 +57,23 @@ public class ConversationService {
     }
 
     public static Message appendUserMessage(Conversation conversation, String content) {
-        return appendMessage(conversation, "user", content, null, null);
+        return appendMessage(conversation, MessageRole.USER, content, null, null);
     }
 
     public static Message appendAssistantMessage(Conversation conversation, String content,
                                                    String toolCalls) {
-        return appendMessage(conversation, "assistant", content, toolCalls, null);
+        return appendMessage(conversation, MessageRole.ASSISTANT, content, toolCalls, null);
     }
 
     public static Message appendToolResult(Conversation conversation, String toolCallId, String result) {
-        return appendMessage(conversation, "tool", result, null, toolCallId);
+        return appendMessage(conversation, MessageRole.TOOL, result, null, toolCallId);
     }
 
     /**
      * Load recent messages for context window assembly, returned in chronological order.
      */
     public static List<Message> loadRecentMessages(Conversation conversation) {
-        var maxMessages = Integer.parseInt(
-                ConfigService.get("chat.maxContextMessages", "50"));
+        var maxMessages = ConfigService.getInt("chat.maxContextMessages", 50);
         // findRecent returns DESC order; reversed() returns a read-only ASC view
         // without copying — uses JDK 21 SequencedCollection.
         return Message.findRecent(conversation, maxMessages).reversed();
@@ -79,6 +81,47 @@ public class ConversationService {
 
     public static Conversation findById(Long id) {
         return Conversation.findById(id);
+    }
+
+    /**
+     * Bulk-delete conversations (and their messages) by ID using JPQL.
+     * Both single and bulk delete routes use this to ensure consistent behavior.
+     * @return the number of conversations deleted
+     */
+    public static int deleteByIds(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return 0;
+        var em = JPA.em();
+        em.createQuery("DELETE FROM Message m WHERE m.conversation.id IN :ids")
+                .setParameter("ids", ids).executeUpdate();
+        return em.createQuery("DELETE FROM Conversation c WHERE c.id IN :ids")
+                .setParameter("ids", ids).executeUpdate();
+    }
+
+    /**
+     * Assemble message context from a conversation and kick off async title
+     * generation. Returns {@code false} if there are no user messages (i.e. the
+     * caller should fall back to the existing preview).
+     */
+    public static boolean requestTitleGeneration(Conversation conversation) {
+        List<Message> msgs = Message.find("conversation = ?1 ORDER BY createdAt ASC", conversation).fetch(10);
+        var userParts = new StringBuilder();
+        var assistantParts = new StringBuilder();
+        for (var m : msgs) {
+            if (MessageRole.USER.value.equals(m.role) && m.content != null) {
+                if (!userParts.isEmpty()) userParts.append("\n");
+                userParts.append(m.content);
+            } else if (MessageRole.ASSISTANT.value.equals(m.role) && m.content != null) {
+                if (!assistantParts.isEmpty()) assistantParts.append("\n");
+                assistantParts.append(m.content);
+            }
+        }
+
+        if (userParts.isEmpty()) return false;
+
+        generateTitleAsync(conversation.id,
+                userParts.substring(0, Math.min(userParts.length(), 500)),
+                assistantParts.substring(0, Math.min(assistantParts.length(), 500)));
+        return true;
     }
 
     /**
@@ -106,7 +149,7 @@ public class ConversationService {
                 var response = provider.chat(modelId, messages, List.of(), null, null);
                 if (response.choices() == null || response.choices().isEmpty()) return;
 
-                var title = ((String) response.choices().getFirst().message().content()).trim();
+                var title = ((String) response.choices().getFirst().message().content()).strip();
                 if (title.isEmpty() || title.length() > 100) return;
 
                 Tx.run(() -> {
