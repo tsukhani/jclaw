@@ -35,13 +35,14 @@ function isSensitive(key: string) {
 // Unmanaged diagnostic list — regardless of which page actually manages it.
 // Keeps Settings free of exact-key knowledge about other pages' config.
 const MANAGED_PREFIXES = [
-  'provider.',    // LLM providers — Settings
-  'search.',      // Search providers — Settings
-  'scanner.',     // Malware scanners — Settings
-  'chat.',        // Chat settings — Settings
-  'shell.',       // Shell execution defaults + enabled toggle — Settings
-  'playwright.',  // Playwright browser tool — Settings
-  'agent.',       // Per-agent config (shell privileges, queue mode, etc.) — Agents page
+  'provider.',           // LLM providers — Settings
+  'search.',             // Search providers — Settings
+  'scanner.',            // Malware scanners — Settings
+  'chat.',               // Chat settings — Settings
+  'shell.',              // Shell execution defaults + enabled toggle — Settings
+  'playwright.',         // Playwright browser tool — Settings
+  'skillsPromotion.',    // Skills promotion sanitization — Settings
+  'agent.',              // Per-agent config (shell privileges, queue mode, etc.) — Agents page
 ]
 
 function isManagedKey(key: string): boolean {
@@ -73,6 +74,48 @@ async function saveChatField(configKey: string, value: string) {
   }
 }
 
+
+// Skills Promotion config
+const spProvider = computed(() => {
+  const entries = configData.value?.entries ?? []
+  return entries.find((e: any) => e.key === 'skillsPromotion.provider')?.value ?? ''
+})
+const spModel = computed(() => {
+  const entries = configData.value?.entries ?? []
+  return entries.find((e: any) => e.key === 'skillsPromotion.model')?.value ?? ''
+})
+const spTimeout = computed(() => {
+  const entries = configData.value?.entries ?? []
+  return entries.find((e: any) => e.key === 'skillsPromotion.timeoutSeconds')?.value ?? '300'
+})
+const spBatchKb = computed(() => {
+  const entries = configData.value?.entries ?? []
+  return entries.find((e: any) => e.key === 'skillsPromotion.batchSizeKb')?.value ?? '100'
+})
+
+const editingSPField = ref<string | null>(null)
+const spFieldEdit = ref('')
+
+const availableProviderNames = computed(() => {
+  return [...(providerEntries.value?.providers?.keys() ?? [])]
+})
+
+const spAvailableModels = computed(() => {
+  const name = editingSPField.value === 'provider' ? spFieldEdit.value : spProvider.value
+  if (!name) return []
+  return getProviderModels(name)
+})
+
+async function saveSPField(configKey: string, value: string) {
+  saving.value = true
+  try {
+    await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
+    editingSPField.value = null
+    refresh()
+  } finally {
+    saving.value = false
+  }
+}
 
 // Playwright config
 const playwrightEnabled = computed(() => {
@@ -1148,6 +1191,105 @@ const providerEntries = computed(() => {
             <template v-else>
               <span class="flex-1 text-sm text-neutral-300 font-mono">{{ chatMaxContextMessages }} messages</span>
               <button @click="editingChatField = 'maxContextMessages'; chatFieldEdit = chatMaxContextMessages" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              </button>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Skills Promotion -->
+    <div class="mb-6 space-y-4">
+      <h2 class="text-sm font-medium text-neutral-400">Skills Promotion</h2>
+      <p class="text-xs text-neutral-600">LLM sanitization during skill promotion. Uses the main agent's model by default if not configured.</p>
+      <div class="bg-neutral-900 border border-neutral-800">
+        <div class="divide-y divide-neutral-800/50">
+          <!-- Provider -->
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">provider</span>
+            <template v-if="editingSPField === 'provider'">
+              <select v-model="spFieldEdit"
+                      class="w-48 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white font-mono focus:outline-none">
+                <option value="">Default (main agent)</option>
+                <option v-for="name in availableProviderNames" :key="name" :value="name">{{ name }}</option>
+              </select>
+              <button @click="saveSPField('skillsPromotion.provider', spFieldEdit)" class="p-1 text-neutral-500 hover:text-emerald-400 transition-colors" title="Save">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              </button>
+              <button @click="editingSPField = null" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Cancel">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </template>
+            <template v-else>
+              <span class="flex-1 text-sm text-neutral-300 font-mono">{{ spProvider || 'Default (main agent)' }}</span>
+              <button @click="editingSPField = 'provider'; spFieldEdit = spProvider" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              </button>
+            </template>
+          </div>
+          <!-- Model -->
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">model</span>
+            <template v-if="editingSPField === 'model'">
+              <select v-if="spAvailableModels.length"
+                      v-model="spFieldEdit"
+                      class="w-64 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white font-mono focus:outline-none">
+                <option value="">Default (main agent)</option>
+                <option v-for="m in spAvailableModels" :key="m.id" :value="m.id">{{ m.name || m.id }}</option>
+              </select>
+              <input v-else v-model="spFieldEdit" type="text" placeholder="model-id"
+                     class="w-64 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white font-mono focus:outline-none" />
+              <button @click="saveSPField('skillsPromotion.model', spFieldEdit)" class="p-1 text-neutral-500 hover:text-emerald-400 transition-colors" title="Save">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              </button>
+              <button @click="editingSPField = null" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Cancel">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </template>
+            <template v-else>
+              <span class="flex-1 text-sm text-neutral-300 font-mono">{{ spModel || 'Default (main agent)' }}</span>
+              <button @click="editingSPField = 'model'; spFieldEdit = spModel" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              </button>
+            </template>
+          </div>
+          <!-- Timeout -->
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">timeoutSeconds</span>
+            <template v-if="editingSPField === 'timeout'">
+              <input v-model="spFieldEdit" type="number" min="30" max="900"
+                     class="w-24 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white font-mono focus:outline-none" />
+              <button @click="saveSPField('skillsPromotion.timeoutSeconds', spFieldEdit)" class="p-1 text-neutral-500 hover:text-emerald-400 transition-colors" title="Save">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              </button>
+              <button @click="editingSPField = null" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Cancel">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </template>
+            <template v-else>
+              <span class="flex-1 text-sm text-neutral-300 font-mono">{{ spTimeout }}s</span>
+              <button @click="editingSPField = 'timeout'; spFieldEdit = spTimeout" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              </button>
+            </template>
+          </div>
+          <!-- Batch Size KB -->
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">batchSizeKb</span>
+            <template v-if="editingSPField === 'batchKb'">
+              <input v-model="spFieldEdit" type="number" min="10" max="1000"
+                     class="w-24 px-2 py-1 bg-neutral-800 border border-neutral-700 text-sm text-white font-mono focus:outline-none" />
+              <button @click="saveSPField('skillsPromotion.batchSizeKb', spFieldEdit)" class="p-1 text-neutral-500 hover:text-emerald-400 transition-colors" title="Save">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              </button>
+              <button @click="editingSPField = null" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Cancel">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </template>
+            <template v-else>
+              <span class="flex-1 text-sm text-neutral-300 font-mono">{{ spBatchKb }} KB</span>
+              <button @click="editingSPField = 'batchKb'; spFieldEdit = spBatchKb" class="p-1 text-neutral-500 hover:text-white transition-colors" title="Edit">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
               </button>
             </template>

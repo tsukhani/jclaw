@@ -391,8 +391,8 @@ public class SkillPromotionService {
                 .collect(java.util.stream.Collectors.joining("; "));
     }
 
-    private static final int SANITIZE_BATCH_SIZE = 5;
-    private static final int SANITIZE_TIMEOUT_SECONDS = 300;
+    private static final int DEFAULT_BATCH_KB = 100;
+    private static final int DEFAULT_TIMEOUT_SECONDS = 300;
 
     private static final String SANITIZE_SYSTEM_PROMPT = """
             You are a security reviewer. You will receive text files from an AI agent's skill folder.
@@ -416,39 +416,53 @@ public class SkillPromotionService {
             """;
 
     static LinkedHashMap<String, String> sanitizeWithLlm(LinkedHashMap<String, String> fileContents) {
-        Agent mainAgent = Agent.findByName(Agent.MAIN_AGENT_NAME);
-        if (mainAgent == null) {
-            EventLogger.warn("skills", "Sanitization skipped: main agent not found");
-            return fileContents;
+        // Resolve provider and model — prefer dedicated sanitization config, fall back to main agent
+        var configProvider = ConfigService.get("skillsPromotion.provider");
+        var configModel = ConfigService.get("skillsPromotion.model");
+        int batchKb = ConfigService.getInt("skillsPromotion.batchSizeKb", DEFAULT_BATCH_KB);
+        int timeoutSeconds = ConfigService.getInt("skillsPromotion.timeoutSeconds", DEFAULT_TIMEOUT_SECONDS);
+
+        llm.LlmProvider provider = null;
+        String modelId = null;
+
+        if (configProvider != null && !configProvider.isBlank()) {
+            provider = ProviderRegistry.get(configProvider);
+            modelId = configModel;
         }
 
-        var provider = ProviderRegistry.get(mainAgent.modelProvider);
+        // Fall back to main agent's provider/model if not explicitly configured
+        if (provider == null || modelId == null || modelId.isBlank()) {
+            Agent mainAgent = Agent.findByName(Agent.MAIN_AGENT_NAME);
+            if (mainAgent == null) {
+                EventLogger.warn("skills", "Sanitization skipped: main agent not found");
+                return fileContents;
+            }
+            if (provider == null) provider = ProviderRegistry.get(mainAgent.modelProvider);
+            if (modelId == null || modelId.isBlank()) modelId = mainAgent.modelId;
+        }
+
         if (provider == null) {
-            EventLogger.warn("skills", "Sanitization skipped: no provider for agent " + mainAgent.name);
+            EventLogger.warn("skills", "Sanitization skipped: no provider configured");
             return fileContents;
         }
 
-        EventLogger.info("skills", "Starting LLM sanitization of %d file(s) via %s / %s"
-                .formatted(fileContents.size(), provider.config().name(), mainAgent.modelId));
+        EventLogger.info("skills", "Starting LLM sanitization of %d file(s) via %s / %s (batch=%dKB, timeout=%ds)"
+                .formatted(fileContents.size(), provider.config().name(), modelId, batchKb, timeoutSeconds));
 
         for (var entry : fileContents.entrySet()) {
             EventLogger.info("skills", "Sanitizing file: %s (%d chars)"
                     .formatted(entry.getKey(), entry.getValue().length()));
         }
 
-        // Batch files to avoid overwhelming the model with a single massive payload
-        var entries = new java.util.ArrayList<>(fileContents.entrySet());
+        // Batch files by KB to avoid overwhelming the model with a single massive payload
+        var batches = buildBatchesBySize(fileContents, batchKb * 1024);
         var result = new LinkedHashMap<String, String>();
-        int batchCount = (entries.size() + SANITIZE_BATCH_SIZE - 1) / SANITIZE_BATCH_SIZE;
 
-        for (int i = 0; i < entries.size(); i += SANITIZE_BATCH_SIZE) {
-            var batch = entries.subList(i, Math.min(i + SANITIZE_BATCH_SIZE, entries.size()));
-            int batchNum = (i / SANITIZE_BATCH_SIZE) + 1;
-
+        for (int i = 0; i < batches.size(); i++) {
             EventLogger.info("skills", "Sending batch %d/%d (%d files)"
-                    .formatted(batchNum, batchCount, batch.size()));
+                    .formatted(i + 1, batches.size(), batches.get(i).size()));
 
-            var batchResult = sanitizeBatch(provider, mainAgent.modelId, batch, fileContents);
+            var batchResult = sanitizeBatch(provider, modelId, batches.get(i), fileContents, timeoutSeconds);
             result.putAll(batchResult);
         }
 
@@ -456,10 +470,32 @@ public class SkillPromotionService {
         return result;
     }
 
+    private static java.util.List<java.util.List<java.util.Map.Entry<String, String>>> buildBatchesBySize(
+            LinkedHashMap<String, String> fileContents, int maxBatchBytes) {
+
+        var batches = new java.util.ArrayList<java.util.List<java.util.Map.Entry<String, String>>>();
+        var currentBatch = new java.util.ArrayList<java.util.Map.Entry<String, String>>();
+        int currentSize = 0;
+
+        for (var entry : fileContents.entrySet()) {
+            int entrySize = entry.getValue().length() * 2; // rough byte estimate (UTF-16 chars → bytes)
+            // If this single file exceeds the limit, send it alone
+            if (!currentBatch.isEmpty() && currentSize + entrySize > maxBatchBytes) {
+                batches.add(currentBatch);
+                currentBatch = new java.util.ArrayList<>();
+                currentSize = 0;
+            }
+            currentBatch.add(entry);
+            currentSize += entrySize;
+        }
+        if (!currentBatch.isEmpty()) batches.add(currentBatch);
+        return batches;
+    }
+
     private static LinkedHashMap<String, String> sanitizeBatch(
             llm.LlmProvider provider, String modelId,
             java.util.List<java.util.Map.Entry<String, String>> batch,
-            LinkedHashMap<String, String> originals) {
+            LinkedHashMap<String, String> originals, int timeoutSeconds) {
 
         var sb = new StringBuilder();
         for (var entry : batch) {
@@ -475,8 +511,7 @@ public class SkillPromotionService {
 
         try {
             // No reasoning (null thinkingMode) — sanitization is classification, not reasoning.
-            // Extended timeout — large payloads need more time to process.
-            var response = provider.chat(modelId, messages, null, null, null, SANITIZE_TIMEOUT_SECONDS);
+            var response = provider.chat(modelId, messages, null, null, null, timeoutSeconds);
             var text = response.choices().get(0).message().content().toString().strip();
 
             EventLogger.info("skills",
