@@ -133,6 +133,18 @@ const thinkingSupported = computed(() => selectedModelInfo.value?.supportsThinki
 // non-thinking models — the toolbar hides the selector in that case.
 const thinkingLevels = computed<string[]>(() => effectiveThinkingLevels(selectedModelInfo.value as any))
 
+// Whether any reasoning content is currently visible on this page: either the
+// in-flight stream is emitting reasoning, or a prior assistant message carries
+// reasoning text / a non-zero reasoning-token count. Drives the lightbulb
+// toggle's enabled state — there's nothing to show/hide when reasoning never
+// happened for this agent's visible conversation.
+const hasReasoningContent = computed(() => {
+  if (streamReasoning.value) return true
+  return (messages.value ?? []).some(
+    (m: any) => m.reasoning || (m.usage && m.usage.reasoning)
+  )
+})
+
 // Sync model or thinking mode change back to the agent
 async function updateAgentSetting(updates: Record<string, any>) {
   if (!selectedAgentId.value) return
@@ -698,10 +710,27 @@ function exportConversation() {
           </select>
         </template>
 
-        <button v-if="thinkingSupported" @click="showThinking = !showThinking"
-                :class="showThinking ? 'text-blue-400' : 'text-neutral-600'"
-                class="p-1 hover:text-blue-300 transition-colors"
-                title="Toggle thinking display">
+        <!--
+          Lightbulb: toggles the reasoning display. Only interactive when there's
+          reasoning to show/hide — either the agent is actively configured to
+          reason (thinkingMode is a non-off level) or the model has already
+          emitted reasoning in this conversation despite the off setting (some
+          Ollama thinking-by-default models ignore `reasoning_effort: none`).
+          Fully disabled otherwise so the icon doesn't invite clicks that change
+          a flag with no visible effect.
+        -->
+        <button v-if="thinkingSupported"
+                @click="showThinking = !showThinking"
+                :disabled="!selectedAgent?.thinkingMode && !hasReasoningContent"
+                :class="[
+                  (!selectedAgent?.thinkingMode && !hasReasoningContent)
+                    ? 'text-neutral-700 cursor-not-allowed'
+                    : (showThinking ? 'text-blue-400 hover:text-blue-300' : 'text-neutral-600 hover:text-blue-300')
+                ]"
+                class="p-1 transition-colors"
+                :title="(!selectedAgent?.thinkingMode && !hasReasoningContent)
+                  ? 'No reasoning emitted — nothing to toggle'
+                  : 'Toggle thinking display'">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
         </button>
 
