@@ -1,4 +1,8 @@
 <script setup lang="ts">
+// Tool-pill color map (shared with agents.vue) — keeps per-tool color coding
+// consistent between the Agent detail page and these skill cards.
+const { getPillClass } = useToolMeta()
+
 const { data: skills, refresh: refreshSkills } = await useFetch<any[]>('/api/skills')
 const { data: agents } = await useFetch<any[]>('/api/agents')
 
@@ -346,6 +350,13 @@ const editing = ref<any>(null)
 // happens exclusively via the skill-creator skill (using the filesystem tool).
 const skillFiles = ref<any[]>([])
 const skillTools = ref<any[]>([])
+// Shell commands this skill contributes to an installing agent's allowlist.
+// Populated from the SKILL.md `commands:` frontmatter via the files API.
+const skillCommands = ref<string[]>([])
+// Agent name recorded in the SKILL.md `author:` frontmatter. Empty string for
+// legacy skills that predate the field — the header suppresses the attribution
+// rather than guessing.
+const skillAuthor = ref<string>('')
 const activeFile = ref<string | null>(null)
 const fileContent = ref('')
 const editingAgentId = ref<number | null>(null)  // null = global skill, number = agent workspace skill
@@ -359,6 +370,8 @@ async function editSkill(skill: any) {
     const res = await $fetch<any>(`/api/skills/${folderName}/files`)
     skillFiles.value = res.files || []
     skillTools.value = res.tools || []
+    skillCommands.value = res.commands || []
+    skillAuthor.value = res.author || ''
 
     // Auto-select SKILL.md
     const skillMd = skillFiles.value.find((f: any) => f.path === 'SKILL.md')
@@ -417,6 +430,8 @@ async function editAgentSkill(agentId: number, skill: any) {
     const res = await $fetch<any>(`/api/agents/${agentId}/skills/${name}/files`)
     skillFiles.value = res.files || []
     skillTools.value = res.tools || []
+    skillCommands.value = res.commands || []
+    skillAuthor.value = res.author || ''
 
     const skillMd = skillFiles.value.find((f: any) => f.path === 'SKILL.md')
     if (skillMd) {
@@ -440,6 +455,8 @@ async function deleteAgentSkill(agentId: number, skill: any) {
     editingAgentId.value = null
     skillFiles.value = []
     skillTools.value = []
+    skillCommands.value = []
+    skillAuthor.value = ''
     activeFile.value = null
     loadAllAgentSkills()
   } catch (e) {
@@ -636,39 +653,85 @@ function totalSkillCount(agentId: number) {
           No global skills. Create one via the skill-creator skill in an agent workspace, then drag it here to promote.
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          <!--
+            Card layout: three explicitly bordered segments stacked top-to-bottom
+            (HEADER → TOOLS → COMMANDS) followed by a flex-grow spacer and the
+            action row. Each segment has a consistent `min-h` so that TOOLS and
+            COMMANDS align across cards in a row regardless of description
+            length or how many pills each skill carries. The capabilities
+            segments always render (even for zero tools / zero commands) so the
+            alignment holds uniformly across the whole grid — empty state is a
+            dimmed em-dash, not a hidden block.
+          -->
           <div v-for="skill in skills" :key="skill.folderName || skill.name"
                draggable="true"
                @dragstart="onGlobalDragStart($event, skill)"
                @dragend="onDragEnd"
                :class="[
-                 'bg-neutral-900 border border-neutral-800 p-4 cursor-grab active:cursor-grabbing transition-all duration-150 select-none',
+                 'bg-neutral-900 border border-neutral-800 flex flex-col cursor-grab active:cursor-grabbing transition-all duration-150 select-none overflow-hidden',
                  dragging?.name === skill.name && dragSource === 'global' ? 'opacity-50 scale-95' : 'hover:border-neutral-700'
                ]">
-            <div class="flex items-center justify-between mb-1">
-              <!-- Inline folder name editing -->
-              <template v-if="renamingSkill === (skill.folderName || skill.name)">
-                <input v-model="renameValue"
-                       @keydown.enter="commitRename(skill)"
-                       @keydown.escape="cancelRename"
-                       @blur="commitRename(skill)"
-                       @click.stop
-                       @mousedown.stop
-                       ref="renameInput"
-                       class="text-sm text-white font-mono bg-neutral-800 border border-neutral-600 px-1.5 py-0.5 w-full mr-2 focus:outline-none focus:border-emerald-500" />
-              </template>
-              <template v-else>
-                <span class="text-sm text-white font-mono cursor-text"
-                      @dblclick.stop="startRename(skill)">{{ skill.folderName || skill.name }}</span>
-              </template>
-              <div class="flex items-center gap-1.5 shrink-0">
-                <span class="text-[10px] text-neutral-500 font-mono">v{{ skill.version || '0.0.0' }}</span>
-                <span class="text-[10px] text-green-400 border border-green-400/30 px-1">global</span>
+            <!-- HEADER segment: identity + description.
+                 Description is line-clamped so header heights match across cards;
+                 full description is visible on the detail page (eye icon). -->
+            <div class="p-4">
+              <div class="flex items-start justify-between gap-2 mb-1">
+                <template v-if="renamingSkill === (skill.folderName || skill.name)">
+                  <input v-model="renameValue"
+                         @keydown.enter="commitRename(skill)"
+                         @keydown.escape="cancelRename"
+                         @blur="commitRename(skill)"
+                         @click.stop
+                         @mousedown.stop
+                         ref="renameInput"
+                         class="text-sm text-white font-mono bg-neutral-800 border border-neutral-600 px-1.5 py-0.5 w-full mr-2 focus:outline-none focus:border-emerald-500" />
+                </template>
+                <template v-else>
+                  <span class="text-sm text-white font-mono cursor-text min-w-0 break-all"
+                        @dblclick.stop="startRename(skill)">{{ skill.folderName || skill.name }}</span>
+                </template>
+                <span class="text-[10px] text-neutral-500 font-mono shrink-0 pt-0.5">v{{ skill.version || '0.0.0' }}</span>
+              </div>
+              <div v-if="skill.name !== (skill.folderName || skill.name)"
+                   class="text-[10px] text-neutral-600">name: {{ skill.name }}</div>
+              <div v-if="skill.author" class="text-[10px] text-neutral-500">
+                by <span class="font-mono text-neutral-400">{{ skill.author }}</span>
+              </div>
+              <div class="text-xs text-neutral-500 mt-2 line-clamp-4">
+                {{ skill.description || '(no description)' }}
               </div>
             </div>
-            <div v-if="skill.name !== (skill.folderName || skill.name)"
-                 class="text-[10px] text-neutral-600 mb-0.5">name: {{ skill.name }}</div>
-            <div class="text-xs text-neutral-500">{{ skill.description || '(no description)' }}</div>
-            <div class="mt-3 flex items-center justify-end gap-2">
+
+            <!-- TOOLS segment -->
+            <div class="px-4 py-3 border-t border-neutral-800">
+              <div class="text-[10px] font-medium text-neutral-500 uppercase tracking-wider mb-1.5">Tools</div>
+              <div v-if="skill.tools?.length" class="flex flex-wrap gap-1">
+                <span v-for="tool in skill.tools" :key="'t:' + tool"
+                      class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm"
+                      :class="getPillClass(tool)">
+                  {{ tool }}
+                </span>
+              </div>
+              <div v-else class="text-[10px] text-neutral-700">—</div>
+            </div>
+
+            <!-- COMMANDS segment -->
+            <div class="px-4 py-3 border-t border-neutral-800">
+              <div class="text-[10px] font-medium text-neutral-500 uppercase tracking-wider mb-1.5">Commands</div>
+              <div v-if="skill.commands?.length" class="flex flex-wrap gap-1">
+                <span v-for="cmd in skill.commands" :key="'c:' + cmd"
+                      class="text-[10px] font-mono px-1.5 py-0.5 bg-cyan-900/20 border border-cyan-800/40 rounded-sm text-cyan-300">
+                  {{ cmd }}
+                </span>
+              </div>
+              <div v-else class="text-[10px] text-neutral-700">—</div>
+            </div>
+
+            <!-- Flex spacer pushes action row to the bottom of the card -->
+            <div class="flex-1"></div>
+
+            <!-- ACTIONS, bottom-aligned -->
+            <div class="px-4 py-2 border-t border-neutral-800 flex items-center justify-end gap-2">
               <button @click.stop="editSkill(skill)"
                       class="p-1.5 text-neutral-500 hover:text-white transition-colors"
                       title="View skill">
@@ -711,7 +774,12 @@ function totalSkillCount(agentId: number) {
               </span>
               <span v-else class="text-[10px] text-green-400 border border-green-400/30 px-1">global</span>
             </div>
-            <div class="text-xs text-neutral-500">{{ skillFiles.length }} file{{ skillFiles.length !== 1 ? 's' : '' }}</div>
+            <div class="text-xs text-neutral-500">
+              {{ skillFiles.length }} file{{ skillFiles.length !== 1 ? 's' : '' }}
+              <span v-if="skillAuthor" class="ml-2">
+                · by <span class="font-mono text-neutral-400">{{ skillAuthor }}</span>
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -724,8 +792,32 @@ function totalSkillCount(agentId: number) {
         </div>
         <div class="flex flex-wrap gap-2">
           <span v-for="tool in skillTools" :key="tool.name"
-                class="inline-flex items-center px-2.5 py-1 bg-amber-900/20 border border-amber-800/30 rounded text-xs font-mono text-amber-300 leading-none">
+                class="inline-flex items-center px-2.5 py-1 border rounded text-xs font-mono leading-none"
+                :class="getPillClass(tool.name)">
             {{ tool.name }}
+          </span>
+        </div>
+      </div>
+
+      <!--
+        Shell commands this skill contributes to an installing agent's
+        effective allowlist (from the `commands:` frontmatter). Rendered below
+        Required Tools because tools are the dependencies the skill consumes
+        while commands are the binaries it *provides* — consume-before-provide
+        matches the reading order a reviewer uses to trust the skill.
+      -->
+      <div v-if="skillCommands.length" class="bg-neutral-900 border border-neutral-800 px-4 py-3">
+        <div class="flex items-center gap-2 mb-3">
+          <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+          <span class="text-xs font-medium text-neutral-400 uppercase tracking-wider">Commands</span>
+          <span class="text-[10px] text-neutral-600 normal-case tracking-normal">
+            added to the agent's shell allowlist when this skill is installed
+          </span>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <span v-for="cmd in skillCommands" :key="cmd"
+                class="inline-flex items-center px-2.5 py-1 bg-cyan-900/20 border border-cyan-800/40 rounded text-xs font-mono text-cyan-300 leading-none">
+            {{ cmd }}
           </span>
         </div>
       </div>

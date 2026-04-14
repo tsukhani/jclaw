@@ -19,7 +19,7 @@ import java.util.regex.Pattern;
 
 public class ShellExecTool implements ToolRegistry.Tool {
 
-    public static final String DEFAULT_ALLOWLIST = "git,npm,npx,pnpm,node,python,python3,pip,ls,cat,head,tail,grep,find,wc,sort,uniq,diff,mkdir,cp,mv,echo,curl,wget,jq,tar,zip,unzip";
+    public static final String DEFAULT_ALLOWLIST = "git,npm,npx,pnpm,node,python,python3,pip,ls,cat,head,tail,grep,find,wc,sort,uniq,diff,mkdir,cp,mv,echo,curl,wget,jq,tar,zip,unzip,test,pwd,which,whoami,uname,date,file,stat,env,printenv,awk,sed,tr,cut,tee,xargs,touch,cmp,sleep";
 
     /** Atomically cached parsed allowlist: invalidated when the raw config string changes. */
     private record AllowlistCache(String raw, Set<String> set) {}
@@ -168,29 +168,45 @@ public class ShellExecTool implements ToolRegistry.Tool {
      * absence of a row means enabled-by-default; only rows where
      * {@code enabled=false} exclude a skill's contribution.
      *
-     * <p>Uncached by design. The global portion is already cached in
+     * <p>The per-agent portion involves JPA reads and is wrapped in
+     * {@link services.Tx#run(play.libs.F.Function0)}. Tool execution runs on
+     * a path that deliberately has no active EntityManager — LLM HTTP calls
+     * span minutes and we don't want a DB connection held across them — so
+     * any DB touch from inside a tool needs its own short transaction. Uncached
+     * by design: the global portion is already cached in
      * {@link #parsedAllowlist()}; the per-agent portion is a bounded JPA query
-     * (one table scan per call, at most tens of rows in realistic setups).
-     * If this surfaces as a hot-path cost, add a per-agent cache with
-     * explicit invalidation hooks in {@code SkillPromotionService}.
+     * (tens of rows in realistic setups). If this surfaces as a hot-path cost,
+     * add a per-agent cache with explicit invalidation hooks in
+     * {@code SkillPromotionService}.
      */
     public static Set<String> effectiveAllowlistFor(Agent agent) {
         var global = parsedAllowlist();
         if (agent == null) return global;
 
-        // Build disabled-skill filter from AgentSkillConfig. Absent config row
-        // means enabled-by-default, matching SkillLoader's existing semantics.
-        var configs = AgentSkillConfig.findByAgent(agent);
-        var disabledSkills = new java.util.HashSet<String>();
-        for (var c : configs) {
-            if (!c.enabled) disabledSkills.add(c.skillName);
-        }
+        return services.Tx.run(() -> {
+            // Re-fetch the agent inside the transaction. The caller may have
+            // obtained the entity from a different (already-committed) Tx.run
+            // block, which detached it — findByAgent on a detached entity is
+            // legal but safer to re-attach. Explicit Agent type required:
+            // Model.findById() declares JPABase as the return type, and var
+            // would infer JPABase here, failing the downstream signature match.
+            models.Agent managed = models.Agent.findById(agent.id);
+            if (managed == null) return global;
 
-        var union = new java.util.HashSet<>(global);
-        for (var row : AgentSkillAllowedTool.findByAgent(agent)) {
-            if (!disabledSkills.contains(row.skillName)) union.add(row.toolName);
-        }
-        return java.util.Collections.unmodifiableSet(union);
+            // Build disabled-skill filter from AgentSkillConfig. Absent config row
+            // means enabled-by-default, matching SkillLoader's existing semantics.
+            var configs = AgentSkillConfig.findByAgent(managed);
+            var disabledSkills = new java.util.HashSet<String>();
+            for (var c : configs) {
+                if (!c.enabled) disabledSkills.add(c.skillName);
+            }
+
+            var union = new java.util.HashSet<>(global);
+            for (var row : AgentSkillAllowedTool.findByAgent(managed)) {
+                if (!disabledSkills.contains(row.skillName)) union.add(row.toolName);
+            }
+            return java.util.Collections.unmodifiableSet(union);
+        });
     }
 
     /**

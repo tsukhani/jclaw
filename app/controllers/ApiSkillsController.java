@@ -394,9 +394,25 @@ public class ApiSkillsController extends Controller {
             var content = allTextContent.toString();
             var detectedTools = resolveSkillTools(dir, content);
 
+            // Shell commands declared in the SKILL.md frontmatter — the set
+            // this skill will contribute to an installing agent's allowlist.
+            // Surfaced here so the detail page can render a "Commands" pill row.
+            var skillMd = dir.resolve("SKILL.md");
+            java.util.List<String> commands = java.util.List.of();
+            String author = "";
+            if (Files.exists(skillMd)) {
+                var info = SkillLoader.parseSkillFile(skillMd);
+                if (info != null) {
+                    if (info.commands() != null) commands = info.commands();
+                    if (info.author() != null) author = info.author();
+                }
+            }
+
             var result = new java.util.HashMap<String, Object>();
             result.put("files", files);
             result.put("tools", detectedTools);
+            result.put("commands", commands);
+            result.put("author", author);
             renderJSON(gson.toJson(result));
         } catch (IOException e) {
             error(500, "Failed to list skill files: " + e.getMessage());
@@ -458,6 +474,7 @@ public class ApiSkillsController extends Controller {
         map.put("location", s.location() != null ? s.location().toString() : "");
         map.put("tools", s.tools() != null ? s.tools() : List.of());
         map.put("commands", s.commands() != null ? s.commands() : List.of());
+        map.put("author", s.author() != null ? s.author() : "");
         map.put("version", s.version() != null ? s.version() : "0.0.0");
         // Folder name = parent directory name of the SKILL.md file
         if (s.location() != null && s.location().getParent() != null) {

@@ -34,18 +34,28 @@ public class SkillLoader {
      *                      Blessed at promotion time and snapshotted per-agent at install time;
      *                      feeds the ShellExecTool allowlist union. Empty/null when the skill
      *                      declares no executables.
+     * @param author        name of the agent that authored the skill, from the {@code author:}
+     *                      frontmatter key. Empty string when the skill predates the field
+     *                      (caller should render no attribution rather than guessing).
      */
     public record SkillInfo(String name, String description, Path location,
                             List<String> tools, boolean toolsDeclared, String version,
-                            List<String> commands) {
+                            List<String> commands, String author) {
         public SkillInfo(String name, String description, Path location) {
-            this(name, description, location, List.of(), false, "0.0.0", List.of());
+            this(name, description, location, List.of(), false, "0.0.0", List.of(), "");
         }
 
-        /** Backwards-compatible 6-arg constructor for call sites predating the {@code commands} field. */
+        /** Backwards-compatible 6-arg constructor for call sites predating the {@code commands}/{@code author} fields. */
         public SkillInfo(String name, String description, Path location,
                          List<String> tools, boolean toolsDeclared, String version) {
-            this(name, description, location, tools, toolsDeclared, version, List.of());
+            this(name, description, location, tools, toolsDeclared, version, List.of(), "");
+        }
+
+        /** Backwards-compatible 7-arg constructor for call sites predating the {@code author} field. */
+        public SkillInfo(String name, String description, Path location,
+                         List<String> tools, boolean toolsDeclared, String version,
+                         List<String> commands) {
+            this(name, description, location, tools, toolsDeclared, version, commands, "");
         }
     }
 
@@ -369,9 +379,11 @@ public class SkillLoader {
             var tools = extractYamlList(frontmatter, "tools");
             var version = extractYamlValue(frontmatter, "version");
             var commands = extractYamlList(frontmatter, "commands");
+            var author = extractYamlValue(frontmatter, "author");
             if (name != null) {
                 return new SkillInfo(name, description != null ? description : "", locationHint,
-                        tools, toolsDeclared, version != null ? version : "0.0.0", commands);
+                        tools, toolsDeclared, version != null ? version : "0.0.0",
+                        commands, author != null ? author : "");
             }
         }
         return null;
