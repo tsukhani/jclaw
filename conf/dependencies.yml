@@ -36,3 +36,8 @@ require:
     - com.vladsch.flexmark -> flexmark-ext-autolink 0.64.8
     - org.xhtmlrenderer -> flying-saucer-pdf-openpdf 9.4.0
     - org.hdrhistogram -> HdrHistogram 2.2.2
+    # Pin junit-vintage-engine to match the platform (1.13.4) that the rest of the
+    # JUnit graph resolves to. A transitive dep (pdf-test via flexmark-test) pulls
+    # in vintage 5.9.3, which uses junit-platform-commons 1.9.x — the resulting
+    # ClassFilter NoClassDefFoundError kills the TestRunner before any test runs.
+    - org.junit.vintage -> junit-vintage-engine 5.13.4
