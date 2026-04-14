@@ -53,12 +53,14 @@ describe('Chat page', () => {
     expect(component.text()).toContain('Kimi K2.5')
   })
 
-  it('renders thinking mode selector', async () => {
+  it('hides thinking selector for non-thinking models', async () => {
     setupChatApi()
     const component = await mountSuspended(Chat)
 
-    expect(component.text()).toContain('Thinking:')
-    expect(component.text()).toContain('Off')
+    // Both mock models have supportsThinking:false, so no Thinking: label should
+    // render in the toolbar — the per-model selector is only shown when the
+    // currently selected model advertises reasoning support.
+    expect(component.text()).not.toContain('Thinking:')
   })
 
   it('renders conversation sidebar', async () => {
@@ -102,5 +104,33 @@ describe('Chat page', () => {
     // There should be a hidden file input for attachments
     const fileInput = component.find('input[type="file"]')
     expect(fileInput.exists()).toBe(true)
+  })
+
+  // Kept LAST intentionally: registerEndpoint() persists across tests within a
+  // file, and this case overrides /api/agents + /api/config + /api/conversations
+  // with a thinking-capable fixture. Putting it at the end prevents leakage
+  // into unrelated tests above that expect the default non-thinking fixture.
+  it('renders thinking level selector for thinking-capable models', async () => {
+    registerEndpoint('/api/agents', () => [
+      { id: 1, name: 'reasoning-agent', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true, isMain: true, thinkingMode: 'medium', providerConfigured: true },
+    ])
+    registerEndpoint('/api/config', () => ({
+      entries: [
+        { key: 'provider.ollama-cloud.baseUrl', value: 'https://ollama.com/v1' },
+        { key: 'provider.ollama-cloud.apiKey', value: 'xxxx****' },
+        // Explicit thinkingLevels populate the dropdown; supportsThinking gates its visibility.
+        { key: 'provider.ollama-cloud.models', value: '[{"id":"kimi-k2.5","name":"Kimi K2.5","supportsThinking":true,"thinkingLevels":["low","medium","high"]}]' },
+      ]
+    }))
+    registerEndpoint('/api/conversations', () => [])
+
+    const component = await mountSuspended(Chat)
+
+    expect(component.text()).toContain('Thinking:')
+    expect(component.text()).toContain('Low')
+    expect(component.text()).toContain('Medium')
+    expect(component.text()).toContain('High')
+    // "Off" is the always-present first option for reasoning-capable models.
+    expect(component.text()).toContain('Off')
   })
 })

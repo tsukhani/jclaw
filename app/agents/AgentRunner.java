@@ -96,6 +96,28 @@ public class AgentRunner {
     }
 
     /**
+     * Resolve the reasoning-effort level this call should use. Combines the
+     * agent's persisted {@code thinkingMode} with the model's capability:
+     * the setting only takes effect when the model supports thinking and the
+     * stored level is still advertised by the model. Otherwise returns
+     * {@code null} (reasoning disabled).
+     *
+     * <p>The {@code null} path is not redundant with
+     * {@link services.AgentService#normalizeThinkingMode}: agents can persist a
+     * valid level today and see their model's levels change tomorrow (operator
+     * edits the provider config), and we prefer to silently disable reasoning
+     * rather than send a level the model no longer understands.
+     */
+    private static String resolveThinkingMode(Agent agent, LlmProvider provider) {
+        if (agent.thinkingMode == null || agent.thinkingMode.isBlank()) return null;
+        return resolveModelInfo(agent, provider)
+                .filter(ModelInfo::supportsThinking)
+                .filter(m -> m.effectiveThinkingLevels().contains(agent.thinkingMode))
+                .map(_ -> agent.thinkingMode)
+                .orElse(null);
+    }
+
+    /**
      * Run the agent synchronously. Returns the final assistant response.
      * JPA transactions are scoped to short Tx.run() blocks — no JDBC connection
      * is held during LLM HTTP calls or tool execution.
@@ -281,18 +303,19 @@ public class AgentRunner {
         messages = trimToContextWindow(messages, agent, primary);
 
         var tools = services.Tx.run(() -> ToolRegistry.getToolDefsForAgent(agent));
+        var thinkingMode = resolveThinkingMode(agent, primary);
         EventLogger.info("llm", agent.name, channelType,
                 "Streaming: calling %s / %s (%d messages, %d tools, %d skills%s)"
                         .formatted(primary.config().name(), agent.modelId,
                                 messages.size(), tools.size(), assembled.skills().size(),
-                                agent.thinkingMode != null ? ", thinking=" + agent.thinkingMode : ""));
+                                thinkingMode != null ? ", thinking=" + thinkingMode : ""));
         var maxTokens = effectiveMaxTokens(agent, primary);
         var modelInfo = resolveModelInfo(agent, primary).orElse(null);
 
         // Stream with tool call handling (HTTP, no JPA)
         var streamStartMs = System.currentTimeMillis();
         var accumulator = primary.chatStreamAccumulate(
-                agent.modelId, messages, tools, cb.onToken(), cb.onReasoning(), maxTokens, agent.thinkingMode);
+                agent.modelId, messages, tools, cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode);
 
         if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType)) return;
 
@@ -301,7 +324,7 @@ public class AgentRunner {
                 && accumulator.error.getMessage().contains("HTTP 5")) {
             EventLogger.warn("llm", agent.name, null, "Retrying streaming after transient error");
             accumulator = primary.chatStreamAccumulate(
-                    agent.modelId, messages, tools, cb.onToken(), cb.onReasoning(), maxTokens, agent.thinkingMode);
+                    agent.modelId, messages, tools, cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode);
             if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType)) return;
         }
 
@@ -334,7 +357,7 @@ public class AgentRunner {
         // Handle tool calls if present
         if (!accumulator.toolCalls.isEmpty()) {
             content = handleToolCallsStreaming(agent, conversation.id, messages, tools,
-                    accumulator.toolCalls, content, primary, cb, maxTokens, 0, isCancelled);
+                    accumulator.toolCalls, content, primary, cb, maxTokens, thinkingMode, 0, isCancelled);
         }
 
         if (checkCancelled(isCancelled, agent, channelType)) return;
@@ -421,13 +444,14 @@ public class AgentRunner {
                                             LlmProvider primary, LlmProvider secondary) {
         var currentMessages = new ArrayList<>(messages);
         var maxTokens = effectiveMaxTokens(agent, primary);
+        var thinkingMode = resolveThinkingMode(agent, primary);
 
         for (int round = 0; round < maxToolRounds(); round++) {
             ChatResponse response;
             try {
                 response = (secondary != null)
-                        ? LlmProvider.chatWithFailover(primary, secondary, agent.modelId, currentMessages, tools, maxTokens, agent.thinkingMode)
-                        : primary.chat(agent.modelId, currentMessages, tools, maxTokens, agent.thinkingMode);
+                        ? LlmProvider.chatWithFailover(primary, secondary, agent.modelId, currentMessages, tools, maxTokens, thinkingMode)
+                        : primary.chat(agent.modelId, currentMessages, tools, maxTokens, thinkingMode);
             } catch (Exception e) {
                 EventLogger.error("llm", agent.name, null, "LLM call failed: %s".formatted(e.getMessage()));
                 return "I'm sorry, I encountered an error communicating with the AI provider. Please try again.";
@@ -471,7 +495,7 @@ public class AgentRunner {
                                                     List<ToolCall> toolCalls, String priorContent,
                                                     LlmProvider provider,
                                                     StreamingCallbacks cb,
-                                                    Integer maxTokens,
+                                                    Integer maxTokens, String thinkingMode,
                                                     int round, AtomicBoolean isCancelled) {
         if (round >= maxToolRounds()) {
             return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
@@ -500,7 +524,7 @@ public class AgentRunner {
 
         // Continue with streaming after tool results
         var accumulator = provider.chatStreamAccumulate(
-                agent.modelId, currentMessages, tools, cb.onToken(), cb.onReasoning(), maxTokens, agent.thinkingMode);
+                agent.modelId, currentMessages, tools, cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode);
 
         try {
             if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, null)) return priorContent;
@@ -531,7 +555,7 @@ public class AgentRunner {
         // Recursively handle if more tool calls
         if (!accumulator.toolCalls.isEmpty()) {
             return handleToolCallsStreaming(agent, conversationId, currentMessages, tools,
-                    accumulator.toolCalls, accumulator.content, provider, cb, maxTokens, round + 1, isCancelled);
+                    accumulator.toolCalls, accumulator.content, provider, cb, maxTokens, thinkingMode, round + 1, isCancelled);
         }
 
         // Some models (especially smaller/distilled ones) occasionally return zero tokens
@@ -550,7 +574,7 @@ public class AgentRunner {
                             + "Do not call any more tools. Write the full answer as markdown."));
 
             var retry = provider.chatStreamAccumulate(
-                    agent.modelId, retryMessages, tools, cb.onToken(), cb.onReasoning(), maxTokens, agent.thinkingMode);
+                    agent.modelId, retryMessages, tools, cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode);
             try {
                 if (!awaitAccumulatorOrCancel(retry, isCancelled, agent, null)) return priorContent;
             } catch (InterruptedException e) {

@@ -185,9 +185,24 @@ public final class LlmTypes {
     ) {}
 
     /**
+     * Default reasoning-effort levels assumed when a thinking-capable model does
+     * not declare its own {@code thinkingLevels}. Matches the OpenAI/Ollama
+     * {@code reasoning_effort} enum. OpenRouter-routed effort-style models
+     * additionally accept {@code "minimal"} and {@code "xhigh"}; seed those in
+     * {@code thinkingLevels} per-model when the provider supports them.
+     */
+    public static final List<String> DEFAULT_THINKING_LEVELS = List.of("low", "medium", "high");
+
+    /**
      * Model metadata including pricing. Pricing fields use {@code double} defaults
      * of {@code -1} to distinguish "not provided" from "free" ({@code 0.0}).
      * Values are per-million tokens, matching the convention in provider config JSON.
+     *
+     * <p>{@code thinkingLevels} enumerates the reasoning-effort values the model
+     * accepts (e.g. {@code ["low","medium","high"]}, or the OpenRouter-extended
+     * {@code ["minimal","low","medium","high","xhigh"]}). A {@code null} or empty
+     * list is equivalent to {@link #DEFAULT_THINKING_LEVELS} when
+     * {@code supportsThinking} is true, and meaningless otherwise.
      */
     public record ModelInfo(
             String id,
@@ -198,11 +213,31 @@ public final class LlmTypes {
             double promptPrice,
             double completionPrice,
             double cachedReadPrice,
-            double cacheWritePrice
+            double cacheWritePrice,
+            List<String> thinkingLevels
     ) {
         /** Backwards-compatible factory for callers that don't have pricing data. */
         public ModelInfo(String id, String name, int contextWindow, int maxTokens, boolean supportsThinking) {
-            this(id, name, contextWindow, maxTokens, supportsThinking, -1, -1, -1, -1);
+            this(id, name, contextWindow, maxTokens, supportsThinking, -1, -1, -1, -1, null);
+        }
+
+        /** Backwards-compatible factory for callers that have pricing but no explicit thinking levels. */
+        public ModelInfo(String id, String name, int contextWindow, int maxTokens, boolean supportsThinking,
+                         double promptPrice, double completionPrice,
+                         double cachedReadPrice, double cacheWritePrice) {
+            this(id, name, contextWindow, maxTokens, supportsThinking,
+                    promptPrice, completionPrice, cachedReadPrice, cacheWritePrice, null);
+        }
+
+        /**
+         * Resolve the effective list of reasoning-effort levels this model accepts.
+         * Returns the model's explicit list when non-empty, otherwise
+         * {@link #DEFAULT_THINKING_LEVELS} for thinking-capable models, otherwise
+         * an empty list.
+         */
+        public List<String> effectiveThinkingLevels() {
+            if (thinkingLevels != null && !thinkingLevels.isEmpty()) return thinkingLevels;
+            return supportsThinking ? DEFAULT_THINKING_LEVELS : List.of();
         }
     }
 }

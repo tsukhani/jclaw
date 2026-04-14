@@ -44,10 +44,13 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("provider.ollama-cloud.baseUrl", "https://ollama.com/v1");
         seedIfAbsent("provider.ollama-cloud.apiKey", "");
         seedIfAbsent("provider.ollama-cloud.leaderboardUrl", "");
+        // Ollama's /v1 endpoint accepts reasoning_effort: low|medium|high (plus "none",
+        // which we model on the client side as null). Kimi and Qwen both expose the
+        // full gradient; OpenAI-style providers may add "minimal"/"xhigh" for their
+        // effort-based models (GPT-5, Grok) — seed those per-model when applicable.
         seedIfAbsent("provider.ollama-cloud.models", """
-                [{"id":"qwen3.5","name":"Qwen 3.5","contextWindow":262144,"maxTokens":65535},\
-                {"id":"kimi-k2.5","name":"Kimi K2.5","contextWindow":262144,"maxTokens":65535},\
-                {"id":"gemma4:31b-cloud","name":"Gemma 4 31B","contextWindow":266000,"maxTokens":32768}]""");
+                [{"id":"qwen3.5","name":"Qwen 3.5","contextWindow":262144,"maxTokens":65535,"supportsThinking":true,"thinkingLevels":["low","medium","high"]},\
+                {"id":"kimi-k2.5","name":"Kimi K2.5","contextWindow":262144,"maxTokens":65535,"supportsThinking":true,"thinkingLevels":["low","medium","high"]}]""");
 
         seedIfAbsent("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
         seedIfAbsent("provider.openrouter.apiKey", "");
@@ -124,7 +127,7 @@ public class DefaultConfigJob extends Job<Void> {
 
     private void seedDefaultAgent() {
         if (Agent.findByName("main") == null) {
-            AgentService.create("main", "ollama-cloud", "kimi-k2.5", null);
+            AgentService.create("main", "ollama-cloud", "kimi-k2.5");
             EventLogger.info("agent", "main", null, "Default agent 'main' created");
         }
         // Always reset the built-in agent's workspace to match tracked files

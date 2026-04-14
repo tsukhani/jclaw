@@ -8,6 +8,7 @@ export interface Agent {
   modelId: string
   enabled: boolean
   isMain: boolean
+  /** Persisted reasoning-effort level ("low" | "medium" | "high" | provider-specific), or null when reasoning is off. */
   thinkingMode: string | null
 }
 

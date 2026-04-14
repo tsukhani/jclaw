@@ -19,7 +19,7 @@ public class ShellExecToolTest extends UnitTest {
         Fixtures.deleteDatabase();
         cleanupTestAgent();
         tool = new ShellExecTool();
-        agent = AgentService.create("shell-test-agent", "openrouter", "gpt-4.1", null);
+        agent = AgentService.create("shell-test-agent", "openrouter", "gpt-4.1");
         // Seed allowlist
         ConfigService.set("shell.allowlist", "echo,ls,cat,git,head,sleep,pwd,printenv,exit,sh,wc,grep");
     }
@@ -240,7 +240,7 @@ public class ShellExecToolTest extends UnitTest {
 
     @Test
     public void mainAgentBypassesAllowlistWhenConfigured() {
-        var mainAgent = AgentService.create("main", "openrouter", "gpt-4.1", null);
+        var mainAgent = AgentService.create("main", "openrouter", "gpt-4.1");
         ConfigService.set("agent.main.shell.bypassAllowlist", "true");
 
         // whoami is NOT in the allowlist; with bypass on, it must slip past the allowlist check
@@ -266,7 +266,7 @@ public class ShellExecToolTest extends UnitTest {
 
     @Test
     public void mainAgentUsesAbsoluteWorkdirWhenConfigured() {
-        var mainAgent = AgentService.create("main", "openrouter", "gpt-4.1", null);
+        var mainAgent = AgentService.create("main", "openrouter", "gpt-4.1");
         ConfigService.set("agent.main.shell.allowGlobalPaths", "true");
 
         var result = tool.execute("""
@@ -291,7 +291,7 @@ public class ShellExecToolTest extends UnitTest {
     @Test
     public void mainAgentWithoutPrivilegeConfigStillRejected() {
         // Main agent without the bypass config set: must still hit the allowlist
-        var mainAgent = AgentService.create("main", "openrouter", "gpt-4.1", null);
+        var mainAgent = AgentService.create("main", "openrouter", "gpt-4.1");
 
         var result = tool.execute("""
                 {"command": "whoami"}

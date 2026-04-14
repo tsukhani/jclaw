@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Agent, ConfigResponse } from '~/types/api'
+import { effectiveThinkingLevels } from '~/composables/useProviders'
 
 const { confirm } = useConfirm()
 
@@ -127,11 +128,14 @@ const availableModels = computed(() => {
   return provider?.models ?? []
 })
 
-// Whether the selected model supports thinking/reasoning
-const selectedModelSupportsThinking = computed(() => {
-  const model = availableModels.value.find((m: any) => m.id === form.value.modelId)
-  return model?.supportsThinking === true
-})
+// The currently selected model's full metadata — drives the thinking-level dropdown.
+const selectedModel = computed(() =>
+  availableModels.value.find((m: any) => m.id === form.value.modelId) ?? null
+)
+
+// Thinking levels the selected provider+model pair accepts. Empty when the
+// model doesn't support reasoning — the UI hides the selector in that case.
+const thinkingLevels = computed<string[]>(() => effectiveThinkingLevels(selectedModel.value as any))
 
 // Whether the selected provider is configured and the selected model is available
 const providerValid = computed(() => {
@@ -155,7 +159,7 @@ function editAgent(agent: any) {
     modelProvider: agent.modelProvider,
     modelId: agent.modelId,
     enabled: agent.enabled,
-    thinkingMode: agent.thinkingMode || ''
+    thinkingMode: agent.thinkingMode ?? ''
   }
   editing.value = agent
   creating.value = false
@@ -165,6 +169,15 @@ function editAgent(agent: any) {
   loadQueueMode(agent.name)
   loadExecConfig(agent.name)
 }
+
+// When the selected model changes, drop a thinking mode the new model doesn't
+// advertise. Prevents submitting a stale level (e.g. "xhigh" after swapping
+// from GPT-5 to Kimi) that would be silently normalized to null server-side.
+watch(() => [form.value.modelProvider, form.value.modelId], () => {
+  if (form.value.thinkingMode && !thinkingLevels.value.includes(form.value.thinkingMode)) {
+    form.value.thinkingMode = ''
+  }
+})
 
 async function loadAgentTools(agentId: number) {
   try {
@@ -286,20 +299,21 @@ watch(() => form.value.modelProvider, (newProvider) => {
   }
 })
 
-// Clear thinking mode if selected model doesn't support it
-watch(() => form.value.modelId, () => {
-  if (!selectedModelSupportsThinking.value) {
-    form.value.thinkingMode = ''
-  }
-})
 
 async function saveAgent() {
   saving.value = true
   try {
+    // Empty string means "reasoning off" — send null so the backend clears the
+    // column. The model also collapses unknown levels to null defensively, but
+    // normalizing on the way out keeps the wire payload honest.
+    const payload = {
+      ...form.value,
+      thinkingMode: form.value.thinkingMode || null,
+    }
     if (creating.value) {
-      await $fetch('/api/agents', { method: 'POST', body: form.value })
+      await $fetch('/api/agents', { method: 'POST', body: payload })
     } else if (editing.value) {
-      await $fetch(`/api/agents/${editing.value.id}`, { method: 'PUT', body: form.value })
+      await $fetch(`/api/agents/${editing.value.id}`, { method: 'PUT', body: payload })
     }
     editing.value = null
     creating.value = false
@@ -529,15 +543,29 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
               </option>
             </select>
           </div>
+          <!--
+            Thinking mode selector. The available options come from the selected
+            model's `thinkingLevels` metadata (falling back to low/medium/high for
+            any thinking-capable model that doesn't declare its own). Non-thinking
+            models render the selector disabled with "Not supported" so the agent
+            form shape stays consistent across rows.
+          -->
           <div>
-            <label class="block text-xs text-neutral-500 mb-1" :class="{ 'opacity-40': !selectedModelSupportsThinking }">Thinking Mode</label>
-            <select v-model="form.thinkingMode" :disabled="!selectedModelSupportsThinking"
+            <label class="block text-xs text-neutral-500 mb-1"
+                   :class="{ 'opacity-40': !thinkingLevels.length }">
+              Thinking
+            </label>
+            <select v-model="form.thinkingMode"
+                    :disabled="!thinkingLevels.length"
                     class="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none focus:border-neutral-600
                            disabled:opacity-40 disabled:cursor-not-allowed">
-              <option value="">Off</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
+              <option v-if="!thinkingLevels.length" value="">Not supported</option>
+              <template v-else>
+                <option value="">Off</option>
+                <option v-for="level in thinkingLevels" :key="level" :value="level">
+                  {{ level.charAt(0).toUpperCase() + level.slice(1) }}
+                </option>
+              </template>
             </select>
           </div>
         </div>

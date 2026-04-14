@@ -24,6 +24,13 @@ public class Agent extends Model {
     @Column(nullable = false)
     public boolean enabled = true;
 
+    /**
+     * Reasoning-effort level for this agent, or {@code null} when reasoning is
+     * disabled (or the model doesn't support it). Must be one of the values
+     * advertised by the selected model's {@code thinkingLevels}; the API layer
+     * is responsible for validating against the active provider/model pair —
+     * this column just persists the operator's choice verbatim.
+     */
     @Column(name = "thinking_mode")
     public String thinkingMode;
 

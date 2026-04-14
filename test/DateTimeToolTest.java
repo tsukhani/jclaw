@@ -13,7 +13,7 @@ public class DateTimeToolTest extends UnitTest {
     void setup() {
         Fixtures.deleteDatabase();
         tool = new DateTimeTool();
-        agent = AgentService.create("datetime-test-agent", "openrouter", "gpt-4.1", null);
+        agent = AgentService.create("datetime-test-agent", "openrouter", "gpt-4.1");
     }
 
     @AfterAll

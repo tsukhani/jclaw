@@ -59,11 +59,23 @@ public class ApiAgentsController extends Controller {
         }
         var modelProvider = body.get("modelProvider").getAsString();
         var modelId = body.get("modelId").getAsString();
-        var thinkingMode = body.has("thinkingMode") && !body.get("thinkingMode").isJsonNull()
-                ? body.get("thinkingMode").getAsString() : null;
+        var thinkingMode = readOptionalString(body, "thinkingMode");
 
         var agent = AgentService.create(name, modelProvider, modelId, thinkingMode);
         renderJSON(gson.toJson(AgentView.of(agent)));
+    }
+
+    /**
+     * Read a JSON string field that may be missing, null, or blank, returning
+     * {@code null} in all of those cases. Used for optional nullable fields
+     * like {@code thinkingMode} where the frontend sends {@code null} to clear.
+     */
+    private static String readOptionalString(com.google.gson.JsonObject body, String key) {
+        if (!body.has(key)) return null;
+        var el = body.get(key);
+        if (el.isJsonNull()) return null;
+        var s = el.getAsString();
+        return (s == null || s.isBlank()) ? null : s;
     }
 
     public static void update(Long id) {
@@ -91,8 +103,12 @@ public class ApiAgentsController extends Controller {
         if (agent.isMain() && !enabled) {
             error(409, "The main agent cannot be disabled");
         }
+
+        // thinkingMode is optional on update: absent key leaves the stored value
+        // untouched, explicit null/blank clears it, any other string is validated
+        // downstream against the model's advertised levels.
         var thinkingMode = body.has("thinkingMode")
-                ? (body.get("thinkingMode").isJsonNull() ? null : body.get("thinkingMode").getAsString())
+                ? readOptionalString(body, "thinkingMode")
                 : agent.thinkingMode;
 
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode);

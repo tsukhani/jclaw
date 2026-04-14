@@ -28,7 +28,7 @@ public class ToolSystemTest extends UnitTest {
                 new TaskTool(), new CheckListTool(), new FileSystemTools(),
                 new WebFetchTool(), new SkillsTool()
         ));
-        agent = AgentService.create("tool-test-agent", "openrouter", "gpt-4.1", null);
+        agent = AgentService.create("tool-test-agent", "openrouter", "gpt-4.1");
     }
 
     /** Publish the base tools plus additional ones for tests that need them. */

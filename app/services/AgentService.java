@@ -44,6 +44,10 @@ public class AgentService {
         }
     }
 
+    public static Agent create(String name, String modelProvider, String modelId) {
+        return create(name, modelProvider, modelId, null);
+    }
+
     public static Agent create(String name, String modelProvider, String modelId, String thinkingMode) {
         var agent = new Agent();
         agent.name = name;
@@ -54,7 +58,7 @@ public class AgentService {
         // the web chat default selection. Provider misconfiguration will surface as
         // a runtime error at call time, not as a silent disabled state.
         agent.enabled = agent.isMain() || isProviderConfigured(modelProvider, modelId);
-        agent.thinkingMode = thinkingMode;
+        agent.thinkingMode = normalizeThinkingMode(thinkingMode, modelProvider, modelId);
         agent.save();
 
         createWorkspace(name);
@@ -74,6 +78,11 @@ public class AgentService {
     }
 
     public static Agent update(Agent agent, String name, String modelProvider, String modelId,
+                                boolean enabled) {
+        return update(agent, name, modelProvider, modelId, enabled, agent.thinkingMode);
+    }
+
+    public static Agent update(Agent agent, String name, String modelProvider, String modelId,
                                 boolean enabled, String thinkingMode) {
         agent.name = name;
         agent.modelProvider = modelProvider;
@@ -83,9 +92,29 @@ public class AgentService {
         // tries to toggle it off is either a bug or a pre-guard bypass, and the API
         // layer additionally rejects such requests with 409 in ApiAgentsController.
         agent.enabled = agent.isMain() || (enabled && isProviderConfigured(modelProvider, modelId));
-        agent.thinkingMode = thinkingMode;
+        agent.thinkingMode = normalizeThinkingMode(thinkingMode, modelProvider, modelId);
         agent.save();
         return agent;
+    }
+
+    /**
+     * Validate a requested thinking mode against the model's advertised levels.
+     * Null/blank clears the setting. Unknown levels for a non-thinking model
+     * collapse to null (silent drop — the model can't reason anyway). Unknown
+     * levels for a thinking model also collapse to null rather than 500-ing,
+     * which protects against stale frontend state after a model swap.
+     */
+    private static String normalizeThinkingMode(String requested, String modelProvider, String modelId) {
+        if (requested == null || requested.isBlank()) return null;
+        var provider = ProviderRegistry.get(modelProvider);
+        if (provider == null) return null;
+        var model = provider.config().models().stream()
+                .filter(m -> m.id().equals(modelId))
+                .findFirst()
+                .orElse(null);
+        if (model == null) return null;
+        var levels = model.effectiveThinkingLevels();
+        return levels.contains(requested) ? requested : null;
     }
 
     /** Check whether the given provider+model combination is currently configured and available. */

@@ -4,7 +4,19 @@ export interface ProviderModel {
   id: string
   name?: string
   supportsThinking?: boolean
+  /** Reasoning-effort levels this model accepts, e.g. ["low","medium","high"]. */
+  thinkingLevels?: string[]
   [key: string]: unknown
+}
+
+/** Fallback thinking levels used when a thinking-capable model doesn't declare its own. Mirrors backend LlmTypes.DEFAULT_THINKING_LEVELS. */
+export const DEFAULT_THINKING_LEVELS = ['low', 'medium', 'high'] as const
+
+/** Resolve the effective thinking levels for a model, applying the default fallback. */
+export function effectiveThinkingLevels(model: ProviderModel | null | undefined): string[] {
+  if (!model) return []
+  if (model.thinkingLevels && model.thinkingLevels.length) return model.thinkingLevels
+  return model.supportsThinking ? [...DEFAULT_THINKING_LEVELS] : []
 }
 
 export interface Provider {

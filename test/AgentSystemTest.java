@@ -37,8 +37,39 @@ public class AgentSystemTest extends UnitTest {
     // --- AgentService tests ---
 
     @Test
+    public void thinkingModeIsPersistedWhenModelAdvertisesLevel() {
+        // Seed an Ollama provider whose model declares all three levels, then
+        // verify the agent row captures the chosen level verbatim.
+        ConfigService.set("provider.ollama-cloud.baseUrl", "https://ollama.com/v1");
+        ConfigService.set("provider.ollama-cloud.apiKey", "test-key");
+        ConfigService.set("provider.ollama-cloud.models",
+                "[{\"id\":\"kimi-k2.5\",\"name\":\"Kimi K2.5\",\"supportsThinking\":true,"
+                + "\"thinkingLevels\":[\"low\",\"medium\",\"high\"]}]");
+        llm.ProviderRegistry.refresh();
+
+        var agent = AgentService.create("thinker", "ollama-cloud", "kimi-k2.5", "medium");
+        assertEquals("medium", agent.thinkingMode);
+    }
+
+    @Test
+    public void thinkingModeUnknownLevelCollapsesToNull() {
+        // A level the model doesn't advertise must be silently dropped rather than
+        // persisted — we'd otherwise send a bogus value on every LLM call.
+        ConfigService.set("provider.ollama-cloud.baseUrl", "https://ollama.com/v1");
+        ConfigService.set("provider.ollama-cloud.apiKey", "test-key");
+        ConfigService.set("provider.ollama-cloud.models",
+                "[{\"id\":\"kimi-k2.5\",\"name\":\"Kimi K2.5\",\"supportsThinking\":true,"
+                + "\"thinkingLevels\":[\"low\",\"medium\",\"high\"]}]");
+        llm.ProviderRegistry.refresh();
+
+        var agent = AgentService.create("thinker", "ollama-cloud", "kimi-k2.5", "xhigh");
+        assertNull(agent.thinkingMode,
+                "Unknown thinking levels should collapse to null, not be persisted");
+    }
+
+    @Test
     public void createAgentCreatesWorkspace() {
-        var agent = AgentService.create("test-agent", "openrouter", "gpt-4.1", null);
+        var agent = AgentService.create("test-agent", "openrouter", "gpt-4.1");
         assertNotNull(agent);
         assertEquals("test-agent", agent.name);
         assertFalse(agent.isMain());
@@ -53,7 +84,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void readAndWriteWorkspaceFile() {
-        AgentService.create("ws-agent", "openrouter", "gpt-4.1", null);
+        AgentService.create("ws-agent", "openrouter", "gpt-4.1");
 
         AgentService.writeWorkspaceFile("ws-agent", "AGENT.md", "# Custom Instructions\nBe helpful.");
         var content = AgentService.readWorkspaceFile("ws-agent", "AGENT.md");
@@ -63,17 +94,17 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void readMissingWorkspaceFileReturnsNull() {
-        AgentService.create("missing-agent", "openrouter", "gpt-4.1", null);
+        AgentService.create("missing-agent", "openrouter", "gpt-4.1");
         var content = AgentService.readWorkspaceFile("missing-agent", "NONEXISTENT.md");
         assertNull(content);
     }
 
     @Test
     public void listEnabledFiltersDisabled() {
-        var agent1 = AgentService.create("enabled-1", "openrouter", "gpt-4.1", null);
+        var agent1 = AgentService.create("enabled-1", "openrouter", "gpt-4.1");
         agent1.enabled = true;
         agent1.save();
-        var agent2 = AgentService.create("disabled-1", "openrouter", "gpt-4.1", null);
+        var agent2 = AgentService.create("disabled-1", "openrouter", "gpt-4.1");
         agent2.enabled = false;
         agent2.save();
 
@@ -88,7 +119,7 @@ public class AgentSystemTest extends UnitTest {
     public void mainAgentIsCreatedEnabledEvenWithUnconfiguredProvider() {
         // Use a provider that's definitely not configured in tests — main should
         // still be created as enabled because the invariant is "main is always enabled."
-        var main = AgentService.create("main", "nonexistent-provider", "nonexistent-model", null);
+        var main = AgentService.create("main", "nonexistent-provider", "nonexistent-model");
         assertTrue(main.isMain());
         assertTrue(main.enabled,
                 "Main agent must be enabled at creation regardless of provider config");
@@ -96,16 +127,16 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void mainAgentUpdateForcesEnabledTrue() {
-        var main = AgentService.create("main", "openrouter", "gpt-4.1", null);
+        var main = AgentService.create("main", "openrouter", "gpt-4.1");
         // Simulate a caller passing enabled=false — service layer must override it.
-        var updated = AgentService.update(main, "main", "openrouter", "gpt-4.1", false, null);
+        var updated = AgentService.update(main, "main", "openrouter", "gpt-4.1", false);
         assertTrue(updated.enabled,
                 "AgentService.update must ignore enabled=false for the main agent");
     }
 
     @Test
     public void mainAgentSurvivesSyncEnabledStatesWithNoProvider() {
-        var main = AgentService.create("main", "nonexistent-provider", "nonexistent-model", null);
+        var main = AgentService.create("main", "nonexistent-provider", "nonexistent-model");
         assertTrue(main.enabled); // created enabled per the invariant above
 
         // syncEnabledStates would normally disable agents whose provider isn't
@@ -122,7 +153,7 @@ public class AgentSystemTest extends UnitTest {
     public void mainAgentSyncHealsADisabledMainRow() {
         // If main was ever persisted as disabled (e.g. by a pre-fix boot), sync
         // must heal it on the next pass rather than leave it broken.
-        var main = AgentService.create("main", "openrouter", "gpt-4.1", null);
+        var main = AgentService.create("main", "openrouter", "gpt-4.1");
         main.enabled = false;
         main.save();
 
@@ -136,7 +167,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void loadSkillsFromFilesystem() {
-        var agent = AgentService.create("skill-agent", "openrouter", "gpt-4.1", null);
+        var agent = AgentService.create("skill-agent", "openrouter", "gpt-4.1");
 
         // Create a skill file in the agent's workspace
         var skillDir = AgentService.workspacePath("skill-agent").resolve("skills").resolve("coding");
@@ -161,7 +192,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void loadSkillsReturnsEmptyForNoSkills() {
-        AgentService.create("no-skills", "openrouter", "gpt-4.1", null);
+        AgentService.create("no-skills", "openrouter", "gpt-4.1");
         SkillLoader.clearCache();
         var skills = SkillLoader.loadSkills("no-skills");
         assertTrue(skills.isEmpty());
@@ -169,7 +200,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void formatSkillsXmlContainsSkillData() {
-        var agent = AgentService.create("xml-agent", "openrouter", "gpt-4.1", null);
+        var agent = AgentService.create("xml-agent", "openrouter", "gpt-4.1");
 
         // Create a skill file in the agent's workspace
         var skillDir = AgentService.workspacePath("xml-agent").resolve("skills").resolve("research");
@@ -204,7 +235,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void findOrCreateConversation() {
-        var agent = AgentService.create("convo-agent", "openrouter", "gpt-4.1", null);
+        var agent = AgentService.create("convo-agent", "openrouter", "gpt-4.1");
         var convo1 = ConversationService.findOrCreate(agent, "web", "admin");
         assertNotNull(convo1);
 
@@ -214,7 +245,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void appendAndLoadMessages() {
-        var agent = AgentService.create("msg-agent", "openrouter", "gpt-4.1", null);
+        var agent = AgentService.create("msg-agent", "openrouter", "gpt-4.1");
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
 
         ConversationService.appendUserMessage(convo, "Hello");
@@ -232,7 +263,7 @@ public class AgentSystemTest extends UnitTest {
     @Test
     public void loadRecentMessagesRespectsChatMaxContextMessages() {
         ConfigService.set("chat.maxContextMessages", "3");
-        var agent = AgentService.create("window-agent", "openrouter", "gpt-4.1", null);
+        var agent = AgentService.create("window-agent", "openrouter", "gpt-4.1");
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
 
         for (int i = 1; i <= 5; i++) {
@@ -277,7 +308,7 @@ public class AgentSystemTest extends UnitTest {
         // Seed an agent plus one row in every FK-constrained child table so the delete
         // path has to clear each one. Creation itself writes an AgentToolConfig (the
         // seeded "browser=disabled" for non-main agents), so that table is pre-populated.
-        var agent = AgentService.create("delete-agent", "openrouter", "gpt-4.1", null);
+        var agent = AgentService.create("delete-agent", "openrouter", "gpt-4.1");
 
         var skillConfig = new models.AgentSkillConfig();
         skillConfig.agent = agent;
@@ -347,7 +378,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void assembleIncludesWorkspaceFiles() {
-        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1", null);
+        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile("prompt-agent", "AGENT.md", "# Be helpful and concise");
 
         var assembled = SystemPromptAssembler.assemble(agent, "test query");
@@ -368,7 +399,7 @@ public class AgentSystemTest extends UnitTest {
      */
     @Test
     public void assembleIsStableAcrossCallsWithSameInputs() {
-        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1", null);
+        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile("prompt-agent", "AGENT.md", "# Be stable");
 
         var first = SystemPromptAssembler.assemble(agent, "same user message");
@@ -383,7 +414,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void assembleSkipsOptionalFiles() {
-        var agent = AgentService.create("minimal-agent", "openrouter", "gpt-4.1", null);
+        var agent = AgentService.create("minimal-agent", "openrouter", "gpt-4.1");
         // Delete optional files
         try {
             Files.deleteIfExists(AgentService.workspacePath("minimal-agent").resolve("IDENTITY.md"));
@@ -398,7 +429,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void assembleIncludesSafetyAndExecutionBias() {
-        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1", null);
+        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1");
         var prompt = SystemPromptAssembler.assemble(agent, "test").systemPrompt();
         assertTrue(prompt.contains("## Safety"), "must include Safety section");
         assertTrue(prompt.contains("no self-preservation interest"),
@@ -410,7 +441,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void assembleEnvironmentIncludesModelAndRuntime() {
-        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1-new", null);
+        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1-new");
         var prompt = SystemPromptAssembler.assemble(agent, "test").systemPrompt();
         assertTrue(prompt.contains("Model: gpt-4.1-new"), "must expose the agent model id");
         assertTrue(prompt.contains("JClaw version:"), "must expose the app version");
@@ -425,7 +456,7 @@ public class AgentSystemTest extends UnitTest {
      */
     @Test
     public void breakdownMatchesAssembledPrompt() {
-        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1", null);
+        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile("prompt-agent", "AGENT.md", "# Be helpful");
 
         var assembled = SystemPromptAssembler.assemble(agent, null).systemPrompt();
@@ -466,7 +497,7 @@ public class AgentSystemTest extends UnitTest {
      */
     @Test
     public void assembleCacheBoundaryKeepsPrefixStable() {
-        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1", null);
+        var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1");
 
         var first = SystemPromptAssembler.assemble(agent, "first user message").systemPrompt();
         var second = SystemPromptAssembler.assemble(agent, "entirely different request").systemPrompt();

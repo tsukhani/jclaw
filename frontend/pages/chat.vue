@@ -90,6 +90,7 @@ function formatTimestamp(iso: string): string {
 }
 
 import type { Agent, Conversation, Message, ConfigResponse } from '~/types/api'
+import { effectiveThinkingLevels } from '~/composables/useProviders'
 
 const { data: agents, refresh: refreshAgents } = await useFetch<Agent[]>('/api/agents')
 const { data: configData } = await useFetch<ConfigResponse>('/api/config')
@@ -128,6 +129,10 @@ const selectedModelKey = computed(() => {
 // Whether the selected model supports thinking
 const thinkingSupported = computed(() => selectedModelInfo.value?.supportsThinking === true)
 
+// Thinking levels advertised by the currently selected model. Empty for
+// non-thinking models — the toolbar hides the selector in that case.
+const thinkingLevels = computed<string[]>(() => effectiveThinkingLevels(selectedModelInfo.value as any))
+
 // Sync model or thinking mode change back to the agent
 async function updateAgentSetting(updates: Record<string, any>) {
   if (!selectedAgentId.value) return
@@ -149,19 +154,27 @@ function onModelChange(event: Event) {
   // lands atomically; sending only modelId would leave the agent pointing a
   // stale modelProvider at a model that doesn't exist there.
   const updates: Record<string, any> = { modelProvider, modelId }
-  // Clear thinking mode if new model doesn't support it
-  if (!model?.supportsThinking) {
+  // If the new model doesn't advertise the current thinking level, clear it in
+  // the same PUT so the backend doesn't have to normalize the mismatch. The
+  // backend also collapses unknown levels to null defensively, but sending the
+  // cleared value keeps the optimistic UI and the persisted state aligned.
+  const nextLevels = effectiveThinkingLevels(model as any)
+  const current = selectedAgent.value?.thinkingMode
+  if (current && !nextLevels.includes(current)) {
     updates.thinkingMode = null
   }
   updateAgentSetting(updates)
 }
 
 function onThinkingModeChange(event: Event) {
-  const val = (event.target as HTMLSelectElement).value
-  updateAgentSetting({ thinkingMode: val || null })
-  // Auto-toggle thinking display to match
-  showThinking.value = !!val
+  const value = (event.target as HTMLSelectElement).value
+  // Empty string is "off" — send null so the backend clears the column.
+  updateAgentSetting({ thinkingMode: value || null })
+  // Auto-reveal the thinking panel when reasoning is turned on, so streamed
+  // reasoning tokens aren't silently hidden behind a collapsed toggle.
+  if (value) showThinking.value = true
 }
+
 
 const conversationsUrl = computed(() =>
   selectedAgentId.value
@@ -211,8 +224,8 @@ async function editUserMessage(msg: any) {
 const agentBusy = ref(false)
 const streamContent = ref('')
 const streamReasoning = ref('')
-// Default thinking display to match whether the agent has thinking enabled
-const showThinking = ref(false)
+// Default thinking display on; model capability gates whether the panel renders
+const showThinking = ref(true)
 const messagesEl = ref<HTMLElement | null>(null)
 const abortController = ref<AbortController | null>(null)
 const sidebarWidth = ref(224) // 14rem = 224px (matches w-56)
@@ -323,12 +336,10 @@ watch(agents, (val) => {
   }
 }, { immediate: true })
 
-// When agent changes, clear current conversation and sync thinking toggle
+// When agent changes, clear current conversation
 watch(selectedAgentId, () => {
   selectedConvoId.value = null
   messages.value = []
-  const agent = agents.value?.find((a: any) => a.id === selectedAgentId.value)
-  showThinking.value = !!agent?.thinkingMode
 })
 
 async function loadConversation(id: number) {
@@ -664,20 +675,28 @@ function exportConversation() {
           </optgroup>
         </select>
 
-        <label class="text-xs text-neutral-500" :class="{ 'opacity-40': !thinkingSupported }">Thinking:</label>
-        <select
-          :value="selectedAgent?.thinkingMode || ''"
-          @change="onThinkingModeChange"
-          :disabled="!thinkingSupported"
-          class="bg-neutral-800 border border-neutral-700 text-sm text-white px-2 py-1
-                 focus:outline-none focus:border-neutral-600
-                 disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          <option value="">Off</option>
-          <option value="low">Low</option>
-          <option value="medium">Medium</option>
-          <option value="high">High</option>
-        </select>
+        <!--
+          Thinking-level selector. Options come from the selected model's
+          `thinkingLevels` metadata, so switching from an Ollama model (3 levels)
+          to an OpenAI o-series on OpenRouter (up to 5 levels) re-populates in
+          place. Hidden entirely for non-thinking models — the agent detail
+          page renders a disabled placeholder, but the chat toolbar prioritizes
+          compactness since non-reasoning is the common case.
+        -->
+        <template v-if="thinkingSupported && thinkingLevels.length">
+          <label class="text-xs text-neutral-500">Thinking:</label>
+          <select
+            :value="selectedAgent?.thinkingMode || ''"
+            @change="onThinkingModeChange"
+            class="bg-neutral-800 border border-neutral-700 text-sm text-white px-2 py-1
+                   focus:outline-none focus:border-neutral-600"
+          >
+            <option value="">Off</option>
+            <option v-for="level in thinkingLevels" :key="level" :value="level">
+              {{ level.charAt(0).toUpperCase() + level.slice(1) }}
+            </option>
+          </select>
+        </template>
 
         <button v-if="thinkingSupported" @click="showThinking = !showThinking"
                 :class="showThinking ? 'text-blue-400' : 'text-neutral-600'"

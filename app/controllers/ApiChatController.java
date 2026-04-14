@@ -215,8 +215,20 @@ public class ApiChatController extends Controller {
         var callbacks = new AgentRunner.StreamingCallbacks(
                 conversation -> {
                     var initData = new java.util.HashMap<>(Map.of("type", "init", "conversationId", conversation.id));
+                    // Use the agent's persisted thinking mode, gated by the model's
+                    // current capability — same semantics as AgentRunner so the UI
+                    // reflects what the LLM will actually receive.
                     if (agent.thinkingMode != null && !agent.thinkingMode.isBlank()) {
-                        initData.put("thinkingMode", agent.thinkingMode);
+                        var provider = llm.ProviderRegistry.get(agent.modelProvider);
+                        if (provider != null) {
+                            var valid = provider.config().models().stream()
+                                    .filter(m -> m.id().equals(agent.modelId))
+                                    .findFirst()
+                                    .filter(llm.LlmTypes.ModelInfo::supportsThinking)
+                                    .map(m -> m.effectiveThinkingLevels().contains(agent.thinkingMode))
+                                    .orElse(false);
+                            if (valid) initData.put("thinkingMode", agent.thinkingMode);
+                        }
                     }
                     writeSse(res, cancelled, latch, initData, false);
                 },

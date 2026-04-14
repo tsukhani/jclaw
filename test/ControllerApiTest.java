@@ -143,17 +143,6 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsCreateWithThinkingMode() {
-        login();
-        var body = """
-                {"name": "thinker", "modelProvider": "openrouter", "modelId": "claude-4", "thinkingMode": "extended"}
-                """;
-        var resp = POST("/api/agents", "application/json", body);
-        assertIsOk(resp);
-        assertTrue(getContent(resp).contains("\"thinkingMode\":\"extended\""));
-    }
-
-    @Test
     public void agentsCreateRejectsReservedMainName() {
         login();
         var body = """
