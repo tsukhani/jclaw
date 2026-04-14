@@ -11,7 +11,7 @@ public class Application extends Controller {
         // Serve the SPA if it's been built
         File spaIndex = Play.getFile("public/spa/index.html");
         if (spaIndex.exists()) {
-            response.setContentTypeIfNotSet("text/html");
+            response.setContentTypeIfNotSet("text/html; charset=" + play.Play.defaultWebEncoding);
             renderBinary(spaIndex);
         }
         // SPA not built — return a simple HTML page instead of the legacy Groovy template
@@ -44,7 +44,7 @@ public class Application extends Controller {
         if (!index.exists()) {
             notFound("SPA not built. Run: cd frontend && pnpm generate, then copy .output/public/* to public/spa/");
         }
-        response.setContentTypeIfNotSet("text/html");
+        response.setContentTypeIfNotSet("text/html; charset=" + play.Play.defaultWebEncoding);
         renderBinary(index);
     }
 

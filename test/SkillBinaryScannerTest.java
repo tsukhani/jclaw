@@ -4,16 +4,17 @@ import services.ConfigService;
 import services.SkillBinaryScanner;
 import services.scanners.MalwareBazaarScanner;
 import services.scanners.MetaDefenderCloudScanner;
+import services.scanners.VirusTotalScanner;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * End-to-end smoke test for the malware scanner. Hits the real MalwareBazaar
- * and MetaDefender Cloud APIs over the network when keys are provided, so
- * requires outbound HTTPS and a valid {@code MALWAREBAZAAR_AUTH_KEY} and/or
- * {@code METADEFENDER_API_KEY} env var. Tests that need live API access are
- * skipped cleanly when the relevant key is absent.
+ * End-to-end smoke test for the malware scanner. Hits the real MalwareBazaar,
+ * MetaDefender Cloud, and VirusTotal APIs over the network when keys are
+ * provided, so requires outbound HTTPS and a valid {@code MALWAREBAZAAR_AUTH_KEY},
+ * {@code METADEFENDER_API_KEY}, and/or {@code VIRUSTOTAL_API_KEY} env var. Tests
+ * that need live API access are skipped cleanly when the relevant key is absent.
  *
  * <p>Note on test-sample choice: EICAR is <b>not</b> indexed by MalwareBazaar
  * because it's a harmless test pattern, not real malware. These tests use a
@@ -47,6 +48,10 @@ public class SkillBinaryScannerTest extends UnitTest {
         if (mdKey != null && !mdKey.isBlank()) {
             ConfigService.set("scanner.metadefender.apiKey", mdKey);
         }
+        var vtKey = System.getenv("VIRUSTOTAL_API_KEY");
+        if (vtKey != null && !vtKey.isBlank()) {
+            ConfigService.set("scanner.virustotal.apiKey", vtKey);
+        }
     }
 
     private static boolean hasMalwareBazaarKey() {
@@ -56,6 +61,11 @@ public class SkillBinaryScannerTest extends UnitTest {
 
     private static boolean hasMetaDefenderKey() {
         var key = System.getenv("METADEFENDER_API_KEY");
+        return key != null && !key.isBlank();
+    }
+
+    private static boolean hasVirusTotalKey() {
+        var key = System.getenv("VIRUSTOTAL_API_KEY");
         return key != null && !key.isBlank();
     }
 
@@ -164,6 +174,33 @@ public class SkillBinaryScannerTest extends UnitTest {
         assertFalse(verdict.malicious(), "Unknown hash (404) should be treated as clean");
     }
 
+    // ==================== VirusTotal Scanner ====================
+
+    @Test
+    public void virusTotalLookupFlagsKnownMalwareHash() {
+        // Live lookup: confirms HTTP integration, x-apikey header, JSON parsing,
+        // and last_analysis_stats.malicious → Verdict translation against the real API.
+        Assumptions.assumeTrue(hasVirusTotalKey(), "Skipping: VIRUSTOTAL_API_KEY not configured");
+
+        var verdict = new VirusTotalScanner().lookup(KNOWN_MALICIOUS_SHA256);
+
+        assertTrue(verdict.malicious(),
+                "Known Mirai sample should be flagged by VirusTotal (got: "
+                        + (verdict.malicious() ? "malicious" : "clean") + ")");
+        assertNotNull(verdict.reason(), "Verdict reason must describe the detection");
+        assertFalse(verdict.reason().isBlank());
+    }
+
+    @Test
+    public void virusTotalLookupReturnsCleanForUnknownHash() {
+        Assumptions.assumeTrue(hasVirusTotalKey(), "Skipping: VIRUSTOTAL_API_KEY not configured");
+
+        // SHA-256 of the empty string — VirusTotal returns 404 for hashes it has never seen
+        var emptyHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        var verdict = new VirusTotalScanner().lookup(emptyHash);
+        assertFalse(verdict.malicious(), "Unknown hash (404) should be treated as clean");
+    }
+
     // ==================== Composition Matrix ====================
 
     /**
@@ -180,32 +217,53 @@ public class SkillBinaryScannerTest extends UnitTest {
     public void compositionMatrixPerKeyIndependence() {
         var mbScanner = new MalwareBazaarScanner();
         var mdScanner = new MetaDefenderCloudScanner();
+        var vtScanner = new VirusTotalScanner();
 
-        // State: both blank → both disabled
+        // State: all blank → all disabled
         ConfigService.set("scanner.malwarebazaar.authKey", "");
         ConfigService.set("scanner.metadefender.apiKey", "");
+        ConfigService.set("scanner.virustotal.apiKey", "");
         assertFalse(mbScanner.isEnabled(), "MalwareBazaar must be disabled with no key");
         assertFalse(mdScanner.isEnabled(), "MetaDefender must be disabled with no key");
+        assertFalse(vtScanner.isEnabled(), "VirusTotal must be disabled with no key");
 
-        // State: only MalwareBazaar key set → MB enabled, MD still disabled
+        // State: only MalwareBazaar key set → MB enabled, others disabled
         ConfigService.set("scanner.malwarebazaar.authKey", "test-mb-key");
         ConfigService.set("scanner.metadefender.apiKey", "");
+        ConfigService.set("scanner.virustotal.apiKey", "");
         assertTrue(mbScanner.isEnabled(), "MalwareBazaar must be enabled with key set");
         assertFalse(mdScanner.isEnabled(),
                 "MetaDefender must remain disabled when only MalwareBazaar key is set");
+        assertFalse(vtScanner.isEnabled(),
+                "VirusTotal must remain disabled when only MalwareBazaar key is set");
 
-        // State: only MetaDefender key set → MD enabled, MB disabled
+        // State: only MetaDefender key set → MD enabled, others disabled
         ConfigService.set("scanner.malwarebazaar.authKey", "");
         ConfigService.set("scanner.metadefender.apiKey", "test-md-key");
+        ConfigService.set("scanner.virustotal.apiKey", "");
         assertFalse(mbScanner.isEnabled(),
                 "MalwareBazaar must remain disabled when only MetaDefender key is set");
         assertTrue(mdScanner.isEnabled(), "MetaDefender must be enabled with key set");
+        assertFalse(vtScanner.isEnabled(),
+                "VirusTotal must remain disabled when only MetaDefender key is set");
 
-        // State: both keys set → both enabled (OR composition)
+        // State: only VirusTotal key set → VT enabled, others disabled
+        ConfigService.set("scanner.malwarebazaar.authKey", "");
+        ConfigService.set("scanner.metadefender.apiKey", "");
+        ConfigService.set("scanner.virustotal.apiKey", "test-vt-key");
+        assertFalse(mbScanner.isEnabled(),
+                "MalwareBazaar must remain disabled when only VirusTotal key is set");
+        assertFalse(mdScanner.isEnabled(),
+                "MetaDefender must remain disabled when only VirusTotal key is set");
+        assertTrue(vtScanner.isEnabled(), "VirusTotal must be enabled with key set");
+
+        // State: all keys set → all enabled (OR composition)
         ConfigService.set("scanner.malwarebazaar.authKey", "test-mb-key");
         ConfigService.set("scanner.metadefender.apiKey", "test-md-key");
+        ConfigService.set("scanner.virustotal.apiKey", "test-vt-key");
         assertTrue(mbScanner.isEnabled(), "MalwareBazaar must be enabled");
         assertTrue(mdScanner.isEnabled(), "MetaDefender must be enabled alongside MalwareBazaar");
+        assertTrue(vtScanner.isEnabled(), "VirusTotal must be enabled alongside the others");
 
         // Restore real keys from env (or clear) so subsequent tests behave
         // according to what they explicitly expect.
@@ -215,6 +273,9 @@ public class SkillBinaryScannerTest extends UnitTest {
         var mdKey = System.getenv("METADEFENDER_API_KEY");
         ConfigService.set("scanner.metadefender.apiKey",
                 mdKey != null && !mdKey.isBlank() ? mdKey : "");
+        var vtKey = System.getenv("VIRUSTOTAL_API_KEY");
+        ConfigService.set("scanner.virustotal.apiKey",
+                vtKey != null && !vtKey.isBlank() ? vtKey : "");
     }
 
     /**

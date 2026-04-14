@@ -433,6 +433,18 @@ const SCANNER_PROVIDERS: Record<string, {
       placeholder: 'API key from https://metadefender.opswat.com/',
     },
   },
+  virustotal: {
+    label: 'VirusTotal',
+    description: 'Hash reputation across ~70 AV engines (Kaspersky, ESET, Microsoft, Sophos, Bitdefender, and more). Google-owned, the de-facto industry reference for multi-engine file intelligence. Free public API: 500 requests/day at 4 req/minute.',
+    signupUrl: 'https://www.virustotal.com/gui/join-us',
+    signupLabel: 'virustotal.com',
+    enabledKey: 'scanner.virustotal.enabled',
+    apiKey: {
+      key: 'scanner.virustotal.apiKey',
+      label: 'apiKey',
+      placeholder: 'API key from https://www.virustotal.com/gui/my-apikey',
+    },
+  },
 }
 
 function scannerApiKeyValue(scannerId: string): string {
@@ -1484,7 +1496,7 @@ const providerEntries = computed(() => {
 
     <!-- Malware Scanners -->
     <div class="mb-6 space-y-4">
-      <h2 class="text-sm font-medium text-neutral-400">Malware Scanners</h2>
+      <h2 class="text-sm font-medium text-neutral-400">Malware and Virus Scanners</h2>
       <p class="text-xs text-neutral-600">
         Hash-based reputation lookups that scan every binary inside a skill before it's installed.
         Each scanner hashes the file with SHA-256 and asks an external service whether that hash

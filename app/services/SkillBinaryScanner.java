@@ -4,6 +4,7 @@ import agents.SkillLoader;
 import services.scanners.MalwareBazaarScanner;
 import services.scanners.MetaDefenderCloudScanner;
 import services.scanners.Scanner;
+import services.scanners.VirusTotalScanner;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -46,7 +47,8 @@ public class SkillBinaryScanner {
      */
     private static final List<Scanner> SCANNERS = List.of(
             new MalwareBazaarScanner(),
-            new MetaDefenderCloudScanner()
+            new MetaDefenderCloudScanner(),
+            new VirusTotalScanner()
     );
 
     public record Violation(String relativePath, String sha256, String scanner, String reason) {

@@ -131,6 +131,11 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("scanner.metadefender.apiKey", "");
         seedIfAbsent("scanner.metadefender.url", "https://api.metadefender.com/v4/");
         seedIfAbsent("scanner.metadefender.timeoutMs", "5000");
+        // VirusTotal API key: free 500 req/day at 4 req/min, from https://www.virustotal.com/gui/join-us
+        seedIfAbsent("scanner.virustotal.enabled", "true");
+        seedIfAbsent("scanner.virustotal.apiKey", "");
+        seedIfAbsent("scanner.virustotal.url", "https://www.virustotal.com/api/v3/");
+        seedIfAbsent("scanner.virustotal.timeoutMs", "5000");
     }
 
     private void seedDefaultAgent() {
