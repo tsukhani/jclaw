@@ -47,6 +47,22 @@ export interface ConfigResponse {
   entries: ConfigEntry[]
 }
 
+/** A single histogram for a latency segment, as returned by /api/metrics/latency. */
+export interface LatencyHistogram {
+  count: number
+  sum_ms: number
+  min_ms: number
+  max_ms: number
+  p50_ms: number
+  p90_ms: number
+  p99_ms: number
+  p999_ms: number
+  buckets?: Array<{ le_ms: number; count: number }>
+}
+
+/** Map of segment name → histogram from GET /api/metrics/latency. */
+export type LatencyMetrics = Record<string, LatencyHistogram>
+
 /** A skill definition. */
 export interface Skill {
   name: string

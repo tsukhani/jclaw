@@ -11,6 +11,7 @@ import models.Conversation;
 import models.MessageRole;
 import services.ConversationService;
 import services.EventLogger;
+import utils.LatencyTrace;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -198,7 +199,8 @@ public class AgentRunner {
     public static void runStreaming(Agent agent, Long conversationId, String channelType, String peerId,
                                     String userMessage,
                                     AtomicBoolean isCancelled,
-                                    StreamingCallbacks cb) {
+                                    StreamingCallbacks cb,
+                                    LatencyTrace trace) {
         Thread.ofVirtual().start(() -> {
             final Long[] conversationIdRef = {null};
             try {
@@ -211,7 +213,7 @@ public class AgentRunner {
                 if (checkCancelled(isCancelled, agent, channelType)) return;
 
                 // Phase 2: Assemble prompt, resolve provider, call LLM in streaming loop
-                streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb);
+                streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace);
 
             } catch (Exception e) {
                 EventLogger.error("llm", agent.name, channelType,
@@ -276,7 +278,8 @@ public class AgentRunner {
      */
     private static void streamLlmLoop(Agent agent, Conversation conversation,
                                        String channelType, String userMessage,
-                                       AtomicBoolean isCancelled, StreamingCallbacks cb)
+                                       AtomicBoolean isCancelled, StreamingCallbacks cb,
+                                       LatencyTrace trace)
             throws InterruptedException {
 
         EventLogger.info("llm", agent.name, channelType,
@@ -313,6 +316,7 @@ public class AgentRunner {
         var modelInfo = resolveModelInfo(agent, primary).orElse(null);
 
         // Stream with tool call handling (HTTP, no JPA)
+        if (trace != null) trace.mark(LatencyTrace.PROLOGUE_DONE);
         var streamStartMs = System.currentTimeMillis();
         var accumulator = primary.chatStreamAccumulate(
                 agent.modelId, messages, tools, cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode);
@@ -345,11 +349,13 @@ public class AgentRunner {
                     ? "I tried to use a tool but my response was too long and got cut off. Let me try a more concise approach."
                     : content;
             cb.onToken().accept(truncMsg.equals(content) ? "" : "\n\n*[Response was truncated — retrying with a simpler approach]*");
+            if (trace != null) trace.mark(LatencyTrace.STREAM_BODY_END);
             var finalContent = truncMsg;
             services.Tx.run(() -> {
                 var conv = ConversationService.findById(conversation.id);
                 ConversationService.appendAssistantMessage(conv, finalContent, null);
             });
+            if (trace != null) trace.mark(LatencyTrace.PERSIST_DONE);
             cb.onComplete().accept(finalContent);
             return;
         }
@@ -357,10 +363,13 @@ public class AgentRunner {
         // Handle tool calls if present
         if (!accumulator.toolCalls.isEmpty()) {
             content = handleToolCallsStreaming(agent, conversation.id, messages, tools,
-                    accumulator.toolCalls, content, primary, cb, maxTokens, thinkingMode, 0, isCancelled);
+                    accumulator.toolCalls, content, primary, cb, maxTokens, thinkingMode, 0,
+                    isCancelled, trace);
         }
 
         if (checkCancelled(isCancelled, agent, channelType)) return;
+
+        if (trace != null) trace.mark(LatencyTrace.STREAM_BODY_END);
 
         // Persist and complete
         var finalContent = content;
@@ -368,6 +377,8 @@ public class AgentRunner {
             var conv = ConversationService.findById(conversation.id);
             ConversationService.appendAssistantMessage(conv, finalContent, null);
         });
+
+        if (trace != null) trace.mark(LatencyTrace.PERSIST_DONE);
 
         emitUsageAndComplete(agent, channelType, content, accumulator, modelInfo, streamStartMs, cb);
     }
@@ -523,7 +534,8 @@ public class AgentRunner {
                                                     LlmProvider provider,
                                                     StreamingCallbacks cb,
                                                     Integer maxTokens, String thinkingMode,
-                                                    int round, AtomicBoolean isCancelled) {
+                                                    int round, AtomicBoolean isCancelled,
+                                                    LatencyTrace trace) {
         if (round >= maxToolRounds()) {
             return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
         }
@@ -537,10 +549,14 @@ public class AgentRunner {
         currentMessages.add(ChatMessage.assistant(priorContent, toolCalls));
         var collectedImages = new ArrayList<String>();
 
+        var toolRoundStartNs = System.nanoTime();
         for (var toolCall : toolCalls) {
             if (isCancelled.get()) return priorContent;
             executeToolCall(toolCall, agent, conversationId, currentMessages,
                     cb.onStatus(), collectedImages);
+        }
+        if (trace != null) {
+            trace.addToolRound((System.nanoTime() - toolRoundStartNs) / 1_000_000L);
         }
 
         if (isCancelled.get()) return priorContent;
@@ -582,7 +598,8 @@ public class AgentRunner {
         // Recursively handle if more tool calls
         if (!accumulator.toolCalls.isEmpty()) {
             return handleToolCallsStreaming(agent, conversationId, currentMessages, tools,
-                    accumulator.toolCalls, accumulator.content, provider, cb, maxTokens, thinkingMode, round + 1, isCancelled);
+                    accumulator.toolCalls, accumulator.content, provider, cb, maxTokens, thinkingMode,
+                    round + 1, isCancelled, trace);
         }
 
         // Some models (especially smaller/distilled ones) occasionally return zero tokens

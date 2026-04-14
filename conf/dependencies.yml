@@ -35,3 +35,4 @@ require:
     - com.vladsch.flexmark -> flexmark-ext-gfm-tasklist 0.64.8
     - com.vladsch.flexmark -> flexmark-ext-autolink 0.64.8
     - org.xhtmlrenderer -> flying-saucer-pdf-openpdf 9.4.0
+    - org.hdrhistogram -> HdrHistogram 2.2.2

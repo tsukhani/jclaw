@@ -577,9 +577,8 @@ function totalSkillCount(agentId: number) {
                    @dragstart="onAgentSkillDragStart($event, skill, agent.id)"
                    @dragend="onDragEnd"
                    class="flex items-center justify-between px-2 py-1.5 bg-neutral-800/50 cursor-grab active:cursor-grabbing select-none group">
-                <div class="flex items-center gap-2 min-w-0">
+                <div class="flex items-center gap-2 min-w-0 flex-1">
                   <span class="text-xs text-white font-mono truncate">{{ skill.name }}</span>
-                  <span class="text-[9px] text-neutral-500 font-mono shrink-0">v{{ skill.version || '0.0.0' }}</span>
                   <button v-if="updateAvailable(skill)"
                           @click.stop="updateAgentSkillFromGlobal(agent.id, skill)"
                           class="text-[9px] text-amber-400 border border-amber-700/40 bg-amber-900/20 px-1.5 py-0.5 font-mono hover:bg-amber-900/40 transition-colors shrink-0"
@@ -587,7 +586,8 @@ function totalSkillCount(agentId: number) {
                     update → v{{ updateAvailable(skill) }}
                   </button>
                 </div>
-                <div class="flex items-center gap-1 shrink-0">
+                <div class="flex items-center gap-2 shrink-0">
+                  <span class="text-xs text-emerald-400 font-mono font-semibold tabular-nums min-w-16 text-right">v{{ skill.version || '0.0.0' }}</span>
                   <button @click.stop="editAgentSkill(agent.id, skill)"
                           class="p-1 text-neutral-600 hover:text-white transition-colors opacity-0 group-hover:opacity-100" title="View skill">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
@@ -690,7 +690,7 @@ function totalSkillCount(agentId: number) {
                   <span class="text-sm text-white font-mono cursor-text min-w-0 break-all"
                         @dblclick.stop="startRename(skill)">{{ skill.folderName || skill.name }}</span>
                 </template>
-                <span class="text-[10px] text-neutral-500 font-mono shrink-0 pt-0.5">v{{ skill.version || '0.0.0' }}</span>
+                <span class="text-xs text-emerald-300 font-mono font-semibold shrink-0 bg-emerald-900/30 border border-emerald-800/50 px-1.5 py-0.5">v{{ skill.version || '0.0.0' }}</span>
               </div>
               <div v-if="skill.name !== (skill.folderName || skill.name)"
                    class="text-[10px] text-neutral-600">name: {{ skill.name }}</div>

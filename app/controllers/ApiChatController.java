@@ -11,6 +11,7 @@ import play.mvc.With;
 import services.AgentService;
 import services.ConversationService;
 import services.EventLogger;
+import utils.LatencyTrace;
 import utils.VirtualThreads;
 
 import java.nio.charset.StandardCharsets;
@@ -23,7 +24,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -185,6 +186,7 @@ public class ApiChatController extends Controller {
      * POST /api/chat/stream — Send a message and stream the response as SSE.
      */
     public static void streamChat() {
+        var trace = LatencyTrace.fromCurrentRequest();
         var ctx = resolveChatContext(JsonBodyReader.readJsonBody());
         var agent = ctx.agent();
         var messageText = ctx.message();
@@ -197,17 +199,21 @@ public class ApiChatController extends Controller {
         res.setHeader("Connection", "keep-alive");
         res.setHeader("X-Accel-Buffering", "no");
 
-        var latch = new CountDownLatch(1);
-        var cancelled = new java.util.concurrent.atomic.AtomicBoolean(false);
+        // streamDone completes when the SSE stream reaches a terminal frame
+        // (onComplete/onError), a heartbeat write fails (client disconnected),
+        // or the 600s safety timeout fires. We hand it to Play's await() below
+        // so the invocation thread returns to the pool rather than blocking.
+        var streamDone = new CompletableFuture<Void>();
+        var cancelled = new AtomicBoolean(false);
 
         var heartbeatExecutor = VirtualThreads.newSingleThreadScheduledExecutor();
         heartbeatExecutor.scheduleAtFixedRate(() -> {
-            if (cancelled.get()) return;
+            if (cancelled.get() || streamDone.isDone()) return;
             try {
                 res.writeChunk(": keep-alive\n\n".getBytes(StandardCharsets.UTF_8));
-            } catch (Exception e) {
+            } catch (Exception _) {
                 cancelled.set(true);
-                latch.countDown();
+                streamDone.complete(null);
             }
         }, 30, 30, TimeUnit.SECONDS);
 
@@ -230,59 +236,76 @@ public class ApiChatController extends Controller {
                             if (valid) initData.put("thinkingMode", agent.thinkingMode);
                         }
                     }
-                    writeSse(res, cancelled, latch, initData, false);
+                    writeSse(res, cancelled, streamDone, initData, false);
                 },
                 token -> {
                     Map<String, Object> data = new java.util.HashMap<>(Map.of("type", "token", "content", token));
                     if (firstToken.compareAndSet(true, false)) {
+                        trace.mark(LatencyTrace.FIRST_TOKEN);
                         data.put("timestamp", java.time.Instant.now().toString());
                     }
-                    writeSse(res, cancelled, latch, data, false);
+                    writeSse(res, cancelled, streamDone, data, false);
                 },
-                reasoning -> writeSse(res, cancelled, latch,
+                reasoning -> writeSse(res, cancelled, streamDone,
                         Map.of("type", "reasoning", "content", reasoning), false),
-                status -> writeSse(res, cancelled, latch,
+                status -> writeSse(res, cancelled, streamDone,
                         Map.of("type", "status", "content", status), false),
-                content -> writeSse(res, cancelled, latch,
+                content -> writeSse(res, cancelled, streamDone,
                         Map.of("type", "complete", "content", content), true),
                 error -> {
-                    writeSse(res, cancelled, latch,
+                    writeSse(res, cancelled, streamDone,
                             Map.of("type", "error", "content", "An error occurred: " + error.getMessage()), true);
                     EventLogger.error("channel", agent.name, "web",
                             "SSE stream error: %s".formatted(error.getMessage()));
                 }
         );
         AgentRunner.runStreaming(agent, conversationId, "web", username, messageText,
-                cancelled, callbacks);
+                cancelled, callbacks, trace);
 
-        try {
-            if (!latch.await(600, TimeUnit.SECONDS)) {
+        // Safety timeout: emit one error frame and complete normally if no
+        // terminal frame arrives within 600s. Scheduled on the heartbeat
+        // executor so it's cancelled alongside the heartbeat when the stream
+        // finishes (no leaked timers). Using a manual watcher instead of
+        // CompletableFuture.orTimeout avoids a race where the future
+        // completes exceptionally before we write the timeout SSE frame.
+        heartbeatExecutor.schedule(() -> {
+            if (!streamDone.isDone()) {
                 cancelled.set(true);
-                writeSse(res, cancelled, latch, Map.of("type", "error", "content", "Request timed out"), false);
+                writeSse(res, cancelled, streamDone,
+                        Map.of("type", "error", "content", "Request timed out"), true);
             }
-        } catch (InterruptedException _) {
-            Thread.currentThread().interrupt();
-        } finally {
+        }, 600, TimeUnit.SECONDS);
+
+        // Cleanup runs regardless of how the future completes — success,
+        // exception, or cancellation. shutdownNow() also cancels the timeout.
+        streamDone.whenComplete((_, _) -> {
             heartbeatExecutor.shutdownNow();
-        }
+            trace.end();
+        });
+
+        // Suspend this invocation until streamDone completes. The Play worker
+        // thread returns to the pool immediately — no more blocking on a latch.
+        // The no-op callback satisfies the framework contract; all real work
+        // has already happened on the virtual thread via SSE chunk writes.
+        await(streamDone, _ -> { });
     }
 
     /**
      * Write a single SSE frame to the response. On write failure, marks the
-     * stream as cancelled. If {@code terminal} is true, always counts down
-     * the latch (signalling stream completion).
+     * stream as cancelled. If {@code terminal} is true, always completes the
+     * stream-done future (signalling the invocation can resume).
      */
     private static void writeSse(Http.Response res, AtomicBoolean cancelled,
-                                 CountDownLatch latch, Map<String, ?> data, boolean terminal) {
+                                 CompletableFuture<Void> done, Map<String, ?> data, boolean terminal) {
         try {
             res.writeChunk("data: %s\n\n".formatted(gson.toJson(data)).getBytes(StandardCharsets.UTF_8));
         } catch (Exception _) {
             cancelled.set(true);
             if (!terminal) {
-                latch.countDown();
+                done.complete(null);
                 return;
             }
         }
-        if (terminal) latch.countDown();
+        if (terminal) done.complete(null);
     }
 }
