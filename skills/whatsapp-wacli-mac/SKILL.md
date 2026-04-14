@@ -26,7 +26,7 @@ If it prints `needs install`, build or install it using **one** of the methods b
 ### Option A: Homebrew (recommended — no Go toolchain required)
 
 ```bash
-brew install steipete/tap/wacli
+brew install [USERNAME]/tap/wacli
 cp "$(brew --prefix)/bin/wacli" ./skills/whatsapp-wacli-mac/tools/wacli
 chmod +x ./skills/whatsapp-wacli-mac/tools/wacli
 ```
@@ -34,7 +34,7 @@ chmod +x ./skills/whatsapp-wacli-mac/tools/wacli
 ### Option B: Build from source (requires Go 1.25+ with CGO enabled)
 
 ```bash
-git clone --depth 1 https://github.com/steipete/wacli /tmp/wacli-src \
+git clone --depth 1 https://github.com/[USERNAME]/wacli /tmp/wacli-src \
   && cd /tmp/wacli-src \
   && CGO_ENABLED=1 go build -tags sqlite_fts5 -o /tmp/wacli-bin ./cmd/wacli \
   && cp /tmp/wacli-bin ./skills/whatsapp-wacli-mac/tools/wacli \

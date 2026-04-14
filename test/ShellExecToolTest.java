@@ -70,6 +70,40 @@ public class ShellExecToolTest extends UnitTest {
         assertNull(error);
     }
 
+    @Test
+    public void relativePathMatchesByBasename() {
+        // Skill-provided tools are commonly invoked by their workspace-relative
+        // path. Users list the binary *name* in the allowlist; the validator
+        // must treat "./skills/.../wacli" as equivalent to "wacli" for matching.
+        ConfigService.set("shell.allowlist", "echo,wacli");
+        var error = tool.validateAllowlist("./skills/whatsapp-wacli-mac/tools/wacli --status");
+        assertNull(error, "relative-path invocation should match the basename entry");
+    }
+
+    @Test
+    public void absolutePathMatchesByBasename() {
+        ConfigService.set("shell.allowlist", "grep");
+        var error = tool.validateAllowlist("/usr/bin/grep foo bar");
+        assertNull(error, "absolute-path invocation should match the basename entry");
+    }
+
+    @Test
+    public void explicitPathInAllowlistStillMatches() {
+        // Operators who want strict path-scoped allowlists (list an exact relative
+        // path) keep working — exact-token match is checked alongside basename.
+        ConfigService.set("shell.allowlist", "./skills/foo/bar");
+        var error = tool.validateAllowlist("./skills/foo/bar --go");
+        assertNull(error, "exact relative-path allowlist entry must still match");
+    }
+
+    @Test
+    public void basenameMismatchStillRejected() {
+        ConfigService.set("shell.allowlist", "wacli");
+        var error = tool.validateAllowlist("./skills/foo/rm -rf /");
+        assertNotNull(error, "a binary whose basename is not in the allowlist must be rejected");
+        assertTrue(error.contains("not in the allowed commands list"));
+    }
+
     // ==================== Working Directory Resolution ====================
 
     @Test

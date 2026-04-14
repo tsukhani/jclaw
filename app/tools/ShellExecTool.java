@@ -128,11 +128,39 @@ public class ShellExecTool implements ToolRegistry.Tool {
         }
 
         var allowed = parsedAllowlist();
-        if (allowed.isEmpty() || !allowed.contains(firstToken)) {
+        if (allowed.isEmpty()) {
+            return "Error: Command '%s' is not in the allowed commands list. Allowed: %s"
+                    .formatted(firstToken, String.join(", ", allowed));
+        }
+        // Match against the allowlist by either the raw first token (supports
+        // operators who list explicit paths like "./skills/foo/wacli") or the
+        // path basename (so "wacli" in the allowlist covers invocations as
+        // "wacli", "./wacli", or "./path/to/wacli" — the user's mental model is
+        // "allow this named binary" regardless of how the agent resolved it).
+        var basename = commandBasename(firstToken);
+        if (!allowed.contains(firstToken) && (basename.isEmpty() || !allowed.contains(basename))) {
             return "Error: Command '%s' is not in the allowed commands list. Allowed: %s"
                     .formatted(firstToken, String.join(", ", allowed));
         }
         return null;
+    }
+
+    /**
+     * Extract the final path segment of a command token: {@code "./a/b/wacli"}
+     * → {@code "wacli"}, {@code "/usr/bin/grep"} → {@code "grep"}, plain
+     * {@code "ls"} → {@code "ls"}. Returns an empty string for tokens that
+     * resolve to no filename (e.g. {@code "/"}). Defensive against malformed
+     * input: any exception from {@code Path.of} (invalid path syntax on the
+     * platform) is treated as "no basename," forcing the exact-token check.
+     */
+    static String commandBasename(String token) {
+        if (token == null || token.isEmpty()) return "";
+        try {
+            var name = Path.of(token).getFileName();
+            return name == null ? "" : name.toString();
+        } catch (Exception _) {
+            return "";
+        }
     }
 
     static String extractFirstToken(String command) {

@@ -114,6 +114,11 @@ _bmad-output/
 
 # Global skills (track all skills in the registry)
 # Agent workspace copies are excluded via the workspace/* rule below.
+#
+# Skill-bundled binaries are excluded: they're platform-specific, typically
+# large (~tens of MB), and should be fetched by the skill's install step
+# rather than tracked in git. SKILL.md stays; the binary under tools/ does not.
+skills/whatsapp-wacli-mac/tools/wacli
 
 # Agent workspaces (only track the default main agent's core files)
 workspace/*
