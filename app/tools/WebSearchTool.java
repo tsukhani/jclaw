@@ -36,7 +36,8 @@ public class WebSearchTool implements ToolRegistry.Tool {
             new BraveProvider(),
             new TavilyProvider(),
             new PerplexityProvider(),
-            new OllamaProvider()
+            new OllamaProvider(),
+            new FeloProvider()
     );
 
     @Override
@@ -47,7 +48,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
         return """
                 Search the web for current information. \
                 Returns relevant results with titles, URLs, and content snippets. \
-                Supports Exa, Brave, Tavily, Perplexity, and Ollama search providers (uses first configured, or specify with 'provider' parameter). \
+                Supports Exa, Brave, Tavily, Perplexity, Ollama, and Felo search providers (uses first configured, or specify with 'provider' parameter). \
                 Use this to find up-to-date information, research topics, or answer questions about recent events.""";
     }
 
@@ -60,7 +61,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
                         "numResults", Map.of("type", "integer",
                                 "description", "Number of results to return (default: 5, max: 10)"),
                         "provider", Map.of("type", "string",
-                                "enum", List.of("exa", "brave", "tavily", "perplexity", "ollama"),
+                                "enum", List.of("exa", "brave", "tavily", "perplexity", "ollama", "felo"),
                                 "description", "Search provider to use (default: first configured)")
                 ),
                 "required", List.of("query")
@@ -433,6 +434,58 @@ public class WebSearchTool implements ToolRegistry.Tool {
                     var content = r.get("content").getAsString().strip();
                     if (content.length() > 500) content = content.substring(0, 500) + "...";
                     sb.append("> %s\n".formatted(content));
+                }
+                sb.append("\n");
+            }
+            return sb.toString().strip();
+        }
+    }
+
+    // --- Felo ---
+
+    static class FeloProvider implements SearchProvider {
+        @Override public String id() { return "felo"; }
+        @Override public String displayName() { return "Felo"; }
+        @Override public String defaultBaseUrl() { return "https://openapi.felo.ai/v2/chat"; }
+
+        @Override
+        public HttpRequest buildRequest(String apiKey, String query, int numResults) {
+            var body = Map.of("query", query);
+            return HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl()))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + apiKey)
+                    .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
+                    .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body), StandardCharsets.UTF_8))
+                    .build();
+        }
+
+        @Override
+        public String formatResults(String responseJson) {
+            var json = JsonParser.parseString(responseJson).getAsJsonObject();
+            if (!json.has("data") || json.get("data").isJsonNull()) {
+                return "No results found.";
+            }
+            var data = json.getAsJsonObject("data");
+            if (!data.has("resources") || data.getAsJsonArray("resources").isEmpty()) {
+                return "No results found.";
+            }
+            var resources = data.getAsJsonArray("resources");
+            var sb = new StringBuilder();
+            if (data.has("answer") && !data.get("answer").isJsonNull()) {
+                var answer = data.get("answer").getAsString().strip();
+                if (!answer.isEmpty()) {
+                    sb.append("**Felo summary:** ").append(answer).append("\n\n");
+                }
+            }
+            sb.append("Found %d results (via Felo):\n\n".formatted(resources.size()));
+            for (int i = 0; i < resources.size(); i++) {
+                var r = resources.get(i).getAsJsonObject();
+                sb.append("### %d. %s\n".formatted(i + 1,
+                        r.has("title") ? r.get("title").getAsString() : "Untitled"));
+                sb.append("URL: %s\n".formatted(r.has("link") ? r.get("link").getAsString() : ""));
+                if (r.has("snippet") && !r.get("snippet").isJsonNull()) {
+                    sb.append("> %s\n".formatted(r.get("snippet").getAsString().strip()));
                 }
                 sb.append("\n");
             }

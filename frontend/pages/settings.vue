@@ -263,6 +263,13 @@ const SEARCH_PROVIDERS: Record<string, {
     signupLabel: 'ollama.com/settings/keys',
     apiKeyPlaceholder: 'Your Ollama API key from ollama.com',
   },
+  felo: {
+    label: 'Felo',
+    description: 'AI-powered search API that returns an LLM-generated summary alongside source links. Simple query interface — good when you want a synthesized answer plus citations in one call.',
+    signupUrl: 'https://openapi.felo.ai/',
+    signupLabel: 'openapi.felo.ai',
+    apiKeyPlaceholder: 'Your Felo API key from openapi.felo.ai',
+  },
 }
 
 function searchApiKey(providerId: string): string {

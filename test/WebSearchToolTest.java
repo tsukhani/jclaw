@@ -25,6 +25,8 @@ public class WebSearchToolTest extends UnitTest {
             "search.brave.enabled", "search.brave.apiKey", "search.brave.baseUrl",
             "search.tavily.enabled", "search.tavily.apiKey", "search.tavily.baseUrl",
             "search.perplexity.enabled", "search.perplexity.apiKey", "search.perplexity.baseUrl",
+            "search.ollama.enabled", "search.ollama.apiKey", "search.ollama.baseUrl",
+            "search.felo.enabled", "search.felo.apiKey", "search.felo.baseUrl",
     };
 
     @BeforeEach
@@ -38,6 +40,8 @@ public class WebSearchToolTest extends UnitTest {
         ConfigService.set("search.brave.enabled", "false");
         ConfigService.set("search.tavily.enabled", "false");
         ConfigService.set("search.perplexity.enabled", "false");
+        ConfigService.set("search.ollama.enabled", "false");
+        ConfigService.set("search.felo.enabled", "false");
         ConfigService.clearCache();
     }
 
@@ -102,6 +106,24 @@ public class WebSearchToolTest extends UnitTest {
         ConfigService.set("search.perplexity.apiKey", "fake-key");
         ConfigService.clearCache();
         var result = tool.execute("{\"query\":\"test\",\"provider\":\"perplexity\"}", null);
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains("disabled"));
+    }
+
+    @Test
+    public void feloPreferredMissingKey_reportsMissingKey() {
+        ConfigService.set("search.felo.enabled", "true");
+        ConfigService.clearCache();
+        var result = tool.execute("{\"query\":\"test\",\"provider\":\"felo\"}", null);
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains("search.felo.apiKey"));
+    }
+
+    @Test
+    public void feloDisabledPreferred_reportsDisabled() {
+        ConfigService.set("search.felo.apiKey", "fake-key");
+        ConfigService.clearCache();
+        var result = tool.execute("{\"query\":\"test\",\"provider\":\"felo\"}", null);
         assertTrue(result.startsWith("Error:"));
         assertTrue(result.contains("disabled"));
     }

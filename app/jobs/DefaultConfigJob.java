@@ -111,6 +111,10 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("search.ollama.apiKey", "");
         seedIfAbsent("search.ollama.baseUrl", "https://ollama.com/api/web_search");
         seedIfAbsent("search.ollama.priority", "4");
+        seedIfAbsent("search.felo.enabled", "true");
+        seedIfAbsent("search.felo.apiKey", "");
+        seedIfAbsent("search.felo.baseUrl", "https://openapi.felo.ai/v2/chat");
+        seedIfAbsent("search.felo.priority", "5");
 
         // Malware scanners — independent hash-lookup APIs, composed under OR.
         // Keys are seeded empty; each scanner is inert until an operator provides its key.
