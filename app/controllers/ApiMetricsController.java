@@ -56,6 +56,8 @@ public class ApiMetricsController extends Controller {
         int ttftMs = readInt(body, "ttftMs", 100);
         int tokensPerSecond = readInt(body, "tokensPerSecond", 50);
         int responseTokens = readInt(body, "responseTokens", 40);
+        int simulatedToolCalls = readInt(body, "simulatedToolCalls", 0);
+        int toolSleepMs = readInt(body, "toolSleepMs", 200);
 
         int maxConcurrency = ConfigService.getInt("loadtest.maxConcurrency", 100);
         int maxIterations = ConfigService.getInt("loadtest.maxIterations", 50);
@@ -69,7 +71,8 @@ public class ApiMetricsController extends Controller {
         try {
             var result = LoadTestRunner.run(new LoadTestRunner.Request(
                     concurrency, iterations,
-                    new LoadTestHarness.Scenario(ttftMs, tokensPerSecond, responseTokens)));
+                    new LoadTestHarness.Scenario(ttftMs, tokensPerSecond, responseTokens,
+                            simulatedToolCalls, toolSleepMs)));
 
             var out = new JsonObject();
             out.addProperty("totalRequests", result.totalRequests());

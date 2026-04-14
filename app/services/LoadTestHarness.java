@@ -20,9 +20,23 @@ import java.util.concurrent.Executors;
  */
 public final class LoadTestHarness {
 
-    /** Scenario shape streamed by the mock endpoint. */
-    public record Scenario(int ttftMs, int tokensPerSecond, int responseTokens) {
-        public static Scenario defaults() { return new Scenario(100, 50, 40); }
+    /**
+     * Scenario shape streamed by the mock endpoint.
+     *
+     * <p>When {@code simulatedToolCalls > 0}, the first response in a round
+     * emits that many {@code loadtest_sleep} tool_calls (each with
+     * {@code ms=toolSleepMs}) instead of content. The follow-up request
+     * carrying tool results triggers a normal content stream. This drives
+     * the agent's parallel tool-execution path end-to-end.
+     */
+    public record Scenario(int ttftMs, int tokensPerSecond, int responseTokens,
+                            int simulatedToolCalls, int toolSleepMs) {
+        public static Scenario defaults() { return new Scenario(100, 50, 40, 0, 200); }
+
+        /** Backwards-compat overload — content-only scenario, no tool calls. */
+        public Scenario(int ttftMs, int tokensPerSecond, int responseTokens) {
+            this(ttftMs, tokensPerSecond, responseTokens, 0, 200);
+        }
     }
 
     private static final Object lock = new Object();
@@ -62,17 +76,67 @@ public final class LoadTestHarness {
 
     private static void handle(HttpExchange ex) throws IOException {
         try {
-            ex.getRequestBody().readAllBytes();
+            byte[] body = ex.getRequestBody().readAllBytes();
             var scn = scenario;
+            boolean continuation = isToolResultContinuation(body);
+
             ex.getResponseHeaders().add("Content-Type", "text/event-stream");
             ex.getResponseHeaders().add("Cache-Control", "no-cache");
             ex.sendResponseHeaders(200, 0);
             try (var out = ex.getResponseBody()) {
-                streamResponse(out, scn);
+                if (!continuation && scn.simulatedToolCalls() > 0) {
+                    streamToolCalls(out, scn);
+                } else {
+                    streamResponse(out, scn);
+                }
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /**
+     * Returns true when the last message in the request has {@code role=tool},
+     * meaning the agent is carrying tool results back to us for a follow-up.
+     * The mock responds with content tokens in that case instead of another
+     * tool_calls round, preventing infinite loops.
+     */
+    private static boolean isToolResultContinuation(byte[] body) {
+        try {
+            var json = com.google.gson.JsonParser.parseString(
+                    new String(body, StandardCharsets.UTF_8)).getAsJsonObject();
+            if (!json.has("messages")) return false;
+            var msgs = json.getAsJsonArray("messages");
+            if (msgs.isEmpty()) return false;
+            var last = msgs.get(msgs.size() - 1).getAsJsonObject();
+            return last.has("role") && "tool".equals(last.get("role").getAsString());
+        } catch (Exception _) {
+            return false;
+        }
+    }
+
+    private static void streamToolCalls(OutputStream out, Scenario scn)
+            throws IOException, InterruptedException {
+        Thread.sleep(Math.max(0, scn.ttftMs()));
+        for (int i = 0; i < scn.simulatedToolCalls(); i++) {
+            var callId = "call-mock-" + i;
+            // Arguments string is a JSON document embedded *inside* the outer
+            // JSON chunk, so its quotes need double-escaping.
+            var argsJson = "{\\\"ms\\\":" + scn.toolSleepMs() + "}";
+            var chunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
+                    + "\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":"
+                    + "[{\"index\":" + i + ",\"id\":\"" + callId + "\","
+                    + "\"type\":\"function\",\"function\":{\"name\":\"loadtest_sleep\","
+                    + "\"arguments\":\"" + argsJson + "\"}}]}}]}\n\n";
+            out.write(chunk.getBytes(StandardCharsets.UTF_8));
+            out.flush();
+        }
+        var finalChunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
+                + "\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],"
+                + "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\n"
+                + "data: [DONE]\n\n";
+        out.write(finalChunk.getBytes(StandardCharsets.UTF_8));
+        out.flush();
     }
 
     private static void streamResponse(OutputStream out, Scenario scn)

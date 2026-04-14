@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -515,14 +516,13 @@ public class AgentRunner {
                         : "I tried to use a tool but my response was too long and got cut off. Let me try a more concise approach.";
             }
 
-            // Tool calls — execute and continue
+            // Tool calls — execute (in parallel when multiple) and continue
             currentMessages.add(assistantMsg);
             EventLogger.info("tool", agent.name, null,
                     "Round %d: executing %d tool call(s)".formatted(round + 1, assistantMsg.toolCalls().size()));
 
-            for (var toolCall : assistantMsg.toolCalls()) {
-                executeToolCall(toolCall, agent, conversationId, currentMessages, null, null);
-            }
+            executeToolsParallel(assistantMsg.toolCalls(), agent, conversationId,
+                    currentMessages, null, null, null);
         }
 
         return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
@@ -550,11 +550,8 @@ public class AgentRunner {
         var collectedImages = new ArrayList<String>();
 
         var toolRoundStartNs = System.nanoTime();
-        for (var toolCall : toolCalls) {
-            if (isCancelled.get()) return priorContent;
-            executeToolCall(toolCall, agent, conversationId, currentMessages,
-                    cb.onStatus(), collectedImages);
-        }
+        executeToolsParallel(toolCalls, agent, conversationId, currentMessages,
+                cb.onStatus(), collectedImages, isCancelled);
         if (trace != null) {
             trace.addToolRound((System.nanoTime() - toolRoundStartNs) / 1_000_000L);
         }
@@ -646,13 +643,11 @@ public class AgentRunner {
     }
 
     /**
-     * Execute a single tool call: log, dispatch, log result, persist, and append
-     * the tool-result message to {@code currentMessages}. Streaming-specific
-     * hooks (status callback, image collection) are applied when non-null.
+     * Pure compute: dispatch one tool call and return its result. No side
+     * effects on shared state (message lists, image collector, DB). Safe to
+     * call from multiple virtual threads concurrently.
      */
-    private static void executeToolCall(ToolCall toolCall, Agent agent, Long conversationId,
-                                         List<ChatMessage> currentMessages,
-                                         Consumer<String> onStatus, List<String> imageCollector) {
+    private static String runToolCall(ToolCall toolCall, Agent agent, Consumer<String> onStatus) {
         if (onStatus != null) {
             onStatus.accept("Using tool: " + toolCall.function().name());
         }
@@ -668,17 +663,78 @@ public class AgentRunner {
                 ? result.substring(0, 200) + "... (%d chars)".formatted(result.length()) : result;
         EventLogger.info("tool", agent.name, null,
                 "Tool '%s' returned: %s".formatted(toolCall.function().name(), resultPreview));
-        currentMessages.add(ChatMessage.toolResult(toolCall.id(), result));
+        return result;
+    }
 
-        if (imageCollector != null) {
-            extractImageUrls(result, imageCollector);
+    /**
+     * Execute a batch of tool calls, in parallel when there are multiple.
+     * Preserves original order when committing results to the message list
+     * and DB, so LLM history invariants (tool_call_id → tool_result pairing
+     * and order) match the pre-parallel behavior exactly.
+     *
+     * <p>Single-tool batches skip the virtual-thread overhead and execute
+     * inline. Cancellation between tools is honored — in-flight tools finish
+     * naturally (their results are discarded at commit time).
+     */
+    private static void executeToolsParallel(List<ToolCall> toolCalls,
+                                              Agent agent, Long conversationId,
+                                              List<ChatMessage> currentMessages,
+                                              Consumer<String> onStatus,
+                                              List<String> imageCollector,
+                                              AtomicBoolean isCancelled) {
+        int n = toolCalls.size();
+        if (n == 0) return;
+
+        String[] results = new String[n];
+
+        if (n == 1) {
+            if (isCancelled == null || !isCancelled.get()) {
+                results[0] = runToolCall(toolCalls.getFirst(), agent, onStatus);
+            }
+        } else {
+            var latch = new CountDownLatch(n);
+            for (int i = 0; i < n; i++) {
+                final int idx = i;
+                final ToolCall tc = toolCalls.get(i);
+                Thread.ofVirtual().start(() -> {
+                    try {
+                        if (isCancelled == null || !isCancelled.get()) {
+                            results[idx] = runToolCall(tc, agent, onStatus);
+                        }
+                    } catch (Exception e) {
+                        EventLogger.error("tool", agent.name, null,
+                                "Tool '%s' threw: %s"
+                                        .formatted(tc.function().name(), e.getMessage()));
+                        results[idx] = "Error executing tool: " + e.getMessage();
+                    } finally {
+                        latch.countDown();
+                    }
+                });
+            }
+            try {
+                latch.await();
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
         }
 
-        services.Tx.run(() -> {
-            var conv = ConversationService.findById(conversationId);
-            ConversationService.appendAssistantMessage(conv, null, gson.toJson(toolCall));
-            ConversationService.appendToolResult(conv, toolCall.id(), result);
-        });
+        // Commit phase: append to message history and persist to DB in
+        // original order, preserving LLM tool_result ordering invariants.
+        for (int i = 0; i < n; i++) {
+            var result = results[i];
+            if (result == null) continue; // skipped due to cancellation
+            var tc = toolCalls.get(i);
+            currentMessages.add(ChatMessage.toolResult(tc.id(), result));
+            if (imageCollector != null) {
+                extractImageUrls(result, imageCollector);
+            }
+            final String r = result;
+            services.Tx.run(() -> {
+                var conv = ConversationService.findById(conversationId);
+                ConversationService.appendAssistantMessage(conv, null, gson.toJson(tc));
+                ConversationService.appendToolResult(conv, tc.id(), r);
+            });
+        }
     }
 
     private static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation) {

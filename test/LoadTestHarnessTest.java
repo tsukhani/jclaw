@@ -61,6 +61,48 @@ public class LoadTestHarnessTest extends UnitTest {
     }
 
     @Test
+    public void emitsToolCallsWhenScenarioRequests() throws Exception {
+        int port = LoadTestHarness.start(0);
+        LoadTestHarness.setScenario(new LoadTestHarness.Scenario(5, 1000, 5, 3, 150));
+
+        var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        var initial = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + port + "/v1/chat/completions"))
+                .timeout(Duration.ofSeconds(10))
+                .POST(HttpRequest.BodyPublishers.ofString(
+                        "{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}"))
+                .build();
+        var firstResp = client.send(initial, HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, firstResp.statusCode());
+        var firstBody = firstResp.body();
+        assertTrue(firstBody.contains("\"name\":\"loadtest_sleep\""), firstBody);
+        assertTrue(firstBody.contains("\"finish_reason\":\"tool_calls\""), firstBody);
+        // 3 tool_calls requested → 3 distinct call IDs in the stream.
+        assertTrue(firstBody.contains("\"id\":\"call-mock-0\""), firstBody);
+        assertTrue(firstBody.contains("\"id\":\"call-mock-1\""), firstBody);
+        assertTrue(firstBody.contains("\"id\":\"call-mock-2\""), firstBody);
+
+        // Continuation: last message role=tool → mock emits content instead
+        // of another tool_calls round.
+        var continuation = HttpRequest.newBuilder()
+                .uri(URI.create("http://127.0.0.1:" + port + "/v1/chat/completions"))
+                .timeout(Duration.ofSeconds(10))
+                .POST(HttpRequest.BodyPublishers.ofString(
+                        "{\"messages\":["
+                                + "{\"role\":\"user\",\"content\":\"hi\"},"
+                                + "{\"role\":\"assistant\",\"tool_calls\":[]},"
+                                + "{\"role\":\"tool\",\"content\":\"slept 150ms\"}"
+                                + "]}"))
+                .build();
+        var secondResp = client.send(continuation, HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, secondResp.statusCode());
+        var secondBody = secondResp.body();
+        assertTrue(secondBody.contains("\"content\":\"Hello\""), secondBody);
+        assertTrue(secondBody.contains("\"finish_reason\":\"stop\""), secondBody);
+        assertFalse(secondBody.contains("tool_calls"), secondBody);
+    }
+
+    @Test
     public void ttftDelayIsHonored() throws Exception {
         int port = LoadTestHarness.start(0);
         LoadTestHarness.setScenario(new LoadTestHarness.Scenario(150, 1000, 1));
