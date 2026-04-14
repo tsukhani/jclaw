@@ -8,6 +8,9 @@ import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.ProviderRegistry;
 import models.Agent;
+import models.AgentSkillAllowedTool;
+import models.AgentSkillConfig;
+import models.SkillRegistryTool;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -112,6 +115,15 @@ public class SkillPromotionService {
 
             atomicSwap(targetDir, stagingDir, backupDir, replacing);
             SkillLoader.clearCache();
+
+            // ── Snapshot per-agent allowlist contribution from the registry ──
+            // AgentSkillAllowedTool rows for this (agent, skill) are the canonical
+            // allowlist source consulted by ShellExecTool at call time. They are
+            // sourced from the registry *once* at install — subsequent registry
+            // un-promotion does NOT retroactively revoke, and workspace SKILL.md
+            // edits do NOT expand the set. Both properties are load-bearing for
+            // the threat model.
+            syncAgentAllowlistFromRegistry(agent, skillName);
         } catch (IOException | RuntimeException e) {
             if (Files.exists(stagingDir)) {
                 try { deleteRecursive(stagingDir); } catch (IOException _) {}
@@ -120,14 +132,102 @@ public class SkillPromotionService {
         }
     }
 
+    /**
+     * Mirror the registry's blessed command list for {@code skillName} into the
+     * per-agent allowlist table. Idempotent: clears any prior rows for this
+     * (agent, skill) pair, then inserts one row per registry-declared command.
+     * Called at install time (both fresh and re-install) and by
+     * {@link #revokeAgentAllowlist} via the skill-delete path.
+     */
+    public static void syncAgentAllowlistFromRegistry(Agent agent, String skillName) {
+        AgentSkillAllowedTool.deleteByAgentAndSkill(agent, skillName);
+        var blessed = SkillRegistryTool.findBySkill(skillName);
+        for (var src : blessed) {
+            var row = new AgentSkillAllowedTool();
+            row.agent = agent;
+            row.skillName = skillName;
+            row.toolName = src.toolName;
+            row.save();
+        }
+        EventLogger.info("skills",
+                "Agent '%s' skill '%s' allowlist: %d command(s) snapshotted from registry"
+                        .formatted(agent.name, skillName, blessed.size()));
+    }
+
+    /**
+     * Remove all {@link AgentSkillAllowedTool} rows for {@code (agent, skillName)}.
+     * Call from the skill-delete path so an agent removing a skill from its
+     * workspace also loses the associated shell-allowlist grants.
+     */
+    public static void revokeAgentAllowlist(Agent agent, String skillName) {
+        AgentSkillAllowedTool.deleteByAgentAndSkill(agent, skillName);
+        EventLogger.info("skills",
+                "Agent '%s' skill '%s' allowlist revoked".formatted(agent.name, skillName));
+    }
+
     // --- Promote: agent workspace skill → global registry ---
+
+    /**
+     * Skill name used as the promotion capability gate. Only agents with this
+     * skill installed and enabled may promote workspace skills to the global
+     * registry. The bootstrap seed in {@code DefaultConfigJob} ensures the
+     * main agent has this skill enabled at first boot so the delegation graph
+     * has a root.
+     */
+    public static final String SKILL_CREATOR_NAME = "skill-creator";
+
+    /**
+     * True when {@code agent} may promote: skill-creator must be present in the
+     * agent's workspace AND not explicitly disabled via AgentSkillConfig.
+     * Absence of an AgentSkillConfig row is treated as "enabled by default,"
+     * matching {@link agents.SkillLoader}'s existing semantics.
+     */
+    public static boolean hasSkillCreatorCapability(Agent agent) {
+        if (agent == null) return false;
+        var workspaceSkillMd = services.AgentService.workspacePath(agent.name)
+                .resolve("skills").resolve(SKILL_CREATOR_NAME).resolve("SKILL.md");
+        if (!Files.exists(workspaceSkillMd)) return false;
+        var cfg = AgentSkillConfig.findByAgentAndSkill(agent, SKILL_CREATOR_NAME);
+        return cfg == null || cfg.enabled;
+    }
 
     /**
      * Run the full promotion pipeline in the current thread. This is designed
      * to be called from a virtual thread — the controller returns 202 immediately.
+     *
+     * <p>The {@code agentId} parameter is the agent that requested this promotion.
+     * Promotion is gated on that agent having {@code skill-creator} installed
+     * and enabled; requests from agents without it are rejected before any
+     * filesystem or network work happens. The agent's name is also attached to
+     * failure notifications so operators can tell which agent tried what.
      */
-    public static void promoteInBackground(Path skillDir, String skillName) {
+    public static void promoteInBackground(Path skillDir, String skillName, Long agentId) {
         EventLogger.info("skills", "Starting background promotion of '%s'".formatted(skillName));
+
+        // ── Capability gate: only agents with skill-creator installed + enabled may promote ──
+        // Note: Agent.findById() inherits from play.db.jpa.Model and returns JPABase;
+        // explicit type is required so downstream callers see the Agent API.
+        Agent agent = Agent.findById(agentId);
+        if (agent == null) {
+            EventLogger.warn("skills", "Promotion of '%s' refused: requesting agent id=%d not found"
+                    .formatted(skillName, agentId));
+            NotificationBus.publish("skill.promote_failed", Map.of(
+                    "skillName", skillName,
+                    "error", "Requesting agent not found."
+            ));
+            return;
+        }
+        if (!hasSkillCreatorCapability(agent)) {
+            EventLogger.warn("skills",
+                    "Promotion of '%s' refused: agent '%s' does not have the skill-creator capability"
+                            .formatted(skillName, agent.name));
+            NotificationBus.publish("skill.promote_failed", Map.of(
+                    "skillName", skillName,
+                    "error", "Agent '" + agent.name + "' lacks the skill-creator capability. "
+                            + "Install the skill-creator skill in this agent's workspace first."
+            ));
+            return;
+        }
 
         // ── Hash-based noop check ──
         var globalDirCheck = SkillLoader.globalSkillsPath().resolve(skillName);
@@ -313,6 +413,13 @@ public class SkillPromotionService {
             atomicSwap(targetDir, stagingDir, backupDir, replacingExisting);
             SkillLoader.clearCache();
 
+            // ── Update registry allowlist blessings ──
+            // Rewrite SkillRegistryTool rows from the just-promoted SKILL.md's
+            // {@code commands:} frontmatter list. Idempotent: clear prior rows
+            // for this skill, insert new ones. Un-promotion (future delete
+            // endpoint) must mirror the delete.
+            syncRegistryToolRows(skillName, targetDir);
+
             var action = replacingExisting ? "replaced" : "created";
             EventLogger.info("skills", "Promotion of '%s' completed (%s)".formatted(skillName, action));
             NotificationBus.publish("skill.promoted", Map.of(
@@ -330,6 +437,31 @@ public class SkillPromotionService {
                     "error", e.getMessage()
             ));
         }
+    }
+
+    /**
+     * Refresh {@link SkillRegistryTool} rows for this skill from the on-disk
+     * SKILL.md at {@code globalSkillDir}. Clears existing rows for the skill
+     * and inserts one row per entry in the frontmatter {@code commands:} list.
+     * Missing or empty {@code commands:} frontmatter produces zero rows
+     * (skill declares no shell-allowlist contribution — the legitimate case
+     * for skills that only ship prompt instructions).
+     */
+    private static void syncRegistryToolRows(String skillName, Path globalSkillDir) {
+        var skillMd = globalSkillDir.resolve("SKILL.md");
+        var info = Files.exists(skillMd) ? SkillLoader.parseSkillFile(skillMd) : null;
+        var declared = (info != null && info.commands() != null) ? info.commands() : List.<String>of();
+
+        SkillRegistryTool.deleteBySkill(skillName);
+        for (var cmd : declared) {
+            if (cmd == null || cmd.isBlank()) continue;
+            var row = new SkillRegistryTool();
+            row.skillName = skillName;
+            row.toolName = cmd.strip();
+            row.save();
+        }
+        EventLogger.info("skills",
+                "Registry allowlist for '%s': %d command(s) declared".formatted(skillName, declared.size()));
     }
 
     /**

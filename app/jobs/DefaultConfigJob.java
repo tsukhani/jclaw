@@ -107,6 +107,10 @@ public class DefaultConfigJob extends Job<Void> {
         // so "latest X" queries don't return year-old snippets — the LLM will
         // not reliably add year/month keywords on its own.
         seedIfAbsent("search.perplexity.recencyFilter", "month");
+        seedIfAbsent("search.ollama.enabled", "true");
+        seedIfAbsent("search.ollama.apiKey", "");
+        seedIfAbsent("search.ollama.baseUrl", "https://ollama.com/api/web_search");
+        seedIfAbsent("search.ollama.priority", "4");
 
         // Malware scanners — independent hash-lookup APIs, composed under OR.
         // Keys are seeded empty; each scanner is inert until an operator provides its key.
@@ -132,6 +136,43 @@ public class DefaultConfigJob extends Job<Void> {
         }
         // Always reset the built-in agent's workspace to match tracked files
         AgentService.resetWorkspace("main");
+
+        // Bootstrap the skill-creator capability: the main agent must have
+        // skill-creator installed in its workspace on first boot so it can
+        // promote other skills into the global registry. Idempotent —
+        // copyToAgentWorkspace performs an atomic swap; re-running it is a no-op
+        // when the workspace copy is already up to date.
+        seedSkillCreatorForMain();
+    }
+
+    /**
+     * Ensure the main agent has {@code skill-creator} installed in its workspace.
+     * Runs on every boot so a clean checkout that ships {@code skills/skill-creator/}
+     * in the global registry can still reach a state where {@code main} can promote
+     * other skills (per {@code SkillPromotionService.SKILL_CREATOR_NAME}).
+     *
+     * <p>Skipped silently when the global registry doesn't ship skill-creator
+     * (e.g. in tests that strip skills) — main is still usable for everything
+     * except promotion, and the capability gate will reject promotion attempts
+     * with an actionable error.
+     */
+    private void seedSkillCreatorForMain() {
+        var skillName = services.SkillPromotionService.SKILL_CREATOR_NAME;
+        var globalSkillMd = agents.SkillLoader.globalSkillsPath()
+                .resolve(skillName).resolve("SKILL.md");
+        if (!java.nio.file.Files.exists(globalSkillMd)) {
+            play.Logger.info("Skill-creator not present in global registry — skipping bootstrap");
+            return;
+        }
+        var main = Agent.findByName("main");
+        if (main == null) return;
+        try {
+            services.SkillPromotionService.copyToAgentWorkspace(main, skillName);
+            EventLogger.info("agent", "main", null,
+                    "Skill-creator installed for main agent (promotion capability seeded)");
+        } catch (java.io.IOException e) {
+            play.Logger.warn("Failed to bootstrap skill-creator for main: %s", e.getMessage());
+        }
     }
 
     private void seedIfAbsent(String key, String value) {

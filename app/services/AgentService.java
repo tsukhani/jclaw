@@ -196,6 +196,8 @@ public class AgentService {
                 .setParameter("agentId", agentId).executeUpdate();
         em.createQuery("DELETE FROM AgentSkillConfig s WHERE s.agent.id = :agentId")
                 .setParameter("agentId", agentId).executeUpdate();
+        em.createQuery("DELETE FROM AgentSkillAllowedTool a WHERE a.agent.id = :agentId")
+                .setParameter("agentId", agentId).executeUpdate();
         em.createQuery("DELETE FROM AgentBinding b WHERE b.agent.id = :agentId")
                 .setParameter("agentId", agentId).executeUpdate();
         em.createQuery("DELETE FROM Task t WHERE t.agent.id = :agentId")

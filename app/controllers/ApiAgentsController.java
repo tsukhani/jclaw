@@ -49,6 +49,56 @@ public class ApiAgentsController extends Controller {
         renderJSON(gson.toJson(breakdown));
     }
 
+    /**
+     * GET /api/agents/{id}/shell/effective-allowlist — Derived view of the
+     * effective shell allowlist this agent would be checked against at exec
+     * time: the global {@code shell.allowlist} unioned with every command
+     * contributed by the agent's currently-enabled skills. Response shape:
+     * {@code { global: string[], bySkill: { <skill>: string[] } }} so the UI
+     * can render provenance without recomputing the join on the client.
+     *
+     * <p>Read-only: nothing about the allowlist is mutable from this page —
+     * global is edited via Settings; per-skill contributions are set at skill
+     * install time. Operators who need to remove a per-skill grant do so by
+     * disabling or removing the skill.
+     */
+    public static void effectiveShellAllowlist(Long id) {
+        var agent = AgentService.findById(id);
+        if (agent == null) notFound();
+
+        // Global portion: re-parse the raw config string rather than call
+        // parsedAllowlist() directly, which lives on a tool instance. The parse
+        // is cheap (bounded length, split-and-trim).
+        var rawGlobal = services.ConfigService.get("shell.allowlist",
+                tools.ShellExecTool.DEFAULT_ALLOWLIST);
+        var global = java.util.Arrays.stream(rawGlobal.split(","))
+                .map(String::strip)
+                .filter(s -> !s.isEmpty())
+                .sorted()
+                .toList();
+
+        // Per-skill contributions: only surface skills that are currently
+        // enabled for this agent (enabled-by-default when no config row).
+        var configs = models.AgentSkillConfig.findByAgent(agent);
+        var disabledSkills = new java.util.HashSet<String>();
+        for (var c : configs) {
+            if (!c.enabled) disabledSkills.add(c.skillName);
+        }
+        var bySkill = new java.util.TreeMap<String, java.util.List<String>>();
+        for (var row : models.AgentSkillAllowedTool.findByAgent(agent)) {
+            if (disabledSkills.contains(row.skillName)) continue;
+            bySkill.computeIfAbsent(row.skillName, _ -> new java.util.ArrayList<>()).add(row.toolName);
+        }
+        for (var entry : bySkill.entrySet()) {
+            entry.getValue().sort(String::compareTo);
+        }
+
+        renderJSON(gson.toJson(java.util.Map.of(
+                "global", global,
+                "bySkill", bySkill
+        )));
+    }
+
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();

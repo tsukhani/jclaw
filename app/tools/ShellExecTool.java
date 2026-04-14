@@ -4,6 +4,8 @@ import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
+import models.AgentSkillAllowedTool;
+import models.AgentSkillConfig;
 import services.AgentService;
 import services.ConfigService;
 
@@ -87,7 +89,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
         boolean bypassAllowlist = agent.isMain() && "true".equals(
                 ConfigService.get("agent." + agent.name + ".shell.bypassAllowlist", "false"));
         if (!bypassAllowlist) {
-            var allowlistError = validateAllowlist(command);
+            var allowlistError = validateAllowlist(command, agent);
             if (allowlistError != null) return allowlistError;
         }
 
@@ -121,28 +123,74 @@ public class ShellExecTool implements ToolRegistry.Tool {
         return executeCommand(command, workdir, timeout, maxOutputBytes, env, startTime, agent);
     }
 
+    /**
+     * Back-compat overload retained for tests and external callers that don't
+     * need per-agent skill-allowlist contributions. Production use should go
+     * through {@link #validateAllowlist(String, Agent)} so the agent's enabled
+     * skills can contribute commands.
+     */
     public String validateAllowlist(String command) {
+        return validateAllowlist(command, null);
+    }
+
+    /**
+     * Validate a command against the effective allowlist for this agent:
+     * {@code global shell.allowlist ∪ commands from every enabled skill's
+     * AgentSkillAllowedTool rows}. Matches by either the raw first token
+     * (supports path-literal entries like {@code "./skills/foo/wacli"}) or
+     * the path basename (so {@code "wacli"} covers {@code wacli},
+     * {@code ./wacli}, or {@code ./path/to/wacli}). When {@code agent} is
+     * null, only the global allowlist is consulted.
+     */
+    public String validateAllowlist(String command, Agent agent) {
         var firstToken = extractFirstToken(command);
         if (firstToken.isEmpty()) {
             return "Error: command is required and must not be empty.";
         }
 
-        var allowed = parsedAllowlist();
-        if (allowed.isEmpty()) {
+        var effective = effectiveAllowlistFor(agent);
+        if (effective.isEmpty()) {
             return "Error: Command '%s' is not in the allowed commands list. Allowed: %s"
-                    .formatted(firstToken, String.join(", ", allowed));
+                    .formatted(firstToken, String.join(", ", effective));
         }
-        // Match against the allowlist by either the raw first token (supports
-        // operators who list explicit paths like "./skills/foo/wacli") or the
-        // path basename (so "wacli" in the allowlist covers invocations as
-        // "wacli", "./wacli", or "./path/to/wacli" — the user's mental model is
-        // "allow this named binary" regardless of how the agent resolved it).
         var basename = commandBasename(firstToken);
-        if (!allowed.contains(firstToken) && (basename.isEmpty() || !allowed.contains(basename))) {
+        if (!effective.contains(firstToken) && (basename.isEmpty() || !effective.contains(basename))) {
             return "Error: Command '%s' is not in the allowed commands list. Allowed: %s"
-                    .formatted(firstToken, String.join(", ", allowed));
+                    .formatted(firstToken, String.join(", ", effective));
         }
         return null;
+    }
+
+    /**
+     * Compute the effective allowlist for this agent: the union of the global
+     * {@code shell.allowlist} with every command granted by the agent's enabled
+     * skills. "Enabled" follows the {@link AgentSkillConfig} convention where
+     * absence of a row means enabled-by-default; only rows where
+     * {@code enabled=false} exclude a skill's contribution.
+     *
+     * <p>Uncached by design. The global portion is already cached in
+     * {@link #parsedAllowlist()}; the per-agent portion is a bounded JPA query
+     * (one table scan per call, at most tens of rows in realistic setups).
+     * If this surfaces as a hot-path cost, add a per-agent cache with
+     * explicit invalidation hooks in {@code SkillPromotionService}.
+     */
+    public static Set<String> effectiveAllowlistFor(Agent agent) {
+        var global = parsedAllowlist();
+        if (agent == null) return global;
+
+        // Build disabled-skill filter from AgentSkillConfig. Absent config row
+        // means enabled-by-default, matching SkillLoader's existing semantics.
+        var configs = AgentSkillConfig.findByAgent(agent);
+        var disabledSkills = new java.util.HashSet<String>();
+        for (var c : configs) {
+            if (!c.enabled) disabledSkills.add(c.skillName);
+        }
+
+        var union = new java.util.HashSet<>(global);
+        for (var row : AgentSkillAllowedTool.findByAgent(agent)) {
+            if (!disabledSkills.contains(row.skillName)) union.add(row.toolName);
+        }
+        return java.util.Collections.unmodifiableSet(union);
     }
 
     /**

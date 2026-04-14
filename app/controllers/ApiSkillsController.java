@@ -294,6 +294,11 @@ public class ApiSkillsController extends Controller {
         if (agent == null) notFound();
         var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve("skills"), name);
         if (!Files.isDirectory(dir)) notFound();
+        // Revoke the skill's shell-allowlist grants for this agent BEFORE deleting
+        // the workspace copy — if the filesystem delete fails halfway we'd rather
+        // have a stale directory without grants than the inverse. The revoke is
+        // idempotent, so a retry after a transient failure is safe.
+        services.SkillPromotionService.revokeAgentAllowlist(agent, name);
         deleteSkillDir(dir);
     }
 
@@ -318,10 +323,14 @@ public class ApiSkillsController extends Controller {
             error(404, "Skill '%s' not found in agent workspace".formatted(skillName));
         }
 
-        // Return immediately — run sanitization in the background
+        // Return immediately — run sanitization in the background. Pass the
+        // requesting agent's id so the service can gate promotion on the
+        // skill-creator capability (see SkillPromotionService.promoteInBackground).
+        var requestingAgentId = agent.id;
         Thread.ofVirtual().start(() -> {
             try {
-                services.Tx.run(() -> services.SkillPromotionService.promoteInBackground(skillDir, skillName));
+                services.Tx.run(() -> services.SkillPromotionService.promoteInBackground(
+                        skillDir, skillName, requestingAgentId));
             } catch (Exception e) {
                 play.Logger.error("Background promotion failed for '%s': %s",
                         skillName, e.getMessage());
@@ -448,6 +457,7 @@ public class ApiSkillsController extends Controller {
         map.put("isGlobal", isGlobal);
         map.put("location", s.location() != null ? s.location().toString() : "");
         map.put("tools", s.tools() != null ? s.tools() : List.of());
+        map.put("commands", s.commands() != null ? s.commands() : List.of());
         map.put("version", s.version() != null ? s.version() : "0.0.0");
         // Folder name = parent directory name of the SKILL.md file
         if (s.location() != null && s.location().getParent() != null) {

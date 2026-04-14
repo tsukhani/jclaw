@@ -35,7 +35,8 @@ public class WebSearchTool implements ToolRegistry.Tool {
             new ExaProvider(),
             new BraveProvider(),
             new TavilyProvider(),
-            new PerplexityProvider()
+            new PerplexityProvider(),
+            new OllamaProvider()
     );
 
     @Override
@@ -46,7 +47,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
         return """
                 Search the web for current information. \
                 Returns relevant results with titles, URLs, and content snippets. \
-                Supports Exa, Brave, Tavily, and Perplexity search providers (uses first configured, or specify with 'provider' parameter). \
+                Supports Exa, Brave, Tavily, Perplexity, and Ollama search providers (uses first configured, or specify with 'provider' parameter). \
                 Use this to find up-to-date information, research topics, or answer questions about recent events.""";
     }
 
@@ -59,7 +60,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
                         "numResults", Map.of("type", "integer",
                                 "description", "Number of results to return (default: 5, max: 10)"),
                         "provider", Map.of("type", "string",
-                                "enum", List.of("exa", "brave", "tavily", "perplexity"),
+                                "enum", List.of("exa", "brave", "tavily", "perplexity", "ollama"),
                                 "description", "Search provider to use (default: first configured)")
                 ),
                 "required", List.of("query")
@@ -87,7 +88,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
             if (p.id().equals(providerId)) { match = p; break; }
         }
         if (match == null) {
-            return "Error: Unknown search provider '%s'. Supported: exa, brave, tavily, perplexity.".formatted(providerId);
+            return "Error: Unknown search provider '%s'. Supported: exa, brave, tavily, perplexity, ollama.".formatted(providerId);
         }
         if (!match.isEnabled()) {
             return "Error: %s is disabled. Enable it in Settings.".formatted(match.displayName());
@@ -107,7 +108,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
     private String executeWithFallback(String query, int numResults, Agent agent) {
         var candidates = resolveProvidersByPriority();
         if (candidates.isEmpty()) {
-            return "Error: No search provider configured. Enable one of Exa, Brave, Tavily, or Perplexity and add its API key in Settings.";
+            return "Error: No search provider configured. Enable one of Exa, Brave, Tavily, Perplexity, or Ollama and add its API key in Settings.";
         }
 
         String lastError = null;
@@ -387,6 +388,51 @@ public class WebSearchTool implements ToolRegistry.Tool {
                 sb.append("URL: %s\n".formatted(r.has("url") ? r.get("url").getAsString() : ""));
                 if (r.has("snippet") && !r.get("snippet").isJsonNull()) {
                     sb.append("> %s\n".formatted(r.get("snippet").getAsString().strip()));
+                }
+                sb.append("\n");
+            }
+            return sb.toString().strip();
+        }
+    }
+
+    // --- Ollama ---
+
+    static class OllamaProvider implements SearchProvider {
+        @Override public String id() { return "ollama"; }
+        @Override public String displayName() { return "Ollama"; }
+        @Override public String defaultBaseUrl() { return "https://ollama.com/api/web_search"; }
+
+        @Override
+        public HttpRequest buildRequest(String apiKey, String query, int numResults) {
+            var body = new java.util.HashMap<String, Object>();
+            body.put("query", query);
+            body.put("max_results", Math.min(numResults, 10));
+            return HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl()))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + apiKey)
+                    .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
+                    .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body), StandardCharsets.UTF_8))
+                    .build();
+        }
+
+        @Override
+        public String formatResults(String responseJson) {
+            var json = JsonParser.parseString(responseJson).getAsJsonObject();
+            if (!json.has("results") || json.getAsJsonArray("results").isEmpty()) {
+                return "No results found.";
+            }
+            var results = json.getAsJsonArray("results");
+            var sb = new StringBuilder("Found %d results (via Ollama):\n\n".formatted(results.size()));
+            for (int i = 0; i < results.size(); i++) {
+                var r = results.get(i).getAsJsonObject();
+                sb.append("### %d. %s\n".formatted(i + 1,
+                        r.has("title") ? r.get("title").getAsString() : "Untitled"));
+                sb.append("URL: %s\n".formatted(r.has("url") ? r.get("url").getAsString() : ""));
+                if (r.has("content") && !r.get("content").isJsonNull()) {
+                    var content = r.get("content").getAsString().strip();
+                    if (content.length() > 500) content = content.substring(0, 500) + "...";
+                    sb.append("> %s\n".formatted(content));
                 }
                 sb.append("\n");
             }

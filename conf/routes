@@ -36,6 +36,7 @@ GET     /api/agents/{id}                        ApiAgentsController.get
 PUT     /api/agents/{id}                        ApiAgentsController.update
 DELETE  /api/agents/{id}                        ApiAgentsController.delete
 GET     /api/agents/{id}/prompt-breakdown       ApiAgentsController.promptBreakdown
+GET     /api/agents/{id}/shell/effective-allowlist  ApiAgentsController.effectiveShellAllowlist
 GET     /api/agents/{id}/workspace/{filename}   ApiAgentsController.getWorkspaceFile
 GET     /api/agents/{id}/files/{<.+>filePath}   ApiAgentsController.serveWorkspaceFile
 PUT     /api/agents/{id}/workspace/{filename}   ApiAgentsController.saveWorkspaceFile

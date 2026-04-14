@@ -14,6 +14,12 @@ const workspaceContent = ref('')
 const form = ref({ name: '', modelProvider: '', modelId: '', enabled: true, thinkingMode: '' })
 const agentTools = ref<any[]>([])
 const agentSkills = ref<any[]>([])
+// Effective shell allowlist for the current agent: global entries + per-skill
+// contributions. Derived server-side so the UI doesn't have to re-compute the
+// join. Populated on agent edit and refreshed whenever skill enable/disable or
+// install actions happen — i.e., any time the union could change.
+const effectiveAllowlist = ref<{ global: string[]; bySkill: Record<string, string[]> } | null>(null)
+const allowlistExpanded = ref(false)
 
 // Group agentTools by category, in the canonical order from useToolMeta.
 // Each entry is { category, tools[] } — empty categories are omitted.
@@ -166,6 +172,7 @@ function editAgent(agent: any) {
   loadWorkspaceFile(agent.id, 'AGENT.md')
   loadAgentTools(agent.id)
   loadAgentSkills(agent.id)
+  loadEffectiveAllowlist(agent.id)
   loadQueueMode(agent.name)
   loadExecConfig(agent.name)
 }
@@ -229,6 +236,14 @@ async function loadAgentSkills(agentId: number) {
   }
 }
 
+async function loadEffectiveAllowlist(agentId: number) {
+  try {
+    effectiveAllowlist.value = await $fetch(`/api/agents/${agentId}/shell/effective-allowlist`)
+  } catch {
+    effectiveAllowlist.value = null
+  }
+}
+
 async function loadQueueMode(agentName: string) {
   try {
     const config = await $fetch<any>(`/api/config/agent.${agentName}.queue.mode`)
@@ -282,6 +297,9 @@ async function toggleSkill(skillName: string, enabled: boolean) {
       body: { enabled }
     })
     await loadAgentSkills(editing.value.id)
+    // Skill enable/disable flips which commands count toward the effective
+    // allowlist — refresh the table so the bySkill section matches the toggle.
+    await loadEffectiveAllowlist(editing.value.id)
   } catch (e) {
     console.error('Failed to toggle skill:', e)
   }
@@ -735,6 +753,19 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
                   {{ tool }}
                 </span>
               </div>
+              <!--
+                Shell commands this skill contributes to the agent's effective
+                allowlist. These are the binaries bundled under the skill's
+                tools/ directory, blessed at promotion time. Enabling this
+                skill grants execution rights for these exact names.
+              -->
+              <div v-if="skill.commands?.length" class="mt-1.5 text-[11px] text-neutral-500 flex flex-wrap items-center gap-1">
+                <span class="text-neutral-600 uppercase tracking-wide text-[10px]">Provides:</span>
+                <span v-for="cmd in skill.commands" :key="cmd"
+                      class="font-mono text-cyan-400/80 bg-cyan-400/5 border border-cyan-400/20 px-1.5 py-0.5 rounded-sm">
+                  {{ cmd }}
+                </span>
+              </div>
               <div v-if="skillDisabledTools(skill).length"
                    class="text-[10px] text-amber-500/70 mt-1.5">
                 requires {{ skillDisabledTools(skill).join(', ') }}
@@ -757,6 +788,63 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
         </div>
         <div v-if="!agentSkills.length" class="px-4 py-4 text-xs text-neutral-600 text-center">
           No skills available
+        </div>
+      </div>
+
+      <!--
+        Effective shell allowlist — derived view of what this agent can run via
+        the exec tool. Aggregates the global shell.allowlist (edited in Settings)
+        with the commands each enabled skill contributes at install time.
+        Read-only: remove a per-skill grant by disabling or removing the skill;
+        change global by editing shell.allowlist in Settings.
+      -->
+      <div v-if="editing && effectiveAllowlist" class="bg-neutral-900 border border-neutral-800">
+        <button @click="allowlistExpanded = !allowlistExpanded"
+                class="w-full px-4 py-2.5 border-b border-neutral-800 text-left hover:bg-neutral-800/30 transition-colors flex items-center justify-between">
+          <span class="text-sm font-medium text-white">
+            Shell Allowlist
+            <span class="ml-2 text-xs font-normal text-neutral-500">
+              {{ effectiveAllowlist.global.length + Object.values(effectiveAllowlist.bySkill).reduce((n, arr) => n + arr.length, 0) }}
+              commands
+              ({{ effectiveAllowlist.global.length }} global +
+              {{ Object.values(effectiveAllowlist.bySkill).reduce((n, arr) => n + arr.length, 0) }}
+              from {{ Object.keys(effectiveAllowlist.bySkill).length }} skill{{ Object.keys(effectiveAllowlist.bySkill).length === 1 ? '' : 's' }})
+            </span>
+          </span>
+          <svg class="w-3 h-3 text-neutral-500 transition-transform"
+               :class="allowlistExpanded ? 'rotate-90' : ''"
+               fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+          </svg>
+        </button>
+        <div v-if="allowlistExpanded" class="px-4 py-3">
+          <p class="text-[11px] text-neutral-500 mb-2">
+            What this agent can run via the exec tool. Global entries come from
+            <span class="font-mono text-neutral-400">shell.allowlist</span> in Settings;
+            per-skill entries come from the skill's declared
+            <span class="font-mono text-neutral-400">commands:</span>
+            and disappear when you disable or remove the skill.
+          </p>
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-neutral-500 text-[10px] uppercase tracking-wide">
+                <th class="text-left font-medium py-1 pr-4">Command</th>
+                <th class="text-left font-medium py-1">Source</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-800/50">
+              <tr v-for="cmd in effectiveAllowlist.global" :key="'g:' + cmd">
+                <td class="py-1 pr-4 font-mono text-neutral-300">{{ cmd }}</td>
+                <td class="py-1 text-neutral-500">Global (shell.allowlist)</td>
+              </tr>
+              <template v-for="(cmds, skillName) in effectiveAllowlist.bySkill" :key="skillName">
+                <tr v-for="cmd in cmds" :key="skillName + ':' + cmd">
+                  <td class="py-1 pr-4 font-mono text-cyan-400/80">{{ cmd }}</td>
+                  <td class="py-1 text-neutral-500">Skill: <span class="font-mono text-neutral-400">{{ skillName }}</span></td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
         </div>
       </div>
 

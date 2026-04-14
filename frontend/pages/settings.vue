@@ -256,6 +256,13 @@ const SEARCH_PROVIDERS: Record<string, {
     signupLabel: 'perplexity.ai/settings/api',
     apiKeyPlaceholder: 'Your Perplexity API key from perplexity.ai',
   },
+  ollama: {
+    label: 'Ollama',
+    description: 'Hosted web search via ollama.com. Uses the same account as Ollama Cloud LLMs — one key covers both. Free tier available; returns title/URL/content for each result.',
+    signupUrl: 'https://ollama.com/settings/keys',
+    signupLabel: 'ollama.com/settings/keys',
+    apiKeyPlaceholder: 'Your Ollama API key from ollama.com',
+  },
 }
 
 function searchApiKey(providerId: string): string {

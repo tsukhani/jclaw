@@ -26,11 +26,26 @@ public class SkillLoader {
      *                      declaration system and callers should fall back to heuristics.
      * @param version       semver string from frontmatter ({@code version:}), or {@code "0.0.0"}
      *                      if the key was absent.
+     * @param commands      shell-allowlist contributions declared by this skill — typically the
+     *                      basenames of executables bundled under the skill's {@code tools/}
+     *                      directory. Distinct from {@code tools}: {@code tools} names the
+     *                      JClaw tools the skill consumes (exec, filesystem, browser...),
+     *                      while {@code commands} names shell binaries the skill provides.
+     *                      Blessed at promotion time and snapshotted per-agent at install time;
+     *                      feeds the ShellExecTool allowlist union. Empty/null when the skill
+     *                      declares no executables.
      */
     public record SkillInfo(String name, String description, Path location,
-                            List<String> tools, boolean toolsDeclared, String version) {
+                            List<String> tools, boolean toolsDeclared, String version,
+                            List<String> commands) {
         public SkillInfo(String name, String description, Path location) {
-            this(name, description, location, List.of(), false, "0.0.0");
+            this(name, description, location, List.of(), false, "0.0.0", List.of());
+        }
+
+        /** Backwards-compatible 6-arg constructor for call sites predating the {@code commands} field. */
+        public SkillInfo(String name, String description, Path location,
+                         List<String> tools, boolean toolsDeclared, String version) {
+            this(name, description, location, tools, toolsDeclared, version, List.of());
         }
     }
 
@@ -353,9 +368,10 @@ public class SkillLoader {
             var toolsDeclared = TOOLS_KEY_PRESENT.matcher(frontmatter).find();
             var tools = extractYamlList(frontmatter, "tools");
             var version = extractYamlValue(frontmatter, "version");
+            var commands = extractYamlList(frontmatter, "commands");
             if (name != null) {
                 return new SkillInfo(name, description != null ? description : "", locationHint,
-                        tools, toolsDeclared, version != null ? version : "0.0.0");
+                        tools, toolsDeclared, version != null ? version : "0.0.0", commands);
             }
         }
         return null;
