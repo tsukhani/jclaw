@@ -118,18 +118,23 @@ Dependencies are automatically installed when you start with `jclaw.sh`.
 
 # Check status
 ./jclaw.sh --dev status
-```
 
+# View logs
+./jclaw.sh --dev logs
+```
 Default ports: backend on **:9000**, frontend on **:3000**.
 
 ### Production Deployment
 
 ```bash
-# Deploy to /opt (creates /opt/jclaw), build everything, and start
-./jclaw.sh --deploy /opt start
+# Deploy to /opt (creates /tmp/jclaw), build everything, and start
+./jclaw.sh --deploy /tmp start
 
 # Stop
-./jclaw.sh --deploy /opt stop
+./jclaw.sh --deploy /tmp stop
+
+# View logs
+./jclaw.sh --deploy /tmp logs
 ```
 
 This packages the app with `play dist`, unzips to `<dir>/jclaw/`, installs dependencies, builds the frontend, and starts both services in production mode.
@@ -137,11 +142,14 @@ This packages the app with `play dist`, unzips to `<dir>/jclaw/`, installs depen
 To start an existing deployment (without re-packaging):
 
 ```bash
-cd /opt/jclaw
+# Start
 ./jclaw.sh start
 
 # Stop
 ./jclaw.sh stop
+
+# View logs
+./jclaw.sh logs
 ```
 
 ### Custom Ports
@@ -154,6 +162,8 @@ Use `--backend-port` and `--frontend-port` with any mode. The script automatical
 
 # Production deploy with custom ports (creates /opt/jclaw)
 ./jclaw.sh --deploy /opt --backend-port 8080 --frontend-port 4000 start
+
+./jclaw.sh --backend-port 8080 --frontend-port 4000 start
 ```
 
 ---
