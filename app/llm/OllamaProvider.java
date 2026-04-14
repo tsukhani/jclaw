@@ -26,8 +26,13 @@ public final class OllamaProvider extends LlmProvider {
 
     @Override
     protected void disableReasoning(JsonObject request) {
-        // Ollama models like Kimi K2.5 think by default. The native API uses "think": false
-        // to disable it. Pass this through the /v1 endpoint — Ollama may forward it to the model.
+        // The OpenAI-compat /v1 endpoint accepts reasoning_effort: "none" as the
+        // first-class "off" signal (confirmed in Ollama docs). We previously sent
+        // {@code "think": false}, which is a native-API field the /v1 shim silently
+        // ignores — so models that think by default (Kimi K2.5, Qwen 3.5, glm-5.1)
+        // kept reasoning anyway. Still send {@code think: false} as a belt-and-braces
+        // fallback in case the local shim forwards it to the native scheduler.
+        request.addProperty("reasoning_effort", "none");
         request.addProperty("think", false);
     }
 

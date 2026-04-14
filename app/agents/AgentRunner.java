@@ -377,6 +377,26 @@ public class AgentRunner {
      * Returns {@code true} if the accumulator completed, {@code false} if
      * cancelled (in which case the cancellation has already been logged).
      */
+    /**
+     * Resolve the reasoning-token count to surface in usage metrics. Prefers the
+     * provider-reported {@code usage.reasoning_tokens} when available; falls back
+     * to a character-length estimate over the streamed reasoning text (≈4 chars
+     * per token, the standard English heuristic) when the provider reported zero
+     * despite reasoning having been detected. Returning an estimate — clearly
+     * non-zero when reasoning ran — is better than showing no count at all, since
+     * the UI's reasoning-count badge is gated on this value being truthy.
+     */
+    private static int effectiveReasoningTokens(llm.LlmTypes.Usage usage,
+                                                 LlmProvider.StreamAccumulator accumulator) {
+        if (usage.reasoningTokens() > 0) return usage.reasoningTokens();
+        if (!accumulator.reasoningDetected) return 0;
+        var chars = accumulator.reasoningChars();
+        if (chars <= 0) return 0;
+        // Round up: a small amount of text still represents at least one reasoning
+        // token on the wire, and rounding down would silently swallow short traces.
+        return Math.max(1, (chars + 3) / 4);
+    }
+
     private static boolean awaitAccumulatorOrCancel(LlmProvider.StreamAccumulator accumulator,
                                                      AtomicBoolean isCancelled,
                                                      Agent agent, String channelType)
@@ -398,8 +418,15 @@ public class AgentRunner {
         var durationMs = System.currentTimeMillis() - streamStartMs;
         if (accumulator.usage != null) {
             var u = accumulator.usage;
+            // Reasoning count is based on *actual emitted reasoning*, not the agent's
+            // thinking-mode toggle. Providers that populate usage.reasoning_tokens win;
+            // otherwise estimate from streamed-text length at ~4 chars/token (the
+            // conservative English heuristic used across the LLM ecosystem). This
+            // matters for Ollama Cloud thinking-by-default models like glm-5.1 that
+            // stream reasoning text without ever reporting a token count.
+            var reasoningCount = effectiveReasoningTokens(u, accumulator);
             var extras = new StringBuilder();
-            if (u.reasoningTokens() > 0) extras.append(", %d reasoning".formatted(u.reasoningTokens()));
+            if (reasoningCount > 0) extras.append(", %d reasoning".formatted(reasoningCount));
             if (u.cachedTokens() > 0) extras.append(", %d cached".formatted(u.cachedTokens()));
             if (u.cacheCreationTokens() > 0) extras.append(", %d cache-write".formatted(u.cacheCreationTokens()));
             var usageSummary = " [%d prompt, %d completion, %d total tokens%s, %.1fs]".formatted(
@@ -414,7 +441,7 @@ public class AgentRunner {
             usageMap.addProperty("prompt", u.promptTokens());
             usageMap.addProperty("completion", u.completionTokens());
             usageMap.addProperty("total", u.totalTokens());
-            usageMap.addProperty("reasoning", u.reasoningTokens());
+            usageMap.addProperty("reasoning", reasoningCount);
             usageMap.addProperty("cached", u.cachedTokens());
             usageMap.addProperty("cacheCreation", u.cacheCreationTokens());
             usageMap.addProperty("durationMs", durationMs);

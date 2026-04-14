@@ -269,11 +269,16 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                             contentBuilder.append(delta.content());
                             onToken.accept(delta.content());
                         }
-                        // Delegate reasoning extraction to the provider subclass
+                        // Delegate reasoning extraction to the provider subclass.
+                        // We buffer the text even when the consumer doesn't supply an
+                        // onReasoning callback, because the length feeds the token-count
+                        // estimate for providers (e.g. Ollama Cloud on glm-5.1) that
+                        // stream reasoning but omit reasoning_tokens from usage.
                         var reasoningText = extractReasoningFromDelta(delta);
-                        if (reasoningText != null && onReasoning != null) {
+                        if (reasoningText != null) {
                             accumulator.reasoningDetected = true;
-                            onReasoning.accept(reasoningText);
+                            accumulator.appendReasoningText(reasoningText);
+                            if (onReasoning != null) onReasoning.accept(reasoningText);
                         }
                         if (delta.toolCalls() != null) {
                             for (var tc : delta.toolCalls()) {
@@ -585,8 +590,24 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         public volatile Exception error;
         public volatile boolean reasoningDetected = false;
         public volatile int reasoningTokens = 0;
+        /**
+         * Accumulated reasoning text across all streamed deltas. Populated even
+         * when the provider doesn't report {@code reasoning_tokens} in the usage
+         * block, so callers can estimate a token count from the text length when
+         * needed (see {@code AgentRunner.emitUsageAndComplete}). Appending is
+         * synchronized because the streaming callback fires on a virtual thread
+         * distinct from the consumer reading {@link #reasoningChars()}.
+         */
+        private final StringBuilder reasoningTextBuffer = new StringBuilder();
         public volatile Usage usage;
         private final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
+
+        synchronized void appendReasoningText(String text) {
+            if (text != null) reasoningTextBuffer.append(text);
+        }
+
+        /** Character count of accumulated reasoning text. Used for token estimation. */
+        public synchronized int reasoningChars() { return reasoningTextBuffer.length(); }
 
         void markComplete() { complete = true; latch.countDown(); }
         public void awaitCompletion() throws InterruptedException { latch.await(); }
