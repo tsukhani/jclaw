@@ -137,8 +137,8 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     @Test
     public void loadtestReturns503WhenDisabled() {
         login();
-        // Default: loadtest.enabled is absent → treated as false
-        ConfigService.delete("loadtest.enabled");
+        // Default: provider.loadtest-mock.enabled is absent → treated as false
+        ConfigService.delete("provider.loadtest-mock.enabled");
         var response = POST("/api/metrics/loadtest", "application/json", "{}");
         assertEquals(503, response.status.intValue());
     }
@@ -146,26 +146,26 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     @Test
     public void loadtestRejectsInvalidConcurrency() {
         login();
-        ConfigService.set("loadtest.enabled", "true");
+        ConfigService.set("provider.loadtest-mock.enabled", "true");
         try {
             var response = POST("/api/metrics/loadtest", "application/json",
                     "{\"concurrency\":0,\"iterations\":1}");
             assertEquals(400, response.status.intValue());
         } finally {
-            ConfigService.delete("loadtest.enabled");
+            ConfigService.delete("provider.loadtest-mock.enabled");
         }
     }
 
     @Test
     public void loadtestRejectsInvalidIterations() {
         login();
-        ConfigService.set("loadtest.enabled", "true");
+        ConfigService.set("provider.loadtest-mock.enabled", "true");
         try {
             var response = POST("/api/metrics/loadtest", "application/json",
                     "{\"concurrency\":1,\"iterations\":9999}");
             assertEquals(400, response.status.intValue());
         } finally {
-            ConfigService.delete("loadtest.enabled");
+            ConfigService.delete("provider.loadtest-mock.enabled");
         }
     }
 

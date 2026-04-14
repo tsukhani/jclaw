@@ -91,7 +91,7 @@ public class ConfigService {
             AgentService.syncEnabledStates();
         }
         if (key.equals("shell.enabled") || key.equals("playwright.enabled")
-                || key.equals("loadtest.enabled")) {
+                || key.equals("provider.loadtest-mock.enabled")) {
             jobs.ToolRegistrationJob.registerAll();
         }
 
@@ -118,7 +118,7 @@ public class ConfigService {
             AgentService.syncEnabledStates();
         }
         if (key.equals("shell.enabled") || key.equals("playwright.enabled")
-                || key.equals("loadtest.enabled")) {
+                || key.equals("provider.loadtest-mock.enabled")) {
             jobs.ToolRegistrationJob.registerAll();
         }
     }

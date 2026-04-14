@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * populate with realistic numbers, including {@code queue_wait}.
  *
  * <p>Uses a local {@link LoadTestHarness} mock provider so no external LLM is
- * called. Guarded at the controller layer by {@code loadtest.enabled}.
+ * called. Guarded at the controller layer by {@code provider.loadtest-mock.enabled}.
  */
 public final class LoadTestRunner {
 
@@ -153,7 +153,7 @@ public final class LoadTestRunner {
 
     private static int ensureHarnessStarted() throws java.io.IOException {
         if (!LoadTestHarness.isRunning()) {
-            int portCfg = ConfigService.getInt("loadtest.mock.port", 19999);
+            int portCfg = ConfigService.getInt("provider.loadtest-mock.port", 19999);
             LoadTestHarness.start(portCfg);
         }
         return LoadTestHarness.port();

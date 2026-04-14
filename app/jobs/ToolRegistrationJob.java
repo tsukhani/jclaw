@@ -30,7 +30,7 @@ public class ToolRegistrationJob extends Job<Void> {
         if ("true".equals(services.ConfigService.get("shell.enabled"))) {
             toolList.add(new ShellExecTool());
         }
-        if ("true".equals(services.ConfigService.get("loadtest.enabled"))) {
+        if ("true".equals(services.ConfigService.get("provider.loadtest-mock.enabled"))) {
             toolList.add(new LoadTestSleepTool());
         }
         ToolRegistry.publish(toolList);

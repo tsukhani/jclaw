@@ -13,7 +13,7 @@ import java.util.Map;
  * and produce measurable {@code tool_exec} histograms without depending
  * on real network I/O.
  *
- * <p>Registered only when {@code loadtest.enabled=true}; absent in
+ * <p>Registered only when {@code provider.loadtest-mock.enabled=true}; absent in
  * production. Never call this from real agent workflows — it exists
  * solely for the harness at {@code POST /api/metrics/loadtest}.
  */

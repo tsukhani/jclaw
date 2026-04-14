@@ -6,20 +6,28 @@ FRONTEND_PID_FILE="frontend.pid"
 
 usage() {
     cat <<EOF
-Usage: jclaw.sh [options] <start|stop|restart|status>
+Usage: jclaw.sh [options] <start|stop|restart|status|logs|loadtest>
 
 Commands:
-  start    Start the Play backend and Nuxt frontend
-  stop     Stop the running Play backend and Nuxt frontend
-  restart  Stop and start (combines stop + start)
-  status   Show whether backend and frontend are running
-  logs     Tail the production application log
+  start     Start the Play backend and Nuxt frontend
+  stop      Stop the running Play backend and Nuxt frontend
+  restart   Stop and start (combines stop + start)
+  status    Show whether backend and frontend are running
+  logs      Tail the production application log
+  loadtest  Drive the in-process load-test harness against /api/chat/stream
 
 Options:
   --dev                   Run in development mode (play run + pnpm dev)
   --deploy <dir>          Package with play dist, copy to <dir>, and run in production
   --backend-port <port>   Play backend port (default: 9000)
   --frontend-port <port>  Nuxt dev server port, dev mode only (default: 3000)
+
+Load-test options (only used with the 'loadtest' command):
+  --concurrency <n>       Parallel workers (default: 10)
+  --iterations <n>        Requests per worker (default: 5)
+  --ttft-ms <n>           Simulated time-to-first-token in ms (default: 100)
+  --tokens-per-second <n> Simulated token throughput (default: 50)
+  --response-tokens <n>   Tokens per simulated response (default: 40)
 
 Examples:
   ./jclaw.sh --dev start                              # Start in dev mode
@@ -30,6 +38,8 @@ Examples:
   ./jclaw.sh --dev stop                               # Stop dev mode services
   ./jclaw.sh --deploy /tmp stop                       # Stop services in /tmp/jclaw
   ./jclaw.sh stop                                     # Stop production in current directory
+  ./jclaw.sh loadtest                                 # Drive default 10×5 load test against :9000
+  ./jclaw.sh --concurrency 50 --iterations 20 loadtest
 EOF
     exit 1
 }
@@ -40,6 +50,11 @@ DEV_MODE=false
 BACKEND_PORT="9000"
 FRONTEND_PORT="3000"
 COMMAND=""
+LT_CONCURRENCY="10"
+LT_ITERATIONS="5"
+LT_TTFT_MS="100"
+LT_TOKENS_PER_SECOND="50"
+LT_RESPONSE_TOKENS="40"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -59,7 +74,27 @@ while [[ $# -gt 0 ]]; do
             FRONTEND_PORT="$2"
             shift 2
             ;;
-        start|stop|restart|status|logs)
+        --concurrency)
+            LT_CONCURRENCY="$2"
+            shift 2
+            ;;
+        --iterations)
+            LT_ITERATIONS="$2"
+            shift 2
+            ;;
+        --ttft-ms)
+            LT_TTFT_MS="$2"
+            shift 2
+            ;;
+        --tokens-per-second)
+            LT_TOKENS_PER_SECOND="$2"
+            shift 2
+            ;;
+        --response-tokens)
+            LT_RESPONSE_TOKENS="$2"
+            shift 2
+            ;;
+        start|stop|restart|status|logs|loadtest)
             COMMAND="$1"
             shift
             ;;
@@ -384,6 +419,114 @@ do_logs() {
     tail -f "$log_file"
 }
 
+# ─── Load test ───
+
+# Drive the in-process mock-provider load test against the running backend.
+# Authenticates as the admin user (credentials from application.conf), toggles
+# provider.loadtest-mock.enabled for the duration of the run, POSTs
+# /api/metrics/loadtest, and restores the prior enabled value on exit.
+do_loadtest() {
+    cd "$JCLAW_DIR"
+
+    if [[ ! -f "conf/application.conf" ]]; then
+        echo "Error: Not a JClaw directory (conf/application.conf not found)"
+        exit 1
+    fi
+
+    # Verify the backend is reachable before doing anything else
+    if ! curl -s -o /dev/null -w '%{http_code}' "http://localhost:$BACKEND_PORT/" | grep -q '^[23]'; then
+        echo "Error: Backend is not responding on port $BACKEND_PORT."
+        echo "       Start it first: $0 ${DEV_MODE:+--dev }${DEPLOY_DIR:+--deploy $DEPLOY_DIR }start"
+        exit 1
+    fi
+
+    # Read admin credentials straight from application.conf — same source
+    # LoadTestRunner uses for its own internal login path.
+    local admin_user admin_pass
+    admin_user=$(grep -E '^jclaw\.admin\.username=' conf/application.conf | head -1 | cut -d= -f2-)
+    admin_pass=$(grep -E '^jclaw\.admin\.password=' conf/application.conf | head -1 | cut -d= -f2-)
+    if [[ -z "$admin_user" || -z "$admin_pass" ]]; then
+        echo "Error: jclaw.admin.username/password not found in conf/application.conf"
+        exit 1
+    fi
+
+    # Declared at script scope (not local) so the EXIT trap below can still
+    # see them after do_loadtest returns.
+    cookie_jar=$(mktemp -t jclaw-loadtest-cookie.XXXXXX)
+
+    echo "==> Authenticating as $admin_user..."
+    local login_status
+    login_status=$(curl -s -o /dev/null -w '%{http_code}' -c "$cookie_jar" \
+        -X POST "http://localhost:$BACKEND_PORT/api/auth/login" \
+        -H 'Content-Type: application/json' \
+        -d "{\"username\":\"$admin_user\",\"password\":\"$admin_pass\"}")
+    if [[ "$login_status" != "200" ]]; then
+        echo "Error: Login failed (HTTP $login_status). Check jclaw.admin.* credentials."
+        exit 1
+    fi
+
+    # Snapshot the current enabled value so we can restore it when done —
+    # leaving it enabled after a one-shot CLI run is a footgun (the harness
+    # binds a loopback port and registers loadtest_sleep on every boot).
+    # Script-scoped for the same trap-visibility reason as cookie_jar.
+    prior_enabled=$(curl -s -b "$cookie_jar" \
+        "http://localhost:$BACKEND_PORT/api/config/provider.loadtest-mock.enabled" \
+        | sed -nE 's/.*"value":"([^"]*)".*/\1/p')
+    [[ -z "$prior_enabled" ]] && prior_enabled="false"
+
+    restore_enabled() {
+        curl -s -b "$cookie_jar" \
+            -X POST "http://localhost:$BACKEND_PORT/api/config" \
+            -H 'Content-Type: application/json' \
+            -d "{\"key\":\"provider.loadtest-mock.enabled\",\"value\":\"$prior_enabled\"}" \
+            -o /dev/null
+        rm -f "$cookie_jar"
+    }
+    trap restore_enabled EXIT
+
+    echo "==> Enabling provider.loadtest-mock.enabled (was: $prior_enabled)..."
+    curl -s -b "$cookie_jar" \
+        -X POST "http://localhost:$BACKEND_PORT/api/config" \
+        -H 'Content-Type: application/json' \
+        -d '{"key":"provider.loadtest-mock.enabled","value":"true"}' \
+        -o /dev/null
+
+    echo "==> Running load test: concurrency=$LT_CONCURRENCY iterations=$LT_ITERATIONS"
+    echo "    ttft=${LT_TTFT_MS}ms tokens/s=$LT_TOKENS_PER_SECOND response=${LT_RESPONSE_TOKENS} tokens"
+    echo ""
+
+    local body
+    body=$(printf '{"concurrency":%s,"iterations":%s,"ttftMs":%s,"tokensPerSecond":%s,"responseTokens":%s}' \
+        "$LT_CONCURRENCY" "$LT_ITERATIONS" "$LT_TTFT_MS" "$LT_TOKENS_PER_SECOND" "$LT_RESPONSE_TOKENS")
+
+    local response http_code
+    response=$(curl -s -b "$cookie_jar" \
+        -X POST "http://localhost:$BACKEND_PORT/api/metrics/loadtest" \
+        -H 'Content-Type: application/json' \
+        -d "$body" \
+        -w '\n%{http_code}' \
+        --max-time 300)
+    http_code=$(echo "$response" | tail -1)
+    local json
+    json=$(echo "$response" | sed '$d')
+
+    if [[ "$http_code" != "200" ]]; then
+        echo "Error: Load test failed (HTTP $http_code)"
+        echo "$json"
+        exit 1
+    fi
+
+    # Pretty-print with python if available, otherwise raw JSON
+    if command -v python3 >/dev/null 2>&1; then
+        echo "$json" | python3 -m json.tool
+    else
+        echo "$json"
+    fi
+
+    echo ""
+    echo "==> Tip: GET /api/metrics/latency for per-segment histograms"
+}
+
 # ─── Execute ───
 
 case "$COMMAND" in
@@ -425,5 +568,8 @@ case "$COMMAND" in
         ;;
     logs)
         do_logs
+        ;;
+    loadtest)
+        do_loadtest
         ;;
 esac

@@ -13,7 +13,7 @@ import static utils.GsonHolder.INSTANCE;
 /**
  * Runtime observability endpoints. In-memory only — histograms reset
  * on JVM restart or via {@link #resetLatency()}. Includes a load-test
- * harness guarded by {@code loadtest.enabled=true} in application.conf.
+ * harness guarded by {@code provider.loadtest-mock.enabled=true} in application.conf.
  */
 @With(AuthCheck.class)
 public class ApiMetricsController extends Controller {
@@ -46,8 +46,8 @@ public class ApiMetricsController extends Controller {
      * /api/metrics/latency afterwards for per-segment histograms.
      */
     public static void loadtest() {
-        if (!"true".equalsIgnoreCase(ConfigService.get("loadtest.enabled", "false"))) {
-            error(503, "Load testing is disabled (set loadtest.enabled=true in application.conf)");
+        if (!"true".equalsIgnoreCase(ConfigService.get("provider.loadtest-mock.enabled", "false"))) {
+            error(503, "Load testing is disabled (set provider.loadtest-mock.enabled=true in application.conf)");
         }
 
         var body = JsonBodyReader.readJsonBody();
@@ -59,8 +59,8 @@ public class ApiMetricsController extends Controller {
         int simulatedToolCalls = readInt(body, "simulatedToolCalls", 0);
         int toolSleepMs = readInt(body, "toolSleepMs", 200);
 
-        int maxConcurrency = ConfigService.getInt("loadtest.maxConcurrency", 100);
-        int maxIterations = ConfigService.getInt("loadtest.maxIterations", 50);
+        int maxConcurrency = ConfigService.getInt("provider.loadtest-mock.maxConcurrency", 100);
+        int maxIterations = ConfigService.getInt("provider.loadtest-mock.maxIterations", 50);
         if (concurrency < 1 || concurrency > maxConcurrency) {
             error(400, "concurrency must be between 1 and " + maxConcurrency);
         }
