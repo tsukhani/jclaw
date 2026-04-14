@@ -10,3 +10,12 @@ services:
       - ./workspace:/app/workspace
       - ./skills:/app/skills
     restart: unless-stopped
+    # Liveness probe via bash's /dev/tcp — avoids pulling curl/wget back into
+    # the runtime image just for a healthcheck. start_period gives Play time
+    # to precompile, seed the DB, and bind :9000 on a cold boot.
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ': >/dev/tcp/127.0.0.1/9000' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s

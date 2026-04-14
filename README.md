@@ -152,6 +152,23 @@ To start an existing deployment (without re-packaging):
 ./jclaw.sh logs
 ```
 
+### Docker (Production)
+
+The simplest way to run JClaw in production is with Docker Compose. The shipped `docker-compose.yml` pulls the prebuilt image from GHCR, publishes the app on **:9000**, and persists `data/`, `logs/`, `workspace/`, and `skills/` to the host so config and conversations survive restarts.
+
+```bash
+# Start in the background
+docker compose up -d
+
+# Follow logs
+docker compose logs -f
+
+# Stop and remove the container
+docker compose down
+```
+
+The container runs in production mode — the Nuxt SPA is already built into the image, so no local Node.js, pnpm, or Play toolchain is required on the host. Open `http://localhost:9000` once the container is healthy.
+
 ### Custom Ports
 
 Use `--backend-port` and `--frontend-port` with any mode. The script automatically updates the frontend API proxy to point at the correct backend port.
