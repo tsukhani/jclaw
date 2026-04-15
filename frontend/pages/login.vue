@@ -56,7 +56,7 @@ async function handleLogin() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-[#FCFCFB] dark:bg-neutral-950 flex items-center justify-center">
+  <div class="min-h-screen bg-white dark:bg-neutral-950 flex items-center justify-center">
     <div class="w-full max-w-sm">
       <div class="mb-4 flex items-center justify-center gap-4">
         <img :src="mascotSrc[mascotPeriod]" alt="JClaw" class="w-32 h-32 rounded-full shrink-0 cursor-pointer select-none" @click="cycleMascot" />
