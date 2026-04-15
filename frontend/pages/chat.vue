@@ -922,7 +922,7 @@ function exportConversation() {
                 v-if="streaming"
                 type="button"
                 @click="stopStreaming"
-                class="p-1.5 text-neutral-600 dark:text-neutral-400 hover:text-red-400 transition-colors"
+                class="p-1.5 text-red-600 dark:text-red-500 hover:text-red-700 dark:hover:text-red-400 transition-colors"
                 title="Stop generating"
               >
                 <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5" /></svg>
