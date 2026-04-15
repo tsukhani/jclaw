@@ -45,9 +45,9 @@ public class ApiConversationsControllerTest extends FunctionalTest {
     // --- Tests ---
 
     @Test
-    public void unauthenticatedRequestReturns403() {
+    public void unauthenticatedRequestReturns401() {
         var response = GET("/api/conversations");
-        assertEquals(403, response.status.intValue());
+        assertEquals(401, response.status.intValue());
     }
 
     @Test

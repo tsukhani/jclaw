@@ -55,7 +55,7 @@ describe('useAuth', () => {
   it('checkAuth returns false when API rejects', async () => {
     registerEndpoint('/api/config', {
       method: 'GET',
-      handler: () => { throw createError({ statusCode: 403 }) }
+      handler: () => { throw createError({ statusCode: 401 }) }
     })
 
     const { checkAuth } = useAuth()

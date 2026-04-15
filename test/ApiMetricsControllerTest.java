@@ -28,7 +28,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     @Test
     public void latencyRequiresAuth() {
         var response = GET("/api/metrics/latency");
-        assertEquals(403, response.status.intValue());
+        assertEquals(401, response.status.intValue());
     }
 
     @Test
@@ -131,7 +131,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     @Test
     public void loadtestRequiresAuth() {
         var response = POST("/api/metrics/loadtest", "application/json", "{}");
-        assertEquals(403, response.status.intValue());
+        assertEquals(401, response.status.intValue());
     }
 
     @Test

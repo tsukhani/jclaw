@@ -66,14 +66,13 @@ jclaw/
 │   ├── routes                    # URL routing
 │   ├── dependencies.yml          # Module dependencies
 │   └── initial-data.yml          # Bootstrap data
-├── frontend/                     # Nuxt 3 SPA
-│   ├── app/                      # Nuxt app directory
-│   ├── components/               # Vue components
-│   ├── composables/              # Vue composables
+├── frontend/                     # Nuxt 3 SPA (SPA-only; ssr: false)
+│   ├── app.vue                   # Root component
 │   ├── layouts/                  # Page layouts
-│   ├── pages/                    # Nuxt pages
-│   ├── stores/                   # Pinia stores
-│   ├── server/                   # Server middleware
+│   ├── pages/                    # Nuxt file-based routes
+│   ├── components/               # Reusable Vue components
+│   ├── composables/              # Shared reactive state (useAuth, useEventBus, ...)
+│   ├── middleware/               # Global route middleware (auth guard)
 │   ├── public/                   # Static assets
 │   └── nuxt.config.ts            # Nuxt configuration
 ├── lib/                          # Custom JARs (if needed)
@@ -197,10 +196,10 @@ Use `--backend-port` and `--frontend-port` with any mode. The script automatical
 
 ### Frontend (Nuxt 3)
 
-- **Framework**: Vue 3 + TypeScript + Nuxt 3
-- **State**: Pinia stores
+- **Framework**: Vue 3 + TypeScript + Nuxt 3 (SPA mode, `ssr: false`)
+- **State**: Composables backed by `useState` (no Pinia)
 - **Styling**: Tailwind CSS
-- **API**: Auto-generated from Play backend
+- **API**: Cookie-session authenticated `$fetch` to the Play backend, proxied via Nitro in dev
 
 ---
 

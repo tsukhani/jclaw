@@ -68,13 +68,13 @@ public class ControllerApiTest extends FunctionalTest {
     // --- Unauthenticated access is rejected ---
 
     @Test
-    public void allEndpointsReject403WithoutAuth() {
-        assertEquals(403, GET("/api/agents").status.intValue());
-        assertEquals(403, GET("/api/tasks").status.intValue());
-        assertEquals(403, GET("/api/channels").status.intValue());
-        assertEquals(403, GET("/api/logs").status.intValue());
-        assertEquals(403, GET("/api/skills").status.intValue());
-        assertEquals(403, GET("/api/tools").status.intValue());
+    public void allEndpointsReject401WithoutAuth() {
+        assertEquals(401, GET("/api/agents").status.intValue());
+        assertEquals(401, GET("/api/tasks").status.intValue());
+        assertEquals(401, GET("/api/channels").status.intValue());
+        assertEquals(401, GET("/api/logs").status.intValue());
+        assertEquals(401, GET("/api/skills").status.intValue());
+        assertEquals(401, GET("/api/tools").status.intValue());
     }
 
     // =====================
@@ -409,15 +409,15 @@ public class ControllerApiTest extends FunctionalTest {
      * The SSE endpoint uses Play's async continuation (await) which blocks the
      * FunctionalTest GET() call until the stream ends (24h timeout). We cannot
      * exercise it via the standard GET() helper. Instead, verify that an
-     * unauthenticated request is rejected (covered in allEndpointsReject403WithoutAuth)
-     * and that the route is wired by confirming the 403 comes from AuthCheck, not a 404.
+     * unauthenticated request is rejected (covered in allEndpointsReject401WithoutAuth)
+     * and that the route is wired by confirming the 401 comes from AuthCheck, not a 404.
      */
     @Test
     public void eventsStreamRouteIsWired() {
-        // Without auth, AuthCheck returns 403 — proving the route exists and
+        // Without auth, AuthCheck returns 401 — proving the route exists and
         // reaches the controller (a missing route would give 404).
         var response = GET("/api/events");
-        assertEquals(403, response.status.intValue());
+        assertEquals(401, response.status.intValue());
     }
 
     // =====================
