@@ -79,17 +79,14 @@ pipeline {
             steps {
                 sh 'play dist'
 
-                // Inject the SPA build into the dist zip
-                // play dist names the zip after the workspace directory, so find it dynamically
+                // play dist names the zip after the workspace directory;
+                // rename it to jclaw.zip for a stable artifact name.
                 sh '''
                     cd dist
                     ZIP_FILE=$(ls *.zip | head -1)
-                    DIR_NAME="${ZIP_FILE%.zip}"
-                    unzip -q "$ZIP_FILE"
-                    cp -r ../frontend/.output/public "$DIR_NAME/public/spa"
-                    rm "$ZIP_FILE"
-                    zip -qr jclaw.zip "$DIR_NAME/"
-                    rm -rf "$DIR_NAME/"
+                    if [ "$ZIP_FILE" != "jclaw.zip" ]; then
+                        mv "$ZIP_FILE" jclaw.zip
+                    fi
                 '''
 
                 archiveArtifacts artifacts: 'dist/jclaw.zip', fingerprint: true

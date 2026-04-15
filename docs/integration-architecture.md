@@ -9,7 +9,7 @@ Two transports, one origin.
 ### 1. REST over `$fetch` (request/response)
 
 - **Dev:** Nuxt's Nitro `devProxy` forwards `/api/**` from `:3000` to `http://localhost:9000/api` (see `frontend/nuxt.config.ts`). No CORS, same-origin from the browser's perspective.
-- **Prod:** The SPA is built with `nuxi generate` and its `.output/public/` is copied into the Play dist at `public/spa/`. Play's routes map `/_nuxt/*` → `staticDir:public/spa/_nuxt` and a catch-all `GET /{path}` → `Application.spa` which serves `public/spa/index.html`. Backend + frontend therefore share origin `:9000`.
+- **Prod:** The SPA is built with `nuxi generate` and its `.output/public/` is staged into the running app's `public/spa/` at deploy time by `jclaw.sh` (or bake-time by the Dockerfile) — the Play dist zip itself does not contain it. Play's routes map `/_nuxt/*` → `staticDir:public/spa/_nuxt` and a catch-all `GET /{path}` → `Application.spa` which serves `public/spa/index.html`. Backend + frontend therefore share origin `:9000`.
 - **Auth:** Session cookie (`PLAY_SESSION`). Set by `POST /api/auth/login`, consulted by `AuthCheck @Before`, surfaced client-side by `useAuth.checkAuth()` which probes `GET /api/config`.
 - **Unauthenticated:** Backend returns **HTTP 401** with `{"error":"Authentication required"}`. Login failure is also `401`. Authenticated-but-forbidden actions (e.g. disabling a system tool) return `403`. Client middleware treats any non-2xx from `checkAuth` as invalid session.
 
@@ -81,7 +81,7 @@ All webhook inbounds flow: `WebhookXController.webhook` → signature verify →
 
 ## Shared deploy artifact
 
-A single Play dist zip contains both runtimes. The Jenkins `Package` stage injects `frontend/.output/public/` into `<dist>/public/spa/`, and the Dockerfile does the same across build stages. There is no independent frontend release pipeline.
+The Play dist zip is backend-only. Each deploy consumer stages the SPA independently: `jclaw.sh start` runs `nuxi generate` and copies `.output/public` to `public/spa/` on every boot; the Dockerfile does the same at image-build time via a multi-stage `COPY --from=frontend-build`. There is no independent frontend release pipeline, and no SPA bytes travel inside `dist/jclaw.zip`.
 
 ## Failure modes to know about
 

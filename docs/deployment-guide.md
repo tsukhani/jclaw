@@ -6,7 +6,7 @@ How JClaw is built, packaged, and shipped.
 
 | Artifact | Source | Consumers |
 |---|---|---|
-| `dist/jclaw.zip` | `play dist` + injected SPA | Manual `./jclaw.sh --deploy` flow, GitHub Releases. |
+| `dist/jclaw.zip` | `play dist` (backend only; SPA staged by the consumer at deploy/start time) | Manual `./jclaw.sh --deploy` flow, GitHub Releases. |
 | `ghcr.io/tsukhani/jclaw:<tag>` | Multi-stage `Dockerfile` | `docker-compose.yml`, anywhere a container runtime is available. |
 | GitHub Release | Jenkins `Release` stage | End-users downloading the dist zip. |
 
@@ -26,7 +26,7 @@ Key steps:
 - **Build.Frontend** — `(cd frontend && npx nuxi generate)`.
 - **Test.Backend** — `play autotest` + JUnit XML publish from `test-result/*.xml`.
 - **Test.Frontend** — `(cd frontend && pnpm test)`.
-- **Package** — `play dist`, then the SPA (`frontend/.output/public`) is unzipped into the dist directory as `public/spa/` and re-zipped as `dist/jclaw.zip`. Archived as a Jenkins artifact.
+- **Package** — `play dist` produces the zip, which is renamed to `dist/jclaw.zip` and archived as a Jenkins artifact. The SPA is **not** injected into the zip; each consumer (bare-metal `jclaw.sh` or Docker build) generates and stages the SPA itself.
 - **Release** (when param `RELEASE=true`): creates git tag `v<application.version>`, deletes any pre-existing GitHub Release at that tag, uploads `dist/jclaw.zip`, then builds and pushes `ghcr.io/tsukhani/jclaw:<tag>` and `:latest`.
 - **Cleanup** — Keeps the 5 most recent GitHub Releases; prunes old GHCR versions while preserving whatever `:latest` currently points to.
 

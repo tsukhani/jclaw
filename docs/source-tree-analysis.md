@@ -106,7 +106,7 @@ jclaw/
 │
 ├── test/                         # Play backend tests (44 JUnit classes + Application.test.html).
 │                                 # Run with `play auto-test` (non-interactive) — not `play test`.
-├── public/                       # Play static assets (+ spa/ injected by dist).
+├── public/                       # Play static assets; spa/ is staged here at start/deploy time (gitignored), not baked into the dist zip.
 ├── skills/                       # File-system skill definitions (global, promoted-skill source of truth).
 ├── workspace/                    # Per-agent workspace (filesystem-tool scoped).
 ├── data/                         # H2 DB file + attachments/ blob storage (dev default).

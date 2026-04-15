@@ -10,7 +10,7 @@ Current version: **v0.7.18** (status: v0.1.0-alpha / work in progress per CLAUDE
 
 ## Repository type
 
-**Multi-part**. One git repo, two runtimes that ship as a single deploy unit (the Nuxt SPA is generated and copied into `public/spa/` of the Play dist zip).
+**Multi-part**. One git repo, two runtimes that ship as a single deploy unit. The Play dist zip is backend-only; the Nuxt SPA is generated and staged into `public/spa/` by whichever consumer deploys it (bare-metal `jclaw.sh start` or the Docker multi-stage build).
 
 | Part | Root | Type | Runtime |
 |---|---|---|---|

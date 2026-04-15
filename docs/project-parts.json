@@ -95,6 +95,6 @@
     }
   ],
   "deploy_units": {
-    "single_artifact": "public/spa/ is injected into play dist zip; Docker multi-stage bakes both into ghcr.io/tsukhani/jclaw"
+    "single_artifact": "Play dist zip is backend-only; SPA is generated per-consumer (jclaw.sh rebuilds on each start, Docker multi-stage bakes it into ghcr.io/tsukhani/jclaw at image build time)"
   }
 }

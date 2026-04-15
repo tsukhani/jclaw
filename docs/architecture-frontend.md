@@ -96,7 +96,7 @@ Typed requests/responses live in `frontend/types/api.ts`, mirroring the backend 
 ## Dev proxy / prod serving
 
 - **Dev (:3000):** `nuxt.config.ts` → `nitro.devProxy['/api'] = http://localhost:9000/api`. No CORS needed.
-- **Prod:** `nuxi generate` → `frontend/.output/public/` → copied into `public/spa/` of the Play dist zip (injected by the Jenkins `Package` stage and by the Dockerfile). Play's `/_nuxt/` route maps the static bundle; `Application.spa` serves `index.html` for all unmatched frontend routes.
+- **Prod:** `nuxi generate` → `frontend/.output/public/` → copied into `public/spa/`. The bare-metal path (`./jclaw.sh start`) generates and stages the SPA on every start; the Dockerfile bakes it into the image during the multi-stage build. Play's `/_nuxt/` route maps the static bundle; `Application.spa` serves `index.html` for all unmatched frontend routes.
 
 ## Constraints
 
