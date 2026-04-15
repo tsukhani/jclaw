@@ -1,6 +1,6 @@
 type ThemeMode = 'system' | 'light' | 'dark'
 
-const themeMode = ref<ThemeMode>('dark')
+const themeMode = ref<ThemeMode>('system')
 
 function applyTheme(mode: ThemeMode) {
   if (import.meta.server) return

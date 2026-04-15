@@ -13,6 +13,30 @@ public class ApiAgentsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    /**
+     * Reserved agent names that no user-facing API surface can create, read,
+     * update, or delete. Internal harnesses write these rows via JPA directly
+     * and are unaffected. Case-insensitive match — spelling variations like
+     * {@code __LoadTest__} are also rejected.
+     */
+    private static boolean isReservedName(String name) {
+        return name != null
+                && services.LoadTestRunner.LOADTEST_AGENT_NAME.equalsIgnoreCase(name);
+    }
+
+    /**
+     * Fetch an agent by id, treating reserved agents as non-existent so the
+     * API never leaks their presence. Every by-id endpoint below funnels
+     * through here instead of calling {@link AgentService#findById} directly.
+     */
+    private static Agent requireVisibleAgent(Long id) {
+        var agent = AgentService.findById(id);
+        if (agent == null || isReservedName(agent.name)) {
+            notFound();
+        }
+        return agent;
+    }
+
     private record AgentView(Long id, String name, String modelProvider, String modelId,
                              boolean enabled, boolean isMain, String thinkingMode,
                              String createdAt, String updatedAt, boolean providerConfigured) {
@@ -26,13 +50,15 @@ public class ApiAgentsController extends Controller {
 
     public static void list() {
         var agents = AgentService.listAll();
-        var result = agents.stream().map(AgentView::of).toList();
+        var result = agents.stream()
+                .filter(a -> !isReservedName(a.name))
+                .map(AgentView::of)
+                .toList();
         renderJSON(gson.toJson(result));
     }
 
     public static void get(Long id) {
-        var agent = AgentService.findById(id);
-        if (agent == null) notFound();
+        var agent = requireVisibleAgent(id);
         renderJSON(gson.toJson(AgentView.of(agent)));
     }
 
@@ -43,8 +69,7 @@ public class ApiAgentsController extends Controller {
      * agent state and doesn't depend on a hypothetical user query.
      */
     public static void promptBreakdown(Long id) {
-        var agent = AgentService.findById(id);
-        if (agent == null) notFound();
+        var agent = requireVisibleAgent(id);
         var breakdown = agents.SystemPromptAssembler.breakdown(agent, null);
         renderJSON(gson.toJson(breakdown));
     }
@@ -63,8 +88,7 @@ public class ApiAgentsController extends Controller {
      * disabling or removing the skill.
      */
     public static void effectiveShellAllowlist(Long id) {
-        var agent = AgentService.findById(id);
-        if (agent == null) notFound();
+        var agent = requireVisibleAgent(id);
 
         // Global portion: re-parse the raw config string rather than call
         // parsedAllowlist() directly, which lives on a tool instance. The parse
@@ -107,6 +131,10 @@ public class ApiAgentsController extends Controller {
         if (Agent.MAIN_AGENT_NAME.equalsIgnoreCase(name)) {
             error(409, "The agent name 'main' is reserved for the built-in agent");
         }
+        if (isReservedName(name)) {
+            error(409, "The agent name '%s' is reserved for internal use"
+                    .formatted(services.LoadTestRunner.LOADTEST_AGENT_NAME));
+        }
         var modelProvider = body.get("modelProvider").getAsString();
         var modelId = body.get("modelId").getAsString();
         var thinkingMode = readOptionalString(body, "thinkingMode");
@@ -129,8 +157,7 @@ public class ApiAgentsController extends Controller {
     }
 
     public static void update(Long id) {
-        var agent = AgentService.findById(id);
-        if (agent == null) notFound();
+        var agent = requireVisibleAgent(id);
 
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
@@ -143,6 +170,10 @@ public class ApiAgentsController extends Controller {
         }
         if (agent.isMain() && !Agent.MAIN_AGENT_NAME.equalsIgnoreCase(name)) {
             error(409, "The main agent cannot be renamed");
+        }
+        if (isReservedName(name)) {
+            error(409, "The agent name '%s' is reserved for internal use"
+                    .formatted(services.LoadTestRunner.LOADTEST_AGENT_NAME));
         }
         var modelProvider = body.has("modelProvider") ? body.get("modelProvider").getAsString() : agent.modelProvider;
         var modelId = body.has("modelId") ? body.get("modelId").getAsString() : agent.modelId;
@@ -166,8 +197,7 @@ public class ApiAgentsController extends Controller {
     }
 
     public static void delete(Long id) {
-        var agent = AgentService.findById(id);
-        if (agent == null) notFound();
+        var agent = requireVisibleAgent(id);
         if (agent.isMain()) {
             error(409, "The built-in 'main' agent cannot be deleted");
         }
@@ -182,8 +212,7 @@ public class ApiAgentsController extends Controller {
      * Supports images, PDFs, and other binary files for inline rendering or download.
      */
     public static void serveWorkspaceFile(Long id, String filePath) {
-        var agent = AgentService.findById(id);
-        if (agent == null) notFound();
+        var agent = requireVisibleAgent(id);
 
         // Two-layer (lexical + canonical) path validation with double-resolve.
         // The previous substring check (`filePath.contains("..")`) didn't
@@ -216,16 +245,14 @@ public class ApiAgentsController extends Controller {
     }
 
     public static void getWorkspaceFile(Long id, String filename) {
-        var agent = AgentService.findById(id);
-        if (agent == null) notFound();
+        var agent = requireVisibleAgent(id);
         var content = AgentService.readWorkspaceFile(agent.name, filename);
         if (content == null) notFound();
         renderJSON(gson.toJson(java.util.Map.of("filename", filename, "content", content)));
     }
 
     public static void saveWorkspaceFile(Long id, String filename) {
-        var agent = AgentService.findById(id);
-        if (agent == null) notFound();
+        var agent = requireVisibleAgent(id);
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("content")) badRequest();
         AgentService.writeWorkspaceFile(agent.name, filename, body.get("content").getAsString());

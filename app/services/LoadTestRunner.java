@@ -24,8 +24,20 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class LoadTestRunner {
 
-    private static final String LOADTEST_AGENT_NAME = "__loadtest__";
-    private static final String LOADTEST_PROVIDER = "loadtest-mock";
+    /**
+     * Reserved agent name. The API layer hides this agent from every list and
+     * by-id endpoint and rejects user attempts to create or rename to this
+     * name — the load-test harness is the only legitimate writer, and it goes
+     * through direct JPA here, bypassing the API.
+     */
+    public static final String LOADTEST_AGENT_NAME = "__loadtest__";
+    /**
+     * Reserved provider name. Config keys under {@code provider.loadtest-mock.*}
+     * are filtered out of the public {@code /api/config} endpoints for the
+     * same reason — the harness drives this provider via {@code ConfigService}
+     * directly, which bypasses the filter.
+     */
+    public static final String LOADTEST_PROVIDER = "loadtest-mock";
     private static final String LOADTEST_MODEL = "mock-model";
 
     public record Request(int concurrency, int iterations, LoadTestHarness.Scenario scenario) {}

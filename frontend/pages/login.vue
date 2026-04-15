@@ -7,6 +7,14 @@ const password = ref('')
 const error = ref('')
 const loading = ref(false)
 
+// The login screen is always light, regardless of the OS color scheme or
+// any stored preference. The stored theme belongs to the signed-in user and
+// the default layout's useTheme reapplies it after sign-in, so forcing light
+// here is purely a logged-out presentation choice.
+onMounted(() => {
+  document.documentElement.classList.remove('dark')
+})
+
 async function handleLogin() {
   error.value = ''
   loading.value = true
@@ -23,10 +31,14 @@ async function handleLogin() {
 <template>
   <div class="min-h-screen bg-white dark:bg-neutral-950 flex items-center justify-center">
     <div class="w-full max-w-sm">
-      <div class="mb-8 flex flex-col items-center text-center">
-        <img src="/avatar.png" alt="JClaw" class="w-20 h-20 rounded-full mb-4" />
-        <h1 class="text-xl font-semibold text-emerald-700 dark:text-emerald-400 tracking-tight">JClaw</h1>
-        <p class="text-sm text-neutral-500 mt-1">Sign in to continue</p>
+      <div class="mb-8 flex items-center justify-center gap-4">
+        <img src="/avatar.png" alt="JClaw" class="w-16 h-16 rounded-full shrink-0" />
+        <div class="text-left">
+          <h1 class="text-xl font-semibold tracking-wider">
+            <span class="text-emerald-700 dark:text-emerald-400">J</span><span class="text-red-600 dark:text-red-500">Claw</span>
+          </h1>
+          <p class="text-sm text-neutral-500 mt-1">Sign in to continue</p>
+        </div>
       </div>
 
       <form @submit.prevent="handleLogin" class="space-y-4">

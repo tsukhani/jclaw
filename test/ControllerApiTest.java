@@ -153,6 +153,45 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
+    public void agentsCreateRejectsReservedLoadtestName() {
+        login();
+        var body = """
+                {"name": "__loadtest__", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
+                """;
+        var response = POST("/api/agents", "application/json", body);
+        assertEquals(409, response.status.intValue());
+    }
+
+    @Test
+    public void agentsUpdateRejectsRenameToReservedLoadtestName() {
+        login();
+        var id = createAgent("rename-src");
+        var body = """
+                {"name": "__loadtest__"}
+                """;
+        var response = PUT("/api/agents/" + id, "application/json", body);
+        assertEquals(409, response.status.intValue());
+    }
+
+    @Test
+    public void agentsListHidesLoadtestAgent() {
+        login();
+        // Seed a __loadtest__ row directly via JPA (the harness path) — the API
+        // must not surface it even when present.
+        services.Tx.run(() -> {
+            var a = new models.Agent();
+            a.name = "__loadtest__";
+            a.modelProvider = "loadtest-mock";
+            a.modelId = "mock-model";
+            a.save();
+        });
+        var response = GET("/api/agents");
+        assertIsOk(response);
+        assertFalse(getContent(response).contains("\"__loadtest__\""),
+                "Reserved agent __loadtest__ must not appear in /api/agents");
+    }
+
+    @Test
     public void agentsGetNonExistentReturns404() {
         login();
         var response = GET("/api/agents/999999");
@@ -418,6 +457,61 @@ public class ControllerApiTest extends FunctionalTest {
         // reaches the controller (a missing route would give 404).
         var response = GET("/api/events");
         assertEquals(401, response.status.intValue());
+    }
+
+    // =====================
+    // ApiConfigController — loadtest-mock provider hiding
+    // =====================
+
+    @Test
+    public void configListHidesLoadtestMockProviderKeys() {
+        login();
+        services.ConfigService.set("provider.loadtest-mock.enabled", "false");
+        services.ConfigService.set("provider.loadtest-mock.baseUrl", "http://127.0.0.1:19999/v1");
+        var response = GET("/api/config");
+        assertIsOk(response);
+        var body = getContent(response);
+        assertFalse(body.contains("provider.loadtest-mock.enabled"),
+                "Reserved provider.loadtest-mock.* keys must not appear in /api/config");
+        assertFalse(body.contains("provider.loadtest-mock.baseUrl"),
+                "Reserved provider.loadtest-mock.* keys must not appear in /api/config");
+        // Cleanup — delete via ConfigService since the API now refuses.
+        services.ConfigService.delete("provider.loadtest-mock.enabled");
+        services.ConfigService.delete("provider.loadtest-mock.baseUrl");
+    }
+
+    @Test
+    public void configGetOnLoadtestMockKeyReturns404() {
+        login();
+        services.ConfigService.set("provider.loadtest-mock.enabled", "true");
+        try {
+            var response = GET("/api/config/provider.loadtest-mock.enabled");
+            assertEquals(404, response.status.intValue());
+        } finally {
+            services.ConfigService.delete("provider.loadtest-mock.enabled");
+        }
+    }
+
+    @Test
+    public void configSaveOnLoadtestMockKeyReturns409() {
+        login();
+        var body = """
+                {"key":"provider.loadtest-mock.enabled","value":"true"}
+                """;
+        var response = POST("/api/config", "application/json", body);
+        assertEquals(409, response.status.intValue());
+    }
+
+    @Test
+    public void configDeleteOnLoadtestMockKeyReturns409() {
+        login();
+        services.ConfigService.set("provider.loadtest-mock.enabled", "true");
+        try {
+            var response = DELETE("/api/config/provider.loadtest-mock.enabled");
+            assertEquals(409, response.status.intValue());
+        } finally {
+            services.ConfigService.delete("provider.loadtest-mock.enabled");
+        }
     }
 
     // =====================
