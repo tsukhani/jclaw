@@ -2,3 +2,12 @@
 _bmad/
 _bmad-output/
 openspec/
+docs/
+test/
+AGENTS.md
+CLAUDE.md
+Dockerfile
+Jenkinsfile
+.distignore
+.dockerignore
+.gitignore

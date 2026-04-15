@@ -13,8 +13,9 @@ logs/
 # Play precompiled files
 precompiled/
 
-# Claude Code config
+# Claude Code and OpenAI Codex config
 .claude/
+.agents/
 
 # Autoresearch state
 .autoresearch/

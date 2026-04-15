@@ -2,6 +2,8 @@
 
 JClaw v0.1.0 (core platform) and v0.2.0 high-priority features (Playwright browser tool, conversation message queue) are complete. This proposal captures all remaining gaps identified through a comprehensive delta analysis against OpenClaw and JavaClaw, prioritized for production parity.
 
+**Re-audit 2026-04-16 (current v0.7.27):** Items shipped since this proposal was authored are marked ~~strikethrough with "[shipped vX.Y.Z]"~~. Remaining items form the v1.0-GA scope consumed by the PRD capability contract.
+
 ## High Priority — Production Blockers
 
 ### Security
@@ -10,7 +12,7 @@ JClaw v0.1.0 (core platform) and v0.2.0 high-priority features (Playwright brows
 
 ### Infrastructure
 - `github-actions-ci`: No CI/CD pipeline. JavaClaw has GitHub Actions CI. Need build + test + lint workflow. **Small complexity.**
-- `dockerfile`: No Docker support. OpenClaw has multi-platform Docker release workflow (amd64 + arm64). Need Dockerfile for Play 1.x + JDK 25 + pnpm frontend build. **Medium complexity.**
+- ~~`dockerfile`: Multi-stage Dockerfile with Node 22 + JDK 25 stages~~ **[shipped; see `Dockerfile` + GHCR publish in Jenkins]**
 - `onboarding-wizard`: No guided first-run experience. JavaClaw has a 6-step wizard (welcome, provider, credentials, agent editor, MCP, plugins). JClaw requires manual Settings navigation. **Medium complexity.**
 
 ### Agent Intelligence
@@ -19,7 +21,7 @@ JClaw v0.1.0 (core platform) and v0.2.0 high-priority features (Playwright brows
 - `core-memory-importance`: No importance scoring or core-memory auto-load. OpenClaw has memory categories (core, fact, preference, decision, entity, lesson) with importance (0.0–1.0). Core memories are injected into every session automatically. **Medium complexity.**
 
 ### Tools
-- `shell-exec-tool`: Agents have no shell access — severely limits automation. JavaClaw has ShellTools, OpenClaw has sandboxed openshell. Needs safe-binary allow-list. **Medium complexity.**
+- ~~`shell-exec-tool`: ShellExecTool with allowlist, workspace isolation, output limits, timeout, env sanitization~~ **[shipped 2026-04-08; see `app/tools/ShellExecTool.java` + `openspec/archive/2026-04-08-exec-tool`]**
 - `mcp-client`: No Model Context Protocol support. Both JavaClaw and OpenClaw have MCP clients for connecting external tool servers. MCP is becoming the industry standard for extending agent capabilities. **Medium complexity.**
 
 ### Channels
@@ -47,7 +49,7 @@ JClaw v0.1.0 (core platform) and v0.2.0 high-priority features (Playwright brows
 
 ### UI
 - `usage-analytics-dashboard`: No token/cost analytics. OpenClaw has mosaic charts, cost breakdown by provider/model, session-level detail. Requires token tracking first. **Medium complexity.**
-- `conversation-search`: Conversations page has no search or filtering. **Small complexity.**
+- `conversation-search`: **Partially shipped** — list-page filtering by name/channel/agent/peer is live on `frontend/pages/conversations.vue`. Full-text search via Postgres `tsvector` still pending. **Small complexity remaining.**
 - `chat-slash-commands`: No slash commands in web chat (/new, /reset, /model). OpenClaw has a full slash-command executor. **Small complexity.**
 
 ### Security
@@ -60,7 +62,7 @@ JClaw v0.1.0 (core platform) and v0.2.0 high-priority features (Playwright brows
 - `agent-heartbeat`: No periodic self-directed agent activity. OpenClaw supports cron-scheduled heartbeats that inject events into sessions for autonomous background work. **Medium complexity.**
 - `sub-agent-spawning`: No sub-agent concept. OpenClaw has full sub-agent lifecycle (spawn, steer, kill, status tracking) via ACP protocol. When this lands, the system-prompt assembler must grow a `promptMode` parameter (`full` | `minimal` | `none`) so sub-agents can receive a lean prompt — OpenClaw's assembler drops most sections in `minimal` mode and emits only identity + tools in `none` mode. See `SystemPromptAssembler.assemble` — currently always builds the full prompt. **Large complexity.**
 - `channel-aware-prompt-sections`: System prompt has no per-channel stanzas (voice/TTS, reactions, messaging routing). OpenClaw conditionally injects `## Voice`, `## Reactions`, and `## Messaging` sections based on the active channel so agent behavior adapts to the medium (e.g., short bullet-free responses for Telegram, TTS-friendly phrasing for voice). JClaw's current `SystemPromptAssembler` is channel-agnostic. Low priority until JClaw grows voice or richer reaction UX, but worth adding the `channelType` parameter to `assemble()` so future channels can plug in cleanly. **Small complexity.**
-- `brave-web-search`: No general web search API. Both JavaClaw and OpenClaw have Brave Search integration. **Small complexity.**
+- ~~`brave-web-search`: Brave + Tavily + Exa + Perplexity + Ollama + Felo search providers~~ **[shipped; see `app/tools/WebSearchTool.java` — 6 providers via the `SearchProvider` list]**
 
 ### Infrastructure
 - `health-check-enriched`: /api/status is minimal. Should include DB connectivity, provider reachability, memory store status. **Small complexity.**
@@ -116,17 +118,17 @@ Identified via full-codebase performance audit (2026-04-07) covering database/JP
 
 ### Critical — Fix Immediately
 
-- ~~`fix-sync-transaction-scope`~~: **Done.** Sync path already uses scoped `Tx.run()` calls — setup, LLM loop (no tx), persist.
-- ~~`fix-db-pool-config`~~: **Done.** Pool sizing configured in `application.conf` (minSize=5, maxSize=20, prod maxSize=30).
-- `fix-queue-thread-safety`: `ConversationQueue` has unsynchronized `ArrayDeque` mutation in the `interrupt` mode path (`state.pending.clear()` without holding the monitor) and `getQueueSize()` reads `state.pending.size()` unsynchronized. `ArrayDeque` is not thread-safe — concurrent access corrupts internal state. Also has a dead `ReentrantLock lock` field. `ConversationQueue.java:63-66,134`. **Small complexity.**
-- `fix-tailwind-purge`: `tailwind.config.js` has `content: []` which disables CSS purging — the entire Tailwind CSS (~3-4 MB) ships to every user. Set content paths to cover Vue/TS source files. `frontend/tailwind.config.js:3`. **Small complexity.**
+- ~~`fix-sync-transaction-scope`~~ **[done v0.1.0]** — Sync path uses scoped `Tx.run()` calls.
+- ~~`fix-db-pool-config`~~ **[done v0.1.0]** — Pool sizing in `application.conf`.
+- ~~`fix-queue-thread-safety`~~ **[done; verified 2026-04-16]** — `ConversationQueue` now uses `ConcurrentHashMap<Long, QueueState>` + `synchronized(state)` on all mutation paths; `tryStartProcessing`, `finishProcessing`, `isProcessing` all synchronized.
+- ~~`fix-tailwind-purge`~~ **[done; verified 2026-04-16]** — `tailwind.config.js` has correct content paths covering Vue/TS sources.
 
 ### High — Fix Soon (correctness or significant performance)
 
-- `fix-sse-disconnect-propagation`: Client disconnect during SSE streaming is silently swallowed. The virtual thread continues LLM inference + tool execution indefinitely. The controller thread blocks on a 600s latch. Set a `volatile cancelled` flag on write failure, propagate to the virtual thread, release the latch. `ApiChatController.java:100-107`. **Medium complexity.**
-- `fix-task-poller-detached-entity`: `TaskPollerJob` loads tasks in its transaction then spawns virtual threads that access `task.agent.name` outside any transaction. Lazy proxy access throws `LazyInitializationException`. Use JOIN FETCH in `findPendingDue()` or copy agent fields before thread launch. `TaskPollerJob.java:36-44`. **Small complexity.**
-- `fix-streaming-detached-agent`: `AgentRunner.runStreaming()` receives an `Agent` entity loaded in the request thread's transaction, then passes it across multiple `Tx.run()` boundaries on a virtual thread. Each new `EntityManager` sees it as detached, causing extra SELECTs or exceptions. Capture `agent.id` and reload inside the virtual thread. `AgentRunner.java:95-212`. **Small complexity.**
-- `fix-n-plus-one-queries`: N+1 query patterns across list endpoints — `AgentBinding.findAll()` + agent access, `listConversations()` + `c.agent.name`, `ApiTasksController.list()` + `t.agent.name`, `JpaMemoryStore.fullTextSearch()` ID-by-ID loop. Add `JOIN FETCH` to all list queries; use `WHERE id IN (:ids)` for memory search. `ApiBindingsController.java:22`, `ApiChatController.java:170`, `ApiTasksController.java:42`, `JpaMemoryStore.java:87-115`. **Small complexity.**
+- ~~`fix-sse-disconnect-propagation`~~ **[done; verified 2026-04-16]** — `ApiChatController.stream` uses `AtomicBoolean cancelled` with propagation on write failures to stop the virtual thread.
+- ~~`fix-task-poller-detached-entity`~~ **[done; verified 2026-04-16]** — `Task.findPendingDue()` uses a native query returning materialized entities, eliminating the lazy-proxy path.
+- ~~`fix-streaming-detached-agent`~~ **[done per git commit cadd543 "Fix detached entity bug in AgentRunner.run()"]** — verify fix still holds at next code review pass.
+- ~~`fix-n-plus-one-queries`~~ **[done v0.6.5 "N+1 bulk delete" + v0.7.2 "Paginate getMessages, lock-free ConfigService, bulk memory delete"]** — full sweep completed across the named sites.
 - `fix-queue-mode-race`: `ConversationQueue.tryAcquire()` writes `state.mode` unsynchronized; concurrent calls for the same conversation overwrite each other's mode setting. Read mode once into a local variable; stop mutating `state.mode` from `tryAcquire()`. `ConversationQueue.java:52-83`. **Small complexity.**
 - `fix-playwright-session-race`: `PlaywrightBrowserTool.getOrCreatePage()` is synchronized on `this`, but `closeSession()` and `cleanupIdleSessions()` are not synchronized at all. The cleanup job can close a `Page` mid-use. Synchronize all session lifecycle methods on the same monitor. `PlaywrightBrowserTool.java:157-196`. **Small complexity.**
 - `fix-task-double-execution`: `TaskPollerJob` has a TOCTOU race — two consecutive poller runs can both see a task as `PENDING` and execute it twice. No optimistic locking. Use `UPDATE task SET status='RUNNING' WHERE id=? AND status='PENDING'` CAS pattern. `TaskPollerJob.java:21-27`. **Small complexity.**
@@ -136,19 +138,31 @@ Identified via full-codebase performance audit (2026-04-07) covering database/JP
 
 ### Medium — Performance Under Load
 
-- `fix-eventlogger-transaction-spam`: `EventLogger.record()` opens a new transaction per log call — ~60+ individual transactions per tool loop just for logging. Buffer and batch-flush, or make logging async. `EventLogger.java:23-36`. **Medium complexity.**
+- ~~`fix-eventlogger-transaction-spam`~~ **[done v0.6.5 "EventLogger batching"]** — buffer + batch-flush implemented.
 - `fix-conversation-merge-overhead`: `ConversationService.appendMessage()` re-merges a detached conversation on every call in the streaming tool loop (SELECT + INSERT + UPDATE instead of INSERT + UPDATE). Pass `conversationId` across boundaries; reload inside `Tx.run()`. `ConversationService.java:34-37`. **Small complexity.**
 - `fix-cache-eviction`: `ConfigService`, `AgentService.fileCache`, and `SkillLoader.skillCache` all use TTL caches that never evict expired entries — zombie entries accumulate indefinitely. Add periodic sweep or use `computeIfAbsent` with expiry. `ConfigService.java:19`, `AgentService.java:14`, `SkillLoader.java:26`. **Small complexity.**
 - `fix-unbounded-fetches`: Several queries lack pagination: `Conversation.findByChannel()` loads all rows, `Memory.findByAgent()` caps at 1000 with TEXT content, `ApiChatController.getMessages()` loads every message for a conversation. Add limit/offset to all. `Conversation.java:63`, `Memory.java:43`, `ApiChatController.java:194`. **Small complexity.**
 - `fix-per-token-serialization`: Per-token `Map.of()` + `gson.toJson()` allocation in the SSE hot path (dozens per second). Replace with a pre-built string template with manual JSON escaping. `ApiChatController.java:101-107`. **Small complexity.**
 - `fix-streaming-retry-duplication`: Streaming retry re-emits already-sent tokens to the SSE client. Client receives duplicate content with no dedup mechanism. Remove streaming retry or emit an error event for client-side retry. `AgentRunner.java:171-178`. **Small complexity.**
 - `fix-channel-config-caching`: `SlackChannel.load()`, `TelegramChannel.load()`, `WhatsAppChannel.load()` each query the DB on every webhook request with no cache. Add volatile + TTL cache. `SlackChannel.java:29-37`, `TelegramChannel.java:26-34`, `WhatsAppChannel.java:28-38`. **Small complexity.**
-- `fix-provider-registry-volatile`: Two separate volatile writes to `cache` and `lastRefresh` outside the lock defeat double-checked locking — causes redundant refreshes. Move both writes inside `synchronized(refreshLock)`. `ProviderRegistry.java:85-87`. **Small complexity.**
+- ~~`fix-provider-registry-volatile`~~ **[done v0.6.5 "ProviderRegistry lock-free IO + deterministic order"]**.
 - `fix-cache-stampede`: TTL caches in `AgentService`, `ConfigService`, and `SkillLoader` use check-then-act without atomicity. Under concurrent load, N threads miss cache simultaneously and do redundant work. Use `ConcurrentHashMap.compute()`. `AgentService.java:161`, `ConfigService.java:23`, `SkillLoader.java:42`. **Small complexity.**
 - `fix-missing-indexes`: Add database indexes for frequently-queried FK columns: `agent_id` on `agent_binding` and `task`; `agent_id`+`channel` compound index on `event_log`; explicit `@Index` on `channel_config.channel_type` and `config.config_key`. **Small complexity.**
 - `fix-chat-streaming-reactivity`: Per-token mutation of the reactive messages array triggers O(n) re-render of `displayMessages` computed on every token. Keep streaming content in a separate `shallowRef`; only push to messages on `complete`. `frontend/pages/chat.vue:124-127`. **Small complexity.**
 - `fix-markdown-memoization`: `renderMarkdown` (marked.parse + DOMPurify.sanitize) runs on every render for every message, including during streaming (20-50x/sec). Memoize or only render on `complete`. `frontend/pages/chat.vue:215`. **Small complexity.**
 - `fix-edit-agent-serial-fetches`: Four serial `$fetch` calls in `editAgent` should be parallelized with `Promise.all`. `frontend/pages/agents.vue:96-130`. **Small complexity.**
+
+## Re-audit Status (2026-04-16 against v0.7.27)
+
+**Items shipped since this proposal was authored (removed from scope):**
+`dockerfile`, `shell-exec-tool`, `brave-web-search`, `runtime-tool-reregistration`, `fix-sync-transaction-scope`, `fix-db-pool-config`, `fix-queue-thread-safety`, `fix-tailwind-purge`, `fix-sse-disconnect-propagation`, `fix-task-poller-detached-entity`, `fix-streaming-detached-agent`, `fix-n-plus-one-queries`, `fix-eventlogger-transaction-spam`, `fix-provider-registry-volatile`.
+
+**Items partially shipped (remaining scope trimmed):**
+- `conversation-search` — list-page filtering live; full-text via tsvector pending.
+- `token-usage-tracking` — per-turn counts surfaced in UI; persistence + aggregation + CSV export pending.
+
+**Items not individually re-verified this pass (check at epic-breakdown time):**
+`fix-queue-mode-race`, `fix-playwright-session-race`, `fix-task-double-execution`, `fix-orphaned-sse-streams`, `fix-agents-fetch-waterfall`, `fix-auth-double-fetch`, all remaining Medium-tier performance fixes.
 
 ## Implementation Lessons (from v0.1.0 and v0.2.0)
 - Virtual threads require explicit JPA transaction context (`Tx.run` helper) — Play's thread-local JPA is not inherited
