@@ -21,34 +21,34 @@ async function handleLogin() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-neutral-950 flex items-center justify-center">
+  <div class="min-h-screen bg-white dark:bg-neutral-950 flex items-center justify-center">
     <div class="w-full max-w-sm">
       <div class="mb-8 text-center">
-        <h1 class="text-xl font-semibold text-emerald-400 tracking-tight">JClaw</h1>
+        <h1 class="text-xl font-semibold text-emerald-700 dark:text-emerald-400 tracking-tight">JClaw</h1>
         <p class="text-sm text-neutral-500 mt-1">Sign in to continue</p>
       </div>
 
       <form @submit.prevent="handleLogin" class="space-y-4">
         <div>
-          <label class="block text-xs font-medium text-neutral-400 mb-1.5">Username</label>
+          <label class="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1.5">Username</label>
           <input
             v-model="username"
             type="text"
             autocomplete="username"
-            class="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 text-white text-sm
-                   focus:outline-none focus:border-neutral-600 transition-colors"
+            class="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white text-sm
+                   focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors"
             placeholder="admin"
           />
         </div>
 
         <div>
-          <label class="block text-xs font-medium text-neutral-400 mb-1.5">Password</label>
+          <label class="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1.5">Password</label>
           <input
             v-model="password"
             type="password"
             autocomplete="current-password"
-            class="w-full px-3 py-2 bg-neutral-900 border border-neutral-800 text-white text-sm
-                   focus:outline-none focus:border-neutral-600 transition-colors"
+            class="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white text-sm
+                   focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors"
           />
         </div>
 

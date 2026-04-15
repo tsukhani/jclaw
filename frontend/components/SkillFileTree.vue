@@ -49,7 +49,7 @@ function iconFor(file: SkillFile | undefined) {
       <div
         v-if="node.isDir"
         @click="toggle(node.path ?? (node.name + (depth ?? 0)))"
-        class="flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-neutral-400 hover:bg-neutral-800/50 transition-colors select-none"
+        class="flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800/50 transition-colors select-none"
         :style="{ paddingLeft: `${12 + (depth ?? 0) * 12}px` }"
       >
         <svg
@@ -82,20 +82,20 @@ function iconFor(file: SkillFile | undefined) {
         @click="node.file ? emit('select', node.file) : undefined"
         :class="[
           'flex items-center gap-2 px-3 py-1.5 transition-colors',
-          activePath === node.path ? 'bg-neutral-800 text-white' : 'text-neutral-400 hover:bg-neutral-800/50',
+          activePath === node.path ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white' : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800/50',
           node.file?.isText ? 'cursor-pointer' : 'cursor-default opacity-60'
         ]"
         :style="{ paddingLeft: `${12 + (depth ?? 0) * 12}px` }"
       >
         <span
           class="text-[9px] font-mono px-1 py-0.5 rounded shrink-0"
-          :class="node.file?.isText ? 'bg-emerald-900/40 text-emerald-400' : 'bg-neutral-700 text-neutral-400'"
+          :class="node.file?.isText ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400' : 'bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-400'"
         >
           {{ iconFor(node.file) }}
         </span>
         <div class="min-w-0">
           <div class="text-xs truncate">{{ node.name }}</div>
-          <div class="text-[10px] text-neutral-600">{{ formatSize(node.file?.size ?? 0) }}</div>
+          <div class="text-[10px] text-neutral-400 dark:text-neutral-600">{{ formatSize(node.file?.size ?? 0) }}</div>
         </div>
       </div>
     </template>

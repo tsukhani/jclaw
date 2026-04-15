@@ -432,23 +432,23 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
 <template>
   <div>
     <div class="flex items-center justify-between mb-6">
-      <h1 class="text-lg font-semibold text-white">Agents</h1>
+      <h1 class="text-lg font-semibold text-neutral-900 dark:text-white">Agents</h1>
       <div v-if="!editing && !creating" class="flex items-center gap-2">
         <template v-if="!selectMode">
           <button @click="newAgent" :disabled="!providers.length"
-                  class="p-2 border border-neutral-700 text-neutral-400 hover:text-emerald-400 hover:border-emerald-600/50 disabled:opacity-40 disabled:hover:text-neutral-400 disabled:hover:border-neutral-700 transition-colors"
+                  class="p-2 border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 hover:text-emerald-700 dark:hover:text-emerald-400 hover:border-emerald-600/50 disabled:opacity-40 disabled:hover:text-neutral-600 dark:disabled:hover:text-neutral-400 disabled:hover:border-neutral-300 dark:disabled:hover:border-neutral-700 transition-colors"
                   title="New Agent">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M12 4.5v15m7.5-7.5h-15" /></svg>
           </button>
           <button @click="enterSelectMode" :disabled="!customAgents.length"
-                  class="p-2 border border-neutral-700 text-neutral-400 hover:text-red-400 hover:border-red-700/50 disabled:opacity-40 disabled:hover:text-neutral-400 disabled:hover:border-neutral-700 transition-colors"
+                  class="p-2 border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 hover:text-red-400 hover:border-red-700/50 disabled:opacity-40 disabled:hover:text-neutral-600 dark:disabled:hover:text-neutral-400 disabled:hover:border-neutral-300 dark:disabled:hover:border-neutral-700 transition-colors"
                   title="Delete an agent">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
           </button>
         </template>
         <template v-else>
           <button @click="exitSelectMode"
-                  class="px-3 py-1.5 border border-neutral-700 text-neutral-400 text-xs hover:text-white hover:border-neutral-500 transition-colors">
+                  class="px-3 py-1.5 border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 text-xs hover:text-neutral-900 dark:hover:text-white hover:border-neutral-500 transition-colors">
             Cancel
           </button>
           <button @click="deleteSelected" :disabled="!selectedIds.size || deletingBulk"
@@ -460,23 +460,23 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
     </div>
 
     <div v-if="!providers.length && !editing && !creating"
-         class="bg-neutral-900 border border-neutral-800 p-4 mb-4 text-sm text-neutral-400">
-      No LLM providers configured. Go to <NuxtLink to="/settings" class="text-white underline">Settings</NuxtLink> and add an API key first.
+         class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-4 mb-4 text-sm text-neutral-600 dark:text-neutral-400">
+      No LLM providers configured. Go to <NuxtLink to="/settings" class="text-neutral-900 dark:text-white underline">Settings</NuxtLink> and add an API key first.
     </div>
 
     <!-- Main Agent section -->
     <div v-if="!editing && !creating" class="mb-6 space-y-2">
-      <h2 class="text-sm font-medium text-neutral-400">Main Agent</h2>
-      <p class="text-xs text-neutral-600">The built-in singleton agent. Always enabled, cannot be renamed or deleted. Handles admin chat and acts as the fallback route for channels without an explicit binding.</p>
-      <div class="bg-neutral-900 border border-neutral-800">
+      <h2 class="text-sm font-medium text-neutral-600 dark:text-neutral-400">Main Agent</h2>
+      <p class="text-xs text-neutral-400 dark:text-neutral-600">The built-in singleton agent. Always enabled, cannot be renamed or deleted. Handles admin chat and acts as the fallback route for channels without an explicit binding.</p>
+      <div class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
         <div v-if="mainAgent"
              @click="editAgent(mainAgent)"
-             class="px-4 py-3 flex items-center justify-between hover:bg-neutral-800/50 cursor-pointer transition-colors">
+             class="px-4 py-3 flex items-center justify-between hover:bg-neutral-100 dark:hover:bg-neutral-800/50 cursor-pointer transition-colors">
           <div>
-            <span class="text-sm text-white">{{ mainAgent.name }}</span>
+            <span class="text-sm text-neutral-900 dark:text-white">{{ mainAgent.name }}</span>
             <div class="text-xs text-neutral-500 mt-0.5">{{ mainAgent.modelProvider }} / {{ mainAgent.modelId }}</div>
             <button @click.stop="openPromptBreakdown(mainAgent)"
-                    class="mt-2 px-2.5 py-1 text-[11px] font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-600/30 hover:bg-emerald-500/20 hover:text-emerald-300 hover:border-emerald-500/50 transition-colors"
+                    class="mt-2 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-600/30 hover:bg-emerald-500/20 hover:text-emerald-600 dark:hover:text-emerald-300 hover:border-emerald-600 dark:hover:border-emerald-500/50 transition-colors"
                     title="Inspect the system prompt this agent receives — per-section char + token breakdown">
               Inspect prompt
             </button>
@@ -490,23 +490,23 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
 
     <!-- Custom Agents section -->
     <div v-if="!editing && !creating" class="mb-6 space-y-2">
-      <h2 class="text-sm font-medium text-neutral-400">Custom Agents</h2>
-      <p class="text-xs text-neutral-600">Additional agents you create for specific channels, peers, or workflows.</p>
-      <div class="bg-neutral-900 border border-neutral-800">
+      <h2 class="text-sm font-medium text-neutral-600 dark:text-neutral-400">Custom Agents</h2>
+      <p class="text-xs text-neutral-400 dark:text-neutral-600">Additional agents you create for specific channels, peers, or workflows.</p>
+      <div class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
         <div v-for="agent in customAgents" :key="agent.id"
              @click="selectMode ? toggleSelection(agent.id) : editAgent(agent)"
-             class="px-4 py-3 border-b border-neutral-800/50 last:border-b-0 flex items-center justify-between hover:bg-neutral-800/50 cursor-pointer transition-colors">
+             class="px-4 py-3 border-b border-neutral-200 dark:border-neutral-800/50 last:border-b-0 flex items-center justify-between hover:bg-neutral-100 dark:hover:bg-neutral-800/50 cursor-pointer transition-colors">
           <div class="flex items-center gap-3 min-w-0">
             <input v-if="selectMode" type="checkbox"
                    :checked="selectedIds.has(agent.id)"
                    @click.stop="toggleSelection(agent.id)"
                    class="accent-red-500 shrink-0" />
             <div class="min-w-0">
-              <span class="text-sm text-white">{{ agent.name }}</span>
+              <span class="text-sm text-neutral-900 dark:text-white">{{ agent.name }}</span>
               <div class="text-xs text-neutral-500 mt-0.5">{{ agent.modelProvider }} / {{ agent.modelId }}</div>
               <!-- Inspect prompt: below model line, hidden in select mode -->
               <button v-if="!selectMode" @click.stop="openPromptBreakdown(agent)"
-                      class="mt-2 px-2.5 py-1 text-[11px] font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-600/30 hover:bg-emerald-500/20 hover:text-emerald-300 hover:border-emerald-500/50 transition-colors"
+                      class="mt-2 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-600/30 hover:bg-emerald-500/20 hover:text-emerald-600 dark:hover:text-emerald-300 hover:border-emerald-600 dark:hover:border-emerald-500/50 transition-colors"
                       title="Inspect the system prompt this agent receives — per-section char + token breakdown">
                 Inspect prompt
               </button>
@@ -517,7 +517,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
                   class="text-[10px] font-mono text-amber-400 border border-amber-400/30 px-1">provider not configured</span>
             <!-- Enabled toggle (hidden in select mode to keep the row's action surface unambiguous) -->
             <button v-if="!selectMode" @click.stop="toggleAgentEnabled(agent)"
-                    :class="agent.enabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-neutral-700 hover:bg-neutral-600'"
+                    :class="agent.enabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600'"
                     class="relative w-9 h-5 rounded-full transition-colors"
                     :title="agent.enabled ? 'Disable agent' : 'Enable agent'">
               <span :class="agent.enabled ? 'translate-x-4' : 'translate-x-0.5'"
@@ -525,37 +525,37 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
             </button>
           </div>
         </div>
-        <div v-if="!customAgents.length" class="px-4 py-8 text-center text-sm text-neutral-600">
-          No custom agents yet. Click <span class="text-neutral-400">New Agent</span> to create one.
+        <div v-if="!customAgents.length" class="px-4 py-8 text-center text-sm text-neutral-400 dark:text-neutral-600">
+          No custom agents yet. Click <span class="text-neutral-600 dark:text-neutral-400">New Agent</span> to create one.
         </div>
       </div>
     </div>
 
     <!-- Edit / Create form -->
     <div v-if="editing || creating" class="space-y-4">
-      <button @click="cancel" class="text-xs text-neutral-500 hover:text-white transition-colors">&larr; Back to agents</button>
-      <div class="bg-neutral-900 border border-neutral-800 p-4">
-        <h2 class="text-sm font-medium text-white mb-4">{{ creating ? 'New Agent' : 'Edit Agent' }}</h2>
+      <button @click="cancel" class="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors">&larr; Back to agents</button>
+      <div class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-4">
+        <h2 class="text-sm font-medium text-neutral-900 dark:text-white mb-4">{{ creating ? 'New Agent' : 'Edit Agent' }}</h2>
         <div class="grid grid-cols-2 gap-3">
           <div>
             <label class="block text-xs text-neutral-500 mb-1">
               Name
-              <span v-if="editing?.isMain" class="ml-1 text-neutral-600">(locked)</span>
+              <span v-if="editing?.isMain" class="ml-1 text-neutral-400 dark:text-neutral-600">(locked)</span>
             </label>
             <input v-model="form.name" :disabled="editing?.isMain"
-                   class="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none focus:border-neutral-600 disabled:opacity-50 disabled:cursor-not-allowed" />
+                   class="w-full px-3 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 disabled:opacity-50 disabled:cursor-not-allowed" />
           </div>
           <div>
             <label class="block text-xs text-neutral-500 mb-1">Model Provider</label>
             <select v-model="form.modelProvider"
-                    class="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none focus:border-neutral-600">
+                    class="w-full px-3 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600">
               <option v-for="p in providers" :key="p.name" :value="p.name">{{ p.name }}</option>
             </select>
           </div>
           <div>
             <label class="block text-xs text-neutral-500 mb-1">Model</label>
             <select v-model="form.modelId"
-                    class="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none focus:border-neutral-600">
+                    class="w-full px-3 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600">
               <option v-for="m in availableModels" :key="m.id" :value="m.id">
                 {{ m.name || m.id }}
               </option>
@@ -575,7 +575,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
             </label>
             <select v-model="form.thinkingMode"
                     :disabled="!thinkingLevels.length"
-                    class="w-full px-3 py-2 bg-neutral-800 border border-neutral-700 text-sm text-white focus:outline-none focus:border-neutral-600
+                    class="w-full px-3 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600
                            disabled:opacity-40 disabled:cursor-not-allowed">
               <option v-if="!thinkingLevels.length" value="">Not supported</option>
               <template v-else>
@@ -589,7 +589,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
         </div>
         <div class="flex mt-4">
           <button @click="saveAgent" :disabled="saving || !form.name || !form.modelProvider || !form.modelId"
-                  class="p-1.5 text-emerald-400 hover:text-emerald-300 disabled:opacity-40 disabled:hover:text-emerald-400 transition-colors"
+                  class="p-1.5 text-emerald-700 dark:text-emerald-400 hover:text-emerald-600 dark:hover:text-emerald-300 disabled:opacity-40 disabled:hover:text-emerald-700 dark:disabled:hover:text-emerald-400 transition-colors"
                   :title="saving ? 'Saving...' : 'Save'">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 5.25A2.25 2.25 0 015.25 3h10.379a2.25 2.25 0 011.59.659l2.122 2.121a2.25 2.25 0 01.659 1.591V18.75A2.25 2.25 0 0118.75 21H5.25A2.25 2.25 0 013 18.75V5.25z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7.5 3v4.5h7.5V3M7.5 21v-6.75h9V21" /></svg>
           </button>
@@ -597,15 +597,15 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
       </div>
 
       <!-- Queue Mode -->
-      <div v-if="editing" class="bg-neutral-900 border border-neutral-800 p-4">
+      <div v-if="editing" class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-4">
         <div class="flex items-center justify-between">
           <div>
-            <span class="text-sm font-medium text-white">Queue Mode</span>
+            <span class="text-sm font-medium text-neutral-900 dark:text-white">Queue Mode</span>
             <div class="text-xs text-neutral-500 mt-0.5">How to handle messages when the agent is busy</div>
           </div>
           <div class="flex items-center gap-2">
             <select v-model="queueMode" @change="saveQueueMode"
-                    class="bg-neutral-800 border border-neutral-700 text-sm text-white px-2 py-1 focus:outline-none focus:border-neutral-600">
+                    class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600">
               <option value="queue">Queue (FIFO)</option>
               <option value="collect">Collect (batch)</option>
               <option value="interrupt">Interrupt</option>
@@ -615,10 +615,10 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
       </div>
 
       <!-- Tools -->
-      <div v-if="editing" class="bg-neutral-900 border border-neutral-800">
-        <div class="px-4 py-2.5 border-b border-neutral-800 flex items-center justify-between">
+      <div v-if="editing" class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
+        <div class="px-4 py-2.5 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <span class="text-sm font-medium text-white">Tools</span>
+            <span class="text-sm font-medium text-neutral-900 dark:text-white">Tools</span>
             <span class="text-xs text-neutral-500">{{ toggleableAgentTools.filter((t: any) => t.enabled).length }}/{{ toggleableAgentTools.length }} enabled</span>
           </div>
           <button v-if="toggleableAgentTools.length"
@@ -626,7 +626,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
                   :title="allAgentToolsEnabled ? 'Disable all tools for this agent' : 'Enable all tools for this agent'"
                   class="shrink-0">
             <div class="relative w-9 h-5 rounded-full transition-colors duration-200"
-                 :class="allAgentToolsEnabled ? 'bg-emerald-500' : 'bg-neutral-700'">
+                 :class="allAgentToolsEnabled ? 'bg-emerald-500' : 'bg-neutral-200 dark:bg-neutral-700'">
               <div class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
                    :class="allAgentToolsEnabled ? 'left-[18px]' : 'left-0.5'" />
             </div>
@@ -635,7 +635,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
         <div>
           <template v-for="group in toolsByCategory" :key="group.category">
             <!-- Category header row -->
-            <div class="px-4 py-1.5 border-b border-neutral-800/50 bg-neutral-900/60">
+            <div class="px-4 py-1.5 border-b border-neutral-200 dark:border-neutral-800/50 bg-neutral-50 dark:bg-neutral-900/60">
               <span class="text-[10px] font-semibold uppercase tracking-widest"
                     :class="{
                       'text-neutral-500':   group.category === 'System',
@@ -646,13 +646,13 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
                 {{ group.category }}
               </span>
             </div>
-            <div class="divide-y divide-neutral-800/50">
+            <div class="divide-y divide-neutral-200 dark:divide-neutral-800/50">
               <div v-for="tool in group.tools" :key="tool.name"
                    class="px-4 py-3 flex items-center gap-3">
                 <!-- Colored icon matching the Tools page -->
                 <div class="w-8 h-8 rounded flex items-center justify-center shrink-0"
-                     :class="getToolMeta(tool.name)?.iconBg ?? 'bg-neutral-800'">
-                  <svg class="w-4 h-4" :class="getToolMeta(tool.name)?.iconColor ?? 'text-neutral-400'"
+                     :class="getToolMeta(tool.name)?.iconBg ?? 'bg-neutral-100 dark:bg-neutral-800'">
+                  <svg class="w-4 h-4" :class="getToolMeta(tool.name)?.iconColor ?? 'text-neutral-600 dark:text-neutral-400'"
                        fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path v-if="getToolMeta(tool.name)?.icon === 'terminal'"  stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     <path v-if="getToolMeta(tool.name)?.icon === 'folder'"    stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
@@ -668,7 +668,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
                 </div>
                 <!-- Name + function pills -->
                 <div class="flex-1 min-w-0">
-                  <span class="text-sm text-white font-mono">{{ tool.name }}</span>
+                  <span class="text-sm text-neutral-900 dark:text-white font-mono">{{ tool.name }}</span>
                   <div class="flex flex-wrap gap-1 mt-1.5">
                     <span v-for="fn in (getToolMeta(tool.name)?.functions ?? [])" :key="fn.name"
                           class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm"
@@ -682,7 +682,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
                         :title="tool.enabled ? 'Disable tool for this agent' : 'Enable tool for this agent'"
                         class="shrink-0">
                   <div class="relative w-9 h-5 rounded-full transition-colors duration-200"
-                       :class="tool.enabled ? 'bg-emerald-500' : 'bg-neutral-700'">
+                       :class="tool.enabled ? 'bg-emerald-500' : 'bg-neutral-200 dark:bg-neutral-700'">
                     <div class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
                          :class="tool.enabled ? 'left-[18px]' : 'left-0.5'" />
                   </div>
@@ -691,25 +691,25 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
             </div>
           </template>
         </div>
-        <div v-if="!agentTools.length" class="px-4 py-4 text-xs text-neutral-600 text-center">
+        <div v-if="!agentTools.length" class="px-4 py-4 text-xs text-neutral-400 dark:text-neutral-600 text-center">
           No tools registered
         </div>
       </div>
 
       <!-- Exec privileges (main agent only) -->
-      <div v-if="editing && editing.isMain" class="bg-neutral-900 border border-neutral-800">
-        <div class="px-4 py-2.5 border-b border-neutral-800">
-          <span class="text-sm font-medium text-white">Shell Exec Privileges</span>
+      <div v-if="editing && editing.isMain" class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
+        <div class="px-4 py-2.5 border-b border-neutral-200 dark:border-neutral-800">
+          <span class="text-sm font-medium text-neutral-900 dark:text-white">Shell Exec Privileges</span>
           <span class="ml-2 text-[10px] text-amber-400">main agent only</span>
         </div>
-        <div class="divide-y divide-neutral-800/50">
+        <div class="divide-y divide-neutral-200 dark:divide-neutral-800/50">
           <div class="px-4 py-2.5 flex items-center justify-between">
             <div>
-              <span class="text-sm text-white">Bypass allowlist</span>
+              <span class="text-sm text-neutral-900 dark:text-white">Bypass allowlist</span>
               <div class="text-xs text-neutral-500 mt-0.5">Allow any command without allowlist validation</div>
             </div>
             <button @click="execBypassAllowlist = !execBypassAllowlist; toggleExecConfig('bypassAllowlist', execBypassAllowlist)"
-                    :class="execBypassAllowlist ? 'bg-amber-600 hover:bg-amber-500' : 'bg-neutral-700 hover:bg-neutral-600'"
+                    :class="execBypassAllowlist ? 'bg-amber-600 hover:bg-amber-500' : 'bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600'"
                     class="relative w-9 h-5 rounded-full transition-colors shrink-0">
               <span :class="execBypassAllowlist ? 'translate-x-4' : 'translate-x-0.5'"
                     class="block w-4 h-4 bg-white rounded-full transition-transform" />
@@ -717,11 +717,11 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
           </div>
           <div class="px-4 py-2.5 flex items-center justify-between">
             <div>
-              <span class="text-sm text-white">Allow global paths</span>
+              <span class="text-sm text-neutral-900 dark:text-white">Allow global paths</span>
               <div class="text-xs text-neutral-500 mt-0.5">Execute commands outside the agent workspace directory</div>
             </div>
             <button @click="execAllowGlobalPaths = !execAllowGlobalPaths; toggleExecConfig('allowGlobalPaths', execAllowGlobalPaths)"
-                    :class="execAllowGlobalPaths ? 'bg-amber-600 hover:bg-amber-500' : 'bg-neutral-700 hover:bg-neutral-600'"
+                    :class="execAllowGlobalPaths ? 'bg-amber-600 hover:bg-amber-500' : 'bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600'"
                     class="relative w-9 h-5 rounded-full transition-colors shrink-0">
               <span :class="execAllowGlobalPaths ? 'translate-x-4' : 'translate-x-0.5'"
                     class="block w-4 h-4 bg-white rounded-full transition-transform" />
@@ -731,19 +731,19 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
       </div>
 
       <!-- Skills -->
-      <div v-if="editing" class="bg-neutral-900 border border-neutral-800">
-        <div class="px-4 py-2.5 border-b border-neutral-800">
-          <span class="text-sm font-medium text-white">Skills</span>
+      <div v-if="editing" class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
+        <div class="px-4 py-2.5 border-b border-neutral-200 dark:border-neutral-800">
+          <span class="text-sm font-medium text-neutral-900 dark:text-white">Skills</span>
           <span class="ml-2 text-xs text-neutral-500">{{ agentSkills.filter(s => s.enabled).length }}/{{ agentSkills.length }} enabled</span>
         </div>
-        <div class="divide-y divide-neutral-800/50">
+        <div class="divide-y divide-neutral-200 dark:divide-neutral-800/50">
           <div v-for="skill in agentSkills" :key="skill.name"
                class="px-4 py-2.5 flex items-start justify-between gap-3 transition-opacity"
                :class="skillDisabledTools(skill).length ? 'opacity-45' : ''">
             <div class="flex-1 min-w-0 transition-[filter]"
                  :class="skillDisabledTools(skill).length ? 'blur-[0.4px]' : ''">
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-sm text-white font-mono">{{ skill.name }}</span>
+                <span class="text-sm text-neutral-900 dark:text-white font-mono">{{ skill.name }}</span>
                 <span v-if="skill.isGlobal" class="text-[10px] text-green-400 border border-green-400/30 px-1">global</span>
               </div>
               <div v-if="skill.tools?.length" class="flex flex-wrap gap-1 mt-1.5">
@@ -760,7 +760,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
                 skill grants execution rights for these exact names.
               -->
               <div v-if="skill.commands?.length" class="mt-1.5 text-[11px] text-neutral-500 flex flex-wrap items-center gap-1">
-                <span class="text-neutral-600 uppercase tracking-wide text-[10px]">Provides:</span>
+                <span class="text-neutral-400 dark:text-neutral-600 uppercase tracking-wide text-[10px]">Provides:</span>
                 <span v-for="cmd in skill.commands" :key="cmd"
                       class="font-mono text-cyan-400/80 bg-cyan-400/5 border border-cyan-400/20 px-1.5 py-0.5 rounded-sm">
                   {{ cmd }}
@@ -779,14 +779,14 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
                     class="shrink-0 pt-0.5"
                     :class="skillDisabledTools(skill).length ? 'cursor-not-allowed' : ''">
               <div class="relative w-9 h-5 rounded-full transition-colors duration-200"
-                   :class="(!skillDisabledTools(skill).length && skill.enabled) ? 'bg-emerald-500' : 'bg-neutral-700'">
+                   :class="(!skillDisabledTools(skill).length && skill.enabled) ? 'bg-emerald-500' : 'bg-neutral-200 dark:bg-neutral-700'">
                 <div class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
                      :class="(!skillDisabledTools(skill).length && skill.enabled) ? 'left-[18px]' : 'left-0.5'" />
               </div>
             </button>
           </div>
         </div>
-        <div v-if="!agentSkills.length" class="px-4 py-4 text-xs text-neutral-600 text-center">
+        <div v-if="!agentSkills.length" class="px-4 py-4 text-xs text-neutral-400 dark:text-neutral-600 text-center">
           No skills available
         </div>
       </div>
@@ -798,10 +798,10 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
         Read-only: remove a per-skill grant by disabling or removing the skill;
         change global by editing shell.allowlist in Settings.
       -->
-      <div v-if="editing && effectiveAllowlist" class="bg-neutral-900 border border-neutral-800">
+      <div v-if="editing && effectiveAllowlist" class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
         <button @click="allowlistExpanded = !allowlistExpanded"
-                class="w-full px-4 py-2.5 border-b border-neutral-800 text-left hover:bg-neutral-800/30 transition-colors flex items-center justify-between">
-          <span class="text-sm font-medium text-white">
+                class="w-full px-4 py-2.5 border-b border-neutral-200 dark:border-neutral-800 text-left hover:bg-neutral-100 dark:hover:bg-neutral-800/30 transition-colors flex items-center justify-between">
+          <span class="text-sm font-medium text-neutral-900 dark:text-white">
             Shell Allowlist
             <span class="ml-2 text-xs font-normal text-neutral-500">
               {{ effectiveAllowlist.global.length + Object.values(effectiveAllowlist.bySkill).reduce((n, arr) => n + arr.length, 0) }}
@@ -820,9 +820,9 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
         <div v-if="allowlistExpanded" class="px-4 py-3">
           <p class="text-[11px] text-neutral-500 mb-2">
             What this agent can run via the exec tool. Global entries come from
-            <span class="font-mono text-neutral-400">shell.allowlist</span> in Settings;
+            <span class="font-mono text-neutral-600 dark:text-neutral-400">shell.allowlist</span> in Settings;
             per-skill entries come from the skill's declared
-            <span class="font-mono text-neutral-400">commands:</span>
+            <span class="font-mono text-neutral-600 dark:text-neutral-400">commands:</span>
             and disappear when you disable or remove the skill.
           </p>
           <table class="w-full text-xs">
@@ -832,15 +832,15 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
                 <th class="text-left font-medium py-1">Source</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-neutral-800/50">
+            <tbody class="divide-y divide-neutral-200 dark:divide-neutral-800/50">
               <tr v-for="cmd in effectiveAllowlist.global" :key="'g:' + cmd">
-                <td class="py-1 pr-4 font-mono text-neutral-300">{{ cmd }}</td>
+                <td class="py-1 pr-4 font-mono text-neutral-700 dark:text-neutral-300">{{ cmd }}</td>
                 <td class="py-1 text-neutral-500">Global (shell.allowlist)</td>
               </tr>
               <template v-for="(cmds, skillName) in effectiveAllowlist.bySkill" :key="skillName">
                 <tr v-for="cmd in cmds" :key="skillName + ':' + cmd">
                   <td class="py-1 pr-4 font-mono text-cyan-400/80">{{ cmd }}</td>
-                  <td class="py-1 text-neutral-500">Skill: <span class="font-mono text-neutral-400">{{ skillName }}</span></td>
+                  <td class="py-1 text-neutral-500">Skill: <span class="font-mono text-neutral-600 dark:text-neutral-400">{{ skillName }}</span></td>
                 </tr>
               </template>
             </tbody>
@@ -849,24 +849,24 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
       </div>
 
       <!-- Workspace editor -->
-      <div v-if="editing" class="bg-neutral-900 border border-neutral-800">
-        <div class="flex border-b border-neutral-800">
+      <div v-if="editing" class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
+        <div class="flex border-b border-neutral-200 dark:border-neutral-800">
           <button
             v-for="file in workspaceFiles" :key="file"
             @click="loadWorkspaceFile(editing.id, file)"
-            :class="workspaceTab === file ? 'text-white border-b border-white' : 'text-neutral-500'"
+            :class="workspaceTab === file ? 'text-neutral-900 dark:text-white border-b border-white' : 'text-neutral-500'"
             class="px-4 py-2 text-xs font-mono transition-colors"
           >{{ file }}</button>
         </div>
         <textarea
           v-model="workspaceContent"
           rows="16"
-          class="w-full px-4 py-3 bg-transparent text-sm text-neutral-300 font-mono
+          class="w-full px-4 py-3 bg-transparent text-sm text-neutral-700 dark:text-neutral-300 font-mono
                  resize-y focus:outline-none"
         />
-        <div class="px-4 py-2 border-t border-neutral-800 flex">
+        <div class="px-4 py-2 border-t border-neutral-200 dark:border-neutral-800 flex">
           <button @click="saveWorkspaceFile"
-                  class="p-1.5 text-emerald-400 hover:text-emerald-300 transition-colors"
+                  class="p-1.5 text-emerald-700 dark:text-emerald-400 hover:text-emerald-600 dark:hover:text-emerald-300 transition-colors"
                   title="Save file">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 5.25A2.25 2.25 0 015.25 3h10.379a2.25 2.25 0 011.59.659l2.122 2.121a2.25 2.25 0 01.659 1.591V18.75A2.25 2.25 0 0118.75 21H5.25A2.25 2.25 0 013 18.75V5.25z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7.5 3v4.5h7.5V3M7.5 21v-6.75h9V21" /></svg>
           </button>
@@ -878,20 +878,20 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
     <div v-if="promptBreakdownOpen"
          class="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-6 overflow-y-auto"
          @click.self="closePromptBreakdown()">
-      <div class="bg-neutral-900 border border-neutral-800 w-full max-w-4xl my-6 text-neutral-200">
-        <div class="px-4 py-3 border-b border-neutral-800 flex items-center justify-between gap-3">
+      <div class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 w-full max-w-4xl my-6 text-neutral-800 dark:text-neutral-200">
+        <div class="px-4 py-3 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between gap-3">
           <div class="min-w-0">
-            <h3 class="text-sm font-medium text-white truncate">System prompt — {{ promptBreakdownAgent?.name }}</h3>
+            <h3 class="text-sm font-medium text-neutral-900 dark:text-white truncate">System prompt — {{ promptBreakdownAgent?.name }}</h3>
             <p class="text-[10px] text-neutral-500 truncate">{{ promptBreakdownAgent?.modelProvider }} / {{ promptBreakdownAgent?.modelId }}</p>
           </div>
           <div class="flex items-center gap-2 shrink-0">
             <button v-if="promptBreakdownData"
                     @click="copyPromptBreakdownJson()"
-                    class="px-2 py-1 text-[10px] text-neutral-400 border border-neutral-700 hover:text-white hover:border-neutral-500"
+                    class="px-2 py-1 text-[10px] text-neutral-600 dark:text-neutral-400 border border-neutral-300 dark:border-neutral-700 hover:text-neutral-900 dark:hover:text-white hover:border-neutral-500"
                     title="Copy the raw breakdown JSON (useful for bug reports)">
               Copy JSON
             </button>
-            <button @click="closePromptBreakdown()" class="p-1 text-neutral-500 hover:text-white" title="Close">
+            <button @click="closePromptBreakdown()" class="p-1 text-neutral-500 hover:text-neutral-900 dark:hover:text-white" title="Close">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
@@ -908,23 +908,23 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
         <div v-else-if="promptBreakdownData" class="px-4 py-4 space-y-5">
           <!-- Totals strip -->
           <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-            <div class="bg-neutral-800/60 border border-neutral-800 px-3 py-2">
+            <div class="bg-neutral-100 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-800 px-3 py-2">
               <div class="text-[10px] text-neutral-500 uppercase tracking-wide">Total chars</div>
-              <div class="text-sm font-mono text-white">{{ formatChars(promptBreakdownData.totalChars) }}</div>
+              <div class="text-sm font-mono text-neutral-900 dark:text-white">{{ formatChars(promptBreakdownData.totalChars) }}</div>
               <div class="text-[10px] text-neutral-500">prompt + tool schemas</div>
             </div>
-            <div class="bg-neutral-800/60 border border-neutral-800 px-3 py-2">
+            <div class="bg-neutral-100 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-800 px-3 py-2">
               <div class="text-[10px] text-neutral-500 uppercase tracking-wide">≈ tokens</div>
               <div class="text-sm font-mono text-amber-300">{{ formatTokens(promptBreakdownData.totalTokenEstimate) }}</div>
               <div class="text-[10px] text-neutral-500">chars/4 heuristic</div>
             </div>
-            <div class="bg-neutral-800/60 border border-neutral-800 px-3 py-2"
+            <div class="bg-neutral-100 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-800 px-3 py-2"
                  title="Bytes above the cache boundary marker — hash-stable, reused from the provider cache on repeat turns">
               <div class="text-[10px] text-neutral-500 uppercase tracking-wide">Cacheable prefix</div>
-              <div class="text-sm font-mono text-emerald-400">{{ formatChars(promptBreakdownData.cacheablePrefixChars) }}</div>
+              <div class="text-sm font-mono text-emerald-700 dark:text-emerald-400">{{ formatChars(promptBreakdownData.cacheablePrefixChars) }}</div>
               <div class="text-[10px] text-neutral-500">≈ {{ formatTokens(Math.round(promptBreakdownData.cacheablePrefixChars / 4)) }} tokens</div>
             </div>
-            <div class="bg-neutral-800/60 border border-neutral-800 px-3 py-2"
+            <div class="bg-neutral-100 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-800 px-3 py-2"
                  title="Bytes after the cache boundary — per-turn-variable content (memories) that never hits the cache">
               <div class="text-[10px] text-neutral-500 uppercase tracking-wide">Variable suffix</div>
               <div class="text-sm font-mono text-rose-400">{{ formatChars(promptBreakdownData.variableSuffixChars) }}</div>
@@ -936,7 +936,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
           <div>
             <h4 class="text-[11px] text-neutral-500 uppercase tracking-wide mb-1.5">Prompt sections</h4>
             <table class="w-full text-xs font-mono">
-              <thead class="text-[10px] text-neutral-500 border-b border-neutral-800">
+              <thead class="text-[10px] text-neutral-500 border-b border-neutral-200 dark:border-neutral-800">
                 <tr>
                   <th class="text-left py-1 pr-2">Section</th>
                   <th class="text-right py-1 px-2">Chars</th>
@@ -947,8 +947,8 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
               <tbody>
                 <tr v-for="s in promptBreakdownData.sections" :key="'section-' + s.name"
                     class="border-b border-neutral-900/50">
-                  <td class="py-1 pr-2 text-neutral-300">{{ s.name }}</td>
-                  <td class="py-1 px-2 text-right text-neutral-400">{{ formatChars(s.chars) }}</td>
+                  <td class="py-1 pr-2 text-neutral-700 dark:text-neutral-300">{{ s.name }}</td>
+                  <td class="py-1 px-2 text-right text-neutral-600 dark:text-neutral-400">{{ formatChars(s.chars) }}</td>
                   <td class="py-1 px-2 text-right text-amber-300/80">{{ formatTokens(s.tokens) }}</td>
                   <td class="py-1 pl-2 text-right text-neutral-500">{{ percentOfTotal(s.chars, promptBreakdownData.cacheablePrefixChars + promptBreakdownData.variableSuffixChars) }}</td>
                 </tr>
@@ -960,7 +960,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
           <div v-if="promptBreakdownData.skills.length > 0">
             <h4 class="text-[11px] text-neutral-500 uppercase tracking-wide mb-1.5">Skills included ({{ promptBreakdownData.skills.length }})</h4>
             <table class="w-full text-xs font-mono">
-              <thead class="text-[10px] text-neutral-500 border-b border-neutral-800">
+              <thead class="text-[10px] text-neutral-500 border-b border-neutral-200 dark:border-neutral-800">
                 <tr>
                   <th class="text-left py-1 pr-2">Skill</th>
                   <th class="text-right py-1 px-2">Chars</th>
@@ -970,8 +970,8 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
               <tbody>
                 <tr v-for="s in promptBreakdownData.skills" :key="'skill-' + s.name"
                     class="border-b border-neutral-900/50">
-                  <td class="py-1 pr-2 text-neutral-300">{{ s.name }}</td>
-                  <td class="py-1 px-2 text-right text-neutral-400">{{ formatChars(s.chars) }}</td>
+                  <td class="py-1 pr-2 text-neutral-700 dark:text-neutral-300">{{ s.name }}</td>
+                  <td class="py-1 px-2 text-right text-neutral-600 dark:text-neutral-400">{{ formatChars(s.chars) }}</td>
                   <td class="py-1 pl-2 text-right text-amber-300/80">{{ formatTokens(s.tokens) }}</td>
                 </tr>
               </tbody>
@@ -981,9 +981,9 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
           <!-- Tools table -->
           <div v-if="promptBreakdownData.tools.length > 0">
             <h4 class="text-[11px] text-neutral-500 uppercase tracking-wide mb-1.5">Tool schemas ({{ promptBreakdownData.tools.length }})</h4>
-            <p class="text-[10px] text-neutral-600 mb-1">Sent separately as the <code class="text-neutral-500">tools</code> array, not part of the prompt string, but counted as input tokens by every provider.</p>
+            <p class="text-[10px] text-neutral-400 dark:text-neutral-600 mb-1">Sent separately as the <code class="text-neutral-500">tools</code> array, not part of the prompt string, but counted as input tokens by every provider.</p>
             <table class="w-full text-xs font-mono">
-              <thead class="text-[10px] text-neutral-500 border-b border-neutral-800">
+              <thead class="text-[10px] text-neutral-500 border-b border-neutral-200 dark:border-neutral-800">
                 <tr>
                   <th class="text-left py-1 pr-2">Tool</th>
                   <th class="text-right py-1 px-2">Schema chars</th>
@@ -993,8 +993,8 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
               <tbody>
                 <tr v-for="t in promptBreakdownData.tools" :key="'tool-' + t.name"
                     class="border-b border-neutral-900/50">
-                  <td class="py-1 pr-2 text-neutral-300">{{ t.name }}</td>
-                  <td class="py-1 px-2 text-right text-neutral-400">{{ formatChars(t.chars) }}</td>
+                  <td class="py-1 pr-2 text-neutral-700 dark:text-neutral-300">{{ t.name }}</td>
+                  <td class="py-1 px-2 text-right text-neutral-600 dark:text-neutral-400">{{ formatChars(t.chars) }}</td>
                   <td class="py-1 pl-2 text-right text-amber-300/80">{{ formatTokens(t.tokens) }}</td>
                 </tr>
               </tbody>

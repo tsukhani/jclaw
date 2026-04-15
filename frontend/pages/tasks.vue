@@ -34,24 +34,24 @@ const statusColors: Record<string, string> = {
 
 <template>
   <div>
-    <h1 class="text-lg font-semibold text-white mb-6">Tasks</h1>
+    <h1 class="text-lg font-semibold text-neutral-900 dark:text-white mb-6">Tasks</h1>
 
     <!-- Filters -->
     <div class="flex gap-3 mb-4">
-      <select v-model="statusFilter" class="bg-neutral-800 border border-neutral-700 text-sm text-white px-2 py-1 focus:outline-none">
+      <select v-model="statusFilter" class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1 focus:outline-none">
         <option value="">All statuses</option>
         <option v-for="s in ['PENDING','RUNNING','COMPLETED','FAILED','CANCELLED']" :key="s" :value="s">{{ s }}</option>
       </select>
-      <select v-model="typeFilter" class="bg-neutral-800 border border-neutral-700 text-sm text-white px-2 py-1 focus:outline-none">
+      <select v-model="typeFilter" class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1 focus:outline-none">
         <option value="">All types</option>
         <option v-for="t in ['IMMEDIATE','SCHEDULED','CRON']" :key="t" :value="t">{{ t }}</option>
       </select>
     </div>
 
-    <div class="bg-neutral-900 border border-neutral-800">
+    <div class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
       <table class="w-full text-sm">
         <thead>
-          <tr class="border-b border-neutral-800 text-left text-xs text-neutral-500">
+          <tr class="border-b border-neutral-200 dark:border-neutral-800 text-left text-xs text-neutral-500">
             <th class="px-4 py-2.5 font-medium">Name</th>
             <th class="px-4 py-2.5 font-medium">Type</th>
             <th class="px-4 py-2.5 font-medium">Status</th>
@@ -61,26 +61,26 @@ const statusColors: Record<string, string> = {
             <th class="px-4 py-2.5 font-medium">Actions</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-neutral-800/50">
+        <tbody class="divide-y divide-neutral-200 dark:divide-neutral-800/50">
           <tr v-for="task in tasks" :key="task.id">
-            <td class="px-4 py-2.5 text-neutral-300">{{ task.name }}</td>
+            <td class="px-4 py-2.5 text-neutral-700 dark:text-neutral-300">{{ task.name }}</td>
             <td class="px-4 py-2.5 text-neutral-500 font-mono text-xs">{{ task.type }}</td>
             <td class="px-4 py-2.5">
               <span :class="statusColors[task.status]" class="text-xs font-mono">{{ task.status }}</span>
             </td>
-            <td class="px-4 py-2.5 text-neutral-400">{{ task.agentName || '—' }}</td>
+            <td class="px-4 py-2.5 text-neutral-600 dark:text-neutral-400">{{ task.agentName || '—' }}</td>
             <td class="px-4 py-2.5 text-neutral-500 text-xs">{{ task.nextRunAt ? new Date(task.nextRunAt).toLocaleString() : '—' }}</td>
             <td class="px-4 py-2.5 text-neutral-500 text-xs">{{ task.retryCount }}/{{ task.maxRetries }}</td>
             <td class="px-4 py-2.5 space-x-2">
               <button v-if="task.status === 'PENDING'" @click="cancelTask(task.id)"
                       class="text-xs text-neutral-500 hover:text-red-400 transition-colors">Cancel</button>
               <button v-if="task.status === 'FAILED'" @click="retryTask(task.id)"
-                      class="text-xs text-neutral-500 hover:text-white transition-colors">Retry</button>
+                      class="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors">Retry</button>
             </td>
           </tr>
         </tbody>
       </table>
-      <div v-if="!tasks?.length" class="px-4 py-8 text-center text-sm text-neutral-600">
+      <div v-if="!tasks?.length" class="px-4 py-8 text-center text-sm text-neutral-400 dark:text-neutral-600">
         No tasks found
       </div>
     </div>

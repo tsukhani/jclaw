@@ -168,7 +168,7 @@ function exportConversation() {
 <template>
   <div>
     <div class="flex items-center justify-between mb-6">
-      <h1 class="text-lg font-semibold text-white">Conversations</h1>
+      <h1 class="text-lg font-semibold text-neutral-900 dark:text-white">Conversations</h1>
       <button v-if="!selectedConvo"
               @click="deleteSelected"
               :disabled="!selectedIds.size || deletingBulk"
@@ -181,27 +181,27 @@ function exportConversation() {
     <div v-if="!selectedConvo" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
       <input v-model="filterName" @input="onFilterChange(true)"
              type="text" placeholder="Search name..."
-             class="px-3 py-1.5 bg-neutral-900 border border-neutral-800 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-neutral-600" />
+             class="px-3 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white placeholder-neutral-500 dark:placeholder-neutral-600 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600" />
       <select v-model="filterChannel" @change="onFilterChange(false)"
-              class="px-3 py-1.5 bg-neutral-900 border border-neutral-800 text-sm text-white focus:outline-none focus:border-neutral-600">
+              class="px-3 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600">
         <option value="">All channels</option>
         <option v-for="ch in channelList" :key="ch" :value="ch">{{ ch }}</option>
       </select>
       <select v-model="filterAgentId" @change="onFilterChange(false)"
-              class="px-3 py-1.5 bg-neutral-900 border border-neutral-800 text-sm text-white focus:outline-none focus:border-neutral-600">
+              class="px-3 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600">
         <option value="">All agents</option>
         <option v-for="a in agentList" :key="a.id" :value="a.id">{{ a.name }}</option>
       </select>
       <input v-model="filterPeer" @input="onFilterChange(true)"
              type="text" placeholder="Filter peer..."
-             class="px-3 py-1.5 bg-neutral-900 border border-neutral-800 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-neutral-600" />
+             class="px-3 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white placeholder-neutral-500 dark:placeholder-neutral-600 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600" />
     </div>
 
     <!-- List view -->
-    <div v-if="!selectedConvo" class="bg-neutral-900 border border-neutral-800">
+    <div v-if="!selectedConvo" class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
       <table class="w-full text-sm">
         <thead>
-          <tr class="border-b border-neutral-800 text-left text-xs text-neutral-500">
+          <tr class="border-b border-neutral-200 dark:border-neutral-800 text-left text-xs text-neutral-500">
             <th class="px-4 py-2.5 w-10">
               <input type="checkbox"
                      :checked="allSelected"
@@ -219,12 +219,12 @@ function exportConversation() {
             <th class="px-4 py-2.5 font-medium">Last Activity</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-neutral-800/50">
+        <tbody class="divide-y divide-neutral-200 dark:divide-neutral-800/50">
           <tr
             v-for="convo in conversations"
             :key="convo.id"
             @click="selectConversation(convo)"
-            class="hover:bg-neutral-800/50 cursor-pointer transition-colors"
+            class="hover:bg-neutral-100 dark:hover:bg-neutral-800/50 cursor-pointer transition-colors"
           >
             <td class="px-4 py-2.5 w-10" @click.stop>
               <input type="checkbox"
@@ -232,33 +232,33 @@ function exportConversation() {
                      @change="toggleSelection(convo.id)"
                      class="accent-red-500 align-middle" />
             </td>
-            <td class="px-4 py-2.5 text-neutral-300 max-w-xs truncate" :title="convo.preview || ''">
+            <td class="px-4 py-2.5 text-neutral-700 dark:text-neutral-300 max-w-xs truncate" :title="convo.preview || ''">
               <span v-if="convo.preview">{{ convo.preview }}</span>
-              <span v-else class="text-neutral-600">—</span>
+              <span v-else class="text-neutral-400 dark:text-neutral-600">—</span>
             </td>
-            <td class="px-4 py-2.5 text-neutral-300">
-              <span class="font-mono text-xs bg-neutral-800 px-1.5 py-0.5">{{ convo.channelType }}</span>
+            <td class="px-4 py-2.5 text-neutral-700 dark:text-neutral-300">
+              <span class="font-mono text-xs bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5">{{ convo.channelType }}</span>
             </td>
-            <td class="px-4 py-2.5 text-neutral-300">{{ convo.agentName }}</td>
-            <td class="px-4 py-2.5 text-neutral-400 font-mono text-xs">{{ convo.peerId || '—' }}</td>
-            <td class="px-4 py-2.5 text-neutral-400">{{ convo.messageCount }}</td>
+            <td class="px-4 py-2.5 text-neutral-700 dark:text-neutral-300">{{ convo.agentName }}</td>
+            <td class="px-4 py-2.5 text-neutral-600 dark:text-neutral-400 font-mono text-xs">{{ convo.peerId || '—' }}</td>
+            <td class="px-4 py-2.5 text-neutral-600 dark:text-neutral-400">{{ convo.messageCount }}</td>
             <td class="px-4 py-2.5 text-neutral-500 text-xs">{{ new Date(convo.updatedAt).toLocaleString() }}</td>
           </tr>
         </tbody>
       </table>
-      <div v-if="!conversations?.length" class="px-4 py-8 text-center text-sm text-neutral-600">
+      <div v-if="!conversations?.length" class="px-4 py-8 text-center text-sm text-neutral-400 dark:text-neutral-600">
         No conversations yet
       </div>
       <div
         v-if="total > 0"
-        class="flex items-center justify-between px-4 py-2.5 border-t border-neutral-800 text-xs text-neutral-500"
+        class="flex items-center justify-between px-4 py-2.5 border-t border-neutral-200 dark:border-neutral-800 text-xs text-neutral-500"
       >
         <span>Showing {{ rangeStart }}–{{ rangeEnd }} of {{ total }}</span>
         <div class="flex items-center gap-1">
           <button
             @click="goto(page - 1)"
             :disabled="page <= 1 || loading"
-            class="px-2 py-1 border border-neutral-800 rounded hover:text-white hover:border-neutral-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            class="px-2 py-1 border border-neutral-200 dark:border-neutral-800 rounded hover:text-neutral-900 dark:hover:text-white hover:border-neutral-400 dark:hover:border-neutral-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Prev
           </button>
@@ -266,7 +266,7 @@ function exportConversation() {
           <button
             @click="goto(page + 1)"
             :disabled="page >= totalPages || loading"
-            class="px-2 py-1 border border-neutral-800 rounded hover:text-white hover:border-neutral-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            class="px-2 py-1 border border-neutral-200 dark:border-neutral-800 rounded hover:text-neutral-900 dark:hover:text-white hover:border-neutral-400 dark:hover:border-neutral-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             Next
           </button>
@@ -277,19 +277,19 @@ function exportConversation() {
     <!-- Detail view -->
     <div v-else>
       <div class="flex items-center justify-between mb-4">
-        <button @click="back" class="text-xs text-neutral-500 hover:text-white transition-colors">&larr; Back</button>
+        <button @click="back" class="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors">&larr; Back</button>
         <button @click="exportConversation"
-                class="p-1.5 text-neutral-400 hover:text-white transition-colors"
+                class="p-1.5 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-colors"
                 title="Export conversation as Markdown">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
         </button>
       </div>
-      <div class="bg-neutral-900 border border-neutral-800 p-4 mb-4">
-        <div class="flex flex-wrap gap-x-6 gap-y-1 text-xs text-neutral-400">
-          <span>Name: <strong class="text-neutral-300">{{ selectedConvo.preview || '—' }}</strong></span>
-          <span>Channel: <strong class="text-neutral-300">{{ selectedConvo.channelType }}</strong></span>
-          <span>Agent: <strong class="text-neutral-300">{{ selectedConvo.agentName }}</strong></span>
-          <span>Peer: <strong class="text-neutral-300 font-mono">{{ selectedConvo.peerId || '—' }}</strong></span>
+      <div class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-4 mb-4">
+        <div class="flex flex-wrap gap-x-6 gap-y-1 text-xs text-neutral-600 dark:text-neutral-400">
+          <span>Name: <strong class="text-neutral-700 dark:text-neutral-300">{{ selectedConvo.preview || '—' }}</strong></span>
+          <span>Channel: <strong class="text-neutral-700 dark:text-neutral-300">{{ selectedConvo.channelType }}</strong></span>
+          <span>Agent: <strong class="text-neutral-700 dark:text-neutral-300">{{ selectedConvo.agentName }}</strong></span>
+          <span>Peer: <strong class="text-neutral-700 dark:text-neutral-300 font-mono">{{ selectedConvo.peerId || '—' }}</strong></span>
         </div>
       </div>
       <div class="space-y-3">
@@ -301,12 +301,12 @@ function exportConversation() {
           <div class="flex items-center gap-2 mb-0.5">
             <span class="text-xs font-mono" :class="{
               'text-neutral-500': msg.role === 'user',
-              'text-neutral-400': msg.role === 'assistant',
-              'text-neutral-600': msg.role === 'tool'
+              'text-neutral-600 dark:text-neutral-400': msg.role === 'assistant',
+              'text-neutral-400 dark:text-neutral-600': msg.role === 'tool'
             }">{{ msg.role }}</span>
-            <span class="text-xs text-neutral-700">{{ new Date(msg.createdAt).toLocaleTimeString() }}</span>
+            <span class="text-xs text-neutral-300 dark:text-neutral-700">{{ new Date(msg.createdAt).toLocaleTimeString() }}</span>
           </div>
-          <div class="bg-neutral-800/50 border border-neutral-800 px-3 py-2 text-sm text-neutral-300 whitespace-pre-wrap">{{ msg.content || '(tool call)' }}</div>
+          <div class="bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-200 dark:border-neutral-800 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 whitespace-pre-wrap">{{ msg.content || '(tool call)' }}</div>
         </div>
       </div>
     </div>

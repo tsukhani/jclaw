@@ -6,17 +6,10 @@ function applyTheme(mode: ThemeMode) {
   if (import.meta.server) return
 
   const root = document.documentElement
-  if (mode === 'system') {
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-    root.classList.toggle('dark', prefersDark)
-    root.classList.toggle('light-mode', !prefersDark)
-  } else if (mode === 'light') {
-    root.classList.remove('dark')
-    root.classList.add('light-mode')
-  } else {
-    root.classList.add('dark')
-    root.classList.remove('light-mode')
-  }
+  const prefersDark =
+    mode === 'dark' ||
+    (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  root.classList.toggle('dark', prefersDark)
 }
 
 export function useTheme() {

@@ -161,7 +161,7 @@ function toggleAllExpanded() {
   <div>
     <!-- Header -->
     <div class="mb-6">
-      <h1 class="text-lg font-semibold text-white">Tools</h1>
+      <h1 class="text-lg font-semibold text-neutral-900 dark:text-white">Tools</h1>
       <p class="mt-1 text-sm text-neutral-500">
         Built-in capabilities available to every agent. Toggle a tool to enable or disable it globally across all agents.
       </p>
@@ -176,8 +176,8 @@ function toggleAllExpanded() {
           @click="activeCategory = cat"
           class="px-3 py-1 text-xs border transition-colors"
           :class="activeCategory === cat
-            ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
-            : 'bg-neutral-900 border-neutral-800 text-neutral-500 hover:text-neutral-300 hover:border-neutral-700'"
+            ? 'bg-emerald-500/10 border-emerald-600 dark:border-emerald-500/40 text-emerald-700 dark:text-emerald-400'
+            : 'bg-neutral-50 dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 hover:border-neutral-300 dark:hover:border-neutral-700'"
         >
           {{ cat }}
         </button>
@@ -190,13 +190,13 @@ function toggleAllExpanded() {
           :disabled="togglingAll"
           class="flex items-center gap-2 px-3 py-1 text-xs border transition-colors disabled:cursor-not-allowed"
           :class="allEnabled
-            ? 'border-emerald-600/40 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
-            : 'border-neutral-700 bg-neutral-900 text-neutral-500 hover:text-neutral-300 hover:border-neutral-600'"
+            ? 'border-emerald-600/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/20'
+            : 'border-neutral-300 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 hover:border-neutral-400 dark:hover:border-neutral-600'"
           :title="allEnabled ? 'Disable all visible tools' : 'Enable all visible tools'"
         >
           <div
             class="relative w-7 h-[15px] rounded-full transition-colors duration-200 shrink-0"
-            :class="togglingAll ? 'bg-neutral-700' : allEnabled ? 'bg-emerald-500' : 'bg-neutral-700'"
+            :class="togglingAll ? 'bg-neutral-200 dark:bg-neutral-700' : allEnabled ? 'bg-emerald-500' : 'bg-neutral-200 dark:bg-neutral-700'"
           >
             <div
               class="absolute top-[1.5px] w-3 h-3 rounded-full bg-white shadow-sm transition-all duration-200"
@@ -209,7 +209,7 @@ function toggleAllExpanded() {
         <!-- Expand/collapse all -->
         <button
           @click="toggleAllExpanded"
-          class="flex items-center gap-1.5 px-3 py-1 text-xs border border-neutral-800 bg-neutral-900 text-neutral-500 hover:text-neutral-300 hover:border-neutral-700 transition-colors"
+          class="flex items-center gap-1.5 px-3 py-1 text-xs border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-900 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 hover:border-neutral-300 dark:hover:border-neutral-700 transition-colors"
         >
           <svg class="w-3 h-3 transition-transform duration-200" :class="allExpanded ? 'rotate-180' : ''" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
@@ -220,14 +220,14 @@ function toggleAllExpanded() {
     </div>
 
     <!-- Loading overlay for agent configs -->
-    <p v-if="configLoading" class="text-xs text-neutral-600 mb-4">Loading agent configurations…</p>
+    <p v-if="configLoading" class="text-xs text-neutral-400 dark:text-neutral-600 mb-4">Loading agent configurations…</p>
 
     <!-- Grid -->
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
       <div
         v-for="tool in filteredTools"
         :key="tool.name"
-        class="bg-neutral-900 border border-neutral-800 flex flex-col transition-opacity"
+        class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex flex-col transition-opacity"
         :class="tool.registered ? '' : 'opacity-40'"
       >
         <!-- Card header -->
@@ -251,7 +251,7 @@ function toggleAllExpanded() {
           <!-- Name + badge + toggle -->
           <div class="flex-1 min-w-0">
             <div class="flex items-center justify-between gap-2">
-              <span class="text-sm font-mono font-semibold text-white truncate">{{ tool.name }}</span>
+              <span class="text-sm font-mono font-semibold text-neutral-900 dark:text-white truncate">{{ tool.name }}</span>
 
               <!-- Toggle (registered tools only) -->
               <button
@@ -264,10 +264,10 @@ function toggleAllExpanded() {
                 <div
                   class="relative w-9 h-5 rounded-full transition-colors duration-200"
                   :class="togglingSet.has(tool.name)
-                    ? 'bg-neutral-700'
+                    ? 'bg-neutral-200 dark:bg-neutral-700'
                     : isGloballyEnabled(tool.name)
                       ? 'bg-emerald-500'
-                      : 'bg-neutral-700'"
+                      : 'bg-neutral-200 dark:bg-neutral-700'"
                 >
                   <div
                     class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
@@ -281,7 +281,7 @@ function toggleAllExpanded() {
               <!-- Unregistered: needs config -->
               <span
                 v-else
-                class="text-[10px] text-neutral-600 shrink-0"
+                class="text-[10px] text-neutral-400 dark:text-neutral-600 shrink-0"
                 :title="`Enable ${tool.meta.requiresConfig} in Settings to activate this tool`"
               >
                 requires config
@@ -299,26 +299,26 @@ function toggleAllExpanded() {
         </div>
 
         <!-- Description — fixed height so Functions header aligns across all cards in a row -->
-        <p class="px-4 pb-4 text-xs text-neutral-400 leading-relaxed min-h-[4rem] line-clamp-3">
+        <p class="px-4 pb-4 text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed min-h-[4rem] line-clamp-3">
           {{ tool.meta.shortDescription }}
         </p>
 
         <!-- Functions accordion header -->
         <button
           @click="toggleExpand(tool.name)"
-          class="px-4 py-2.5 border-t border-neutral-800 flex items-center justify-between w-full group transition-colors"
-          :class="expandedSet.has(tool.name) ? 'bg-neutral-800/40' : 'hover:bg-neutral-800/20'"
+          class="px-4 py-2.5 border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-between w-full group transition-colors"
+          :class="expandedSet.has(tool.name) ? 'bg-neutral-100 dark:bg-neutral-800/40' : 'hover:bg-neutral-100 dark:hover:bg-neutral-800/20'"
         >
           <div class="flex items-center gap-2">
-            <span class="text-[11px] font-medium text-neutral-500 group-hover:text-neutral-300 transition-colors">
+            <span class="text-[11px] font-medium text-neutral-500 group-hover:text-neutral-700 dark:group-hover:text-neutral-300 transition-colors">
               Functions
             </span>
-            <span class="text-[10px] text-neutral-300 bg-neutral-700 px-1.5 py-px rounded tabular-nums">
+            <span class="text-[10px] text-neutral-700 dark:text-neutral-300 bg-neutral-200 dark:bg-neutral-700 px-1.5 py-px rounded tabular-nums">
               {{ tool.meta.functions.length }}
             </span>
           </div>
           <svg
-            class="w-3.5 h-3.5 text-neutral-600 group-hover:text-neutral-400 transition-all duration-200 shrink-0"
+            class="w-3.5 h-3.5 text-neutral-400 dark:text-neutral-600 group-hover:text-neutral-600 dark:group-hover:text-neutral-400 transition-all duration-200 shrink-0"
             :class="expandedSet.has(tool.name) ? 'rotate-180' : ''"
             fill="none" stroke="currentColor" viewBox="0 0 24 24"
           >
@@ -327,13 +327,13 @@ function toggleAllExpanded() {
         </button>
 
         <!-- Functions panel -->
-        <div v-if="expandedSet.has(tool.name)" class="border-t border-neutral-800/50">
+        <div v-if="expandedSet.has(tool.name)" class="border-t border-neutral-200 dark:border-neutral-800/50">
           <div
             v-for="fn in tool.meta.functions"
             :key="fn.name"
-            class="px-4 py-2 flex items-start gap-3 border-b border-neutral-800/30 last:border-b-0"
+            class="px-4 py-2 flex items-start gap-3 border-b border-neutral-200 dark:border-neutral-800/30 last:border-b-0"
           >
-            <code class="text-[10px] font-mono text-emerald-400/80 shrink-0 mt-px w-32 truncate">{{ fn.name }}</code>
+            <code class="text-[10px] font-mono text-emerald-700 dark:text-emerald-400/80 shrink-0 mt-px w-32 truncate">{{ fn.name }}</code>
             <span class="text-[10px] text-neutral-500 leading-relaxed">{{ fn.description }}</span>
           </div>
         </div>

@@ -601,27 +601,27 @@ function exportConversation() {
 <template>
   <div class="flex -m-6" style="height: calc(100vh - 3rem);" :class="{ 'select-none': isResizing }">
     <!-- Conversation sidebar -->
-    <div :style="{ width: sidebarWidth + 'px' }" class="shrink-0 border-r border-neutral-800 flex flex-col overflow-hidden">
-      <div class="p-3 border-b border-neutral-800 flex items-center justify-between">
+    <div :style="{ width: sidebarWidth + 'px' }" class="shrink-0 border-r border-neutral-200 dark:border-neutral-800 flex flex-col overflow-hidden">
+      <div class="p-3 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
         <template v-if="selectMode">
-          <button @click="selectAll" class="text-xs text-neutral-500 hover:text-white transition-colors">
+          <button @click="selectAll" class="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors">
             {{ selectedIds.size === (conversations?.length || 0) ? 'None' : 'All' }}
           </button>
           <div class="flex items-center gap-2">
             <button
               @click="deleteSelected"
               :disabled="selectedIds.size === 0"
-              class="text-xs text-red-400 hover:text-red-300 disabled:text-neutral-600 transition-colors"
+              class="text-xs text-red-400 hover:text-red-300 disabled:text-neutral-400 dark:disabled:text-neutral-600 transition-colors"
             >Delete ({{ selectedIds.size }})</button>
-            <button @click="exitSelectMode" class="text-xs text-neutral-500 hover:text-white transition-colors">Done</button>
+            <button @click="exitSelectMode" class="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors">Done</button>
           </div>
         </template>
         <template v-else>
-          <span class="text-xs font-medium text-neutral-400">Conversations</span>
+          <span class="text-xs font-medium text-neutral-600 dark:text-neutral-400">Conversations</span>
           <button
             v-if="conversations?.length"
             @click="selectMode = true"
-            class="p-1 text-neutral-500 hover:text-white transition-colors"
+            class="p-1 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors"
             title="Edit conversations"
           >
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
@@ -634,12 +634,12 @@ function exportConversation() {
           :key="convo.id"
           @click="selectMode ? toggleSelect(convo.id) : loadConversation(convo.id)"
           :class="[
-            selectMode && selectedIds.has(convo.id) ? 'bg-neutral-700 text-white' :
-            selectedConvoId === convo.id ? 'bg-neutral-800 text-white' : 'text-neutral-400'
+            selectMode && selectedIds.has(convo.id) ? 'bg-neutral-200 dark:bg-neutral-700 text-neutral-900 dark:text-white' :
+            selectedConvoId === convo.id ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white' : 'text-neutral-600 dark:text-neutral-400'
           ]"
-          class="w-full text-left px-3 py-2 text-xs hover:bg-neutral-800 transition-colors truncate flex items-center gap-2 cursor-pointer"
+          class="w-full text-left px-3 py-2 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors truncate flex items-center gap-2 cursor-pointer"
         >
-          <span v-if="selectMode" class="shrink-0 w-3.5 h-3.5 border border-neutral-600 flex items-center justify-center text-[10px]"
+          <span v-if="selectMode" class="shrink-0 w-3.5 h-3.5 border border-neutral-400 dark:border-neutral-600 flex items-center justify-center text-[10px]"
                 :class="selectedIds.has(convo.id) ? 'bg-white text-neutral-900 border-white' : ''">
             <span v-if="selectedIds.has(convo.id)">&#10003;</span>
           </span>
@@ -651,18 +651,18 @@ function exportConversation() {
     <!-- Resize handle -->
     <div
       @mousedown="startResize"
-      class="w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-neutral-600 active:bg-neutral-500 transition-colors"
+      class="w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-neutral-300 dark:hover:bg-neutral-600 active:bg-neutral-500 transition-colors"
     />
 
     <!-- Chat area -->
     <div class="flex-1 flex flex-col">
       <!-- Agent / Model / Thinking selector -->
-      <div class="px-4 py-2.5 border-b border-neutral-800 flex items-center gap-3 flex-wrap">
+      <div class="px-4 py-2.5 border-b border-neutral-200 dark:border-neutral-800 flex items-center gap-3 flex-wrap">
         <label class="text-xs text-neutral-500">Agent:</label>
         <select
           v-model="selectedAgentId"
-          class="bg-neutral-800 border border-neutral-700 text-sm text-white px-2 py-1
-                 focus:outline-none focus:border-neutral-600"
+          class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1
+                 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600"
         >
           <option v-for="agent in agents" :key="agent.id" :value="agent.id">
             {{ agent.name }}
@@ -673,8 +673,8 @@ function exportConversation() {
         <select
           :value="selectedModelKey"
           @change="onModelChange"
-          class="bg-neutral-800 border border-neutral-700 text-sm text-white px-2 py-1
-                 focus:outline-none focus:border-neutral-600"
+          class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1
+                 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600"
         >
           <optgroup v-for="p in providers" :key="p.name" :label="p.name">
             <option
@@ -700,8 +700,8 @@ function exportConversation() {
           <select
             :value="selectedAgent?.thinkingMode || ''"
             @change="onThinkingModeChange"
-            class="bg-neutral-800 border border-neutral-700 text-sm text-white px-2 py-1
-                   focus:outline-none focus:border-neutral-600"
+            class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1
+                   focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600"
           >
             <option value="">Off</option>
             <option v-for="level in thinkingLevels" :key="level" :value="level">
@@ -724,8 +724,8 @@ function exportConversation() {
                 :disabled="!selectedAgent?.thinkingMode && !hasReasoningContent"
                 :class="[
                   (!selectedAgent?.thinkingMode && !hasReasoningContent)
-                    ? 'text-neutral-700 cursor-not-allowed'
-                    : (showThinking ? 'text-blue-400 hover:text-blue-300' : 'text-neutral-600 hover:text-blue-300')
+                    ? 'text-neutral-300 dark:text-neutral-700 cursor-not-allowed'
+                    : (showThinking ? 'text-blue-400 hover:text-blue-300' : 'text-neutral-400 dark:text-neutral-600 hover:text-blue-300')
                 ]"
                 class="p-1 transition-colors"
                 :title="(!selectedAgent?.thinkingMode && !hasReasoningContent)
@@ -734,7 +734,7 @@ function exportConversation() {
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
         </button>
 
-        <span v-if="streaming" class="text-xs text-emerald-400 animate-pulse">{{ streamStatus || 'streaming...' }}</span>
+        <span v-if="streaming" class="text-xs text-emerald-700 dark:text-emerald-400 animate-pulse">{{ streamStatus || 'streaming...' }}</span>
         <span v-else-if="agentBusy" class="text-xs text-neutral-500 animate-pulse">processing queue...</span>
       </div>
 
@@ -747,31 +747,31 @@ function exportConversation() {
         >
           <div :class="msg.role === 'user' ? 'max-w-[80%]' : 'max-w-[85%]'" class="min-w-0">
             <div class="flex items-baseline gap-2 mb-1" :class="msg.role === 'user' ? 'justify-end' : ''">
-              <span class="text-xs font-medium" :class="msg.role === 'user' ? 'text-blue-400' : 'text-emerald-400'">
+              <span class="text-xs font-medium" :class="msg.role === 'user' ? 'text-blue-700 dark:text-blue-400' : 'text-emerald-700 dark:text-emerald-400'">
                 {{ msg.role === 'user' ? 'you' : 'assistant' }}
               </span>
-              <span v-if="msg.createdAt" class="text-xs text-neutral-400">{{ formatTimestamp(msg.createdAt) }}</span>
+              <span v-if="msg.createdAt" class="text-xs text-neutral-600 dark:text-neutral-400">{{ formatTimestamp(msg.createdAt) }}</span>
             </div>
             <!-- User messages: plain text + hover actions (copy, edit) -->
             <div v-if="msg.role === 'user'" class="group">
               <div
-                class="bg-blue-900/30 border border-blue-800/40 rounded-2xl rounded-tr-sm text-neutral-200 px-4 py-2.5 text-sm whitespace-pre-wrap break-words"
+                class="bg-blue-100 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800/40 rounded-2xl rounded-tr-sm text-neutral-800 dark:text-neutral-200 px-4 py-2.5 text-sm whitespace-pre-wrap break-words"
               >{{ msg.content }}</div>
               <div class="flex items-center justify-end gap-1 mt-1 h-5 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
                   type="button"
                   @click="copyUserMessage(msg)"
-                  class="p-1 text-neutral-500 hover:text-neutral-200 transition-colors"
+                  class="p-1 text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 transition-colors"
                   :title="copiedMessageId === (msg.id ?? msg._key) ? 'Copied' : 'Copy to clipboard'"
                 >
                   <svg v-if="copiedMessageId !== (msg.id ?? msg._key)" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                  <svg v-else class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" /></svg>
+                  <svg v-else class="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" /></svg>
                 </button>
                 <button
                   type="button"
                   @click="editUserMessage(msg)"
                   :disabled="streaming"
-                  class="p-1 text-neutral-500 hover:text-neutral-200 disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
+                  class="p-1 text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
                   title="Edit & resubmit"
                 >
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
@@ -782,8 +782,8 @@ function exportConversation() {
             <div v-else>
               <!-- Thinking/reasoning block -->
               <div v-if="showThinking && msg.reasoning"
-                   class="bg-blue-950/30 border border-blue-800/20 rounded-xl rounded-tl-sm text-blue-300/70 px-3 py-2 text-xs font-mono mb-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap break-words">
-                <div class="flex items-center gap-1.5 mb-1 text-blue-400/60 text-[10px] font-sans font-medium">
+                   class="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/20 rounded-xl rounded-tl-sm text-blue-800/80 dark:text-blue-300/70 px-3 py-2 text-xs font-mono mb-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap break-words">
+                <div class="flex items-center gap-1.5 mb-1 text-blue-700 dark:text-blue-400/60 text-[10px] font-sans font-medium">
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
                   Thinking
                 </div>
@@ -791,38 +791,38 @@ function exportConversation() {
               </div>
               <!-- Response content -->
               <div v-if="msg.content"
-                   class="prose-chat bg-neutral-800/50 border border-neutral-700/50 rounded-2xl rounded-tl-sm text-neutral-300 px-4 py-2.5 text-sm overflow-x-auto break-words"
+                   class="prose-chat bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-300 dark:border-neutral-700/50 rounded-2xl rounded-tl-sm text-neutral-700 dark:text-neutral-300 px-4 py-2.5 text-sm overflow-x-auto break-words"
                    v-html="renderMarkdown(msg.content, selectedAgentId)"
               />
               <div v-else-if="!msg.reasoning"
-                   class="bg-neutral-800/50 border border-neutral-700/50 rounded-2xl rounded-tl-sm text-neutral-500 px-4 py-2.5 text-sm italic">
+                   class="bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-300 dark:border-neutral-700/50 rounded-2xl rounded-tl-sm text-neutral-500 px-4 py-2.5 text-sm italic">
                 (empty response)
               </div>
               <!-- Usage metrics footer -->
               <div v-if="msg.usage" class="flex items-center gap-2 flex-wrap mt-1.5 px-1">
-                <span class="inline-flex items-center gap-1 text-xs text-neutral-400"
+                <span class="inline-flex items-center gap-1 text-xs text-neutral-600 dark:text-neutral-400"
                       :title="`${msg.usage.prompt.toLocaleString()} input tokens`">
                   <svg class="w-3 h-3 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11l5-5m0 0l5 5m-5-5v12" /></svg>
                   {{ msg.usage.prompt.toLocaleString() }}
                 </span>
                 <span v-if="msg.usage.cached"
-                      class="inline-flex items-center gap-1 text-xs text-emerald-400/70"
+                      class="inline-flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400/70"
                       :title="`${msg.usage.cached.toLocaleString()} of ${msg.usage.prompt.toLocaleString()} input tokens served from prompt cache`">
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                   {{ msg.usage.cached.toLocaleString() }}
                 </span>
                 <span v-if="msg.usage.reasoning"
-                      class="inline-flex items-center gap-1 text-xs text-blue-400/70"
+                      class="inline-flex items-center gap-1 text-xs text-blue-700/80 dark:text-blue-400/70"
                       :title="`${msg.usage.reasoning.toLocaleString()} reasoning tokens`">
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
                   {{ msg.usage.reasoning.toLocaleString() }}
                 </span>
-                <span class="inline-flex items-center gap-1 text-xs text-neutral-400"
+                <span class="inline-flex items-center gap-1 text-xs text-neutral-600 dark:text-neutral-400"
                       :title="`${msg.usage.completion.toLocaleString()} output tokens`">
                   <svg class="w-3 h-3 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 13l-5 5m0 0l-5-5m5 5V6" /></svg>
                   {{ msg.usage.completion.toLocaleString() }}
                 </span>
-                <span class="text-neutral-700 text-xs">|</span>
+                <span class="text-neutral-300 dark:text-neutral-700 text-xs">|</span>
                 <span v-if="formatTokensPerSec(msg.usage)" class="text-xs text-neutral-500" title="Output tokens per second">
                   {{ formatTokensPerSec(msg.usage) }}
                 </span>
@@ -841,9 +841,9 @@ function exportConversation() {
         <div v-if="streaming && !streamContent" class="flex justify-start">
           <div class="max-w-[85%]">
             <div class="flex items-baseline gap-2 mb-1">
-              <span class="text-xs font-medium text-emerald-400">assistant</span>
+              <span class="text-xs font-medium text-emerald-700 dark:text-emerald-400">assistant</span>
             </div>
-            <div class="bg-neutral-800/50 border border-neutral-700/50 rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm text-neutral-500">
+            <div class="bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-300 dark:border-neutral-700/50 rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm text-neutral-500">
               <span class="animate-pulse">{{ streamStatus || 'Thinking...' }}</span>
             </div>
           </div>
@@ -853,12 +853,12 @@ function exportConversation() {
       <!-- Input -->
       <div class="px-4 py-3">
         <form @submit.prevent="sendMessage"
-              class="bg-neutral-900 border border-neutral-600/40 rounded-xl overflow-hidden">
+              class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-400 dark:border-neutral-600/40 rounded-xl overflow-hidden">
           <div v-if="attachedFiles.length || attachError" class="px-3 pt-2.5 pb-1 flex flex-wrap gap-1.5">
             <span
               v-for="(f, idx) in attachedFiles"
               :key="`${f.name}-${idx}`"
-              class="inline-flex items-center gap-1.5 px-2 py-1 bg-neutral-800 border border-neutral-700 rounded text-[11px] text-neutral-300"
+              class="inline-flex items-center gap-1.5 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded text-[11px] text-neutral-700 dark:text-neutral-300"
             >
               <svg class="w-3 h-3 text-neutral-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
@@ -868,7 +868,7 @@ function exportConversation() {
               <button
                 type="button"
                 @click="removeAttachment(idx)"
-                class="ml-0.5 text-neutral-500 hover:text-white transition-colors"
+                class="ml-0.5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors"
                 title="Remove"
               >
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -878,13 +878,13 @@ function exportConversation() {
             </span>
             <span
               v-if="attachError"
-              class="inline-flex items-center gap-1.5 px-2 py-1 bg-red-900/30 border border-red-800/50 rounded text-[11px] text-red-300"
+              class="inline-flex items-center gap-1.5 px-2 py-1 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800/50 rounded text-[11px] text-red-700 dark:text-red-300"
             >
               <span>{{ attachError }}</span>
               <button
                 type="button"
                 @click="attachError = null"
-                class="text-red-400/70 hover:text-red-200 transition-colors"
+                class="text-red-600 dark:text-red-400/70 hover:text-red-800 dark:hover:text-red-200 transition-colors"
                 title="Dismiss"
               >
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -901,28 +901,28 @@ function exportConversation() {
             @keydown.enter.exact.prevent="sendMessage()"
             @input="autoResize"
             ref="chatInput"
-            class="w-full px-4 pt-3 pb-2 bg-transparent text-sm text-white
-                   placeholder-neutral-600 focus:outline-none resize-none overflow-hidden"
+            class="w-full px-4 pt-3 pb-2 bg-transparent text-sm text-neutral-900 dark:text-white
+                   placeholder-neutral-500 dark:placeholder-neutral-600 focus:outline-none resize-none overflow-hidden"
           />
           <input ref="fileInput" type="file" multiple class="hidden" @change="handleFileUpload" />
           <div class="flex items-center justify-between px-3 pb-2.5">
             <div class="flex items-center gap-1">
-              <button type="button" @click="triggerFileUpload" class="p-1.5 text-neutral-500 hover:text-neutral-300 transition-colors" title="Attach file">
+              <button type="button" @click="triggerFileUpload" class="p-1.5 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors" title="Attach file">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
               </button>
             </div>
             <div class="flex items-center gap-1">
-              <button type="button" @click="newChat" class="p-1.5 text-neutral-500 hover:text-neutral-300 transition-colors" title="New conversation">
+              <button type="button" @click="newChat" class="p-1.5 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors" title="New conversation">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4" /></svg>
               </button>
-              <button type="button" @click="exportConversation" :disabled="!displayMessages.length" class="p-1.5 text-neutral-500 hover:text-neutral-300 disabled:text-neutral-700 transition-colors" title="Export as Markdown">
+              <button type="button" @click="exportConversation" :disabled="!displayMessages.length" class="p-1.5 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 disabled:text-neutral-300 dark:disabled:text-neutral-700 transition-colors" title="Export as Markdown">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
               </button>
               <button
                 v-if="streaming"
                 type="button"
                 @click="stopStreaming"
-                class="p-1.5 text-neutral-400 hover:text-red-400 transition-colors"
+                class="p-1.5 text-neutral-600 dark:text-neutral-400 hover:text-red-400 transition-colors"
                 title="Stop generating"
               >
                 <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1.5" /></svg>
@@ -931,7 +931,7 @@ function exportConversation() {
                 v-else
                 type="submit"
                 :disabled="!input.trim() && !attachedFiles.length"
-                class="p-1.5 text-neutral-500 hover:text-emerald-400 disabled:text-neutral-700 transition-colors"
+                class="p-1.5 text-neutral-500 hover:text-emerald-700 dark:hover:text-emerald-400 disabled:text-neutral-300 dark:disabled:text-neutral-700 transition-colors"
                 title="Send"
               >
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 12L3 21l18-9L3 3l3 9zm0 0h8" /></svg>
@@ -945,92 +945,119 @@ function exportConversation() {
 </template>
 
 <style>
-/* Markdown rendering styles for chat messages */
+/* Markdown rendering styles for chat messages.
+ * Structural rules first, then light-mode palette as the default, with
+ * `html.dark .prose-chat …` overrides mirroring the original dark palette.
+ * The outer `.prose-chat` wrapper already uses Tailwind `dark:` utilities for
+ * the surface bg/border/text — these rules only target nested markdown output
+ * that the Vue template can't reach directly. */
 .prose-chat { overflow-wrap: break-word; word-break: break-word; }
 .prose-chat p { margin: 0.5em 0; }
 .prose-chat p:first-child { margin-top: 0; }
 .prose-chat p:last-child { margin-bottom: 0; }
-.prose-chat strong { color: #e5e5e5; font-weight: 600; }
-.prose-chat em { color: #d4d4d4; }
-.prose-chat code {
-  background: rgba(255,255,255,0.06);
-  padding: 0.15em 0.35em;
-  font-size: 0.875em;
-  font-family: ui-monospace, monospace;
-}
-.prose-chat pre {
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
-  padding: 0.75em 1em;
-  margin: 0.5em 0;
-  overflow-x: auto;
-}
-.prose-chat pre code {
-  background: none;
-  padding: 0;
-}
 .prose-chat ul, .prose-chat ol {
   margin: 0.5em 0;
   padding-left: 1.5em;
 }
 .prose-chat li { margin: 0.25em 0; }
-.prose-chat h1, .prose-chat h2, .prose-chat h3 {
-  color: #e5e5e5;
-  font-weight: 600;
-  margin: 0.75em 0 0.25em;
-}
+.prose-chat h1, .prose-chat h2, .prose-chat h3 { font-weight: 600; margin: 0.75em 0 0.25em; }
 .prose-chat h1 { font-size: 1.1em; }
 .prose-chat h2 { font-size: 1em; }
 .prose-chat h3 { font-size: 0.95em; }
-.prose-chat a { color: #a3a3a3; text-decoration: underline; }
+.prose-chat pre { padding: 0.75em 1em; margin: 0.5em 0; overflow-x: auto; }
+.prose-chat pre code { background: none; padding: 0; }
+.prose-chat code {
+  padding: 0.15em 0.35em;
+  font-size: 0.875em;
+  font-family: ui-monospace, monospace;
+}
+.prose-chat a { text-decoration: underline; }
 .prose-chat a.workspace-file {
   display: inline-flex;
   align-items: center;
   gap: 0.4em;
   padding: 0.25em 0.6em;
   margin: 0.15em 0.15em 0.15em 0;
-  background: rgba(16, 185, 129, 0.1);
-  border: 1px solid rgba(16, 185, 129, 0.3);
   border-radius: 0.4em;
-  color: #6ee7b7;
   text-decoration: none;
   font-size: 0.9em;
   transition: background 0.15s, border-color 0.15s;
 }
-.prose-chat a.workspace-file:hover {
-  background: rgba(16, 185, 129, 0.18);
-  border-color: rgba(16, 185, 129, 0.55);
-}
-.prose-chat a.workspace-file::before {
-  content: "⬇";
-  font-size: 0.85em;
-  opacity: 0.75;
-}
+.prose-chat a.workspace-file::before { content: "⬇"; font-size: 0.85em; opacity: 0.75; }
 .prose-chat blockquote {
-  border-left: 2px solid rgba(255,255,255,0.1);
   padding-left: 0.75em;
   margin: 0.5em 0;
-  color: #a3a3a3;
 }
-.prose-chat hr {
-  border: none;
-  border-top: 1px solid rgba(255,255,255,0.08);
-  margin: 0.75em 0;
-}
+.prose-chat hr { border: none; margin: 0.75em 0; }
 .prose-chat img {
   max-width: 100%;
   height: auto;
   border-radius: 0.5em;
-  border: 1px solid rgba(255,255,255,0.08);
   margin: 0.5em 0;
   cursor: pointer;
-}
-.prose-chat img:hover {
-  border-color: rgba(255,255,255,0.2);
 }
 .prose-chat audio, .prose-chat video {
   max-width: 100%;
   margin: 0.5em 0;
   border-radius: 0.5em;
 }
+.prose-chat table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  width: 100%;
+  font-size: 0.95em;
+}
+.prose-chat th, .prose-chat td {
+  padding: 0.4em 0.75em;
+  text-align: left;
+  vertical-align: top;
+}
+
+/* Light-mode palette (default) */
+.prose-chat strong { color: #171717; font-weight: 600; }
+.prose-chat em { color: #404040; }
+.prose-chat h1, .prose-chat h2, .prose-chat h3 { color: #171717; }
+.prose-chat code { background: rgba(0,0,0,0.06); color: #171717; }
+.prose-chat pre { background: rgba(0,0,0,0.04); border: 1px solid rgba(0,0,0,0.08); }
+.prose-chat a { color: #525252; }
+.prose-chat a.workspace-file {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: #047857;
+}
+.prose-chat a.workspace-file:hover {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.6);
+}
+.prose-chat blockquote { border-left: 2px solid rgba(0,0,0,0.12); color: #525252; }
+.prose-chat hr { border-top: 1px solid rgba(0,0,0,0.1); }
+.prose-chat img { border: 1px solid rgba(0,0,0,0.08); }
+.prose-chat img:hover { border-color: rgba(0,0,0,0.2); }
+.prose-chat th { color: #171717; border-bottom: 1px solid rgba(0,0,0,0.15); font-weight: 600; }
+.prose-chat td { border-bottom: 1px solid rgba(0,0,0,0.06); }
+
+/* Dark-mode overrides */
+html.dark .prose-chat strong { color: #e5e5e5; }
+html.dark .prose-chat em { color: #d4d4d4; }
+html.dark .prose-chat h1,
+html.dark .prose-chat h2,
+html.dark .prose-chat h3 { color: #e5e5e5; }
+html.dark .prose-chat code { background: rgba(255,255,255,0.06); color: inherit; }
+html.dark .prose-chat pre { background: rgba(255,255,255,0.04); border-color: rgba(255,255,255,0.08); }
+html.dark .prose-chat a { color: #a3a3a3; }
+html.dark .prose-chat a.workspace-file {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #6ee7b7;
+}
+html.dark .prose-chat a.workspace-file:hover {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.55);
+}
+html.dark .prose-chat blockquote { border-left-color: rgba(255,255,255,0.1); color: #a3a3a3; }
+html.dark .prose-chat hr { border-top-color: rgba(255,255,255,0.08); }
+html.dark .prose-chat img { border-color: rgba(255,255,255,0.08); }
+html.dark .prose-chat img:hover { border-color: rgba(255,255,255,0.2); }
+html.dark .prose-chat th { color: #e5e5e5; border-bottom-color: rgba(255,255,255,0.15); }
+html.dark .prose-chat td { border-bottom-color: rgba(255,255,255,0.06); }
 </style>
