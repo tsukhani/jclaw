@@ -50,12 +50,12 @@ async function handleLogin() {
   <div class="min-h-screen bg-white dark:bg-neutral-950 flex items-center justify-center">
     <div class="w-full max-w-sm">
       <div class="mb-4 flex items-center justify-center gap-4">
-        <img :src="mascotSrc[period]" alt="JClaw" class="w-16 h-16 rounded-full shrink-0" />
-        <h1 class="text-xl font-semibold tracking-wider">
+        <img :src="mascotSrc[period]" alt="JClaw" class="w-32 h-32 rounded-full shrink-0" />
+        <h1 class="text-4xl font-semibold tracking-wider">
           <span class="text-emerald-700 dark:text-emerald-400">J</span><span class="text-red-600 dark:text-red-500">Claw</span>
         </h1>
       </div>
-      <p class="mb-8 text-center text-sm text-neutral-500">{{ greeting[period] }}! Sign in to continue</p>
+      <p class="mb-8 text-center text-base text-neutral-500">{{ greeting[period] }}! Sign in to continue</p>
 
       <form @submit.prevent="handleLogin" class="space-y-4">
         <div>
