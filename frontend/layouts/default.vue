@@ -38,7 +38,10 @@ function handleKeydown(e: KeyboardEvent) {
 onMounted(() => {
   checkStatus()
   statusInterval = setInterval(checkStatus, 30_000)
-  isMac.value = ((navigator as any).userAgentData?.platform ?? navigator.userAgent).includes('Mac')
+  // userAgentData.platform returns "macOS" (lowercase m); navigator.userAgent
+  // contains "Macintosh". Normalize before matching so both paths agree.
+  isMac.value = ((navigator as any).userAgentData?.platform ?? navigator.userAgent)
+    .toLowerCase().includes('mac')
   document.addEventListener('keydown', handleKeydown)
 })
 

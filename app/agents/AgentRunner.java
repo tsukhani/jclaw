@@ -284,7 +284,7 @@ public class AgentRunner {
             throws InterruptedException {
 
         EventLogger.info("llm", agent.name, channelType,
-                "Streaming: assembling prompt for conversation %d".formatted(conversation.id));
+                "Streaming: assembling prompt for conversation id: %d".formatted(conversation.id));
 
         var assembled = services.Tx.run(() ->
                 SystemPromptAssembler.assemble(agent, userMessage));
