@@ -33,6 +33,7 @@ COPY app/ app/
 COPY conf/ conf/
 COPY public/ public/
 COPY skills/ skills/
+COPY workspace/ workspace/
 COPY .gitignore .distignore ./
 
 COPY conf/dependencies.yml conf/dependencies.yml
