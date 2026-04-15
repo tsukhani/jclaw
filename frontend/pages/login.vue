@@ -25,6 +25,15 @@ const greeting: Record<TimeOfDay, string> = {
   evening: 'Good evening',
 }
 
+// Easter egg: click the mascot to cycle through the day's other avatars.
+// Greeting stays pinned to the actual time of day — only the image rotates.
+const periods: TimeOfDay[] = ['morning', 'afternoon', 'evening']
+const mascotPeriod = ref<TimeOfDay>(period)
+function cycleMascot() {
+  const next = (periods.indexOf(mascotPeriod.value) + 1) % periods.length
+  mascotPeriod.value = periods[next]
+}
+
 // The login screen is always light, regardless of the OS color scheme or
 // any stored preference. The stored theme belongs to the signed-in user and
 // the default layout's useTheme reapplies it after sign-in, so forcing light
@@ -50,7 +59,7 @@ async function handleLogin() {
   <div class="min-h-screen bg-white dark:bg-neutral-950 flex items-center justify-center">
     <div class="w-full max-w-sm">
       <div class="mb-4 flex items-center justify-center gap-4">
-        <img :src="mascotSrc[period]" alt="JClaw" class="w-32 h-32 rounded-full shrink-0" />
+        <img :src="mascotSrc[mascotPeriod]" alt="JClaw" class="w-32 h-32 rounded-full shrink-0 cursor-pointer select-none" @click="cycleMascot" />
         <h1 class="text-4xl font-semibold tracking-wider">
           <span class="text-emerald-700 dark:text-emerald-400">J</span><span class="text-red-600 dark:text-red-500">Claw</span>
         </h1>
