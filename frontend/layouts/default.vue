@@ -106,7 +106,7 @@ const navGroups = [
           <img src="/avatar.png" alt="JClaw" class="w-9 h-9 rounded-full" />
           <div class="leading-tight">
             <div class="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">Control</div>
-            <div class="text-sm font-semibold tracking-wider" aria-label="JClaw"><span class="text-emerald-700 dark:text-emerald-400" aria-hidden="true">J</span><span class="text-red-600 dark:text-red-500" aria-hidden="true">Claw</span></div>
+            <div class="text-sm font-semibold tracking-[0.075em]" aria-label="JClaw"><span class="text-emerald-700 dark:text-emerald-400" aria-hidden="true">J</span><span class="text-red-600 dark:text-red-500" aria-hidden="true">Claw</span></div>
           </div>
         </div>
         <button

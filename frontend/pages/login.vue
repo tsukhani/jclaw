@@ -60,7 +60,7 @@ async function handleLogin() {
     <div class="w-full max-w-sm">
       <div class="mb-4 flex items-center justify-center gap-4">
         <img :src="mascotSrc[mascotPeriod]" alt="JClaw" class="w-32 h-32 rounded-full shrink-0 cursor-pointer select-none" @click="cycleMascot" />
-        <h1 class="text-4xl font-semibold tracking-wider">
+        <h1 class="text-4xl font-semibold tracking-[0.075em]">
           <span class="text-emerald-700 dark:text-emerald-400">J</span><span class="text-red-600 dark:text-red-500">Claw</span>
         </h1>
       </div>
