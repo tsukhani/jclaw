@@ -29,19 +29,27 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 WORKDIR /app
+
+# Resolve dependencies off just the manifest so this expensive layer
+# (~hundreds of MB of Ivy modules + Playwright driver jars) caches across
+# every change that leaves dependencies.yml alone. Narrower than copying
+# all of conf/ because conf/application.conf carries application.version,
+# which bumps on every release and would otherwise bust this layer.
+COPY conf/dependencies.yml conf/dependencies.yml
+RUN play deps --sync
+
+# Playwright browser install depends on the jars brought in by the step
+# above, not on app source — keep it here so it caches alongside deps.
+RUN java -cp "$(echo lib/playwright-*.jar lib/driver-*.jar | tr ' ' ':')" \
+        com.microsoft.playwright.CLI install chromium
+
+# Volatile source last — these COPY layers invalidate on most changes.
 COPY app/ app/
 COPY conf/ conf/
 COPY public/ public/
 COPY skills/ skills/
 COPY workspace/ workspace/
 COPY .gitignore .distignore ./
-
-COPY conf/dependencies.yml conf/dependencies.yml
-RUN play deps --sync
-
-RUN java -cp "$(echo lib/playwright-*.jar lib/driver-*.jar | tr ' ' ':')" \
-        com.microsoft.playwright.CLI install chromium
-
 COPY --from=frontend-build /app/frontend/.output/public public/spa/
 
 RUN play precompile
