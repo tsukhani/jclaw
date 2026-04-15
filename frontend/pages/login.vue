@@ -32,7 +32,7 @@ async function handleLogin() {
   <div class="min-h-screen bg-white dark:bg-neutral-950 flex items-center justify-center">
     <div class="w-full max-w-sm">
       <div class="mb-8 flex items-center justify-center gap-4">
-        <img src="/avatar.png" alt="JClaw" class="w-16 h-16 rounded-full shrink-0" />
+        <img src="/mascot.gif" alt="JClaw" class="w-16 h-16 rounded-full shrink-0" />
         <div class="text-left">
           <h1 class="text-xl font-semibold tracking-wider">
             <span class="text-emerald-700 dark:text-emerald-400">J</span><span class="text-red-600 dark:text-red-500">Claw</span>
