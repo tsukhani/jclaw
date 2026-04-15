@@ -23,7 +23,8 @@ async function handleLogin() {
 <template>
   <div class="min-h-screen bg-white dark:bg-neutral-950 flex items-center justify-center">
     <div class="w-full max-w-sm">
-      <div class="mb-8 text-center">
+      <div class="mb-8 flex flex-col items-center text-center">
+        <img src="/avatar.png" alt="JClaw" class="w-20 h-20 rounded-full mb-4" />
         <h1 class="text-xl font-semibold text-emerald-700 dark:text-emerald-400 tracking-tight">JClaw</h1>
         <p class="text-sm text-neutral-500 mt-1">Sign in to continue</p>
       </div>
