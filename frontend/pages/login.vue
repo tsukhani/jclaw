@@ -9,7 +9,7 @@ const loading = ref(false)
 
 function mascotForHour(hour: number): string {
   if (hour >= 5 && hour < 12) return '/mascot-morning.gif'
-  if (hour >= 12 && hour < 18) return '/mascot.gif'
+  if (hour >= 12 && hour < 22) return '/mascot.gif'
   return '/mascot-evening.gif'
 }
 const mascotSrc = mascotForHour(new Date().getHours())
