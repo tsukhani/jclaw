@@ -7,6 +7,13 @@ const password = ref('')
 const error = ref('')
 const loading = ref(false)
 
+function mascotForHour(hour: number): string {
+  if (hour >= 5 && hour < 12) return '/mascot-morning.gif'
+  if (hour >= 12 && hour < 18) return '/mascot.gif'
+  return '/mascot-evening.gif'
+}
+const mascotSrc = mascotForHour(new Date().getHours())
+
 // The login screen is always light, regardless of the OS color scheme or
 // any stored preference. The stored theme belongs to the signed-in user and
 // the default layout's useTheme reapplies it after sign-in, so forcing light
@@ -32,7 +39,7 @@ async function handleLogin() {
   <div class="min-h-screen bg-white dark:bg-neutral-950 flex items-center justify-center">
     <div class="w-full max-w-sm">
       <div class="mb-8 flex items-center justify-center gap-4">
-        <img src="/mascot.gif" alt="JClaw" class="w-16 h-16 rounded-full shrink-0" />
+        <img :src="mascotSrc" alt="JClaw" class="w-16 h-16 rounded-full shrink-0" />
         <div class="text-left">
           <h1 class="text-xl font-semibold tracking-wider">
             <span class="text-emerald-700 dark:text-emerald-400">J</span><span class="text-red-600 dark:text-red-500">Claw</span>
