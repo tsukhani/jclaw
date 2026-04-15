@@ -7,12 +7,23 @@ const password = ref('')
 const error = ref('')
 const loading = ref(false)
 
-function mascotForHour(hour: number): string {
-  if (hour >= 5 && hour < 12) return '/mascot-morning.gif'
-  if (hour >= 12 && hour < 22) return '/mascot.gif'
-  return '/mascot-evening.gif'
+type TimeOfDay = 'morning' | 'afternoon' | 'evening'
+function timeOfDay(hour: number): TimeOfDay {
+  if (hour >= 5 && hour < 12) return 'morning'
+  if (hour >= 12 && hour < 22) return 'afternoon'
+  return 'evening'
 }
-const mascotSrc = mascotForHour(new Date().getHours())
+const period = timeOfDay(new Date().getHours())
+const mascotSrc: Record<TimeOfDay, string> = {
+  morning: '/mascot-morning.gif',
+  afternoon: '/mascot.gif',
+  evening: '/mascot-evening.gif',
+}
+const greeting: Record<TimeOfDay, string> = {
+  morning: 'Good morning',
+  afternoon: 'Good day',
+  evening: 'Good evening',
+}
 
 // The login screen is always light, regardless of the OS color scheme or
 // any stored preference. The stored theme belongs to the signed-in user and
@@ -39,12 +50,13 @@ async function handleLogin() {
   <div class="min-h-screen bg-white dark:bg-neutral-950 flex items-center justify-center">
     <div class="w-full max-w-sm">
       <div class="mb-8 flex items-center justify-center gap-4">
-        <img :src="mascotSrc" alt="JClaw" class="w-16 h-16 rounded-full shrink-0" />
+        <img :src="mascotSrc[period]" alt="JClaw" class="w-16 h-16 rounded-full shrink-0" />
         <div class="text-left">
           <h1 class="text-xl font-semibold tracking-wider">
             <span class="text-emerald-700 dark:text-emerald-400">J</span><span class="text-red-600 dark:text-red-500">Claw</span>
           </h1>
           <p class="text-sm text-neutral-500 mt-1">Sign in to continue</p>
+          <p class="text-xs text-neutral-400 mt-0.5">{{ greeting[period] }}</p>
         </div>
       </div>
 
