@@ -8,7 +8,7 @@ import {
   SelectViewport,
   useForwardPropsEmits,
 } from "reka-ui"
-import { cn } from "~/lib/utils"
+import { cn } from "~/composables/ui-utils"
 import { SelectScrollDownButton, SelectScrollUpButton } from "."
 
 defineOptions({

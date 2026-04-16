@@ -12,7 +12,7 @@
   "aliases": {
     "components": "~/components",
     "composables": "~/composables",
-    "utils": "~/lib/utils",
+    "utils": "~/composables/ui-utils",
     "ui": "~/components/ui",
     "lib": "~/lib"
   },

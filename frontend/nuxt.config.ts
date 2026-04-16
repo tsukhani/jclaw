@@ -1,4 +1,3 @@
-import { resolve } from 'node:path'
 import tailwindcss from '@tailwindcss/vite'
 
 const backendPort = process.env.JCLAW_BACKEND_PORT || '9000'
@@ -21,12 +20,6 @@ export default defineNuxtConfig({
 
   vite: {
     plugins: [tailwindcss()],
-    resolve: {
-      alias: {
-        '@/lib': resolve(__dirname, 'lib'),
-        '~/lib': resolve(__dirname, 'lib'),
-      },
-    },
   },
 
   // Proxy API requests to the Play backend during development

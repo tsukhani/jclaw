@@ -4,7 +4,7 @@ import { h } from 'vue'
 import { Button } from '~/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '~/components/ui/dialog'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '~/components/ui/accordion'
-import { cn } from '~/lib/utils'
+import { cn } from '~/composables/ui-utils'
 
 // ---------------------------------------------------------------------------
 // cn() utility
