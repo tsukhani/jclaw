@@ -1,6 +1,7 @@
 package services;
 
 import models.Agent;
+import play.db.jpa.JPA;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -224,5 +225,38 @@ public final class LoadTestRunner {
             throw new RuntimeException("Internal login returned no Set-Cookie header");
         }
         return String.join("; ", cookies);
+    }
+
+    /**
+     * Remove all DB collateral created during load-test runs: conversations,
+     * messages, event-log entries, the __loadtest__ agent, and the mock
+     * provider config keys. Called after each run so the load test is
+     * invisible to the operator.
+     */
+    public static void cleanup() {
+        Tx.run(() -> {
+            var agent = Agent.findByName(LOADTEST_AGENT_NAME);
+            if (agent != null) {
+                // Delete messages belonging to loadtest conversations
+                JPA.em().createQuery("DELETE FROM Message m WHERE m.conversation IN " +
+                        "(SELECT c FROM Conversation c WHERE c.agent = :agent)")
+                        .setParameter("agent", agent)
+                        .executeUpdate();
+                // Delete conversations
+                JPA.em().createQuery("DELETE FROM Conversation c WHERE c.agent = :agent")
+                        .setParameter("agent", agent)
+                        .executeUpdate();
+                // Delete event-log entries attributed to the loadtest agent
+                JPA.em().createQuery("DELETE FROM EventLog e WHERE e.agentId = :name")
+                        .setParameter("name", LOADTEST_AGENT_NAME)
+                        .executeUpdate();
+                // Delete the agent itself
+                agent.delete();
+            }
+            // Remove mock provider config keys
+            ConfigService.delete("provider." + LOADTEST_PROVIDER + ".baseUrl");
+            ConfigService.delete("provider." + LOADTEST_PROVIDER + ".apiKey");
+            ConfigService.delete("provider." + LOADTEST_PROVIDER + ".models");
+        });
     }
 }

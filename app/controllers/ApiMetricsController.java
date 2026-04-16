@@ -71,6 +71,7 @@ public class ApiMetricsController extends Controller {
                             simulatedToolCalls, toolSleepMs)));
 
             LoadTestHarness.stop();
+            LoadTestRunner.cleanup();
 
             var out = new JsonObject();
             out.addProperty("totalRequests", result.totalRequests());
@@ -84,10 +85,10 @@ public class ApiMetricsController extends Controller {
             out.addProperty("agentId", result.agentId());
             renderJSON(INSTANCE.toJson(out));
         } catch (play.mvc.results.Result r) {
-            // Play result (renderJSON) — rethrow so the framework handles it
             throw r;
         } catch (Exception e) {
             LoadTestHarness.stop();
+            LoadTestRunner.cleanup();
             error(500, "Load test failed: " + e.getMessage());
         }
     }
