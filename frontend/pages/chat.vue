@@ -801,7 +801,7 @@ function exportConversation() {
                 :class="[
                   (!selectedAgent?.thinkingMode && !hasReasoningContent)
                     ? 'text-border cursor-not-allowed'
-                    : (showThinking ? 'text-blue-400 hover:text-blue-300' : 'text-fg-muted hover:text-blue-300')
+                    : (showThinking ? 'text-emerald-400 hover:text-emerald-300' : 'text-fg-muted hover:text-emerald-300')
                 ]"
                 class="p-1 transition-colors"
                 :title="(!selectedAgent?.thinkingMode && !hasReasoningContent)
@@ -858,8 +858,8 @@ function exportConversation() {
             <div v-else>
               <!-- Thinking/reasoning block -->
               <div v-if="showThinking && msg.reasoning"
-                   class="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/20 rounded-xl rounded-tl-sm text-blue-800/80 dark:text-blue-300/70 px-3 py-2 text-xs font-mono mb-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap break-words">
-                <div class="flex items-center gap-1.5 mb-1 text-blue-700 dark:text-blue-400/60 text-[10px] font-sans font-medium">
+                   class="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/20 rounded-xl rounded-tl-sm text-emerald-800/80 dark:text-emerald-300/70 px-3 py-2 text-xs font-mono mb-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap break-words">
+                <div class="flex items-center gap-1.5 mb-1 text-emerald-700 dark:text-emerald-400/60 text-[10px] font-sans font-medium">
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
                   Thinking
                 </div>
@@ -888,7 +888,7 @@ function exportConversation() {
                   {{ msg.usage.cached.toLocaleString() }}
                 </span>
                 <span v-if="msg.usage.reasoning"
-                      class="inline-flex items-center gap-1 text-xs text-blue-700/80 dark:text-blue-400/70"
+                      class="inline-flex items-center gap-1 text-xs text-emerald-700/80 dark:text-emerald-400/70"
                       :title="`${msg.usage.reasoning.toLocaleString()} reasoning tokens`">
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
                   {{ msg.usage.reasoning.toLocaleString() }}
