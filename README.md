@@ -126,7 +126,7 @@ Default ports: backend on **:9000**, frontend on **:3000**.
 ### Production Deployment
 
 ```bash
-# Deploy to /opt (creates /tmp/jclaw), build everything, and start
+# Deploy to /tmp (creates /tmp/jclaw), build everything, and start
 ./jclaw.sh --deploy /tmp start
 
 # Stop
@@ -181,8 +181,8 @@ Use `--backend-port` and `--frontend-port` with any `jclaw.sh` mode. The fronten
 # Dev mode with custom ports
 ./jclaw.sh --dev --backend-port 8080 --frontend-port 4000 start
 
-# Production deploy with custom ports (creates /opt/jclaw)
-./jclaw.sh --deploy /opt --backend-port 8080 --frontend-port 4000 start
+# Production deploy with custom ports (creates /tmp/jclaw)
+./jclaw.sh --deploy /tmp --backend-port 8080 --frontend-port 4000 start
 
 # Bare start with custom backend port
 ./jclaw.sh --backend-port 8080 start
