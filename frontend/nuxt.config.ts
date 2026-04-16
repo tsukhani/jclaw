@@ -37,5 +37,5 @@ export default defineNuxtConfig({
     '/api/**': { proxy: `${backendUrl}/api/**` }
   },
 
-  compatibilityDate: '2025-01-01'
+  compatibilityDate: '2026-04-16'
 })

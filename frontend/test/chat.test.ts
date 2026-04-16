@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import { registerEndpoint } from '@nuxt/test-utils/runtime'
+import { flushPromises } from '@vue/test-utils'
 import Chat from '~/pages/chat.vue'
 
 function setupChatApi() {
@@ -66,6 +67,7 @@ describe('Chat page', () => {
   it('renders conversation sidebar', async () => {
     setupChatApi()
     const component = await mountSuspended(Chat)
+    await flushPromises()
 
     expect(component.text()).toContain('Conversations')
     expect(component.text()).toContain('Hello world')
@@ -111,6 +113,11 @@ describe('Chat page', () => {
   // with a thinking-capable fixture. Putting it at the end prevents leakage
   // into unrelated tests above that expect the default non-thinking fixture.
   it('renders thinking level selector for thinking-capable models', async () => {
+    // Clear Nuxt's useFetch cache so re-registered endpoints take effect.
+    // In Nuxt 4, useFetch shares data across calls with the same key (URL),
+    // so stale data from prior tests would otherwise persist.
+    clearNuxtData()
+
     registerEndpoint('/api/agents', () => [
       { id: 1, name: 'reasoning-agent', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true, isMain: true, thinkingMode: 'medium', providerConfigured: true },
     ])
@@ -125,6 +132,7 @@ describe('Chat page', () => {
     registerEndpoint('/api/conversations', () => [])
 
     const component = await mountSuspended(Chat)
+    await flushPromises()
 
     expect(component.text()).toContain('Thinking:')
     expect(component.text()).toContain('Low')

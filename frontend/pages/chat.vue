@@ -82,7 +82,13 @@ function rewriteWorkspaceLinks(html: string, agentId: number): string {
     const href = a.getAttribute('href') || ''
     if (!href) return
     if (href.startsWith('/') || href.startsWith('#')) return
-    if (/^(https?|mailto|tel|ftp|data|javascript):/i.test(href)) return
+    // External links open in a new tab
+    if (/^https?:/i.test(href)) {
+      a.setAttribute('target', '_blank')
+      a.setAttribute('rel', 'noopener noreferrer')
+      return
+    }
+    if (/^(mailto|tel|ftp|data|javascript):/i.test(href)) return
     // Decode first: marked.parse already URL-encodes the href (spaces → %20),
     // so a raw encodeURIComponent would double-encode (%20 → %2520), producing
     // a URL that 404s because the filename on disk has real spaces, not "%20".
