@@ -466,29 +466,24 @@ public class ControllerApiTest extends FunctionalTest {
     @Test
     public void configListHidesLoadtestMockProviderKeys() {
         login();
-        services.ConfigService.set("provider.loadtest-mock.enabled", "false");
         services.ConfigService.set("provider.loadtest-mock.baseUrl", "http://127.0.0.1:19999/v1");
         var response = GET("/api/config");
         assertIsOk(response);
         var body = getContent(response);
-        assertFalse(body.contains("provider.loadtest-mock.enabled"),
-                "Reserved provider.loadtest-mock.* keys must not appear in /api/config");
         assertFalse(body.contains("provider.loadtest-mock.baseUrl"),
                 "Reserved provider.loadtest-mock.* keys must not appear in /api/config");
-        // Cleanup — delete via ConfigService since the API now refuses.
-        services.ConfigService.delete("provider.loadtest-mock.enabled");
         services.ConfigService.delete("provider.loadtest-mock.baseUrl");
     }
 
     @Test
     public void configGetOnLoadtestMockKeyReturns404() {
         login();
-        services.ConfigService.set("provider.loadtest-mock.enabled", "true");
+        services.ConfigService.set("provider.loadtest-mock.baseUrl", "http://127.0.0.1:19999/v1");
         try {
-            var response = GET("/api/config/provider.loadtest-mock.enabled");
+            var response = GET("/api/config/provider.loadtest-mock.baseUrl");
             assertEquals(404, response.status.intValue());
         } finally {
-            services.ConfigService.delete("provider.loadtest-mock.enabled");
+            services.ConfigService.delete("provider.loadtest-mock.baseUrl");
         }
     }
 
@@ -496,7 +491,7 @@ public class ControllerApiTest extends FunctionalTest {
     public void configSaveOnLoadtestMockKeyReturns409() {
         login();
         var body = """
-                {"key":"provider.loadtest-mock.enabled","value":"true"}
+                {"key":"provider.loadtest-mock.baseUrl","value":"http://localhost:19999/v1"}
                 """;
         var response = POST("/api/config", "application/json", body);
         assertEquals(409, response.status.intValue());
@@ -505,12 +500,12 @@ public class ControllerApiTest extends FunctionalTest {
     @Test
     public void configDeleteOnLoadtestMockKeyReturns409() {
         login();
-        services.ConfigService.set("provider.loadtest-mock.enabled", "true");
+        services.ConfigService.set("provider.loadtest-mock.baseUrl", "http://127.0.0.1:19999/v1");
         try {
-            var response = DELETE("/api/config/provider.loadtest-mock.enabled");
+            var response = DELETE("/api/config/provider.loadtest-mock.baseUrl");
             assertEquals(409, response.status.intValue());
         } finally {
-            services.ConfigService.delete("provider.loadtest-mock.enabled");
+            services.ConfigService.delete("provider.loadtest-mock.baseUrl");
         }
     }
 

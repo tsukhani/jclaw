@@ -16,7 +16,7 @@ import java.util.concurrent.Executors;
  *
  * <p>Binds to loopback only (127.0.0.1) on a configured port. Started
  * on demand by {@link LoadTestRunner}; safe to leave running (no auth,
- * but not reachable off-host). Guarded by {@code provider.loadtest-mock.enabled}.
+ * but not reachable off-host). Started and stopped by the loadtest endpoint.
  */
 public final class LoadTestHarness {
 

@@ -439,9 +439,8 @@ do_loadtest() {
         exit 1
     fi
 
-    # Declared at script scope (not local) so the EXIT trap below can still
-    # see them after do_loadtest returns.
     cookie_jar=$(mktemp -t jclaw-loadtest-cookie.XXXXXX)
+    trap 'rm -f "$cookie_jar"' EXIT
 
     echo "==> Authenticating as $admin_user..."
     local login_status
@@ -453,32 +452,6 @@ do_loadtest() {
         echo "Error: Login failed (HTTP $login_status). Check jclaw.admin.* credentials."
         exit 1
     fi
-
-    # Snapshot the current enabled value so we can restore it when done —
-    # leaving it enabled after a one-shot CLI run is a footgun (the harness
-    # binds a loopback port and registers loadtest_sleep on every boot).
-    # Script-scoped for the same trap-visibility reason as cookie_jar.
-    prior_enabled=$(curl -s -b "$cookie_jar" \
-        "http://localhost:$BACKEND_PORT/api/config/provider.loadtest-mock.enabled" \
-        | sed -nE 's/.*"value":"([^"]*)".*/\1/p')
-    [[ -z "$prior_enabled" ]] && prior_enabled="false"
-
-    restore_enabled() {
-        curl -s -b "$cookie_jar" \
-            -X POST "http://localhost:$BACKEND_PORT/api/config" \
-            -H 'Content-Type: application/json' \
-            -d "{\"key\":\"provider.loadtest-mock.enabled\",\"value\":\"$prior_enabled\"}" \
-            -o /dev/null
-        rm -f "$cookie_jar"
-    }
-    trap restore_enabled EXIT
-
-    echo "==> Enabling provider.loadtest-mock.enabled (was: $prior_enabled)..."
-    curl -s -b "$cookie_jar" \
-        -X POST "http://localhost:$BACKEND_PORT/api/config" \
-        -H 'Content-Type: application/json' \
-        -d '{"key":"provider.loadtest-mock.enabled","value":"true"}' \
-        -o /dev/null
 
     echo "==> Running load test: concurrency=$LT_CONCURRENCY iterations=$LT_ITERATIONS"
     echo "    ttft=${LT_TTFT_MS}ms tokens/s=$LT_TOKENS_PER_SECOND response=${LT_RESPONSE_TOKENS} tokens"

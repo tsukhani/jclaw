@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * populate with realistic numbers, including {@code queue_wait}.
  *
  * <p>Uses a local {@link LoadTestHarness} mock provider so no external LLM is
- * called. Guarded at the controller layer by {@code provider.loadtest-mock.enabled}.
+ * called. Auth-gated at the controller layer.
  */
 public final class LoadTestRunner {
 

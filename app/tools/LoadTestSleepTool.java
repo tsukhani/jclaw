@@ -13,9 +13,8 @@ import java.util.Map;
  * and produce measurable {@code tool_exec} histograms without depending
  * on real network I/O.
  *
- * <p>Registered only when {@code provider.loadtest-mock.enabled=true}; absent in
- * production. Never call this from real agent workflows — it exists
- * solely for the harness at {@code POST /api/metrics/loadtest}.
+ * <p>Always registered. Only invoked by the load-test harness at
+ * {@code POST /api/metrics/loadtest}; never called from real agent workflows.
  */
 public class LoadTestSleepTool implements ToolRegistry.Tool {
 

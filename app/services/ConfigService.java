@@ -90,8 +90,7 @@ public class ConfigService {
         if (key.startsWith("provider.")) {
             AgentService.syncEnabledStates();
         }
-        if (key.equals("shell.enabled") || key.equals("playwright.enabled")
-                || key.equals("provider.loadtest-mock.enabled")) {
+        if (key.equals("shell.enabled") || key.equals("playwright.enabled")) {
             jobs.ToolRegistrationJob.registerAll();
         }
 
@@ -117,8 +116,7 @@ public class ConfigService {
         if (key.startsWith("provider.")) {
             AgentService.syncEnabledStates();
         }
-        if (key.equals("shell.enabled") || key.equals("playwright.enabled")
-                || key.equals("provider.loadtest-mock.enabled")) {
+        if (key.equals("shell.enabled") || key.equals("playwright.enabled")) {
             jobs.ToolRegistrationJob.registerAll();
         }
     }

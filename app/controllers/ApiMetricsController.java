@@ -12,8 +12,8 @@ import static utils.GsonHolder.INSTANCE;
 
 /**
  * Runtime observability endpoints. In-memory only — histograms reset
- * on JVM restart or via {@link #resetLatency()}. Includes a load-test
- * harness guarded by {@code provider.loadtest-mock.enabled=true} in application.conf.
+ * on JVM restart or via {@link #resetLatency()}. Includes an auth-gated
+ * load-test harness that uses an in-process mock LLM provider.
  */
 @With(AuthCheck.class)
 public class ApiMetricsController extends Controller {
@@ -46,13 +46,6 @@ public class ApiMetricsController extends Controller {
      * /api/metrics/latency afterwards for per-segment histograms.
      */
     public static void loadtest() {
-        // Auto-enable the mock provider for this run — the hidden-key guard in
-        // ApiConfigController prevents enabling via the REST config API, so we
-        // bypass directly through ConfigService here.
-        if (!"true".equalsIgnoreCase(ConfigService.get("provider.loadtest-mock.enabled", "false"))) {
-            ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "true");
-        }
-
         var body = JsonBodyReader.readJsonBody();
         int concurrency = readInt(body, "concurrency", 10);
         int iterations = readInt(body, "iterations", 5);
@@ -91,9 +84,6 @@ public class ApiMetricsController extends Controller {
         } catch (Exception e) {
             error(500, "Load test failed: " + e.getMessage());
         } finally {
-            // Auto-disable and stop the harness so the mock provider doesn't
-            // stay active and the loopback port is released for the next run.
-            ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "false");
             LoadTestHarness.stop();
         }
     }
