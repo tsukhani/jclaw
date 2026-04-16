@@ -90,6 +90,11 @@ public class ApiMetricsController extends Controller {
             renderJSON(INSTANCE.toJson(out));
         } catch (Exception e) {
             error(500, "Load test failed: " + e.getMessage());
+        } finally {
+            // Auto-disable and stop the harness so the mock provider doesn't
+            // stay active and the loopback port is released for the next run.
+            ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "false");
+            LoadTestHarness.stop();
         }
     }
 
