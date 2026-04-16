@@ -46,20 +46,20 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
            @click.self="onCancel"
            role="dialog"
            aria-modal="true">
-        <div class="w-full max-w-md mx-4 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shadow-2xl">
-          <div class="px-5 py-4 border-b border-neutral-200 dark:border-neutral-800">
-            <h2 v-if="state.title" class="text-sm font-semibold text-neutral-900 dark:text-white">{{ state.title }}</h2>
-            <h2 v-else class="text-sm font-semibold text-neutral-900 dark:text-white">Confirm</h2>
+        <div class="w-full max-w-md mx-4 bg-surface-elevated border border-border shadow-2xl">
+          <div class="px-5 py-4 border-b border-border">
+            <h2 v-if="state.title" class="text-sm font-semibold text-fg-strong">{{ state.title }}</h2>
+            <h2 v-else class="text-sm font-semibold text-fg-strong">Confirm</h2>
           </div>
 
           <div class="px-5 py-4">
-            <p class="text-xs text-neutral-700 dark:text-neutral-300 leading-relaxed whitespace-pre-line">{{ state.message }}</p>
+            <p class="text-xs text-fg-primary leading-relaxed whitespace-pre-line">{{ state.message }}</p>
           </div>
 
-          <div class="px-5 py-3 border-t border-neutral-200 dark:border-neutral-800 flex items-center justify-end gap-2">
+          <div class="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
             <button type="button"
                     @click="onCancel"
-                    class="px-3 py-1.5 text-xs text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-colors">
+                    class="px-3 py-1.5 text-xs text-fg-muted hover:text-fg-strong transition-colors">
               {{ state.cancelText }}
             </button>
             <button ref="confirmBtn"

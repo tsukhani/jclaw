@@ -94,50 +94,50 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
-    <h1 class="text-lg font-semibold text-neutral-900 dark:text-white mb-6">Dashboard</h1>
+    <h1 class="text-lg font-semibold text-fg-strong mb-6">Dashboard</h1>
 
     <!-- Stats -->
     <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-      <div class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-4">
-        <div class="text-2xl font-semibold text-neutral-900 dark:text-white">{{ enabledAgents }}/{{ agentCount }}</div>
-        <div class="text-xs text-neutral-500 mt-1">Agents enabled</div>
+      <div class="bg-surface-elevated border border-border p-4">
+        <div class="text-2xl font-semibold text-fg-strong">{{ enabledAgents }}/{{ agentCount }}</div>
+        <div class="text-xs text-fg-muted mt-1">Agents enabled</div>
       </div>
-      <div class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-4">
-        <div class="text-2xl font-semibold text-neutral-900 dark:text-white">{{ channelCount }}</div>
-        <div class="text-xs text-neutral-500 mt-1">Channels active</div>
+      <div class="bg-surface-elevated border border-border p-4">
+        <div class="text-2xl font-semibold text-fg-strong">{{ channelCount }}</div>
+        <div class="text-xs text-fg-muted mt-1">Channels active</div>
       </div>
-      <div class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-4">
-        <div class="text-2xl font-semibold text-neutral-900 dark:text-white">{{ pendingTasks }}</div>
-        <div class="text-xs text-neutral-500 mt-1">Tasks pending</div>
+      <div class="bg-surface-elevated border border-border p-4">
+        <div class="text-2xl font-semibold text-fg-strong">{{ pendingTasks }}</div>
+        <div class="text-xs text-fg-muted mt-1">Tasks pending</div>
       </div>
-      <div class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-4">
-        <div class="text-2xl font-semibold text-neutral-900 dark:text-white">{{ logs?.events?.length ?? 0 }}</div>
-        <div class="text-xs text-neutral-500 mt-1">Recent events</div>
+      <div class="bg-surface-elevated border border-border p-4">
+        <div class="text-2xl font-semibold text-fg-strong">{{ logs?.events?.length ?? 0 }}</div>
+        <div class="text-xs text-fg-muted mt-1">Recent events</div>
       </div>
     </div>
 
     <!-- Chat Performance -->
-    <div class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 mb-8">
-      <div class="px-4 py-3 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
-        <h2 class="text-sm font-medium text-neutral-700 dark:text-neutral-300">Chat Performance</h2>
+    <div class="bg-surface-elevated border border-border mb-8">
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between">
+        <h2 class="text-sm font-medium text-fg-primary">Chat Performance</h2>
         <div class="flex items-center gap-3 text-xs">
-          <span class="text-neutral-400 dark:text-neutral-600">In-memory • resets on JVM restart</span>
+          <span class="text-fg-muted">In-memory • resets on JVM restart</span>
           <button
             type="button"
-            class="text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-white transition-colors"
+            class="text-fg-muted hover:text-fg-strong transition-colors"
             @click="resetLatency"
           >Reset</button>
         </div>
       </div>
 
-      <div v-if="!hasLatencyData" class="px-4 py-8 text-center text-sm text-neutral-400 dark:text-neutral-600">
+      <div v-if="!hasLatencyData" class="px-4 py-8 text-center text-sm text-fg-muted">
         No samples yet. Send a chat message to populate latency histograms.
       </div>
 
       <div v-else class="overflow-x-auto">
         <table class="w-full text-xs">
           <thead>
-            <tr class="text-neutral-500 border-b border-neutral-200 dark:border-neutral-800/50">
+            <tr class="text-fg-muted border-b border-border">
               <th class="text-left font-normal px-4 py-2">Segment</th>
               <th class="text-right font-normal px-3 py-2">n</th>
               <th class="text-right font-normal px-3 py-2">p50</th>
@@ -152,16 +152,16 @@ onBeforeUnmount(() => {
             <tr
               v-for="row in latencyRows"
               :key="row.key"
-              class="border-b border-neutral-200 dark:border-neutral-800/30 last:border-b-0"
+              class="border-b border-border last:border-b-0"
             >
-              <td class="text-neutral-700 dark:text-neutral-300 px-4 py-2">{{ row.label }}</td>
-              <td class="text-right font-mono text-neutral-600 dark:text-neutral-400 px-3 py-2">{{ row.h.count }}</td>
-              <td class="text-right font-mono text-neutral-700 dark:text-neutral-300 px-3 py-2">{{ formatMs(row.h.p50_ms) }}</td>
-              <td class="text-right font-mono text-neutral-700 dark:text-neutral-300 px-3 py-2">{{ formatMs(row.h.p90_ms) }}</td>
-              <td class="text-right font-mono text-neutral-700 dark:text-neutral-300 px-3 py-2">{{ formatMs(row.h.p99_ms) }}</td>
-              <td class="text-right font-mono text-neutral-700 dark:text-neutral-300 px-3 py-2">{{ formatMs(row.h.p999_ms) }}</td>
-              <td class="text-right font-mono text-neutral-500 px-3 py-2">{{ formatMs(row.h.min_ms) }}</td>
-              <td class="text-right font-mono text-neutral-500 px-3 py-2">{{ formatMs(row.h.max_ms) }}</td>
+              <td class="text-fg-primary px-4 py-2">{{ row.label }}</td>
+              <td class="text-right font-mono text-fg-muted px-3 py-2">{{ row.h.count }}</td>
+              <td class="text-right font-mono text-fg-primary px-3 py-2">{{ formatMs(row.h.p50_ms) }}</td>
+              <td class="text-right font-mono text-fg-primary px-3 py-2">{{ formatMs(row.h.p90_ms) }}</td>
+              <td class="text-right font-mono text-fg-primary px-3 py-2">{{ formatMs(row.h.p99_ms) }}</td>
+              <td class="text-right font-mono text-fg-primary px-3 py-2">{{ formatMs(row.h.p999_ms) }}</td>
+              <td class="text-right font-mono text-fg-muted px-3 py-2">{{ formatMs(row.h.min_ms) }}</td>
+              <td class="text-right font-mono text-fg-muted px-3 py-2">{{ formatMs(row.h.max_ms) }}</td>
             </tr>
           </tbody>
         </table>
@@ -169,27 +169,27 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Recent Events -->
-    <div class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800">
-      <div class="px-4 py-3 border-b border-neutral-200 dark:border-neutral-800">
-        <h2 class="text-sm font-medium text-neutral-700 dark:text-neutral-300">Recent Activity</h2>
+    <div class="bg-surface-elevated border border-border">
+      <div class="px-4 py-3 border-b border-border">
+        <h2 class="text-sm font-medium text-fg-primary">Recent Activity</h2>
       </div>
-      <div v-if="logs?.events?.length" class="divide-y divide-neutral-200 dark:divide-neutral-800/50">
+      <div v-if="logs?.events?.length" class="divide-y divide-border">
         <div v-for="event in logs.events" :key="event.id" class="px-4 py-2.5 flex items-start gap-3">
           <span
             :class="{
               'text-red-400': event.level === 'ERROR',
               'text-yellow-400': event.level === 'WARN',
-              'text-neutral-500': event.level === 'INFO'
+              'text-fg-muted': event.level === 'INFO'
             }"
             class="text-xs font-mono mt-0.5 shrink-0 w-10"
           >{{ event.level }}</span>
-          <span class="text-xs text-neutral-500 shrink-0 w-16 font-mono">{{ event.category }}</span>
-          <span v-if="event.agentId" class="text-xs text-neutral-400 dark:text-neutral-600 shrink-0 font-mono">{{ event.agentId }}</span>
-          <span class="text-sm text-neutral-700 dark:text-neutral-300 min-w-0 truncate">{{ event.message }}</span>
-          <span class="text-xs text-neutral-400 dark:text-neutral-600 ml-auto shrink-0">{{ new Date(event.timestamp).toLocaleTimeString() }}</span>
+          <span class="text-xs text-fg-muted shrink-0 w-16 font-mono">{{ event.category }}</span>
+          <span v-if="event.agentId" class="text-xs text-fg-muted shrink-0 font-mono">{{ event.agentId }}</span>
+          <span class="text-sm text-fg-primary min-w-0 truncate">{{ event.message }}</span>
+          <span class="text-xs text-fg-muted ml-auto shrink-0">{{ new Date(event.timestamp).toLocaleTimeString() }}</span>
         </div>
       </div>
-      <div v-else class="px-4 py-8 text-center text-sm text-neutral-400 dark:text-neutral-600">
+      <div v-else class="px-4 py-8 text-center text-sm text-fg-muted">
         No recent events
       </div>
     </div>

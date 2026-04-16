@@ -340,19 +340,75 @@ const displayMessages = computed(() =>
   })
 )
 
-// Auto-select the main agent on load
+// Deep-link: if ?conversation=ID is present, load that conversation and switch
+// to its agent on mount.
+const route = useRoute()
+const deepLinkConvoId = route.query.conversation ? Number(route.query.conversation) : null
+const initializing = ref(true) // suppresses agent-change clear during setup
+
+// Auto-select agent on load
 watch(agents, (val) => {
-  if (val?.length && !selectedAgentId.value) {
-    const def = val.find((a: any) => a.isMain) || val[0]
-    selectedAgentId.value = def.id
-  }
+  if (!val?.length || selectedAgentId.value) return
+  const def = val.find((a: any) => a.isMain) || val[0]
+  selectedAgentId.value = def.id
 }, { immediate: true })
 
-// When agent changes, clear current conversation
+// When agent changes, clear current conversation (unless during initial setup)
 watch(selectedAgentId, () => {
+  if (initializing.value) return
   selectedConvoId.value = null
   messages.value = []
 })
+
+// Deep-link: once conversations are loaded, find and select the target conversation.
+// The conversationsUrl computed auto-fetches when selectedAgentId changes, so we
+// watch the conversations data to detect when the right agent's list arrives.
+if (deepLinkConvoId) {
+  const stopDeepLink = watch(conversations, async (convos) => {
+    if (!convos || !agents.value?.length) return
+
+    // Check if the target conversation is in the current agent's list
+    const found = convos.find((c: any) => c.id === deepLinkConvoId)
+    if (found) {
+      // It's in the current list — select it
+      selectedConvoId.value = deepLinkConvoId
+      messages.value = await $fetch<Message[]>(`/api/conversations/${deepLinkConvoId}/messages`) ?? []
+      scrollToBottom()
+      initializing.value = false
+      stopDeepLink()
+      return
+    }
+
+    // Not in the current agent's list — find which agent owns it
+    if (initializing.value) {
+      try {
+        const allConvos = await $fetch<Conversation[]>('/api/conversations?channel=web&limit=100')
+        const convo = allConvos?.find((c: any) => c.id === deepLinkConvoId)
+        if (convo) {
+          const agent = agents.value.find((a: any) => a.name === convo.agentName)
+          if (agent && agent.id !== selectedAgentId.value) {
+            // Switch agent — this triggers conversationsUrl to change, which
+            // triggers useFetch to refetch, which triggers this watcher again
+            // with the correct agent's conversation list.
+            selectedAgentId.value = agent.id
+            return  // wait for next watcher fire with new conversations
+          }
+        }
+      } catch { /* fall through */ }
+      // Couldn't find the conversation — give up and finish init
+      initializing.value = false
+      stopDeepLink()
+    }
+  }, { immediate: true })
+
+  // Safety: don't leave the watcher running forever
+  onUnmounted(() => stopDeepLink())
+} else {
+  // No deep-link — mark init done after first tick so agent watcher works normally
+  watch(conversations, () => {
+    if (initializing.value) initializing.value = false
+  }, { once: true })
+}
 
 async function loadConversation(id: number) {
   // Generate a title for the conversation we're leaving (if it still has a truncated preview)
@@ -601,27 +657,27 @@ function exportConversation() {
 <template>
   <div class="flex -m-6" style="height: calc(100vh - 3rem);" :class="{ 'select-none': isResizing }">
     <!-- Conversation sidebar -->
-    <div :style="{ width: sidebarWidth + 'px' }" class="shrink-0 border-r border-neutral-200 dark:border-neutral-800 flex flex-col overflow-hidden">
-      <div class="p-3 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+    <div :style="{ width: sidebarWidth + 'px' }" class="shrink-0 border-r border-border flex flex-col overflow-hidden">
+      <div class="p-3 border-b border-border flex items-center justify-between">
         <template v-if="selectMode">
-          <button @click="selectAll" class="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors">
+          <button @click="selectAll" class="text-xs text-fg-muted hover:text-fg-strong transition-colors">
             {{ selectedIds.size === (conversations?.length || 0) ? 'None' : 'All' }}
           </button>
           <div class="flex items-center gap-2">
             <button
               @click="deleteSelected"
               :disabled="selectedIds.size === 0"
-              class="text-xs text-red-400 hover:text-red-300 disabled:text-neutral-400 dark:disabled:text-neutral-600 transition-colors"
+              class="text-xs text-red-400 hover:text-red-300 disabled:text-fg-muted transition-colors"
             >Delete ({{ selectedIds.size }})</button>
-            <button @click="exitSelectMode" class="text-xs text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors">Done</button>
+            <button @click="exitSelectMode" class="text-xs text-fg-muted hover:text-fg-strong transition-colors">Done</button>
           </div>
         </template>
         <template v-else>
-          <span class="text-xs font-medium text-neutral-600 dark:text-neutral-400">Conversations</span>
+          <span class="text-xs font-medium text-fg-muted">Conversations</span>
           <button
             v-if="conversations?.length"
             @click="selectMode = true"
-            class="p-1 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors"
+            class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
             title="Edit conversations"
           >
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
@@ -634,13 +690,13 @@ function exportConversation() {
           :key="convo.id"
           @click="selectMode ? toggleSelect(convo.id) : loadConversation(convo.id)"
           :class="[
-            selectMode && selectedIds.has(convo.id) ? 'bg-neutral-200 dark:bg-neutral-700 text-neutral-900 dark:text-white' :
-            selectedConvoId === convo.id ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white' : 'text-neutral-600 dark:text-neutral-400'
+            selectMode && selectedIds.has(convo.id) ? 'bg-muted text-fg-strong' :
+            selectedConvoId === convo.id ? 'bg-muted text-fg-strong' : 'text-fg-muted'
           ]"
-          class="w-full text-left px-3 py-2 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors truncate flex items-center gap-2 cursor-pointer"
+          class="w-full text-left px-3 py-2 text-xs hover:bg-muted transition-colors truncate flex items-center gap-2 cursor-pointer"
         >
-          <span v-if="selectMode" class="shrink-0 w-3.5 h-3.5 border border-neutral-400 dark:border-neutral-600 flex items-center justify-center text-[10px]"
-                :class="selectedIds.has(convo.id) ? 'bg-white text-neutral-900 border-white' : ''">
+          <span v-if="selectMode" class="shrink-0 w-3.5 h-3.5 border border-input flex items-center justify-center text-[10px]"
+                :class="selectedIds.has(convo.id) ? 'bg-white text-fg-strong border-white' : ''">
             <span v-if="selectedIds.has(convo.id)">&#10003;</span>
           </span>
           <span class="truncate">{{ convo.preview || convo.agentName }} &middot; {{ new Date(convo.updatedAt).toLocaleDateString() }}</span>
@@ -651,30 +707,30 @@ function exportConversation() {
     <!-- Resize handle -->
     <div
       @mousedown="startResize"
-      class="w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-neutral-300 dark:hover:bg-neutral-600 active:bg-neutral-500 transition-colors"
+      class="w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-muted active:bg-neutral-500 transition-colors"
     />
 
     <!-- Chat area -->
     <div class="flex-1 flex flex-col">
       <!-- Agent / Model / Thinking selector -->
-      <div class="px-4 py-2.5 border-b border-neutral-200 dark:border-neutral-800 flex items-center gap-3 flex-wrap">
-        <label class="text-xs text-neutral-500">Agent:</label>
+      <div class="px-4 py-2.5 border-b border-border flex items-center gap-3 flex-wrap">
+        <label class="text-xs text-fg-muted">Agent:</label>
         <select
           v-model="selectedAgentId"
-          class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1
-                 focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600"
+          class="bg-muted border border-input text-sm text-fg-strong px-2 py-1
+                 focus:outline-hidden focus:border-ring"
         >
           <option v-for="agent in agents" :key="agent.id" :value="agent.id">
             {{ agent.name }}
           </option>
         </select>
 
-        <label class="text-xs text-neutral-500">Model:</label>
+        <label class="text-xs text-fg-muted">Model:</label>
         <select
           :value="selectedModelKey"
           @change="onModelChange"
-          class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1
-                 focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600"
+          class="bg-muted border border-input text-sm text-fg-strong px-2 py-1
+                 focus:outline-hidden focus:border-ring"
         >
           <optgroup v-for="p in providers" :key="p.name" :label="p.name">
             <option
@@ -696,12 +752,12 @@ function exportConversation() {
           compactness since non-reasoning is the common case.
         -->
         <template v-if="thinkingSupported && thinkingLevels.length">
-          <label class="text-xs text-neutral-500">Thinking:</label>
+          <label class="text-xs text-fg-muted">Thinking:</label>
           <select
             :value="selectedAgent?.thinkingMode || ''"
             @change="onThinkingModeChange"
-            class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1
-                   focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600"
+            class="bg-muted border border-input text-sm text-fg-strong px-2 py-1
+                   focus:outline-hidden focus:border-ring"
           >
             <option value="">Off</option>
             <option v-for="level in thinkingLevels" :key="level" :value="level">
@@ -724,8 +780,8 @@ function exportConversation() {
                 :disabled="!selectedAgent?.thinkingMode && !hasReasoningContent"
                 :class="[
                   (!selectedAgent?.thinkingMode && !hasReasoningContent)
-                    ? 'text-neutral-300 dark:text-neutral-700 cursor-not-allowed'
-                    : (showThinking ? 'text-blue-400 hover:text-blue-300' : 'text-neutral-400 dark:text-neutral-600 hover:text-blue-300')
+                    ? 'text-border cursor-not-allowed'
+                    : (showThinking ? 'text-blue-400 hover:text-blue-300' : 'text-fg-muted hover:text-blue-300')
                 ]"
                 class="p-1 transition-colors"
                 :title="(!selectedAgent?.thinkingMode && !hasReasoningContent)
@@ -735,7 +791,7 @@ function exportConversation() {
         </button>
 
         <span v-if="streaming" class="text-xs text-emerald-700 dark:text-emerald-400 animate-pulse">{{ streamStatus || 'streaming...' }}</span>
-        <span v-else-if="agentBusy" class="text-xs text-neutral-500 animate-pulse">processing queue...</span>
+        <span v-else-if="agentBusy" class="text-xs text-fg-muted animate-pulse">processing queue...</span>
       </div>
 
       <!-- Messages -->
@@ -750,18 +806,18 @@ function exportConversation() {
               <span class="text-xs font-medium" :class="msg.role === 'user' ? 'text-blue-700 dark:text-blue-400' : 'text-emerald-700 dark:text-emerald-400'">
                 {{ msg.role === 'user' ? 'you' : 'assistant' }}
               </span>
-              <span v-if="msg.createdAt" class="text-xs text-neutral-600 dark:text-neutral-400">{{ formatTimestamp(msg.createdAt) }}</span>
+              <span v-if="msg.createdAt" class="text-xs text-fg-muted">{{ formatTimestamp(msg.createdAt) }}</span>
             </div>
             <!-- User messages: plain text + hover actions (copy, edit) -->
             <div v-if="msg.role === 'user'" class="group">
               <div
-                class="bg-blue-100 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800/40 rounded-2xl rounded-tr-sm text-neutral-800 dark:text-neutral-200 px-4 py-2.5 text-sm whitespace-pre-wrap break-words"
+                class="bg-blue-100 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800/40 rounded-2xl rounded-tr-sm text-fg-primary px-4 py-2.5 text-sm whitespace-pre-wrap break-words"
               >{{ msg.content }}</div>
               <div class="flex items-center justify-end gap-1 mt-1 h-5 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
                   type="button"
                   @click="copyUserMessage(msg)"
-                  class="p-1 text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 transition-colors"
+                  class="p-1 text-fg-muted hover:text-fg-primary transition-colors"
                   :title="copiedMessageId === (msg.id ?? msg._key) ? 'Copied' : 'Copy to clipboard'"
                 >
                   <svg v-if="copiedMessageId !== (msg.id ?? msg._key)" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
@@ -771,7 +827,7 @@ function exportConversation() {
                   type="button"
                   @click="editUserMessage(msg)"
                   :disabled="streaming"
-                  class="p-1 text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
+                  class="p-1 text-fg-muted hover:text-fg-primary disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
                   title="Edit & resubmit"
                 >
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
@@ -791,18 +847,18 @@ function exportConversation() {
               </div>
               <!-- Response content -->
               <div v-if="msg.content"
-                   class="prose-chat bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-300 dark:border-neutral-700/50 rounded-2xl rounded-tl-sm text-neutral-700 dark:text-neutral-300 px-4 py-2.5 text-sm overflow-x-auto break-words"
+                   class="prose-chat bg-muted border border-input rounded-2xl rounded-tl-sm text-fg-primary px-4 py-2.5 text-sm overflow-x-auto break-words"
                    v-html="renderMarkdown(msg.content, selectedAgentId)"
               />
               <div v-else-if="!msg.reasoning"
-                   class="bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-300 dark:border-neutral-700/50 rounded-2xl rounded-tl-sm text-neutral-500 px-4 py-2.5 text-sm italic">
+                   class="bg-muted border border-input rounded-2xl rounded-tl-sm text-fg-muted px-4 py-2.5 text-sm italic">
                 (empty response)
               </div>
               <!-- Usage metrics footer -->
               <div v-if="msg.usage" class="flex items-center gap-2 flex-wrap mt-1.5 px-1">
-                <span class="inline-flex items-center gap-1 text-xs text-neutral-600 dark:text-neutral-400"
+                <span class="inline-flex items-center gap-1 text-xs text-fg-muted"
                       :title="`${msg.usage.prompt.toLocaleString()} input tokens`">
-                  <svg class="w-3 h-3 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11l5-5m0 0l5 5m-5-5v12" /></svg>
+                  <svg class="w-3 h-3 text-fg-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11l5-5m0 0l5 5m-5-5v12" /></svg>
                   {{ msg.usage.prompt.toLocaleString() }}
                 </span>
                 <span v-if="msg.usage.cached"
@@ -817,16 +873,16 @@ function exportConversation() {
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
                   {{ msg.usage.reasoning.toLocaleString() }}
                 </span>
-                <span class="inline-flex items-center gap-1 text-xs text-neutral-600 dark:text-neutral-400"
+                <span class="inline-flex items-center gap-1 text-xs text-fg-muted"
                       :title="`${msg.usage.completion.toLocaleString()} output tokens`">
-                  <svg class="w-3 h-3 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 13l-5 5m0 0l-5-5m5 5V6" /></svg>
+                  <svg class="w-3 h-3 text-fg-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 13l-5 5m0 0l-5-5m5 5V6" /></svg>
                   {{ msg.usage.completion.toLocaleString() }}
                 </span>
-                <span class="text-neutral-300 dark:text-neutral-700 text-xs">|</span>
-                <span v-if="formatTokensPerSec(msg.usage)" class="text-xs text-neutral-500" title="Output tokens per second">
+                <span class="text-border text-xs">|</span>
+                <span v-if="formatTokensPerSec(msg.usage)" class="text-xs text-fg-muted" title="Output tokens per second">
                   {{ formatTokensPerSec(msg.usage) }}
                 </span>
-                <span v-if="msg.usage.durationMs" class="text-xs text-neutral-500" title="Total response time">
+                <span v-if="msg.usage.durationMs" class="text-xs text-fg-muted" title="Total response time">
                   {{ (msg.usage.durationMs / 1000).toFixed(1) }}s
                 </span>
                 <span v-if="formatUsageCost(msg.usage)"
@@ -843,7 +899,7 @@ function exportConversation() {
             <div class="flex items-baseline gap-2 mb-1">
               <span class="text-xs font-medium text-emerald-700 dark:text-emerald-400">assistant</span>
             </div>
-            <div class="bg-neutral-100 dark:bg-neutral-800/50 border border-neutral-300 dark:border-neutral-700/50 rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm text-neutral-500">
+            <div class="bg-muted border border-input rounded-2xl rounded-tl-sm px-4 py-2.5 text-sm text-fg-muted">
               <span class="animate-pulse">{{ streamStatus || 'Thinking...' }}</span>
             </div>
           </div>
@@ -853,22 +909,22 @@ function exportConversation() {
       <!-- Input -->
       <div class="px-4 py-3">
         <form @submit.prevent="sendMessage"
-              class="bg-neutral-50 dark:bg-neutral-900 border border-neutral-400 dark:border-neutral-600/40 rounded-xl overflow-hidden">
+              class="bg-surface-elevated border border-ring rounded-xl overflow-hidden">
           <div v-if="attachedFiles.length || attachError" class="px-3 pt-2.5 pb-1 flex flex-wrap gap-1.5">
             <span
               v-for="(f, idx) in attachedFiles"
               :key="`${f.name}-${idx}`"
-              class="inline-flex items-center gap-1.5 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded text-[11px] text-neutral-700 dark:text-neutral-300"
+              class="inline-flex items-center gap-1.5 px-2 py-1 bg-muted border border-input rounded text-[11px] text-fg-primary"
             >
-              <svg class="w-3 h-3 text-neutral-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg class="w-3 h-3 text-fg-muted shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
               </svg>
               <span class="truncate max-w-[140px]" :title="f.name">{{ f.name }}</span>
-              <span class="text-neutral-500">{{ formatAttachmentSize(f.size) }}</span>
+              <span class="text-fg-muted">{{ formatAttachmentSize(f.size) }}</span>
               <button
                 type="button"
                 @click="removeAttachment(idx)"
-                class="ml-0.5 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors"
+                class="ml-0.5 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Remove"
               >
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -901,21 +957,21 @@ function exportConversation() {
             @keydown.enter.exact.prevent="sendMessage()"
             @input="autoResize"
             ref="chatInput"
-            class="w-full px-4 pt-3 pb-2 bg-transparent text-sm text-neutral-900 dark:text-white
-                   placeholder-neutral-500 dark:placeholder-neutral-600 focus:outline-hidden resize-none overflow-hidden"
+            class="w-full px-4 pt-3 pb-2 bg-transparent text-sm text-fg-strong
+                   placeholder-fg-muted focus:outline-hidden resize-none overflow-hidden"
           />
           <input ref="fileInput" type="file" multiple class="hidden" @change="handleFileUpload" />
           <div class="flex items-center justify-between px-3 pb-2.5">
             <div class="flex items-center gap-1">
-              <button type="button" @click="triggerFileUpload" class="p-1.5 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors" title="Attach file">
+              <button type="button" @click="triggerFileUpload" class="p-1.5 text-fg-muted hover:text-fg-primary transition-colors" title="Attach file">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
               </button>
             </div>
             <div class="flex items-center gap-1">
-              <button type="button" @click="newChat" class="p-1.5 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors" title="New conversation">
+              <button type="button" @click="newChat" class="p-1.5 text-fg-muted hover:text-fg-primary transition-colors" title="New conversation">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4" /></svg>
               </button>
-              <button type="button" @click="exportConversation" :disabled="!displayMessages.length" class="p-1.5 text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300 disabled:text-neutral-300 dark:disabled:text-neutral-700 transition-colors" title="Export as Markdown">
+              <button type="button" @click="exportConversation" :disabled="!displayMessages.length" class="p-1.5 text-fg-muted hover:text-fg-primary disabled:text-neutral-300 dark:disabled:text-neutral-700 transition-colors" title="Export as Markdown">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
               </button>
               <button
@@ -931,7 +987,7 @@ function exportConversation() {
                 v-else
                 type="submit"
                 :disabled="!input.trim() && !attachedFiles.length"
-                class="p-1.5 text-neutral-500 hover:text-emerald-700 dark:hover:text-emerald-400 disabled:text-neutral-300 dark:disabled:text-neutral-700 transition-colors"
+                class="p-1.5 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 disabled:text-neutral-300 dark:disabled:text-neutral-700 transition-colors"
                 title="Send"
               >
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 12L3 21l18-9L3 3l3 9zm0 0h8" /></svg>

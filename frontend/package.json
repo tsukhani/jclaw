@@ -15,9 +15,16 @@
     "test:e2e:headed": "PWSLOWMO=500 playwright test --headed --workers=1"
   },
   "dependencies": {
+    "@vueuse/core": "^14.2.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "dompurify": "^3.3.3",
+    "lucide-vue-next": "^1.0.0",
     "marked": "^17.0.6",
-    "nuxt": "^3.16.0"
+    "nuxt": "^3.16.0",
+    "reka-ui": "^2.9.6",
+    "shadcn-nuxt": "^2.6.2",
+    "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
     "@nuxt/test-utils": "^4.0.0",

@@ -49,7 +49,7 @@ function iconFor(file: SkillFile | undefined) {
       <div
         v-if="node.isDir"
         @click="toggle(node.path ?? (node.name + (depth ?? 0)))"
-        class="flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800/50 transition-colors select-none"
+        class="flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-fg-muted hover:bg-muted/50 transition-colors select-none"
         :style="{ paddingLeft: `${12 + (depth ?? 0) * 12}px` }"
       >
         <svg
@@ -61,7 +61,7 @@ function iconFor(file: SkillFile | undefined) {
         >
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
         </svg>
-        <svg class="w-3.5 h-3.5 text-neutral-500 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+        <svg class="w-3.5 h-3.5 text-fg-muted shrink-0" fill="currentColor" viewBox="0 0 20 20">
           <path d="M2 6a2 2 0 012-2h3.172a2 2 0 011.414.586l1.828 1.828A2 2 0 0011.828 7H16a2 2 0 012 2v5a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
         </svg>
         <span class="text-xs truncate">{{ node.name }}</span>
@@ -82,20 +82,20 @@ function iconFor(file: SkillFile | undefined) {
         @click="node.file ? emit('select', node.file) : undefined"
         :class="[
           'flex items-center gap-2 px-3 py-1.5 transition-colors',
-          activePath === node.path ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-white' : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800/50',
+          activePath === node.path ? 'bg-muted text-fg-strong' : 'text-fg-muted hover:bg-muted/50',
           node.file?.isText ? 'cursor-pointer' : 'cursor-default opacity-60'
         ]"
         :style="{ paddingLeft: `${12 + (depth ?? 0) * 12}px` }"
       >
         <span
           class="text-[9px] font-mono px-1 py-0.5 rounded shrink-0"
-          :class="node.file?.isText ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400' : 'bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-400'"
+          :class="node.file?.isText ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400' : 'bg-muted text-fg-muted'"
         >
           {{ iconFor(node.file) }}
         </span>
         <div class="min-w-0">
           <div class="text-xs truncate">{{ node.name }}</div>
-          <div class="text-[10px] text-neutral-400 dark:text-neutral-600">{{ formatSize(node.file?.size ?? 0) }}</div>
+          <div class="text-[10px] text-fg-muted">{{ formatSize(node.file?.size ?? 0) }}</div>
         </div>
       </div>
     </template>

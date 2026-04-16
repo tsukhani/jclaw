@@ -5,7 +5,7 @@ import Index from '~/pages/index.vue'
 import Agents from '~/pages/agents.vue'
 import Settings from '~/pages/settings.vue'
 import Logs from '~/pages/logs.vue'
-import Conversations from '~/pages/conversations.vue'
+import Conversations from '~/pages/conversations/index.vue'
 
 // Register mock API endpoints
 function setupMockApi() {

@@ -56,7 +56,7 @@ async function handleLogin() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-white dark:bg-neutral-950 flex items-center justify-center">
+  <div class="min-h-screen bg-surface flex items-center justify-center">
     <div class="w-full max-w-sm">
       <div class="mb-4 flex items-center justify-center gap-4">
         <img :src="mascotSrc[mascotPeriod]" alt="JClaw" class="w-32 h-32 rounded-full shrink-0 cursor-pointer select-none" @click="cycleMascot" />
@@ -64,29 +64,29 @@ async function handleLogin() {
           <span class="text-emerald-700 dark:text-emerald-400">J</span><span class="text-red-600 dark:text-red-500">Claw</span>
         </h1>
       </div>
-      <p class="mb-8 text-center text-base text-neutral-500">{{ greeting[period] }}! Sign in to continue</p>
+      <p class="mb-8 text-center text-base text-fg-muted">{{ greeting[period] }}! Sign in to continue</p>
 
       <form @submit.prevent="handleLogin" class="space-y-4">
         <div>
-          <label class="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1.5">Username</label>
+          <label class="block text-xs font-medium text-fg-muted mb-1.5">Username</label>
           <input
             v-model="username"
             type="text"
             autocomplete="username"
-            class="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white text-sm
-                   focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors"
+            class="w-full px-3 py-2 bg-surface-elevated border border-border text-fg-strong text-sm
+                   focus:outline-hidden focus:border-input transition-colors"
             placeholder="admin"
           />
         </div>
 
         <div>
-          <label class="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1.5">Password</label>
+          <label class="block text-xs font-medium text-fg-muted mb-1.5">Password</label>
           <input
             v-model="password"
             type="password"
             autocomplete="current-password"
-            class="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white text-sm
-                   focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors"
+            class="w-full px-3 py-2 bg-surface-elevated border border-border text-fg-strong text-sm
+                   focus:outline-hidden focus:border-input transition-colors"
           />
         </div>
 

@@ -2,8 +2,8 @@
 const { logout, username } = useAuth()
 const { themeMode, setTheme } = useTheme()
 const sidebarOpen = ref(true)
-const searchInput = ref<HTMLInputElement | null>(null)
 const isMac = ref(true)
+const paletteOpen = ref(false)
 
 const apiVersion = ref('')
 const apiOnline = ref(false)
@@ -28,10 +28,7 @@ let statusInterval: ReturnType<typeof setInterval>
 function handleKeydown(e: KeyboardEvent) {
   if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
     e.preventDefault()
-    searchInput.value?.focus()
-  }
-  if (e.key === 'Escape' && document.activeElement === searchInput.value) {
-    searchInput.value?.blur()
+    paletteOpen.value = !paletteOpen.value
   }
 }
 
@@ -93,25 +90,25 @@ const navGroups = [
 </script>
 
 <template>
-  <div class="h-screen bg-white dark:bg-neutral-950 text-neutral-700 dark:text-neutral-300 flex overflow-hidden">
+  <div class="h-screen bg-surface text-fg-primary flex overflow-hidden">
     <!-- Sidebar -->
     <aside
       :class="sidebarOpen ? 'w-52' : 'w-0 -ml-52'"
-      class="fixed inset-y-0 left-0 z-30 bg-neutral-50 dark:bg-neutral-900/50 border-r border-neutral-200 dark:border-neutral-800
+      class="fixed inset-y-0 left-0 z-30 bg-surface-elevated border-r border-border
              flex flex-col transition-all duration-200 overflow-hidden lg:relative lg:ml-0"
     >
       <!-- Logo -->
-      <div class="h-14 flex items-center justify-between px-3 border-b border-neutral-200 dark:border-neutral-800 shrink-0">
+      <div class="h-14 flex items-center justify-between px-3 border-b border-border shrink-0">
         <div class="flex items-center gap-2.5">
           <img src="/avatar.png" alt="JClaw" class="w-9 h-9 rounded-full" />
           <div class="leading-tight">
-            <div class="text-[10px] text-neutral-500 uppercase tracking-wider font-medium">Control</div>
+            <div class="text-[10px] text-fg-muted uppercase tracking-wider font-medium">Control</div>
             <div class="text-sm font-semibold tracking-widest" aria-label="JClaw"><span class="text-emerald-700 dark:text-emerald-400" aria-hidden="true">J</span><span class="text-red-600 dark:text-red-500" aria-hidden="true">Claw</span></div>
           </div>
         </div>
         <button
           @click="sidebarOpen = false"
-          class="p-1.5 rounded-full border border-neutral-300 dark:border-neutral-700 text-neutral-500 hover:text-neutral-900 dark:hover:text-white hover:border-neutral-500 transition-colors"
+          class="p-1.5 rounded-full border border-border text-fg-muted hover:text-fg-strong hover:border-fg-muted transition-colors"
           title="Collapse sidebar"
         >
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" /></svg>
@@ -125,8 +122,8 @@ const navGroups = [
             v-for="item in group.items"
             :key="item.to"
             :to="item.to"
-            class="flex items-center gap-3 px-4 py-2.5 text-[15px] text-neutral-600 dark:text-neutral-400
-                   hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-colors"
+            class="flex items-center gap-3 px-4 py-2.5 text-[15px] text-fg-muted
+                   hover:text-fg-strong hover:bg-surface-elevated transition-colors"
             active-class="text-emerald-700! dark:text-emerald-400! bg-emerald-500/10 border-r-2 border-emerald-600 dark:border-emerald-500"
           >
             <svg class="w-5 h-5 opacity-60 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -153,32 +150,32 @@ const navGroups = [
             </svg>
             {{ item.label }}
           </NuxtLink>
-          <div v-if="gi < navGroups.length - 1" class="my-2 mx-4 border-t border-neutral-200 dark:border-neutral-800/50" />
+          <div v-if="gi < navGroups.length - 1" class="my-2 mx-4 border-t border-border" />
         </div>
       </nav>
 
       <!-- Version & API Status -->
-      <div class="px-4 py-2.5 shrink-0 border-t border-neutral-200 dark:border-neutral-800">
+      <div class="px-4 py-2.5 shrink-0 border-t border-border">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <span class="text-xs text-neutral-500 font-mono uppercase tracking-wider">Version</span>
-            <span class="text-sm text-neutral-700 dark:text-neutral-300 font-mono">{{ apiVersion ? `v${apiVersion}` : '...' }}</span>
+            <span class="text-xs text-fg-muted font-mono uppercase tracking-wider">Version</span>
+            <span class="text-sm text-fg-primary font-mono">{{ apiVersion ? `v${apiVersion}` : '...' }}</span>
           </div>
           <span
             class="w-2.5 h-2.5 rounded-full transition-colors"
-            :class="apiOnline ? 'bg-emerald-500' : 'bg-red-500'"
+            :class="apiOnline ? 'bg-ok' : 'bg-danger'"
             :title="apiOnline ? 'API online' : 'API offline'"
           />
         </div>
       </div>
 
       <!-- User -->
-      <div class="border-t border-neutral-200 dark:border-neutral-800 px-4 py-3 shrink-0">
+      <div class="border-t border-border px-4 py-3 shrink-0">
         <div class="flex items-center justify-between">
-          <span class="text-xs text-neutral-500">{{ username || 'admin' }}</span>
+          <span class="text-xs text-fg-muted">{{ username || 'admin' }}</span>
           <button
             @click="logout()"
-            class="text-xs text-neutral-400 dark:text-neutral-600 hover:text-neutral-600 dark:hover:text-neutral-400 transition-colors"
+            class="text-xs text-fg-muted hover:text-fg-primary transition-colors"
           >
             Sign out
           </button>
@@ -189,40 +186,37 @@ const navGroups = [
     <!-- Main -->
     <div class="flex-1 flex flex-col min-w-0">
       <!-- Top bar -->
-      <header class="h-14 flex items-center justify-between px-4 bg-neutral-50 dark:bg-neutral-900/50 border-b border-neutral-200 dark:border-neutral-800 shrink-0">
+      <header class="h-14 flex items-center justify-between px-4 bg-surface-elevated border-b border-border shrink-0">
         <!-- Left: hamburger + breadcrumb -->
         <div class="flex items-center gap-3">
           <button
             v-if="!sidebarOpen"
             @click="sidebarOpen = true"
-            class="p-1 text-neutral-500 hover:text-neutral-900 dark:hover:text-white transition-colors"
+            class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
           >
             <span class="text-lg">☰</span>
           </button>
           <nav class="text-sm">
-            <span class="text-neutral-500">JClaw</span>
-            <span class="text-neutral-400 dark:text-neutral-600 mx-1.5">›</span>
+            <span class="text-fg-muted">JClaw</span>
+            <span class="text-fg-muted mx-1.5">›</span>
             <span class="text-emerald-700 dark:text-emerald-400 font-medium">{{ currentPageLabel }}</span>
           </nav>
         </div>
 
         <!-- Right: search + theme toggle -->
         <div class="flex items-center gap-3">
-          <div class="relative">
-            <input
-              ref="searchInput"
-              type="text"
-              placeholder="Search coming soon..."
-              readonly
-              class="w-64 pl-3 pr-16 py-1.5 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm text-neutral-900 dark:text-white
-                     placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors cursor-default"
-            />
-            <kbd class="absolute right-2.5 top-1/2 -translate-y-1/2 px-1.5 py-0.5 bg-neutral-200 dark:bg-neutral-700 border border-neutral-400 dark:border-neutral-600 rounded text-[10px] text-neutral-600 dark:text-neutral-400 font-mono tracking-widest">{{ isMac ? '⌘ K' : 'Ctrl K' }}</kbd>
-          </div>
-          <div class="flex items-center border border-neutral-300 dark:border-neutral-700 rounded-lg overflow-hidden">
+          <button
+            @click="paletteOpen = true"
+            class="w-64 flex items-center justify-between pl-3 pr-2.5 py-1.5 bg-muted border border-input rounded-lg text-sm text-fg-muted
+                   hover:border-ring transition-colors cursor-pointer"
+          >
+            <span>Search...</span>
+            <kbd class="px-1.5 py-0.5 bg-surface border border-input rounded text-[10px] font-mono tracking-widest">{{ isMac ? '⌘ K' : 'Ctrl K' }}</kbd>
+          </button>
+          <div class="flex items-center border border-input rounded-lg overflow-hidden">
             <button
               @click="setTheme('system')"
-              :class="themeMode === 'system' ? 'bg-neutral-200 dark:bg-neutral-700 text-neutral-900 dark:text-white' : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'"
+              :class="themeMode === 'system' ? 'bg-muted text-fg-strong' : 'text-fg-muted hover:text-fg-strong'"
               class="p-1.5 transition-colors"
               title="System theme"
             >
@@ -230,7 +224,7 @@ const navGroups = [
             </button>
             <button
               @click="setTheme('light')"
-              :class="themeMode === 'light' ? 'bg-neutral-200 dark:bg-neutral-700 text-neutral-900 dark:text-white' : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'"
+              :class="themeMode === 'light' ? 'bg-muted text-fg-strong' : 'text-fg-muted hover:text-fg-strong'"
               class="p-1.5 transition-colors"
               title="Light theme"
             >
@@ -238,7 +232,7 @@ const navGroups = [
             </button>
             <button
               @click="setTheme('dark')"
-              :class="themeMode === 'dark' ? 'bg-neutral-200 dark:bg-neutral-700 text-neutral-900 dark:text-white' : 'text-neutral-500 hover:text-neutral-900 dark:hover:text-white'"
+              :class="themeMode === 'dark' ? 'bg-muted text-fg-strong' : 'text-fg-muted hover:text-fg-strong'"
               class="p-1.5 transition-colors"
               title="Dark theme"
             >
@@ -253,5 +247,8 @@ const navGroups = [
         <slot />
       </main>
     </div>
+
+    <!-- Command Palette -->
+    <CommandPalette v-model:open="paletteOpen" />
   </div>
 </template>

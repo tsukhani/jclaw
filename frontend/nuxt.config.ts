@@ -7,6 +7,13 @@ const backendUrl = `http://localhost:${backendPort}`
 export default defineNuxtConfig({
   ssr: false,
 
+  modules: ['shadcn-nuxt'],
+
+  shadcn: {
+    prefix: '',
+    componentDir: './components/ui',
+  },
+
   css: ['~/assets/css/tailwind.css'],
 
   devtools: { enabled: true },
