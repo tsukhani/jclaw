@@ -54,14 +54,25 @@ public final class LoadTestHarness {
     public static int start(int requestedPort) throws IOException {
         synchronized (lock) {
             if (server != null) return port;
-            var s = HttpServer.create(new InetSocketAddress("127.0.0.1", requestedPort), 0);
-            s.createContext("/v1/chat/completions", LoadTestHarness::handle);
-            s.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
-            s.start();
-            server = s;
-            port = s.getAddress().getPort();
-            return port;
+            try {
+                return bindAndStart(requestedPort);
+            } catch (java.net.BindException e) {
+                // Port may be held by a stale server from a previous class-reload
+                // cycle (dev mode). Force-stop whatever is there and retry once.
+                stop();
+                return bindAndStart(requestedPort);
+            }
         }
+    }
+
+    private static int bindAndStart(int requestedPort) throws IOException {
+        var s = HttpServer.create(new InetSocketAddress("127.0.0.1", requestedPort), 0);
+        s.createContext("/v1/chat/completions", LoadTestHarness::handle);
+        s.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
+        s.start();
+        server = s;
+        port = s.getAddress().getPort();
+        return port;
     }
 
     public static void stop() {
