@@ -4,8 +4,11 @@ import { effectiveThinkingLevels } from '~/composables/useProviders'
 
 const { confirm } = useConfirm()
 
-const { data: agents, refresh } = await useFetch<Agent[]>('/api/agents')
-const { data: configData } = await useFetch<ConfigResponse>('/api/config')
+// Parallel fetch — avoids sequential waterfall
+const [{ data: agents, refresh }, { data: configData }] = await Promise.all([
+  useFetch<Agent[]>('/api/agents'),
+  useFetch<ConfigResponse>('/api/config'),
+])
 
 const editing = ref<Agent | null>(null)
 const creating = ref(false)

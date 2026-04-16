@@ -175,48 +175,60 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 
     // --- Session management ---
 
-    private synchronized Page getOrCreatePage(String agentName) {
-        var session = sessions.get(agentName);
-        if (session != null && session.page().isClosed()) {
-            closeSession(agentName);
-            session = null;
-        }
-        if (session != null) {
-            sessions.put(agentName, session.withLastUsed());
-            return session.page();
-        }
-
-        EventLogger.info("tool", agentName, null, "Launching headless browser");
-        ensureBrowserInstalled();
-        // CreateOptions env is passed to the Playwright server subprocess.
-        // PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD prevents the driver from
-        // auto-downloading all browsers — we already installed Chromium above.
-        var playwright = Playwright.create(new Playwright.CreateOptions()
-                .setEnv(Map.of("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")));
-        var browser = playwright.chromium().launch(
-                new BrowserType.LaunchOptions().setHeadless(
-                        !"false".equals(services.ConfigService.get("playwright.headless", "true"))));
-        var page = browser.newPage();
-        sessions.put(agentName, new BrowserSession(playwright, browser, page, System.currentTimeMillis()));
-        return page;
+    private Page getOrCreatePage(String agentName) {
+        // Use compute() for atomic get-or-create — prevents race between
+        // concurrent getOrCreatePage and closeSession on the same key.
+        var session = sessions.compute(agentName, (key, existing) -> {
+            if (existing != null && existing.page().isClosed()) {
+                destroySession(existing, key);
+                existing = null;
+            }
+            if (existing != null) {
+                return existing.withLastUsed();
+            }
+            EventLogger.info("tool", key, null, "Launching headless browser");
+            ensureBrowserInstalled();
+            var playwright = Playwright.create(new Playwright.CreateOptions()
+                    .setEnv(Map.of("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")));
+            var browser = playwright.chromium().launch(
+                    new BrowserType.LaunchOptions().setHeadless(
+                            !"false".equals(services.ConfigService.get("playwright.headless", "true"))));
+            var page = browser.newPage();
+            return new BrowserSession(playwright, browser, page, System.currentTimeMillis());
+        });
+        return session.page();
     }
 
     public static void closeSession(String agentName) {
+        // Atomic remove — ConcurrentHashMap guarantees no race with compute()
         var session = sessions.remove(agentName);
         if (session != null) {
-            try { session.page().close(); } catch (Exception _) {}
-            try { session.browser().close(); } catch (Exception _) {}
-            try { session.playwright().close(); } catch (Exception _) {}
-            EventLogger.info("tool", agentName, null, "Browser session closed");
+            destroySession(session, agentName);
         }
+    }
+
+    /** Tear down a session's resources. Safe to call from any thread. */
+    private static void destroySession(BrowserSession session, String agentName) {
+        try { session.page().close(); } catch (Exception _) {}
+        try { session.browser().close(); } catch (Exception _) {}
+        try { session.playwright().close(); } catch (Exception _) {}
+        EventLogger.info("tool", agentName, null, "Browser session closed");
     }
 
     /** Called periodically to clean up idle sessions. */
     public static void cleanupIdleSessions() {
         var now = System.currentTimeMillis();
+        // Use removeIf-style iteration — avoids ConcurrentModificationException
+        // and makes remove+destroy atomic per key.
         sessions.forEach((name, session) -> {
             if (now - session.lastUsed() > IDLE_TIMEOUT_MS) {
-                closeSession(name);
+                sessions.computeIfPresent(name, (k, s) -> {
+                    if (System.currentTimeMillis() - s.lastUsed() > IDLE_TIMEOUT_MS) {
+                        destroySession(s, k);
+                        return null; // removes the entry
+                    }
+                    return s; // keep — was refreshed between check and compute
+                });
             }
         });
     }

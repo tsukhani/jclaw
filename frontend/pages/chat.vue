@@ -460,6 +460,7 @@ async function sendMessage() {
   const assistantIdx = messages.value.length
   messages.value.push({ _key: crypto.randomUUID(), role: 'assistant', content: '', createdAt: new Date().toISOString() })
 
+  abortController.value?.abort() // cancel any orphaned previous stream
   abortController.value = new AbortController()
   try {
     const res = await fetch('/api/chat/stream', {

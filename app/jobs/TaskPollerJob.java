@@ -2,6 +2,7 @@ package jobs;
 
 import agents.AgentRunner;
 import models.Task;
+import play.db.jpa.JPA;
 import play.jobs.Every;
 import play.jobs.Job;
 import services.ConversationService;
@@ -67,10 +68,18 @@ public class TaskPollerJob extends Job<Void> {
 
     private void executeTask(Task task) {
         try {
-            Tx.run(() -> {
-                task.status = Task.Status.RUNNING;
-                task.save();
+            // Atomic CAS: only proceed if status is still PENDING.
+            // Prevents double-execution when two poller cycles overlap.
+            boolean claimed = Tx.run(() -> {
+                int updated = JPA.em().createQuery(
+                        "UPDATE Task SET status = :running WHERE id = :id AND status = :pending")
+                        .setParameter("running", Task.Status.RUNNING)
+                        .setParameter("id", task.id)
+                        .setParameter("pending", Task.Status.PENDING)
+                        .executeUpdate();
+                return updated == 1;
             });
+            if (!claimed) return; // another thread already claimed it
 
             EventLogger.info("task", task.agent != null ? task.agent.name : null, null,
                     "Executing task: %s".formatted(task.name));
