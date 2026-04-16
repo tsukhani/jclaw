@@ -235,11 +235,26 @@ public final class LoadTestRunner {
     }
 
     /**
-     * Clean up after a load-test run: delete conversations, messages, and
-     * event-log entries, then disable the mock provider so LoadTestSleepTool
-     * is unregistered from the tool list. Runs in its own transaction.
+     * Disable the mock provider so LoadTestSleepTool is unregistered from
+     * the tool list. Runs in its own transaction.
      */
-    public static void cleanupAndDisable() {
+    public static void disable() {
+        try {
+            JPA.withTransaction("default", false, (play.libs.F.Function0<Void>) () -> {
+                ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "false");
+                return null;
+            });
+        } catch (Throwable e) {
+            play.Logger.warn("Loadtest disable failed: %s", e.getMessage());
+        }
+    }
+
+    /**
+     * Delete conversations, messages, and event-log entries created by
+     * load-test runs. Called explicitly via {@code DELETE /api/metrics/loadtest/data}
+     * so the operator can inspect results before clearing them.
+     */
+    public static void cleanupConversations() {
         try {
             JPA.withTransaction("default", false, (play.libs.F.Function0<Void>) () -> {
                 var agent = Agent.findByName(LOADTEST_AGENT_NAME);
@@ -255,12 +270,10 @@ public final class LoadTestRunner {
                             .setParameter("name", LOADTEST_AGENT_NAME)
                             .executeUpdate();
                 }
-                // Disable mock provider and re-register tools (removes LoadTestSleepTool)
-                ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "false");
                 return null;
             });
         } catch (Throwable e) {
-            play.Logger.warn("Loadtest cleanup failed: %s", e.getMessage());
+            play.Logger.warn("Loadtest conversation cleanup failed: %s", e.getMessage());
         }
     }
 }

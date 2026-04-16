@@ -110,6 +110,7 @@ GET     /api/metrics/latency                    ApiMetricsController.latency
 DELETE  /api/metrics/latency                    ApiMetricsController.resetLatency
 POST    /api/metrics/loadtest                   ApiMetricsController.loadtest
 DELETE  /api/metrics/loadtest                   ApiMetricsController.stopLoadtest
+DELETE  /api/metrics/loadtest/data              ApiMetricsController.cleanLoadtest
 
 # SPA static assets (production build: nuxi generate output copied to public/spa/)
 GET     /_nuxt/                                 staticDir:public/spa/_nuxt

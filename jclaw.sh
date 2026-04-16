@@ -28,6 +28,7 @@ Load-test options (only used with the 'loadtest' command):
   --ttft-ms <n>           Simulated time-to-first-token in ms (default: 100)
   --tokens-per-second <n> Simulated token throughput (default: 50)
   --response-tokens <n>   Tokens per simulated response (default: 40)
+  --clean                 Delete loadtest conversations/events from DB instead of running a test
 
 Examples:
   ./jclaw.sh --dev start                              # Start in dev mode
@@ -55,6 +56,7 @@ LT_ITERATIONS="5"
 LT_TTFT_MS="100"
 LT_TOKENS_PER_SECOND="50"
 LT_RESPONSE_TOKENS="40"
+LT_CLEAN=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -93,6 +95,10 @@ while [[ $# -gt 0 ]]; do
         --response-tokens)
             LT_RESPONSE_TOKENS="$2"
             shift 2
+            ;;
+        --clean)
+            LT_CLEAN=true
+            shift
             ;;
         start|stop|restart|status|logs|loadtest)
             COMMAND="$1"
@@ -451,6 +457,21 @@ do_loadtest() {
     if [[ "$login_status" != "200" ]]; then
         echo "Error: Login failed (HTTP $login_status). Check jclaw.admin.* credentials."
         exit 1
+    fi
+
+    # --clean: delete loadtest data and exit
+    if [[ "$LT_CLEAN" == true ]]; then
+        echo "==> Cleaning loadtest data..."
+        local clean_status
+        clean_status=$(curl -s -o /dev/null -w '%{http_code}' -b "$cookie_jar" \
+            -X DELETE "http://localhost:$BACKEND_PORT/api/metrics/loadtest/data")
+        if [[ "$clean_status" == "200" ]]; then
+            echo "==> Loadtest conversations, messages, and events deleted."
+        else
+            echo "Error: Cleanup failed (HTTP $clean_status)"
+            exit 1
+        fi
+        return
     fi
 
     echo "==> Running load test: concurrency=$LT_CONCURRENCY iterations=$LT_ITERATIONS"

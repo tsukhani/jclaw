@@ -84,7 +84,7 @@ public class ApiMetricsController extends Controller {
                             simulatedToolCalls, toolSleepMs)));
 
             LoadTestHarness.stop();
-            LoadTestRunner.cleanupAndDisable();
+            LoadTestRunner.disable();
 
             var out = new JsonObject();
             out.addProperty("totalRequests", result.totalRequests());
@@ -101,7 +101,7 @@ public class ApiMetricsController extends Controller {
             throw r;
         } catch (Exception e) {
             LoadTestHarness.stop();
-            LoadTestRunner.cleanupAndDisable();
+            LoadTestRunner.disable();
             error(500, "Load test failed: " + e.getMessage());
         }
     }
@@ -110,6 +110,12 @@ public class ApiMetricsController extends Controller {
     public static void stopLoadtest() {
         LoadTestHarness.stop();
         renderJSON("{\"status\":\"stopped\"}");
+    }
+
+    /** DELETE /api/metrics/loadtest/data — delete loadtest conversations, messages, and events. */
+    public static void cleanLoadtest() {
+        LoadTestRunner.cleanupConversations();
+        renderJSON("{\"status\":\"cleaned\"}");
     }
 
     private static int readInt(com.google.gson.JsonObject body, String key, int defaultValue) {
