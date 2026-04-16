@@ -41,14 +41,30 @@ function normalizeMarkdownLinks(text: string): string {
   })
 }
 
+// Memoized markdown rendering — avoids re-parsing unchanged messages on re-render.
+// Cache is keyed by (text + agentId); entries for the streaming message are skipped
+// since its content changes every token.
+const markdownCache = new Map<string, string>()
+const MARKDOWN_CACHE_MAX = 200
+
 function renderMarkdown(text: string, agentId: number | null = null): string {
   if (!text) return ''
+  const cacheKey = `${agentId}:${text}`
+  const cached = markdownCache.get(cacheKey)
+  if (cached) return cached
+
   const html = marked.parse(normalizeMarkdownLinks(text)) as string
   const sanitized = DOMPurify.sanitize(html, {
     ADD_TAGS: ['img', 'audio', 'video', 'source'],
     ADD_ATTR: ['src', 'controls', 'autoplay', 'download', 'target']
   })
-  return agentId != null ? rewriteWorkspaceLinks(sanitized, agentId) : sanitized
+  const result = agentId != null ? rewriteWorkspaceLinks(sanitized, agentId) : sanitized
+
+  // Only cache if under limit (prevents unbounded growth during long sessions)
+  if (markdownCache.size < MARKDOWN_CACHE_MAX) {
+    markdownCache.set(cacheKey, result)
+  }
+  return result
 }
 
 /**
@@ -195,7 +211,7 @@ const conversationsUrl = computed(() =>
 )
 const { data: conversations, refresh: refreshConversations } = await useFetch<Conversation[]>(conversationsUrl)
 const selectedConvoId = ref<number | null>(null)
-const messages = ref<Message[]>([])
+const messages = shallowRef<Message[]>([])
 const input = ref('')
 const streaming = ref(false)
 const streamStatus = ref('')
@@ -324,6 +340,7 @@ function stopStreaming() {
   abortController.value?.abort()
   streaming.value = false
   streamStatus.value = ''
+  triggerRef(messages) // re-render after abort
 }
 
 // Filter out tool messages and empty assistant messages (tool call records) from display.
@@ -449,6 +466,7 @@ async function sendMessage() {
   attachedFiles.value = []
   if (chatInput.value) chatInput.value.style.height = 'auto'
   messages.value.push({ _key: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString() })
+  triggerRef(messages)
   scrollToBottom()
 
   streaming.value = true
@@ -459,6 +477,7 @@ async function sendMessage() {
   // Add placeholder for streaming response
   const assistantIdx = messages.value.length
   messages.value.push({ _key: crypto.randomUUID(), role: 'assistant', content: '', createdAt: new Date().toISOString() })
+  triggerRef(messages)
 
   abortController.value?.abort() // cancel any orphaned previous stream
   abortController.value = new AbortController()
@@ -548,6 +567,7 @@ async function sendMessage() {
     }
   } finally {
     streaming.value = false
+    triggerRef(messages) // re-render with final content + markdown
     // Check if agent is still processing queued messages
     if (selectedConvoId.value) {
       try {

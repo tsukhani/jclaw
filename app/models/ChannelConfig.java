@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import play.db.jpa.Model;
 
 import java.time.Instant;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Entity
 @Table(name = "channel_config")
@@ -36,7 +37,51 @@ public class ChannelConfig extends Model {
         updatedAt = Instant.now();
     }
 
+    // ── TTL cache for channel configs (avoids DB hit on every message send) ──
+    // Returns a transient (non-managed) copy to avoid detached-entity errors.
+    // Callers only read configJson/enabled — they never persist the result.
+
+    private static final long CACHE_TTL_MS = 60_000; // 60 seconds
+    private record CachedSnapshot(Long id, String channelType, String configJson, boolean enabled,
+                                   Instant createdAt, Instant updatedAt, long expiresAt) {
+        boolean isExpired() { return System.currentTimeMillis() > expiresAt; }
+        ChannelConfig toTransient() {
+            var cc = new ChannelConfig();
+            cc.id = id;
+            cc.channelType = channelType;
+            cc.configJson = configJson;
+            cc.enabled = enabled;
+            cc.createdAt = createdAt;
+            cc.updatedAt = updatedAt;
+            return cc;
+        }
+    }
+    private static final ConcurrentHashMap<String, CachedSnapshot> cache = new ConcurrentHashMap<>();
+
     public static ChannelConfig findByType(String channelType) {
-        return ChannelConfig.find("channelType", channelType).first();
+        var cached = cache.get(channelType);
+        if (cached != null && !cached.isExpired()) {
+            return cached.configJson() != null ? cached.toTransient() : null;
+        }
+        ChannelConfig config = ChannelConfig.find("channelType", channelType).first();
+        cache.put(channelType, new CachedSnapshot(
+                config != null ? config.id : null,
+                channelType,
+                config != null ? config.configJson : null,
+                config != null && config.enabled,
+                config != null ? config.createdAt : null,
+                config != null ? config.updatedAt : null,
+                System.currentTimeMillis() + CACHE_TTL_MS));
+        return config;
+    }
+
+    /** Evict the cache for a specific channel type (call after admin updates). */
+    public static void evictCache(String channelType) {
+        cache.remove(channelType);
+    }
+
+    /** Evict all cached channel configs. */
+    public static void evictAllCache() {
+        cache.clear();
     }
 }

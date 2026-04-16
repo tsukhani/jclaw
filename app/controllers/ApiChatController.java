@@ -239,12 +239,16 @@ public class ApiChatController extends Controller {
                     writeSse(res, cancelled, streamDone, initData, false);
                 },
                 token -> {
-                    Map<String, Object> data = new java.util.HashMap<>(Map.of("type", "token", "content", token));
                     if (firstToken.compareAndSet(true, false)) {
                         trace.mark(LatencyTrace.FIRST_TOKEN);
-                        data.put("timestamp", java.time.Instant.now().toString());
+                        // First token includes timestamp — use Gson path
+                        writeSse(res, cancelled, streamDone,
+                                Map.of("type", "token", "content", token,
+                                       "timestamp", java.time.Instant.now().toString()), false);
+                    } else {
+                        // Hot path — skip Gson, use pre-built template
+                        writeSseToken(res, cancelled, streamDone, token);
                     }
-                    writeSse(res, cancelled, streamDone, data, false);
                 },
                 reasoning -> writeSse(res, cancelled, streamDone,
                         Map.of("type", "reasoning", "content", reasoning), false),
@@ -307,5 +311,23 @@ public class ApiChatController extends Controller {
             }
         }
         if (terminal) done.complete(null);
+    }
+
+    /**
+     * Fast-path SSE write for token events. Avoids Gson serialization on the
+     * hot path by using a pre-built JSON string template. Only the content
+     * value needs escaping.
+     */
+    private static void writeSseToken(Http.Response res, AtomicBoolean cancelled,
+                                      CompletableFuture<Void> done, String content) {
+        try {
+            var escaped = content.replace("\\", "\\\\").replace("\"", "\\\"")
+                    .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+            res.writeChunk(("data: {\"type\":\"token\",\"content\":\"" + escaped + "\"}\n\n")
+                    .getBytes(StandardCharsets.UTF_8));
+        } catch (Exception _) {
+            cancelled.set(true);
+            done.complete(null);
+        }
     }
 }

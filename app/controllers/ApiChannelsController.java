@@ -42,6 +42,8 @@ public class ApiChannelsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
+        // Evict cache before lookup so we get a managed (attached) entity for write
+        ChannelConfig.evictCache(channelType);
         var config = ChannelConfig.findByType(channelType);
         if (config == null) {
             config = new ChannelConfig();
@@ -55,6 +57,7 @@ public class ApiChannelsController extends Controller {
             config.enabled = body.get("enabled").getAsBoolean();
         }
         config.save();
+        ChannelConfig.evictCache(channelType); // evict again so next read sees the update
 
         services.EventLogger.info("channel", null, channelType, "Channel config updated");
         renderJSON(gson.toJson(ChannelView.of(config)));
