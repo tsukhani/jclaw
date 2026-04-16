@@ -235,12 +235,11 @@ public final class LoadTestRunner {
     }
 
     /**
-     * Remove all DB collateral created during load-test runs: conversations,
-     * messages, event-log entries, the __loadtest__ agent, and the mock
-     * provider config keys. Called after each run so the load test is
-     * invisible to the operator.
+     * Clean up after a load-test run: delete conversations, messages, and
+     * event-log entries, then disable the mock provider so LoadTestSleepTool
+     * is unregistered from the tool list. Runs in its own transaction.
      */
-    public static void cleanup() {
+    public static void cleanupAndDisable() {
         try {
             JPA.withTransaction("default", false, (play.libs.F.Function0<Void>) () -> {
                 var agent = Agent.findByName(LOADTEST_AGENT_NAME);
@@ -255,15 +254,12 @@ public final class LoadTestRunner {
                     JPA.em().createQuery("DELETE FROM EventLog e WHERE e.agentId = :name")
                             .setParameter("name", LOADTEST_AGENT_NAME)
                             .executeUpdate();
-                    agent.delete();
                 }
-                ConfigService.delete("provider." + LOADTEST_PROVIDER + ".baseUrl");
-                ConfigService.delete("provider." + LOADTEST_PROVIDER + ".apiKey");
-                ConfigService.delete("provider." + LOADTEST_PROVIDER + ".models");
+                // Disable mock provider and re-register tools (removes LoadTestSleepTool)
+                ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "false");
                 return null;
             });
         } catch (Throwable e) {
-            // Best-effort cleanup — log but don't fail the loadtest result
             play.Logger.warn("Loadtest cleanup failed: %s", e.getMessage());
         }
     }

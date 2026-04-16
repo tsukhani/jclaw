@@ -25,6 +25,7 @@ public class ApiConfigController extends Controller {
     public static void list() {
         var configs = ConfigService.listAll();
         var entries = configs.stream()
+                .filter(c -> !isReservedKey(c.key))
                 .map(c -> {
                     var map = new HashMap<String, Object>();
                     map.put("key", c.key);
@@ -39,6 +40,7 @@ public class ApiConfigController extends Controller {
     }
 
     public static void get(String key) {
+        if (isReservedKey(key)) notFound();
         var config = models.Config.findByKey(key);
         if (config == null) {
             notFound();

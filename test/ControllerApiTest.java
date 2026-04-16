@@ -467,6 +467,33 @@ public class ControllerApiTest extends FunctionalTest {
         }
     }
 
+    @Test
+    public void configListHidesLoadtestMockProviderKeys() {
+        login();
+        services.ConfigService.set("provider.loadtest-mock.baseUrl", "http://127.0.0.1:19999/v1");
+        var response = GET("/api/config");
+        assertIsOk(response);
+        assertFalse(getContent(response).contains("provider.loadtest-mock."),
+                "Reserved provider.loadtest-mock.* keys must not appear in /api/config");
+        services.ConfigService.delete("provider.loadtest-mock.baseUrl");
+    }
+
+    @Test
+    public void agentsListHidesLoadtestAgent() {
+        login();
+        services.Tx.run(() -> {
+            var a = new models.Agent();
+            a.name = "__loadtest__";
+            a.modelProvider = "loadtest-mock";
+            a.modelId = "mock-model";
+            a.save();
+        });
+        var response = GET("/api/agents");
+        assertIsOk(response);
+        assertFalse(getContent(response).contains("\"__loadtest__\""),
+                "Reserved agent __loadtest__ must not appear in /api/agents");
+    }
+
     // =====================
     // Helpers
     // =====================

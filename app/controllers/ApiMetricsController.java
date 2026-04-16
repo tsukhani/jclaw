@@ -64,6 +64,9 @@ public class ApiMetricsController extends Controller {
             error(400, "iterations must be between 1 and " + maxIterations);
         }
 
+        // Enable the mock provider (registers LoadTestSleepTool) for the duration of the run
+        ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "true");
+
         try {
             var result = LoadTestRunner.run(new LoadTestRunner.Request(
                     concurrency, iterations,
@@ -71,7 +74,7 @@ public class ApiMetricsController extends Controller {
                             simulatedToolCalls, toolSleepMs)));
 
             LoadTestHarness.stop();
-            LoadTestRunner.cleanup();
+            LoadTestRunner.cleanupAndDisable();
 
             var out = new JsonObject();
             out.addProperty("totalRequests", result.totalRequests());
@@ -88,7 +91,7 @@ public class ApiMetricsController extends Controller {
             throw r;
         } catch (Exception e) {
             LoadTestHarness.stop();
-            LoadTestRunner.cleanup();
+            LoadTestRunner.cleanupAndDisable();
             error(500, "Load test failed: " + e.getMessage());
         }
     }

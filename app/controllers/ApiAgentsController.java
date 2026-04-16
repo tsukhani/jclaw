@@ -19,7 +19,6 @@ public class ApiAgentsController extends Controller {
      * and are unaffected. Case-insensitive match — spelling variations like
      * {@code __LoadTest__} are also rejected.
      */
-    /** Reject agent names reserved for internal use (e.g. __loadtest__). */
     private static boolean isReservedName(String name) {
         return name != null
                 && services.LoadTestRunner.LOADTEST_AGENT_NAME.equalsIgnoreCase(name);
@@ -27,7 +26,7 @@ public class ApiAgentsController extends Controller {
 
     private static Agent requireAgent(Long id) {
         var agent = AgentService.findById(id);
-        if (agent == null) notFound();
+        if (agent == null || isReservedName(agent.name)) notFound();
         return agent;
     }
 
@@ -44,7 +43,10 @@ public class ApiAgentsController extends Controller {
 
     public static void list() {
         var agents = AgentService.listAll();
-        var result = agents.stream().map(AgentView::of).toList();
+        var result = agents.stream()
+                .filter(a -> !isReservedName(a.name))
+                .map(AgentView::of)
+                .toList();
         renderJSON(gson.toJson(result));
     }
 
