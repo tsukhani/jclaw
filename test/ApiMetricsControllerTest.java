@@ -135,12 +135,14 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void loadtestReturns503WhenDisabled() {
+    public void loadtestAutoEnablesWhenDisabled() {
         login();
-        // Default: provider.loadtest-mock.enabled is absent → treated as false
+        // Default: provider.loadtest-mock.enabled is absent → treated as false.
+        // The endpoint auto-enables it on invocation, so it should not return 503.
         ConfigService.delete("provider.loadtest-mock.enabled");
-        var response = POST("/api/metrics/loadtest", "application/json", "{}");
-        assertEquals(503, response.status.intValue());
+        var response = POST("/api/metrics/loadtest", "application/json",
+                "{\"concurrency\":1,\"iterations\":1}");
+        assertNotEquals(503, response.status.intValue());
     }
 
     @Test

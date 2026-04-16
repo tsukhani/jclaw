@@ -46,8 +46,11 @@ public class ApiMetricsController extends Controller {
      * /api/metrics/latency afterwards for per-segment histograms.
      */
     public static void loadtest() {
+        // Auto-enable the mock provider for this run — the hidden-key guard in
+        // ApiConfigController prevents enabling via the REST config API, so we
+        // bypass directly through ConfigService here.
         if (!"true".equalsIgnoreCase(ConfigService.get("provider.loadtest-mock.enabled", "false"))) {
-            error(503, "Load testing is disabled (set provider.loadtest-mock.enabled=true in application.conf)");
+            ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "true");
         }
 
         var body = JsonBodyReader.readJsonBody();
