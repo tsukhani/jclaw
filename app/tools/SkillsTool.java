@@ -20,9 +20,6 @@ public class SkillsTool implements ToolRegistry.Tool {
     public boolean isSystem() { return true; }
 
     @Override
-    public boolean isInternal() { return true; }
-
-    @Override
     public String description() {
         return "Runtime introspection: discover which tools and skills are currently available to this agent. Actions: listTools, listSkills, readSkill.";
     }
