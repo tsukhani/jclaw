@@ -118,7 +118,7 @@ Dependencies are automatically installed when you start with `jclaw.sh`.
 # Check status
 ./jclaw.sh --dev status
 
-# View logs
+# View logs (tails both backend and frontend logs)
 ./jclaw.sh --dev logs
 ```
 Default ports: backend on **:9000**, frontend on **:3000**.
@@ -164,13 +164,18 @@ docker compose logs -f
 
 # Stop and remove the container
 docker compose down
+
+# Run on a custom port (default: 9000)
+JCLAW_PORT=8080 docker compose up -d
 ```
 
-The container runs in production mode — the Nuxt SPA is already built into the image, so no local Node.js, pnpm, or Play toolchain is required on the host. Open `http://localhost:9000` once the container is healthy.
+You can also set `JCLAW_PORT` in a `.env` file alongside `docker-compose.yml` instead of passing it inline.
+
+The container runs in production mode — the Nuxt SPA is already built into the image, so no local Node.js, pnpm, or Play toolchain is required on the host. Open `http://localhost:9000` (or your custom port) once the container is healthy.
 
 ### Custom Ports
 
-Use `--backend-port` and `--frontend-port` with any mode. The script automatically updates the frontend API proxy to point at the correct backend port.
+Use `--backend-port` and `--frontend-port` with any `jclaw.sh` mode. The frontend reads the backend port via the `JCLAW_BACKEND_PORT` environment variable at startup — no files are modified.
 
 ```bash
 # Dev mode with custom ports
@@ -179,7 +184,8 @@ Use `--backend-port` and `--frontend-port` with any mode. The script automatical
 # Production deploy with custom ports (creates /opt/jclaw)
 ./jclaw.sh --deploy /opt --backend-port 8080 --frontend-port 4000 start
 
-./jclaw.sh --backend-port 8080 --frontend-port 4000 start
+# Bare start with custom backend port
+./jclaw.sh --backend-port 8080 start
 ```
 
 ---

@@ -390,19 +390,22 @@ do_status() {
 do_logs() {
     cd "$JCLAW_DIR"
 
-    local log_file
     if [[ "$DEV_MODE" == true ]]; then
-        log_file="logs/backend-dev.out"
+        local files=()
+        [[ -f "logs/backend-dev.out" ]]  && files+=("logs/backend-dev.out")
+        [[ -f "logs/frontend-dev.out" ]] && files+=("logs/frontend-dev.out")
+        if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No dev log files found in $JCLAW_DIR/logs/"
+            exit 1
+        fi
+        tail -f "${files[@]}"
     else
-        log_file="logs/application.log"
+        if [[ ! -f "logs/application.log" ]]; then
+            echo "No log file found at $JCLAW_DIR/logs/application.log"
+            exit 1
+        fi
+        tail -f "logs/application.log"
     fi
-
-    if [[ ! -f "$log_file" ]]; then
-        echo "No log file found at $JCLAW_DIR/$log_file"
-        exit 1
-    fi
-
-    tail -f "$log_file"
 }
 
 # ─── Load test ───

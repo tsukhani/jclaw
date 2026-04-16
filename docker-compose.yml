@@ -3,7 +3,7 @@ services:
     image: ghcr.io/tsukhani/jclaw:latest
     pull_policy: always
     ports:
-      - "9000:9000"
+      - "${JCLAW_PORT:-9000}:9000"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
