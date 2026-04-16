@@ -372,16 +372,19 @@ public class AgentRunner {
 
         if (trace != null) trace.mark(LatencyTrace.STREAM_BODY_END);
 
+        // Build usage JSON before persisting so it can be stored alongside the message
+        var usageJson = buildUsageJson(accumulator, modelInfo, streamStartMs);
+
         // Persist and complete
         var finalContent = content;
         services.Tx.run(() -> {
             var conv = ConversationService.findById(conversation.id);
-            ConversationService.appendAssistantMessage(conv, finalContent, null);
+            ConversationService.appendAssistantMessage(conv, finalContent, null, usageJson);
         });
 
         if (trace != null) trace.mark(LatencyTrace.PERSIST_DONE);
 
-        emitUsageAndComplete(agent, channelType, content, accumulator, modelInfo, streamStartMs, cb);
+        emitUsageAndComplete(agent, channelType, content, accumulator, modelInfo, streamStartMs, usageJson, cb);
     }
 
     /**
@@ -423,19 +426,40 @@ public class AgentRunner {
      * Log usage, build the usage JSON payload (including pricing), and invoke
      * the status + complete callbacks.
      */
+    /** Build the usage JSON string from the accumulator, or null if no usage data. */
+    private static String buildUsageJson(LlmProvider.StreamAccumulator accumulator,
+                                          ModelInfo modelInfo, long streamStartMs) {
+        var durationMs = System.currentTimeMillis() - streamStartMs;
+        if (accumulator.usage == null) return "{\"durationMs\":%d}".formatted(durationMs);
+
+        var u = accumulator.usage;
+        var reasoningCount = effectiveReasoningTokens(u, accumulator);
+        var usageMap = new com.google.gson.JsonObject();
+        usageMap.addProperty("prompt", u.promptTokens());
+        usageMap.addProperty("completion", u.completionTokens());
+        usageMap.addProperty("total", u.totalTokens());
+        usageMap.addProperty("reasoning", reasoningCount);
+        usageMap.addProperty("cached", u.cachedTokens());
+        usageMap.addProperty("cacheCreation", u.cacheCreationTokens());
+        usageMap.addProperty("durationMs", durationMs);
+
+        if (modelInfo != null) {
+            if (modelInfo.promptPrice() >= 0) usageMap.addProperty("promptPrice", modelInfo.promptPrice());
+            if (modelInfo.completionPrice() >= 0) usageMap.addProperty("completionPrice", modelInfo.completionPrice());
+            if (modelInfo.cachedReadPrice() >= 0) usageMap.addProperty("cachedReadPrice", modelInfo.cachedReadPrice());
+            if (modelInfo.cacheWritePrice() >= 0) usageMap.addProperty("cacheWritePrice", modelInfo.cacheWritePrice());
+        }
+        return gson.toJson(usageMap);
+    }
+
     private static void emitUsageAndComplete(Agent agent, String channelType, String content,
                                               LlmProvider.StreamAccumulator accumulator,
                                               ModelInfo modelInfo,
-                                              long streamStartMs, StreamingCallbacks cb) {
+                                              long streamStartMs, String usageJson,
+                                              StreamingCallbacks cb) {
         var durationMs = System.currentTimeMillis() - streamStartMs;
         if (accumulator.usage != null) {
             var u = accumulator.usage;
-            // Reasoning count is based on *actual emitted reasoning*, not the agent's
-            // thinking-mode toggle. Providers that populate usage.reasoning_tokens win;
-            // otherwise estimate from streamed-text length at ~4 chars/token (the
-            // conservative English heuristic used across the LLM ecosystem). This
-            // matters for Ollama Cloud thinking-by-default models like glm-5.1 that
-            // stream reasoning text without ever reporting a token count.
             var reasoningCount = effectiveReasoningTokens(u, accumulator);
             var extras = new StringBuilder();
             if (reasoningCount > 0) extras.append(", %d reasoning".formatted(reasoningCount));
@@ -447,32 +471,11 @@ public class AgentRunner {
                     durationMs / 1000.0);
             EventLogger.info("llm", agent.name, channelType,
                     "Streaming complete (%d chars)%s".formatted(content.length(), usageSummary));
-
-            // Build usage JSON with timing and pricing for the frontend
-            var usageMap = new com.google.gson.JsonObject();
-            usageMap.addProperty("prompt", u.promptTokens());
-            usageMap.addProperty("completion", u.completionTokens());
-            usageMap.addProperty("total", u.totalTokens());
-            usageMap.addProperty("reasoning", reasoningCount);
-            usageMap.addProperty("cached", u.cachedTokens());
-            usageMap.addProperty("cacheCreation", u.cacheCreationTokens());
-            usageMap.addProperty("durationMs", durationMs);
-
-            // Include model pricing if available from the resolved ModelInfo
-            if (modelInfo != null) {
-                if (modelInfo.promptPrice() >= 0) usageMap.addProperty("promptPrice", modelInfo.promptPrice());
-                if (modelInfo.completionPrice() >= 0) usageMap.addProperty("completionPrice", modelInfo.completionPrice());
-                if (modelInfo.cachedReadPrice() >= 0) usageMap.addProperty("cachedReadPrice", modelInfo.cachedReadPrice());
-                if (modelInfo.cacheWritePrice() >= 0) usageMap.addProperty("cacheWritePrice", modelInfo.cacheWritePrice());
-            }
-            var wrapper = new com.google.gson.JsonObject();
-            wrapper.add("usage", usageMap);
-            cb.onStatus().accept(gson.toJson(wrapper));
         } else {
             EventLogger.info("llm", agent.name, channelType,
                     "Streaming complete (%d chars, %.1fs)".formatted(content.length(), durationMs / 1000.0));
-            cb.onStatus().accept("{\"usage\":{\"durationMs\":%d}}".formatted(durationMs));
         }
+        cb.onStatus().accept("{\"usage\":%s}".formatted(usageJson));
         cb.onComplete().accept(content);
     }
 

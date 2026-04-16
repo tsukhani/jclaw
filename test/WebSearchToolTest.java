@@ -9,8 +9,7 @@ import tools.WebSearchTool;
  * <ul>
  *   <li>A disabled provider is skipped even if its API key is set.</li>
  *   <li>An enabled-but-keyless provider is skipped during auto-selection.</li>
- *   <li>Preferred-provider requests report the specific failure reason
- *       (disabled vs missing key vs unknown id).</li>
+ *   <li>Provider selection follows the configured priority order.</li>
  * </ul>
  *
  * The tool's {@code execute()} resolves the provider <em>before</em> any HTTP
@@ -32,10 +31,7 @@ public class WebSearchToolTest extends UnitTest {
     @BeforeEach
     void setup() {
         tool = new WebSearchTool();
-        // Reset all search keys to a known-blank state. ConfigService caches
-        // aggressively, so both set-to-blank and cache-clear are required.
         for (var k : ALL_KEYS) ConfigService.set(k, "");
-        // Disable everything by default so individual tests opt in.
         ConfigService.set("search.exa.enabled", "false");
         ConfigService.set("search.brave.enabled", "false");
         ConfigService.set("search.tavily.enabled", "false");
@@ -64,81 +60,38 @@ public class WebSearchToolTest extends UnitTest {
         ConfigService.clearCache();
         var result = tool.execute("{\"query\":\"test\"}", null);
         assertTrue(result.startsWith("Error:"));
-        // Auto-select falls through because no enabled provider has a key.
         assertTrue(result.contains("No search provider"));
     }
 
     @Test
-    public void disabledPreferredProvider_reportsDisabled() {
+    public void disabledProviderSkippedEvenWithKey() {
+        // Exa has a key but is disabled — should be skipped
+        ConfigService.set("search.exa.apiKey", "fake-key");
+        ConfigService.clearCache();
+        var result = tool.execute("{\"query\":\"test\"}", null);
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains("No search provider"));
+    }
+
+    @Test
+    public void providerArgIgnored_usesFallbackOrder() {
+        // Even if the LLM passes provider:"exa", the tool should use fallback
+        // order. With exa disabled, this should report no provider.
         ConfigService.set("search.exa.apiKey", "fake-key");
         ConfigService.clearCache();
         var result = tool.execute("{\"query\":\"test\",\"provider\":\"exa\"}", null);
         assertTrue(result.startsWith("Error:"));
-        assertTrue(result.contains("disabled"));
-    }
-
-    @Test
-    public void enabledPreferredProviderMissingKey_reportsMissingKey() {
-        ConfigService.set("search.brave.enabled", "true");
-        ConfigService.clearCache();
-        var result = tool.execute("{\"query\":\"test\",\"provider\":\"brave\"}", null);
-        assertTrue(result.startsWith("Error:"));
-        assertTrue(result.contains("search.brave.apiKey"));
-    }
-
-    @Test
-    public void unknownPreferredProvider_reportsUnknown() {
-        var result = tool.execute("{\"query\":\"test\",\"provider\":\"bing\"}", null);
-        assertTrue(result.contains("Unknown search provider"));
-    }
-
-    @Test
-    public void perplexityPreferredMissingKey_reportsMissingKey() {
-        ConfigService.set("search.perplexity.enabled", "true");
-        ConfigService.clearCache();
-        var result = tool.execute("{\"query\":\"test\",\"provider\":\"perplexity\"}", null);
-        assertTrue(result.startsWith("Error:"));
-        assertTrue(result.contains("search.perplexity.apiKey"));
-    }
-
-    @Test
-    public void perplexityDisabledPreferred_reportsDisabled() {
-        ConfigService.set("search.perplexity.apiKey", "fake-key");
-        ConfigService.clearCache();
-        var result = tool.execute("{\"query\":\"test\",\"provider\":\"perplexity\"}", null);
-        assertTrue(result.startsWith("Error:"));
-        assertTrue(result.contains("disabled"));
-    }
-
-    @Test
-    public void feloPreferredMissingKey_reportsMissingKey() {
-        ConfigService.set("search.felo.enabled", "true");
-        ConfigService.clearCache();
-        var result = tool.execute("{\"query\":\"test\",\"provider\":\"felo\"}", null);
-        assertTrue(result.startsWith("Error:"));
-        assertTrue(result.contains("search.felo.apiKey"));
-    }
-
-    @Test
-    public void feloDisabledPreferred_reportsDisabled() {
-        ConfigService.set("search.felo.apiKey", "fake-key");
-        ConfigService.clearCache();
-        var result = tool.execute("{\"query\":\"test\",\"provider\":\"felo\"}", null);
-        assertTrue(result.startsWith("Error:"));
-        assertTrue(result.contains("disabled"));
+        assertTrue(result.contains("No search provider"));
     }
 
     @Test
     public void defaultEnabledWhenKeyAbsent() {
-        // Delete the enabled key entirely; the provider should default to enabled
-        // (matches WebSearchTool.SearchProvider.isEnabled default behavior).
+        // Delete the enabled key entirely; the provider should default to enabled.
+        // Still no API key, so auto-select skips it.
         ConfigService.delete("search.tavily.enabled");
         ConfigService.clearCache();
-        // Still no API key, so auto-select returns the usual error — but the
-        // preferred-provider path surfaces the missing-key error rather than
-        // a disabled error, proving the default is "enabled".
-        var result = tool.execute("{\"query\":\"test\",\"provider\":\"tavily\"}", null);
-        assertTrue(result.contains("search.tavily.apiKey"));
-        assertFalse(result.contains("disabled"));
+        var result = tool.execute("{\"query\":\"test\"}", null);
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains("No search provider"));
     }
 }

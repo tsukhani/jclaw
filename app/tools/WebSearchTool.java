@@ -48,7 +48,6 @@ public class WebSearchTool implements ToolRegistry.Tool {
         return """
                 Search the web for current information. \
                 Returns relevant results with titles, URLs, and content snippets. \
-                Supports Exa, Brave, Tavily, Perplexity, Ollama, and Felo search providers (uses first configured, or specify with 'provider' parameter). \
                 Use this to find up-to-date information, research topics, or answer questions about recent events.""";
     }
 
@@ -59,10 +58,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
                 "properties", Map.of(
                         "query", Map.of("type", "string", "description", "The search query"),
                         "numResults", Map.of("type", "integer",
-                                "description", "Number of results to return (default: 5, max: 10)"),
-                        "provider", Map.of("type", "string",
-                                "enum", List.of("exa", "brave", "tavily", "perplexity", "ollama", "felo"),
-                                "description", "Search provider to use (default: first configured)")
+                                "description", "Number of results to return (default: 5, max: 10)")
                 ),
                 "required", List.of("query")
         );
@@ -74,32 +70,10 @@ public class WebSearchTool implements ToolRegistry.Tool {
         var query = args.get("query").getAsString();
         var numResults = args.has("numResults")
                 ? Math.min(args.get("numResults").getAsInt(), MAX_NUM_RESULTS) : DEFAULT_NUM_RESULTS;
-        var preferredProvider = args.has("provider") ? args.get("provider").getAsString() : null;
-
-        if (preferredProvider != null) {
-            return executeWithExplicitProvider(preferredProvider, query, numResults, agent);
-        }
+        // Always use the configured provider priority order — the LLM should not
+        // pick a provider. The 'provider' parameter was removed from the schema;
+        // any stale tool-call that still passes it is silently ignored.
         return executeWithFallback(query, numResults, agent);
-    }
-
-    /** Explicit provider: no fallback, clear error if misconfigured. */
-    private String executeWithExplicitProvider(String providerId, String query, int numResults, Agent agent) {
-        SearchProvider match = null;
-        for (var p : PROVIDERS) {
-            if (p.id().equals(providerId)) { match = p; break; }
-        }
-        if (match == null) {
-            return "Error: Unknown search provider '%s'. Supported: exa, brave, tavily, perplexity, ollama.".formatted(providerId);
-        }
-        if (!match.isEnabled()) {
-            return "Error: %s is disabled. Enable it in Settings.".formatted(match.displayName());
-        }
-        var apiKey = ConfigService.get(match.apiKeyKey());
-        if (apiKey == null || apiKey.isBlank()) {
-            return "Error: %s API key not configured. Add '%s' in Settings.".formatted(
-                    match.displayName(), match.apiKeyKey());
-        }
-        return doSearch(match, apiKey, query, numResults, agent);
     }
 
     /**

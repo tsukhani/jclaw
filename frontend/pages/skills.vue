@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
+
+marked.setOptions({ breaks: true, gfm: true })
+
 // Tool-pill color map (shared with agents.vue) — keeps per-tool color coding
 // consistent between the Agent detail page and these skill cards.
 const { getPillClass } = useToolMeta()
@@ -359,6 +364,14 @@ const skillCommands = ref<string[]>([])
 const skillAuthor = ref<string>('')
 const activeFile = ref<string | null>(null)
 const fileContent = ref('')
+const fileViewMode = ref<'raw' | 'rendered'>('rendered')
+
+const isMarkdownFile = computed(() => activeFile.value?.endsWith('.md') ?? false)
+
+const renderedMarkdown = computed(() => {
+  if (!isMarkdownFile.value || !fileContent.value) return ''
+  return DOMPurify.sanitize(marked.parse(fileContent.value) as string)
+})
 const editingAgentId = ref<number | null>(null)  // null = global skill, number = agent workspace skill
 
 async function editSkill(skill: any) {
@@ -841,8 +854,30 @@ function totalSkillCount(agentId: number) {
             <div class="px-4 py-2 border-b border-border flex items-center gap-2">
               <span class="text-xs font-mono text-fg-muted">{{ activeFile }}</span>
               <span class="text-[10px] text-fg-muted">(read-only — edit via skill-creator)</span>
+              <div v-if="isMarkdownFile" class="ml-auto flex items-center gap-0.5">
+                <button
+                  @click="fileViewMode = 'rendered'"
+                  :class="fileViewMode === 'rendered' ? 'text-fg-strong bg-muted' : 'text-fg-muted hover:text-fg-strong'"
+                  class="p-1 rounded transition-colors"
+                  title="Rendered markdown"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                </button>
+                <button
+                  @click="fileViewMode = 'raw'"
+                  :class="fileViewMode === 'raw' ? 'text-fg-strong bg-muted' : 'text-fg-muted hover:text-fg-strong'"
+                  class="p-1 rounded transition-colors"
+                  title="Raw text"
+                >
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+                </button>
+              </div>
             </div>
-            <textarea :value="fileContent"
+            <div v-if="isMarkdownFile && fileViewMode === 'rendered'"
+                 class="prose-skill flex-1 overflow-y-auto px-6 py-4 text-sm text-fg-primary"
+                 v-html="renderedMarkdown" />
+            <textarea v-else
+                      :value="fileContent"
                       readonly
                       class="flex-1 w-full px-4 py-3 bg-transparent text-sm text-fg-primary font-mono resize-none focus:outline-hidden cursor-default opacity-80"
                       spellcheck="false" />
@@ -857,3 +892,29 @@ function totalSkillCount(agentId: number) {
     </div>
   </div>
 </template>
+
+<style>
+.prose-skill { overflow-wrap: break-word; word-break: break-word; line-height: 1.7; }
+.prose-skill p { margin: 0.6em 0; }
+.prose-skill p:first-child { margin-top: 0; }
+.prose-skill p:last-child { margin-bottom: 0; }
+.prose-skill ul, .prose-skill ol { padding-left: 1.5em; margin: 0.5em 0; }
+.prose-skill ul { list-style-type: disc; }
+.prose-skill ol { list-style-type: decimal; }
+.prose-skill li { margin: 0.25em 0; }
+.prose-skill h1, .prose-skill h2, .prose-skill h3 { font-weight: 600; margin: 1em 0 0.4em; }
+.prose-skill h1 { font-size: 1.4em; }
+.prose-skill h2 { font-size: 1.2em; }
+.prose-skill h3 { font-size: 1.05em; }
+.prose-skill pre { padding: 0.75em 1em; margin: 0.5em 0; overflow-x: auto; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 0.375rem; }
+.prose-skill pre code { background: none; padding: 0; font-size: 0.85em; }
+.prose-skill code { background: rgba(255,255,255,0.08); padding: 0.15em 0.35em; border-radius: 0.25rem; font-size: 0.85em; }
+.prose-skill a { color: var(--color-fg-muted); text-decoration: underline; }
+.prose-skill a:hover { color: var(--color-fg-strong); }
+.prose-skill blockquote { border-left: 2px solid rgba(255,255,255,0.15); padding-left: 1em; margin: 0.5em 0; color: var(--color-fg-muted); }
+.prose-skill hr { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 1em 0; }
+.prose-skill strong { font-weight: 600; color: var(--color-fg-strong); }
+.prose-skill table { width: 100%; border-collapse: collapse; margin: 0.5em 0; font-size: 0.9em; }
+.prose-skill th, .prose-skill td { padding: 0.4em 0.75em; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.prose-skill th { font-weight: 600; color: var(--color-fg-strong); border-bottom-width: 2px; }
+</style>

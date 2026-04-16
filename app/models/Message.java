@@ -29,6 +29,10 @@ public class Message extends Model {
     @Column(name = "tool_results", columnDefinition = "TEXT")
     public String toolResults;
 
+    /** JSON-serialized usage metrics (tokens, cost, duration) from the LLM response. */
+    @Column(name = "usage_json", columnDefinition = "TEXT")
+    public String usageJson;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 

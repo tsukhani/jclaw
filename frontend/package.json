@@ -27,6 +27,9 @@
     "shadcn-nuxt": "^2.6.2",
     "tailwind-merge": "^3.5.0"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": ["vue-demi"]
+  },
   "devDependencies": {
     "@nuxt/test-utils": "^4.0.0",
     "@playwright/test": "^1.59.1",

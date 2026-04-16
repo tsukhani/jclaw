@@ -28,6 +28,7 @@ const SEGMENT_ORDER = [
   'ttft',
   'stream_body',
   'tool_exec',
+  'tool_round_count',
   'persist',
   'total',
 ] as const

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Conversation, Message } from '~/types/api'
+import { computeUsageCostBreakdown } from '~/utils/usage-cost'
 
 const route = useRoute()
 const router = useRouter()
@@ -18,6 +19,41 @@ try {
 } catch {
   // handled by empty state below
 }
+
+const conversationStats = computed(() => {
+  let inputTokens = 0
+  let outputTokens = 0
+  let totalCost = 0
+  let totalDurationMs = 0
+  let totalOutputTokens = 0
+  let hasCost = false
+
+  for (const msg of messages.value) {
+    if (!msg.usage) continue
+    inputTokens += msg.usage.prompt || 0
+    outputTokens += msg.usage.completion || 0
+    if (msg.usage.durationMs > 0 && msg.usage.completion > 0) {
+      totalDurationMs += msg.usage.durationMs
+      totalOutputTokens += msg.usage.completion
+    }
+    const breakdown = computeUsageCostBreakdown(msg.usage)
+    if (breakdown) {
+      totalCost += breakdown.total
+      hasCost = true
+    }
+  }
+
+  const avgTokPerSec = totalDurationMs > 0
+    ? (totalOutputTokens / totalDurationMs) * 1000
+    : null
+
+  return {
+    inputTokens,
+    outputTokens,
+    avgTokPerSec,
+    totalCost: hasCost ? totalCost : null,
+  }
+})
 
 function exportConversation() {
   const c = conversation.value
@@ -86,6 +122,12 @@ function exportConversation() {
           <span>Messages: <strong class="text-fg-primary">{{ conversation.messageCount }}</strong></span>
           <span>Created: <strong class="text-fg-primary">{{ new Date(conversation.createdAt).toLocaleString() }}</strong></span>
           <span>Updated: <strong class="text-fg-primary">{{ new Date(conversation.updatedAt).toLocaleString() }}</strong></span>
+        </div>
+        <div v-if="conversationStats.inputTokens > 0" class="flex flex-wrap gap-x-6 gap-y-1 text-xs text-fg-muted mt-2 pt-2 border-t border-border">
+          <span>Input: <strong class="text-fg-primary">{{ conversationStats.inputTokens.toLocaleString() }}</strong> tokens</span>
+          <span>Output: <strong class="text-fg-primary">{{ conversationStats.outputTokens.toLocaleString() }}</strong> tokens</span>
+          <span v-if="conversationStats.avgTokPerSec">Avg speed: <strong class="text-fg-primary">{{ conversationStats.avgTokPerSec.toFixed(1) }}</strong> tok/s</span>
+          <span v-if="conversationStats.totalCost !== null">Cost: <strong class="text-emerald-400">{{ conversationStats.totalCost < 0.0001 ? '< $0.0001' : '$' + conversationStats.totalCost.toFixed(4) }}</strong></span>
         </div>
       </div>
 

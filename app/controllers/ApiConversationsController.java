@@ -129,6 +129,7 @@ public class ApiConversationsController extends Controller {
 
         setPaginationHeaders(total);
 
+        var jsonParser = new com.google.gson.JsonParser();
         var result = messages.stream().map(m -> {
             var map = new HashMap<String, Object>();
             map.put("id", m.id);
@@ -137,6 +138,9 @@ public class ApiConversationsController extends Controller {
             map.put("toolCalls", m.toolCalls);
             map.put("toolResults", m.toolResults);
             map.put("createdAt", m.createdAt.toString());
+            if (m.usageJson != null) {
+                map.put("usage", jsonParser.parse(m.usageJson));
+            }
             return map;
         }).toList();
 

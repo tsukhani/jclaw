@@ -36,13 +36,14 @@ public class ConversationService {
     }
 
     public static Message appendMessage(Conversation conversation, MessageRole role, String content,
-                                         String toolCalls, String toolResults) {
+                                         String toolCalls, String toolResults, String usageJson) {
         var msg = new Message();
         msg.conversation = conversation;
         msg.role = role.value;
         msg.content = content;
         msg.toolCalls = toolCalls;
         msg.toolResults = toolResults;
+        msg.usageJson = usageJson;
         msg.save();
 
         conversation.messageCount++;
@@ -60,16 +61,21 @@ public class ConversationService {
     }
 
     public static Message appendUserMessage(Conversation conversation, String content) {
-        return appendMessage(conversation, MessageRole.USER, content, null, null);
+        return appendMessage(conversation, MessageRole.USER, content, null, null, null);
     }
 
     public static Message appendAssistantMessage(Conversation conversation, String content,
                                                    String toolCalls) {
-        return appendMessage(conversation, MessageRole.ASSISTANT, content, toolCalls, null);
+        return appendAssistantMessage(conversation, content, toolCalls, null);
+    }
+
+    public static Message appendAssistantMessage(Conversation conversation, String content,
+                                                   String toolCalls, String usageJson) {
+        return appendMessage(conversation, MessageRole.ASSISTANT, content, toolCalls, null, usageJson);
     }
 
     public static Message appendToolResult(Conversation conversation, String toolCallId, String result) {
-        return appendMessage(conversation, MessageRole.TOOL, result, null, toolCallId);
+        return appendMessage(conversation, MessageRole.TOOL, result, null, toolCallId, null);
     }
 
     /**
