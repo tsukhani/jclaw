@@ -180,11 +180,14 @@ function handleInputKeydown(e: KeyboardEvent) {
         <div v-if="!savedViews.length && !showSaveInput" class="px-3 py-2 text-xs text-fg-muted">
           No saved views
         </div>
-        <button
+        <div
           v-for="(view, i) in savedViews"
           :key="view.name"
-          class="w-full flex items-center justify-between px-3 py-2 text-xs text-fg-primary hover:bg-muted transition-colors group"
+          class="w-full flex items-center justify-between px-3 py-2 text-xs text-fg-primary hover:bg-muted transition-colors group cursor-pointer"
+          role="button"
+          tabindex="0"
           @click="applySavedView(view)"
+          @keydown.enter="applySavedView(view)"
         >
           <span class="truncate">{{ view.name }}</span>
           <button
@@ -192,7 +195,7 @@ function handleInputKeydown(e: KeyboardEvent) {
             class="text-fg-muted hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity"
             :aria-label="`Delete saved view ${view.name}`"
           >×</button>
-        </button>
+        </div>
         <div class="border-t border-border">
           <div v-if="showSaveInput" class="flex items-center gap-1 px-2 py-1.5">
             <input
