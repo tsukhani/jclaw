@@ -1,5 +1,8 @@
 import tailwindcss from '@tailwindcss/vite'
 
+const backendPort = process.env.JCLAW_BACKEND_PORT || '9000'
+const backendUrl = `http://localhost:${backendPort}`
+
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   ssr: false,
@@ -16,7 +19,7 @@ export default defineNuxtConfig({
   nitro: {
     devProxy: {
       '/api': {
-        target: 'http://localhost:9000/api',
+        target: `${backendUrl}/api`,
         changeOrigin: true
       }
     }
@@ -24,7 +27,7 @@ export default defineNuxtConfig({
 
   // Proxy API requests in production (SSR mode)
   routeRules: {
-    '/api/**': { proxy: 'http://localhost:9000/api/**' }
+    '/api/**': { proxy: `${backendUrl}/api/**` }
   },
 
   compatibilityDate: '2025-01-01'

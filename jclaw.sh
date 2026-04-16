@@ -248,13 +248,6 @@ do_start_dev() {
     echo "==> Resolving backend dependencies..."
     play deps --sync
 
-    # Update nuxt devProxy if backend port is non-default
-    if [[ "$BACKEND_PORT" != "9000" ]]; then
-        echo "==> Updating frontend devProxy to use backend port $BACKEND_PORT..."
-        sed -i '' "s|localhost:9000|localhost:$BACKEND_PORT|g" "$JCLAW_DIR/frontend/nuxt.config.ts"
-        touch "$JCLAW_DIR/.nuxt-config-modified"
-    fi
-
     echo "==> Starting Play backend on port $BACKEND_PORT (dev)..."
     nohup play run --http.port="$BACKEND_PORT" > "$JCLAW_DIR/logs/backend-dev.out" 2>&1 &
     local play_pid=$!
@@ -278,7 +271,7 @@ do_start_dev() {
 
     echo "==> Starting Nuxt dev server on port $FRONTEND_PORT..."
     cd "$JCLAW_DIR/frontend"
-    PORT="$FRONTEND_PORT" nohup pnpm dev > "$JCLAW_DIR/logs/frontend-dev.out" 2>&1 &
+    PORT="$FRONTEND_PORT" JCLAW_BACKEND_PORT="$BACKEND_PORT" nohup pnpm dev > "$JCLAW_DIR/logs/frontend-dev.out" 2>&1 &
     echo $! > "$JCLAW_DIR/$FRONTEND_PID_FILE"
 
     echo ""
@@ -347,13 +340,6 @@ do_stop_dev() {
         fi
     else
         echo "    No backend pid file found"
-    fi
-
-    # Restore nuxt.config.ts only if the start script modified it (non-default port)
-    if [[ -f "$JCLAW_DIR/.nuxt-config-modified" ]]; then
-        echo "==> Restoring frontend/nuxt.config.ts (port override cleanup)..."
-        git -C "$JCLAW_DIR" checkout frontend/nuxt.config.ts 2>/dev/null || true
-        rm -f "$JCLAW_DIR/.nuxt-config-modified"
     fi
 
     if [[ $stopped -eq 1 ]]; then
