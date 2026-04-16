@@ -19,21 +19,15 @@ public class ApiAgentsController extends Controller {
      * and are unaffected. Case-insensitive match — spelling variations like
      * {@code __LoadTest__} are also rejected.
      */
+    /** Reject agent names reserved for internal use (e.g. __loadtest__). */
     private static boolean isReservedName(String name) {
         return name != null
                 && services.LoadTestRunner.LOADTEST_AGENT_NAME.equalsIgnoreCase(name);
     }
 
-    /**
-     * Fetch an agent by id, treating reserved agents as non-existent so the
-     * API never leaks their presence. Every by-id endpoint below funnels
-     * through here instead of calling {@link AgentService#findById} directly.
-     */
-    private static Agent requireVisibleAgent(Long id) {
+    private static Agent requireAgent(Long id) {
         var agent = AgentService.findById(id);
-        if (agent == null || isReservedName(agent.name)) {
-            notFound();
-        }
+        if (agent == null) notFound();
         return agent;
     }
 
@@ -50,15 +44,12 @@ public class ApiAgentsController extends Controller {
 
     public static void list() {
         var agents = AgentService.listAll();
-        var result = agents.stream()
-                .filter(a -> !isReservedName(a.name))
-                .map(AgentView::of)
-                .toList();
+        var result = agents.stream().map(AgentView::of).toList();
         renderJSON(gson.toJson(result));
     }
 
     public static void get(Long id) {
-        var agent = requireVisibleAgent(id);
+        var agent = requireAgent(id);
         renderJSON(gson.toJson(AgentView.of(agent)));
     }
 
@@ -69,7 +60,7 @@ public class ApiAgentsController extends Controller {
      * agent state and doesn't depend on a hypothetical user query.
      */
     public static void promptBreakdown(Long id) {
-        var agent = requireVisibleAgent(id);
+        var agent = requireAgent(id);
         var breakdown = agents.SystemPromptAssembler.breakdown(agent, null);
         renderJSON(gson.toJson(breakdown));
     }
@@ -88,7 +79,7 @@ public class ApiAgentsController extends Controller {
      * disabling or removing the skill.
      */
     public static void effectiveShellAllowlist(Long id) {
-        var agent = requireVisibleAgent(id);
+        var agent = requireAgent(id);
 
         // Global portion: re-parse the raw config string rather than call
         // parsedAllowlist() directly, which lives on a tool instance. The parse
@@ -157,7 +148,7 @@ public class ApiAgentsController extends Controller {
     }
 
     public static void update(Long id) {
-        var agent = requireVisibleAgent(id);
+        var agent = requireAgent(id);
 
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
@@ -197,7 +188,7 @@ public class ApiAgentsController extends Controller {
     }
 
     public static void delete(Long id) {
-        var agent = requireVisibleAgent(id);
+        var agent = requireAgent(id);
         if (agent.isMain()) {
             error(409, "The built-in 'main' agent cannot be deleted");
         }
@@ -212,7 +203,7 @@ public class ApiAgentsController extends Controller {
      * Supports images, PDFs, and other binary files for inline rendering or download.
      */
     public static void serveWorkspaceFile(Long id, String filePath) {
-        var agent = requireVisibleAgent(id);
+        var agent = requireAgent(id);
 
         // Two-layer (lexical + canonical) path validation with double-resolve.
         // The previous substring check (`filePath.contains("..")`) didn't
@@ -245,14 +236,14 @@ public class ApiAgentsController extends Controller {
     }
 
     public static void getWorkspaceFile(Long id, String filename) {
-        var agent = requireVisibleAgent(id);
+        var agent = requireAgent(id);
         var content = AgentService.readWorkspaceFile(agent.name, filename);
         if (content == null) notFound();
         renderJSON(gson.toJson(java.util.Map.of("filename", filename, "content", content)));
     }
 
     public static void saveWorkspaceFile(Long id, String filename) {
-        var agent = requireVisibleAgent(id);
+        var agent = requireAgent(id);
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("content")) badRequest();
         AgentService.writeWorkspaceFile(agent.name, filename, body.get("content").getAsString());

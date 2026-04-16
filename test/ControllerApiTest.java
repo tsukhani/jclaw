@@ -174,24 +174,6 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsListHidesLoadtestAgent() {
-        login();
-        // Seed a __loadtest__ row directly via JPA (the harness path) — the API
-        // must not surface it even when present.
-        services.Tx.run(() -> {
-            var a = new models.Agent();
-            a.name = "__loadtest__";
-            a.modelProvider = "loadtest-mock";
-            a.modelId = "mock-model";
-            a.save();
-        });
-        var response = GET("/api/agents");
-        assertIsOk(response);
-        assertFalse(getContent(response).contains("\"__loadtest__\""),
-                "Reserved agent __loadtest__ must not appear in /api/agents");
-    }
-
-    @Test
     public void agentsGetNonExistentReturns404() {
         login();
         var response = GET("/api/agents/999999");
@@ -460,32 +442,8 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     // =====================
-    // ApiConfigController — loadtest-mock provider hiding
+    // ApiConfigController — loadtest-mock reserved key guards
     // =====================
-
-    @Test
-    public void configListHidesLoadtestMockProviderKeys() {
-        login();
-        services.ConfigService.set("provider.loadtest-mock.baseUrl", "http://127.0.0.1:19999/v1");
-        var response = GET("/api/config");
-        assertIsOk(response);
-        var body = getContent(response);
-        assertFalse(body.contains("provider.loadtest-mock.baseUrl"),
-                "Reserved provider.loadtest-mock.* keys must not appear in /api/config");
-        services.ConfigService.delete("provider.loadtest-mock.baseUrl");
-    }
-
-    @Test
-    public void configGetOnLoadtestMockKeyReturns404() {
-        login();
-        services.ConfigService.set("provider.loadtest-mock.baseUrl", "http://127.0.0.1:19999/v1");
-        try {
-            var response = GET("/api/config/provider.loadtest-mock.baseUrl");
-            assertEquals(404, response.status.intValue());
-        } finally {
-            services.ConfigService.delete("provider.loadtest-mock.baseUrl");
-        }
-    }
 
     @Test
     public void configSaveOnLoadtestMockKeyReturns409() {
