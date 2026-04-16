@@ -62,7 +62,17 @@ public final class LoadTestRunner {
         }
         var mockPort = ensureHarnessStarted();
         LoadTestHarness.setScenario(req.scenario());
-        var agentId = ensureLoadtestAgent(mockPort);
+        // Run setup in a dedicated transaction so the __loadtest__ agent and
+        // provider config are committed and visible to the HTTP request threads
+        // before any loadtest requests fire.
+        long agentId;
+        try {
+            agentId = JPA.withTransaction("default", false,
+                    (play.libs.F.Function0<Long>) () -> ensureLoadtestAgentInner(mockPort));
+        } catch (Throwable t) {
+            throw t instanceof Exception e ? e : new RuntimeException(t);
+        }
+
         var sessionCookie = internalLogin();
 
         var baseUrl = "http://127.0.0.1:" + play.Play.configuration.getProperty("http.port", "9000");
@@ -172,31 +182,28 @@ public final class LoadTestRunner {
         return LoadTestHarness.port();
     }
 
-    private static long ensureLoadtestAgent(int mockPort) {
-        return Tx.run(() -> {
-            ConfigService.set("provider." + LOADTEST_PROVIDER + ".baseUrl",
-                    "http://127.0.0.1:" + mockPort + "/v1");
-            ConfigService.set("provider." + LOADTEST_PROVIDER + ".apiKey", "mock");
-            // Minimal model metadata — contextWindow large enough to never trim, prices zero.
-            ConfigService.set("provider." + LOADTEST_PROVIDER + ".models",
-                    "[{\"id\":\"" + LOADTEST_MODEL + "\",\"name\":\"Load Test Mock\","
-                    + "\"maxTokens\":0,\"contextWindow\":128000,"
-                    + "\"promptPrice\":0,\"completionPrice\":0,"
-                    + "\"supportsThinking\":false,\"effectiveThinkingLevels\":[]}]");
+    private static long ensureLoadtestAgentInner(int mockPort) {
+        ConfigService.set("provider." + LOADTEST_PROVIDER + ".baseUrl",
+                "http://127.0.0.1:" + mockPort + "/v1");
+        ConfigService.set("provider." + LOADTEST_PROVIDER + ".apiKey", "mock");
+        ConfigService.set("provider." + LOADTEST_PROVIDER + ".models",
+                "[{\"id\":\"" + LOADTEST_MODEL + "\",\"name\":\"Load Test Mock\","
+                + "\"maxTokens\":0,\"contextWindow\":128000,"
+                + "\"promptPrice\":0,\"completionPrice\":0,"
+                + "\"supportsThinking\":false,\"effectiveThinkingLevels\":[]}]");
 
-            llm.ProviderRegistry.refresh();
+        llm.ProviderRegistry.refresh();
 
-            var agent = Agent.findByName(LOADTEST_AGENT_NAME);
-            if (agent == null) {
-                agent = new Agent();
-                agent.name = LOADTEST_AGENT_NAME;
-            }
-            agent.modelProvider = LOADTEST_PROVIDER;
-            agent.modelId = LOADTEST_MODEL;
-            agent.enabled = true;
-            agent.save();
-            return agent.id;
-        });
+        var agent = Agent.findByName(LOADTEST_AGENT_NAME);
+        if (agent == null) {
+            agent = new Agent();
+            agent.name = LOADTEST_AGENT_NAME;
+        }
+        agent.modelProvider = LOADTEST_PROVIDER;
+        agent.modelId = LOADTEST_MODEL;
+        agent.enabled = true;
+        agent.save();
+        return agent.id;
     }
 
     private static String internalLogin() throws Exception {
@@ -234,29 +241,30 @@ public final class LoadTestRunner {
      * invisible to the operator.
      */
     public static void cleanup() {
-        Tx.run(() -> {
-            var agent = Agent.findByName(LOADTEST_AGENT_NAME);
-            if (agent != null) {
-                // Delete messages belonging to loadtest conversations
-                JPA.em().createQuery("DELETE FROM Message m WHERE m.conversation IN " +
-                        "(SELECT c FROM Conversation c WHERE c.agent = :agent)")
-                        .setParameter("agent", agent)
-                        .executeUpdate();
-                // Delete conversations
-                JPA.em().createQuery("DELETE FROM Conversation c WHERE c.agent = :agent")
-                        .setParameter("agent", agent)
-                        .executeUpdate();
-                // Delete event-log entries attributed to the loadtest agent
-                JPA.em().createQuery("DELETE FROM EventLog e WHERE e.agentId = :name")
-                        .setParameter("name", LOADTEST_AGENT_NAME)
-                        .executeUpdate();
-                // Delete the agent itself
-                agent.delete();
-            }
-            // Remove mock provider config keys
-            ConfigService.delete("provider." + LOADTEST_PROVIDER + ".baseUrl");
-            ConfigService.delete("provider." + LOADTEST_PROVIDER + ".apiKey");
-            ConfigService.delete("provider." + LOADTEST_PROVIDER + ".models");
-        });
+        try {
+            JPA.withTransaction("default", false, (play.libs.F.Function0<Void>) () -> {
+                var agent = Agent.findByName(LOADTEST_AGENT_NAME);
+                if (agent != null) {
+                    JPA.em().createQuery("DELETE FROM Message m WHERE m.conversation IN " +
+                            "(SELECT c FROM Conversation c WHERE c.agent = :agent)")
+                            .setParameter("agent", agent)
+                            .executeUpdate();
+                    JPA.em().createQuery("DELETE FROM Conversation c WHERE c.agent = :agent")
+                            .setParameter("agent", agent)
+                            .executeUpdate();
+                    JPA.em().createQuery("DELETE FROM EventLog e WHERE e.agentId = :name")
+                            .setParameter("name", LOADTEST_AGENT_NAME)
+                            .executeUpdate();
+                    agent.delete();
+                }
+                ConfigService.delete("provider." + LOADTEST_PROVIDER + ".baseUrl");
+                ConfigService.delete("provider." + LOADTEST_PROVIDER + ".apiKey");
+                ConfigService.delete("provider." + LOADTEST_PROVIDER + ".models");
+                return null;
+            });
+        } catch (Throwable e) {
+            // Best-effort cleanup — log but don't fail the loadtest result
+            play.Logger.warn("Loadtest cleanup failed: %s", e.getMessage());
+        }
     }
 }
