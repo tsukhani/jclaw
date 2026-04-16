@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { Agent, Conversation, Message } from '~/types/api'
+import { h, type VNode } from 'vue'
+import type { ColumnDef } from '@tanstack/vue-table'
 
 const { confirm } = useConfirm()
 
@@ -180,6 +182,66 @@ function exportConversation() {
   document.body.removeChild(a)
   URL.revokeObjectURL(url)
 }
+
+// ── DataTable column definitions ────────────────────────────────────────────
+const columns: ColumnDef<Conversation, any>[] = [
+  {
+    id: 'select',
+    header: () => h('input', {
+      type: 'checkbox',
+      checked: allSelected.value,
+      indeterminate: someSelected.value,
+      disabled: !conversations.value.length,
+      class: 'accent-red-500 align-middle',
+      title: 'Select all on this page',
+      onChange: () => toggleSelectAll(),
+    }),
+    cell: ({ row }) => h('input', {
+      type: 'checkbox',
+      checked: selectedIds.value.has(row.original.id),
+      class: 'accent-red-500 align-middle',
+      onClick: (e: Event) => e.stopPropagation(),
+      onChange: () => toggleSelection(row.original.id),
+    }),
+    enableSorting: false,
+    size: 40,
+  },
+  {
+    accessorKey: 'preview',
+    header: 'Name',
+    cell: ({ getValue }) => {
+      const v = getValue() as string | null
+      return v
+        ? h('span', { class: 'text-fg-primary truncate max-w-xs block', title: v }, v)
+        : h('span', { class: 'text-fg-muted' }, '—')
+    },
+  },
+  {
+    accessorKey: 'channelType',
+    header: 'Channel',
+    cell: ({ getValue }) => h('span', { class: 'font-mono text-xs bg-muted px-1.5 py-0.5 text-fg-primary' }, getValue() as string),
+  },
+  {
+    accessorKey: 'agentName',
+    header: 'Agent',
+    cell: ({ getValue }) => h('span', { class: 'text-fg-primary' }, getValue() as string),
+  },
+  {
+    accessorKey: 'peerId',
+    header: 'Peer',
+    cell: ({ getValue }) => h('span', { class: 'text-fg-muted font-mono text-xs' }, (getValue() as string) || '—'),
+  },
+  {
+    accessorKey: 'messageCount',
+    header: 'Messages',
+    cell: ({ getValue }) => h('span', { class: 'text-fg-muted' }, String(getValue())),
+  },
+  {
+    accessorKey: 'updatedAt',
+    header: 'Last Activity',
+    cell: ({ getValue }) => h('span', { class: 'text-fg-muted text-xs' }, new Date(getValue() as string).toLocaleString()),
+  },
+]
 </script>
 
 <template>
@@ -215,57 +277,13 @@ function exportConversation() {
 
     <!-- List view -->
     <div class="bg-surface-elevated border border-border">
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="border-b border-border text-left text-xs text-fg-muted">
-            <th class="px-4 py-2.5 w-10">
-              <input type="checkbox"
-                     :checked="allSelected"
-                     :indeterminate.prop="someSelected"
-                     @change="toggleSelectAll"
-                     :disabled="!conversations.length"
-                     class="accent-red-500 align-middle"
-                     title="Select all on this page" />
-            </th>
-            <th class="px-4 py-2.5 font-medium">Name</th>
-            <th class="px-4 py-2.5 font-medium">Channel</th>
-            <th class="px-4 py-2.5 font-medium">Agent</th>
-            <th class="px-4 py-2.5 font-medium">Peer</th>
-            <th class="px-4 py-2.5 font-medium">Messages</th>
-            <th class="px-4 py-2.5 font-medium">Last Activity</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-border">
-          <tr
-            v-for="convo in conversations"
-            :key="convo.id"
-            @click="selectConversation(convo)"
-            class="cursor-pointer transition-colors"
-            :class="selectedConvo?.id === convo.id && peekOpen ? 'bg-muted' : 'hover:bg-muted'"
-          >
-            <td class="px-4 py-2.5 w-10" @click.stop>
-              <input type="checkbox"
-                     :checked="selectedIds.has(convo.id)"
-                     @change="toggleSelection(convo.id)"
-                     class="accent-red-500 align-middle" />
-            </td>
-            <td class="px-4 py-2.5 text-fg-primary max-w-xs truncate" :title="convo.preview || ''">
-              <span v-if="convo.preview">{{ convo.preview }}</span>
-              <span v-else class="text-fg-muted">—</span>
-            </td>
-            <td class="px-4 py-2.5 text-fg-primary">
-              <span class="font-mono text-xs bg-muted px-1.5 py-0.5">{{ convo.channelType }}</span>
-            </td>
-            <td class="px-4 py-2.5 text-fg-primary">{{ convo.agentName }}</td>
-            <td class="px-4 py-2.5 text-fg-muted font-mono text-xs">{{ convo.peerId || '—' }}</td>
-            <td class="px-4 py-2.5 text-fg-muted">{{ convo.messageCount }}</td>
-            <td class="px-4 py-2.5 text-fg-muted text-xs">{{ new Date(convo.updatedAt).toLocaleString() }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <div v-if="!conversations?.length" class="px-4 py-8 text-center text-sm text-fg-muted">
-        No conversations yet
-      </div>
+      <DataTable
+        :columns="columns"
+        :data="conversations"
+        :loading="loading"
+        empty-message="No conversations yet"
+        @row-click="selectConversation"
+      />
       <div
         v-if="total > 0"
         class="flex items-center justify-between px-4 py-2.5 border-t border-border text-xs text-fg-muted"
