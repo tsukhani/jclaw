@@ -155,7 +155,7 @@ const navGroups = [
             </svg>
             {{ item.label }}
           </NuxtLink>
-          <div v-if="gi < navGroups.length - 1" class="my-1.5 mx-4 border-t border-border" />
+          <div v-if="gi < navGroups.length - 1" class="my-1.5 border-t border-border" />
         </div>
       </nav>
 
