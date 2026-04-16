@@ -211,7 +211,7 @@ const conversationsUrl = computed(() =>
 )
 const { data: conversations, refresh: refreshConversations } = await useFetch<Conversation[]>(conversationsUrl)
 const selectedConvoId = ref<number | null>(null)
-const messages = shallowRef<Message[]>([])
+const messages = ref<Message[]>([])
 const input = ref('')
 const streaming = ref(false)
 const streamStatus = ref('')
@@ -340,7 +340,7 @@ function stopStreaming() {
   abortController.value?.abort()
   streaming.value = false
   streamStatus.value = ''
-  triggerRef(messages) // re-render after abort
+
 }
 
 // Filter out tool messages and empty assistant messages (tool call records) from display.
@@ -466,7 +466,6 @@ async function sendMessage() {
   attachedFiles.value = []
   if (chatInput.value) chatInput.value.style.height = 'auto'
   messages.value.push({ _key: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString() })
-  triggerRef(messages)
   scrollToBottom()
 
   streaming.value = true
@@ -477,7 +476,7 @@ async function sendMessage() {
   // Add placeholder for streaming response
   const assistantIdx = messages.value.length
   messages.value.push({ _key: crypto.randomUUID(), role: 'assistant', content: '', createdAt: new Date().toISOString() })
-  triggerRef(messages)
+
 
   abortController.value?.abort() // cancel any orphaned previous stream
   abortController.value = new AbortController()
