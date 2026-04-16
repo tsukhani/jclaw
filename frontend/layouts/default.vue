@@ -242,6 +242,15 @@ const navGroups = [
         </div>
       </header>
 
+      <!-- Status banners -->
+      <StatusBanner
+        v-if="!apiOnline"
+        message="API is unreachable. Some features may be unavailable."
+        variant="error"
+        action-text="Retry"
+        @action="checkStatus"
+      />
+
       <!-- Content -->
       <main class="flex-1 min-h-0 overflow-auto p-6">
         <slot />
