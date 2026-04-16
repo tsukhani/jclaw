@@ -57,9 +57,12 @@ public final class LoadTestHarness {
             try {
                 return bindAndStart(requestedPort);
             } catch (java.net.BindException e) {
-                // Port may be held by a stale server from a previous class-reload
-                // cycle (dev mode). Force-stop whatever is there and retry once.
+                // Port may be held by a stale server from a previous run or
+                // class-reload cycle. Stop, wait for OS socket release, retry.
                 stop();
+                try { Thread.sleep(500); } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                }
                 return bindAndStart(requestedPort);
             }
         }

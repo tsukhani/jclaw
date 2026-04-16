@@ -1,6 +1,7 @@
 package controllers;
 
 import com.google.gson.JsonObject;
+import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
@@ -64,8 +65,17 @@ public class ApiMetricsController extends Controller {
             error(400, "iterations must be between 1 and " + maxIterations);
         }
 
-        // Enable the mock provider (registers LoadTestSleepTool) for the duration of the run
-        ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "true");
+        // Enable the mock provider in its own transaction so it's committed
+        // before the loadtest requests fire (they use separate connections).
+        try {
+            JPA.withTransaction("default", false,
+                    (play.libs.F.Function0<Void>) () -> {
+                        ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "true");
+                        return null;
+                    });
+        } catch (Throwable t) {
+            error(500, "Failed to enable mock provider: " + t.getMessage());
+        }
 
         try {
             var result = LoadTestRunner.run(new LoadTestRunner.Request(
