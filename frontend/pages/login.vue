@@ -74,7 +74,7 @@ async function handleLogin() {
             type="text"
             autocomplete="username"
             class="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white text-sm
-                   focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors"
+                   focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors"
             placeholder="admin"
           />
         </div>
@@ -86,7 +86,7 @@ async function handleLogin() {
             type="password"
             autocomplete="current-password"
             class="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-white text-sm
-                   focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors"
+                   focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors"
           />
         </div>
 

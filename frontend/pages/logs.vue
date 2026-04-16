@@ -57,11 +57,11 @@ const categories = ['llm', 'channel', 'tool', 'task', 'agent', 'auth', 'system']
 
     <!-- Filters -->
     <div class="flex gap-3 mb-4">
-      <select v-model="categoryFilter" class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1 focus:outline-none">
+      <select v-model="categoryFilter" class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1 focus:outline-hidden">
         <option value="">All categories</option>
         <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
       </select>
-      <select v-model="levelFilter" class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1 focus:outline-none">
+      <select v-model="levelFilter" class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1 focus:outline-hidden">
         <option value="">All levels</option>
         <option value="ERROR">ERROR</option>
         <option value="WARN">WARN</option>
@@ -69,7 +69,7 @@ const categories = ['llm', 'channel', 'tool', 'task', 'agent', 'auth', 'system']
       </select>
       <input v-model="searchFilter" placeholder="Search messages..."
              class="flex-1 max-w-xs px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white
-                    placeholder-neutral-500 dark:placeholder-neutral-600 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors" />
+                    placeholder-neutral-500 dark:placeholder-neutral-600 focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors" />
     </div>
 
     <!-- Events -->

@@ -684,7 +684,7 @@ function totalSkillCount(agentId: number) {
                          @click.stop
                          @mousedown.stop
                          ref="renameInput"
-                         class="text-sm text-neutral-900 dark:text-white font-mono bg-neutral-100 dark:bg-neutral-800 border border-neutral-400 dark:border-neutral-600 px-1.5 py-0.5 w-full mr-2 focus:outline-none focus:border-emerald-600 dark:focus:border-emerald-500" />
+                         class="text-sm text-neutral-900 dark:text-white font-mono bg-neutral-100 dark:bg-neutral-800 border border-neutral-400 dark:border-neutral-600 px-1.5 py-0.5 w-full mr-2 focus:outline-hidden focus:border-emerald-600 dark:focus:border-emerald-500" />
                 </template>
                 <template v-else>
                   <span class="text-sm text-neutral-900 dark:text-white font-mono cursor-text min-w-0 break-all"
@@ -844,7 +844,7 @@ function totalSkillCount(agentId: number) {
             </div>
             <textarea :value="fileContent"
                       readonly
-                      class="flex-1 w-full px-4 py-3 bg-transparent text-sm text-neutral-700 dark:text-neutral-300 font-mono resize-none focus:outline-none cursor-default opacity-80"
+                      class="flex-1 w-full px-4 py-3 bg-transparent text-sm text-neutral-700 dark:text-neutral-300 font-mono resize-none focus:outline-hidden cursor-default opacity-80"
                       spellcheck="false" />
           </template>
           <template v-else>

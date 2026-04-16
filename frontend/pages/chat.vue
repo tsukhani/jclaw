@@ -662,7 +662,7 @@ function exportConversation() {
         <select
           v-model="selectedAgentId"
           class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1
-                 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600"
+                 focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600"
         >
           <option v-for="agent in agents" :key="agent.id" :value="agent.id">
             {{ agent.name }}
@@ -674,7 +674,7 @@ function exportConversation() {
           :value="selectedModelKey"
           @change="onModelChange"
           class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1
-                 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600"
+                 focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600"
         >
           <optgroup v-for="p in providers" :key="p.name" :label="p.name">
             <option
@@ -701,7 +701,7 @@ function exportConversation() {
             :value="selectedAgent?.thinkingMode || ''"
             @change="onThinkingModeChange"
             class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1
-                   focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600"
+                   focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600"
           >
             <option value="">Off</option>
             <option v-for="level in thinkingLevels" :key="level" :value="level">
@@ -902,7 +902,7 @@ function exportConversation() {
             @input="autoResize"
             ref="chatInput"
             class="w-full px-4 pt-3 pb-2 bg-transparent text-sm text-neutral-900 dark:text-white
-                   placeholder-neutral-500 dark:placeholder-neutral-600 focus:outline-none resize-none overflow-hidden"
+                   placeholder-neutral-500 dark:placeholder-neutral-600 focus:outline-hidden resize-none overflow-hidden"
           />
           <input ref="fileInput" type="file" multiple class="hidden" @change="handleFileUpload" />
           <div class="flex items-center justify-between px-3 pb-2.5">

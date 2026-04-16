@@ -127,7 +127,7 @@ const navGroups = [
             :to="item.to"
             class="flex items-center gap-3 px-4 py-2.5 text-[15px] text-neutral-600 dark:text-neutral-400
                    hover:text-neutral-900 dark:hover:text-white hover:bg-neutral-50 dark:hover:bg-neutral-900 transition-colors"
-            active-class="!text-emerald-700 dark:!text-emerald-400 bg-emerald-500/10 border-r-2 border-emerald-600 dark:border-emerald-500"
+            active-class="text-emerald-700! dark:text-emerald-400! bg-emerald-500/10 border-r-2 border-emerald-600 dark:border-emerald-500"
           >
             <svg class="w-5 h-5 opacity-60 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <!-- Dashboard -->
@@ -215,7 +215,7 @@ const navGroups = [
               placeholder="Search coming soon..."
               readonly
               class="w-64 pl-3 pr-16 py-1.5 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg text-sm text-neutral-900 dark:text-white
-                     placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors cursor-default"
+                     placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors cursor-default"
             />
             <kbd class="absolute right-2.5 top-1/2 -translate-y-1/2 px-1.5 py-0.5 bg-neutral-200 dark:bg-neutral-700 border border-neutral-400 dark:border-neutral-600 rounded text-[10px] text-neutral-600 dark:text-neutral-400 font-mono tracking-widest">{{ isMac ? '⌘ K' : 'Ctrl K' }}</kbd>
           </div>

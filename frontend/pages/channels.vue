@@ -84,7 +84,7 @@ function getChannelStatus(type: string) {
             v-model="form[field]"
             :type="field.toLowerCase().includes('token') || field.toLowerCase().includes('secret') ? 'password' : 'text'"
             class="w-full px-3 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white
-                   focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors"
+                   focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600 transition-colors"
           />
         </div>
         <div class="flex items-center gap-2">

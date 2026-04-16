@@ -252,6 +252,7 @@ do_start_dev() {
     if [[ "$BACKEND_PORT" != "9000" ]]; then
         echo "==> Updating frontend devProxy to use backend port $BACKEND_PORT..."
         sed -i '' "s|localhost:9000|localhost:$BACKEND_PORT|g" "$JCLAW_DIR/frontend/nuxt.config.ts"
+        touch "$JCLAW_DIR/.nuxt-config-modified"
     fi
 
     echo "==> Starting Play backend on port $BACKEND_PORT (dev)..."
@@ -348,12 +349,11 @@ do_stop_dev() {
         echo "    No backend pid file found"
     fi
 
-    # Restore nuxt.config.ts if it was modified
-    if git -C "$JCLAW_DIR" diff --quiet frontend/nuxt.config.ts 2>/dev/null; then
-        : # no changes to restore
-    else
-        echo "==> Restoring frontend/nuxt.config.ts..."
+    # Restore nuxt.config.ts only if the start script modified it (non-default port)
+    if [[ -f "$JCLAW_DIR/.nuxt-config-modified" ]]; then
+        echo "==> Restoring frontend/nuxt.config.ts (port override cleanup)..."
         git -C "$JCLAW_DIR" checkout frontend/nuxt.config.ts 2>/dev/null || true
+        rm -f "$JCLAW_DIR/.nuxt-config-modified"
     fi
 
     if [[ $stopped -eq 1 ]]; then

@@ -181,20 +181,20 @@ function exportConversation() {
     <div v-if="!selectedConvo" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
       <input v-model="filterName" @input="onFilterChange(true)"
              type="text" placeholder="Search name..."
-             class="px-3 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white placeholder-neutral-500 dark:placeholder-neutral-600 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600" />
+             class="px-3 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white placeholder-neutral-500 dark:placeholder-neutral-600 focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600" />
       <select v-model="filterChannel" @change="onFilterChange(false)"
-              class="px-3 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600">
+              class="px-3 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600">
         <option value="">All channels</option>
         <option v-for="ch in channelList" :key="ch" :value="ch">{{ ch }}</option>
       </select>
       <select v-model="filterAgentId" @change="onFilterChange(false)"
-              class="px-3 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600">
+              class="px-3 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600">
         <option value="">All agents</option>
         <option v-for="a in agentList" :key="a.id" :value="a.id">{{ a.name }}</option>
       </select>
       <input v-model="filterPeer" @input="onFilterChange(true)"
              type="text" placeholder="Filter peer..."
-             class="px-3 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white placeholder-neutral-500 dark:placeholder-neutral-600 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600" />
+             class="px-3 py-1.5 bg-neutral-50 dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-sm text-neutral-900 dark:text-white placeholder-neutral-500 dark:placeholder-neutral-600 focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600" />
     </div>
 
     <!-- List view -->

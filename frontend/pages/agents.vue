@@ -543,19 +543,19 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
               <span v-if="editing?.isMain" class="ml-1 text-neutral-400 dark:text-neutral-600">(locked)</span>
             </label>
             <input v-model="form.name" :disabled="editing?.isMain"
-                   class="w-full px-3 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600 disabled:opacity-50 disabled:cursor-not-allowed" />
+                   class="w-full px-3 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600 disabled:opacity-50 disabled:cursor-not-allowed" />
           </div>
           <div>
             <label class="block text-xs text-neutral-500 mb-1">Model Provider</label>
             <select v-model="form.modelProvider"
-                    class="w-full px-3 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600">
+                    class="w-full px-3 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600">
               <option v-for="p in providers" :key="p.name" :value="p.name">{{ p.name }}</option>
             </select>
           </div>
           <div>
             <label class="block text-xs text-neutral-500 mb-1">Model</label>
             <select v-model="form.modelId"
-                    class="w-full px-3 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600">
+                    class="w-full px-3 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600">
               <option v-for="m in availableModels" :key="m.id" :value="m.id">
                 {{ m.name || m.id }}
               </option>
@@ -575,7 +575,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
             </label>
             <select v-model="form.thinkingMode"
                     :disabled="!thinkingLevels.length"
-                    class="w-full px-3 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600
+                    class="w-full px-3 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600
                            disabled:opacity-40 disabled:cursor-not-allowed">
               <option v-if="!thinkingLevels.length" value="">Not supported</option>
               <template v-else>
@@ -605,7 +605,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
           </div>
           <div class="flex items-center gap-2">
             <select v-model="queueMode" @change="saveQueueMode"
-                    class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1 focus:outline-none focus:border-neutral-400 dark:focus:border-neutral-600">
+                    class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1 focus:outline-hidden focus:border-neutral-400 dark:focus:border-neutral-600">
               <option value="queue">Queue (FIFO)</option>
               <option value="collect">Collect (batch)</option>
               <option value="interrupt">Interrupt</option>
@@ -862,7 +862,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
           v-model="workspaceContent"
           rows="16"
           class="w-full px-4 py-3 bg-transparent text-sm text-neutral-700 dark:text-neutral-300 font-mono
-                 resize-y focus:outline-none"
+                 resize-y focus:outline-hidden"
         />
         <div class="px-4 py-2 border-t border-neutral-200 dark:border-neutral-800 flex">
           <button @click="saveWorkspaceFile"

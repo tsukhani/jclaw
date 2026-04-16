@@ -801,7 +801,7 @@ const providerEntries = computed(() => {
             <template v-if="editingKey === entry.key">
               <input v-model="editValue"
                      :type="isSensitive(entry.key) ? 'password' : 'text'"
-                     class="flex-1 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-none" />
+                     class="flex-1 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-hidden" />
               <button @click="updateEntry(entry.key)" class="p-1 text-neutral-500 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
               </button>
@@ -829,7 +829,7 @@ const providerEntries = computed(() => {
             </span>
             <template v-if="editingKey === 'ollama.keepAlive'">
               <input v-model="editValue"
-                     class="flex-1 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-none" />
+                     class="flex-1 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-hidden" />
               <button @click="updateEntry('ollama.keepAlive')" class="p-1 text-neutral-500 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
               </button>
@@ -873,35 +873,35 @@ const providerEntries = computed(() => {
                 <div class="grid grid-cols-2 gap-2 mb-2">
                   <div>
                     <label class="block text-[10px] text-neutral-400 dark:text-neutral-600 mb-0.5">ID</label>
-                    <input v-model="modelForm.id" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                    <input v-model="modelForm.id" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
                   </div>
                   <div>
                     <label class="block text-[10px] text-neutral-400 dark:text-neutral-600 mb-0.5">Display Name</label>
-                    <input v-model="modelForm.name" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white focus:outline-none" />
+                    <input v-model="modelForm.name" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white focus:outline-hidden" />
                   </div>
                   <div>
                     <label class="block text-[10px] text-neutral-400 dark:text-neutral-600 mb-0.5">Context Window</label>
-                    <input v-model.number="modelForm.contextWindow" type="number" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                    <input v-model.number="modelForm.contextWindow" type="number" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
                   </div>
                   <div>
                     <label class="block text-[10px] text-neutral-400 dark:text-neutral-600 mb-0.5">Max Tokens</label>
-                    <input v-model.number="modelForm.maxTokens" type="number" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                    <input v-model.number="modelForm.maxTokens" type="number" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
                   </div>
                   <div>
                     <label class="block text-[10px] text-neutral-400 dark:text-neutral-600 mb-0.5">Input $/M tokens</label>
-                    <input v-model.number="modelForm.promptPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                    <input v-model.number="modelForm.promptPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
                   </div>
                   <div>
                     <label class="block text-[10px] text-neutral-400 dark:text-neutral-600 mb-0.5">Output $/M tokens</label>
-                    <input v-model.number="modelForm.completionPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                    <input v-model.number="modelForm.completionPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
                   </div>
                   <div>
                     <label class="block text-[10px] text-neutral-400 dark:text-neutral-600 mb-0.5" title="Anthropic: ~0.1× input. OpenAI: ~0.5× input. Leave -1 to auto-default.">Cache read $/M</label>
-                    <input v-model.number="modelForm.cachedReadPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                    <input v-model.number="modelForm.cachedReadPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
                   </div>
                   <div>
                     <label class="block text-[10px] text-neutral-400 dark:text-neutral-600 mb-0.5" title="Anthropic 5-min TTL: ~1.25× input. OpenAI: n/a. Leave -1 to auto-default.">Cache write $/M</label>
-                    <input v-model.number="modelForm.cacheWritePrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                    <input v-model.number="modelForm.cacheWritePrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
                   </div>
                 </div>
                 <div class="flex items-center justify-between">
@@ -959,35 +959,35 @@ const providerEntries = computed(() => {
               <div class="grid grid-cols-2 gap-2 mb-2">
                 <div>
                   <label class="block text-[10px] text-neutral-400 dark:text-neutral-600 mb-0.5">ID</label>
-                  <input v-model="modelForm.id" placeholder="model-id" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                  <input v-model="modelForm.id" placeholder="model-id" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
                 </div>
                 <div>
                   <label class="block text-[10px] text-neutral-400 dark:text-neutral-600 mb-0.5">Display Name</label>
-                  <input v-model="modelForm.name" placeholder="Model Name" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white focus:outline-none" />
+                  <input v-model="modelForm.name" placeholder="Model Name" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white focus:outline-hidden" />
                 </div>
                 <div>
                   <label class="block text-[10px] text-neutral-400 dark:text-neutral-600 mb-0.5">Context Window</label>
-                  <input v-model.number="modelForm.contextWindow" type="number" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                  <input v-model.number="modelForm.contextWindow" type="number" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
                 </div>
                 <div>
                   <label class="block text-[10px] text-neutral-400 dark:text-neutral-600 mb-0.5">Max Tokens</label>
-                  <input v-model.number="modelForm.maxTokens" type="number" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                  <input v-model.number="modelForm.maxTokens" type="number" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
                 </div>
                 <div>
                   <label class="block text-[10px] text-neutral-400 dark:text-neutral-600 mb-0.5">Input $/M tokens</label>
-                  <input v-model.number="modelForm.promptPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                  <input v-model.number="modelForm.promptPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
                 </div>
                 <div>
                   <label class="block text-[10px] text-neutral-400 dark:text-neutral-600 mb-0.5">Output $/M tokens</label>
-                  <input v-model.number="modelForm.completionPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                  <input v-model.number="modelForm.completionPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
                 </div>
                 <div>
                   <label class="block text-[10px] text-neutral-400 dark:text-neutral-600 mb-0.5" title="Anthropic: ~0.1× input. OpenAI: ~0.5× input. Leave -1 to auto-default.">Cache read $/M</label>
-                  <input v-model.number="modelForm.cachedReadPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                  <input v-model.number="modelForm.cachedReadPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
                 </div>
                 <div>
                   <label class="block text-[10px] text-neutral-400 dark:text-neutral-600 mb-0.5" title="Anthropic 5-min TTL: ~1.25× input. OpenAI: n/a. Leave -1 to auto-default.">Cache write $/M</label>
-                  <input v-model.number="modelForm.cacheWritePrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                  <input v-model.number="modelForm.cacheWritePrice" type="number" step="0.01" class="w-full px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-xs text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
                 </div>
               </div>
               <div class="flex items-center justify-between">
@@ -1047,21 +1047,21 @@ const providerEntries = computed(() => {
             <div class="px-4 py-2 flex items-center gap-2 border-b border-neutral-200 dark:border-neutral-800/50">
               <svg class="w-3.5 h-3.5 text-neutral-400 dark:text-neutral-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
               <input v-model="discoverySearch" placeholder="Search models..."
-                     class="flex-1 px-2 py-1 bg-transparent text-xs text-neutral-900 dark:text-white placeholder-neutral-500 dark:placeholder-neutral-600 focus:outline-none" />
+                     class="flex-1 px-2 py-1 bg-transparent text-xs text-neutral-900 dark:text-white placeholder-neutral-500 dark:placeholder-neutral-600 focus:outline-hidden" />
               <select v-model="discoveryFilterThinking"
-                      class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-[10px] text-neutral-600 dark:text-neutral-400 px-1.5 py-0.5 focus:outline-none">
+                      class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-[10px] text-neutral-600 dark:text-neutral-400 px-1.5 py-0.5 focus:outline-hidden">
                 <option value="all">Thinking: All</option>
                 <option value="yes">Thinking: Yes</option>
                 <option value="no">Thinking: No</option>
               </select>
               <select v-if="discoveryHasPricing" v-model="discoveryFilterCost"
-                      class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-[10px] text-neutral-600 dark:text-neutral-400 px-1.5 py-0.5 focus:outline-none">
+                      class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-[10px] text-neutral-600 dark:text-neutral-400 px-1.5 py-0.5 focus:outline-hidden">
                 <option value="all">Cost: All</option>
                 <option value="free">Free</option>
                 <option value="paid">Paid</option>
               </select>
               <select v-if="discoveryHasRankings" v-model="discoveryFilterPopular"
-                      class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-[10px] text-neutral-600 dark:text-neutral-400 px-1.5 py-0.5 focus:outline-none">
+                      class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-[10px] text-neutral-600 dark:text-neutral-400 px-1.5 py-0.5 focus:outline-hidden">
                 <option value="all">Rank: All</option>
                 <option value="top10">Top 10</option>
                 <option value="top25">Top 25</option>
@@ -1176,7 +1176,7 @@ const providerEntries = computed(() => {
               <input v-model="editValue"
                      type="password"
                      :placeholder="SEARCH_PROVIDERS[id].apiKeyPlaceholder"
-                     class="flex-1 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-none" />
+                     class="flex-1 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-hidden" />
               <button @click="updateEntry(`search.${id}.apiKey`)" class="p-1 text-neutral-500 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
               </button>
@@ -1196,7 +1196,7 @@ const providerEntries = computed(() => {
             <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">baseUrl</span>
             <template v-if="editingKey === `search.${id}.baseUrl`">
               <input v-model="editValue" type="text"
-                     class="flex-1 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                     class="flex-1 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
               <button @click="updateEntry(`search.${id}.baseUrl`)" class="p-1 text-neutral-500 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
               </button>
@@ -1216,7 +1216,7 @@ const providerEntries = computed(() => {
             <span class="text-xs font-mono text-neutral-500 w-48 shrink-0" title="Server-side recency filter on Perplexity /search. Narrows results to content indexed within the selected window; 'none' disables filtering. Narrower windows prevent the LLM from echoing stale snippets.">recencyFilter</span>
             <select :value="searchRecencyFilter(id)"
                     @change="updateSearchRecencyFilter(id, ($event.target as HTMLSelectElement).value)"
-                    class="flex-1 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-none">
+                    class="flex-1 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-hidden">
               <option value="hour">hour</option>
               <option value="day">day</option>
               <option value="week">week</option>
@@ -1247,7 +1247,7 @@ const providerEntries = computed(() => {
             </span>
             <template v-if="editingChatField === 'maxToolRounds'">
               <input v-model="chatFieldEdit" type="number" min="1" max="50"
-                     class="w-24 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                     class="w-24 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
               <button @click="saveChatField('chat.maxToolRounds', chatFieldEdit)" class="p-1 text-neutral-500 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
               </button>
@@ -1274,7 +1274,7 @@ const providerEntries = computed(() => {
             </span>
             <template v-if="editingChatField === 'maxContextMessages'">
               <input v-model="chatFieldEdit" type="number" min="1" max="500"
-                     class="w-24 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                     class="w-24 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
               <button @click="saveChatField('chat.maxContextMessages', chatFieldEdit)" class="p-1 text-neutral-500 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
               </button>
@@ -1304,7 +1304,7 @@ const providerEntries = computed(() => {
             <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">provider</span>
             <template v-if="editingSPField === 'provider'">
               <select v-model="spFieldEdit"
-                      class="w-48 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-none">
+                      class="w-48 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-hidden">
                 <option value="">Default (main agent)</option>
                 <option v-for="name in availableProviderNames" :key="name" :value="name">{{ name }}</option>
               </select>
@@ -1330,12 +1330,12 @@ const providerEntries = computed(() => {
             <template v-if="editingSPField === 'model'">
               <select v-if="spAvailableModels.length"
                       v-model="spFieldEdit"
-                      class="w-64 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-none">
+                      class="w-64 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-hidden">
                 <option v-if="!spHasExplicitProvider" value="">Default (main agent)</option>
                 <option v-for="m in spAvailableModels" :key="m.id" :value="m.id">{{ m.name || m.id }}</option>
               </select>
               <input v-else v-model="spFieldEdit" type="text" placeholder="model-id"
-                     class="w-64 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                     class="w-64 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
               <button @click="saveSPField('skillsPromotion.model', spFieldEdit)" class="p-1 text-neutral-500 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
               </button>
@@ -1357,7 +1357,7 @@ const providerEntries = computed(() => {
             <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">timeoutSeconds</span>
             <template v-if="editingSPField === 'timeout'">
               <input v-model="spFieldEdit" type="number" min="30" max="900"
-                     class="w-24 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                     class="w-24 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
               <button @click="saveSPField('skillsPromotion.timeoutSeconds', spFieldEdit)" class="p-1 text-neutral-500 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
               </button>
@@ -1377,7 +1377,7 @@ const providerEntries = computed(() => {
             <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">batchSizeKb</span>
             <template v-if="editingSPField === 'batchKb'">
               <input v-model="spFieldEdit" type="number" min="10" max="1000"
-                     class="w-24 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                     class="w-24 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
               <button @click="saveSPField('skillsPromotion.batchSizeKb', spFieldEdit)" class="p-1 text-neutral-500 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
               </button>
@@ -1453,7 +1453,7 @@ const providerEntries = computed(() => {
             <span class="text-xs font-mono text-neutral-500 w-48 shrink-0 pt-0.5">allowlist</span>
             <template v-if="editingShellField === 'allowlist'">
               <textarea v-model="shellAllowlistEdit" rows="3"
-                        class="flex-1 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-none resize-none" />
+                        class="flex-1 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-hidden resize-none" />
               <div class="flex flex-col gap-1">
                 <button @click="saveShellField('shell.allowlist', shellAllowlistEdit)" class="p-1 text-neutral-500 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
@@ -1475,7 +1475,7 @@ const providerEntries = computed(() => {
             <span class="text-xs font-mono text-neutral-500 w-48 shrink-0">defaultTimeoutSeconds</span>
             <template v-if="editingShellField === 'timeout'">
               <input v-model="shellTimeoutEdit" type="number" min="1" max="300"
-                     class="w-24 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-none" />
+                     class="w-24 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white font-mono focus:outline-hidden" />
               <button @click="saveShellField('shell.defaultTimeoutSeconds', shellTimeoutEdit)" class="p-1 text-neutral-500 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
               </button>
@@ -1533,7 +1533,7 @@ const providerEntries = computed(() => {
             <input v-model="editValue"
                    type="password"
                    :placeholder="def.apiKey.placeholder"
-                   class="flex-1 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-none" />
+                   class="flex-1 px-2 py-1 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white focus:outline-hidden" />
             <button @click="updateEntry(def.apiKey.key)" class="p-1 text-neutral-500 hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
             </button>

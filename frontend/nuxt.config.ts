@@ -1,10 +1,16 @@
+import tailwindcss from '@tailwindcss/vite'
+
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   ssr: false,
 
-  modules: ['@nuxtjs/tailwindcss'],
+  css: ['~/assets/css/tailwind.css'],
 
   devtools: { enabled: true },
+
+  vite: {
+    plugins: [tailwindcss()],
+  },
 
   // Proxy API requests to the Play backend during development
   nitro: {

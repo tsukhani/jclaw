@@ -1,0 +1,24 @@
+@import "tailwindcss";
+
+/* Class-based dark mode (preserves v3 darkMode: 'class' behavior).
+   The <html> element carries the 'dark' class; useTheme() manages it. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Preserve v3 defaults that changed in v4 */
+@layer base {
+  /* v4 changed button cursor from pointer to default */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  /* v4 changed default border-color from gray-200 to currentColor.
+     Restore the neutral border default so bare `border` classes behave as before. */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentColor);
+  }
+}

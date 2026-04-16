@@ -38,11 +38,11 @@ const statusColors: Record<string, string> = {
 
     <!-- Filters -->
     <div class="flex gap-3 mb-4">
-      <select v-model="statusFilter" class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1 focus:outline-none">
+      <select v-model="statusFilter" class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1 focus:outline-hidden">
         <option value="">All statuses</option>
         <option v-for="s in ['PENDING','RUNNING','COMPLETED','FAILED','CANCELLED']" :key="s" :value="s">{{ s }}</option>
       </select>
-      <select v-model="typeFilter" class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1 focus:outline-none">
+      <select v-model="typeFilter" class="bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-sm text-neutral-900 dark:text-white px-2 py-1 focus:outline-hidden">
         <option value="">All types</option>
         <option v-for="t in ['IMMEDIATE','SCHEDULED','CRON']" :key="t" :value="t">{{ t }}</option>
       </select>
