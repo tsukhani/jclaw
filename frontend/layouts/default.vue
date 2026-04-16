@@ -61,11 +61,13 @@ const currentPageLabel = computed(() => {
 
 const navGroups = [
   {
+    label: 'Core',
     items: [
       { label: 'Dashboard', to: '/', icon: 'svg-dashboard' },
     ]
   },
   {
+    label: 'Chat',
     items: [
       { label: 'Chat', to: '/chat', icon: 'svg-chat' },
       { label: 'Channels', to: '/channels', icon: 'svg-channels' },
@@ -73,6 +75,7 @@ const navGroups = [
     ]
   },
   {
+    label: 'Ops',
     items: [
       { label: 'Tasks', to: '/tasks', icon: 'svg-tasks' },
       { label: 'Agents', to: '/agents', icon: 'svg-agents' },
@@ -81,6 +84,7 @@ const navGroups = [
     ]
   },
   {
+    label: 'Admin',
     items: [
       { label: 'Settings', to: '/settings', icon: 'svg-settings' },
       { label: 'Logs', to: '/logs', icon: 'svg-logs' },
@@ -116,13 +120,14 @@ const navGroups = [
       </div>
 
       <!-- Nav -->
-      <nav class="flex-1 overflow-y-auto py-2">
-        <div v-for="(group, gi) in navGroups" :key="gi">
+      <nav class="flex-1 overflow-y-auto py-2" aria-label="Main navigation">
+        <div v-for="(group, gi) in navGroups" :key="gi" role="group" :aria-label="group.label">
+          <div class="px-4 pt-3 pb-1 text-[10px] text-fg-muted uppercase tracking-wider font-medium">{{ group.label }}</div>
           <NuxtLink
             v-for="item in group.items"
             :key="item.to"
             :to="item.to"
-            class="flex items-center gap-3 px-4 py-2.5 text-[15px] text-fg-muted
+            class="flex items-center gap-3 px-4 py-2 text-[15px] text-fg-muted
                    hover:text-fg-strong hover:bg-surface-elevated transition-colors"
             active-class="text-emerald-700! dark:text-emerald-400! bg-emerald-500/10 border-r-2 border-emerald-600 dark:border-emerald-500"
           >
@@ -150,7 +155,7 @@ const navGroups = [
             </svg>
             {{ item.label }}
           </NuxtLink>
-          <div v-if="gi < navGroups.length - 1" class="my-2 mx-4 border-t border-border" />
+          <div v-if="gi < navGroups.length - 1" class="my-1.5 mx-4 border-t border-border" />
         </div>
       </nav>
 
