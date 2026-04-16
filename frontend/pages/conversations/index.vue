@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Agent, Conversation, Message } from '~/types/api'
+import type { Filter } from '~/components/FilterBar.vue'
 import { h, type VNode } from 'vue'
 import type { ColumnDef } from '@tanstack/vue-table'
 
@@ -11,17 +12,18 @@ const page = ref(1)
 const pageSize = 20
 const loading = ref(false)
 
-const filterName = ref('')
-const filterChannel = ref('')
-const filterAgentId = ref('')
-const filterPeer = ref('')
+// Active filters from FilterBar — maps filter keys to API params
+const activeFilters = ref<Filter[]>([])
 
-const { data: channelList } = await useFetch<string[]>('/api/conversations/channels', { default: () => [] })
 const { data: agentList } = await useFetch<Agent[]>('/api/agents', { default: () => [] })
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const rangeStart = computed(() => total.value === 0 ? 0 : (page.value - 1) * pageSize + 1)
 const rangeEnd = computed(() => Math.min(page.value * pageSize, total.value))
+
+function getFilterValue(key: string): string {
+  return activeFilters.value.find(f => f.key === key)?.value ?? ''
+}
 
 async function load() {
   loading.value = true
@@ -30,10 +32,18 @@ async function load() {
     const params = new URLSearchParams()
     params.set('limit', String(pageSize))
     params.set('offset', String(offset))
-    if (filterName.value.trim()) params.set('name', filterName.value.trim())
-    if (filterChannel.value) params.set('channel', filterChannel.value)
-    if (filterAgentId.value) params.set('agentId', filterAgentId.value)
-    if (filterPeer.value.trim()) params.set('peer', filterPeer.value.trim())
+    const name = getFilterValue('name')
+    const channel = getFilterValue('channel')
+    const agent = getFilterValue('agent')
+    const peer = getFilterValue('peer')
+    if (name) params.set('name', name)
+    if (channel) params.set('channel', channel)
+    if (agent) {
+      // Resolve agent name to ID
+      const a = agentList.value?.find((ag: Agent) => ag.name.toLowerCase() === agent.toLowerCase())
+      if (a) params.set('agentId', String(a.id))
+    }
+    if (peer) params.set('peer', peer)
     const res = await $fetch.raw<Conversation[]>(`/api/conversations?${params.toString()}`)
     conversations.value = res._data ?? []
     const headerTotal = res.headers.get('x-total-count')
@@ -45,25 +55,30 @@ async function load() {
 
 await load()
 
-// Debounced refetch on filter changes. Text inputs wait 300ms; selects refetch
-// immediately. Any filter change resets to page 1 and clears selection so we
-// don't carry stale IDs across the new result set.
-let filterDebounce: ReturnType<typeof setTimeout> | null = null
-function onFilterChange(debounce: boolean) {
-  if (filterDebounce) clearTimeout(filterDebounce)
-  const run = () => {
-    page.value = 1
-    selectedIds.value = new Set()
-    load()
-  }
-  if (debounce) {
-    filterDebounce = setTimeout(run, 300)
-  } else {
-    run()
-  }
+function onFiltersChanged(filters: Filter[]) {
+  activeFilters.value = filters
+  page.value = 1
+  selectedIds.value = new Set()
+  load()
 }
 
-onUnmounted(() => { if (filterDebounce) clearTimeout(filterDebounce) })
+function exportAllConversations() {
+  const csv = [
+    ['ID', 'Name', 'Channel', 'Agent', 'Peer', 'Messages', 'Created', 'Updated'].join(','),
+    ...conversations.value.map(c =>
+      [c.id, `"${(c.preview || '').replace(/"/g, '""')}"`, c.channelType, c.agentName, c.peerId || '', c.messageCount, c.createdAt, c.updatedAt].join(',')
+    ),
+  ].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'conversations.csv'
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
 
 function goto(p: number) {
   if (p < 1 || p > totalPages.value || p === page.value) return
@@ -255,24 +270,15 @@ const columns: ColumnDef<Conversation, any>[] = [
       </button>
     </div>
 
-    <!-- Filter row -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mb-3">
-      <input v-model="filterName" @input="onFilterChange(true)"
-             type="text" placeholder="Search name..."
-             class="px-3 py-1.5 bg-surface-elevated border border-border text-sm text-fg-strong placeholder-fg-muted focus:outline-hidden focus:border-ring" />
-      <select v-model="filterChannel" @change="onFilterChange(false)"
-              class="px-3 py-1.5 bg-surface-elevated border border-border text-sm text-fg-strong focus:outline-hidden focus:border-ring">
-        <option value="">All channels</option>
-        <option v-for="ch in channelList" :key="ch" :value="ch">{{ ch }}</option>
-      </select>
-      <select v-model="filterAgentId" @change="onFilterChange(false)"
-              class="px-3 py-1.5 bg-surface-elevated border border-border text-sm text-fg-strong focus:outline-hidden focus:border-ring">
-        <option value="">All agents</option>
-        <option v-for="a in agentList" :key="a.id" :value="a.id">{{ a.name }}</option>
-      </select>
-      <input v-model="filterPeer" @input="onFilterChange(true)"
-             type="text" placeholder="Filter peer..."
-             class="px-3 py-1.5 bg-surface-elevated border border-border text-sm text-fg-strong placeholder-fg-muted focus:outline-hidden focus:border-ring" />
+    <!-- Filter bar -->
+    <div class="mb-3">
+      <FilterBar
+        storage-key="conversations"
+        placeholder="Filter... (e.g., agent:main channel:web peer:admin)"
+        :filter-keys="['name', 'channel', 'agent', 'peer']"
+        @update:filters="onFiltersChanged"
+        @export="exportAllConversations"
+      />
     </div>
 
     <!-- List view -->

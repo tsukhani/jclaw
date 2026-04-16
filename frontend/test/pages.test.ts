@@ -178,11 +178,11 @@ describe('Conversations page', () => {
     expect(inputs.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('has channel and agent filter dropdowns', async () => {
+  it('has a FilterBar with search role', async () => {
     setupMockApi()
     const component = await mountSuspended(Conversations)
 
-    const selects = component.findAll('select')
-    expect(selects.length).toBeGreaterThanOrEqual(1)
+    const filterBar = component.find('[role="search"]')
+    expect(filterBar.exists()).toBe(true)
   })
 })
