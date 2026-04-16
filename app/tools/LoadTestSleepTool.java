@@ -22,6 +22,7 @@ public class LoadTestSleepTool implements ToolRegistry.Tool {
     private static final int MAX_MS = 10_000;
 
     @Override public String name() { return "loadtest_sleep"; }
+    @Override public boolean isInternal() { return true; }
 
     @Override public String description() {
         return "Load-test fixture: sleeps the current thread for the given "

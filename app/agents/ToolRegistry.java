@@ -31,6 +31,10 @@ public class ToolRegistry {
 
         /** System tools are always available and cannot be disabled by users. */
         default boolean isSystem() { return false; }
+
+        /** Internal tools are callable but hidden from the system prompt's tool catalog.
+         *  The LLM can still invoke them via the tool schema — they just aren't advertised. */
+        default boolean isInternal() { return false; }
     }
 
     private static volatile Map<String, Tool> tools = Map.of();

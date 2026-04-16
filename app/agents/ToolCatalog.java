@@ -38,6 +38,7 @@ public class ToolCatalog {
 
     public static String formatCatalogForPrompt(Set<String> disabledForAgent) {
         var tools = ToolRegistry.listTools().stream()
+                .filter(t -> !t.isInternal())
                 .filter(t -> !disabledForAgent.contains(t.name()))
                 .toList();
         if (tools.isEmpty()) return "";
