@@ -43,7 +43,7 @@ jclaw/
 │   │   ├── FileSystemTools.java, WebFetchTool.java, WebSearchTool.java
 │   │   ├── PlaywrightBrowserTool.java  # Headless Chromium via Playwright.
 │   │   ├── DocumentsTool.java    # Tika-backed document ingest.
-│   │   ├── TaskTool.java, CheckListTool.java, DateTimeTool.java, SkillsTool.java
+│   │   ├── TaskTool.java, CheckListTool.java, DateTimeTool.java
 │   │   └── LoadTestSleepTool.java  # Deterministic sleep for load-testing.
 │   ├── jobs/                     # Play background jobs.
 │   │   ├── TaskPollerJob @Every("30s")  # Drains pending tasks on virtual threads.

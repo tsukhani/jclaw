@@ -21,12 +21,15 @@ const FIXTURE_META = [
     actions: [{ name: 'fetch (text)', description: 'Extract text' }],
   },
   {
-    name: 'skills',
+    // Stand-in system tool for the fixture. Doesn't need to match any real
+    // registered tool — the test exercises the composable's handling of a
+    // system=true entry (pill colors etc.), not a specific tool name.
+    name: 'introspect',
     category: 'Utilities',
-    icon: 'skills',
-    shortDescription: 'Runtime introspection.',
+    icon: 'wrench',
+    shortDescription: 'Stub system tool used only by this fixture.',
     system: true,
-    actions: [{ name: 'listTools', description: 'List tools' }],
+    actions: [{ name: 'inspect', description: 'Inspect something' }],
   },
 ]
 
@@ -60,7 +63,7 @@ describe('useToolMeta (JCLAW-72 backend-driven metadata)', () => {
     const { TOOL_META } = await freshComposable()
     expect(TOOL_META.value.exec.iconBg).toContain('neutral')
     expect(TOOL_META.value.web_fetch.iconBg).toContain('blue')
-    expect(TOOL_META.value.skills.iconBg).toContain('emerald')
+    expect(TOOL_META.value.introspect.iconBg).toContain('emerald')
   })
 
   it('preserves the legacy "functions" alias for pages/tools.vue compatibility', async () => {
@@ -72,12 +75,12 @@ describe('useToolMeta (JCLAW-72 backend-driven metadata)', () => {
     const { getPillClass } = await freshComposable()
     expect(getPillClass('exec')).toContain('neutral')
     expect(getPillClass('web_fetch')).toContain('blue')
-    expect(getPillClass('skills')).toContain('emerald')
+    expect(getPillClass('introspect')).toContain('emerald')
   })
 
   it('ORDERED_TOOLS follows the backend registry iteration order', async () => {
     const { ORDERED_TOOLS } = await freshComposable()
-    expect(ORDERED_TOOLS.value).toEqual(['exec', 'web_fetch', 'skills'])
+    expect(ORDERED_TOOLS.value).toEqual(['exec', 'web_fetch', 'introspect'])
   })
 
   it('getToolMeta returns null for unknown tool names', async () => {

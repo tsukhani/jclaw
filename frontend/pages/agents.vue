@@ -33,7 +33,7 @@ const toolsByCategory = computed(() => {
     'exec',
     'filesystem', 'documents',
     'web_fetch', 'web_search', 'browser',
-    'datetime', 'checklist', 'task_manager', 'skills',
+    'datetime', 'checklist', 'task_manager',
   ]
   // Build a lookup from tool name → its position in the canonical order
   const posOf = (name: string) => {
@@ -666,7 +666,6 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
                     <path v-if="getToolMeta(tool.name)?.icon === 'clock'"     stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                     <path v-if="getToolMeta(tool.name)?.icon === 'check'"     stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                     <path v-if="getToolMeta(tool.name)?.icon === 'tasks'"     stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                    <path v-if="getToolMeta(tool.name)?.icon === 'skills'"    stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" d="M13 10V3L4 14h7v7l9-11h-7z" />
                   </svg>
                 </div>
                 <!-- Name + function pills -->

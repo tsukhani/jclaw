@@ -41,12 +41,11 @@ public class ToolRegistry {
          *  them via the tool schema — they just aren't advertised to users). */
         default boolean isSystem() { return false; }
 
-        /** Taxonomy bucket used to group tools in the system-prompt Tool Catalog and
-         *  the {@code skills.listTools} output. Must be one of
-         *  {@code "System"}, {@code "Files"}, {@code "Web"}, {@code "Utilities"} —
-         *  matching the {@code CANONICAL_CATEGORY_ORDER} list exposed by {@link ToolCatalog}.
-         *  Defaults to {@code "Utilities"} so a tool that forgets to override still
-         *  renders somewhere sensible. */
+        /** Taxonomy bucket used to group tools in the system-prompt Tool Catalog.
+         *  Must be one of {@code "System"}, {@code "Files"}, {@code "Web"},
+         *  {@code "Utilities"} — matching the {@code CANONICAL_CATEGORY_ORDER}
+         *  list exposed by {@link ToolCatalog}. Defaults to {@code "Utilities"}
+         *  so a tool that forgets to override still renders somewhere sensible. */
         default String category() { return "Utilities"; }
 
         /** Semantic icon key consumed by the admin UI's SVG dictionary (e.g.

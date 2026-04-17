@@ -23,7 +23,6 @@ public class ToolRegistrationJob extends Job<Void> {
         toolList.add(new DocumentsTool());
         toolList.add(new WebFetchTool());
         toolList.add(new WebSearchTool());
-        toolList.add(new SkillsTool());
         if ("true".equals(services.ConfigService.get("playwright.enabled"))) {
             toolList.add(new PlaywrightBrowserTool());
         }

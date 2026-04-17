@@ -26,7 +26,7 @@ public class ToolSystemTest extends UnitTest {
         cleanupTestAgent();
         ToolRegistry.publish(java.util.List.of(
                 new TaskTool(), new CheckListTool(), new FileSystemTools(),
-                new WebFetchTool(), new SkillsTool()
+                new WebFetchTool()
         ));
         agent = AgentService.create("tool-test-agent", "openrouter", "gpt-4.1");
     }
@@ -35,7 +35,7 @@ public class ToolSystemTest extends UnitTest {
     private static void publishWithExtras(ToolRegistry.Tool... extras) {
         var tools = new java.util.ArrayList<ToolRegistry.Tool>(java.util.List.of(
                 new TaskTool(), new CheckListTool(), new FileSystemTools(),
-                new WebFetchTool(), new SkillsTool()
+                new WebFetchTool()
         ));
         java.util.Collections.addAll(tools, extras);
         ToolRegistry.publish(tools);
@@ -50,8 +50,8 @@ public class ToolSystemTest extends UnitTest {
 
     @Test
     public void registryListsAllTools() {
-        assertEquals(5, ToolRegistry.listTools().size());
-        assertEquals(5, ToolRegistry.getToolDefs().size());
+        assertEquals(4, ToolRegistry.listTools().size());
+        assertEquals(4, ToolRegistry.getToolDefs().size());
     }
 
     @Test
@@ -1022,49 +1022,6 @@ public class ToolSystemTest extends UnitTest {
         }
         sb.append('"');
         return sb.toString();
-    }
-
-    // --- SkillsTool ---
-
-    @Test
-    public void skillsToolListEmpty() {
-        agents.SkillLoader.clearCache();
-        var result = ToolRegistry.execute("skills",
-                """
-                {"action": "listSkills"}
-                """, agent);
-        assertTrue(result.contains("No skills"));
-    }
-
-    @Test
-    public void skillsToolListAndRead() {
-        // Create a skill file in the agent's workspace
-        var skillDir = AgentService.workspacePath("tool-test-agent").resolve("skills").resolve("test-skill");
-        try {
-            Files.createDirectories(skillDir);
-            Files.writeString(skillDir.resolve("SKILL.md"), """
-                    ---
-                    name: test-skill
-                    description: A test skill
-                    ---
-                    # Test Skill Instructions
-                    Do the test thing.
-                    """);
-        } catch (IOException e) { fail(e); }
-
-        agents.SkillLoader.clearCache();
-
-        var listResult = ToolRegistry.execute("skills",
-                """
-                {"action": "listSkills"}
-                """, agent);
-        assertTrue(listResult.contains("test-skill"));
-
-        var readResult = ToolRegistry.execute("skills",
-                """
-                {"action": "readSkill", "name": "test-skill"}
-                """, agent);
-        assertTrue(readResult.contains("Test Skill Instructions"));
     }
 
     // --- Helpers ---
