@@ -21,6 +21,10 @@ Options:
   --deploy <dir>          Package with play dist, copy to <dir>, and run in production
   --backend-port <port>   Play backend port (default: 9000)
   --frontend-port <port>  Nuxt dev server port, dev mode only (default: 3000)
+  --play-pool <N>         Explicit Play invocation pool size. When omitted, the
+                          JVM-side plugins.PlayPoolAutoSizer auto-sizes to
+                          max(8, cores*2) at startup (respects container CPU
+                          limits). Pass an integer to force a specific value.
 
 Environment:
   JCLAW_JVM_HEAP          Production heap size (default: 2g). Sets -Xms == -Xmx.
@@ -54,6 +58,7 @@ DEPLOY_DIR=""
 DEV_MODE=false
 BACKEND_PORT="9000"
 FRONTEND_PORT="3000"
+PLAY_POOL=""
 COMMAND=""
 LT_CONCURRENCY="10"
 LT_ITERATIONS="5"
@@ -78,6 +83,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --frontend-port)
             FRONTEND_PORT="$2"
+            shift 2
+            ;;
+        --play-pool)
+            PLAY_POOL="$2"
             shift 2
             ;;
         --concurrency)
@@ -122,6 +131,24 @@ if [[ "$DEV_MODE" == true && -n "$DEPLOY_DIR" ]]; then
     echo "Error: --dev and --deploy cannot be used together."
     exit 1
 fi
+
+# Resolve an explicit -Dplay.pool=N override from $PLAY_POOL. Prints the JVM
+# arg on stdout, or an empty string when no override was requested. The
+# default (no flag) is intentionally empty so the JVM-side plugin
+# plugins.PlayPoolAutoSizer performs the auto-sizing — that way bare-metal,
+# Docker, and Kubernetes all get the same behavior (respecting container
+# CPU quotas via Runtime.availableProcessors()).
+resolve_play_pool() {
+    local requested="$PLAY_POOL"
+    [[ -z "$requested" ]] && return 0
+
+    if [[ "$requested" =~ ^[0-9]+$ ]] && (( requested > 0 )); then
+        echo "-Dplay.pool=$requested"
+    else
+        echo "Error: --play-pool expects a positive integer, got '$requested'" >&2
+        exit 1
+    fi
+}
 
 # Verify Java 25+ is available
 check_java() {
@@ -243,8 +270,17 @@ do_start_prod() {
         "-Xlog:gc*:file=$JCLAW_DIR/logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M"
     )
 
+    local pool_arg
+    pool_arg=$(resolve_play_pool)
+    [[ -n "$pool_arg" ]] && jvm_opts+=("$pool_arg")
+
     echo "==> Starting Play backend on port $BACKEND_PORT (prod)..."
     echo "    JVM: ${heap} heap, ZGC, GC log → logs/gc.log"
+    if [[ -n "$pool_arg" ]]; then
+        echo "    Play invocation pool: ${pool_arg#-Dplay.pool=} (explicit override)"
+    else
+        echo "    Play invocation pool: auto (sized by PlayPoolAutoSizer at startup)"
+    fi
     play start --%prod --http.port="$BACKEND_PORT" "${jvm_opts[@]}"
 
     echo ""
@@ -292,8 +328,17 @@ do_start_dev() {
     echo "==> Resolving backend dependencies..."
     play deps --sync
 
+    local pool_arg
+    pool_arg=$(resolve_play_pool)
+
     echo "==> Starting Play backend on port $BACKEND_PORT (dev)..."
-    nohup play run --http.port="$BACKEND_PORT" > "$JCLAW_DIR/logs/backend-dev.out" 2>&1 &
+    if [[ -n "$pool_arg" ]]; then
+        echo "    Play invocation pool: ${pool_arg#-Dplay.pool=} (explicit override)"
+        nohup play run --http.port="$BACKEND_PORT" "$pool_arg" > "$JCLAW_DIR/logs/backend-dev.out" 2>&1 &
+    else
+        echo "    Play invocation pool: auto (sized by PlayPoolAutoSizer at startup)"
+        nohup play run --http.port="$BACKEND_PORT" > "$JCLAW_DIR/logs/backend-dev.out" 2>&1 &
+    fi
     local play_pid=$!
     # play run doesn't create server.pid — store the wrapper pid ourselves
     echo "$play_pid" > "$JCLAW_DIR/server.pid"

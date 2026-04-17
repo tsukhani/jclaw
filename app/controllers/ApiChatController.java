@@ -12,7 +12,6 @@ import services.AgentService;
 import services.ConversationService;
 import services.EventLogger;
 import utils.LatencyTrace;
-import utils.VirtualThreads;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -25,6 +24,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
@@ -40,6 +42,21 @@ import static utils.GsonHolder.INSTANCE;
 public class ApiChatController extends Controller {
 
     private static final Gson gson = INSTANCE;
+
+    /**
+     * Shared scheduler for SSE heartbeats and safety timeouts across every streaming
+     * request. Previously each {@link #streamChat} call spun up its own
+     * {@link ScheduledExecutorService} and shut it down on stream completion — that
+     * churned a thread (virtual or not) and a task queue per request under load.
+     * One static scheduler with a small virtual-thread-backed pool is enough: the
+     * heartbeat task is ~1 byte write every 30 s and the timeout task is a single
+     * fire-once. Per-stream cancellation is tracked via {@link ScheduledFuture}
+     * references held by the request and cancelled in the stream's whenComplete.
+     */
+    private static final ScheduledExecutorService STREAM_SCHEDULER =
+            Executors.newScheduledThreadPool(
+                    Math.max(2, Runtime.getRuntime().availableProcessors() / 2),
+                    r -> Thread.ofVirtual().name("sse-scheduler-", 0).unstarted(r));
 
     /** Validated prologue shared by send() and streamChat(). */
     private record ChatContext(Agent agent, String message, Long conversationId, String username) {}
@@ -188,6 +205,7 @@ public class ApiChatController extends Controller {
     public static void streamChat() {
         var trace = LatencyTrace.fromCurrentRequest();
         var ctx = resolveChatContext(JsonBodyReader.readJsonBody());
+        trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
         var agent = ctx.agent();
         var messageText = ctx.message();
         var conversationId = ctx.conversationId();
@@ -206,8 +224,7 @@ public class ApiChatController extends Controller {
         var streamDone = new CompletableFuture<Void>();
         var cancelled = new AtomicBoolean(false);
 
-        var heartbeatExecutor = VirtualThreads.newSingleThreadScheduledExecutor();
-        heartbeatExecutor.scheduleAtFixedRate(() -> {
+        ScheduledFuture<?> heartbeatFuture = STREAM_SCHEDULER.scheduleAtFixedRate(() -> {
             if (cancelled.get() || streamDone.isDone()) return;
             try {
                 res.writeChunk(": keep-alive\n\n".getBytes(StandardCharsets.UTF_8));
@@ -254,11 +271,15 @@ public class ApiChatController extends Controller {
                         Map.of("type", "reasoning", "content", reasoning), false),
                 status -> writeSse(res, cancelled, streamDone,
                         Map.of("type", "status", "content", status), false),
-                content -> writeSse(res, cancelled, streamDone,
-                        Map.of("type", "complete", "content", content), true),
+                content -> {
+                    writeSse(res, cancelled, streamDone,
+                            Map.of("type", "complete", "content", content), true);
+                    trace.mark(LatencyTrace.TERMINAL_SENT);
+                },
                 error -> {
                     writeSse(res, cancelled, streamDone,
                             Map.of("type", "error", "content", "An error occurred: " + error.getMessage()), true);
+                    trace.mark(LatencyTrace.TERMINAL_SENT);
                     EventLogger.error("channel", agent.name, "web",
                             "SSE stream error: %s".formatted(error.getMessage()));
                 }
@@ -267,12 +288,12 @@ public class ApiChatController extends Controller {
                 cancelled, callbacks, trace);
 
         // Safety timeout: emit one error frame and complete normally if no
-        // terminal frame arrives within 600s. Scheduled on the heartbeat
-        // executor so it's cancelled alongside the heartbeat when the stream
-        // finishes (no leaked timers). Using a manual watcher instead of
-        // CompletableFuture.orTimeout avoids a race where the future
-        // completes exceptionally before we write the timeout SSE frame.
-        heartbeatExecutor.schedule(() -> {
+        // terminal frame arrives within 600s. Scheduled on the shared scheduler;
+        // we hold its ScheduledFuture so we can cancel it (along with the heartbeat)
+        // when the stream finishes. Using a manual watcher instead of
+        // CompletableFuture.orTimeout avoids a race where the future completes
+        // exceptionally before we write the timeout SSE frame.
+        ScheduledFuture<?> timeoutFuture = STREAM_SCHEDULER.schedule(() -> {
             if (!streamDone.isDone()) {
                 cancelled.set(true);
                 writeSse(res, cancelled, streamDone,
@@ -281,9 +302,12 @@ public class ApiChatController extends Controller {
         }, 600, TimeUnit.SECONDS);
 
         // Cleanup runs regardless of how the future completes — success,
-        // exception, or cancellation. shutdownNow() also cancels the timeout.
+        // exception, or cancellation. Cancelling both ScheduledFutures ensures
+        // no stray heartbeat or timeout task fires after the stream is done;
+        // the shared scheduler itself is long-lived and never shut down here.
         streamDone.whenComplete((_, _) -> {
-            heartbeatExecutor.shutdownNow();
+            heartbeatFuture.cancel(false);
+            timeoutFuture.cancel(false);
             trace.end();
         });
 

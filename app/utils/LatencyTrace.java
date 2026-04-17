@@ -15,10 +15,14 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class LatencyTrace {
 
+    public static final String PROLOGUE_REQUEST_PARSED = "prologue_request_parsed";
+    public static final String PROLOGUE_CONV_RESOLVED = "prologue_conv_resolved";
+    public static final String PROLOGUE_PROMPT_ASSEMBLED = "prologue_prompt_assembled";
     public static final String PROLOGUE_DONE = "prologue_done";
     public static final String FIRST_TOKEN = "first_token";
     public static final String STREAM_BODY_END = "stream_body_end";
     public static final String PERSIST_DONE = "persist_done";
+    public static final String TERMINAL_SENT = "terminal_sent";
 
     private final long startNs;
     private final long acceptedAtNs;
@@ -91,6 +95,27 @@ public final class LatencyTrace {
         LatencyStats.record("total", nsToMs(endNs - startNs));
         LatencyStats.record("prologue", nsToMs(prologueDone - startNs));
 
+        // Prologue sub-segments — missing marks are OK, we just skip that sub-bucket.
+        // The sequence is: startNs → request_parsed → conv_resolved → prompt_assembled → prologue_done.
+        // Each emitted sub-segment measures the gap between adjacent marks so they sum back
+        // to `prologue` (modulo integer ms rounding).
+        Long requestParsed = marks.get(PROLOGUE_REQUEST_PARSED);
+        Long convResolved = marks.get(PROLOGUE_CONV_RESOLVED);
+        Long promptAssembled = marks.get(PROLOGUE_PROMPT_ASSEMBLED);
+
+        if (requestParsed != null) {
+            LatencyStats.record("prologue_parse", nsToMs(requestParsed - startNs));
+        }
+        if (requestParsed != null && convResolved != null) {
+            LatencyStats.record("prologue_conv", nsToMs(convResolved - requestParsed));
+        }
+        if (convResolved != null && promptAssembled != null) {
+            LatencyStats.record("prologue_prompt", nsToMs(promptAssembled - convResolved));
+        }
+        if (promptAssembled != null) {
+            LatencyStats.record("prologue_tools", nsToMs(prologueDone - promptAssembled));
+        }
+
         Long firstToken = marks.get(FIRST_TOKEN);
         if (firstToken != null) {
             LatencyStats.record("ttft", nsToMs(firstToken - prologueDone));
@@ -101,9 +126,25 @@ public final class LatencyTrace {
             LatencyStats.record("stream_body", nsToMs(streamBodyEnd - firstToken));
         }
 
+        // `persist` is no longer derived here — it's recorded directly by AgentRunner
+        // because it now runs AFTER the terminal SSE frame (off the user-visible path),
+        // and trace.end() fires as soon as the terminal SSE write returns. The legacy
+        // PERSIST_DONE constant is retained so older callers / tests that still set it
+        // can produce a persist sample via this path.
         Long persistDone = marks.get(PERSIST_DONE);
         if (streamBodyEnd != null && persistDone != null) {
             LatencyStats.record("persist", nsToMs(persistDone - streamBodyEnd));
+        }
+
+        // `terminal_tail` measures the gap between stream_body_end and the terminal
+        // SSE frame being written to the response — that is, the wall time for the
+        // final usage-logging callbacks, onStatus + onComplete dispatch, and the
+        // terminal writeChunk itself. This is part of `total` (pre-refactor it was
+        // hidden behind the DB persist); surfacing it lets us confirm the post-stream
+        // emit path stays cheap.
+        Long terminalSent = marks.get(TERMINAL_SENT);
+        if (streamBodyEnd != null && terminalSent != null) {
+            LatencyStats.record("terminal_tail", nsToMs(terminalSent - streamBodyEnd));
         }
 
         if (toolRoundCount.get() > 0) {

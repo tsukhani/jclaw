@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Registry of available tools. Tools are registered at startup and made available
@@ -110,14 +111,46 @@ public class ToolRegistry {
                 .toList();
     }
 
-    /** Load the set of disabled tool names for an agent (single DB query). */
+    /**
+     * Per-agent cache of disabled-tool names. The write path for AgentToolConfig is
+     * a single endpoint ({@link controllers.ApiToolsController}) which calls
+     * {@link #invalidateDisabledToolsCache} after every toggle. Every other caller
+     * is a read, and each streaming turn reads once, so caching here eliminates a
+     * DB round-trip per turn. Keyed by agent ID; values are unmodifiable to guard
+     * against callers accidentally mutating the cached set.
+     */
+    private static final ConcurrentHashMap<Long, Set<String>> DISABLED_TOOLS_CACHE = new ConcurrentHashMap<>();
+
+    /**
+     * Load the set of disabled tool names for an agent. Cached per agent; the cache
+     * is invalidated whenever an {@link models.AgentToolConfig} row is written via
+     * {@link #invalidateDisabledToolsCache}.
+     */
     public static Set<String> loadDisabledTools(Agent agent) {
-        var configs = AgentToolConfig.findByAgent(agent);
-        var disabled = new HashSet<String>();
-        for (var c : configs) {
-            if (!c.enabled) disabled.add(c.toolName);
+        if (agent == null || agent.id == null) {
+            // Unsaved agents have no configs; treat as "nothing disabled."
+            return Set.of();
         }
-        return disabled;
+        return DISABLED_TOOLS_CACHE.computeIfAbsent(agent.id, _ -> {
+            var configs = AgentToolConfig.findByAgent(agent);
+            var disabled = new HashSet<String>();
+            for (var c : configs) {
+                if (!c.enabled) disabled.add(c.toolName);
+            }
+            return Collections.unmodifiableSet(disabled);
+        });
+    }
+
+    /** Invalidate the cached disabled-tools set for a specific agent. */
+    public static void invalidateDisabledToolsCache(Agent agent) {
+        if (agent != null && agent.id != null) {
+            DISABLED_TOOLS_CACHE.remove(agent.id);
+        }
+    }
+
+    /** Clear the entire disabled-tools cache. Used by tests and admin tooling. */
+    public static void clearDisabledToolsCache() {
+        DISABLED_TOOLS_CACHE.clear();
     }
 
     public static List<Tool> listTools() {

@@ -65,7 +65,12 @@ public class ProviderRegistry {
         // enters refreshInner(), concurrent callers skip and use the stale cache.
         if (!refreshing.compareAndSet(false, true)) return;
         try {
-            refreshInner();
+            // refreshInner() reads from the Config table, which requires a JPA
+            // transaction. Wrap in Tx.run so callers (like streaming prologue code)
+            // can invoke get()/getPrimary() without holding an ambient transaction
+            // just in case the 60s cache is stale. Tx.run short-circuits when
+            // already inside a tx, so we don't pay twice.
+            services.Tx.run(ProviderRegistry::refreshInner);
         } finally {
             refreshing.set(false);
         }

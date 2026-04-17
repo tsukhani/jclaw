@@ -91,6 +91,9 @@ public class ApiToolsController extends Controller {
         // requirements just became met is re-included. Prevents a window where the agent can
         // still see/invoke a skill that requires a freshly-disabled tool.
         SkillLoader.clearCache();
+        // Drop the per-agent disabled-tools cache so the next streaming turn sees the
+        // new configuration immediately instead of on cache expiry.
+        ToolRegistry.invalidateDisabledToolsCache(agent);
 
         var map = new HashMap<String, Object>();
         map.put("name", name);

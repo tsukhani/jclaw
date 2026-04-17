@@ -62,6 +62,17 @@ public class AgentRunner {
         List<ToolDef> tools
     ) {}
 
+    /**
+     * Bundle of read-only prologue data computed in a single JPA transaction.
+     * Used by {@link #streamLlmLoop} to fold what used to be 5+ separate
+     * {@code Tx.run} blocks into one round-trip to the connection pool.
+     */
+    private record PreparedPrologue(
+        SystemPromptAssembler.AssembledPrompt assembled,
+        List<ChatMessage> messages,
+        List<ToolDef> tools
+    ) {}
+
     private static final String STREAM_CANCELLED_MSG = "Stream cancelled by client disconnect";
 
     /**
@@ -211,6 +222,8 @@ public class AgentRunner {
                 if (conversation == null) return; // queued, not-found, or error — already handled
                 conversationIdRef[0] = conversation.id;
 
+                if (trace != null) trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
+
                 if (checkCancelled(isCancelled, agent, channelType)) return;
 
                 // Phase 2: Assemble prompt, resolve provider, call LLM in streaming loop
@@ -286,16 +299,10 @@ public class AgentRunner {
         EventLogger.info("llm", agent.name, channelType,
                 "Streaming: assembling prompt for conversation id: %d".formatted(conversation.id));
 
-        var assembled = services.Tx.run(() ->
-                SystemPromptAssembler.assemble(agent, userMessage));
-
-        if (checkCancelled(isCancelled, agent, channelType)) return;
-
-        var messages = services.Tx.run(() ->
-                buildMessages(assembled.systemPrompt(), ConversationService.findById(conversation.id)));
-
-        var agentProvider = services.Tx.run(() -> ProviderRegistry.get(agent.modelProvider));
-        var primary = agentProvider != null ? agentProvider : services.Tx.run(ProviderRegistry::getPrimary);
+        // Provider resolution first — no JPA tx needed. ProviderRegistry.refresh()
+        // self-wraps its own tx when the 60s cache is stale, so callers don't need to.
+        var agentProvider = ProviderRegistry.get(agent.modelProvider);
+        var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
         if (primary == null) {
             EventLogger.error("llm", agent.name, channelType, "No LLM provider configured");
             cb.onError().accept(new RuntimeException("No LLM provider configured"));
@@ -304,9 +311,31 @@ public class AgentRunner {
 
         if (checkCancelled(isCancelled, agent, channelType)) return;
 
-        messages = trimToContextWindow(messages, agent, primary);
+        // Fold the remaining DB reads into ONE transaction. Tx.run short-circuits
+        // nested calls, so inner helpers that also call Tx.run (e.g. loadRecentMessages
+        // via buildMessages, any SystemPromptAssembler internals) don't pay twice.
+        // `loadDisabledTools` is computed once and threaded into both the system prompt
+        // assembler (tool catalog) and the tool-defs for the LLM request, eliminating
+        // the redundant DB query that used to happen in each path.
+        final LlmProvider primaryRef = primary;
+        var prepared = services.Tx.run(() -> {
+            var disabledTools = ToolRegistry.loadDisabledTools(agent);
+            var assembled0 = SystemPromptAssembler.assemble(agent, userMessage, disabledTools);
+            var convo = ConversationService.findById(conversation.id);
+            var msgs = buildMessages(assembled0.systemPrompt(), convo);
+            msgs = trimToContextWindow(msgs, agent, primaryRef);
+            var toolDefs = ToolRegistry.getToolDefsForAgent(disabledTools);
+            return new PreparedPrologue(assembled0, msgs, toolDefs);
+        });
 
-        var tools = services.Tx.run(() -> ToolRegistry.getToolDefsForAgent(agent));
+        var assembled = prepared.assembled();
+        var messages = prepared.messages();
+
+        if (checkCancelled(isCancelled, agent, channelType)) return;
+
+        if (trace != null) trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
+
+        var tools = prepared.tools();
         var thinkingMode = resolveThinkingMode(agent, primary);
         EventLogger.info("llm", agent.name, channelType,
                 "Streaming: calling %s / %s (%d messages, %d tools, %d skills%s)"
@@ -352,12 +381,20 @@ public class AgentRunner {
             cb.onToken().accept(truncMsg.equals(content) ? "" : "\n\n*[Response was truncated — retrying with a simpler approach]*");
             if (trace != null) trace.mark(LatencyTrace.STREAM_BODY_END);
             var finalContent = truncMsg;
+            // Fire the terminal SSE frame FIRST — user sees "done" immediately, and
+            // trace.end() (registered on streamDone.whenComplete) records a tight
+            // `total` that excludes the DB persist. Persist runs below on this same
+            // virtual thread, which means the outer wrapper's finally → processQueueDrain
+            // still observes a fully committed conversation before any queued follow-up
+            // message runs. No race, no stale history for back-to-back turns.
+            cb.onComplete().accept(finalContent);
+            long truncPersistStartNs = System.nanoTime();
             services.Tx.run(() -> {
                 var conv = ConversationService.findById(conversation.id);
                 ConversationService.appendAssistantMessage(conv, finalContent, null);
             });
-            if (trace != null) trace.mark(LatencyTrace.PERSIST_DONE);
-            cb.onComplete().accept(finalContent);
+            utils.LatencyStats.record("persist",
+                    (System.nanoTime() - truncPersistStartNs) / 1_000_000L);
             return;
         }
 
@@ -375,16 +412,21 @@ public class AgentRunner {
         // Build usage JSON before persisting so it can be stored alongside the message
         var usageJson = buildUsageJson(accumulator, modelInfo, streamStartMs);
 
-        // Persist and complete
+        // Fire the terminal SSE frame FIRST so the user-visible `total` ends at the
+        // outgoing write, not at the DB round-trip. Persist happens below on this
+        // same virtual thread — the outer wrapper's finally → processQueueDrain
+        // therefore still observes a committed conversation before any queued
+        // follow-up turn runs. See the truncation branch above for the full rationale.
+        emitUsageAndComplete(agent, channelType, content, accumulator, modelInfo, streamStartMs, usageJson, cb);
+
         var finalContent = content;
+        long persistStartNs = System.nanoTime();
         services.Tx.run(() -> {
             var conv = ConversationService.findById(conversation.id);
             ConversationService.appendAssistantMessage(conv, finalContent, null, usageJson);
         });
-
-        if (trace != null) trace.mark(LatencyTrace.PERSIST_DONE);
-
-        emitUsageAndComplete(agent, channelType, content, accumulator, modelInfo, streamStartMs, usageJson, cb);
+        utils.LatencyStats.record("persist",
+                (System.nanoTime() - persistStartNs) / 1_000_000L);
     }
 
     /**

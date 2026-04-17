@@ -71,6 +71,59 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
+    public void prologueSubSegmentsAreRecordedWhenMarksPresent() throws Exception {
+        login();
+        var trace = new LatencyTrace();
+        Thread.sleep(2);
+        trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
+        Thread.sleep(2);
+        trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
+        Thread.sleep(2);
+        trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
+        Thread.sleep(2);
+        trace.mark(LatencyTrace.PROLOGUE_DONE);
+        Thread.sleep(2);
+        trace.mark(LatencyTrace.FIRST_TOKEN);
+        trace.mark(LatencyTrace.STREAM_BODY_END);
+        trace.mark(LatencyTrace.PERSIST_DONE);
+        Thread.sleep(2);
+        trace.mark(LatencyTrace.TERMINAL_SENT);
+        trace.end();
+
+        var response = GET("/api/metrics/latency");
+        assertIsOk(response);
+        var body = getContent(response);
+        // The four derived prologue sub-segments must sum (roughly) to `prologue`.
+        assertTrue(body.contains("\"prologue_parse\""), body);
+        assertTrue(body.contains("\"prologue_conv\""), body);
+        assertTrue(body.contains("\"prologue_prompt\""), body);
+        assertTrue(body.contains("\"prologue_tools\""), body);
+        // terminal_tail covers post-persist → terminal-SSE-frame-flushed.
+        assertTrue(body.contains("\"terminal_tail\""), body);
+    }
+
+    @Test
+    public void prologueSubSegmentsSkippedWhenMarksMissing() {
+        login();
+        // Only PROLOGUE_DONE set — none of the three finer marks.
+        var trace = new LatencyTrace();
+        trace.mark(LatencyTrace.PROLOGUE_DONE);
+        trace.end();
+
+        var response = GET("/api/metrics/latency");
+        assertIsOk(response);
+        var body = getContent(response);
+        // Backward-compat: missing finer marks don't break anything and don't
+        // create empty sub-segments.
+        assertTrue(body.contains("\"prologue\""), body);
+        assertFalse(body.contains("\"prologue_parse\""), body);
+        assertFalse(body.contains("\"prologue_conv\""), body);
+        assertFalse(body.contains("\"prologue_prompt\""), body);
+        assertFalse(body.contains("\"prologue_tools\""), body);
+        assertFalse(body.contains("\"terminal_tail\""), body);
+    }
+
+    @Test
     public void earlyExitTraceWithoutPrologueRecordsNothing() {
         login();
         new LatencyTrace().end();

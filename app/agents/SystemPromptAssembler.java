@@ -11,6 +11,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Assembles the system prompt for an LLM call by reading workspace files,
@@ -62,8 +63,19 @@ public class SystemPromptAssembler {
      * for memory recall. Byte-for-byte identical to the breakdown path.
      */
     public static AssembledPrompt assemble(Agent agent, String userMessage) {
+        return assemble(agent, userMessage, null);
+    }
+
+    /**
+     * Variant that accepts a pre-loaded disabled-tools set. Hot streaming path uses
+     * this to avoid a redundant DB query — the same set is computed once per turn
+     * and threaded through both the tool catalog embedded in the system prompt and
+     * the tool schemas sent alongside the LLM request. Pass {@code null} for the
+     * legacy behavior that loads the set internally.
+     */
+    public static AssembledPrompt assemble(Agent agent, String userMessage, Set<String> disabledTools) {
         var builder = new SectionedBuilder();
-        var skills = buildPrompt(agent, userMessage, builder);
+        var skills = buildPrompt(agent, userMessage, builder, disabledTools);
         return new AssembledPrompt(builder.sb.toString(), skills);
     }
 
@@ -76,7 +88,7 @@ public class SystemPromptAssembler {
      */
     public static PromptBreakdown breakdown(Agent agent, String userMessage) {
         var builder = new SectionedBuilder();
-        var skills = buildPrompt(agent, userMessage, builder);
+        var skills = buildPrompt(agent, userMessage, builder, null);
         var sectionEntries = builder.finish().stream()
                 .map(s -> new PromptBreakdown.Entry(s.name, s.chars, approxTokens(s.chars)))
                 .toList();
@@ -140,7 +152,8 @@ public class SystemPromptAssembler {
      * canonical description of the prompt's composition lives here so the two public
      * entry points cannot drift.
      */
-    private static List<SkillLoader.SkillInfo> buildPrompt(Agent agent, String userMessage, SectionedBuilder b) {
+    private static List<SkillLoader.SkillInfo> buildPrompt(Agent agent, String userMessage, SectionedBuilder b,
+                                                           Set<String> disabledTools) {
         // 1. AGENT.md content
         b.startSection("AGENT.md");
         appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "AGENT.md"));
@@ -167,7 +180,8 @@ public class SystemPromptAssembler {
             // the authoritative set of tool names instead of hardcoding them in SKILL.md files.
             // Filtered per-agent so the LLM never sees (and therefore never picks) tools that
             // are disabled for this specific agent — skill-creator can trust every name here.
-            var catalog = ToolCatalog.formatCatalogForPrompt(ToolRegistry.loadDisabledTools(agent));
+            var effectiveDisabled = disabledTools != null ? disabledTools : ToolRegistry.loadDisabledTools(agent);
+            var catalog = ToolCatalog.formatCatalogForPrompt(effectiveDisabled);
             if (!catalog.isEmpty()) {
                 b.startSection("Tool Catalog");
                 b.sb.append("\n## Tool Catalog\n");
