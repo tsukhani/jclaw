@@ -3,6 +3,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { formatUsageCost, formatUsageCostTooltip, type MessageUsage } from '~/utils/usage-cost'
 import { formatSize } from '~/utils/format'
+import { thinkingHeaderLabel, initCollapsedState } from '~/utils/thinking'
 
 // Configure marked for safe rendering
 marked.setOptions({
@@ -155,18 +156,6 @@ const thinkingSupported = computed(() => selectedModelInfo.value?.supportsThinki
 // non-thinking models — the toolbar hides the selector in that case.
 const thinkingLevels = computed<string[]>(() => effectiveThinkingLevels(selectedModelInfo.value as any))
 
-// Whether any reasoning content is currently visible on this page: either the
-// in-flight stream is emitting reasoning, or a prior assistant message carries
-// reasoning text / a non-zero reasoning-token count. Drives the lightbulb
-// toggle's enabled state — there's nothing to show/hide when reasoning never
-// happened for this agent's visible conversation.
-const hasReasoningContent = computed(() => {
-  if (streamReasoning.value) return true
-  return (messages.value ?? []).some(
-    (m: any) => m.reasoning || (m.usage && m.usage.reasoning)
-  )
-})
-
 // Sync model or thinking mode change back to the agent
 async function updateAgentSetting(updates: Record<string, any>) {
   if (!selectedAgentId.value) return
@@ -203,10 +192,17 @@ function onModelChange(event: Event) {
 function onThinkingModeChange(event: Event) {
   const value = (event.target as HTMLSelectElement).value
   // Empty string is "off" — send null so the backend clears the column.
+  // This setting only applies to future turns; existing rendered thinking
+  // bubbles are per-message and unaffected (each bubble carries its own
+  // collapse state).
   updateAgentSetting({ thinkingMode: value || null })
-  // Auto-reveal the thinking panel when reasoning is turned on, so streamed
-  // reasoning tokens aren't silently hidden behind a collapsed toggle.
-  if (value) showThinking.value = true
+}
+
+// Per-bubble collapse toggle handler. Header label + default-collapse rules
+// live in ~/utils/thinking.ts (thinkingHeaderLabel, initCollapsedState) so
+// they are unit-testable without mounting the page.
+function toggleThinking(msg: any) {
+  msg.thinkingCollapsed = !msg.thinkingCollapsed
 }
 
 
@@ -258,8 +254,6 @@ async function editUserMessage(msg: any) {
 const agentBusy = ref(false)
 const streamContent = ref('')
 const streamReasoning = ref('')
-// Default thinking display on; model capability gates whether the panel renders
-const showThinking = ref(true)
 const messagesEl = ref<HTMLElement | null>(null)
 const abortController = ref<AbortController | null>(null)
 const sidebarWidth = ref(224) // 14rem = 224px (matches w-56)
@@ -396,6 +390,7 @@ if (deepLinkConvoId) {
       // It's in the current list — select it
       selectedConvoId.value = deepLinkConvoId
       messages.value = await $fetch<Message[]>(`/api/conversations/${deepLinkConvoId}/messages`) ?? []
+      initCollapsedState(messages.value)
       scrollToBottom()
       initializing.value = false
       stopDeepLink()
@@ -440,6 +435,7 @@ async function loadConversation(id: number) {
   }
   selectedConvoId.value = id
   messages.value = await $fetch<Message[]>(`/api/conversations/${id}/messages`) ?? []
+  initCollapsedState(messages.value)
   scrollToBottom()
 }
 
@@ -533,21 +529,41 @@ async function sendMessage() {
               streamStatus.value = event.content
             }
           } else if (event.type === 'reasoning') {
+            const m = messages.value[assistantIdx] as any
+            if (!m._thinkingStartedAt) {
+              m._thinkingStartedAt = Date.now()
+              m.thinkingCollapsed = false  // expanded while streaming
+            }
             streamReasoning.value += event.content
-            messages.value[assistantIdx].reasoning = streamReasoning.value
+            m.reasoning = streamReasoning.value
             if (!streamContent.value) {
               streamStatus.value = 'thinking...'
             }
             scrollToBottom()
           } else if (event.type === 'token') {
+            const m = messages.value[assistantIdx] as any
+            // Reasoning→content transition: stamp duration and auto-collapse
+            // once per bubble. The backend also persists reasoningDurationMs
+            // via usageJson, but doing this client-side makes the collapse
+            // happen at token-time instead of after the usage SSE frame.
+            if (m._thinkingStartedAt && m._thinkingDurationMs == null) {
+              m._thinkingDurationMs = Date.now() - m._thinkingStartedAt
+              m.thinkingCollapsed = true
+            }
             streamStatus.value = ''
-            if (event.timestamp) messages.value[assistantIdx].createdAt = event.timestamp
+            if (event.timestamp) m.createdAt = event.timestamp
             streamContent.value += event.content
-            messages.value[assistantIdx].content = streamContent.value
+            m.content = streamContent.value
             scrollToBottom()
           } else if (event.type === 'complete') {
+            const m = messages.value[assistantIdx] as any
+            // Reasoning-only turn (no content streamed): finalize duration here.
+            if (m._thinkingStartedAt && m._thinkingDurationMs == null) {
+              m._thinkingDurationMs = Date.now() - m._thinkingStartedAt
+              m.thinkingCollapsed = true
+            }
             streamStatus.value = ''
-            messages.value[assistantIdx].content = event.content || streamContent.value
+            m.content = event.content || streamContent.value
           } else if (event.type === 'error') {
             messages.value[assistantIdx].content = event.content
           } else if (event.type === 'queued') {
@@ -792,30 +808,6 @@ function exportConversation() {
           </select>
         </template>
 
-        <!--
-          Lightbulb: toggles the reasoning display. Only interactive when there's
-          reasoning to show/hide — either the agent is actively configured to
-          reason (thinkingMode is a non-off level) or the model has already
-          emitted reasoning in this conversation despite the off setting (some
-          Ollama thinking-by-default models ignore `reasoning_effort: none`).
-          Fully disabled otherwise so the icon doesn't invite clicks that change
-          a flag with no visible effect.
-        -->
-        <button v-if="thinkingSupported"
-                @click="showThinking = !showThinking"
-                :disabled="!selectedAgent?.thinkingMode && !hasReasoningContent"
-                :class="[
-                  (!selectedAgent?.thinkingMode && !hasReasoningContent)
-                    ? 'text-border cursor-not-allowed'
-                    : (showThinking ? 'text-emerald-400 hover:text-emerald-300' : 'text-fg-muted hover:text-emerald-300')
-                ]"
-                class="p-1 transition-colors"
-                :title="(!selectedAgent?.thinkingMode && !hasReasoningContent)
-                  ? 'No reasoning emitted — nothing to toggle'
-                  : 'Toggle thinking display'">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-        </button>
-
         <span v-if="streaming" class="text-xs text-emerald-700 dark:text-emerald-400 animate-pulse">{{ streamStatus || 'streaming...' }}</span>
         <span v-else-if="agentBusy" class="text-xs text-fg-muted animate-pulse">processing queue...</span>
       </div>
@@ -862,14 +854,29 @@ function exportConversation() {
             </div>
             <!-- Assistant messages: rendered markdown with optional thinking -->
             <div v-else>
-              <!-- Thinking/reasoning block -->
-              <div v-if="showThinking && msg.reasoning"
-                   class="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/20 rounded-xl rounded-tl-sm text-emerald-800/80 dark:text-emerald-300/70 px-3 py-2 text-xs font-mono mb-1.5 max-h-48 overflow-y-auto whitespace-pre-wrap break-words">
-                <div class="flex items-center gap-1.5 mb-1 text-emerald-700 dark:text-emerald-400/60 text-[10px] font-sans font-medium">
-                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
-                  Thinking
-                </div>
-                {{ msg.reasoning }}
+              <!--
+                Thinking/reasoning block. Header is always rendered when reasoning
+                exists; clicking it toggles just this bubble's collapse state.
+                Default: in-flight turns start expanded and auto-collapse at the
+                reasoning→content transition; historical turns load collapsed.
+                Body is suppressed when msg.thinkingCollapsed is true.
+              -->
+              <div v-if="msg.reasoning"
+                   class="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/20 rounded-xl rounded-tl-sm text-emerald-800/80 dark:text-emerald-300/70 px-3 py-2 text-xs font-mono mb-1.5 whitespace-pre-wrap break-words"
+                   :class="msg.thinkingCollapsed ? '' : 'max-h-48 overflow-y-auto'">
+                <button type="button"
+                        @click="toggleThinking(msg)"
+                        class="flex items-center gap-1.5 w-full text-left text-emerald-700 dark:text-emerald-400/60 text-[10px] font-sans font-medium hover:text-emerald-600 dark:hover:text-emerald-400/90 focus:outline-none"
+                        :class="msg.thinkingCollapsed ? '' : 'mb-1'"
+                        :title="msg.thinkingCollapsed ? 'Expand reasoning' : 'Collapse reasoning'">
+                  <svg class="w-3 h-3 transition-transform"
+                       :class="msg.thinkingCollapsed ? '' : 'rotate-90'"
+                       fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                  </svg>
+                  <span>{{ thinkingHeaderLabel(msg) }}</span>
+                </button>
+                <div v-if="!msg.thinkingCollapsed">{{ msg.reasoning }}</div>
               </div>
               <!-- Response content -->
               <div v-if="msg.content"
@@ -1084,6 +1091,15 @@ function exportConversation() {
   border-radius: 0.5em;
 }
 .prose-chat table {
+  /* Fixed layout + a common first-column width is what makes separate tables
+     align across the page. When the agent emits one table per category (tools
+     catalog) or a skills table next to a tools table, readers expect the
+     identifier columns to line up; with `auto` layout each table auto-sizes
+     independently, so short rows ("exec") collapse their column tight while
+     wider rows ("filesystem") get wider — the columns visually drift between
+     tables. Fixed layout lets us pin the first column to a consistent width
+     across every table in this bubble. */
+  table-layout: fixed;
   border-collapse: collapse;
   margin: 0.5em 0;
   width: 100%;
@@ -1093,6 +1109,16 @@ function exportConversation() {
   padding: 0.4em 0.75em;
   text-align: left;
   vertical-align: top;
+}
+/* First column (identifier — tool name, skill name, etc.) pinned to a common
+   width across every prose-chat table. Tool/skill names are snake_case and
+   ≤ ~20 chars by convention, so 14em comfortably fits the longest observed
+   name ("restaurant-recommender") without wrapping while keeping consistent
+   horizontal rhythm across categories. nowrap guards against mid-word wraps
+   if a future identifier pushes past the budget. */
+.prose-chat th:first-child, .prose-chat td:first-child {
+  width: 14em;
+  white-space: nowrap;
 }
 
 /* Light-mode palette (default) */

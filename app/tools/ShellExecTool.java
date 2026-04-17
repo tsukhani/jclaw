@@ -49,6 +49,27 @@ public class ShellExecTool implements ToolRegistry.Tool {
     public String name() { return "exec"; }
 
     @Override
+    public String category() { return "System"; }
+
+    @Override
+    public String icon() { return "terminal"; }
+
+    @Override
+    public String shortDescription() {
+        return "Execute shell commands on the host system with allowlist-based security controls.";
+    }
+
+    @Override
+    public String requiresConfig() { return "shell.enabled"; }
+
+    @Override
+    public java.util.List<agents.ToolAction> actions() {
+        return java.util.List.of(
+                new agents.ToolAction("exec", "Run a shell command; validated against the permitted binary allowlist before execution")
+        );
+    }
+
+    @Override
     public String description() {
         return """
                 Execute a shell command on the host system. Commands are validated against an \

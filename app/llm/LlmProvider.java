@@ -600,14 +600,36 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
          */
         private final StringBuilder reasoningTextBuffer = new StringBuilder();
         public volatile Usage usage;
+        // Wall-clock nanoTime at first and latest reasoning chunk. Both remain 0
+        // when the model emitted no reasoning. reasoningEndNanos is updated on
+        // every append so it naturally captures "end of reasoning phase" — the
+        // gap between the last reasoning chunk and the first content chunk is
+        // within one provider tick, accurate enough for a user-visible seconds
+        // label. See AgentRunner.buildUsageJson for the ms conversion.
+        public volatile long reasoningStartNanos = 0L;
+        public volatile long reasoningEndNanos = 0L;
         private final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
 
-        synchronized void appendReasoningText(String text) {
-            if (text != null) reasoningTextBuffer.append(text);
+        public synchronized void appendReasoningText(String text) {
+            if (text == null) return;
+            reasoningTextBuffer.append(text);
+            var now = System.nanoTime();
+            if (reasoningStartNanos == 0L) reasoningStartNanos = now;
+            reasoningEndNanos = now;
         }
 
         /** Character count of accumulated reasoning text. Used for token estimation. */
         public synchronized int reasoningChars() { return reasoningTextBuffer.length(); }
+
+        /**
+         * Milliseconds spent in the reasoning phase, or 0 when no reasoning was
+         * streamed. Computed lazily so callers get a stable snapshot even if the
+         * stream is still in flight.
+         */
+        public long reasoningDurationMs() {
+            if (reasoningStartNanos == 0L) return 0L;
+            return (reasoningEndNanos - reasoningStartNanos) / 1_000_000L;
+        }
 
         void markComplete() { complete = true; latch.countDown(); }
         public void awaitCompletion() throws InterruptedException { latch.await(); }

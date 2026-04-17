@@ -34,6 +34,33 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     public String name() { return "browser"; }
 
     @Override
+    public String category() { return "Web"; }
+
+    @Override
+    public String icon() { return "browser"; }
+
+    @Override
+    public String shortDescription() {
+        return "Headless browser automation for SPAs, login flows, and JavaScript-heavy pages.";
+    }
+
+    @Override
+    public String requiresConfig() { return "playwright.enabled"; }
+
+    @Override
+    public java.util.List<agents.ToolAction> actions() {
+        return java.util.List.of(
+                new agents.ToolAction("navigate",   "Load a URL, wait for network idle, and return page text"),
+                new agents.ToolAction("click",      "Click a DOM element by CSS selector"),
+                new agents.ToolAction("fill",       "Fill a form field with a value by CSS selector"),
+                new agents.ToolAction("getText",    "Extract the text content of a CSS selector"),
+                new agents.ToolAction("screenshot", "Capture a full-page screenshot and save it to the workspace"),
+                new agents.ToolAction("evaluate",   "Execute a JavaScript expression and return the result"),
+                new agents.ToolAction("close",      "Close the browser session and free all resources")
+        );
+    }
+
+    @Override
     public String description() {
         return """
                 Headless browser for JavaScript-heavy web pages. \

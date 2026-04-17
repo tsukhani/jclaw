@@ -44,8 +44,8 @@ const toolsByCategory = computed(() => {
     .map(category => ({
       category,
       tools: agentTools.value
-        .filter(t => !TOOL_META[t.name]?.system)
-        .filter(t => (TOOL_META[t.name]?.category ?? 'Utilities') === category)
+        .filter(t => !TOOL_META.value[t.name]?.system)
+        .filter(t => (TOOL_META.value[t.name]?.category ?? 'Utilities') === category)
         .sort((a, b) => posOf(a.name) - posOf(b.name)),
     }))
     .filter(g => g.tools.length > 0)
@@ -210,7 +210,7 @@ async function toggleTool(toolName: string, enabled: boolean) {
 }
 
 const toggleableAgentTools = computed(() =>
-  agentTools.value.filter((t: any) => !TOOL_META[t.name]?.system)
+  agentTools.value.filter((t: any) => !TOOL_META.value[t.name]?.system)
 )
 
 const allAgentToolsEnabled = computed(() =>

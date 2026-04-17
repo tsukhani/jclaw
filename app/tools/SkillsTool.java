@@ -1,6 +1,7 @@
 package tools;
 
 import agents.SkillLoader;
+import agents.ToolCatalog;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
@@ -8,6 +9,8 @@ import services.AgentService;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -15,6 +18,26 @@ public class SkillsTool implements ToolRegistry.Tool {
 
     @Override
     public String name() { return "skills"; }
+
+    @Override
+    public String category() { return "Utilities"; }
+
+    @Override
+    public String icon() { return "skills"; }
+
+    @Override
+    public String shortDescription() {
+        return "Runtime introspection: discover which tools and skills are currently available to the agent.";
+    }
+
+    @Override
+    public java.util.List<agents.ToolAction> actions() {
+        return java.util.List.of(
+                new agents.ToolAction("listTools",  "List all tools currently enabled for this agent"),
+                new agents.ToolAction("listSkills", "List all skills currently available to this agent"),
+                new agents.ToolAction("readSkill",  "Read the full content of a specific skill by name")
+        );
+    }
 
     @Override
     public boolean isSystem() { return true; }
@@ -46,14 +69,27 @@ public class SkillsTool implements ToolRegistry.Tool {
 
         return switch (action) {
             case "listTools" -> {
-                // loadDisabledTools queries the DB — needs a transaction context.
-                // Exclude this tool itself (skills) — it is always available and listing it would be reflexive.
-                var toolDefs = services.Tx.run(() -> agents.ToolRegistry.getToolDefsForAgent(agent))
-                        .stream().filter(d -> !d.function().name().equals(name())).toList();
-                if (toolDefs.isEmpty()) yield "No other tools are currently enabled for this agent.";
-                var sb = new StringBuilder("Available tools (%d):\n".formatted(toolDefs.size()));
-                for (var def : toolDefs) {
-                    sb.append("- **%s**: %s\n".formatted(def.function().name(), def.function().description()));
+                // Filter out system tools (including this one) so the user-visible reply
+                // doesn't advertise introspection plumbing. loadDisabledTools queries the
+                // DB — needs a transaction context. Group by Tool.category() using the
+                // canonical ordering shared with the system-prompt Tool Catalog.
+                var disabled = services.Tx.run(() -> ToolRegistry.loadDisabledTools(agent));
+                var tools = ToolRegistry.listTools().stream()
+                        .filter(t -> !t.isSystem())
+                        .filter(t -> !disabled.contains(t.name()))
+                        .toList();
+                if (tools.isEmpty()) yield "No tools are currently enabled for this agent.";
+                var byCategory = new LinkedHashMap<String, List<ToolRegistry.Tool>>();
+                for (var cat : ToolCatalog.CANONICAL_CATEGORY_ORDER) byCategory.put(cat, new ArrayList<>());
+                for (var t : tools) byCategory.computeIfAbsent(t.category(), _ -> new ArrayList<>()).add(t);
+                var sb = new StringBuilder("Available tools (%d):\n".formatted(tools.size()));
+                for (var entry : byCategory.entrySet()) {
+                    var bucket = entry.getValue();
+                    if (bucket.isEmpty()) continue;
+                    sb.append("\n### ").append(entry.getKey()).append("\n");
+                    for (var t : bucket) {
+                        sb.append("- **%s**: %s\n".formatted(t.name(), t.description()));
+                    }
                 }
                 yield sb.toString();
             }
@@ -61,9 +97,16 @@ public class SkillsTool implements ToolRegistry.Tool {
                 SkillLoader.clearCache();
                 var skills = SkillLoader.loadSkills(agent.name);
                 if (skills.isEmpty()) yield "No skills are currently available for this agent.";
-                var sb = new StringBuilder("Available skills (%d):\n".formatted(skills.size()));
+                // Emit a markdown table so the chat page's fixed-layout CSS gives
+                // every skill name the same column width — no mid-word wrapping and
+                // the Skill column lines up with the Tool column in listTools.
+                var sb = new StringBuilder("Available skills (%d):\n\n".formatted(skills.size()));
+                sb.append("| Skill | Description |\n");
+                sb.append("|---|---|\n");
                 for (var skill : skills) {
-                    sb.append("- **%s**: %s\n".formatted(skill.name(), skill.description()));
+                    var icon = skill.icon() == null || skill.icon().isEmpty() ? SkillLoader.DEFAULT_SKILL_ICON : skill.icon();
+                    var desc = skill.description() == null ? "" : skill.description().replace("\n", " ");
+                    sb.append("| %s **%s** | %s |\n".formatted(icon, skill.name(), desc));
                 }
                 yield sb.toString();
             }

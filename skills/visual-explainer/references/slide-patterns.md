@@ -712,7 +712,7 @@ Full-viewport Mermaid diagram. Max 8–10 nodes (presentation scale — fewer, l
 For simple linear flows (build steps, deployment stages, data pipelines) where Mermaid would render too small. CSS cards with arrow connectors give full control over sizing and fill the viewport naturally. Each step card expands to fill available space via `flex: 1`.
 
 ```html
-<section class="slide" style="background-image:radial-gradient(...);">
+<section class="slide" style="background-image:radial-gradient(...)">
   <p class="slide__label reveal">Pipeline Label</p>
   <h2 class="slide__heading reveal">Pipeline Title</h2>
   <div class="pipeline reveal">
@@ -799,7 +799,7 @@ For simple linear flows (build steps, deployment stages, data pipelines) where M
 }
 ```
 
-Each `.pipeline__step` uses `flex: 1` to fill available width equally, and the pipeline container itself uses `flex: 1` to fill available vertical space in the slide. Step cards stretch to fill, so the content isn't floating in empty space. The `.pipeline__file" badge at the bottom anchors each card and adds a practical detail. Max 5–6 steps — beyond that, split across two slides.
+Each `.pipeline__step` uses `flex: 1` to fill available width equally, and the pipeline container itself uses `flex: 1` to fill available vertical space in the slide. Step cards stretch to fill, so the content isn't floating in empty space. The `.pipeline__file` badge at the bottom anchors each card and adds a practical detail. Max 5–6 steps — beyond that, split across two slides.
 
 ### Dashboard Slide
 
@@ -1403,4 +1403,4 @@ White, geometric sans, single bold accent, visible grid. Minimal and precise. Li
 }
 ```
 
-Background: clean white or near-black, no gradients. Visible grid lines (the `--with-grid" pattern). Tight geometric layouts. Single accent color used sparingly for emphasis. Data-heavy and analytical content shines here.
+Background: clean white or near-black, no gradients. Visible grid lines (the `--with-grid` pattern). Tight geometric layouts. Single accent color used sparingly for emphasis. Data-heavy and analytical content shines here.

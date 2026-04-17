@@ -3,6 +3,7 @@ package agents;
 import models.Agent;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -42,17 +43,47 @@ public class ToolCatalog {
                 .filter(t -> !disabledForAgent.contains(t.name()))
                 .toList();
         if (tools.isEmpty()) return "";
-        var sb = new StringBuilder();
-        sb.append("| Tool | Purpose |\n");
-        sb.append("|---|---|\n");
+        return renderGroupedCatalog(tools);
+    }
+
+    /**
+     * Group the supplied tools by {@link ToolRegistry.Tool#category()} and emit a
+     * markdown section per category in canonical order (System → Files → Web → Utilities).
+     * Categories outside the canonical set are appended at the end in the order the LLM
+     * first encountered them, so a future custom category doesn't silently disappear.
+     */
+    private static String renderGroupedCatalog(List<ToolRegistry.Tool> tools) {
+        var byCategory = new LinkedHashMap<String, List<ToolRegistry.Tool>>();
+        for (var cat : CANONICAL_CATEGORY_ORDER) byCategory.put(cat, new ArrayList<>());
         for (var t : tools) {
-            var summary = t.summary() != null ? t.summary().replace("\n", " ") : "";
-            sb.append("| `").append(t.name()).append("` | ")
-              .append(summary)
-              .append(" |\n");
+            byCategory.computeIfAbsent(t.category(), _ -> new ArrayList<>()).add(t);
+        }
+        var sb = new StringBuilder();
+        var first = true;
+        for (var entry : byCategory.entrySet()) {
+            var bucket = entry.getValue();
+            if (bucket.isEmpty()) continue;
+            if (!first) sb.append("\n");
+            first = false;
+            sb.append("### ").append(entry.getKey()).append("\n");
+            sb.append("| Tool | Purpose |\n");
+            sb.append("|---|---|\n");
+            for (var t : bucket) {
+                var summary = t.summary() != null ? t.summary().replace("\n", " ") : "";
+                sb.append("| `").append(t.name()).append("` | ")
+                  .append(summary)
+                  .append(" |\n");
+            }
         }
         return sb.toString();
     }
+
+    /**
+     * Canonical ordering for the four categories defined in
+     * {@code frontend/composables/useToolMeta.ts:TOOL_CATEGORIES}. Both surfaces must
+     * stay in sync until JCLAW-72 collapses the taxonomy to a single source of truth.
+     */
+    public static final List<String> CANONICAL_CATEGORY_ORDER = List.of("System", "Files", "Web", "Utilities");
 
     public record ValidationResult(List<String> unknown, List<String> disabled) {
         public boolean isOk() { return unknown.isEmpty() && disabled.isEmpty(); }

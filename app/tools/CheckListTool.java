@@ -17,6 +17,24 @@ public class CheckListTool implements ToolRegistry.Tool {
     public String name() { return "checklist"; }
 
     @Override
+    public String category() { return "Utilities"; }
+
+    @Override
+    public String icon() { return "check"; }
+
+    @Override
+    public String shortDescription() {
+        return "Create and manage structured checklists to track multi-step work in progress.";
+    }
+
+    @Override
+    public java.util.List<agents.ToolAction> actions() {
+        return java.util.List.of(
+                new agents.ToolAction("update", "Submit a checklist with items and statuses; exactly one item must be in_progress at a time")
+        );
+    }
+
+    @Override
     public String description() {
         return """
                 Create and manage a structured checklist for tracking multi-step work. \

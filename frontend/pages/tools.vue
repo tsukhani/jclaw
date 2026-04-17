@@ -1,13 +1,7 @@
 <script setup lang="ts">
 import type { ToolMeta } from '~/composables/useToolMeta'
 
-const { TOOL_META } = useToolMeta()
-
-const ORDERED_TOOLS = [
-  'exec', 'filesystem', 'documents',
-  'web_fetch', 'web_search', 'browser',
-  'datetime', 'checklist', 'task_manager', 'skills'
-]
+const { TOOL_META, ORDERED_TOOLS } = useToolMeta()
 
 const CATEGORIES = ['All', 'System', 'Web', 'Files', 'Utilities'] as const
 
@@ -81,11 +75,13 @@ async function toggleTool(toolName: string, enabled: boolean) {
 const registeredNames = computed(() => new Set((apiTools.value ?? []).map(t => t.name)))
 
 const allTools = computed(() =>
-  ORDERED_TOOLS.map(name => ({
-    name,
-    registered: registeredNames.value.has(name),
-    meta: TOOL_META[name]
-  })).filter(t => !t.meta.system)
+  ORDERED_TOOLS.value
+    .map(name => ({
+      name,
+      registered: registeredNames.value.has(name),
+      meta: TOOL_META.value[name]
+    }))
+    .filter(t => t.meta && !t.meta.system)
 )
 
 const activeCategory = ref<typeof CATEGORIES[number]>('All')

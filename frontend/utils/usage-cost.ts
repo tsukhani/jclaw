@@ -24,6 +24,8 @@ export interface MessageUsage {
   cached: number
   cacheCreation?: number
   durationMs: number
+  /** Wall-clock ms spent in the reasoning phase (first→last reasoning chunk). Omitted when no reasoning was streamed. */
+  reasoningDurationMs?: number
   promptPrice?: number
   completionPrice?: number
   cachedReadPrice?: number

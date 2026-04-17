@@ -157,6 +157,44 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
+    public void streamAccumulatorReasoningDurationIsZeroWhenNoReasoning() {
+        var acc = new LlmProvider.StreamAccumulator();
+        assertEquals(0L, acc.reasoningDurationMs());
+        assertEquals(0L, acc.reasoningStartNanos);
+        assertEquals(0L, acc.reasoningEndNanos);
+    }
+
+    @Test
+    public void streamAccumulatorCapturesReasoningSpan() throws Exception {
+        // Simulates JCLAW-70 timing capture: first reasoning chunk stamps the
+        // start, the last chunk extends the end. Duration must be positive
+        // and within a sane upper bound (the ~5ms sleep plus scheduler noise).
+        var acc = new LlmProvider.StreamAccumulator();
+        acc.appendReasoningText("Thinking about sky...");
+        Thread.sleep(5);
+        acc.appendReasoningText(" because of Rayleigh.");
+
+        var firstStart = acc.reasoningStartNanos;
+        var duration = acc.reasoningDurationMs();
+        assertTrue(duration >= 1L, "duration must be >= 1ms");
+        assertTrue(duration < 500L, "duration must be < 500ms (sleep was 5ms)");
+
+        // Start is latched on first append — later appends extend end, not start.
+        acc.appendReasoningText(" Done.");
+        assertEquals(firstStart, acc.reasoningStartNanos);
+        assertTrue(acc.reasoningDurationMs() >= duration,
+                "end must advance past the third chunk");
+    }
+
+    @Test
+    public void streamAccumulatorIgnoresNullReasoningText() {
+        var acc = new LlmProvider.StreamAccumulator();
+        acc.appendReasoningText(null);
+        assertEquals(0L, acc.reasoningStartNanos);
+        assertEquals(0L, acc.reasoningDurationMs());
+    }
+
+    @Test
     public void llmExceptionPreservesMessage() {
         var ex = new LlmProvider.LlmException("Provider down");
         assertEquals("Provider down", ex.getMessage());

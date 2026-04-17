@@ -43,6 +43,7 @@ PUT     /api/agents/{id}/workspace/{filename}   ApiAgentsController.saveWorkspac
 
 # Tools API
 GET     /api/tools                              ApiToolsController.list
+GET     /api/tools/meta                         ApiToolsController.meta
 GET     /api/agents/{id}/tools                  ApiToolsController.listForAgent
 PUT     /api/agents/{id}/tools/{name}           ApiToolsController.updateForAgent
 

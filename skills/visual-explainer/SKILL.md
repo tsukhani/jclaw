@@ -1,13 +1,20 @@
 ---
 name: visual-explainer
 description: Generate beautiful, self-contained HTML pages that visually explain systems, code changes, plans, and data. Use when the user asks for a diagram, architecture overview, diff review, plan review, project recap, comparison table, or any visual explanation of technical concepts. Also use proactively when you are about to render a complex ASCII table (4+ rows or 3+ columns) — present it as a styled HTML page instead.
-version: 1.0.2
+version: 1.0.3
 tools: [filesystem, exec]
 ---
-
 # Visual Explainer
 
 Generate self-contained HTML files for technical diagrams, visualizations, and data tables. Always open the result in the browser automatically. Never fall back to ASCII art diagrams when this skill is loaded. This is a fully-featured visualization tool for transforming complex technical concepts into beautiful, interactive diagrams.
+
+> **⚠️ YOU are the renderer. There is no build step.**
+>
+> This skill does **not** ship a Markdown-to-HTML pipeline. There is no `explain.py`, no `render.sh`, no static-site generator, no transformer script. Do not write a `.md` file as an intermediate and then try to "compile" it — that path does not exist and `python3 skills/visual-explainer/<anything>.py` will fail with "can't open file" because no such file exists.
+>
+> The workflow is always: **write the final `.html` file directly** using the `filesystem` tool, drawing on `./templates/*.html` and `./references/*.md` for patterns. The only executable script in this skill is `scripts/share.sh`, which deploys an already-written HTML page to Vercel (see the `share` command below).
+>
+> If you catch yourself about to run a Python/Node script against a Markdown source, stop and write the HTML file directly instead.
 
 **Proactive table rendering.** When you're about to present tabular data as an ASCII box-drawing table in the terminal (comparisons, audits, feature matrices, status reports, any structured rows/columns), generate an HTML page instead. The threshold: if the table has 4+ rows or 3+ columns, it belongs in the browser. Don't wait for the user to ask — render it as HTML automatically and tell them the file path. You can still include a brief text summary in the chat, but the table itself should be the HTML page.
 

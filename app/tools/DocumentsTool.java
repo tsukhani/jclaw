@@ -38,6 +38,27 @@ public class DocumentsTool implements ToolRegistry.Tool {
     public String name() { return "documents"; }
 
     @Override
+    public String category() { return "Files"; }
+
+    @Override
+    public String icon() { return "document"; }
+
+    @Override
+    public String shortDescription() {
+        return "Read and author rich formats — PDF, DOCX, HTML, XLSX, PPTX, EPUB — from markdown.";
+    }
+
+    @Override
+    public java.util.List<agents.ToolAction> actions() {
+        return java.util.List.of(
+                new agents.ToolAction("readDocument",   "Extract text from PDF, DOCX, XLSX, PPTX, HTML, RTF, ODT, EPUB via Apache Tika"),
+                new agents.ToolAction("writeDocument",  "Author a new HTML, PDF, or DOCX file from markdown input"),
+                new agents.ToolAction("appendDocument", "Append markdown to a draft file for incremental large-document authoring"),
+                new agents.ToolAction("renderDocument", "Convert an accumulated markdown draft into the target output format")
+        );
+    }
+
+    @Override
     public String description() {
         return """
                 Read and write rich document formats. This is a single tool with an 'action' parameter. \

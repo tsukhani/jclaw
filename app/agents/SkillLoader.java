@@ -40,24 +40,34 @@ public class SkillLoader {
      */
     public record SkillInfo(String name, String description, Path location,
                             List<String> tools, boolean toolsDeclared, String version,
-                            List<String> commands, String author) {
+                            List<String> commands, String author, String icon) {
         public SkillInfo(String name, String description, Path location) {
-            this(name, description, location, List.of(), false, "0.0.0", List.of(), "");
+            this(name, description, location, List.of(), false, "0.0.0", List.of(), "", "");
         }
 
-        /** Backwards-compatible 6-arg constructor for call sites predating the {@code commands}/{@code author} fields. */
+        /** Backwards-compatible 6-arg constructor for call sites predating the {@code commands}/{@code author}/{@code icon} fields. */
         public SkillInfo(String name, String description, Path location,
                          List<String> tools, boolean toolsDeclared, String version) {
-            this(name, description, location, tools, toolsDeclared, version, List.of(), "");
+            this(name, description, location, tools, toolsDeclared, version, List.of(), "", "");
         }
 
-        /** Backwards-compatible 7-arg constructor for call sites predating the {@code author} field. */
+        /** Backwards-compatible 7-arg constructor for call sites predating the {@code author}/{@code icon} fields. */
         public SkillInfo(String name, String description, Path location,
                          List<String> tools, boolean toolsDeclared, String version,
                          List<String> commands) {
-            this(name, description, location, tools, toolsDeclared, version, commands, "");
+            this(name, description, location, tools, toolsDeclared, version, commands, "", "");
+        }
+
+        /** Backwards-compatible 8-arg constructor for call sites predating the {@code icon} field. */
+        public SkillInfo(String name, String description, Path location,
+                         List<String> tools, boolean toolsDeclared, String version,
+                         List<String> commands, String author) {
+            this(name, description, location, tools, toolsDeclared, version, commands, author, "");
         }
     }
+
+    /** Emoji substituted in user-visible skill listings when a SKILL.md omits the {@code icon:} frontmatter key. */
+    public static final String DEFAULT_SKILL_ICON = "🎯";
 
     /** Compare two semver strings. Delegates to {@link SkillVersionManager}. */
     public static int compareVersions(String a, String b) {
@@ -187,11 +197,15 @@ public class SkillLoader {
         var agentDir = workspaceDir.resolve("skills");
         scanSkillsDirectory(agentDir, allSkills);
 
-        // Make locations relative to the agent's workspace (readFile tool resolves relative to workspace)
+        // Make locations relative to the agent's workspace (readFile tool resolves relative to workspace).
+        // Preserve every field on the record — the 6-arg constructor used previously
+        // silently defaulted commands/author/icon to empty, which is how JCLAW-71's
+        // icon field leaked back to "" after parsing.
         allSkills.replaceAll(s -> {
             if (s.location() != null && s.location().startsWith(workspaceDir)) {
                 return new SkillInfo(s.name(), s.description(), workspaceDir.relativize(s.location()),
-                        s.tools(), s.toolsDeclared(), s.version());
+                        s.tools(), s.toolsDeclared(), s.version(),
+                        s.commands(), s.author(), s.icon());
             }
             return s;
         });
@@ -331,6 +345,8 @@ public class SkillLoader {
                 - Match by intent, not exact wording. A skill applies when the user's goal falls within the skill's domain, even if the description includes details the user did not mention. Example: a user asking "recommend a restaurant" matches a skill described as "restaurants in City X" — the skill's specifics are implementation details, not prerequisites.
                 - If none clearly apply: do not read any SKILL.md.
                 - **Skill authoring is always routed through skill-creator.** If the user asks to create, update, modify, edit, rename, refactor, fix, or change a skill (anything under `skills/<name>/`), the applicable skill is `skill-creator` — regardless of whether the user mentions it by name. Read `skill-creator`'s SKILL.md first and follow its workflow. Never edit files under `skills/<name>/` directly via the filesystem tool without going through skill-creator.
+                - **When the user asks what skills you have:** render a markdown table with header `| Skill | Description |`, one row per skill, where the Skill cell is `<icon> **<name>**` (icon from `<available_skills>` `<icon>` element) and the Description cell is the skill's `<description>`.
+                - **When the user asks what tools you have:** present them grouped by the `###` category headings in the Tool Catalog (System / Files / Web / Utilities), each category followed by its own `| Tool | Purpose |` markdown table. Do not mention tools that are not in the Tool Catalog — those are internal and should stay invisible to the user.
                 Constraints: never read more than one skill up front; only read after selecting.
                 """;
     }
@@ -380,10 +396,12 @@ public class SkillLoader {
             var version = extractYamlValue(frontmatter, "version");
             var commands = extractYamlList(frontmatter, "commands");
             var author = extractYamlValue(frontmatter, "author");
+            var icon = extractYamlValue(frontmatter, "icon");
             if (name != null) {
                 return new SkillInfo(name, description != null ? description : "", locationHint,
                         tools, toolsDeclared, version != null ? version : "0.0.0",
-                        commands, author != null ? author : "");
+                        commands, author != null ? author : "",
+                        icon != null ? icon : "");
             }
         }
         return null;
@@ -518,6 +536,8 @@ public class SkillLoader {
         var sb = new StringBuilder();
         sb.append("  <skill>\n");
         sb.append("    <name>").append(skill.name()).append("</name>\n");
+        var icon = skill.icon() == null || skill.icon().isEmpty() ? DEFAULT_SKILL_ICON : skill.icon();
+        sb.append("    <icon>").append(icon).append("</icon>\n");
         if (full) {
             sb.append("    <description>").append(skill.description()).append("</description>\n");
         }

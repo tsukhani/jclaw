@@ -31,6 +31,18 @@ function setupMockApi() {
     { id: 1, agentId: 1, agentName: 'test', channelType: 'web', peerId: 'admin', messageCount: 3, preview: 'Hello', createdAt: '2026-04-07T10:00:00Z', updatedAt: '2026-04-07T10:00:00Z' }
   ])
   registerEndpoint('/api/conversations/channels', () => ['web', 'telegram'])
+  // JCLAW-72: useToolMeta composable fetches from /api/tools/meta on mount.
+  // Supply a minimal fixture so agents.vue renders without errors.
+  registerEndpoint('/api/tools/meta', () => [
+    { name: 'exec', category: 'System', icon: 'terminal',
+      shortDescription: 'Shell', system: false, actions: [] },
+    { name: 'web_fetch', category: 'Web', icon: 'globe',
+      shortDescription: 'Fetch URLs', system: false, actions: [] }
+  ])
+  registerEndpoint('/api/agents/1/tools', () => [
+    { name: 'exec', description: 'Execute shell', system: false, enabled: true },
+    { name: 'web_fetch', description: 'Fetch URLs', system: false, enabled: true }
+  ])
 }
 
 describe('Dashboard page', () => {

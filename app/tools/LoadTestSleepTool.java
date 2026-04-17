@@ -22,6 +22,11 @@ public class LoadTestSleepTool implements ToolRegistry.Tool {
     private static final int MAX_MS = 10_000;
 
     @Override public String name() { return "loadtest_sleep"; }
+    @Override public String category() { return "System"; }
+    @Override public String icon() { return "clock"; }
+    @Override public String shortDescription() {
+        return "Internal load-testing sleep tool — not surfaced in the admin UI.";
+    }
     @Override public boolean isSystem() { return true; }
 
     @Override public String description() {

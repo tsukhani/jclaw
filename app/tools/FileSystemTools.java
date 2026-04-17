@@ -29,6 +29,29 @@ public class FileSystemTools implements ToolRegistry.Tool {
     public String name() { return "filesystem"; }
 
     @Override
+    public String category() { return "Files"; }
+
+    @Override
+    public String icon() { return "folder"; }
+
+    @Override
+    public String shortDescription() {
+        return "Read, write, edit, list, and patch plain text files in the agent's workspace.";
+    }
+
+    @Override
+    public java.util.List<agents.ToolAction> actions() {
+        return java.util.List.of(
+                new agents.ToolAction("readFile",   "Read file content up to 1 MB"),
+                new agents.ToolAction("writeFile",  "Create or overwrite a file with full content"),
+                new agents.ToolAction("appendFile", "Append content to the end of a file, creating it if missing"),
+                new agents.ToolAction("editFile",   "Apply a batch of oldText → newText replacements atomically"),
+                new agents.ToolAction("applyPatch", "Apply a multi-file unified diff patch"),
+                new agents.ToolAction("listFiles",  "List the contents of a directory")
+        );
+    }
+
+    @Override
     public String description() {
         return """
                 Read, write, edit, list, and patch plain text files in the agent's workspace. \

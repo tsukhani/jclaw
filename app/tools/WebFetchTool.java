@@ -27,6 +27,25 @@ public class WebFetchTool implements ToolRegistry.Tool {
     public String name() { return "web_fetch"; }
 
     @Override
+    public String category() { return "Web"; }
+
+    @Override
+    public String icon() { return "globe"; }
+
+    @Override
+    public String shortDescription() {
+        return "Fetch and extract readable text or raw HTML from any URL.";
+    }
+
+    @Override
+    public java.util.List<agents.ToolAction> actions() {
+        return java.util.List.of(
+                new agents.ToolAction("fetch (text)", "Retrieve a URL and extract clean, readable text content"),
+                new agents.ToolAction("fetch (html)", "Retrieve a URL and return the raw HTML source")
+        );
+    }
+
+    @Override
     public String description() {
         return """
                 Fetch the content of a URL. \

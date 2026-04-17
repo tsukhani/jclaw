@@ -40,6 +40,38 @@ public class ToolRegistry {
          *  hidden from the system prompt's tool catalog (the LLM can still invoke
          *  them via the tool schema — they just aren't advertised to users). */
         default boolean isSystem() { return false; }
+
+        /** Taxonomy bucket used to group tools in the system-prompt Tool Catalog and
+         *  the {@code skills.listTools} output. Must be one of
+         *  {@code "System"}, {@code "Files"}, {@code "Web"}, {@code "Utilities"} —
+         *  matching the {@code CANONICAL_CATEGORY_ORDER} list exposed by {@link ToolCatalog}.
+         *  Defaults to {@code "Utilities"} so a tool that forgets to override still
+         *  renders somewhere sensible. */
+        default String category() { return "Utilities"; }
+
+        /** Semantic icon key consumed by the admin UI's SVG dictionary (e.g.
+         *  {@code "terminal"}, {@code "folder"}, {@code "globe"}). The backend
+         *  does not know what pixels render from this — it only emits the key and
+         *  the frontend resolves it to an SVG {@code <path>}. Defaults to
+         *  {@code "wrench"}, the generic fallback icon. */
+        default String icon() { return "wrench"; }
+
+        /** User-facing blurb rendered in the admin UI tool cards. Richer than
+         *  the function-calling {@link #description()} that goes to the LLM —
+         *  describes the tool's purpose for a human browsing the /tools page.
+         *  Defaults to {@link #summary()}. */
+        default String shortDescription() { return summary(); }
+
+        /** Enumerated actions this tool exposes. The admin UI renders these as a
+         *  "Show actions" disclosure under each tool card; the names typically
+         *  match the {@code action} field in {@link #parameters()}. Empty by
+         *  default for single-action tools that would repeat their own name. */
+        default java.util.List<ToolAction> actions() { return java.util.List.of(); }
+
+        /** Runtime config key (in {@code ConfigService}) that must be truthy for
+         *  this tool to be usable. The admin UI gates the "Enable" toggle on
+         *  this. {@code null} means no runtime dependency. */
+        default String requiresConfig() { return null; }
     }
 
     private static volatile Map<String, Tool> tools = Map.of();

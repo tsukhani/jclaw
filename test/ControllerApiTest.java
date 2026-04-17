@@ -381,6 +381,49 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
+    public void toolsMetaReturnsRichShape() {
+        // Publish a known tool set so this test is independent of whatever
+        // the DefaultConfigJob did (or didn't) register in the test JVM.
+        var originalTools = agents.ToolRegistry.listTools();
+        try {
+            agents.ToolRegistry.publish(java.util.List.of(
+                    new tools.ShellExecTool(),
+                    new tools.FileSystemTools(),
+                    new tools.WebFetchTool(),
+                    new tools.DateTimeTool()
+            ));
+            login();
+            var response = GET("/api/tools/meta");
+            assertIsOk(response);
+            assertContentType("application/json", response);
+            var content = getContent(response);
+            assertTrue(content.startsWith("["), "response is a JSON array");
+            // Backend taxonomy — every tool must carry category/icon/shortDescription/actions.
+            assertTrue(content.contains("\"category\""),         "carries category");
+            assertTrue(content.contains("\"icon\""),             "carries icon");
+            assertTrue(content.contains("\"shortDescription\""), "carries shortDescription");
+            assertTrue(content.contains("\"actions\""),          "carries actions");
+            // Concrete category values from the published tool set.
+            assertTrue(content.contains("\"System\""),    "exec is System-category");
+            assertTrue(content.contains("\"Files\""),     "filesystem is Files");
+            assertTrue(content.contains("\"Web\""),       "web_fetch is Web");
+            assertTrue(content.contains("\"Utilities\""), "datetime is Utilities");
+            // ShellExecTool declares its config gate — gate must ride in the response.
+            assertTrue(content.contains("\"shell.enabled\""), "requiresConfig surfaced when set");
+            // Presentational concerns must NOT leak into the backend response.
+            assertFalse(content.contains("bg-neutral"), "no Tailwind classes in API");
+            assertFalse(content.contains("<path"),      "no SVG markup in API");
+        } finally {
+            agents.ToolRegistry.publish(originalTools);
+        }
+    }
+
+    @Test
+    public void toolsMetaRequiresAuth() {
+        assertEquals(401, GET("/api/tools/meta").status.intValue());
+    }
+
+    @Test
     public void toolsListForAgent() {
         login();
         var id = createTestAgent();

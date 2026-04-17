@@ -4,6 +4,7 @@ description: Create new skills or refactor existing skills to follow the standar
 version: 1.1.0
 author: main
 tools: [filesystem]
+icon: 🛠️
 ---
 # Skill Creator & Refactorer
 

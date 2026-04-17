@@ -472,7 +472,12 @@ public class AgentRunner {
     private static String buildUsageJson(LlmProvider.StreamAccumulator accumulator,
                                           ModelInfo modelInfo, long streamStartMs) {
         var durationMs = System.currentTimeMillis() - streamStartMs;
-        if (accumulator.usage == null) return "{\"durationMs\":%d}".formatted(durationMs);
+        if (accumulator.usage == null) {
+            var reasoningMs = accumulator.reasoningDurationMs();
+            return reasoningMs > 0L
+                    ? "{\"durationMs\":%d,\"reasoningDurationMs\":%d}".formatted(durationMs, reasoningMs)
+                    : "{\"durationMs\":%d}".formatted(durationMs);
+        }
 
         var u = accumulator.usage;
         var reasoningCount = effectiveReasoningTokens(u, accumulator);
@@ -484,6 +489,8 @@ public class AgentRunner {
         usageMap.addProperty("cached", u.cachedTokens());
         usageMap.addProperty("cacheCreation", u.cacheCreationTokens());
         usageMap.addProperty("durationMs", durationMs);
+        var reasoningMs = accumulator.reasoningDurationMs();
+        if (reasoningMs > 0L) usageMap.addProperty("reasoningDurationMs", reasoningMs);
 
         if (modelInfo != null) {
             if (modelInfo.promptPrice() >= 0) usageMap.addProperty("promptPrice", modelInfo.promptPrice());

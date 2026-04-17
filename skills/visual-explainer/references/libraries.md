@@ -241,7 +241,7 @@ Auth --> API
 **Arrow styles for semantic meaning:**
 
 | Arrow | Meaning | Use for |
-|-------|---------|---------|
+|-------|---------|----------|
 | `-->` | Solid | Primary flow |
 | `-.->` | Dotted | Optional, async, or fallback paths |
 | `==>` | Thick | Critical or highlighted path |
@@ -405,7 +405,7 @@ graph TD
   user("👤 User<br/><small>Browser client</small>")
   subgraph boundary["Web Platform"]
     app["Web App<br/><small>Node.js</small>"]
-    db[("Database<br/><small>PostgreSQL</small>")]
+    db["("Database<br/><small>PostgreSQL</small>")"]
   end
   email["📧 Email Service"]:::ext
   payment["💳 Payment Gateway"]:::ext

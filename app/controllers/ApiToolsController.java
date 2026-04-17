@@ -35,6 +35,33 @@ public class ApiToolsController extends Controller {
     }
 
     /**
+     * GET /api/tools/meta — Authoritative tool metadata for the admin UI.
+     *
+     * <p>Unlike {@link #list()} this returns the rich presentational shape the
+     * frontend's {@code useToolMeta} composable consumes. The backend is now
+     * the single source of truth for category, icon, short description, and the
+     * enumerated action list (JCLAW-72 migrated these off the hardcoded frontend
+     * dictionary). Purely static registry metadata — no per-agent filtering,
+     * no DB transaction.
+     */
+    public static void meta() {
+        var result = ToolRegistry.listTools().stream().map(t -> {
+            var map = new HashMap<String, Object>();
+            map.put("name", t.name());
+            map.put("category", t.category());
+            map.put("icon", t.icon());
+            map.put("shortDescription", t.shortDescription());
+            map.put("system", t.isSystem());
+            if (t.requiresConfig() != null) {
+                map.put("requiresConfig", t.requiresConfig());
+            }
+            map.put("actions", t.actions());
+            return map;
+        }).toList();
+        renderJSON(gson.toJson(result));
+    }
+
+    /**
      * GET /api/agents/{id}/tools — List tools for an agent with enabled status.
      */
     public static void listForAgent(Long id) {

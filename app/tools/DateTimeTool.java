@@ -34,6 +34,26 @@ public class DateTimeTool implements ToolRegistry.Tool {
     public String name() { return "datetime"; }
 
     @Override
+    public String category() { return "Utilities"; }
+
+    @Override
+    public String icon() { return "clock"; }
+
+    @Override
+    public String shortDescription() {
+        return "Get the current time, convert between timezones, and calculate date differences.";
+    }
+
+    @Override
+    public java.util.List<agents.ToolAction> actions() {
+        return java.util.List.of(
+                new agents.ToolAction("now",       "Return the current date and time in the specified timezone"),
+                new agents.ToolAction("convert",   "Convert a timestamp from one timezone to another"),
+                new agents.ToolAction("calculate", "Add or subtract a duration from a timestamp, or compute the difference between two timestamps")
+        );
+    }
+
+    @Override
     public String description() {
         return """
                 Get the current date and time, convert between timezones, or perform date/time \

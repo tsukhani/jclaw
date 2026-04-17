@@ -21,6 +21,28 @@ public class TaskTool implements ToolRegistry.Tool {
     public String name() { return "task_manager"; }
 
     @Override
+    public String category() { return "Utilities"; }
+
+    @Override
+    public String icon() { return "tasks"; }
+
+    @Override
+    public String shortDescription() {
+        return "Create, schedule, and manage recurring background tasks for the agent.";
+    }
+
+    @Override
+    public java.util.List<agents.ToolAction> actions() {
+        return java.util.List.of(
+                new agents.ToolAction("createTask",            "Create an immediate background task with a name and description"),
+                new agents.ToolAction("scheduleTask",          "Schedule a task to run once at a specific ISO 8601 datetime"),
+                new agents.ToolAction("scheduleRecurringTask", "Create a recurring task using a cron expression"),
+                new agents.ToolAction("deleteRecurringTask",   "Cancel a recurring task by name"),
+                new agents.ToolAction("listRecurringTasks",    "List all currently active recurring tasks")
+        );
+    }
+
+    @Override
     public String description() {
         return """
                 Manage background tasks. This is a single tool with an 'action' parameter. \

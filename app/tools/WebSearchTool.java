@@ -44,6 +44,24 @@ public class WebSearchTool implements ToolRegistry.Tool {
     public String name() { return "web_search"; }
 
     @Override
+    public String category() { return "Web"; }
+
+    @Override
+    public String icon() { return "search"; }
+
+    @Override
+    public String shortDescription() {
+        return "Search the web using Exa, Brave, Tavily, or Perplexity for current results.";
+    }
+
+    @Override
+    public java.util.List<agents.ToolAction> actions() {
+        return java.util.List.of(
+                new agents.ToolAction("search", "Execute a web search; provider is auto-selected or can be specified explicitly")
+        );
+    }
+
+    @Override
     public String description() {
         return """
                 Search the web for current information. \
