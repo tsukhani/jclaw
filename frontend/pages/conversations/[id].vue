@@ -23,7 +23,9 @@ try {
 const conversationStats = computed(() => {
   let inputTokens = 0
   let outputTokens = 0
+  let cachedTokens = 0
   let totalCost = 0
+  let hypotheticalCost = 0
   let totalDurationMs = 0
   let totalOutputTokens = 0
   let hasCost = false
@@ -32,6 +34,7 @@ const conversationStats = computed(() => {
     if (!msg.usage) continue
     inputTokens += msg.usage.prompt || 0
     outputTokens += msg.usage.completion || 0
+    cachedTokens += msg.usage.cached || 0
     if (msg.usage.durationMs > 0 && msg.usage.completion > 0) {
       totalDurationMs += msg.usage.durationMs
       totalOutputTokens += msg.usage.completion
@@ -39,6 +42,11 @@ const conversationStats = computed(() => {
     const breakdown = computeUsageCostBreakdown(msg.usage)
     if (breakdown) {
       totalCost += breakdown.total
+      // Re-price every input token at the uncached rate to get the cost
+      // this turn *would* have been without caching.
+      hypotheticalCost +=
+        ((msg.usage.prompt || 0) / 1_000_000) * breakdown.effectivePromptPrice +
+        breakdown.outputCost
       hasCost = true
     }
   }
@@ -47,11 +55,19 @@ const conversationStats = computed(() => {
     ? (totalOutputTokens / totalDurationMs) * 1000
     : null
 
+  const savings = hasCost ? hypotheticalCost - totalCost : 0
+  const savingsPct = hasCost && hypotheticalCost > 0
+    ? (savings / hypotheticalCost) * 100
+    : 0
+
   return {
     inputTokens,
     outputTokens,
+    cachedTokens,
     avgTokPerSec,
     totalCost: hasCost ? totalCost : null,
+    savings: hasCost && savings > 0 ? savings : null,
+    savingsPct,
   }
 })
 
@@ -125,9 +141,18 @@ function exportConversation() {
         </div>
         <div v-if="conversationStats.inputTokens > 0" class="flex flex-wrap gap-x-6 gap-y-1 text-xs text-fg-muted mt-2 pt-2 border-t border-border">
           <span>Input: <strong class="text-fg-primary">{{ conversationStats.inputTokens.toLocaleString() }}</strong> tokens</span>
+          <span v-if="conversationStats.cachedTokens > 0"
+                :title="`${conversationStats.cachedTokens.toLocaleString()} of ${conversationStats.inputTokens.toLocaleString()} input tokens served from prompt cache`">
+            Cached: <strong class="text-amber-400">{{ conversationStats.cachedTokens.toLocaleString() }}</strong> tokens
+          </span>
           <span>Output: <strong class="text-fg-primary">{{ conversationStats.outputTokens.toLocaleString() }}</strong> tokens</span>
           <span v-if="conversationStats.avgTokPerSec">Avg speed: <strong class="text-fg-primary">{{ conversationStats.avgTokPerSec.toFixed(1) }}</strong> tok/s</span>
           <span v-if="conversationStats.totalCost !== null">Cost: <strong class="text-emerald-400">{{ conversationStats.totalCost < 0.0001 ? '< $0.0001' : '$' + conversationStats.totalCost.toFixed(4) }}</strong></span>
+          <span v-if="conversationStats.savings !== null"
+                :title="`Estimated savings vs. paying full input rate for every token (${conversationStats.savingsPct.toFixed(0)}% off)`">
+            Saved: <strong class="text-emerald-400">{{ conversationStats.savings < 0.0001 ? '< $0.0001' : '$' + conversationStats.savings.toFixed(4) }}</strong>
+            <span class="text-fg-muted">({{ conversationStats.savingsPct.toFixed(0) }}%)</span>
+          </span>
         </div>
       </div>
 

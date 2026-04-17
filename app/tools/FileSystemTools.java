@@ -43,6 +43,11 @@ public class FileSystemTools implements ToolRegistry.Tool {
     }
 
     @Override
+    public String summary() {
+        return "Read, write, edit, list, and patch plain text files via the 'action' parameter: readFile, writeFile, appendFile, editFile, applyPatch, listFiles.";
+    }
+
+    @Override
     public Map<String, Object> parameters() {
         // `path` is required for every action except applyPatch (which encodes paths in the patch body),
         // and `edits`/`content`/`patch` are action-specific. JSON Schema's polymorphism is awkward across

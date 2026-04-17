@@ -42,16 +42,16 @@ public class DocumentsToolTest extends UnitTest {
         var desired = tmp.resolve("report.docx");
         Files.writeString(desired, "x");
         var out = DocumentsTool.resolveNonConflicting(desired);
-        assertEquals(tmp.resolve("report (1).docx"), out);
+        assertEquals(tmp.resolve("report-1.docx"), out);
     }
 
     @Test
     public void multipleExisting_skipsToNextFree() throws Exception {
         Files.writeString(tmp.resolve("report.docx"), "x");
-        Files.writeString(tmp.resolve("report (1).docx"), "x");
-        Files.writeString(tmp.resolve("report (2).docx"), "x");
+        Files.writeString(tmp.resolve("report-1.docx"), "x");
+        Files.writeString(tmp.resolve("report-2.docx"), "x");
         var out = DocumentsTool.resolveNonConflicting(tmp.resolve("report.docx"));
-        assertEquals(tmp.resolve("report (3).docx"), out);
+        assertEquals(tmp.resolve("report-3.docx"), out);
     }
 
     @Test
@@ -59,7 +59,7 @@ public class DocumentsToolTest extends UnitTest {
         var desired = tmp.resolve("Shiva Play - ENHANCED VERSION.docx");
         Files.writeString(desired, "x");
         var out = DocumentsTool.resolveNonConflicting(desired);
-        assertEquals(tmp.resolve("Shiva Play - ENHANCED VERSION (1).docx"), out);
+        assertEquals(tmp.resolve("Shiva Play - ENHANCED VERSION-1.docx"), out);
     }
 
     @Test
@@ -67,7 +67,7 @@ public class DocumentsToolTest extends UnitTest {
         var desired = tmp.resolve("README");
         Files.writeString(desired, "x");
         var out = DocumentsTool.resolveNonConflicting(desired);
-        assertEquals(tmp.resolve("README (1)"), out);
+        assertEquals(tmp.resolve("README-1"), out);
     }
 
     @Test
@@ -77,7 +77,7 @@ public class DocumentsToolTest extends UnitTest {
         var desired = tmp.resolve(".hidden");
         Files.writeString(desired, "x");
         var out = DocumentsTool.resolveNonConflicting(desired);
-        assertEquals(tmp.resolve(".hidden (1)"), out);
+        assertEquals(tmp.resolve(".hidden-1"), out);
     }
 
     @Test

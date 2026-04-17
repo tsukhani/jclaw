@@ -22,6 +22,10 @@ Options:
   --backend-port <port>   Play backend port (default: 9000)
   --frontend-port <port>  Nuxt dev server port, dev mode only (default: 3000)
 
+Environment:
+  JCLAW_JVM_HEAP          Production heap size (default: 2g). Sets -Xms == -Xmx.
+                          Example: JCLAW_JVM_HEAP=4g ./jclaw.sh start
+
 Load-test options (only used with the 'loadtest' command):
   --concurrency <n>       Parallel workers (default: 10)
   --iterations <n>        Requests per worker (default: 5)
@@ -205,9 +209,43 @@ do_start_prod() {
     cp -r .output/public "$JCLAW_DIR/public/spa"
 
     cd "$JCLAW_DIR"
+    mkdir -p "$JCLAW_DIR/logs"
+
+    # JVM tuning for production. Rationale for each flag:
+    #   - ZGC: sub-millisecond pause collector. Matters because SSE streams
+    #     hold connections open for seconds/tens of seconds; a 100 ms G1
+    #     pause would stutter token output to the client.
+    #   - Fixed heap (-Xms == -Xmx): avoids heap-resize pauses under load.
+    #     Default 2 GB; override with JCLAW_JVM_HEAP env var (e.g. 4g).
+    #   - HeapDumpOnOutOfMemoryError + ExitOnOutOfMemoryError: dump for
+    #     postmortem, then exit cleanly so a process manager can restart.
+    #   - MaxDirectMemorySize: caps Netty off-heap buffer allocation so a
+    #     leak here can't exhaust native memory unnoticed.
+    #   - DNS TTLs: LLM providers rotate endpoints via DNS; 30 s positive
+    #     TTL keeps us close to current, 0 s negative TTL prevents caching
+    #     transient lookup failures indefinitely.
+    #   - GC log: rotated, time-stamped, very low overhead; invaluable for
+    #     diagnosing GC-related latency spikes.
+    # Play 1.x passes unrecognized args straight to the JVM (see
+    # framework/pym/play/application.py:java_cmd), so these become the
+    # actual java command line — no -J prefix needed.
+    local heap="${JCLAW_JVM_HEAP:-2g}"
+    local jvm_opts=(
+        "-Xms${heap}"
+        "-Xmx${heap}"
+        "-XX:+UseZGC"
+        "-XX:+HeapDumpOnOutOfMemoryError"
+        "-XX:HeapDumpPath=$JCLAW_DIR/logs/heap-oom.hprof"
+        "-XX:+ExitOnOutOfMemoryError"
+        "-XX:MaxDirectMemorySize=256m"
+        "-Dnetworkaddress.cache.ttl=30"
+        "-Dnetworkaddress.cache.negative.ttl=0"
+        "-Xlog:gc*:file=$JCLAW_DIR/logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M"
+    )
 
     echo "==> Starting Play backend on port $BACKEND_PORT (prod)..."
-    play start --%prod --http.port="$BACKEND_PORT"
+    echo "    JVM: ${heap} heap, ZGC, GC log → logs/gc.log"
+    play start --%prod --http.port="$BACKEND_PORT" "${jvm_opts[@]}"
 
     echo ""
     echo "JClaw is running (production):"

@@ -40,15 +40,20 @@ public class DocumentsTool implements ToolRegistry.Tool {
     @Override
     public String description() {
         return """
-                Read and write rich document formats. \
-                readDocument extracts text from PDF, DOCX, DOC, XLSX, PPTX, RTF, ODT, HTML, EPUB and more via Apache Tika. \
-                writeDocument authors HTML, PDF, or DOCX from markdown input (markdown is the expected 'content' format). \
-                appendDocument appends markdown to a draft file in the workspace — use this for large documents that would exceed your output token budget in a single writeDocument call. Call appendDocument repeatedly with the SAME path (use a .md extension, NOT .docx/.pdf — appending text to a binary format is not supported), then call renderDocument to convert the accumulated draft to the target format. \
-                renderDocument reads an existing markdown file from the workspace (via 'sourcePath') and renders it to HTML, PDF, or DOCX. \
+                Read and write rich document formats. This is a single tool with an 'action' parameter. \
+                Use action="readDocument" to extract text from PDF, DOCX, DOC, XLSX, PPTX, RTF, ODT, HTML, EPUB and more via Apache Tika. \
+                Use action="writeDocument" to author HTML, PDF, or DOCX from markdown input (markdown is the expected 'content' format). \
+                Use action="appendDocument" to append markdown to a draft file in the workspace — use this for large documents that would exceed your output token budget in a single call. Call with action="appendDocument" repeatedly with the SAME path (use a .md extension, NOT .docx/.pdf — appending text to a binary format is not supported), then call with action="renderDocument" to convert the accumulated draft to the target format. \
+                Use action="renderDocument" to read an existing markdown file from the workspace (via 'sourcePath') and render it to HTML, PDF, or DOCX. \
                 Supports headings, paragraphs, bold/italic/strikethrough, inline and fenced code, bullet and ordered lists, block quotes, tables, and horizontal rules. \
                 All paths are relative to the agent's workspace. \
-                If the target path already exists, writeDocument and renderDocument pick a non-conflicting name by appending " (1)", " (2)", … before the extension — the actual written path is reported in the response so you can reference the correct filename in your reply to the user. \
+                If the target path already exists, the write and render actions pick a non-conflicting name by appending -1, -2, etc. before the extension — the actual written path is reported in the response so you can reference the correct filename in your reply to the user. \
                 XLSX and PPTX authoring is not yet supported.""";
+    }
+
+    @Override
+    public String summary() {
+        return "Read and write rich document formats (PDF, DOCX, HTML) via the 'action' parameter: readDocument, writeDocument, appendDocument, renderDocument.";
     }
 
     @Override
@@ -166,7 +171,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
             long size = Files.size(target);
             var fileName = target.getFileName().toString();
             return ("Document written: %s (%s, %d bytes). "
-                    + "IMPORTANT: in your reply to the user, include this markdown link so they can download the file directly from chat: [%s](<%s>)")
+                    + "IMPORTANT: in your reply to the user, include this exact markdown link so they can download the file: [%s](%s)")
                     .formatted(relativePath, resolved, size, fileName, relativePath);
         } catch (IOException e) {
             return "Error writing document: %s".formatted(e.getMessage());
@@ -229,7 +234,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
         var base = (dot <= 0) ? name : name.substring(0, dot);
         var ext = (dot <= 0) ? "" : name.substring(dot);
         for (int i = 1; i < 1000; i++) {
-            var candidate = parent.resolve(base + " (" + i + ")" + ext);
+            var candidate = parent.resolve(base + "-" + i + ext);
             if (!Files.exists(candidate)) return candidate;
         }
         return desired;

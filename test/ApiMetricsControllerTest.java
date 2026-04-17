@@ -65,6 +65,9 @@ public class ApiMetricsControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"tool_round_count\""), body);
         assertTrue(body.contains("\"p50_ms\""), body);
         assertTrue(body.contains("\"p99_ms\""), body);
+        // Log-bucket distribution is emitted so the dashboard can render a PDF.
+        assertTrue(body.contains("\"buckets\""), body);
+        assertTrue(body.contains("\"le_ms\""), body);
     }
 
     @Test
@@ -172,5 +175,26 @@ public class ApiMetricsControllerTest extends FunctionalTest {
         var response = GET("/api/metrics/latency");
         assertIsOk(response);
         assertEquals("{}", getContent(response));
+    }
+
+    @Test
+    public void cleanLoadtestDataDoesNotTouchHistograms() {
+        // /api/metrics/latency and /api/metrics/loadtest/data have orthogonal
+        // scopes: the former clears runtime statistics, the latter clears DB
+        // artifacts from load-test runs. Purging one should leave the other
+        // untouched.
+        login();
+        var trace = new LatencyTrace();
+        trace.mark(LatencyTrace.PROLOGUE_DONE);
+        trace.end();
+
+        var cleanResp = DELETE("/api/metrics/loadtest/data");
+        assertIsOk(cleanResp);
+        assertTrue(getContent(cleanResp).contains("\"status\":\"cleaned\""));
+
+        var response = GET("/api/metrics/latency");
+        assertIsOk(response);
+        // Histograms must survive the loadtest-data cleanup.
+        assertTrue(getContent(response).contains("\"total\""), getContent(response));
     }
 }

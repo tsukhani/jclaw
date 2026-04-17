@@ -37,11 +37,16 @@ public class DateTimeTool implements ToolRegistry.Tool {
     public String description() {
         return """
                 Get the current date and time, convert between timezones, or perform date/time \
-                calculations. Actions: \
-                'now' returns the current date and time in a given timezone (default: server timezone). \
-                'convert' converts a timestamp from one timezone to another. \
-                'calculate' adds or subtracts a duration from a timestamp, or computes the difference \
+                calculations. This is a single tool with an 'action' parameter. \
+                Use action="now" to get the current date and time in a given timezone (default: server timezone). \
+                Use action="convert" to convert a timestamp from one timezone to another. \
+                Use action="calculate" to add or subtract a duration from a timestamp, or compute the difference \
                 between two timestamps.""";
+    }
+
+    @Override
+    public String summary() {
+        return "Get current date/time, convert timezones, calculate durations via the 'action' parameter: now, convert, calculate.";
     }
 
     @Override

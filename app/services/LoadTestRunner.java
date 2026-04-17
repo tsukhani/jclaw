@@ -86,9 +86,13 @@ public final class LoadTestRunner {
         // cache, session affinity, and JIT are stable before concurrent workers
         // start. Without this, the first few requests of a cold run can error
         // in a pattern that's indistinguishable from a real performance problem.
+        //
+        // Snapshot before warmup and restore after, so we drop only the warmup
+        // sample without losing data accumulated by prior runs (or by real
+        // chat traffic the operator cares about).
+        var resetPoint = utils.LatencyStats.captureResetPoint();
         warmupRequest(client, baseUrl, sessionCookie, body);
-        // Drop the warmup sample so histograms reflect only the concurrent run.
-        utils.LatencyStats.reset();
+        resetPoint.run();
 
         var success = new AtomicInteger();
         var error = new AtomicInteger();

@@ -29,6 +29,12 @@ public class ToolRegistry {
         Map<String, Object> parameters();
         String execute(String argsJson, Agent agent);
 
+        /** Short one-line summary for the system prompt tool catalog. Defaults to
+         *  the full description, but tools with multi-sentence descriptions should
+         *  override this to prevent the LLM from misreading action names or internal
+         *  details as top-level tool names. */
+        default String summary() { return description(); }
+
         /** System tools are always available, cannot be disabled by users, and are
          *  hidden from the system prompt's tool catalog (the LLM can still invoke
          *  them via the tool schema — they just aren't advertised to users). */

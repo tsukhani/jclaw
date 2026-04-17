@@ -46,8 +46,9 @@ public class ToolCatalog {
         sb.append("| Tool | Purpose |\n");
         sb.append("|---|---|\n");
         for (var t : tools) {
+            var summary = t.summary() != null ? t.summary().replace("\n", " ") : "";
             sb.append("| `").append(t.name()).append("` | ")
-              .append(t.description() != null ? t.description().replace("\n", " ") : "")
+              .append(summary)
               .append(" |\n");
         }
         return sb.toString();

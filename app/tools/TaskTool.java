@@ -23,8 +23,18 @@ public class TaskTool implements ToolRegistry.Tool {
     @Override
     public String description() {
         return """
-                Manage background tasks. Actions: createTask, scheduleTask, scheduleRecurringTask, \
-                deleteRecurringTask, listRecurringTasks. Tasks run asynchronously via the agent.""";
+                Manage background tasks. This is a single tool with an 'action' parameter. \
+                Use action="createTask" to create a one-off task. \
+                Use action="scheduleTask" to schedule a task for a future time. \
+                Use action="scheduleRecurringTask" to create a recurring task on a cron schedule. \
+                Use action="deleteRecurringTask" to remove a recurring schedule. \
+                Use action="listRecurringTasks" to list all recurring schedules. \
+                Tasks run asynchronously via the agent.""";
+    }
+
+    @Override
+    public String summary() {
+        return "Manage background tasks via the 'action' parameter: createTask, scheduleTask, scheduleRecurringTask, deleteRecurringTask, listRecurringTasks.";
     }
 
     @Override

@@ -6,7 +6,12 @@ interface ChannelStatus {
   enabled: boolean
 }
 
-const [{ data: agents }, { data: channels }, { data: tasks }, { data: logs }] = await Promise.all([
+const [
+  { data: agents },
+  { data: channels },
+  { data: tasks },
+  { data: logs, refresh: refreshLogs },
+] = await Promise.all([
   useFetch<Agent[]>('/api/agents'),
   useFetch<ChannelStatus[]>('/api/channels'),
   useFetch<unknown[]>('/api/tasks?status=PENDING&limit=5'),
@@ -72,6 +77,9 @@ const latencyRows = computed(() => {
 
 const hasLatencyData = computed(() => latencyRows.value.length > 0)
 
+type LatencyView = 'table' | 'chart'
+const latencyView = ref<LatencyView>('table')
+
 function formatMs(ms: number): string {
   if (ms < 1) return '<1 ms'
   if (ms < 1000) return `${Math.round(ms)} ms`
@@ -83,10 +91,41 @@ async function resetLatency() {
   await refreshLatency()
 }
 
-// Poll every 5s so the dashboard reflects traffic without the user reloading.
+// --- Recent Activity (manual refresh) ---
+// Auto-refresh is intentionally off here: event rows reorder on every new
+// entry, and an agent turn can emit 5-10 events in a couple of seconds —
+// the jitter makes the list hard to read. The Logs page is the live-stream
+// view; this widget is a snapshot with an explicit refresh action.
+const logsLastUpdated = ref<Date | null>(null)
+const now = ref(new Date())
+
+function formatAge(then: Date | null, nowRef: Date): string {
+  if (!then) return ''
+  const s = Math.max(0, Math.floor((nowRef.getTime() - then.getTime()) / 1000))
+  if (s < 5) return 'just now'
+  if (s < 60) return `${s}s ago`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m}m ago`
+  return `${Math.floor(m / 60)}h ago`
+}
+
+const logsAgeLabel = computed(() => formatAge(logsLastUpdated.value, now.value))
+
+async function refreshRecentActivity() {
+  await refreshLogs()
+  logsLastUpdated.value = new Date()
+}
+
+// Latency panel continues to poll (numbers don't visually shift rows).
+// The same tick updates `now` so the "X ago" caption on Recent Activity
+// stays current without a second interval.
 let pollTimer: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
-  pollTimer = setInterval(() => { refreshLatency() }, 5000)
+  logsLastUpdated.value = new Date()
+  pollTimer = setInterval(() => {
+    refreshLatency()
+    now.value = new Date()
+  }, 5000)
 })
 onBeforeUnmount(() => {
   if (pollTimer) clearInterval(pollTimer)
@@ -119,15 +158,53 @@ onBeforeUnmount(() => {
 
     <!-- Chat Performance -->
     <div class="bg-surface-elevated border border-border mb-8">
-      <div class="px-4 py-3 border-b border-border flex items-center justify-between">
-        <h2 class="text-sm font-medium text-fg-primary">Chat Performance</h2>
-        <div class="flex items-center gap-3 text-xs">
-          <span class="text-fg-muted">In-memory • resets on JVM restart</span>
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
+        <div class="flex items-center gap-3 min-w-0">
+          <h2 class="text-sm font-medium text-fg-primary shrink-0">Chat Performance</h2>
+          <div
+            v-if="hasLatencyData"
+            class="inline-flex items-center border border-border overflow-hidden"
+            role="tablist"
+            aria-label="Chat performance view"
+          >
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="latencyView === 'table'"
+              class="p-1 transition-colors"
+              :class="latencyView === 'table'
+                ? 'bg-muted text-fg-strong'
+                : 'text-fg-muted hover:text-fg-strong'"
+              @click="latencyView = 'table'"
+              title="Table view"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M3 14h18M3 6h18M3 18h18" /></svg>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="latencyView === 'chart'"
+              class="p-1 transition-colors border-l border-border"
+              :class="latencyView === 'chart'
+                ? 'bg-muted text-fg-strong'
+                : 'text-fg-muted hover:text-fg-strong'"
+              @click="latencyView = 'chart'"
+              title="Distribution chart"
+            >
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3v18h18M7 15l3-4 4 3 5-7" /></svg>
+            </button>
+          </div>
+        </div>
+        <div class="flex items-center gap-3 text-xs shrink-0">
+          <span class="text-fg-muted hidden sm:inline">In-memory • resets on JVM restart</span>
           <button
             type="button"
-            class="text-fg-muted hover:text-fg-strong transition-colors"
+            class="text-fg-muted hover:text-fg-strong transition-colors p-1"
             @click="resetLatency"
-          >Reset</button>
+            title="Reset latency histograms"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+          </button>
         </div>
       </div>
 
@@ -135,7 +212,7 @@ onBeforeUnmount(() => {
         No samples yet. Send a chat message to populate latency histograms.
       </div>
 
-      <div v-else class="overflow-x-auto">
+      <div v-else-if="latencyView === 'table'" class="overflow-x-auto">
         <table class="w-full text-xs">
           <thead>
             <tr class="text-fg-muted border-b border-border">
@@ -153,7 +230,7 @@ onBeforeUnmount(() => {
             <tr
               v-for="row in latencyRows"
               :key="row.key"
-              class="border-b border-border last:border-b-0"
+              :class="row.key === 'total' ? 'border-t-2 border-fg-muted/30 bg-muted/30 font-semibold' : 'border-b border-border last:border-b-0'"
             >
               <td class="text-fg-primary px-4 py-2">{{ row.label }}</td>
               <td class="text-right font-mono text-fg-muted px-3 py-2">{{ row.h.count }}</td>
@@ -167,12 +244,29 @@ onBeforeUnmount(() => {
           </tbody>
         </table>
       </div>
+
+      <div v-else class="p-4">
+        <LatencyOverlayChart
+          :series="latencyRows.map(r => ({ key: r.key, label: r.label, histogram: r.h }))"
+        />
+      </div>
     </div>
 
     <!-- Recent Events -->
     <div class="bg-surface-elevated border border-border">
-      <div class="px-4 py-3 border-b border-border">
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
         <h2 class="text-sm font-medium text-fg-primary">Recent Activity</h2>
+        <div class="flex items-center gap-3 text-xs shrink-0">
+          <span v-if="logsAgeLabel" class="text-fg-muted">{{ logsAgeLabel }}</span>
+          <button
+            type="button"
+            class="text-fg-muted hover:text-fg-strong transition-colors p-1"
+            @click="refreshRecentActivity"
+            title="Refresh"
+          >
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+          </button>
+        </div>
       </div>
       <div v-if="logs?.events?.length" class="divide-y divide-border">
         <div v-for="event in logs.events" :key="event.id" class="px-4 py-2.5 flex items-start gap-3">
