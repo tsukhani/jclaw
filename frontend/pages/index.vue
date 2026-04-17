@@ -24,56 +24,18 @@ const channelCount = computed(() => channels.value?.filter(c => c.enabled).lengt
 const pendingTasks = computed(() => tasks.value?.length ?? 0)
 
 // --- Latency metrics (chat performance panel) ---
-// Ordered so the display reads request-lifetime top-to-bottom; entries absent
-// from the backend snapshot (e.g. queue_wait when the fork isn't rebuilt, or
-// tool_exec when no tool-using agents ran) are simply skipped.
-const SEGMENT_ORDER = [
-  'queue_wait',
-  'prologue',
-  'ttft',
-  'stream_body',
-  'tool_exec',
-  'tool_round_count',
-  'persist',
-  'total',
-] as const
-
-const SEGMENT_LABELS: Record<string, string> = {
-  queue_wait: 'Queue wait',
-  prologue: 'Prologue',
-  ttft: 'Time to first token',
-  stream_body: 'Stream body',
-  tool_exec: 'Tool execution',
-  persist: 'Persist',
-  total: 'Total',
-  tool_round_count: 'Tool rounds / turn',
-}
+// Row assembly (top-level order, prologue_* child nesting, chart-vs-table
+// split) lives in ~/utils/latency-rows for unit-testability without
+// mounting the dashboard.
+import { buildLatencyRows, buildChartSeries } from '~/utils/latency-rows'
 
 const { data: latency, refresh: refreshLatency } = useFetch<LatencyMetrics>(
   '/api/metrics/latency',
   { default: () => ({}) },
 )
 
-const latencyRows = computed(() => {
-  const m = latency.value ?? {}
-  const seen = new Set<string>()
-  const rows: Array<{ key: string; label: string; h: NonNullable<LatencyMetrics[string]> }> = []
-  for (const key of SEGMENT_ORDER) {
-    const h = m[key]
-    if (h && h.count > 0) {
-      rows.push({ key, label: SEGMENT_LABELS[key] ?? key, h })
-      seen.add(key)
-    }
-  }
-  // Surface anything the backend returns that isn't in the canonical list
-  // (e.g. tool_round_count, or future segments) so we never silently hide data.
-  for (const [key, h] of Object.entries(m)) {
-    if (!seen.has(key) && h && h.count > 0) {
-      rows.push({ key, label: SEGMENT_LABELS[key] ?? key, h })
-    }
-  }
-  return rows
-})
+const latencyRows = computed(() => buildLatencyRows((latency.value ?? {}) as any))
+const latencyChartSeries = computed(() => buildChartSeries((latency.value ?? {}) as any))
 
 const hasLatencyData = computed(() => latencyRows.value.length > 0)
 
@@ -232,7 +194,21 @@ onBeforeUnmount(() => {
               :key="row.key"
               :class="row.key === 'total' ? 'border-t-2 border-fg-muted/30 bg-muted/30 font-semibold' : 'border-b border-border last:border-b-0'"
             >
-              <td class="text-fg-primary px-4 py-2">{{ row.label }}</td>
+              <!--
+                Child rows render with indent + muted label + smaller font —
+                the Grafana / Datadog / Linear data-table pattern. Indent
+                alone plus color contrast is enough to signal "these belong
+                to the parent above" without glyphs or border-rules that
+                fight against table cell geometry. Four rows read cleanly
+                as a group because their left edges all line up at a
+                consistent x-position visibly further in than top-level rows.
+              -->
+              <td class="py-2 px-4"
+                  :class="row.isChild
+                    ? 'text-fg-muted text-[0.95em] pl-10'
+                    : 'text-fg-primary'">
+                {{ row.label }}
+              </td>
               <td class="text-right font-mono text-fg-muted px-3 py-2">{{ row.h.count }}</td>
               <td class="text-right font-mono text-fg-primary px-3 py-2">{{ formatMs(row.h.p50_ms) }}</td>
               <td class="text-right font-mono text-fg-primary px-3 py-2">{{ formatMs(row.h.p90_ms) }}</td>
@@ -246,9 +222,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-else class="p-4">
-        <LatencyOverlayChart
-          :series="latencyRows.map(r => ({ key: r.key, label: r.label, histogram: r.h }))"
-        />
+        <LatencyOverlayChart :series="latencyChartSeries" />
       </div>
     </div>
 
