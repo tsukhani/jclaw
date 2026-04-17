@@ -638,6 +638,55 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         }
     }
 
+    /**
+     * Cumulative token usage across every LLM round in a single user turn.
+     * A "turn" is one user message → one final assistant message, which for
+     * tool-using models can span many LLM API calls (each round has its own
+     * {@link StreamAccumulator}). Token counts get folded in via
+     * {@link #addRound(StreamAccumulator)} after each round's stream completes.
+     *
+     * <p>Summing per-round usage is the billing-correct behaviour because each
+     * round is a separate API call; it also matches user intuition for
+     * reasoning/completion counts (the user sees all reasoning and all
+     * synthesis output across rounds, not just round 1). Reasoning-phase
+     * <em>timing</em> remains a per-round concern captured on the first
+     * round's {@link StreamAccumulator}; see {@code AgentRunner.buildUsageJson}
+     * for how the two dimensions combine in the emitted usage JSON.
+     *
+     * <p>See JCLAW-76 for the accounting defect this class fixes.
+     */
+    public static class TurnUsage {
+        public int promptTokens;
+        public int completionTokens;
+        public int totalTokens;
+        /** Sum of provider-reported {@code reasoning_tokens} across all rounds. */
+        public int reasoningTokens;
+        public int cachedTokens;
+        public int cacheCreationTokens;
+        /** Sum of streamed reasoning-text chars, used as a token fallback when the provider returns 0 reasoning_tokens. */
+        public int reasoningChars;
+        /** True once any round has detected reasoning, used to gate the fallback estimate. */
+        public boolean reasoningDetected;
+        /** True once any round returned a non-null {@link Usage}. Gates the zero-usage JSON path. */
+        public boolean hasProviderUsage;
+
+        public void addRound(StreamAccumulator acc) {
+            if (acc == null) return;
+            var u = acc.usage;
+            if (u != null) {
+                hasProviderUsage = true;
+                promptTokens += u.promptTokens();
+                completionTokens += u.completionTokens();
+                totalTokens += u.totalTokens();
+                reasoningTokens += u.reasoningTokens();
+                cachedTokens += u.cachedTokens();
+                cacheCreationTokens += u.cacheCreationTokens();
+            }
+            if (acc.reasoningDetected) reasoningDetected = true;
+            reasoningChars += acc.reasoningChars();
+        }
+    }
+
     protected static class ToolCallBuilder {
         String id;
         String type = "function";

@@ -1,7 +1,7 @@
 ---
 name: whatsapp-wacli-mac
 description: Use wacli (WhatsApp CLI) to sync, search, send messages, manage contacts/groups, and backfill chat history. REQUIRES AUTHENTICATION FIRST. macOS ARM64 binary.
-version: 1.0.2
+version: 1.2.0
 tools: [exec]
 commands: [wacli]
 ---
@@ -43,7 +43,7 @@ If it prints `needs install`, build or install it using **one** of the methods b
 ### Option A: Homebrew (recommended — no Go toolchain required)
 
 ```bash
-brew install [USERNAME]/tap/wacli
+brew install steipete/tap/wacli
 cp "$(brew --prefix)/bin/wacli" ./skills/whatsapp-wacli-mac/tools/wacli
 chmod +x ./skills/whatsapp-wacli-mac/tools/wacli
 ```
@@ -51,7 +51,7 @@ chmod +x ./skills/whatsapp-wacli-mac/tools/wacli
 ### Option B: Build from source (requires Go 1.25+ with CGO enabled)
 
 ```bash
-git clone --depth 1 https://github.com/[USERNAME]/wacli /tmp/wacli-src \
+git clone --depth 1 https://github.com/steipete/wacli /tmp/wacli-src \
   && cd /tmp/wacli-src \
   && CGO_ENABLED=1 go build -tags sqlite_fts5 -o /tmp/wacli-bin ./cmd/wacli \
   && cp /tmp/wacli-bin ./skills/whatsapp-wacli-mac/tools/wacli \
@@ -77,22 +77,89 @@ Use `./skills/whatsapp-wacli/tools/wacli chats list` or `contacts search` to fin
 
 ---
 
-## Authentication (Required First)
+## Authentication Flow
 
-```bash
-./skills/whatsapp-wacli/tools/wacli auth
+The skill uses a `.authenticated` marker file in the skill directory (`./skills/whatsapp-wacli-mac/.authenticated`) to track authentication state and optimize subsequent calls.
+
+### Authentication Decision Flow
+
+Before executing any wacli command, follow this logic:
+
+1. **Check for `.authenticated` marker** (`test -f ./skills/whatsapp-wacli-mac/.authenticated`)
+   - **If EXISTS:** Proceed directly to execute the requested command
+   - **If command fails with auth error:** Remove the marker file (`rm -f ./skills/whatsapp-wacli-mac/.authenticated`) and go to Step 2
+
+2. **If `.authenticated` does NOT exist:** Check auth status via wacli
+   ```bash
+   ./skills/whatsapp-wacli/tools/wacli auth status
+   ```
+   - **If status shows authenticated:** Create marker file and execute command
+     ```bash
+     touch ./skills/whatsapp-wacli-mac/.authenticated
+     # then execute requested command
+     ```
+   - **If status shows NOT authenticated:** Go to Step 3
+
+3. **Full authentication flow:** Run interactive auth and create marker on success
+   ```bash
+   ./skills/whatsapp-wacli/tools/wacli auth
+   # User scans QR code...
+   # On success:
+   touch ./skills/whatsapp-wacli-mac/.authenticated
+   ```
+
+### Complete Auth Logic Example
+
+```python
+# Step 1: Check if .authenticated marker exists
+result = exec({"command": "test -f ./skills/whatsapp-wacli-mac/.authenticated && echo 'marker_exists' || echo 'no_marker'"})
+
+if result contains 'marker_exists':
+    # Proceed with command
+    result = exec({"command": "./skills/whatsapp-wacli/tools/wacli <REQUESTED_COMMAND>"})
+    
+    # If command fails due to auth issues
+    if result contains 'unauthorized' or 'not authenticated':
+        exec({"command": "rm -f ./skills/whatsapp-wacli-mac/.authenticated"})
+        # Fall through to check status
+    else:
+        # Command succeeded, return result
+        return result
+
+# Step 2: Check actual auth status
+status = exec({"command": "./skills/whatsapp-wacli/tools/wacli auth status --json"})
+
+if status contains '"status": "authenticated"':
+    # User is already authenticated, create marker and execute
+    exec({"command": "touch ./skills/whatsapp-wacli-mac/.authenticated"})
+    result = exec({"command": "./skills/whatsapp-wacli/tools/wacli <REQUESTED_COMMAND>"})
+    return result
+else:
+    # Step 3: Need to authenticate
+    print("Please scan the QR code with WhatsApp to authenticate...")
+    auth_result = exec({"command": "./skills/whatsapp-wacli/tools/wacli auth", "timeout": 120})
+    
+    # Verify auth succeeded
+    verify = exec({"command": "./skills/whatsapp-wacli/tools/wacli auth status --json"})
+    if verify contains '"status": "authenticated"':
+        exec({"command": "touch ./skills/whatsapp-wacli-mac/.authenticated"})
+        # Now execute the requested command
+        result = exec({"command": "./skills/whatsapp-wacli/tools/wacli <REQUESTED_COMMAND>"})
+        return result
+    else:
+        return "Authentication failed. Please try again."
 ```
 
-This displays a QR code. The user must scan it with WhatsApp (Settings > Linked Devices > Link a Device). The command stays running while waiting for the scan and initial sync. Use a timeout of at least 120 seconds.
+### Authentication Management
 
 **Check auth status:**
 ```bash
 ./skills/whatsapp-wacli/tools/wacli auth status
 ```
 
-**Logout:**
+**Logout (also removes `.authenticated` marker):**
 ```bash
-./skills/whatsapp-wacli/tools/wacli auth logout
+./skills/whatsapp-wacli/tools/wacli auth logout && rm -f ./skills/whatsapp-wacli-mac/.authenticated
 ```
 
 **Diagnostics:**
@@ -305,7 +372,7 @@ Optional: `--output /path/to/save`
 ## Environment Variables
 
 | Variable | Purpose |
-|----------|---------|
+|----------|----------|
 | `WACLI_DEVICE_LABEL` | Linked device label shown in WhatsApp |
 | `WACLI_DEVICE_PLATFORM` | Override device platform (default: CHROME) |
 
@@ -314,9 +381,6 @@ Optional: `--output /path/to/save`
 ## Exec Tool Examples
 
 ```python
-# Authenticate (use timeout=120 for QR scan)
-exec({"command": "./skills/whatsapp-wacli/tools/wacli auth", "timeout": 120})
-
 # Send text (NO + prefix on phone number)
 exec({"command": "./skills/whatsapp-wacli/tools/wacli send text --to [PHONE_NUMBER] --message 'Hello!'"})
 
@@ -341,8 +405,10 @@ exec({"command": "./skills/whatsapp-wacli/tools/wacli auth status"})
 ## Important Notes
 
 1. **Phone numbers: digits only, no + prefix** — e.g., `[PHONE_NUMBER]` not `+[PHONE_NUMBER]`
-2. **Auth required first** — run `auth` and scan QR before any other command
-3. **Primary device must be online** — phone needs WhatsApp running for sync/send
-4. **Store lock** — only one wacli process can run at a time. If you get a lock error, wait or kill the other process
-5. **Rate limits** — respect WhatsApp's sending limits
-6. **Third-party tool** — not affiliated with WhatsApp/Meta; uses WhatsApp Web protocol
+2. **Auth flow:** The skill follows a three-step authentication flow (marker check → status check → interactive auth) to optimize subsequent calls
+3. **`.authenticated` marker file** — stored in `./skills/whatsapp-wacli-mac/.authenticated`; created after successful auth to bypass checks on future calls
+4. **Auth failure handling** — If a command fails due to auth issues, the marker is automatically removed and the flow restarts
+5. **Primary device must be online** — phone needs WhatsApp running for sync/send
+6. **Store lock** — only one wacli process can run at a time. If you get a lock error, wait or kill the other process
+7. **Rate limits** — respect WhatsApp's sending limits
+8. **Third-party tool** — not affiliated with WhatsApp/Meta; uses WhatsApp Web protocol

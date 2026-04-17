@@ -12,8 +12,17 @@ describe('thinkingHeaderLabel', () => {
     expect(thinkingHeaderLabel(msg)).toBe('Thought for 3.46 seconds')
   })
 
-  it('prefers persisted over live when both are present', () => {
-    const msg = { usage: { reasoningDurationMs: 5000 }, _thinkingDurationMs: 999 }
+  it('prefers live over persisted when both are present (in-flight stamp wins)', () => {
+    // When a message has been stamped live during streaming AND the final
+    // usage frame has since arrived with a slightly different number (backend
+    // timing is ~network-latency shorter), we keep the value the user saw
+    // first rather than retroactively revising it.
+    const msg = { usage: { reasoningDurationMs: 1710 }, _thinkingDurationMs: 1840 }
+    expect(thinkingHeaderLabel(msg)).toBe('Thought for 1.84 seconds')
+  })
+
+  it('falls back to persisted when no live capture exists (reloaded-from-history case)', () => {
+    const msg = { usage: { reasoningDurationMs: 5000 } }
     expect(thinkingHeaderLabel(msg)).toBe('Thought for 5.00 seconds')
   })
 
@@ -30,6 +39,35 @@ describe('thinkingHeaderLabel', () => {
   it('handles sub-second durations correctly', () => {
     const msg = { usage: { reasoningDurationMs: 42 } }
     expect(thinkingHeaderLabel(msg)).toBe('Thought for 0.04 seconds')
+  })
+
+  it('returns "Thinking" while _thinkingInProgress is true — even if a duration has leaked in', () => {
+    // Simulates the backend-provider quirk where a `status` frame carrying
+    // usage.reasoningDurationMs arrives before the first content token.
+    // Without the in-progress guard, thinkingHeaderLabel would flip early.
+    const msg = {
+      _thinkingInProgress: true,
+      usage: { reasoningDurationMs: 9780 },
+    }
+    expect(thinkingHeaderLabel(msg)).toBe('Thinking')
+  })
+
+  it('returns "Thinking" while _thinkingInProgress is true — even with live duration set', () => {
+    const msg = {
+      _thinkingInProgress: true,
+      _thinkingDurationMs: 5000,
+    }
+    expect(thinkingHeaderLabel(msg)).toBe('Thinking')
+  })
+
+  it('flips to "Thought for …" once _thinkingInProgress flips to false', () => {
+    const msg: any = {
+      _thinkingInProgress: true,
+      _thinkingDurationMs: 9780,
+    }
+    expect(thinkingHeaderLabel(msg)).toBe('Thinking')
+    msg._thinkingInProgress = false
+    expect(thinkingHeaderLabel(msg)).toBe('Thought for 9.78 seconds')
   })
 })
 

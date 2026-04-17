@@ -348,6 +348,12 @@ public class AgentRunner {
         // Stream with tool call handling (HTTP, no JPA)
         if (trace != null) trace.mark(LatencyTrace.PROLOGUE_DONE);
         var streamStartMs = System.currentTimeMillis();
+        // Turn-level cumulative usage. Each LLM round (first round here, plus
+        // any tool-result continuation rounds inside handleToolCallsStreaming)
+        // folds its per-round usage into this object. buildUsageJson below
+        // reads from this cumulative so stats pills reflect the whole turn,
+        // not just round 1 (JCLAW-76).
+        var turnUsage = new LlmProvider.TurnUsage();
         var accumulator = primary.chatStreamAccumulate(
                 agent.modelId, messages, tools, cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode);
 
@@ -369,6 +375,11 @@ public class AgentRunner {
             return;
         }
 
+        // Round 1 folded into turn-level usage. The first-round accumulator is
+        // also kept in scope so buildUsageJson can read reasoningDurationMs
+        // from it (that timing is anchored to round 1 per JCLAW-76 AC7).
+        turnUsage.addRound(accumulator);
+        var firstRoundAccumulator = accumulator;
         var content = accumulator.content;
 
         // Check for truncated response (max tokens hit mid-tool-call)
@@ -402,7 +413,7 @@ public class AgentRunner {
         if (!accumulator.toolCalls.isEmpty()) {
             content = handleToolCallsStreaming(agent, conversation.id, messages, tools,
                     accumulator.toolCalls, content, primary, cb, maxTokens, thinkingMode, 0,
-                    isCancelled, trace);
+                    isCancelled, trace, turnUsage);
         }
 
         if (checkCancelled(isCancelled, agent, channelType)) return;
@@ -410,14 +421,14 @@ public class AgentRunner {
         if (trace != null) trace.mark(LatencyTrace.STREAM_BODY_END);
 
         // Build usage JSON before persisting so it can be stored alongside the message
-        var usageJson = buildUsageJson(accumulator, modelInfo, streamStartMs);
+        var usageJson = buildUsageJson(turnUsage, firstRoundAccumulator, modelInfo, streamStartMs);
 
         // Fire the terminal SSE frame FIRST so the user-visible `total` ends at the
         // outgoing write, not at the DB round-trip. Persist happens below on this
         // same virtual thread — the outer wrapper's finally → processQueueDrain
         // therefore still observes a committed conversation before any queued
         // follow-up turn runs. See the truncation branch above for the full rationale.
-        emitUsageAndComplete(agent, channelType, content, accumulator, modelInfo, streamStartMs, usageJson, cb);
+        emitUsageAndComplete(agent, channelType, content, turnUsage, streamStartMs, usageJson, cb);
 
         var finalContent = content;
         long persistStartNs = System.nanoTime();
@@ -436,18 +447,18 @@ public class AgentRunner {
      */
     /**
      * Resolve the reasoning-token count to surface in usage metrics. Prefers the
-     * provider-reported {@code usage.reasoning_tokens} when available; falls back
-     * to a character-length estimate over the streamed reasoning text (≈4 chars
-     * per token, the standard English heuristic) when the provider reported zero
-     * despite reasoning having been detected. Returning an estimate — clearly
-     * non-zero when reasoning ran — is better than showing no count at all, since
-     * the UI's reasoning-count badge is gated on this value being truthy.
+     * summed provider-reported {@code reasoning_tokens} across every LLM round in
+     * the turn when available; falls back to a character-length estimate over
+     * the streamed reasoning text (≈4 chars per token, the standard English
+     * heuristic) when every round reported zero despite reasoning having been
+     * detected on at least one round. Returning an estimate — clearly non-zero
+     * when reasoning ran — is better than showing no count at all, since the
+     * UI's reasoning-count badge is gated on this value being truthy.
      */
-    private static int effectiveReasoningTokens(llm.LlmTypes.Usage usage,
-                                                 LlmProvider.StreamAccumulator accumulator) {
-        if (usage.reasoningTokens() > 0) return usage.reasoningTokens();
-        if (!accumulator.reasoningDetected) return 0;
-        var chars = accumulator.reasoningChars();
+    private static int effectiveReasoningTokens(LlmProvider.TurnUsage turnUsage) {
+        if (turnUsage.reasoningTokens > 0) return turnUsage.reasoningTokens;
+        if (!turnUsage.reasoningDetected) return 0;
+        var chars = turnUsage.reasoningChars;
         if (chars <= 0) return 0;
         // Round up: a small amount of text still represents at least one reasoning
         // token on the wire, and rounding down would silently swallow short traces.
@@ -468,28 +479,35 @@ public class AgentRunner {
      * Log usage, build the usage JSON payload (including pricing), and invoke
      * the status + complete callbacks.
      */
-    /** Build the usage JSON string from the accumulator, or null if no usage data. */
-    private static String buildUsageJson(LlmProvider.StreamAccumulator accumulator,
-                                          ModelInfo modelInfo, long streamStartMs) {
+    /**
+     * Build the usage JSON string from the turn-level cumulative token counts.
+     * Token fields are summed across every LLM round in the turn (JCLAW-76);
+     * {@code reasoningDurationMs} remains a per-first-round measurement on
+     * {@code firstRoundAccumulator} since the reasoning phase timing is
+     * anchored to the first round where reasoning primarily happens in
+     * practice. Returns a compact JSON with just duration fields when no
+     * round reported provider usage.
+     */
+    public static String buildUsageJson(LlmProvider.TurnUsage turnUsage,
+                                        LlmProvider.StreamAccumulator firstRoundAccumulator,
+                                        ModelInfo modelInfo, long streamStartMs) {
         var durationMs = System.currentTimeMillis() - streamStartMs;
-        if (accumulator.usage == null) {
-            var reasoningMs = accumulator.reasoningDurationMs();
+        var reasoningMs = firstRoundAccumulator != null ? firstRoundAccumulator.reasoningDurationMs() : 0L;
+        if (!turnUsage.hasProviderUsage) {
             return reasoningMs > 0L
                     ? "{\"durationMs\":%d,\"reasoningDurationMs\":%d}".formatted(durationMs, reasoningMs)
                     : "{\"durationMs\":%d}".formatted(durationMs);
         }
 
-        var u = accumulator.usage;
-        var reasoningCount = effectiveReasoningTokens(u, accumulator);
+        var reasoningCount = effectiveReasoningTokens(turnUsage);
         var usageMap = new com.google.gson.JsonObject();
-        usageMap.addProperty("prompt", u.promptTokens());
-        usageMap.addProperty("completion", u.completionTokens());
-        usageMap.addProperty("total", u.totalTokens());
+        usageMap.addProperty("prompt", turnUsage.promptTokens);
+        usageMap.addProperty("completion", turnUsage.completionTokens);
+        usageMap.addProperty("total", turnUsage.totalTokens);
         usageMap.addProperty("reasoning", reasoningCount);
-        usageMap.addProperty("cached", u.cachedTokens());
-        usageMap.addProperty("cacheCreation", u.cacheCreationTokens());
+        usageMap.addProperty("cached", turnUsage.cachedTokens);
+        usageMap.addProperty("cacheCreation", turnUsage.cacheCreationTokens);
         usageMap.addProperty("durationMs", durationMs);
-        var reasoningMs = accumulator.reasoningDurationMs();
         if (reasoningMs > 0L) usageMap.addProperty("reasoningDurationMs", reasoningMs);
 
         if (modelInfo != null) {
@@ -502,20 +520,18 @@ public class AgentRunner {
     }
 
     private static void emitUsageAndComplete(Agent agent, String channelType, String content,
-                                              LlmProvider.StreamAccumulator accumulator,
-                                              ModelInfo modelInfo,
+                                              LlmProvider.TurnUsage turnUsage,
                                               long streamStartMs, String usageJson,
                                               StreamingCallbacks cb) {
         var durationMs = System.currentTimeMillis() - streamStartMs;
-        if (accumulator.usage != null) {
-            var u = accumulator.usage;
-            var reasoningCount = effectiveReasoningTokens(u, accumulator);
+        if (turnUsage.hasProviderUsage) {
+            var reasoningCount = effectiveReasoningTokens(turnUsage);
             var extras = new StringBuilder();
             if (reasoningCount > 0) extras.append(", %d reasoning".formatted(reasoningCount));
-            if (u.cachedTokens() > 0) extras.append(", %d cached".formatted(u.cachedTokens()));
-            if (u.cacheCreationTokens() > 0) extras.append(", %d cache-write".formatted(u.cacheCreationTokens()));
+            if (turnUsage.cachedTokens > 0) extras.append(", %d cached".formatted(turnUsage.cachedTokens));
+            if (turnUsage.cacheCreationTokens > 0) extras.append(", %d cache-write".formatted(turnUsage.cacheCreationTokens));
             var usageSummary = " [%d prompt, %d completion, %d total tokens%s, %.1fs]".formatted(
-                    u.promptTokens(), u.completionTokens(), u.totalTokens(),
+                    turnUsage.promptTokens, turnUsage.completionTokens, turnUsage.totalTokens,
                     extras.toString(),
                     durationMs / 1000.0);
             EventLogger.info("llm", agent.name, channelType,
@@ -587,7 +603,8 @@ public class AgentRunner {
                                                     StreamingCallbacks cb,
                                                     Integer maxTokens, String thinkingMode,
                                                     int round, AtomicBoolean isCancelled,
-                                                    LatencyTrace trace) {
+                                                    LatencyTrace trace,
+                                                    LlmProvider.TurnUsage turnUsage) {
         if (round >= maxToolRounds()) {
             return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
         }
@@ -627,6 +644,11 @@ public class AgentRunner {
 
         if (isCancelled.get()) return priorContent;
 
+        // Fold this round's usage into the turn-level cumulative (JCLAW-76).
+        // Runs regardless of whether the round resolves to more tool calls,
+        // truncation, synthesis, or empty-retry — every round contributes.
+        turnUsage.addRound(accumulator);
+
         // Truncation guard: if the model hit max_tokens mid-tool-call, the tool arguments
         // will be an incomplete JSON fragment. Passing that to ToolRegistry.execute causes
         // a Gson EOFException and the user sees a cryptic "End of input" error. Instead,
@@ -648,7 +670,7 @@ public class AgentRunner {
         if (!accumulator.toolCalls.isEmpty()) {
             return handleToolCallsStreaming(agent, conversationId, currentMessages, tools,
                     accumulator.toolCalls, accumulator.content, provider, cb, maxTokens, thinkingMode,
-                    round + 1, isCancelled, trace);
+                    round + 1, isCancelled, trace, turnUsage);
         }
 
         // Some models (especially smaller/distilled ones) occasionally return zero tokens
@@ -674,6 +696,9 @@ public class AgentRunner {
                 Thread.currentThread().interrupt();
                 return priorContent;
             }
+
+            // Retry round is a real LLM call — its usage counts too (JCLAW-76).
+            turnUsage.addRound(retry);
 
             if (retry.content != null && !retry.content.isBlank()) {
                 return buildImagePrefix(collectedImages, retry.content) + retry.content;

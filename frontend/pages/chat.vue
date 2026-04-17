@@ -344,17 +344,12 @@ function stopStreaming() {
 }
 
 // Filter out tool messages and empty assistant messages (tool call records) from display.
-// During streaming, suppress the placeholder until it has visible content — reasoning-only
-// or usage-only messages flash briefly as empty blocks before content tokens arrive,
-// producing a jarring "two blocks collapsing into one" visual artifact. The placeholder
-// is identified by having a _key (frontend-created) but no id (not yet DB-persisted).
-// Once streaming ends, the suppression lifts so genuinely empty responses still render.
+// The predicate lives in ~/utils/display-message-filter for unit-testability; see
+// JCLAW-75 for the specific reasoning-stream regression the reasoning-aware
+// suppression rule closes.
+import { shouldDisplayMessage } from '~/utils/display-message-filter'
 const displayMessages = computed(() =>
-  messages.value.filter(m => {
-    if (m.role === 'tool') return false
-    if (m._key && !m.id && streaming.value && !m.content) return false
-    return m.content || m.reasoning || m.usage
-  })
+  messages.value.filter(m => shouldDisplayMessage(m as any, streaming.value))
 )
 
 // Deep-link: if ?conversation=ID is present, load that conversation and switch
@@ -530,9 +525,18 @@ async function sendMessage() {
             }
           } else if (event.type === 'reasoning') {
             const m = messages.value[assistantIdx] as any
+            // Bubble state is set once on the first reasoning chunk. Writing
+            // these properties again on every subsequent chunk — even to the
+            // same value — triggers Vue reactivity and makes the bubble
+            // visibly reflow/flicker (observed as "expands and contracts over
+            // and over"). The protective _thinkingInProgress=true flag is
+            // enough to pin the "Thinking" label for the duration of the
+            // reasoning phase; no need to re-pin it per chunk.
             if (!m._thinkingStartedAt) {
               m._thinkingStartedAt = Date.now()
-              m.thinkingCollapsed = false  // expanded while streaming
+              m._thinkingInProgress = true
+              m._thinkingDurationMs = null
+              m.thinkingCollapsed = false
             }
             streamReasoning.value += event.content
             m.reasoning = streamReasoning.value
@@ -541,13 +545,25 @@ async function sendMessage() {
             }
             scrollToBottom()
           } else if (event.type === 'token') {
+            // Empty-content token events are emitted by OpenAI-compatible
+            // providers (observed on Kimi K2.5 via OpenRouter) interleaved
+            // with every reasoning chunk — the `content` field is always
+            // present in the API schema and defaults to "" when the chunk
+            // only carries reasoning. Treating those as a real reasoning→
+            // content transition was the "Thought for 0.01 seconds during
+            // streaming" bug: the second empty-content token after the
+            // first reasoning event was tripping the flip. Skip them
+            // entirely so the transition fires only on the first byte of
+            // genuine content.
+            if (!event.content) continue
             const m = messages.value[assistantIdx] as any
-            // Reasoning→content transition: stamp duration and auto-collapse
-            // once per bubble. The backend also persists reasoningDurationMs
-            // via usageJson, but doing this client-side makes the collapse
-            // happen at token-time instead of after the usage SSE frame.
-            if (m._thinkingStartedAt && m._thinkingDurationMs == null) {
-              m._thinkingDurationMs = Date.now() - m._thinkingStartedAt
+            // Reasoning→content transition: stamp duration, flip flag,
+            // auto-collapse. Guarded by _thinkingInProgress so the stamp
+            // fires exactly once at the transition — subsequent content
+            // tokens are no-ops on this branch.
+            if (m._thinkingInProgress) {
+              m._thinkingDurationMs = Date.now() - (m._thinkingStartedAt ?? Date.now())
+              m._thinkingInProgress = false
               m.thinkingCollapsed = true
             }
             streamStatus.value = ''
@@ -558,8 +574,9 @@ async function sendMessage() {
           } else if (event.type === 'complete') {
             const m = messages.value[assistantIdx] as any
             // Reasoning-only turn (no content streamed): finalize duration here.
-            if (m._thinkingStartedAt && m._thinkingDurationMs == null) {
-              m._thinkingDurationMs = Date.now() - m._thinkingStartedAt
+            if (m._thinkingInProgress) {
+              m._thinkingDurationMs = Date.now() - (m._thinkingStartedAt ?? Date.now())
+              m._thinkingInProgress = false
               m.thinkingCollapsed = true
             }
             streamStatus.value = ''
@@ -927,7 +944,16 @@ function exportConversation() {
             </div>
           </div>
         </div>
-        <div v-if="streaming && !streamContent" class="flex justify-start">
+        <!--
+          Pre-first-byte placeholder. Visible only during the gap between "user
+          sent the request" and "the first stream event (reasoning OR content)
+          arrived." Once either signal lands, displayMessages starts rendering
+          the real bubble (with live reasoning and/or content) and this gray
+          placeholder yields. Without the streamReasoning guard, JCLAW-75
+          regression: reasoning-mode turns show this pill for the entire
+          thinking phase.
+        -->
+        <div v-if="streaming && !streamContent && !streamReasoning" class="flex justify-start">
           <div class="max-w-[85%]">
             <div class="flex items-baseline gap-2 mb-1">
               <span class="text-xs font-medium text-emerald-700 dark:text-emerald-400">assistant</span>
