@@ -6,7 +6,7 @@ FRONTEND_PID_FILE="frontend.pid"
 
 usage() {
     cat <<EOF
-Usage: jclaw.sh [options] <start|stop|restart|status|logs|loadtest>
+Usage: jclaw.sh [options] <start|stop|restart|status|logs|loadtest|test>
 
 Commands:
   start     Start the Play backend and Nuxt frontend
@@ -15,6 +15,8 @@ Commands:
   status    Show whether backend and frontend are running
   logs      Tail the production application log
   loadtest  Drive the in-process load-test harness against /api/chat/stream
+  test      Run backend (play auto-test) + frontend (pnpm test) and report a
+            consolidated pass/fail summary. Exits non-zero on any failure.
 
 Options:
   --dev                   Run in development mode (play run + pnpm dev)
@@ -113,7 +115,7 @@ while [[ $# -gt 0 ]]; do
             LT_CLEAN=true
             shift
             ;;
-        start|stop|restart|status|logs|loadtest)
+        start|stop|restart|status|logs|loadtest|test)
             COMMAND="$1"
             shift
             ;;
@@ -593,6 +595,78 @@ do_loadtest() {
     echo "==> Tip: GET /api/metrics/latency for per-segment histograms"
 }
 
+# ─── Consolidated test runner ───
+
+# Runs backend (play auto-test) and frontend (pnpm test) sequentially, streams
+# each side's output, and prints a two-line summary at the end. Continues
+# past a backend failure so the user sees frontend results too — the whole
+# point of this subcommand is a single round-trip. Exits non-zero if either
+# suite failed so CI/git hooks can depend on it.
+#
+# play auto-test sometimes returns 0 even when assertions fail, so we also
+# scrape its log for the terminal "All tests passed" banner as a second
+# confirmation before declaring backend green.
+do_test() {
+    cd "$SCRIPT_DIR"
+    mkdir -p "$SCRIPT_DIR/logs"
+    local backend_log="$SCRIPT_DIR/logs/test-backend.log"
+    local frontend_log="$SCRIPT_DIR/logs/test-frontend.log"
+    local backend_rc=0 frontend_rc=0
+    local t0 backend_elapsed frontend_elapsed
+    local backend_passed backend_failed frontend_summary
+
+    echo "==> Running backend tests (play auto-test)..."
+    t0=$SECONDS
+    set +e
+    play auto-test 2>&1 | tee "$backend_log"
+    backend_rc=${PIPESTATUS[0]}
+    set -e
+    if ! grep -q "^~ All tests passed" "$backend_log" 2>/dev/null; then
+        backend_rc=1
+    fi
+    backend_elapsed=$((SECONDS - t0))
+
+    echo ""
+    echo "==> Running frontend tests (pnpm test)..."
+    t0=$SECONDS
+    set +e
+    (cd "$SCRIPT_DIR/frontend" && pnpm test) 2>&1 | tee "$frontend_log"
+    frontend_rc=${PIPESTATUS[0]}
+    set -e
+    frontend_elapsed=$((SECONDS - t0))
+
+    # Extract human-readable counts for the summary. Each grep is shielded
+    # with `|| true` so a missing match under `set -e` + `pipefail` doesn't
+    # tank the whole function before we get to print the verdict.
+    backend_passed=$(grep -cE "PASSED " "$backend_log" 2>/dev/null || true)
+    backend_failed=$(grep -cE "FAILED " "$backend_log" 2>/dev/null || true)
+    frontend_summary=$(grep -E "^[[:space:]]+Tests[[:space:]]" "$frontend_log" 2>/dev/null | tail -1 | sed 's/^[[:space:]]*//' || true)
+    [[ -z "$frontend_summary" ]] && frontend_summary="(summary unavailable)"
+
+    echo ""
+    echo "────────────────────────────────────────────────────────────"
+    echo " jclaw test summary"
+    echo "────────────────────────────────────────────────────────────"
+    if [[ "$backend_rc" -eq 0 ]]; then
+        printf " backend  : PASSED  (%s classes, %ss)\n" "${backend_passed:-?}" "$backend_elapsed"
+    else
+        printf " backend  : FAILED  (%s passed / %s failed, %ss)\n" \
+            "${backend_passed:-?}" "${backend_failed:-?}" "$backend_elapsed"
+        echo "            log: $backend_log"
+    fi
+    if [[ "$frontend_rc" -eq 0 ]]; then
+        printf " frontend : PASSED  %s (%ss)\n" "$frontend_summary" "$frontend_elapsed"
+    else
+        printf " frontend : FAILED  %s (%ss)\n" "$frontend_summary" "$frontend_elapsed"
+        echo "            log: $frontend_log"
+    fi
+    echo "────────────────────────────────────────────────────────────"
+
+    if [[ "$backend_rc" -ne 0 || "$frontend_rc" -ne 0 ]]; then
+        exit 1
+    fi
+}
+
 # ─── Execute ───
 
 case "$COMMAND" in
@@ -637,5 +711,9 @@ case "$COMMAND" in
         ;;
     loadtest)
         do_loadtest
+        ;;
+    test)
+        check_java
+        do_test
         ;;
 esac

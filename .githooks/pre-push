@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Pre-push hook: run the consolidated test suite before a push leaves the
+# laptop. Skips the run when the current HEAD has already been tested (so
+# the two-remote deploy flow — origin + github — only pays the ~30 s cost
+# once). Cache lives inside $GIT_DIR so it stays local to this clone and
+# is automatically scoped per worktree.
+#
+# Enable once per clone:  git config core.hooksPath .githooks
+# Bypass for a single push (use sparingly):  JCLAW_SKIP_TESTS=1 git push ...
+
+set -euo pipefail
+
+if [[ "${JCLAW_SKIP_TESTS:-}" == "1" ]]; then
+    echo "[jclaw pre-push] JCLAW_SKIP_TESTS=1 — skipping tests."
+    exit 0
+fi
+
+repo_root=$(git rev-parse --show-toplevel)
+git_dir=$(git rev-parse --git-dir)
+cache_file="$git_dir/jclaw-last-tested-sha"
+current_sha=$(git rev-parse HEAD)
+
+if [[ -f "$cache_file" ]] && [[ "$(cat "$cache_file")" == "$current_sha" ]]; then
+    echo "[jclaw pre-push] HEAD $current_sha already tested — skipping."
+    exit 0
+fi
+
+echo "[jclaw pre-push] Testing HEAD $current_sha before push..."
+if (cd "$repo_root" && ./jclaw.sh test); then
+    echo "$current_sha" > "$cache_file"
+    echo "[jclaw pre-push] Tests passed — proceeding with push."
+    exit 0
+else
+    echo "[jclaw pre-push] Tests FAILED — push aborted." >&2
+    echo "[jclaw pre-push] To push anyway: JCLAW_SKIP_TESTS=1 git push ..." >&2
+    exit 1
+fi

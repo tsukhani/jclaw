@@ -188,6 +188,33 @@ Use `--backend-port` and `--frontend-port` with any `jclaw.sh` mode. The fronten
 ./jclaw.sh --backend-port 8080 start
 ```
 
+### Testing
+
+Run the backend and frontend test suites together and print a consolidated pass/fail summary:
+
+```bash
+./jclaw.sh test
+```
+
+This runs `play auto-test` (backend JUnit + functional tests) followed by `pnpm test` (frontend Vitest), streams each side's output live, and finishes with a two-line verdict like:
+
+```
+ backend  : PASSED  (47 classes, 26s)
+ frontend : PASSED  Tests  199 passed (199) (5s)
+```
+
+Full logs land in `logs/test-backend.log` and `logs/test-frontend.log` for post-mortem on failure. The command exits non-zero if either suite failed, so it's safe to wire into git hooks or CI.
+
+#### Pre-push hook (optional)
+
+An in-repo `.githooks/pre-push` hook runs `./jclaw.sh test` before a push reaches the remote and caches the tested SHA in `$GIT_DIR/jclaw-last-tested-sha`, so the second push in a two-remote deploy flow (origin + github) reuses the result instead of re-running the suite. Enable once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+To bypass for a one-off push (e.g. urgent hotfix, docs-only change): `JCLAW_SKIP_TESTS=1 git push origin HEAD`.
+
 ---
 
 ## Architecture
