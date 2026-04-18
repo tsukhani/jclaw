@@ -121,10 +121,23 @@ pipeline {
                         // Single-arch `docker build` was the prior shape;
                         // kept in git history for reference if buildx ever
                         // becomes unavailable on this agent.
+                        //
+                        // --provenance=false disables BuildKit's default
+                        // SLSA provenance attestation. Without this flag,
+                        // the published image index carries an extra
+                        // `unknown/unknown` manifest per platform (the
+                        // attestation blob), which GHCR's package UI then
+                        // renders as a third "platform" in the docker-pull
+                        // dropdown — confusing to anyone copy-pasting the
+                        // wrong command. We don't currently consume the
+                        // attestation anywhere, so dropping it keeps the
+                        // manifest index clean. Flip back to `=true` if
+                        // supply-chain requirements emerge.
                         sh """
                             echo \$GH_TOKEN | docker login ghcr.io -u tsukhani --password-stdin
                             docker buildx create --use --name jclaw-builder --driver docker-container 2>/dev/null || docker buildx use jclaw-builder
                             docker buildx build \\
+                                --provenance=false \\
                                 --platform linux/amd64,linux/arm64 \\
                                 -t ghcr.io/tsukhani/jclaw:${version} \\
                                 -t ghcr.io/tsukhani/jclaw:latest \\
