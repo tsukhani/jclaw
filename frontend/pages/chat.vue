@@ -4,6 +4,7 @@ import DOMPurify from 'dompurify'
 import { formatUsageCost, formatUsageCostTooltip, type MessageUsage } from '~/utils/usage-cost'
 import { formatSize } from '~/utils/format'
 import { thinkingHeaderLabel, initCollapsedState } from '~/utils/thinking'
+import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
 
 // Configure marked for safe rendering
 marked.setOptions({
@@ -66,39 +67,6 @@ function renderMarkdown(text: string, agentId: number | null = null): string {
     markdownCache.set(cacheKey, result)
   }
   return result
-}
-
-/**
- * Rewrite relative anchor hrefs (e.g. "summary.docx" or "uploads/123/report.pdf")
- * to the workspace file endpoint and mark them as downloads. Absolute URLs,
- * anchors, and existing /api/ links are left untouched.
- */
-function rewriteWorkspaceLinks(html: string, agentId: number): string {
-  if (typeof DOMParser === 'undefined') return html
-  const parser = new DOMParser()
-  const doc = parser.parseFromString(`<div id="__root">${html}</div>`, 'text/html')
-  const root = doc.getElementById('__root')
-  if (!root) return html
-  root.querySelectorAll('a[href]').forEach(a => {
-    const href = a.getAttribute('href') || ''
-    if (!href) return
-    if (href.startsWith('/') || href.startsWith('#')) return
-    // External links open in a new tab
-    if (/^https?:/i.test(href)) {
-      a.setAttribute('target', '_blank')
-      a.setAttribute('rel', 'noopener noreferrer')
-      return
-    }
-    if (/^(mailto|tel|ftp|data|javascript):/i.test(href)) return
-    // Decode first: marked.parse already URL-encodes the href (spaces → %20),
-    // so a raw encodeURIComponent would double-encode (%20 → %2520), producing
-    // a URL that 404s because the filename on disk has real spaces, not "%20".
-    const encoded = href.split('/').filter(Boolean).map(s => encodeURIComponent(decodeURIComponent(s))).join('/')
-    a.setAttribute('href', `/api/agents/${agentId}/files/${encoded}`)
-    a.setAttribute('download', '')
-    a.classList.add('workspace-file')
-  })
-  return root.innerHTML
 }
 
 function formatTimestamp(iso: string): string {

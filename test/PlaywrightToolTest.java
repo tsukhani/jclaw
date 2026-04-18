@@ -95,11 +95,59 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void screenshotResultIncludesDoNotReembedInstruction() {
-        // The tool result MUST contain a markdown image tag (so AgentRunner picks it up)
-        // AND an explicit instruction telling the LLM the image is already displayed,
-        // so the LLM doesn't echo a (potentially broken) duplicate in its reply.
-        // See commit history for the duplicate-screenshot bug report.
+    public void parallelBrowserOpsOnSameAgentDoNotCorruptPage() throws Exception {
+        // Regression: when the LLM emits navigate + screenshot in a single
+        // streaming round, AgentRunner.executeToolsParallel dispatches them on
+        // separate virtual threads. Playwright's Page is not thread-safe, so
+        // without per-session serialization one call surfaces as
+        //   "Browser error: Object doesn't exist: request@<hash>"
+        // This test runs two browser actions concurrently against the same
+        // agent and asserts both return non-error results.
+        //
+        // Skipped when Playwright is not configured (no chromium install in CI).
+        if (!"true".equals(services.ConfigService.get("playwright.enabled", "false"))) {
+            return;
+        }
+
+        var tool = new PlaywrightBrowserTool();
+        // Seed the session with an initial navigate so the screenshot target is
+        // a real page rather than about:blank.
+        var seed = tool.execute(
+                "{\"action\":\"navigate\",\"url\":\"data:text/html,<h1>seed</h1>\"}",
+                agent);
+        assertFalse(seed.startsWith("Browser error"), "seed navigate failed: " + seed);
+
+        try {
+            var results = new String[2];
+            var t1 = Thread.ofVirtual().start(() -> results[0] = tool.execute(
+                    "{\"action\":\"navigate\",\"url\":\"data:text/html,<h1>one</h1>\"}",
+                    agent));
+            var t2 = Thread.ofVirtual().start(() -> results[1] = tool.execute(
+                    "{\"action\":\"screenshot\"}",
+                    agent));
+            t1.join();
+            t2.join();
+
+            assertFalse(results[0].contains("Object doesn't exist"),
+                    "navigate must not trip Playwright's request map: " + results[0]);
+            assertFalse(results[1].contains("Object doesn't exist"),
+                    "screenshot must not trip Playwright's request map: " + results[1]);
+            // Screenshot result must still contain the markdown embed so
+            // AgentRunner can prepend the inline image.
+            assertTrue(results[1].contains("![Screenshot]("),
+                    "screenshot result must still contain the markdown embed: " + results[1]);
+        } finally {
+            PlaywrightBrowserTool.closeSession(agent.name);
+        }
+    }
+
+    @Test
+    public void screenshotResultContainsImageEmbedAndGuidance() {
+        // The tool result MUST contain a markdown image tag (so AgentRunner picks
+        // it up and prepends the inline image) AND guidance that tells the LLM:
+        //   - the image is already displayed (don't re-embed as an image), and
+        //   - the URL should be included in the reply as a plain link so the user
+        //     has a referenceable pointer to the file alongside the inline image.
         var url = "/api/agents/1/files/screenshot-1000.png";
         var result = PlaywrightBrowserTool.formatScreenshotResult(url);
 
@@ -107,8 +155,21 @@ public class PlaywrightToolTest extends UnitTest {
                 "Result must contain a well-formed markdown image tag for the screenshot URL");
         assertTrue(result.contains("Do NOT re-embed"),
                 "Result must tell the LLM not to re-embed the image");
-        assertTrue(result.contains("already visible"),
-                "Result must state that the image is already visible to the user");
+        assertTrue(result.contains("already displayed"),
+                "Result must state that the image is already displayed to the user");
+        assertTrue(result.contains("<img>"),
+                "Result must also forbid HTML <img> re-embeds (the dedup catches both forms)");
+        // URL appears twice: once inside the ![](...) image embed and once
+        // inside a ready-to-copy markdown link template, so the LLM has an
+        // unambiguous clickable reference to cite.
+        int first = result.indexOf(url);
+        int second = result.indexOf(url, first + 1);
+        assertTrue(first >= 0 && second > first,
+                "Result must reference the URL both inside the image embed and as a link template");
+        assertTrue(result.contains("[screenshot](" + url + ")"),
+                "Result must provide a ready-to-copy markdown link template for the LLM to echo");
+        assertTrue(result.contains("include the link"),
+                "Result must explicitly invite the LLM to include the link in its reply");
         assertFalse(result.contains("Display it with:"),
                 "Result must NOT invite the LLM to display the image (the buggy prior wording)");
     }

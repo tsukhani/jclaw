@@ -35,6 +35,19 @@ public class AgentRunner {
             Pattern.compile("!\\[([^\\]]*)\\]\\((/api/[^)]+)\\)");
     private static final Pattern PAREN_URL_PATTERN =
             Pattern.compile("\\(([^)]+)\\)");
+    // Matches any image-markdown embed, not just /api/ URLs. Used by buildImagePrefix
+    // to distinguish "LLM re-embedded the image" (suppress prepend) from "LLM
+    // mentioned the filename/URL as text" (still prepend — the user wants both
+    // an inline image AND a textual link reference).
+    private static final Pattern ANY_IMAGE_EMBED =
+            Pattern.compile("!\\[[^\\]]*\\]\\(([^)]+)\\)");
+    // Matches HTML <img src="..."> embeds (single, double, or unquoted src).
+    // LLMs occasionally emit HTML instead of markdown; catching both ensures a
+    // re-embed in either form suppresses the prepend and prevents duplicate
+    // rendering.
+    private static final Pattern HTML_IMG_EMBED =
+            Pattern.compile("<img\\s[^>]*?src\\s*=\\s*[\"']?([^\"'\\s>]+)",
+                    Pattern.CASE_INSENSITIVE);
 
     private static int maxToolRounds() {
         return services.ConfigService.getInt("chat.maxToolRounds", DEFAULT_MAX_TOOL_ROUNDS);
@@ -1010,18 +1023,22 @@ public class AgentRunner {
     }
 
     /**
-     * Build a leading image block containing only collected images whose filename
-     * is NOT already present in {@code content}. Prevents double-rendering when the
-     * LLM echoes (or mis-echoes) the markdown image from a tool result.
+     * Build a leading image block containing only collected images that the LLM
+     * reply has not already embedded as an image. Prevents double-rendering when
+     * the LLM echoes the image from a tool result — in either markdown
+     * ({@code ![alt](url)}) or HTML ({@code <img src="url">}) form — but does
+     * <em>not</em> suppress the prepend when the LLM merely references the URL
+     * or filename as a plain text link. In the text-mention case the user
+     * expects to see both the inline image AND the link reference, so the
+     * prepend still fires.
      *
-     * <p>The dedup matches by <em>filename</em> rather than full URL. Filenames in
-     * JClaw are timestamp-suffixed (e.g. {@code screenshot-1713100000000.png}) so
-     * collisions are effectively impossible, and any LLM reply that references the
-     * filename in any form — the original URL, a rewritten path, a plain-text
-     * mention, or a fabricated {@code <img>} tag — will be caught as "already
-     * rendered" and the prepended copy will be skipped. This is strictly looser
-     * than full-URL substring matching and catches LLM reply drift that the older
-     * exact-URL check missed.
+     * <p>A collected image is suppressed when its filename appears inside any
+     * {@code ![...](...)} or {@code <img src=...>} in the reply. Filenames in
+     * JClaw are timestamp-suffixed (e.g. {@code screenshot-1713100000000.png})
+     * so collisions are effectively impossible, and an LLM reply that re-embeds
+     * the image with a rewritten path (e.g.
+     * {@code ![alt](./workspace/screenshot-1713100000000.png)}) is still caught
+     * by filename match.
      *
      * <p>When the LLM drops the image entirely, every collected image survives
      * the filter and the prefix acts as a safety net so the user still sees it.
@@ -1031,6 +1048,22 @@ public class AgentRunner {
     public static String buildImagePrefix(List<String> collectedImages, String content) {
         if (collectedImages == null || collectedImages.isEmpty()) return "";
         var safeContent = content != null ? content : "";
+
+        // Collect filenames of images already embedded (as markdown OR HTML) in
+        // the reply. Plain-text URL / filename / link mentions are intentionally
+        // NOT collected here — that's the behavioral distinction from the prior
+        // filename-substring dedup.
+        var embeddedFilenames = new java.util.HashSet<String>();
+        for (var pattern : List.of(ANY_IMAGE_EMBED, HTML_IMG_EMBED)) {
+            var m = pattern.matcher(safeContent);
+            while (m.find()) {
+                var url = m.group(1);
+                var slash = url.lastIndexOf('/');
+                var fn = slash >= 0 ? url.substring(slash + 1) : url;
+                if (!fn.isEmpty()) embeddedFilenames.add(fn);
+            }
+        }
+
         var missing = new ArrayList<String>();
         for (var img : collectedImages) {
             var m = PAREN_URL_PATTERN.matcher(img);
@@ -1038,7 +1071,7 @@ public class AgentRunner {
                 var fullUrl = m.group(1);
                 var slash = fullUrl.lastIndexOf('/');
                 var filename = slash >= 0 ? fullUrl.substring(slash + 1) : fullUrl;
-                if (!filename.isEmpty() && safeContent.contains(filename)) continue;
+                if (!filename.isEmpty() && embeddedFilenames.contains(filename)) continue;
             }
             missing.add(img);
         }

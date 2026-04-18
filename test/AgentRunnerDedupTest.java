@@ -83,14 +83,56 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void dedupsWhenFilenameIsPlainTextMentioned() {
-        // Even a plain-text mention of the filename counts as "already referenced"
-        // — the assistant has acknowledged the file, so we don't need to also
-        // prepend a rendered copy.
+    public void prependsWhenFilenameIsMentionedAsPlainTextOnly() {
+        // Intentional behavior change: a plain-text mention of the filename is
+        // NOT an image embed — the user expects both the inline image AND the
+        // textual link reference, so the prepend still fires. Previously this
+        // case suppressed the prepend under a filename-substring dedup, which
+        // conflicted with the PlaywrightBrowserTool guidance that now asks the
+        // LLM to include the screenshot URL as a plain link in its reply.
         List<String> collected = List.of(
                 "![Screenshot](/api/agents/1/files/screenshot-1000.png)");
         var content = "I saved the screenshot as screenshot-1000.png in your workspace.";
-        assertEquals("", AgentRunner.buildImagePrefix(collected, content));
+        var prefix = AgentRunner.buildImagePrefix(collected, content);
+        assertTrue(prefix.contains("![Screenshot](/api/agents/1/files/screenshot-1000.png)"),
+                "Plain-text filename mention must NOT suppress the inline-image prepend");
+    }
+
+    @Test
+    public void prependsWhenUrlIsMentionedAsMarkdownLinkOnly() {
+        // A markdown link (not an image embed) — same rule as plain text.
+        // User sees both: the prepended inline image AND the LLM's clickable link.
+        List<String> collected = List.of(
+                "![Screenshot](/api/agents/1/files/screenshot-1000.png)");
+        var content = "Captured: [screenshot](/api/agents/1/files/screenshot-1000.png)";
+        var prefix = AgentRunner.buildImagePrefix(collected, content);
+        // Stricter than a bare filename substring: the prefix MUST carry a
+        // well-formed image embed so the user actually sees an inline image,
+        // not just a text fragment that happens to contain the filename.
+        assertTrue(prefix.contains("![Screenshot](/api/agents/1/files/screenshot-1000.png)"),
+                "Regular markdown link must NOT suppress the inline-image prepend");
+    }
+
+    @Test
+    public void dedupsWhenLlmReembedsAsHtmlImgTag() {
+        // LLMs occasionally emit HTML <img src="..."> instead of markdown.
+        // The dedup must catch both forms — otherwise the prepend fires AND the
+        // LLM's HTML <img> renders, producing a duplicate.
+        List<String> collected = List.of(
+                "![Screenshot](/api/agents/1/files/screenshot-1000.png)");
+        var content = "Here: <img src=\"/api/agents/1/files/screenshot-1000.png\" alt=\"\">";
+        assertEquals("", AgentRunner.buildImagePrefix(collected, content),
+                "HTML <img> re-embed must suppress the prepend");
+    }
+
+    @Test
+    public void dedupsWhenLlmReembedsAsHtmlImgTagWithSingleQuotes() {
+        // Single-quoted src attribute — same contract.
+        List<String> collected = List.of(
+                "![Screenshot](/api/agents/1/files/screenshot-1000.png)");
+        var content = "<img alt='shot' src='./workspace/screenshot-1000.png'>";
+        assertEquals("", AgentRunner.buildImagePrefix(collected, content),
+                "HTML <img> with single-quoted src must also suppress the prepend");
     }
 
     // ==================== buildImagePrefix: prepend paths ====================

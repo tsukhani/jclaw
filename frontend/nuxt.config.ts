@@ -7,11 +7,19 @@ const backendUrl = `http://localhost:${backendPort}`
 export default defineNuxtConfig({
   ssr: false,
 
-  modules: ['shadcn-nuxt'],
+  modules: ['shadcn-nuxt', '@nuxt/eslint'],
 
   shadcn: {
     prefix: '',
     componentDir: './components/ui',
+  },
+
+  // @nuxt/eslint: stylistic rules double as the formatter (Prettier replacement).
+  // Keep overrides minimal — module defaults are sensible for Nuxt 4.
+  eslint: {
+    config: {
+      stylistic: true,
+    },
   },
 
   css: ['~/assets/css/tailwind.css'],

@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Headless Chromium browser automation for JS-heavy pages.
@@ -24,9 +25,20 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     private static final long IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
     private static final ConcurrentHashMap<String, BrowserSession> sessions = new ConcurrentHashMap<>();
 
-    private record BrowserSession(Playwright playwright, Browser browser, Page page, long lastUsed) {
+    /**
+     * Playwright's {@link Page} API is not thread-safe — concurrent navigate /
+     * screenshot calls on the same Page corrupt its internal request map and
+     * surface as {@code "Object doesn't exist: request@<hash>"}. When the LLM
+     * emits multiple browser tool calls in a single streaming round,
+     * {@link agents.AgentRunner#executeToolsParallel} dispatches them on
+     * separate virtual threads, so the tool must serialize Page access itself.
+     * The {@code lock} is held for the full duration of each {@code execute()}
+     * call on this agent's session.
+     */
+    private record BrowserSession(Playwright playwright, Browser browser, Page page,
+                                  ReentrantLock lock, long lastUsed) {
         BrowserSession withLastUsed() {
-            return new BrowserSession(playwright, browser, page, System.currentTimeMillis());
+            return new BrowserSession(playwright, browser, page, lock, System.currentTimeMillis());
         }
     }
 
@@ -94,45 +106,40 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
         var action = args.get("action").getAsString();
 
+        // "close" tears down the session; don't re-create one just to close it.
+        if ("close".equals(action)) {
+            closeSession(agent.name);
+            return "Browser session closed.";
+        }
+
+        // Acquire the per-agent lock so parallel tool calls in the same round
+        // (e.g. navigate + screenshot dispatched by executeToolsParallel) run
+        // serially against the same Page. Playwright's Page is not thread-safe.
+        var session = getOrCreateSession(agent.name);
+        session.lock().lock();
         try {
+            var page = session.page();
             return switch (action) {
-                case "navigate" -> {
-                    var url = args.get("url").getAsString();
-                    yield navigate(agent.name, url);
-                }
-                case "click" -> {
-                    var selector = args.get("selector").getAsString();
-                    yield click(agent.name, selector);
-                }
-                case "fill" -> {
-                    var selector = args.get("selector").getAsString();
-                    var value = args.get("value").getAsString();
-                    yield fill(agent.name, selector, value);
-                }
-                case "getText" -> {
-                    var selector = args.has("selector") ? args.get("selector").getAsString() : "body";
-                    yield getText(agent.name, selector);
-                }
-                case "screenshot" -> screenshot(agent.name, agent.id);
-                case "evaluate" -> {
-                    var expression = args.get("expression").getAsString();
-                    yield evaluate(agent.name, expression);
-                }
-                case "close" -> {
-                    closeSession(agent.name);
-                    yield "Browser session closed.";
-                }
+                case "navigate" -> navigate(page, args.get("url").getAsString());
+                case "click" -> click(page, args.get("selector").getAsString());
+                case "fill" -> fill(page, args.get("selector").getAsString(),
+                                    args.get("value").getAsString());
+                case "getText" -> getText(page,
+                        args.has("selector") ? args.get("selector").getAsString() : "body");
+                case "screenshot" -> screenshot(page, agent.name, agent.id);
+                case "evaluate" -> evaluate(page, args.get("expression").getAsString());
                 default -> "Error: Unknown action '%s'".formatted(action);
             };
         } catch (PlaywrightException e) {
             return "Browser error: %s".formatted(e.getMessage());
         } catch (Exception e) {
             return "Error: %s".formatted(e.getMessage());
+        } finally {
+            session.lock().unlock();
         }
     }
 
-    private String navigate(String agentName, String url) {
-        var page = getOrCreatePage(agentName);
+    private String navigate(Page page, String url) {
         page.navigate(url);
         page.waitForLoadState(LoadState.NETWORKIDLE);
         var title = page.title();
@@ -143,22 +150,19 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         return "Page: %s\n\n%s".formatted(title, text != null ? text : "(empty page)");
     }
 
-    private String click(String agentName, String selector) {
-        var page = getOrCreatePage(agentName);
+    private String click(Page page, String selector) {
         page.locator(selector).first().click();
         page.waitForLoadState(LoadState.NETWORKIDLE);
         var title = page.title();
         return "Clicked '%s'. Page: %s".formatted(selector, title);
     }
 
-    private String fill(String agentName, String selector, String value) {
-        var page = getOrCreatePage(agentName);
+    private String fill(Page page, String selector, String value) {
         page.locator(selector).first().fill(value);
         return "Filled '%s' with value.".formatted(selector);
     }
 
-    private String getText(String agentName, String selector) {
-        var page = getOrCreatePage(agentName);
+    private String getText(Page page, String selector) {
         var text = page.locator(selector).first().textContent();
         if (text != null && text.length() > MAX_TEXT_LENGTH) {
             text = text.substring(0, MAX_TEXT_LENGTH) + "\n[Truncated]";
@@ -166,8 +170,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         return text != null ? text : "(no text content)";
     }
 
-    private String screenshot(String agentName, Long agentId) {
-        var page = getOrCreatePage(agentName);
+    private String screenshot(Page page, String agentName, Long agentId) {
         var timestamp = System.currentTimeMillis();
         var filename = "screenshot-%d.png".formatted(timestamp);
         var path = AgentService.workspacePath(agentName).resolve(filename);
@@ -181,31 +184,33 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      * Build the tool-result string for a captured screenshot. The markdown image
      * tag is included so {@code AgentRunner.extractImageUrls} picks it up and
      * prepends the rendered screenshot to the assistant message. The instruction
-     * mirrors {@code ShellExecTool}'s QR-code handling and prevents the LLM from
-     * re-embedding the same image in its own reply (which would produce a
-     * duplicate or broken placeholder).
+     * tells the LLM the image is already displayed (so it must not re-embed it
+     * as an image in either markdown or HTML form, to avoid a duplicate render)
+     * and provides a ready-to-copy markdown link template so the URL surfaces
+     * as a clickable reference in the assistant's reply alongside the inline
+     * rendering.
      *
      * <p>Exposed for unit tests; not part of the public tool API.
      */
     public static String formatScreenshotResult(String url) {
         return ("![Screenshot](%s)\n"
-                + "[Screenshot captured and displayed above to the user. Do NOT re-embed, "
-                + "re-link, or re-fetch this image in your reply — it is already visible.]")
-                .formatted(url);
+                + "[Screenshot already displayed above. Do NOT re-embed it as an image "
+                + "(no `![...](...)` markdown or `<img>` HTML), but you SHOULD include "
+                + "the link `[screenshot](%s)` in your reply so the user has a clickable reference.]")
+                .formatted(url, url);
     }
 
-    private String evaluate(String agentName, String expression) {
-        var page = getOrCreatePage(agentName);
+    private String evaluate(Page page, String expression) {
         var result = page.evaluate(expression);
         return result != null ? result.toString() : "null";
     }
 
     // --- Session management ---
 
-    private Page getOrCreatePage(String agentName) {
+    private BrowserSession getOrCreateSession(String agentName) {
         // Use compute() for atomic get-or-create — prevents race between
-        // concurrent getOrCreatePage and closeSession on the same key.
-        var session = sessions.compute(agentName, (key, existing) -> {
+        // concurrent getOrCreateSession and closeSession on the same key.
+        return sessions.compute(agentName, (key, existing) -> {
             if (existing != null && existing.page().isClosed()) {
                 destroySession(existing, key);
                 existing = null;
@@ -221,16 +226,24 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                     new BrowserType.LaunchOptions().setHeadless(
                             !"false".equals(services.ConfigService.get("playwright.headless", "true"))));
             var page = browser.newPage();
-            return new BrowserSession(playwright, browser, page, System.currentTimeMillis());
+            return new BrowserSession(playwright, browser, page,
+                    new ReentrantLock(), System.currentTimeMillis());
         });
-        return session.page();
     }
 
     public static void closeSession(String agentName) {
-        // Atomic remove — ConcurrentHashMap guarantees no race with compute()
+        // Atomic remove — ConcurrentHashMap guarantees no race with compute().
+        // Acquire the session lock before tearing down so an in-flight Page op
+        // from another thread finishes cleanly (Playwright close() during a
+        // live request would surface as "Object doesn't exist").
         var session = sessions.remove(agentName);
         if (session != null) {
-            destroySession(session, agentName);
+            session.lock().lock();
+            try {
+                destroySession(session, agentName);
+            } finally {
+                session.lock().unlock();
+            }
         }
     }
 
@@ -250,11 +263,18 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         sessions.forEach((name, session) -> {
             if (now - session.lastUsed() > IDLE_TIMEOUT_MS) {
                 sessions.computeIfPresent(name, (k, s) -> {
-                    if (System.currentTimeMillis() - s.lastUsed() > IDLE_TIMEOUT_MS) {
+                    if (System.currentTimeMillis() - s.lastUsed() <= IDLE_TIMEOUT_MS) {
+                        return s; // refreshed between check and compute — keep
+                    }
+                    // tryLock: if an op is in flight the session isn't really
+                    // idle, so skip this round and revisit on the next tick.
+                    if (!s.lock().tryLock()) return s;
+                    try {
                         destroySession(s, k);
                         return null; // removes the entry
+                    } finally {
+                        s.lock().unlock();
                     }
-                    return s; // keep — was refreshed between check and compute
                 });
             }
         });
