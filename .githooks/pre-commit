@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Pre-commit hook: run frontend linters on staged files only via lint-staged.
+# Keeps the full test suites (backend + frontend) in pre-push — this hook must
+# stay fast (< 5 s typical) so rapid commits aren't disrupted.
+#
+# Enable once per clone:  git config core.hooksPath .githooks
+# Bypass for a single commit (use sparingly):  git commit --no-verify ...
+#
+# What runs: eslint --fix on staged *.{ts,js,vue,mjs}, stylelint --fix on
+# staged *.{css,vue}. Both fixers re-stage their own output, so formatting
+# drift auto-heals without manual re-stages. Non-frontend changes (app/**,
+# conf/**, test/**, etc.) don't match any glob and pass through instantly.
+#
+# What does NOT run: vue-tsc (can't run per-file cleanly), pnpm audit (not a
+# per-file check), test suites (already in pre-push).
+
+set -euo pipefail
+
+# Skip when lint-staged isn't installed (e.g. a fresh clone before
+# `pnpm install` runs in frontend/). Fail open rather than blocking commits.
+FRONTEND_DIR="$(git rev-parse --show-toplevel)/frontend"
+if [[ ! -x "$FRONTEND_DIR/node_modules/.bin/lint-staged" ]]; then
+    echo "[jclaw pre-commit] lint-staged not installed yet — skipping." >&2
+    echo "[jclaw pre-commit] Run 'cd frontend && pnpm install' to enable this hook." >&2
+    exit 0
+fi
+
+# Short-circuit when nothing under frontend/ is staged — avoid the lint-staged
+# startup cost (~500 ms) when a commit only touches backend files.
+if ! git diff --cached --name-only --diff-filter=ACMR | grep -qE '^frontend/'; then
+    exit 0
+fi
+
+cd "$FRONTEND_DIR"
+exec pnpm exec lint-staged

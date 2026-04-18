@@ -26,10 +26,47 @@ pnpm install              # Install dependencies
 pnpm dev                  # Dev server on :3000
 pnpm build                # Production build
 pnpm preview              # Preview production build
+
+pnpm lint                 # ESLint (logic + Vue + TS + a11y + stylistic)
+pnpm format               # eslint --fix — stylistic auto-fix across the tree
+pnpm stylelint            # Stylelint on .css + <style> blocks
+pnpm stylelint:fix        # stylelint --fix
+pnpm typecheck            # vue-tsc --noEmit via nuxi typecheck
+pnpm audit                # pnpm audit --prod --audit-level=moderate
+pnpm test                 # Vitest (unit)
 ```
 
 ### Running Both Together
 Start the Play backend (`play run`) and the Nuxt frontend (`cd frontend && pnpm dev`) in separate terminals. The frontend proxies `/api/**` requests to `localhost:9000`.
+
+## Git Hooks
+
+Checked-in hooks live in `.githooks/`. Enable them on a fresh clone with:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Two hooks, layered by speed:
+
+- **`pre-commit`** — runs `lint-staged` on staged frontend files only (ESLint + Stylelint `--fix`). Target: < 5 s typical. Auto-fixes formatting and re-stages; blocks the commit if a non-fixable rule violates. Short-circuits instantly when no `frontend/**` file is staged, so backend-only commits pay zero cost. Requires `cd frontend && pnpm install` first; before that, the hook fails open with a note.
+- **`pre-push`** — runs the full backend + frontend test suite. Caches per-HEAD so the two-remote deploy flow (origin + github) only pays the ~30 s cost once.
+
+Bypass for a single commit / push (use sparingly):
+
+```bash
+git commit --no-verify -m "…"          # skip pre-commit
+JCLAW_SKIP_TESTS=1 git push …          # skip pre-push tests
+```
+
+Disable per-worktree (overrides the checked-in hook for this clone only):
+
+```bash
+git config --unset core.hooksPath      # opts out entirely
+# or, to keep pre-push but disable pre-commit:
+echo '#!/bin/sh' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+git config core.hooksPath .git/hooks
+```
 
 ## Architecture
 
