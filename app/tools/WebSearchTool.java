@@ -82,6 +82,10 @@ public class WebSearchTool implements ToolRegistry.Tool {
         );
     }
 
+    /** Stateless search — each call is an independent HTTP request. Safe to
+     *  run multiple queries in parallel. */
+    @Override public boolean parallelSafe() { return true; }
+
     @Override
     public String execute(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();

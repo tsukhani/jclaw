@@ -32,6 +32,23 @@ export default defineNuxtConfig({
 
   vite: {
     plugins: [tailwindcss()],
+    // Pre-bundle deps Vite otherwise discovers at runtime on the first
+    // page load — avoids the "Vite discovered new dependencies" reload
+    // that makes cold `pnpm dev` starts (and container restarts) flicker.
+    // Keep in sync with the runtime-discovery log in dev output: these are
+    // imported by shadcn-nuxt components + the chat-page markdown pipeline.
+    optimizeDeps: {
+      include: [
+        'reka-ui',
+        'lucide-vue-next',
+        '@vueuse/core',
+        'clsx',
+        'tailwind-merge',
+        'class-variance-authority',
+        'marked',
+        'dompurify',
+      ],
+    },
   },
 
   // @nuxt/eslint: stylistic rules double as the formatter (Prettier replacement).

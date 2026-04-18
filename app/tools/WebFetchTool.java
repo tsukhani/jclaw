@@ -67,6 +67,10 @@ public class WebFetchTool implements ToolRegistry.Tool {
         );
     }
 
+    /** Stateless HTTP GET — holds no handles between calls, writes nothing
+     *  to disk. Safe to call many URLs in parallel. */
+    @Override public boolean parallelSafe() { return true; }
+
     @Override
     public String execute(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();

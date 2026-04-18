@@ -65,6 +65,10 @@ public class CheckListTool implements ToolRegistry.Tool {
         );
     }
 
+    /** Pure validation — returns a string, mutates no state. Safe for any
+     *  number of parallel invocations. */
+    @Override public boolean parallelSafe() { return true; }
+
     @Override
     public String execute(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();

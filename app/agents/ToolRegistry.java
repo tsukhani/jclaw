@@ -71,6 +71,28 @@ public class ToolRegistry {
          *  this tool to be usable. The admin UI gates the "Enable" toggle on
          *  this. {@code null} means no runtime dependency. */
         default String requiresConfig() { return null; }
+
+        /** Safe to invoke concurrently from multiple virtual threads on behalf
+         *  of the SAME agent in a SINGLE round?
+         *
+         *  <p>The default is {@code false} — under {@link agents.AgentRunner}'s
+         *  JCLAW-80 scheduler, multiple calls to a non-parallel-safe tool in
+         *  one round run sequentially in the LLM's declared order on a single
+         *  virtual thread. This is the conservative position that matches
+         *  OpenClaw, JavaClaw, and most production agent frameworks.
+         *
+         *  <p>A tool should override this to {@code true} only when it holds
+         *  <em>no shared state</em> — no workspace file I/O, no long-lived
+         *  handles (browser Page, shell process), no non-idempotent DB writes.
+         *  Parallel-safe tools get one virtual thread per call, so calls race
+         *  freely. Stateless HTTP clients ({@code web_fetch}, {@code
+         *  web_search}), pure-compute helpers ({@code date_time}), and
+         *  validating-only tools ({@code checklist}) are the typical shape.
+         *
+         *  <p>Getting this wrong is a correctness bug, not a performance
+         *  tradeoff: the screenshot-before-navigate class of race
+         *  (JCLAW-80). When in doubt, leave it {@code false}. */
+        default boolean parallelSafe() { return false; }
     }
 
     private static volatile Map<String, Tool> tools = Map.of();
@@ -92,6 +114,15 @@ public class ToolRegistry {
         return tools.values().stream()
                 .map(t -> ToolDef.of(t.name(), t.description(), t.parameters()))
                 .toList();
+    }
+
+    /** Resolve a tool's {@link Tool#parallelSafe()} flag by name, defaulting
+     *  to {@code false} for unknown names. Used by
+     *  {@link agents.AgentRunner#executeToolsParallel} to decide whether
+     *  multiple calls to the same tool in one round may race or must serialize. */
+    public static boolean isParallelSafe(String toolName) {
+        var tool = tools.get(toolName);
+        return tool != null && tool.parallelSafe();
     }
 
     public static String execute(String toolName, String argsJson, Agent agent) {

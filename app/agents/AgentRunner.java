@@ -14,6 +14,7 @@ import services.EventLogger;
 import utils.LatencyTrace;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -758,13 +759,32 @@ public class AgentRunner {
     }
 
     /**
-     * Execute a batch of tool calls, in parallel when there are multiple.
-     * Preserves original order when committing results to the message list
-     * and DB, so LLM history invariants (tool_call_id → tool_result pairing
-     * and order) match the pre-parallel behavior exactly.
+     * Execute a batch of tool calls, honoring a three-tier scheduling model
+     * that preserves ordering for stateful tools while keeping independent
+     * calls parallel. Results are always committed in the LLM's declared
+     * order so {@code tool_call_id → tool_result} pairing matches the
+     * pre-parallel history exactly.
+     *
+     * <p><b>Scheduling model</b> (JCLAW-80 + JCLAW-81):
+     * <ul>
+     *   <li><b>Parallel-safe tool</b> (opt-in via {@link
+     *   ToolRegistry.Tool#parallelSafe()}): each call gets its own virtual
+     *   thread — the pre-v0.7.13 behavior. Appropriate for stateless HTTP
+     *   clients ({@code web_fetch}, {@code web_search}), pure-compute helpers
+     *   ({@code date_time}), and validators ({@code checklist}).</li>
+     *   <li><b>Non-parallel-safe tool</b>: calls are grouped by tool name
+     *   into a single virtual thread and run sequentially in declared order.
+     *   This is the JCLAW-80 fix — the LLM's declared call order is the
+     *   authoritative contract for stateful tools (browser Page, shell cwd,
+     *   workspace writers) because racing them gives screenshot-before-navigate
+     *   class bugs.</li>
+     *   <li><b>Across tool-name groups</b> (whether safe or unsafe): always
+     *   parallel. Different tools touch different state, so there's no
+     *   correctness reason to serialize them.</li>
+     * </ul>
      *
      * <p>Single-tool batches skip the virtual-thread overhead and execute
-     * inline. Cancellation between tools is honored — in-flight tools finish
+     * inline on the caller. Cancellation is honored — in-flight tools finish
      * naturally (their results are discarded at commit time).
      */
     private static void executeToolsParallel(List<ToolCall> toolCalls,
@@ -783,25 +803,70 @@ public class AgentRunner {
                 results[0] = runToolCall(toolCalls.getFirst(), agent, onStatus);
             }
         } else {
-            var latch = new CountDownLatch(n);
+            // Partition calls into work units:
+            //   - parallel-safe tools → one work unit per CALL (each races freely)
+            //   - non-parallel-safe tools → one work unit per tool-NAME group
+            //     (calls within it run sequentially in declared order)
+            // LinkedHashMap preserves first-occurrence order so the unsafe
+            // groups, like the safe singletons, see their declared positions.
+            var unsafeGroups = new LinkedHashMap<String, List<Integer>>();
+            var safeCalls = new ArrayList<Integer>();
             for (int i = 0; i < n; i++) {
-                final int idx = i;
-                final ToolCall tc = toolCalls.get(i);
+                var name = toolCalls.get(i).function().name();
+                if (ToolRegistry.isParallelSafe(name)) {
+                    safeCalls.add(i);
+                } else {
+                    unsafeGroups.computeIfAbsent(name, k -> new ArrayList<>()).add(i);
+                }
+            }
+
+            int workUnits = safeCalls.size() + unsafeGroups.size();
+            var latch = new CountDownLatch(workUnits);
+
+            // One virtual thread per parallel-safe call — full concurrency.
+            for (int idx : safeCalls) {
+                final int i = idx;
                 Thread.ofVirtual().start(() -> {
                     try {
-                        if (isCancelled == null || !isCancelled.get()) {
-                            results[idx] = runToolCall(tc, agent, onStatus);
+                        if (isCancelled != null && isCancelled.get()) return;
+                        var tc = toolCalls.get(i);
+                        try {
+                            results[i] = runToolCall(tc, agent, onStatus);
+                        } catch (Exception e) {
+                            EventLogger.error("tool", agent.name, null,
+                                    "Tool '%s' threw: %s"
+                                            .formatted(tc.function().name(), e.getMessage()));
+                            results[i] = "Error executing tool: " + e.getMessage();
                         }
-                    } catch (Exception e) {
-                        EventLogger.error("tool", agent.name, null,
-                                "Tool '%s' threw: %s"
-                                        .formatted(tc.function().name(), e.getMessage()));
-                        results[idx] = "Error executing tool: " + e.getMessage();
                     } finally {
                         latch.countDown();
                     }
                 });
             }
+
+            // One virtual thread per non-parallel-safe tool-name group —
+            // calls within execute sequentially in declared order.
+            for (var group : unsafeGroups.values()) {
+                Thread.ofVirtual().start(() -> {
+                    try {
+                        for (int idx : group) {
+                            if (isCancelled != null && isCancelled.get()) break;
+                            var tc = toolCalls.get(idx);
+                            try {
+                                results[idx] = runToolCall(tc, agent, onStatus);
+                            } catch (Exception e) {
+                                EventLogger.error("tool", agent.name, null,
+                                        "Tool '%s' threw: %s"
+                                                .formatted(tc.function().name(), e.getMessage()));
+                                results[idx] = "Error executing tool: " + e.getMessage();
+                            }
+                        }
+                    } finally {
+                        latch.countDown();
+                    }
+                });
+            }
+
             try {
                 latch.await();
             } catch (InterruptedException _) {

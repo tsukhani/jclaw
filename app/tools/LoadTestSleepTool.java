@@ -47,6 +47,9 @@ public class LoadTestSleepTool implements ToolRegistry.Tool {
         );
     }
 
+    /** Test-only: a no-op sleep. Stateless by definition. */
+    @Override public boolean parallelSafe() { return true; }
+
     @Override public String execute(String argsJson, Agent agent) {
         int ms = DEFAULT_MS;
         try {

@@ -97,6 +97,9 @@ public class DateTimeTool implements ToolRegistry.Tool {
         );
     }
 
+    /** Pure compute — no I/O, no shared state. Safe for parallel calls. */
+    @Override public boolean parallelSafe() { return true; }
+
     @Override
     public String execute(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
