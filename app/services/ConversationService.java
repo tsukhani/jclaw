@@ -112,11 +112,13 @@ public class ConversationService {
      * caller should fall back to the existing preview).
      */
     public static boolean requestTitleGeneration(Conversation conversation) {
-        // Idempotency gate: a conversation's title is computed once and then
-        // considered final. Without this, the chat page fires this endpoint on
-        // every sidebar-switch and the LLM keeps rewriting the preview —
-        // burning tokens and flipping the title visibly each time.
-        if (conversation.titleGenerated) return false;
+        // Idempotency gate: a conversation's title is generated at most
+        // MAX_TITLE_GENERATIONS times — an initial pass after the opening
+        // turn, then one refresh once the conversation has grown. Without
+        // this bound, the chat page fires this endpoint on every sidebar
+        // switch and the LLM keeps rewriting the preview, burning tokens
+        // and visibly flipping the title each time.
+        if (conversation.titleGenerationCount >= Conversation.MAX_TITLE_GENERATIONS) return false;
 
         List<Message> msgs = Message.find("conversation = ?1 ORDER BY createdAt ASC", conversation).fetch(TITLE_CONTEXT_MESSAGES);
         var userParts = new StringBuilder();
@@ -172,7 +174,7 @@ public class ConversationService {
                     Conversation convo = Conversation.findById(conversationId);
                     if (convo != null) {
                         convo.preview = title;
-                        convo.titleGenerated = true;
+                        convo.titleGenerationCount += 1;
                         convo.save();
                     }
                 });

@@ -29,15 +29,21 @@ public class Conversation extends Model {
     public String preview;
 
     /**
-     * True once the conversation has had an LLM-generated title written to
+     * Number of times an LLM-generated title has been successfully written to
      * {@link #preview}. Gates {@code ConversationService.requestTitleGeneration}
-     * so clicking the conversation sidebar doesn't re-trigger generation every
-     * time the user switches away — the title is computed once, then considered
-     * final until an operator explicitly regenerates. Defaults {@code false} so
-     * pre-existing rows from before this column was added retry on next switch.
+     * with a cap of {@link #MAX_TITLE_GENERATIONS}: the first generation
+     * produces the initial title (after the user's opening turn), the second
+     * refreshes it once more when the conversation has gained real content,
+     * and any subsequent requests short-circuit. Prevents the sidebar-click
+     * rewrite loop while still allowing one "the conversation has grown since
+     * the first turn" re-title. Defaults {@code 0} so pre-migration rows still
+     * get their full allotment of generations.
      */
-    @Column(name = "title_generated", nullable = false)
-    public boolean titleGenerated = false;
+    @Column(name = "title_generation_count", nullable = false)
+    public int titleGenerationCount = 0;
+
+    /** Upper bound on how many times a conversation's title will be LLM-regenerated. */
+    public static final int MAX_TITLE_GENERATIONS = 2;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;

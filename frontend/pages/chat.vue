@@ -984,8 +984,21 @@ function exportConversation() {
                    class="bg-muted border border-input rounded-2xl rounded-tl-sm text-fg-muted px-4 py-2.5 text-sm italic">
                 (empty response)
               </div>
-              <!-- Usage metrics footer -->
-              <div v-if="msg.usage" class="flex items-center gap-2 flex-wrap mt-1.5 px-1">
+              <!--
+                Usage metrics + hover actions share a single right-aligned
+                row so the copy/delete icons live on the same visual baseline
+                as the token pills. ml-auto on the action group pushes it to
+                the far right of the flex row regardless of how many stat
+                pills are visible; the min-width ensures the bubble widens
+                far enough that the full worst-case set (prompt + cached +
+                reasoning + completion + separator + tok/s + duration + cost
+                + copy + delete) fits with breathing room. flex-wrap is
+                dropped — wrapping the action icons to their own line was
+                the previous layout we're explicitly moving away from.
+              -->
+              <div v-if="msg.usage || msg.id"
+                   class="flex items-center gap-2 mt-1.5 px-1 min-w-[500px]">
+                <template v-if="msg.usage">
                 <span class="inline-flex items-center gap-1 text-xs text-fg-muted"
                       :title="`${msg.usage.prompt.toLocaleString()} input tokens`">
                   <svg class="w-3 h-3 text-fg-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11l5-5m0 0l5 5m-5-5v12" /></svg>
@@ -1023,33 +1036,35 @@ function exportConversation() {
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                   {{ formatUsageCost(msg.usage) }}
                 </span>
-              </div>
-              <!--
-                Assistant hover actions: copy the raw markdown to clipboard, or
-                delete the message server-side. Hidden until hover to keep the
-                transcript calm; the group class sits on the outer <div v-else>.
-                Only rendered on persisted messages (msg.id) — mid-stream
-                placeholders have no server row to delete yet.
-              -->
-              <div v-if="msg.id" class="flex items-center gap-1 mt-1 h-5 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  type="button"
-                  @click="copyMessage(msg)"
-                  class="p-1 text-fg-muted hover:text-fg-primary transition-colors"
-                  :title="copiedMessageId === (msg.id ?? msg._key) ? 'Copied' : 'Copy to clipboard'"
-                >
-                  <svg v-if="copiedMessageId !== (msg.id ?? msg._key)" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                  <svg v-else class="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" /></svg>
-                </button>
-                <button
-                  type="button"
-                  @click="deleteMessage(msg)"
-                  :disabled="streaming"
-                  class="p-1 text-fg-muted hover:text-red-600 dark:hover:text-red-400 disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
-                  title="Delete message"
-                >
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                </button>
+                </template>
+                <!--
+                  Assistant hover actions: copy the raw markdown to clipboard,
+                  or delete the message server-side. Hidden until hover to
+                  keep the row calm; ml-auto anchors them to the right edge
+                  regardless of how much stat content sits on the left. Only
+                  rendered on persisted messages (msg.id) — mid-stream
+                  placeholders have no server row to delete yet.
+                -->
+                <div v-if="msg.id" class="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    type="button"
+                    @click="copyMessage(msg)"
+                    class="p-1 text-fg-muted hover:text-fg-primary transition-colors"
+                    :title="copiedMessageId === (msg.id ?? msg._key) ? 'Copied' : 'Copy to clipboard'"
+                  >
+                    <svg v-if="copiedMessageId !== (msg.id ?? msg._key)" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                    <svg v-else class="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" /></svg>
+                  </button>
+                  <button
+                    type="button"
+                    @click="deleteMessage(msg)"
+                    :disabled="streaming"
+                    class="p-1 text-fg-muted hover:text-red-600 dark:hover:text-red-400 disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
+                    title="Delete message"
+                  >
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

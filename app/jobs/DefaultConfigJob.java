@@ -27,14 +27,24 @@ public class DefaultConfigJob extends Job<Void> {
     }
 
     /**
-     * Drop columns left behind by previous model versions. Hibernate's
-     * {@code jpa.ddl=update} adds columns but never drops them; stale
-     * NOT NULL columns break inserts when the model no longer sets them.
+     * Drop columns left behind by previous model versions, and add columns
+     * introduced in this release that Hibernate's {@code jpa.ddl=update}
+     * wouldn't patch onto a hot-reloaded dev server (DDL only runs at
+     * SessionFactory init, not on class reload). Both paths use the
+     * idempotent {@code IF (NOT) EXISTS} form so a server that's already in
+     * the right state does nothing.
+     *
+     * <p>Stale NOT NULL columns also break inserts when the model stops
+     * setting them — that's the reason the pre-existing {@code is_default}
+     * drop stays here, and the reason we drop {@code title_generated} from
+     * the v0.9.6 iteration of the title-regeneration gate.
      */
     private void dropOrphanedColumns() {
-        try (var conn = play.db.DB.getDataSource("default").getConnection()) {
-            conn.createStatement().execute(
-                    "ALTER TABLE agent DROP COLUMN IF EXISTS is_default");
+        try (var conn = play.db.DB.getDataSource("default").getConnection();
+             var stmt = conn.createStatement()) {
+            stmt.execute("ALTER TABLE agent DROP COLUMN IF EXISTS is_default");
+            stmt.execute("ALTER TABLE conversation DROP COLUMN IF EXISTS title_generated");
+            stmt.execute("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS title_generation_count INT NOT NULL DEFAULT 0");
         } catch (Exception e) {
             play.Logger.warn("Schema migration: %s", e.getMessage());
         }
