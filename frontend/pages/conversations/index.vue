@@ -48,7 +48,8 @@ async function load() {
     conversations.value = res._data ?? []
     const headerTotal = res.headers.get('x-total-count')
     total.value = headerTotal ? parseInt(headerTotal, 10) : conversations.value.length
-  } finally {
+  }
+  finally {
     loading.value = false
   }
 }
@@ -66,7 +67,7 @@ function exportAllConversations() {
   const csv = [
     ['ID', 'Name', 'Channel', 'Agent', 'Peer', 'Messages', 'Created', 'Updated'].join(','),
     ...conversations.value.map(c =>
-      [c.id, `"${(c.preview || '').replace(/"/g, '""')}"`, c.channelType, c.agentName, c.peerId || '', c.messageCount, c.createdAt, c.updatedAt].join(',')
+      [c.id, `"${(c.preview || '').replace(/"/g, '""')}"`, c.channelType, c.agentName, c.peerId || '', c.messageCount, c.createdAt, c.updatedAt].join(','),
     ),
   ].join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })
@@ -109,7 +110,8 @@ function toggleSelection(id: number) {
 function toggleSelectAll() {
   if (allSelected.value) {
     selectedIds.value = new Set()
-  } else {
+  }
+  else {
     selectedIds.value = new Set(conversations.value.map(c => c.id))
   }
 }
@@ -132,9 +134,11 @@ async function deleteSelected() {
     })
     selectedIds.value = new Set()
     await load()
-  } catch (e) {
+  }
+  catch (e) {
     console.error('Failed to delete conversations:', e)
-  } finally {
+  }
+  finally {
     deletingBulk.value = false
   }
 }
@@ -262,10 +266,14 @@ const columns: ColumnDef<Conversation, any>[] = [
 <template>
   <div>
     <div class="flex items-center justify-between mb-6">
-      <h1 class="text-lg font-semibold text-fg-strong">Conversations</h1>
-      <button @click="deleteSelected"
-              :disabled="!selectedIds.size || deletingBulk"
-              class="px-3 py-1.5 bg-red-700 text-white text-xs font-medium hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+      <h1 class="text-lg font-semibold text-fg-strong">
+        Conversations
+      </h1>
+      <button
+        :disabled="!selectedIds.size || deletingBulk"
+        class="px-3 py-1.5 bg-red-700 text-white text-xs font-medium hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        @click="deleteSelected"
+      >
         {{ deletingBulk ? 'Deleting...' : `Delete${selectedIds.size ? ' ' + selectedIds.size : ''}` }}
       </button>
     </div>
@@ -297,17 +305,17 @@ const columns: ColumnDef<Conversation, any>[] = [
         <span>Showing {{ rangeStart }}–{{ rangeEnd }} of {{ total }}</span>
         <div class="flex items-center gap-1">
           <button
-            @click="goto(page - 1)"
             :disabled="page <= 1 || loading"
             class="px-2 py-1 border border-border rounded hover:text-fg-strong hover:border-ring disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            @click="goto(page - 1)"
           >
             Prev
           </button>
           <span class="px-2">Page {{ page }} of {{ totalPages }}</span>
           <button
-            @click="goto(page + 1)"
             :disabled="page >= totalPages || loading"
             class="px-2 py-1 border border-border rounded hover:text-fg-strong hover:border-ring disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            @click="goto(page + 1)"
           >
             Next
           </button>
@@ -318,12 +326,12 @@ const columns: ColumnDef<Conversation, any>[] = [
     <!-- PeekPanel for conversation detail -->
     <PeekPanel
       :open="peekOpen"
-      @update:open="closePeek"
-      @next="peekNext"
-      @prev="peekPrev"
       :title="selectedConvo?.preview || 'Conversation'"
       :description="`${selectedConvo?.agentName || ''} · ${selectedConvo?.channelType || ''}`"
       :pop-out-route="selectedConvo ? `/conversations/${selectedConvo.id}` : undefined"
+      @update:open="closePeek"
+      @next="peekNext"
+      @prev="peekPrev"
     >
       <template v-if="selectedConvo">
         <div class="flex items-center justify-between mb-4">
@@ -339,12 +347,34 @@ const columns: ColumnDef<Conversation, any>[] = [
               class="p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
               title="Open in Chat"
             >
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+              <svg
+                class="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              ><path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="1.5"
+                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+              /></svg>
             </NuxtLink>
-            <button @click="exportConversation"
-                    class="p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
-                    title="Export conversation as Markdown">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg>
+            <button
+              class="p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
+              title="Export conversation as Markdown"
+              @click="exportConversation"
+            >
+              <svg
+                class="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              ><path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="1.5"
+                d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
+              /></svg>
             </button>
           </div>
         </div>
@@ -358,7 +388,9 @@ const columns: ColumnDef<Conversation, any>[] = [
               <span class="text-xs font-mono text-fg-muted">{{ msg.role }}</span>
               <span class="text-xs text-fg-muted">{{ new Date(msg.createdAt).toLocaleTimeString() }}</span>
             </div>
-            <div class="bg-muted border border-border px-3 py-2 text-sm text-fg-primary whitespace-pre-wrap">{{ msg.content || '(tool call)' }}</div>
+            <div class="bg-muted border border-border px-3 py-2 text-sm text-fg-primary whitespace-pre-wrap">
+              {{ msg.content || '(tool call)' }}
+            </div>
           </div>
         </div>
       </template>

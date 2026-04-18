@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mountSuspended } from '@nuxt/test-utils/runtime'
-import { registerEndpoint } from '@nuxt/test-utils/runtime'
+import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import Skills from '~/pages/skills.vue'
 
 // Stub EventSource since happy-dom doesn't provide it and
@@ -24,10 +23,10 @@ function setupSkillsApi() {
     { name: 'code-review', folderName: 'code-review', description: 'Review code changes', version: '0.2.0' },
   ])
   registerEndpoint('/api/agents', () => [
-    { id: 1, name: 'main-agent', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true, isMain: true }
+    { id: 1, name: 'main-agent', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true, isMain: true },
   ])
   registerEndpoint('/api/agents/1/skills', () => [
-    { name: 'web-search', folderName: 'web-search', enabled: true, version: '1.0.0' }
+    { name: 'web-search', folderName: 'web-search', enabled: true, version: '1.0.0' },
   ])
 }
 

@@ -1,6 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { mountSuspended } from '@nuxt/test-utils/runtime'
-import { registerEndpoint } from '@nuxt/test-utils/runtime'
+import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { nextTick } from 'vue'
 import CommandPalette from '~/components/CommandPalette.vue'
 

@@ -20,7 +20,7 @@ const props = withDefaults(defineProps<{
 const PALETTE = [
   'hsl(160 84% 52%)', // emerald
   'hsl(199 89% 58%)', // sky
-  'hsl(38 92% 55%)',  // amber
+  'hsl(38 92% 55%)', // amber
   'hsl(258 85% 66%)', // violet
   'hsl(350 82% 60%)', // rose
   'hsl(173 70% 52%)', // teal
@@ -50,7 +50,8 @@ onMounted(() => {
     const raw = localStorage.getItem(props.storageKey)
     if (!raw) return
     if (props.series.some(s => s.key === raw)) selectedKey.value = raw
-  } catch {
+  }
+  catch {
     /* SSR / privacy mode — stick with default */
   }
 })
@@ -61,7 +62,8 @@ function select(key: string) {
   hoveredBarIdx.value = null
   try {
     localStorage.setItem(props.storageKey, key)
-  } catch { /* ignore */ }
+  }
+  catch { /* ignore */ }
 }
 
 // ── Geometry ────────────────────────────────────────────────────────────────
@@ -110,7 +112,7 @@ interface PercentileMarker {
  * Catmull-Rom through `pts` with tension 0.5, rendered as cubic Beziers.
  * Produces the smooth density curve over the histogram bars.
  */
-function catmullRomPath(pts: Array<{ x: number; y: number }>): string {
+function catmullRomPath(pts: Array<{ x: number, y: number }>): string {
   if (pts.length === 0) return ''
   if (pts.length === 1) return `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`
   let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`
@@ -146,7 +148,8 @@ const plot = computed(() => {
   if (min_ms >= max_ms) {
     minLog = Math.log2(min_ms) - 0.5
     maxLog = Math.log2(min_ms) + 0.5
-  } else {
+  }
+  else {
     const rawMin = Math.log2(min_ms)
     const rawMax = Math.log2(max_ms)
     const pad = Math.max((rawMax - rawMin) * 0.1, 0.5)
@@ -177,16 +180,17 @@ const plot = computed(() => {
 
   const LABEL_OVERLAP_THRESHOLD = 40
   const ROW_OFFSETS = [
-    { nameDY: -12, valueDY: -3 },   // row 0 (closest to plot)
-    { nameDY: -28, valueDY: -19 },  // row 1
-    { nameDY: -44, valueDY: -35 },  // row 2
-    { nameDY: -60, valueDY: -51 },  // row 3 (topmost, just inside viewBox)
+    { nameDY: -12, valueDY: -3 }, // row 0 (closest to plot)
+    { nameDY: -28, valueDY: -19 }, // row 1
+    { nameDY: -44, valueDY: -35 }, // row 2
+    { nameDY: -60, valueDY: -51 }, // row 3 (topmost, just inside viewBox)
   ]
   let row = 0
   const percentiles: PercentileMarker[] = percentileBase.map((m, i) => {
     if (i === 0) {
       row = 0
-    } else {
+    }
+    else {
       const distance = m.x - percentileBase[i - 1].x
       row = distance < LABEL_OVERLAP_THRESHOLD
         ? Math.min(row + 1, ROW_OFFSETS.length - 1)
@@ -218,7 +222,7 @@ const plot = computed(() => {
   if (relevant.length > 0) {
     maxCount = Math.max(...relevant.map(b => b.count), 0)
     const scale = Math.max(maxCount, 1)
-    bars = relevant.map(b => {
+    bars = relevant.map((b) => {
       const logUpper = Math.log2(b.le_ms)
       // lo_ms=0 represents the open-ended left side of the first bucket —
       // log2(0) = -Infinity, which xForLog would clamp anyway, so use minLog
@@ -246,7 +250,7 @@ const plot = computed(() => {
       ])
     : ''
 
-  const ticks = [0, 0.333, 0.666, 1].map(f => {
+  const ticks = [0, 0.333, 0.666, 1].map((f) => {
     const log = minLog + xSpan * f
     return { x: xForLog(log), label: formatMs(Math.pow(2, log)) }
   })
@@ -296,7 +300,8 @@ const plot = computed(() => {
       data-testid="latency-segment-picker"
     >
       <button
-        v-for="s in series" :key="s.key"
+        v-for="s in series"
+        :key="s.key"
         type="button"
         role="tab"
         :aria-selected="selectedKey === s.key"
@@ -337,26 +342,42 @@ const plot = computed(() => {
     >
       <!-- baseline -->
       <line
-        :x1="PAD_L" :x2="VIEWBOX_W - PAD_R"
-        :y1="plot.baseline" :y2="plot.baseline"
-        stroke="var(--color-border)" stroke-width="0.5"
+        :x1="PAD_L"
+        :x2="VIEWBOX_W - PAD_R"
+        :y1="plot.baseline"
+        :y2="plot.baseline"
+        stroke="var(--color-border)"
+        stroke-width="0.5"
       />
 
       <!-- y-axis: vertical line + count ticks -->
-      <g data-testid="y-axis" aria-hidden="true">
+      <g
+        data-testid="y-axis"
+        aria-hidden="true"
+      >
         <line
-          :x1="PAD_L" :x2="PAD_L"
-          :y1="PAD_T" :y2="plot.baseline"
-          stroke="var(--color-border)" stroke-width="0.5"
+          :x1="PAD_L"
+          :x2="PAD_L"
+          :y1="PAD_T"
+          :y2="plot.baseline"
+          stroke="var(--color-border)"
+          stroke-width="0.5"
         />
-        <template v-for="(t, ti) in plot.yTicks" :key="`yt-${ti}`">
+        <template
+          v-for="(t, ti) in plot.yTicks"
+          :key="`yt-${ti}`"
+        >
           <line
-            :x1="PAD_L - 3" :x2="PAD_L"
-            :y1="t.y" :y2="t.y"
-            stroke="var(--color-border)" stroke-width="0.5"
+            :x1="PAD_L - 3"
+            :x2="PAD_L"
+            :y1="t.y"
+            :y2="t.y"
+            stroke="var(--color-border)"
+            stroke-width="0.5"
           />
           <text
-            :x="PAD_L - 5" :y="t.y + 3"
+            :x="PAD_L - 5"
+            :y="t.y + 3"
             fill="var(--color-fg-muted)"
             font-size="9"
             font-family="ui-monospace, SFMono-Regular, monospace"
@@ -367,7 +388,8 @@ const plot = computed(() => {
 
       <!-- histogram bars -->
       <rect
-        v-for="(b, bi) in plot.bars" :key="`bar-${bi}`"
+        v-for="(b, bi) in plot.bars"
+        :key="`bar-${bi}`"
         :x="b.x1"
         :y="b.y"
         :width="Math.max(0.5, b.x2 - b.x1 - 1)"
@@ -404,16 +426,27 @@ const plot = computed(() => {
 
       <!-- Percentile markers — always visible since only one series is in view.
            Each marker has two stacked labels: name ("p50") and value ("5ms"). -->
-      <g data-testid="percentile-markers" aria-hidden="true">
-        <template v-for="m in plot.percentiles" :key="m.label">
+      <g
+        data-testid="percentile-markers"
+        aria-hidden="true"
+      >
+        <template
+          v-for="m in plot.percentiles"
+          :key="m.label"
+        >
           <line
-            :x1="m.x" :x2="m.x"
-            :y1="PAD_T" :y2="plot.baseline"
+            :x1="m.x"
+            :x2="m.x"
+            :y1="PAD_T"
+            :y2="plot.baseline"
             :stroke="plot.color"
-            stroke-width="1" stroke-dasharray="3 3" opacity="0.65"
+            stroke-width="1"
+            stroke-dasharray="3 3"
+            opacity="0.65"
           />
           <text
-            :x="m.x" :y="m.nameY"
+            :x="m.x"
+            :y="m.nameY"
             :fill="plot.color"
             font-size="9"
             font-family="ui-monospace, SFMono-Regular, monospace"
@@ -421,7 +454,8 @@ const plot = computed(() => {
             font-weight="500"
           >{{ m.label }}</text>
           <text
-            :x="m.x" :y="m.valueY"
+            :x="m.x"
+            :y="m.valueY"
             fill="var(--color-fg-muted)"
             font-size="9"
             font-family="ui-monospace, SFMono-Regular, monospace"
@@ -433,8 +467,10 @@ const plot = computed(() => {
       <!-- x-axis ticks -->
       <g>
         <text
-          v-for="(t, i) in plot.ticks" :key="i"
-          :x="t.x" :y="VIEWBOX_H - 8"
+          v-for="(t, i) in plot.ticks"
+          :key="i"
+          :x="t.x"
+          :y="VIEWBOX_H - 8"
           fill="var(--color-fg-muted)"
           font-size="10"
           font-family="ui-monospace, SFMono-Regular, monospace"
@@ -447,7 +483,8 @@ const plot = computed(() => {
            over zero-count buckets where no visible bar exists. -->
       <g data-testid="bar-hit-targets">
         <rect
-          v-for="(b, bi) in plot.bars" :key="`hit-${bi}`"
+          v-for="(b, bi) in plot.bars"
+          :key="`hit-${bi}`"
           :x="b.x1"
           :y="PAD_T"
           :width="Math.max(0.5, b.x2 - b.x1)"
@@ -466,28 +503,60 @@ const plot = computed(() => {
       data-testid="latency-stats-footer"
     >
       <div class="flex items-baseline gap-1.5">
-        <dt class="text-fg-muted">n</dt>
-        <dd class="text-fg-primary font-medium">{{ plot.count }}</dd>
+        <dt class="text-fg-muted">
+          n
+        </dt>
+        <dd class="text-fg-primary font-medium">
+          {{ plot.count }}
+        </dd>
       </div>
-      <span class="text-border select-none" aria-hidden="true">·</span>
+      <span
+        class="text-border select-none"
+        aria-hidden="true"
+      >·</span>
       <div class="flex items-baseline gap-1.5">
-        <dt class="text-fg-muted">min</dt>
-        <dd class="text-fg-primary">{{ plot.stats.min }}</dd>
+        <dt class="text-fg-muted">
+          min
+        </dt>
+        <dd class="text-fg-primary">
+          {{ plot.stats.min }}
+        </dd>
       </div>
-      <span class="text-border select-none" aria-hidden="true">·</span>
+      <span
+        class="text-border select-none"
+        aria-hidden="true"
+      >·</span>
       <div class="flex items-baseline gap-1.5">
-        <dt class="text-fg-muted">p50</dt>
-        <dd class="text-fg-primary">{{ plot.stats.p50 }}</dd>
+        <dt class="text-fg-muted">
+          p50
+        </dt>
+        <dd class="text-fg-primary">
+          {{ plot.stats.p50 }}
+        </dd>
       </div>
-      <span class="text-border select-none" aria-hidden="true">·</span>
+      <span
+        class="text-border select-none"
+        aria-hidden="true"
+      >·</span>
       <div class="flex items-baseline gap-1.5">
-        <dt class="text-fg-muted">p99</dt>
-        <dd class="text-fg-primary">{{ plot.stats.p99 }}</dd>
+        <dt class="text-fg-muted">
+          p99
+        </dt>
+        <dd class="text-fg-primary">
+          {{ plot.stats.p99 }}
+        </dd>
       </div>
-      <span class="text-border select-none" aria-hidden="true">·</span>
+      <span
+        class="text-border select-none"
+        aria-hidden="true"
+      >·</span>
       <div class="flex items-baseline gap-1.5">
-        <dt class="text-fg-muted">max</dt>
-        <dd class="text-fg-primary">{{ plot.stats.max }}</dd>
+        <dt class="text-fg-muted">
+          max
+        </dt>
+        <dd class="text-fg-primary">
+          {{ plot.stats.max }}
+        </dd>
       </div>
     </dl>
   </div>

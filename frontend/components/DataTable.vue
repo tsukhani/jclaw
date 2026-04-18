@@ -77,10 +77,12 @@ function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'ArrowDown') {
     e.preventDefault()
     focusedRowIndex.value = Math.min(focusedRowIndex.value + 1, rows.length - 1)
-  } else if (e.key === 'ArrowUp') {
+  }
+  else if (e.key === 'ArrowUp') {
     e.preventDefault()
     focusedRowIndex.value = Math.max(focusedRowIndex.value - 1, 0)
-  } else if (e.key === 'Enter' && focusedRowIndex.value >= 0) {
+  }
+  else if (e.key === 'Enter' && focusedRowIndex.value >= 0) {
     e.preventDefault()
     const row = rows[focusedRowIndex.value]
     if (row) emit('row-click', row.original)
@@ -122,7 +124,10 @@ function sortIcon(sorted: false | 'asc' | 'desc') {
                 :render="header.column.columnDef.header"
                 :props="header.getContext()"
               />
-              <span v-if="header.column.getIsSorted()" class="text-fg-strong">
+              <span
+                v-if="header.column.getIsSorted()"
+                class="text-fg-strong"
+              >
                 {{ sortIcon(header.column.getIsSorted()) }}
               </span>
             </div>
@@ -133,7 +138,11 @@ function sortIcon(sorted: false | 'asc' | 'desc') {
       <TableBody>
         <!-- Loading skeleton -->
         <template v-if="loading">
-          <TableRow v-for="i in 5" :key="`skeleton-${i}`" class="border-b border-border">
+          <TableRow
+            v-for="i in 5"
+            :key="`skeleton-${i}`"
+            class="border-b border-border"
+          >
             <TableCell
               v-for="col in columns.length"
               :key="`skeleton-${i}-${col}`"
@@ -147,12 +156,15 @@ function sortIcon(sorted: false | 'asc' | 'desc') {
         <!-- Empty state -->
         <template v-else-if="!table.getRowModel().rows.length">
           <TableRow>
-            <TableCell :colspan="columns.length" class="px-4 py-8 text-center text-sm text-fg-muted">
+            <TableCell
+              :colspan="columns.length"
+              class="px-4 py-8 text-center text-sm text-fg-muted"
+            >
               {{ emptyMessage }}
               <button
                 v-if="emptyAction"
-                @click="emit('empty-action')"
                 class="ml-2 text-emerald-600 dark:text-emerald-400 hover:underline"
+                @click="emit('empty-action')"
               >
                 {{ emptyAction }}
               </button>

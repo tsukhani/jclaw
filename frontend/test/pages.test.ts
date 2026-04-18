@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mountSuspended } from '@nuxt/test-utils/runtime'
-import { registerEndpoint } from '@nuxt/test-utils/runtime'
+import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import Index from '~/pages/index.vue'
 import Agents from '~/pages/agents.vue'
 import Settings from '~/pages/settings.vue'
@@ -10,25 +9,25 @@ import Conversations from '~/pages/conversations/index.vue'
 // Register mock API endpoints
 function setupMockApi() {
   registerEndpoint('/api/agents', () => [
-    { id: 1, name: 'test', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true, isMain: false, providerConfigured: true }
+    { id: 1, name: 'test', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true, isMain: false, providerConfigured: true },
   ])
   registerEndpoint('/api/channels', () => [
     { channelType: 'telegram', enabled: false },
-    { channelType: 'slack', enabled: true }
+    { channelType: 'slack', enabled: true },
   ])
   registerEndpoint('/api/tasks', () => [])
   registerEndpoint('/api/logs', () => ({ events: [
-    { id: 1, timestamp: '2026-04-07T10:00:00Z', level: 'INFO', category: 'system', agentId: null, message: 'Test event' }
-  ]}))
+    { id: 1, timestamp: '2026-04-07T10:00:00Z', level: 'INFO', category: 'system', agentId: null, message: 'Test event' },
+  ] }))
   registerEndpoint('/api/config', () => ({
     entries: [
       { key: 'provider.ollama-cloud.baseUrl', value: 'https://ollama.com/v1', updatedAt: '2026-04-07T10:00:00Z' },
       { key: 'provider.ollama-cloud.apiKey', value: 'xxxx****', updatedAt: '2026-04-07T10:00:00Z' },
-      { key: 'provider.ollama-cloud.models', value: '[{"id":"kimi-k2.5","name":"Kimi K2.5","contextWindow":262144,"maxTokens":65535}]', updatedAt: '2026-04-07T10:00:00Z' }
-    ]
+      { key: 'provider.ollama-cloud.models', value: '[{"id":"kimi-k2.5","name":"Kimi K2.5","contextWindow":262144,"maxTokens":65535}]', updatedAt: '2026-04-07T10:00:00Z' },
+    ],
   }))
   registerEndpoint('/api/conversations', () => [
-    { id: 1, agentId: 1, agentName: 'test', channelType: 'web', peerId: 'admin', messageCount: 3, preview: 'Hello', createdAt: '2026-04-07T10:00:00Z', updatedAt: '2026-04-07T10:00:00Z' }
+    { id: 1, agentId: 1, agentName: 'test', channelType: 'web', peerId: 'admin', messageCount: 3, preview: 'Hello', createdAt: '2026-04-07T10:00:00Z', updatedAt: '2026-04-07T10:00:00Z' },
   ])
   registerEndpoint('/api/conversations/channels', () => ['web', 'telegram'])
   // JCLAW-72: useToolMeta composable fetches from /api/tools/meta on mount.
@@ -37,11 +36,11 @@ function setupMockApi() {
     { name: 'exec', category: 'System', icon: 'terminal',
       shortDescription: 'Shell', system: false, actions: [] },
     { name: 'web_fetch', category: 'Web', icon: 'globe',
-      shortDescription: 'Fetch URLs', system: false, actions: [] }
+      shortDescription: 'Fetch URLs', system: false, actions: [] },
   ])
   registerEndpoint('/api/agents/1/tools', () => [
     { name: 'exec', description: 'Execute shell', system: false, enabled: true },
-    { name: 'web_fetch', description: 'Fetch URLs', system: false, enabled: true }
+    { name: 'web_fetch', description: 'Fetch URLs', system: false, enabled: true },
   ])
 }
 

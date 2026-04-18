@@ -11,7 +11,7 @@ describe('useAuth', () => {
   it('login sets authenticated state on success', async () => {
     registerEndpoint('/api/auth/login', {
       method: 'POST',
-      handler: () => ({ status: 'ok', username: 'admin' })
+      handler: () => ({ status: 'ok', username: 'admin' }),
     })
 
     const { authenticated, username, login } = useAuth()
@@ -25,7 +25,7 @@ describe('useAuth', () => {
   it('login returns false on failure', async () => {
     registerEndpoint('/api/auth/login', {
       method: 'POST',
-      handler: () => { throw createError({ statusCode: 401 }) }
+      handler: () => { throw createError({ statusCode: 401 }) },
     })
 
     // Reset state from previous test
@@ -42,7 +42,7 @@ describe('useAuth', () => {
   it('checkAuth returns true when API responds', async () => {
     registerEndpoint('/api/config', {
       method: 'GET',
-      handler: () => ({ entries: [] })
+      handler: () => ({ entries: [] }),
     })
 
     const { authenticated, checkAuth } = useAuth()
@@ -55,7 +55,7 @@ describe('useAuth', () => {
   it('checkAuth returns false when API rejects', async () => {
     registerEndpoint('/api/config', {
       method: 'GET',
-      handler: () => { throw createError({ statusCode: 401 }) }
+      handler: () => { throw createError({ statusCode: 401 }) },
     })
 
     const { checkAuth } = useAuth()

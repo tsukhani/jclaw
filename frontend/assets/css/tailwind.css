@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import url("tailwindcss");
 
 /* Class-based dark mode (preserves v3 darkMode: 'class' behavior).
    The <html> element carries the 'dark' class; useTheme() manages it. */
@@ -70,7 +70,7 @@
 
     /* ── JClaw semantic design tokens ──────────────────────────────────── */
     --surface: hsl(0 0% 3.9%);             /* page background — neutral-950 */
-    --surface-elevated: hsl(0 0% 9% / 0.5); /* sidebar/header — neutral-900/50 */
+    --surface-elevated: hsl(0 0% 9% / 50%); /* sidebar/header — neutral-900/50 */
     --fg-primary: hsl(0 0% 83%);           /* body text — neutral-300 */
     --fg-muted: hsl(0 0% 50%);             /* secondary text — WCAG AA adjusted */
     --fg-strong: hsl(0 0% 100%);           /* emphasis/hover — white */

@@ -83,9 +83,9 @@ describe('computeUsageCostBreakdown', () => {
       cached: 4670,
       ...CLAUDE_OPUS_PRICES,
     })
-    const oldBuggyCost =
-      (u.prompt / 1_000_000) * CLAUDE_OPUS_PRICES.promptPrice +
-      (u.completion / 1_000_000) * CLAUDE_OPUS_PRICES.completionPrice
+    const oldBuggyCost
+      = (u.prompt / 1_000_000) * CLAUDE_OPUS_PRICES.promptPrice
+        + (u.completion / 1_000_000) * CLAUDE_OPUS_PRICES.completionPrice
     const b = computeUsageCostBreakdown(u)!
     expect(oldBuggyCost).toBeCloseTo(0.08177, 5) // was wrong
     expect(b.total).toBeLessThan(oldBuggyCost * 0.3) // new total is <30% of the bug

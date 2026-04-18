@@ -44,13 +44,16 @@ function iconFor(file: SkillFile | undefined) {
 
 <template>
   <div>
-    <template v-for="node in nodes" :key="(node.path ?? node.name) + (node.isDir ? '/' : '')">
+    <template
+      v-for="node in nodes"
+      :key="(node.path ?? node.name) + (node.isDir ? '/' : '')"
+    >
       <!-- Directory row -->
       <div
         v-if="node.isDir"
-        @click="toggle(node.path ?? (node.name + (depth ?? 0)))"
         class="flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-fg-muted hover:bg-muted/50 transition-colors select-none"
         :style="{ paddingLeft: `${12 + (depth ?? 0) * 12}px` }"
+        @click="toggle(node.path ?? (node.name + (depth ?? 0)))"
       >
         <svg
           class="w-3 h-3 shrink-0 transition-transform"
@@ -59,9 +62,18 @@ function iconFor(file: SkillFile | undefined) {
           stroke="currentColor"
           viewBox="0 0 24 24"
         >
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M9 5l7 7-7 7"
+          />
         </svg>
-        <svg class="w-3.5 h-3.5 text-fg-muted shrink-0" fill="currentColor" viewBox="0 0 20 20">
+        <svg
+          class="w-3.5 h-3.5 text-fg-muted shrink-0"
+          fill="currentColor"
+          viewBox="0 0 20 20"
+        >
           <path d="M2 6a2 2 0 012-2h3.172a2 2 0 011.414.586l1.828 1.828A2 2 0 0011.828 7H16a2 2 0 012 2v5a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
         </svg>
         <span class="text-xs truncate">{{ node.name }}</span>
@@ -79,13 +91,13 @@ function iconFor(file: SkillFile | undefined) {
       <!-- File row -->
       <div
         v-else-if="!node.isDir"
-        @click="node.file ? emit('select', node.file) : undefined"
         :class="[
           'flex items-center gap-2 px-3 py-1.5 transition-colors',
           activePath === node.path ? 'bg-muted text-fg-strong' : 'text-fg-muted hover:bg-muted/50',
-          node.file?.isText ? 'cursor-pointer' : 'cursor-default opacity-60'
+          node.file?.isText ? 'cursor-pointer' : 'cursor-default opacity-60',
         ]"
         :style="{ paddingLeft: `${12 + (depth ?? 0) * 12}px` }"
+        @click="node.file ? emit('select', node.file) : undefined"
       >
         <span
           class="text-[9px] font-mono px-1 py-0.5 rounded shrink-0"
@@ -94,8 +106,12 @@ function iconFor(file: SkillFile | undefined) {
           {{ iconFor(node.file) }}
         </span>
         <div class="min-w-0">
-          <div class="text-xs truncate">{{ node.name }}</div>
-          <div class="text-[10px] text-fg-muted">{{ formatSize(node.file?.size ?? 0) }}</div>
+          <div class="text-xs truncate">
+            {{ node.name }}
+          </div>
+          <div class="text-[10px] text-fg-muted">
+            {{ formatSize(node.file?.size ?? 0) }}
+          </div>
         </div>
       </div>
     </template>

@@ -23,7 +23,7 @@ const emit = defineEmits<{
 
 const dismissed = ref(false)
 
-const variantStyles: Record<BannerVariant, { bg: string; border: string; text: string; icon: string }> = {
+const variantStyles: Record<BannerVariant, { bg: string, border: string, text: string, icon: string }> = {
   warning: {
     bg: 'bg-amber-50 dark:bg-amber-900/20',
     border: 'border-amber-200 dark:border-amber-800/40',
@@ -56,8 +56,18 @@ const style = computed(() => variantStyles[props.variant])
     class="flex items-center gap-3 px-4 py-2.5 border-b text-sm"
   >
     <!-- Status icon -->
-    <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" :d="style.icon" />
+    <svg
+      class="w-5 h-5 shrink-0"
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
+    >
+      <path
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        stroke-width="1.5"
+        :d="style.icon"
+      />
     </svg>
 
     <!-- Message -->
@@ -66,8 +76,8 @@ const style = computed(() => variantStyles[props.variant])
     <!-- Action link -->
     <button
       v-if="actionText"
-      @click="emit('action')"
       class="text-xs font-medium underline underline-offset-2 hover:no-underline shrink-0"
+      @click="emit('action')"
     >
       {{ actionText }}
     </button>
@@ -75,12 +85,22 @@ const style = computed(() => variantStyles[props.variant])
     <!-- Dismiss button (only for transient conditions) -->
     <button
       v-if="dismissable"
-      @click="dismissed = true; emit('dismiss')"
       class="p-0.5 opacity-60 hover:opacity-100 transition-opacity shrink-0"
       aria-label="Dismiss"
+      @click="dismissed = true; emit('dismiss')"
     >
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+      <svg
+        class="w-4 h-4"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="2"
+          d="M6 18L18 6M6 6l12 12"
+        />
       </svg>
     </button>
   </div>

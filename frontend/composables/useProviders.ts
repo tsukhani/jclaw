@@ -29,7 +29,7 @@ export interface Provider {
 }
 
 export interface ConfigData {
-  entries: { key: string; value: string }[]
+  entries: { key: string, value: string }[]
 }
 
 /**
@@ -59,7 +59,8 @@ export function useProviders(configData: Ref<ConfigData | null>) {
         const name = e.key.split('.')[1]
         const provider = providerMap.get(name)
         if (provider) {
-          try { provider.models = JSON.parse(e.value) } catch { provider.models = [] }
+          try { provider.models = JSON.parse(e.value) }
+          catch { provider.models = [] }
         }
       }
     }

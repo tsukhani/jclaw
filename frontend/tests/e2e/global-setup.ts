@@ -32,8 +32,8 @@ export default async function globalSetup(_config: FullConfig) {
   })
   if (!response.ok()) {
     throw new Error(
-      `Admin login failed (${response.status()}). Is the dev server running ` +
-        `via ./jclaw.sh --dev start, and do JCLAW_ADMIN_USERNAME / JCLAW_ADMIN_PASSWORD match?`,
+      `Admin login failed (${response.status()}). Is the dev server running `
+      + `via ./jclaw.sh --dev start, and do JCLAW_ADMIN_USERNAME / JCLAW_ADMIN_PASSWORD match?`,
     )
   }
 

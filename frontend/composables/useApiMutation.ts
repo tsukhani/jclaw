@@ -13,19 +13,21 @@ export function useApiMutation() {
 
   async function mutate<T = unknown>(
     url: string,
-    opts: Parameters<typeof $fetch>[1] = {}
+    opts: Parameters<typeof $fetch>[1] = {},
   ): Promise<T | null> {
     loading.value = true
     error.value = null
     try {
       const result = await $fetch<T>(url, opts)
       return result
-    } catch (e: unknown) {
+    }
+    catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Request failed'
       error.value = message
       console.error(`API mutation failed [${opts.method ?? 'GET'} ${url}]:`, message)
       return null
-    } finally {
+    }
+    finally {
       loading.value = false
     }
   }

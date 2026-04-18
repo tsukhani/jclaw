@@ -9,12 +9,13 @@ export function useAuth() {
     try {
       await $fetch<void>('/api/auth/login', {
         method: 'POST',
-        body: { username: user, password: pass }
+        body: { username: user, password: pass },
       })
       authenticated.value = true
       username.value = user
       return true
-    } catch {
+    }
+    catch {
       return false
     }
   }
@@ -22,7 +23,8 @@ export function useAuth() {
   async function logout() {
     try {
       await $fetch('/api/auth/logout', { method: 'POST' })
-    } catch {
+    }
+    catch {
       // Ignore errors on logout
     }
     authenticated.value = false
@@ -37,7 +39,8 @@ export function useAuth() {
         await $fetch('/api/config')
         authenticated.value = true
         return true
-      } catch {
+      }
+      catch {
         authenticated.value = false
         return false
       }
@@ -50,6 +53,6 @@ export function useAuth() {
     username: readonly(username),
     login,
     logout,
-    checkAuth
+    checkAuth,
   }
 }

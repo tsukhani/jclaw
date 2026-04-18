@@ -65,7 +65,7 @@ describe('buildLatencyRows (JCLAW-74 prologue nesting)', () => {
       prologue: h(3, 20),
       prologue_parse: h(3, 1),
       // prologue_tools missing entirely
-      prologue_conv: { count: 0 },  // zero count → skip
+      prologue_conv: { count: 0 }, // zero count → skip
       prologue_prompt: h(3, 13),
     })
     const childKeys = rows.filter(r => r.isChild).map(r => r.key)
@@ -76,7 +76,7 @@ describe('buildLatencyRows (JCLAW-74 prologue nesting)', () => {
     const rows = buildLatencyRows({
       prologue: h(3, 20),
       prologue_parse: h(3, 1),
-      prologue_future_thing: h(3, 7),  // unknown key
+      prologue_future_thing: h(3, 7), // unknown key
     })
     const childKeys = rows.filter(r => r.isChild).map(r => r.key)
     expect(childKeys).toEqual(['prologue_parse', 'prologue_future_thing'])
@@ -120,7 +120,7 @@ describe('buildLatencyRows (JCLAW-74 prologue nesting)', () => {
     // unknown-key catch-all picks up prologue_parse. Label still clean.
     const parse = rows.find(r => r.key === 'prologue_parse')!
     expect(parse).toBeDefined()
-    expect(parse.label).toBe('prologue_parse')  // treated as top-level fallback
+    expect(parse.label).toBe('prologue_parse') // treated as top-level fallback
   })
 })
 

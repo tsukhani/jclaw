@@ -145,7 +145,7 @@ export function buildLatencyRows(
  */
 export function buildChartSeries(
   metrics: Record<string, LatencyHistogram | undefined>,
-): Array<{ key: string; label: string; histogram: LatencyHistogram }> {
+): Array<{ key: string, label: string, histogram: LatencyHistogram }> {
   return buildLatencyRows(metrics)
     .filter(r => !r.isChild)
     .map(r => ({ key: r.key, label: r.label, histogram: r.h }))

@@ -85,7 +85,10 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
 </script>
 
 <template>
-  <Sheet :open="open" @update:open="emit('update:open', $event)">
+  <Sheet
+    :open="open"
+    @update:open="emit('update:open', $event)"
+  >
     <SheetContent
       side="right"
       :class="['max-w-none', isResizing ? 'select-none' : '']"
@@ -100,28 +103,52 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
       <!-- Header -->
       <SheetHeader class="pr-10">
         <div class="flex items-center gap-2">
-          <SheetTitle class="flex-1 truncate">{{ title }}</SheetTitle>
+          <SheetTitle class="flex-1 truncate">
+            {{ title }}
+          </SheetTitle>
           <button
             v-if="popOutRoute"
-            @click="emit('update:open', false); router.push(popOutRoute)"
             class="p-1 text-fg-muted hover:text-fg-strong transition-colors shrink-0"
             title="Open full page (Cmd+Enter)"
+            @click="emit('update:open', false); router.push(popOutRoute)"
           >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            <svg
+              class="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+              />
             </svg>
           </button>
           <button
-            @click="emit('update:open', false)"
             class="p-1 text-fg-muted hover:text-fg-strong transition-colors shrink-0"
             title="Close panel (Esc)"
+            @click="emit('update:open', false)"
           >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+            <svg
+              class="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M13 5l7 7-7 7M5 5l7 7-7 7"
+              />
             </svg>
           </button>
         </div>
-        <SheetDescription v-if="description">{{ description }}</SheetDescription>
+        <SheetDescription v-if="description">
+          {{ description }}
+        </SheetDescription>
       </SheetHeader>
 
       <!-- Content slot -->

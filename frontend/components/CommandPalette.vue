@@ -57,7 +57,8 @@ watch(() => props.open, async (isOpen) => {
     ])
     agents.value = agentData ?? []
     conversations.value = convoData ?? []
-  } catch {
+  }
+  catch {
     // Palette still works with static items if API is down
   }
 })
@@ -93,7 +94,10 @@ function toggleTheme() {
 </script>
 
 <template>
-  <CommandDialog :open="open" @update:open="emit('update:open', $event)">
+  <CommandDialog
+    :open="open"
+    @update:open="emit('update:open', $event)"
+  >
     <CommandInput placeholder="Search pages, agents, conversations..." />
     <CommandList>
       <CommandEmpty>No results found.</CommandEmpty>
@@ -145,7 +149,10 @@ function toggleTheme() {
 
       <CommandSeparator />
       <CommandGroup heading="Actions">
-        <CommandItem value="toggle theme light dark mode" @select="toggleTheme">
+        <CommandItem
+          value="toggle theme light dark mode"
+          @select="toggleTheme"
+        >
           Toggle theme
         </CommandItem>
       </CommandGroup>

@@ -7,8 +7,8 @@
 export default defineNuxtPlugin(() => {
   const saved = localStorage.getItem('jclaw-theme') as 'system' | 'light' | 'dark' | null
   const mode = saved ?? 'system'
-  const prefersDark =
-    mode === 'dark' ||
-    (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  const prefersDark
+    = mode === 'dark'
+      || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
   document.documentElement.classList.toggle('dark', prefersDark)
 })

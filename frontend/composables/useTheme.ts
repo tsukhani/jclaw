@@ -6,9 +6,9 @@ function applyTheme(mode: ThemeMode) {
   if (import.meta.server) return
 
   const root = document.documentElement
-  const prefersDark =
-    mode === 'dark' ||
-    (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  const prefersDark
+    = mode === 'dark'
+      || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
   root.classList.toggle('dark', prefersDark)
 }
 

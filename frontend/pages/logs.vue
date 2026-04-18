@@ -48,39 +48,73 @@ const categories = ['llm', 'channel', 'tool', 'task', 'agent', 'auth', 'system']
 <template>
   <div>
     <div class="flex items-center justify-between mb-6">
-      <h1 class="text-lg font-semibold text-fg-strong">Logs</h1>
+      <h1 class="text-lg font-semibold text-fg-strong">
+        Logs
+      </h1>
       <label class="flex items-center gap-1.5 text-xs text-fg-muted">
-        <input type="checkbox" v-model="autoRefresh" class="accent-white" />
+        <input
+          v-model="autoRefresh"
+          type="checkbox"
+          class="accent-white"
+        >
         Auto-refresh
       </label>
     </div>
 
     <!-- Filters -->
     <div class="flex gap-3 mb-4">
-      <select v-model="categoryFilter" class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden">
-        <option value="">All categories</option>
-        <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
+      <select
+        v-model="categoryFilter"
+        class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
+      >
+        <option value="">
+          All categories
+        </option>
+        <option
+          v-for="c in categories"
+          :key="c"
+          :value="c"
+        >
+          {{ c }}
+        </option>
       </select>
-      <select v-model="levelFilter" class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden">
-        <option value="">All levels</option>
-        <option value="ERROR">ERROR</option>
-        <option value="WARN">WARN</option>
-        <option value="INFO">INFO</option>
+      <select
+        v-model="levelFilter"
+        class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
+      >
+        <option value="">
+          All levels
+        </option>
+        <option value="ERROR">
+          ERROR
+        </option>
+        <option value="WARN">
+          WARN
+        </option>
+        <option value="INFO">
+          INFO
+        </option>
       </select>
-      <input v-model="searchFilter" placeholder="Search messages..."
-             class="flex-1 max-w-xs px-2 py-1 bg-muted border border-input text-sm text-fg-strong
-                    placeholder-fg-muted focus:outline-hidden focus:border-ring transition-colors" />
+      <input
+        v-model="searchFilter"
+        placeholder="Search messages..."
+        class="flex-1 max-w-xs px-2 py-1 bg-muted border border-input text-sm text-fg-strong
+                    placeholder-fg-muted focus:outline-hidden focus:border-ring transition-colors"
+      >
     </div>
 
     <!-- Events -->
     <div class="bg-surface-elevated border border-border">
-      <div v-if="logs?.events?.length" class="divide-y divide-border">
+      <div
+        v-if="logs?.events?.length"
+        class="divide-y divide-border"
+      >
         <div
           v-for="event in logs.events"
           :key="event.id"
-          @click="event.details ? toggleExpand(event.id) : null"
           :class="event.details ? 'cursor-pointer' : ''"
           class="px-4 py-2 hover:bg-muted transition-colors"
+          @click="event.details ? toggleExpand(event.id) : null"
         >
           <div class="flex items-start gap-3">
             <span class="text-xs text-fg-muted shrink-0 w-20 font-mono mt-0.5">
@@ -93,13 +127,18 @@ const categories = ['llm', 'channel', 'tool', 'task', 'agent', 'auth', 'system']
             <span class="text-xs text-fg-muted shrink-0 w-14 font-mono mt-0.5">{{ event.category }}</span>
             <span class="text-sm text-fg-primary min-w-0">{{ event.message }}</span>
           </div>
-          <div v-if="expandedId === event.id && event.details"
-               class="mt-2 ml-[8.5rem] text-xs font-mono text-fg-muted bg-muted p-2 whitespace-pre-wrap">
+          <div
+            v-if="expandedId === event.id && event.details"
+            class="mt-2 ml-[8.5rem] text-xs font-mono text-fg-muted bg-muted p-2 whitespace-pre-wrap"
+          >
             {{ event.details }}
           </div>
         </div>
       </div>
-      <div v-else class="px-4 py-8 text-center text-sm text-fg-muted">
+      <div
+        v-else
+        class="px-4 py-8 text-center text-sm text-fg-muted"
+      >
         No events matching filters
       </div>
     </div>

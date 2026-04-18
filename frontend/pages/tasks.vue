@@ -34,17 +34,41 @@ const statusColors: Record<string, string> = {
 
 <template>
   <div>
-    <h1 class="text-lg font-semibold text-fg-strong mb-6">Tasks</h1>
+    <h1 class="text-lg font-semibold text-fg-strong mb-6">
+      Tasks
+    </h1>
 
     <!-- Filters -->
     <div class="flex gap-3 mb-4">
-      <select v-model="statusFilter" class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden">
-        <option value="">All statuses</option>
-        <option v-for="s in ['PENDING','RUNNING','COMPLETED','FAILED','CANCELLED']" :key="s" :value="s">{{ s }}</option>
+      <select
+        v-model="statusFilter"
+        class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
+      >
+        <option value="">
+          All statuses
+        </option>
+        <option
+          v-for="s in ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED']"
+          :key="s"
+          :value="s"
+        >
+          {{ s }}
+        </option>
       </select>
-      <select v-model="typeFilter" class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden">
-        <option value="">All types</option>
-        <option v-for="t in ['IMMEDIATE','SCHEDULED','CRON']" :key="t" :value="t">{{ t }}</option>
+      <select
+        v-model="typeFilter"
+        class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
+      >
+        <option value="">
+          All types
+        </option>
+        <option
+          v-for="t in ['IMMEDIATE', 'SCHEDULED', 'CRON']"
+          :key="t"
+          :value="t"
+        >
+          {{ t }}
+        </option>
       </select>
     </div>
 
@@ -52,35 +76,78 @@ const statusColors: Record<string, string> = {
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-border text-left text-xs text-fg-muted">
-            <th class="px-4 py-2.5 font-medium">Name</th>
-            <th class="px-4 py-2.5 font-medium">Type</th>
-            <th class="px-4 py-2.5 font-medium">Status</th>
-            <th class="px-4 py-2.5 font-medium">Agent</th>
-            <th class="px-4 py-2.5 font-medium">Next Run</th>
-            <th class="px-4 py-2.5 font-medium">Retries</th>
-            <th class="px-4 py-2.5 font-medium">Actions</th>
+            <th class="px-4 py-2.5 font-medium">
+              Name
+            </th>
+            <th class="px-4 py-2.5 font-medium">
+              Type
+            </th>
+            <th class="px-4 py-2.5 font-medium">
+              Status
+            </th>
+            <th class="px-4 py-2.5 font-medium">
+              Agent
+            </th>
+            <th class="px-4 py-2.5 font-medium">
+              Next Run
+            </th>
+            <th class="px-4 py-2.5 font-medium">
+              Retries
+            </th>
+            <th class="px-4 py-2.5 font-medium">
+              Actions
+            </th>
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
-          <tr v-for="task in tasks" :key="task.id">
-            <td class="px-4 py-2.5 text-fg-primary">{{ task.name }}</td>
-            <td class="px-4 py-2.5 text-fg-muted font-mono text-xs">{{ task.type }}</td>
-            <td class="px-4 py-2.5">
-              <span :class="statusColors[task.status]" class="text-xs font-mono">{{ task.status }}</span>
+          <tr
+            v-for="task in tasks"
+            :key="task.id"
+          >
+            <td class="px-4 py-2.5 text-fg-primary">
+              {{ task.name }}
             </td>
-            <td class="px-4 py-2.5 text-fg-muted">{{ task.agentName || '—' }}</td>
-            <td class="px-4 py-2.5 text-fg-muted text-xs">{{ task.nextRunAt ? new Date(task.nextRunAt).toLocaleString() : '—' }}</td>
-            <td class="px-4 py-2.5 text-fg-muted text-xs">{{ task.retryCount }}/{{ task.maxRetries }}</td>
+            <td class="px-4 py-2.5 text-fg-muted font-mono text-xs">
+              {{ task.type }}
+            </td>
+            <td class="px-4 py-2.5">
+              <span
+                :class="statusColors[task.status]"
+                class="text-xs font-mono"
+              >{{ task.status }}</span>
+            </td>
+            <td class="px-4 py-2.5 text-fg-muted">
+              {{ task.agentName || '—' }}
+            </td>
+            <td class="px-4 py-2.5 text-fg-muted text-xs">
+              {{ task.nextRunAt ? new Date(task.nextRunAt).toLocaleString() : '—' }}
+            </td>
+            <td class="px-4 py-2.5 text-fg-muted text-xs">
+              {{ task.retryCount }}/{{ task.maxRetries }}
+            </td>
             <td class="px-4 py-2.5 space-x-2">
-              <button v-if="task.status === 'PENDING'" @click="cancelTask(task.id)"
-                      class="text-xs text-fg-muted hover:text-red-400 transition-colors">Cancel</button>
-              <button v-if="task.status === 'FAILED'" @click="retryTask(task.id)"
-                      class="text-xs text-fg-muted hover:text-fg-strong transition-colors">Retry</button>
+              <button
+                v-if="task.status === 'PENDING'"
+                class="text-xs text-fg-muted hover:text-red-400 transition-colors"
+                @click="cancelTask(task.id)"
+              >
+                Cancel
+              </button>
+              <button
+                v-if="task.status === 'FAILED'"
+                class="text-xs text-fg-muted hover:text-fg-strong transition-colors"
+                @click="retryTask(task.id)"
+              >
+                Retry
+              </button>
             </td>
           </tr>
         </tbody>
       </table>
-      <div v-if="!tasks?.length" class="px-4 py-8 text-center text-sm text-fg-muted">
+      <div
+        v-if="!tasks?.length"
+        class="px-4 py-8 text-center text-sm text-fg-muted"
+      >
         No tasks found
       </div>
     </div>

@@ -57,7 +57,7 @@ export interface LatencyHistogram {
   p90_ms: number
   p99_ms: number
   p999_ms: number
-  buckets?: Array<{ le_ms: number; count: number }>
+  buckets?: Array<{ le_ms: number, count: number }>
 }
 
 /** Map of segment name → histogram from GET /api/metrics/latency. */

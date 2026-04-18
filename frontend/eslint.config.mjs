@@ -8,9 +8,16 @@
 // `pnpm format` (= `eslint . --fix`) handles layout the way Prettier would,
 // while `pnpm lint` covers logic + Vue + TS correctness.
 //
-// See https://eslint.nuxt.com/ for the full rule list.
+// `eslint-plugin-vuejs-accessibility` layers WCAG-oriented template rules on
+// top — missing `alt`, missing form-label associations, non-keyboard-accessible
+// event handlers, anchor validity, etc. Baseline findings on existing files
+// are intentionally left as warnings for opportunistic cleanup; any new
+// template markup is expected to be a11y-clean.
+//
+// See https://eslint.nuxt.com/ and https://vue-a11y.github.io/eslint-plugin-vuejs-accessibility/.
 
 import withNuxt from './.nuxt/eslint.config.mjs'
+import vueA11y from 'eslint-plugin-vuejs-accessibility'
 
 export default withNuxt(
   {
@@ -31,4 +38,6 @@ export default withNuxt(
       'vue/multi-word-component-names': 'off',
     },
   },
+  // Vue accessibility (WCAG) rules, Vue SFCs only.
+  ...vueA11y.configs['flat/recommended'],
 )

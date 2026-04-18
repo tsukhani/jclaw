@@ -39,12 +39,12 @@ export interface ToolMeta extends ToolApiMeta {
   categoryColor: string
   iconBg: string
   iconColor: string
-  functions: ToolAction[]  // legacy alias for actions; preserved for pages/tools.vue compatibility
+  functions: ToolAction[] // legacy alias for actions; preserved for pages/tools.vue compatibility
 }
 
 // ───── Presentational mappings (frontend-only concerns) ──────────────────
 
-const CATEGORY_STYLES: Record<ToolCategory, { categoryColor: string; iconBg: string; iconColor: string }> = {
+const CATEGORY_STYLES: Record<ToolCategory, { categoryColor: string, iconBg: string, iconColor: string }> = {
   System: {
     categoryColor: 'text-neutral-400 bg-neutral-800',
     iconBg: 'bg-neutral-800',
@@ -68,9 +68,9 @@ const CATEGORY_STYLES: Record<ToolCategory, { categoryColor: string; iconBg: str
 }
 
 const PILL_CLASSES: Record<ToolCategory, string> = {
-  System:    'bg-neutral-800 border-neutral-700/60 text-neutral-400',
-  Files:     'bg-amber-500/10 border-amber-500/25 text-amber-400',
-  Web:       'bg-blue-500/10 border-blue-500/25 text-blue-400',
+  System: 'bg-neutral-800 border-neutral-700/60 text-neutral-400',
+  Files: 'bg-amber-500/10 border-amber-500/25 text-amber-400',
+  Web: 'bg-blue-500/10 border-blue-500/25 text-blue-400',
   Utilities: 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400',
 }
 
@@ -88,7 +88,7 @@ async function ensureLoaded(): Promise<ToolApiMeta[]> {
   if (metaList.value.length > 0) return metaList.value
   if (!fetchPromise) {
     fetchPromise = $fetch<ToolApiMeta[]>('/api/tools/meta')
-      .then(data => {
+      .then((data) => {
         metaList.value = data ?? []
         return metaList.value
       })
@@ -109,7 +109,7 @@ function augment(api: ToolApiMeta): ToolMeta {
     categoryColor: styles.categoryColor,
     iconBg: styles.iconBg,
     iconColor: styles.iconColor,
-    functions: api.actions,  // legacy name preserved for pages/tools.vue
+    functions: api.actions, // legacy name preserved for pages/tools.vue
   }
 }
 
@@ -128,7 +128,7 @@ export function useToolMeta() {
   })
 
   const ORDERED_TOOLS: ComputedRef<string[]> = computed(() =>
-    metaList.value.map(t => t.name)
+    metaList.value.map(t => t.name),
   )
 
   function getToolMeta(name: string): ToolMeta | null {

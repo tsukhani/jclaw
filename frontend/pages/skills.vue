@@ -22,7 +22,8 @@ async function loadAllAgentSkills() {
     await Promise.all(agents.value.map(async (agent) => {
       try {
         map[agent.id] = await $fetch<any[]>(`/api/agents/${agent.id}/skills`)
-      } catch {
+      }
+      catch {
         map[agent.id] = []
       }
     }))
@@ -133,12 +134,14 @@ async function updateAgentSkillFromGlobal(agentId: number, skill: any) {
     await $fetch(`/api/agents/${agentId}/skills/${skillName}/copy`, { method: 'POST' })
     agentSkillsMap.value[agentId] = await $fetch<any[]>(`/api/agents/${agentId}/skills`)
     showInfo(`Updated '${skillName}' for this agent`)
-  } catch (err: any) {
+  }
+  catch (err: any) {
     const status = err?.response?.status
     if (status === 400) {
       const msg = err?.response?._data || err?.data || err?.message || 'Update failed'
       showDragError(typeof msg === 'string' ? msg : 'Update failed')
-    } else {
+    }
+    else {
       console.error('Failed to update skill from global:', err)
       showDragError('Failed to update skill from global')
     }
@@ -203,10 +206,11 @@ async function onAgentDrop(e: DragEvent, agent: any) {
       if (!existing.enabled) {
         try {
           await $fetch(`/api/agents/${agent.id}/skills/${skillName}`, {
-            method: 'PUT', body: { enabled: true }
+            method: 'PUT', body: { enabled: true },
           })
           agentSkillsMap.value[agent.id] = await $fetch<any[]>(`/api/agents/${agent.id}/skills`)
-        } catch (err) {
+        }
+        catch (err) {
           console.error('Failed to re-enable skill:', err)
         }
       }
@@ -217,8 +221,8 @@ async function onAgentDrop(e: DragEvent, agent: any) {
     const ok = await confirm({
       title: 'Replace skill',
       message:
-        `Agent '${agent.name}' has '${skillName}' at version ${existing.version || '0.0.0'}.\n` +
-        `Replace with global version ${globalVersion}?`,
+        `Agent '${agent.name}' has '${skillName}' at version ${existing.version || '0.0.0'}.\n`
+        + `Replace with global version ${globalVersion}?`,
       confirmText: 'Replace',
     })
     if (!ok) {
@@ -231,13 +235,15 @@ async function onAgentDrop(e: DragEvent, agent: any) {
     await $fetch(`/api/agents/${agent.id}/skills/${skillName}/copy`, { method: 'POST' })
     agentSkillsMap.value[agent.id] = await $fetch<any[]>(`/api/agents/${agent.id}/skills`)
     if (existing) showInfo(`Updated '${skillName}' on agent '${agent.name}' to version ${globalVersion}`)
-  } catch (err: any) {
+  }
+  catch (err: any) {
     const status = err?.response?.status
     if (status === 400) {
       // Missing tools — surface the server's error message to the user
       const msg = err?.response?._data || err?.data || err?.message || 'Cannot add skill to this agent.'
       showDragError(typeof msg === 'string' ? msg : 'Cannot add skill to this agent.')
-    } else {
+    }
+    else {
       console.error('Failed to copy skill:', err)
       showDragError('Failed to add skill to agent.')
     }
@@ -277,8 +283,8 @@ async function onGlobalSectionDrop(e: DragEvent) {
     const ok = await confirm({
       title: 'Replace global skill',
       message:
-        `A global skill named '${skillName}' already exists.\n\n` +
-        `Promoting will replace it with the sanitized version from the agent workspace. Continue?`,
+        `A global skill named '${skillName}' already exists.\n\n`
+        + `Promoting will replace it with the sanitized version from the agent workspace. Continue?`,
       confirmText: 'Promote',
     })
     if (!ok) return
@@ -290,7 +296,7 @@ async function onGlobalSectionDrop(e: DragEvent) {
   // Send promote request — returns immediately, SSE event will notify on completion
   $fetch('/api/skills/promote', {
     method: 'POST',
-    body: { agentId, skillName }
+    body: { agentId, skillName },
   }).catch((err) => {
     console.error('Failed to promote skill:', err)
     const s = new Set(promotingSkills.value)
@@ -304,10 +310,11 @@ async function onGlobalSectionDrop(e: DragEvent) {
 async function toggleAgentSkill(agentId: number, skillName: string, enabled: boolean) {
   try {
     await $fetch(`/api/agents/${agentId}/skills/${skillName}`, {
-      method: 'PUT', body: { enabled }
+      method: 'PUT', body: { enabled },
     })
     agentSkillsMap.value[agentId] = await $fetch<any[]>(`/api/agents/${agentId}/skills`)
-  } catch (e) {
+  }
+  catch (e) {
     console.error('Failed to toggle skill:', e)
   }
 }
@@ -336,12 +343,14 @@ async function commitRename(skill: any) {
   }
   try {
     await $fetch(`/api/skills/${oldName}/rename`, {
-      method: 'PUT', body: { newName }
+      method: 'PUT', body: { newName },
     })
     refreshSkills()
-  } catch (err: any) {
+  }
+  catch (err: any) {
     console.error('Failed to rename skill:', err)
-  } finally {
+  }
+  finally {
     renamingSkill.value = null
     renameValue.value = ''
   }
@@ -372,7 +381,7 @@ const renderedMarkdown = computed(() => {
   if (!isMarkdownFile.value || !fileContent.value) return ''
   return DOMPurify.sanitize(marked.parse(fileContent.value) as string)
 })
-const editingAgentId = ref<number | null>(null)  // null = global skill, number = agent workspace skill
+const editingAgentId = ref<number | null>(null) // null = global skill, number = agent workspace skill
 
 async function editSkill(skill: any) {
   try {
@@ -390,13 +399,16 @@ async function editSkill(skill: any) {
     const skillMd = skillFiles.value.find((f: any) => f.path === 'SKILL.md')
     if (skillMd) {
       await selectFile(skillMd)
-    } else if (skillFiles.value.length > 0 && skillFiles.value[0].isText) {
+    }
+    else if (skillFiles.value.length > 0 && skillFiles.value[0].isText) {
       await selectFile(skillFiles.value[0])
-    } else {
+    }
+    else {
       activeFile.value = null
       fileContent.value = ''
     }
-  } catch (e) {
+  }
+  catch (e) {
     console.error('Failed to load skill:', e)
   }
 }
@@ -415,7 +427,8 @@ async function selectFile(file: any) {
     const res = await $fetch<any>(`${skillFileApiBase()}/${file.path}`)
     activeFile.value = file.path
     fileContent.value = res.content
-  } catch (e) {
+  }
+  catch (e) {
     console.error('Failed to read file:', e)
   }
 }
@@ -429,7 +442,8 @@ async function deleteSkill(skill: any) {
     activeFile.value = null
     refreshSkills()
     loadAllAgentSkills()
-  } catch (e) {
+  }
+  catch (e) {
     console.error('Failed to delete skill:', e)
   }
 }
@@ -449,13 +463,16 @@ async function editAgentSkill(agentId: number, skill: any) {
     const skillMd = skillFiles.value.find((f: any) => f.path === 'SKILL.md')
     if (skillMd) {
       await selectFile(skillMd)
-    } else if (skillFiles.value.length > 0 && skillFiles.value[0].isText) {
+    }
+    else if (skillFiles.value.length > 0 && skillFiles.value[0].isText) {
       await selectFile(skillFiles.value[0])
-    } else {
+    }
+    else {
       activeFile.value = null
       fileContent.value = ''
     }
-  } catch (e) {
+  }
+  catch (e) {
     console.error('Failed to load agent skill:', e)
   }
 }
@@ -472,7 +489,8 @@ async function deleteAgentSkill(agentId: number, skill: any) {
     skillAuthor.value = ''
     activeFile.value = null
     loadAllAgentSkills()
-  } catch (e) {
+  }
+  catch (e) {
     console.error('Failed to delete agent skill:', e)
   }
 }
@@ -504,7 +522,8 @@ const fileTree = computed<FileNode[]>(() => {
       const isLast = i === parts.length - 1
       if (isLast) {
         node.children!.push({ name: part, isDir: false, path: file.path, file })
-      } else {
+      }
+      else {
         let dir = node.children!.find(c => c.isDir && c.name === part)
         if (!dir) {
           dir = { name: part, isDir: true, children: [] }
@@ -538,96 +557,179 @@ function totalSkillCount(agentId: number) {
 <template>
   <div>
     <div class="flex items-center justify-between mb-6">
-      <h1 class="text-lg font-semibold text-fg-strong">Skills</h1>
+      <h1 class="text-lg font-semibold text-fg-strong">
+        Skills
+      </h1>
     </div>
 
-    <div v-if="dragError"
-         class="mb-4 px-3 py-2 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-700 dark:text-red-300 text-xs flex items-start justify-between gap-3">
+    <div
+      v-if="dragError"
+      class="mb-4 px-3 py-2 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-700 dark:text-red-300 text-xs flex items-start justify-between gap-3"
+    >
       <span>{{ dragError }}</span>
-      <button @click="dragError = null" class="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200 shrink-0" title="Dismiss">×</button>
+      <button
+        class="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-200 shrink-0"
+        title="Dismiss"
+        @click="dragError = null"
+      >
+        ×
+      </button>
     </div>
 
-    <div v-if="infoBanner"
-         class="mb-4 px-3 py-2 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 text-blue-700 dark:text-blue-300 text-xs flex items-start justify-between gap-3">
+    <div
+      v-if="infoBanner"
+      class="mb-4 px-3 py-2 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 text-blue-700 dark:text-blue-300 text-xs flex items-start justify-between gap-3"
+    >
       <span>{{ infoBanner }}</span>
-      <button @click="infoBanner = null" class="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 shrink-0" title="Dismiss">×</button>
+      <button
+        class="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 shrink-0"
+        title="Dismiss"
+        @click="infoBanner = null"
+      >
+        ×
+      </button>
     </div>
 
     <template v-if="!editing">
       <!-- Agent cards with skills -->
       <div class="mb-8">
-        <div class="text-xs text-fg-muted uppercase tracking-wider mb-3">Agents</div>
-        <div v-if="!agents?.length" class="bg-surface-elevated border border-border px-4 py-6 text-center text-sm text-fg-muted">
+        <div class="text-xs text-fg-muted uppercase tracking-wider mb-3">
+          Agents
+        </div>
+        <div
+          v-if="!agents?.length"
+          class="bg-surface-elevated border border-border px-4 py-6 text-center text-sm text-fg-muted"
+        >
           No agents configured
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          <div v-for="agent in agents" :key="agent.id"
-               @dragover="onAgentDragOver($event, agent.id)"
-               @dragleave="onAgentDragLeave(agent.id)"
-               @drop="onAgentDrop($event, agent)"
-               :class="[
-                 'bg-surface-elevated border p-4 transition-all duration-150',
-                 dropTarget === agent.id
-                   ? 'border-emerald-600 dark:border-emerald-500/60 bg-emerald-500/5 ring-1 ring-emerald-500/20'
-                   : 'border-border'
-               ]">
+          <div
+            v-for="agent in agents"
+            :key="agent.id"
+            :class="[
+              'bg-surface-elevated border p-4 transition-all duration-150',
+              dropTarget === agent.id
+                ? 'border-emerald-600 dark:border-emerald-500/60 bg-emerald-500/5 ring-1 ring-emerald-500/20'
+                : 'border-border',
+            ]"
+            @dragover="onAgentDragOver($event, agent.id)"
+            @dragleave="onAgentDragLeave(agent.id)"
+            @drop="onAgentDrop($event, agent)"
+          >
             <!-- Agent header -->
             <div class="flex items-center justify-between mb-3">
               <div>
                 <span class="text-sm font-medium text-fg-strong">{{ agent.name }}</span>
-                <span v-if="agent.isMain" class="ml-2 text-[10px] text-fg-muted border border-input px-1">main</span>
+                <span
+                  v-if="agent.isMain"
+                  class="ml-2 text-[10px] text-fg-muted border border-input px-1"
+                >main</span>
               </div>
               <span class="text-[10px] text-fg-muted">
                 {{ enabledSkillCount(agent.id) }}/{{ totalSkillCount(agent.id) }} skills
               </span>
             </div>
-            <div class="text-xs text-fg-muted mb-3">{{ agent.modelProvider }} / {{ agent.modelId }}</div>
+            <div class="text-xs text-fg-muted mb-3">
+              {{ agent.modelProvider }} / {{ agent.modelId }}
+            </div>
 
             <!-- Agent's skills (draggable for promotion) -->
-            <div v-if="agentSkillsMap[agent.id]?.length" class="space-y-1">
-              <div v-for="skill in agentSkillsMap[agent.id]" :key="skill.name"
-                   draggable="true"
-                   @dragstart="onAgentSkillDragStart($event, skill, agent.id)"
-                   @dragend="onDragEnd"
-                   class="flex items-center justify-between px-2 py-1.5 bg-muted cursor-grab active:cursor-grabbing select-none group">
+            <div
+              v-if="agentSkillsMap[agent.id]?.length"
+              class="space-y-1"
+            >
+              <div
+                v-for="skill in agentSkillsMap[agent.id]"
+                :key="skill.name"
+                draggable="true"
+                class="flex items-center justify-between px-2 py-1.5 bg-muted cursor-grab active:cursor-grabbing select-none group"
+                @dragstart="onAgentSkillDragStart($event, skill, agent.id)"
+                @dragend="onDragEnd"
+              >
                 <div class="flex items-center gap-2 min-w-0 flex-1">
                   <span class="text-xs text-fg-strong font-mono truncate">{{ skill.name }}</span>
-                  <button v-if="updateAvailable(skill)"
-                          @click.stop="updateAgentSkillFromGlobal(agent.id, skill)"
-                          class="text-[9px] text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 font-mono hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors shrink-0"
-                          :title="`Update to v${updateAvailable(skill)}`">
+                  <button
+                    v-if="updateAvailable(skill)"
+                    class="text-[9px] text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 font-mono hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors shrink-0"
+                    :title="`Update to v${updateAvailable(skill)}`"
+                    @click.stop="updateAgentSkillFromGlobal(agent.id, skill)"
+                  >
                     update → v{{ updateAvailable(skill) }}
                   </button>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
                   <span class="text-xs text-emerald-700 dark:text-emerald-400 font-mono font-semibold tabular-nums min-w-16 text-right">v{{ skill.version || '0.0.0' }}</span>
-                  <button @click.stop="editAgentSkill(agent.id, skill)"
-                          class="p-1 text-fg-muted hover:text-fg-strong transition-colors opacity-0 group-hover:opacity-100" title="View skill">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                  <button
+                    class="p-1 text-fg-muted hover:text-fg-strong transition-colors opacity-0 group-hover:opacity-100"
+                    title="View skill"
+                    @click.stop="editAgentSkill(agent.id, skill)"
+                  >
+                    <svg
+                      class="w-3.5 h-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    ><path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                    /><path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                    /></svg>
                   </button>
-                  <button @click.stop="deleteAgentSkill(agent.id, skill)"
-                          class="p-1 text-fg-muted hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100" title="Delete skill">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                  <button
+                    class="p-1 text-fg-muted hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                    title="Delete skill"
+                    @click.stop="deleteAgentSkill(agent.id, skill)"
+                  >
+                    <svg
+                      class="w-3.5 h-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    ><path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                    /></svg>
                   </button>
-                  <label class="flex items-center" @click.stop>
-                    <input type="checkbox" :checked="skill.enabled"
-                           @change="(e: Event) => toggleAgentSkill(agent.id, skill.name, (e.target as HTMLInputElement).checked)"
-                           class="accent-emerald-500 scale-90" />
+                  <label
+                    class="flex items-center"
+                    @click.stop
+                  >
+                    <input
+                      type="checkbox"
+                      :checked="skill.enabled"
+                      class="accent-emerald-500 scale-90"
+                      @change="(e: Event) => toggleAgentSkill(agent.id, skill.name, (e.target as HTMLInputElement).checked)"
+                    >
                   </label>
                 </div>
               </div>
             </div>
-            <div v-else class="text-xs text-fg-muted italic">
+            <div
+              v-else
+              class="text-xs text-fg-muted italic"
+            >
               {{ loadingAgents ? 'Loading...' : 'No skills assigned' }}
             </div>
 
             <!-- Drop hint (global → agent) -->
-            <div v-if="dragging && dragSource === 'global' && dropTarget !== agent.id"
-                 class="mt-3 border border-dashed border-input py-2 text-center text-[10px] text-fg-muted">
+            <div
+              v-if="dragging && dragSource === 'global' && dropTarget !== agent.id"
+              class="mt-3 border border-dashed border-input py-2 text-center text-[10px] text-fg-muted"
+            >
               Drop skill here
             </div>
-            <div v-if="dropTarget === agent.id"
-                 class="mt-3 border border-dashed border-emerald-600 dark:border-emerald-500/40 py-2 text-center text-[10px] text-emerald-700 dark:text-emerald-400">
+            <div
+              v-if="dropTarget === agent.id"
+              class="mt-3 border border-dashed border-emerald-600 dark:border-emerald-500/40 py-2 text-center text-[10px] text-emerald-700 dark:text-emerald-400"
+            >
               Release to assign
             </div>
           </div>
@@ -635,19 +737,41 @@ function totalSkillCount(agentId: number) {
       </div>
 
       <!-- Global skills (draggable + drop target for promotion) -->
-      <div @dragover="onGlobalSectionDragOver"
-           @dragleave="onGlobalSectionDragLeave"
-           @drop="onGlobalSectionDrop"
-           :class="[
-             'transition-all duration-150 p-4 -m-4',
-             dropTargetGlobal ? 'bg-emerald-500/5 ring-1 ring-emerald-500/20 rounded' : ''
-           ]">
+      <div
+        :class="[
+          'transition-all duration-150 p-4 -m-4',
+          dropTargetGlobal ? 'bg-emerald-500/5 ring-1 ring-emerald-500/20 rounded' : '',
+        ]"
+        @dragover="onGlobalSectionDragOver"
+        @dragleave="onGlobalSectionDragLeave"
+        @drop="onGlobalSectionDrop"
+      >
         <div class="flex items-center gap-3 mb-3">
-          <div class="text-xs text-fg-muted uppercase tracking-wider">Global Skills</div>
-          <div v-if="promotingSkills.size" class="flex items-center gap-1.5 text-[10px] text-emerald-700 dark:text-emerald-400">
-            <svg class="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+          <div class="text-xs text-fg-muted uppercase tracking-wider">
+            Global Skills
+          </div>
+          <div
+            v-if="promotingSkills.size"
+            class="flex items-center gap-1.5 text-[10px] text-emerald-700 dark:text-emerald-400"
+          >
+            <svg
+              class="w-3 h-3 animate-spin"
+              viewBox="0 0 24 24"
+              fill="none"
+            >
+              <circle
+                class="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                stroke-width="4"
+              />
+              <path
+                class="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+              />
             </svg>
             Promoting {{ promotingSkills.size }} skill{{ promotingSkills.size > 1 ? 's' : '' }}...
           </div>
@@ -657,12 +781,17 @@ function totalSkillCount(agentId: number) {
         </div>
 
         <!-- Drop hint when dragging agent skill over global section -->
-        <div v-if="dragSource === 'agent' && dropTargetGlobal"
-             class="mb-3 border border-dashed border-emerald-600 dark:border-emerald-500/40 py-3 text-center text-xs text-emerald-700 dark:text-emerald-400">
+        <div
+          v-if="dragSource === 'agent' && dropTargetGlobal"
+          class="mb-3 border border-dashed border-emerald-600 dark:border-emerald-500/40 py-3 text-center text-xs text-emerald-700 dark:text-emerald-400"
+        >
           Release to promote to global registry (secrets will be stripped)
         </div>
 
-        <div v-if="!skills?.length && !promotingSkills.size" class="bg-surface-elevated border border-border px-4 py-6 text-center text-sm text-fg-muted">
+        <div
+          v-if="!skills?.length && !promotingSkills.size"
+          class="bg-surface-elevated border border-border px-4 py-6 text-center text-sm text-fg-muted"
+        >
           No global skills. Create one via the skill-creator skill in an agent workspace, then drag it here to promote.
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -676,38 +805,52 @@ function totalSkillCount(agentId: number) {
             alignment holds uniformly across the whole grid — empty state is a
             dimmed em-dash, not a hidden block.
           -->
-          <div v-for="skill in skills" :key="skill.folderName || skill.name"
-               draggable="true"
-               @dragstart="onGlobalDragStart($event, skill)"
-               @dragend="onDragEnd"
-               :class="[
-                 'bg-surface-elevated border border-border flex flex-col cursor-grab active:cursor-grabbing transition-all duration-150 select-none overflow-hidden',
-                 dragging?.name === skill.name && dragSource === 'global' ? 'opacity-50 scale-95' : 'hover:border-input'
-               ]">
+          <div
+            v-for="skill in skills"
+            :key="skill.folderName || skill.name"
+            draggable="true"
+            :class="[
+              'bg-surface-elevated border border-border flex flex-col cursor-grab active:cursor-grabbing transition-all duration-150 select-none overflow-hidden',
+              dragging?.name === skill.name && dragSource === 'global' ? 'opacity-50 scale-95' : 'hover:border-input',
+            ]"
+            @dragstart="onGlobalDragStart($event, skill)"
+            @dragend="onDragEnd"
+          >
             <!-- HEADER segment: identity + description.
                  Description is line-clamped so header heights match across cards;
                  full description is visible on the detail page (eye icon). -->
             <div class="p-4">
               <div class="flex items-start justify-between gap-2 mb-1">
                 <template v-if="renamingSkill === (skill.folderName || skill.name)">
-                  <input v-model="renameValue"
-                         @keydown.enter="commitRename(skill)"
-                         @keydown.escape="cancelRename"
-                         @blur="commitRename(skill)"
-                         @click.stop
-                         @mousedown.stop
-                         ref="renameInput"
-                         class="text-sm text-fg-strong font-mono bg-muted border border-input px-1.5 py-0.5 w-full mr-2 focus:outline-hidden focus:border-emerald-600 dark:focus:border-emerald-500" />
+                  <input
+                    ref="renameInput"
+                    v-model="renameValue"
+                    class="text-sm text-fg-strong font-mono bg-muted border border-input px-1.5 py-0.5 w-full mr-2 focus:outline-hidden focus:border-emerald-600 dark:focus:border-emerald-500"
+                    @keydown.enter="commitRename(skill)"
+                    @keydown.escape="cancelRename"
+                    @blur="commitRename(skill)"
+                    @click.stop
+                    @mousedown.stop
+                  >
                 </template>
                 <template v-else>
-                  <span class="text-sm text-fg-strong font-mono cursor-text min-w-0 break-all"
-                        @dblclick.stop="startRename(skill)">{{ skill.folderName || skill.name }}</span>
+                  <span
+                    class="text-sm text-fg-strong font-mono cursor-text min-w-0 break-all"
+                    @dblclick.stop="startRename(skill)"
+                  >{{ skill.folderName || skill.name }}</span>
                 </template>
                 <span class="text-xs text-emerald-700 dark:text-emerald-300 font-mono font-semibold shrink-0 bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/50 px-1.5 py-0.5">v{{ skill.version || '0.0.0' }}</span>
               </div>
-              <div v-if="skill.name !== (skill.folderName || skill.name)"
-                   class="text-[10px] text-fg-muted">name: {{ skill.name }}</div>
-              <div v-if="skill.author" class="text-[10px] text-fg-muted">
+              <div
+                v-if="skill.name !== (skill.folderName || skill.name)"
+                class="text-[10px] text-fg-muted"
+              >
+                name: {{ skill.name }}
+              </div>
+              <div
+                v-if="skill.author"
+                class="text-[10px] text-fg-muted"
+              >
                 by <span class="font-mono text-fg-muted">{{ skill.author }}</span>
               </div>
               <div class="text-xs text-fg-muted mt-2 line-clamp-4">
@@ -717,43 +860,99 @@ function totalSkillCount(agentId: number) {
 
             <!-- TOOLS segment -->
             <div class="px-4 py-3 border-t border-border">
-              <div class="text-[10px] font-medium text-fg-muted uppercase tracking-wider mb-1.5">Tools</div>
-              <div v-if="skill.tools?.length" class="flex flex-wrap gap-1">
-                <span v-for="tool in skill.tools" :key="'t:' + tool"
-                      class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm"
-                      :class="getPillClass(tool)">
+              <div class="text-[10px] font-medium text-fg-muted uppercase tracking-wider mb-1.5">
+                Tools
+              </div>
+              <div
+                v-if="skill.tools?.length"
+                class="flex flex-wrap gap-1"
+              >
+                <span
+                  v-for="tool in skill.tools"
+                  :key="'t:' + tool"
+                  class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm"
+                  :class="getPillClass(tool)"
+                >
                   {{ tool }}
                 </span>
               </div>
-              <div v-else class="text-[10px] text-fg-muted">—</div>
+              <div
+                v-else
+                class="text-[10px] text-fg-muted"
+              >
+                —
+              </div>
             </div>
 
             <!-- COMMANDS segment -->
             <div class="px-4 py-3 border-t border-border">
-              <div class="text-[10px] font-medium text-fg-muted uppercase tracking-wider mb-1.5">Commands</div>
-              <div v-if="skill.commands?.length" class="flex flex-wrap gap-1">
-                <span v-for="cmd in skill.commands" :key="'c:' + cmd"
-                      class="text-[10px] font-mono px-1.5 py-0.5 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800/40 rounded-sm text-cyan-700 dark:text-cyan-300">
+              <div class="text-[10px] font-medium text-fg-muted uppercase tracking-wider mb-1.5">
+                Commands
+              </div>
+              <div
+                v-if="skill.commands?.length"
+                class="flex flex-wrap gap-1"
+              >
+                <span
+                  v-for="cmd in skill.commands"
+                  :key="'c:' + cmd"
+                  class="text-[10px] font-mono px-1.5 py-0.5 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800/40 rounded-sm text-cyan-700 dark:text-cyan-300"
+                >
                   {{ cmd }}
                 </span>
               </div>
-              <div v-else class="text-[10px] text-fg-muted">—</div>
+              <div
+                v-else
+                class="text-[10px] text-fg-muted"
+              >
+                —
+              </div>
             </div>
 
             <!-- Flex spacer pushes action row to the bottom of the card -->
-            <div class="flex-1"></div>
+            <div class="flex-1" />
 
             <!-- ACTIONS, bottom-aligned -->
             <div class="px-4 py-2 border-t border-border flex items-center justify-end gap-2">
-              <button @click.stop="editSkill(skill)"
-                      class="p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
-                      title="View skill">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+              <button
+                class="p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
+                title="View skill"
+                @click.stop="editSkill(skill)"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                /><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                /></svg>
               </button>
-              <button v-if="(skill.folderName || skill.name) !== 'skill-creator'"
-                      @click.stop="deleteSkill(skill)"
-                      class="p-1.5 text-fg-muted hover:text-red-400 transition-colors" title="Delete skill">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+              <button
+                v-if="(skill.folderName || skill.name) !== 'skill-creator'"
+                class="p-1.5 text-fg-muted hover:text-red-400 transition-colors"
+                title="Delete skill"
+                @click.stop="deleteSkill(skill)"
+              >
+                <svg
+                  class="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                /></svg>
               </button>
             </div>
           </div>
@@ -763,13 +962,34 @@ function totalSkillCount(agentId: number) {
 
     <!-- Skill viewer — read-only file browser. Skills are created and updated via
          the skill-creator skill, not through this page. -->
-    <div v-if="editing" class="space-y-4">
+    <div
+      v-if="editing"
+      class="space-y-4"
+    >
       <div class="flex items-center justify-between">
-        <button @click="cancel" class="text-xs text-fg-muted hover:text-fg-strong transition-colors">&larr; Back to skills</button>
-        <button v-if="(editing.folderName || editing.name) !== 'skill-creator'"
-                @click="editingAgentId != null ? deleteAgentSkill(editingAgentId, editing) : deleteSkill(editing)"
-                class="p-1.5 text-red-400/70 hover:text-red-400 transition-colors" title="Delete skill">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+        <button
+          class="text-xs text-fg-muted hover:text-fg-strong transition-colors"
+          @click="cancel"
+        >
+          &larr; Back to skills
+        </button>
+        <button
+          v-if="(editing.folderName || editing.name) !== 'skill-creator'"
+          class="p-1.5 text-red-400/70 hover:text-red-400 transition-colors"
+          title="Delete skill"
+          @click="editingAgentId != null ? deleteAgentSkill(editingAgentId, editing) : deleteSkill(editing)"
+        >
+          <svg
+            class="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          ><path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+          /></svg>
         </button>
       </div>
 
@@ -777,19 +997,38 @@ function totalSkillCount(agentId: number) {
       <div class="bg-surface-elevated border border-border px-4 py-3">
         <div class="flex items-center gap-3">
           <div class="w-8 h-8 bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/40 rounded flex items-center justify-center">
-            <svg class="w-4 h-4 text-emerald-700 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+            <svg
+              class="w-4 h-4 text-emerald-700 dark:text-emerald-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            ><path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+            /></svg>
           </div>
           <div>
             <div class="flex items-center gap-2">
               <span class="text-sm font-medium text-fg-strong font-mono">{{ editing.folderName || editing.name }}</span>
-              <span v-if="editingAgentId != null" class="text-[10px] text-blue-400 border border-blue-400/30 px-1">
+              <span
+                v-if="editingAgentId != null"
+                class="text-[10px] text-blue-400 border border-blue-400/30 px-1"
+              >
                 {{ agents?.find((a: any) => a.id === editingAgentId)?.name ?? 'agent' }}
               </span>
-              <span v-else class="text-[10px] text-green-400 border border-green-400/30 px-1">global</span>
+              <span
+                v-else
+                class="text-[10px] text-green-400 border border-green-400/30 px-1"
+              >global</span>
             </div>
             <div class="text-xs text-fg-muted">
               {{ skillFiles.length }} file{{ skillFiles.length !== 1 ? 's' : '' }}
-              <span v-if="skillAuthor" class="ml-2">
+              <span
+                v-if="skillAuthor"
+                class="ml-2"
+              >
                 · by <span class="font-mono text-fg-muted">{{ skillAuthor }}</span>
               </span>
             </div>
@@ -798,15 +1037,36 @@ function totalSkillCount(agentId: number) {
       </div>
 
       <!-- Tool dependencies -->
-      <div v-if="skillTools.length" class="bg-surface-elevated border border-border px-4 py-3">
+      <div
+        v-if="skillTools.length"
+        class="bg-surface-elevated border border-border px-4 py-3"
+      >
         <div class="flex items-center gap-2 mb-3">
-          <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+          <svg
+            class="w-4 h-4 text-amber-400"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          ><path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+          /><path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+          /></svg>
           <span class="text-xs font-medium text-fg-muted uppercase tracking-wider">Required Tools</span>
         </div>
         <div class="flex flex-wrap gap-2">
-          <span v-for="tool in skillTools" :key="tool.name"
-                class="inline-flex items-center px-2.5 py-1 border rounded text-xs font-mono leading-none"
-                :class="getPillClass(tool.name)">
+          <span
+            v-for="tool in skillTools"
+            :key="tool.name"
+            class="inline-flex items-center px-2.5 py-1 border rounded text-xs font-mono leading-none"
+            :class="getPillClass(tool.name)"
+          >
             {{ tool.name }}
           </span>
         </div>
@@ -819,23 +1079,42 @@ function totalSkillCount(agentId: number) {
         while commands are the binaries it *provides* — consume-before-provide
         matches the reading order a reviewer uses to trust the skill.
       -->
-      <div v-if="skillCommands.length" class="bg-surface-elevated border border-border px-4 py-3">
+      <div
+        v-if="skillCommands.length"
+        class="bg-surface-elevated border border-border px-4 py-3"
+      >
         <div class="flex items-center gap-2 mb-3">
-          <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+          <svg
+            class="w-4 h-4 text-cyan-400"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          ><path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+          /></svg>
           <span class="text-xs font-medium text-fg-muted uppercase tracking-wider">Commands</span>
           <span class="text-[10px] text-fg-muted normal-case tracking-normal">
             added to the agent's shell allowlist when this skill is installed
           </span>
         </div>
         <div class="flex flex-wrap gap-2">
-          <span v-for="cmd in skillCommands" :key="cmd"
-                class="inline-flex items-center px-2.5 py-1 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800/40 rounded text-xs font-mono text-cyan-700 dark:text-cyan-300 leading-none">
+          <span
+            v-for="cmd in skillCommands"
+            :key="cmd"
+            class="inline-flex items-center px-2.5 py-1 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800/40 rounded text-xs font-mono text-cyan-700 dark:text-cyan-300 leading-none"
+          >
             {{ cmd }}
           </span>
         </div>
       </div>
 
-      <div class="flex gap-4" style="min-height: 500px;">
+      <div
+        class="flex gap-4"
+        style="min-height: 500px;"
+      >
         <!-- File sidebar -->
         <div class="w-52 shrink-0 bg-surface-elevated border border-border overflow-y-auto">
           <div class="px-3 py-2 border-b border-border">
@@ -854,33 +1133,60 @@ function totalSkillCount(agentId: number) {
             <div class="px-4 py-2 border-b border-border flex items-center gap-2">
               <span class="text-xs font-mono text-fg-muted">{{ activeFile }}</span>
               <span class="text-[10px] text-fg-muted">(read-only — edit via skill-creator)</span>
-              <div v-if="isMarkdownFile" class="ml-auto flex items-center gap-0.5">
+              <div
+                v-if="isMarkdownFile"
+                class="ml-auto flex items-center gap-0.5"
+              >
                 <button
-                  @click="fileViewMode = 'rendered'"
                   :class="fileViewMode === 'rendered' ? 'text-fg-strong bg-muted' : 'text-fg-muted hover:text-fg-strong'"
                   class="p-1 rounded transition-colors"
                   title="Rendered markdown"
+                  @click="fileViewMode = 'rendered'"
                 >
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                  <svg
+                    class="w-3.5 h-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  ><path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                  /></svg>
                 </button>
                 <button
-                  @click="fileViewMode = 'raw'"
                   :class="fileViewMode === 'raw' ? 'text-fg-strong bg-muted' : 'text-fg-muted hover:text-fg-strong'"
                   class="p-1 rounded transition-colors"
                   title="Raw text"
+                  @click="fileViewMode = 'raw'"
                 >
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+                  <svg
+                    class="w-3.5 h-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  ><path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+                  /></svg>
                 </button>
               </div>
             </div>
-            <div v-if="isMarkdownFile && fileViewMode === 'rendered'"
-                 class="prose-skill flex-1 overflow-y-auto px-6 py-4 text-sm text-fg-primary"
-                 v-html="renderedMarkdown" />
-            <textarea v-else
-                      :value="fileContent"
-                      readonly
-                      class="flex-1 w-full px-4 py-3 bg-transparent text-sm text-fg-primary font-mono resize-none focus:outline-hidden cursor-default opacity-80"
-                      spellcheck="false" />
+            <div
+              v-if="isMarkdownFile && fileViewMode === 'rendered'"
+              class="prose-skill flex-1 overflow-y-auto px-6 py-4 text-sm text-fg-primary"
+              v-html="renderedMarkdown"
+            />
+            <textarea
+              v-else
+              :value="fileContent"
+              readonly
+              class="flex-1 w-full px-4 py-3 bg-transparent text-sm text-fg-primary font-mono resize-none focus:outline-hidden cursor-default opacity-80"
+              spellcheck="false"
+            />
           </template>
           <template v-else>
             <div class="flex-1 flex items-center justify-center text-sm text-fg-muted">
@@ -906,15 +1212,15 @@ function totalSkillCount(agentId: number) {
 .prose-skill h1 { font-size: 1.4em; }
 .prose-skill h2 { font-size: 1.2em; }
 .prose-skill h3 { font-size: 1.05em; }
-.prose-skill pre { padding: 0.75em 1em; margin: 0.5em 0; overflow-x: auto; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 0.375rem; }
+.prose-skill pre { padding: 0.75em 1em; margin: 0.5em 0; overflow-x: auto; background: rgb(255,255,255,4%); border: 1px solid rgb(255,255,255,8%); border-radius: 0.375rem; }
 .prose-skill pre code { background: none; padding: 0; font-size: 0.85em; }
-.prose-skill code { background: rgba(255,255,255,0.08); padding: 0.15em 0.35em; border-radius: 0.25rem; font-size: 0.85em; }
+.prose-skill code { background: rgb(255,255,255,8%); padding: 0.15em 0.35em; border-radius: 0.25rem; font-size: 0.85em; }
 .prose-skill a { color: var(--color-fg-muted); text-decoration: underline; }
 .prose-skill a:hover { color: var(--color-fg-strong); }
-.prose-skill blockquote { border-left: 2px solid rgba(255,255,255,0.15); padding-left: 1em; margin: 0.5em 0; color: var(--color-fg-muted); }
-.prose-skill hr { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 1em 0; }
+.prose-skill blockquote { border-left: 2px solid rgb(255,255,255,15%); padding-left: 1em; margin: 0.5em 0; color: var(--color-fg-muted); }
+.prose-skill hr { border: none; border-top: 1px solid rgb(255,255,255,10%); margin: 1em 0; }
 .prose-skill strong { font-weight: 600; color: var(--color-fg-strong); }
 .prose-skill table { width: 100%; border-collapse: collapse; margin: 0.5em 0; font-size: 0.9em; }
-.prose-skill th, .prose-skill td { padding: 0.4em 0.75em; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.prose-skill th, .prose-skill td { padding: 0.4em 0.75em; text-align: left; border-bottom: 1px solid rgb(255,255,255,8%); }
 .prose-skill th { font-weight: 600; color: var(--color-fg-strong); border-bottom-width: 2px; }
 </style>

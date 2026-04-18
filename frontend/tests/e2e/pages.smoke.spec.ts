@@ -27,7 +27,7 @@ const pages = [
 for (const { path, breadcrumb } of pages) {
   test(`${breadcrumb} page renders`, async ({ page }) => {
     const consoleErrors: string[] = []
-    page.on('console', msg => {
+    page.on('console', (msg) => {
       if (msg.type() === 'error') consoleErrors.push(msg.text())
     })
 

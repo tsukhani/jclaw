@@ -9,13 +9,15 @@ async function updateEntry(key: string) {
   try {
     await $fetch('/api/config', {
       method: 'POST',
-      body: { key, value: editValue.value }
+      body: { key, value: editValue.value },
     })
     editingKey.value = null
     refresh()
-  } catch (e) {
+  }
+  catch (e) {
     console.error('Failed to update config:', e)
-  } finally {
+  }
+  finally {
     saving.value = false
   }
 }
@@ -35,15 +37,15 @@ function isSensitive(key: string) {
 // Unmanaged diagnostic list — regardless of which page actually manages it.
 // Keeps Settings free of exact-key knowledge about other pages' config.
 const MANAGED_PREFIXES = [
-  'provider.',           // LLM providers — Settings
-  'search.',             // Search providers — Settings
-  'scanner.',            // Malware scanners — Settings
-  'chat.',               // Chat settings — Settings
-  'shell.',              // Shell execution defaults + enabled toggle — Settings
-  'playwright.',         // Playwright browser tool — Settings
-  'skillsPromotion.',    // Skills promotion sanitization — Settings
-  'agent.',              // Per-agent config (shell privileges, queue mode, etc.) — Agents page
-  'ollama.',             // Ollama provider-specific settings — Settings
+  'provider.', // LLM providers — Settings
+  'search.', // Search providers — Settings
+  'scanner.', // Malware scanners — Settings
+  'chat.', // Chat settings — Settings
+  'shell.', // Shell execution defaults + enabled toggle — Settings
+  'playwright.', // Playwright browser tool — Settings
+  'skillsPromotion.', // Skills promotion sanitization — Settings
+  'agent.', // Per-agent config (shell privileges, queue mode, etc.) — Agents page
+  'ollama.', // Ollama provider-specific settings — Settings
 ]
 
 function isManagedKey(key: string): boolean {
@@ -70,11 +72,11 @@ async function saveChatField(configKey: string, value: string) {
     await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
     editingChatField.value = null
     refresh()
-  } finally {
+  }
+  finally {
     saving.value = false
   }
 }
-
 
 // Skills Promotion config
 const { data: agentsList } = await useFetch<any[]>('/api/agents')
@@ -136,7 +138,8 @@ async function saveSPField(configKey: string, value: string) {
     }
     editingSPField.value = null
     refresh()
-  } finally {
+  }
+  finally {
     saving.value = false
   }
 }
@@ -204,7 +207,8 @@ async function saveShellField(configKey: string, value: string) {
     await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
     editingShellField.value = null
     refresh()
-  } finally {
+  }
+  finally {
     saving.value = false
   }
 }
@@ -215,18 +219,17 @@ async function toggleShellEnabled() {
   refresh()
 }
 
-
 // --- Search providers ---
 // Display metadata only. All runtime state (enabled, apiKey, baseUrl) lives in the
 // Config DB under `search.{id}.*`, seeded by DefaultConfigJob. A provider is active
 // only when both enabled is on and its API key is configured, matching the
 // isEnabled() contract in WebSearchTool.SearchProvider.
 const SEARCH_PROVIDERS: Record<string, {
-  label: string,
-  description: string,
-  signupUrl: string,
-  signupLabel: string,
-  apiKeyPlaceholder: string,
+  label: string
+  description: string
+  signupUrl: string
+  signupLabel: string
+  apiKeyPlaceholder: string
 }> = {
   exa: {
     label: 'Exa',
@@ -387,7 +390,7 @@ async function onSearchDrop(ev: DragEvent, targetId: string) {
 
   // Persist new priorities
   await Promise.all(ids.map((id, i) =>
-    $fetch('/api/config', { method: 'POST', body: { key: `search.${id}.priority`, value: String(i) } })
+    $fetch('/api/config', { method: 'POST', body: { key: `search.${id}.priority`, value: String(i) } }),
   ))
   refresh()
 }
@@ -402,11 +405,11 @@ function onSearchDragEnd() {
 // service whether that hash is in its catalog. Runs independently; if multiple scanners
 // are enabled, a file is rejected when any of them flag it (OR composition).
 const SCANNER_PROVIDERS: Record<string, {
-  label: string,
-  description: string,
-  signupUrl: string,
-  signupLabel: string,
-  enabledKey: string,
+  label: string
+  description: string
+  signupUrl: string
+  signupLabel: string
+  enabledKey: string
   apiKey: { key: string, label: string, placeholder: string }
 }> = {
   malwarebazaar: {
@@ -497,7 +500,8 @@ function getProviderModels(providerName: string): any[] {
   const entries = configData.value?.entries ?? []
   const modelsEntry = entries.find((e: any) => e.key === `provider.${providerName}.models`)
   if (!modelsEntry?.value) return []
-  try { return JSON.parse(modelsEntry.value) } catch { return [] }
+  try { return JSON.parse(modelsEntry.value) }
+  catch { return [] }
 }
 
 // Rankings cache for configured models (providerName -> { modelId -> rank })
@@ -506,7 +510,8 @@ const configuredModelRanks = ref<Map<string, Map<string, number>>>(new Map())
 function toggleModelsPanel(providerName: string) {
   if (expandedModelsProvider.value === providerName) {
     expandedModelsProvider.value = null
-  } else {
+  }
+  else {
     expandedModelsProvider.value = providerName
     fetchRanksForProvider(providerName)
   }
@@ -551,7 +556,8 @@ async function fetchRanksForProvider(providerName: string) {
       }
     }
     if (updated) await saveModels(providerName, configured)
-  } catch {
+  }
+  catch {
     // Best-effort — no ranks if discovery fails
   }
 }
@@ -574,7 +580,7 @@ function startEditModel(providerName: string, idx: number) {
     promptPrice: m.promptPrice ?? -1,
     completionPrice: m.completionPrice ?? -1,
     cachedReadPrice: m.cachedReadPrice ?? -1,
-    cacheWritePrice: m.cacheWritePrice ?? -1
+    cacheWritePrice: m.cacheWritePrice ?? -1,
   }
   editingModelIdx.value = idx
   addingModel.value = false
@@ -589,7 +595,7 @@ function startAddModel() {
 async function saveModels(providerName: string, models: any[]) {
   await $fetch('/api/config', {
     method: 'POST',
-    body: { key: `provider.${providerName}.models`, value: JSON.stringify(models) }
+    body: { key: `provider.${providerName}.models`, value: JSON.stringify(models) },
   })
   refresh()
 }
@@ -649,8 +655,8 @@ const discoveredModels = ref<any[]>([])
 const discoverySearch = ref('')
 const discoverySelected = ref<Set<string>>(new Set())
 const discoveryFilterThinking = ref('all') // 'all' | 'yes' | 'no'
-const discoveryFilterCost = ref('all')     // 'all' | 'free' | 'paid'
-const discoveryFilterPopular = ref('all')  // 'all' | 'ranked' | 'top10' | 'top25'
+const discoveryFilterCost = ref('all') // 'all' | 'free' | 'paid'
+const discoveryFilterPopular = ref('all') // 'all' | 'ranked' | 'top10' | 'top25'
 
 const filteredDiscoveredModels = computed(() => {
   let list = discoveredModels.value
@@ -659,30 +665,34 @@ const filteredDiscoveredModels = computed(() => {
   const q = discoverySearch.value.toLowerCase().trim()
   if (q) {
     list = list.filter((m: any) =>
-      m.id.toLowerCase().includes(q) || (m.name || '').toLowerCase().includes(q)
+      m.id.toLowerCase().includes(q) || (m.name || '').toLowerCase().includes(q),
     )
   }
 
   // Thinking filter
   if (discoveryFilterThinking.value === 'yes') {
     list = list.filter((m: any) => m.supportsThinking)
-  } else if (discoveryFilterThinking.value === 'no') {
+  }
+  else if (discoveryFilterThinking.value === 'no') {
     list = list.filter((m: any) => !m.supportsThinking)
   }
 
   // Cost filter
   if (discoveryFilterCost.value === 'free') {
     list = list.filter((m: any) => m.isFree)
-  } else if (discoveryFilterCost.value === 'paid') {
+  }
+  else if (discoveryFilterCost.value === 'paid') {
     list = list.filter((m: any) => !m.isFree)
   }
 
   // Popularity filter
   if (discoveryFilterPopular.value === 'ranked') {
     list = list.filter((m: any) => m.leaderboardRank)
-  } else if (discoveryFilterPopular.value === 'top10') {
+  }
+  else if (discoveryFilterPopular.value === 'top10') {
     list = list.filter((m: any) => m.leaderboardRank && m.leaderboardRank <= 10)
-  } else if (discoveryFilterPopular.value === 'top25') {
+  }
+  else if (discoveryFilterPopular.value === 'top25') {
     list = list.filter((m: any) => m.leaderboardRank && m.leaderboardRank <= 25)
   }
 
@@ -691,12 +701,12 @@ const filteredDiscoveredModels = computed(() => {
 
 // Whether pricing data is available for this provider's models
 const discoveryHasPricing = computed(() =>
-  discoveredModels.value.some((m: any) => m.promptPrice >= 0)
+  discoveredModels.value.some((m: any) => m.promptPrice >= 0),
 )
 
 // Whether leaderboard ranking data is available
 const discoveryHasRankings = computed(() =>
-  discoveredModels.value.some((m: any) => m.leaderboardRank)
+  discoveredModels.value.some((m: any) => m.leaderboardRank),
 )
 
 async function startDiscovery(providerName: string) {
@@ -716,9 +726,11 @@ async function startDiscovery(providerName: string) {
     // Filter out models already configured
     const existing = new Set(getProviderModels(providerName).map((m: any) => m.id))
     discoveredModels.value = (res.models || []).filter((m: any) => !existing.has(m.id))
-  } catch (e: any) {
+  }
+  catch (e: any) {
     discoveryError.value = e.data?.message || e.message || 'Failed to fetch models'
-  } finally {
+  }
+  finally {
     discoveryLoading.value = false
   }
 }
@@ -732,7 +744,8 @@ function toggleDiscoverySelect(modelId: string) {
 function selectAllDiscovered() {
   if (discoverySelected.value.size === filteredDiscoveredModels.value.length) {
     discoverySelected.value = new Set()
-  } else {
+  }
+  else {
     discoverySelected.value = new Set(filteredDiscoveredModels.value.map((m: any) => m.id))
   }
 }
@@ -753,7 +766,7 @@ async function addDiscoveredModels() {
       ...(m.promptPrice >= 0 ? { promptPrice: m.promptPrice } : {}),
       ...(m.completionPrice >= 0 ? { completionPrice: m.completionPrice } : {}),
       ...(m.cachedReadPrice >= 0 ? { cachedReadPrice: m.cachedReadPrice } : {}),
-      ...(m.cacheWritePrice >= 0 ? { cacheWritePrice: m.cacheWritePrice } : {})
+      ...(m.cacheWritePrice >= 0 ? { cacheWritePrice: m.cacheWritePrice } : {}),
     }))
   const merged = [...existing, ...toAdd]
   await saveModels(discoveryProvider.value, merged)
@@ -777,7 +790,8 @@ const providerEntries = computed(() => {
       const name = parts[1]
       if (!providers.has(name)) providers.set(name, [])
       providers.get(name)!.push(e)
-    } else if (!isManagedKey(e.key)) {
+    }
+    else if (!isManagedKey(e.key)) {
       other.push(e)
     }
   }
@@ -787,66 +801,186 @@ const providerEntries = computed(() => {
 
 <template>
   <div>
-    <h1 class="text-lg font-semibold text-fg-strong mb-6">Settings</h1>
+    <h1 class="text-lg font-semibold text-fg-strong mb-6">
+      Settings
+    </h1>
 
     <!-- Provider sections -->
     <div class="mb-6 space-y-4">
-      <h2 class="text-sm font-medium text-fg-muted">LLM Providers</h2>
-      <p class="text-xs text-fg-muted">Enter an API key for at least one provider to enable chat. Base URLs and models are pre-configured.</p>
-      <div v-for="[name, entries] in providerEntries.providers" :key="name"
-           class="bg-surface-elevated border border-border">
+      <h2 class="text-sm font-medium text-fg-muted">
+        LLM Providers
+      </h2>
+      <p class="text-xs text-fg-muted">
+        Enter an API key for at least one provider to enable chat. Base URLs and models are pre-configured.
+      </p>
+      <div
+        v-for="[name, entries] in providerEntries.providers"
+        :key="name"
+        class="bg-surface-elevated border border-border"
+      >
         <div class="px-4 py-2.5 border-b border-border">
           <span class="text-sm font-medium text-fg-strong">{{ name }}</span>
-          <span v-if="entries.find((e: any) => e.key.endsWith('.apiKey') && e.value && !e.value.startsWith('****') && e.value !== '****')"
-                class="ml-2 text-[10px] text-green-400 border border-green-400/30 px-1">configured</span>
+          <span
+            v-if="entries.find((e: any) => e.key.endsWith('.apiKey') && e.value && !e.value.startsWith('****') && e.value !== '****')"
+            class="ml-2 text-[10px] text-green-400 border border-green-400/30 px-1"
+          >configured</span>
         </div>
         <div class="divide-y divide-border">
           <!-- Non-models entries (baseUrl, apiKey) -->
-          <div v-for="entry in entries.filter((e: any) => !e.key.endsWith('.models'))" :key="entry.key" class="px-4 py-2 flex items-center gap-3">
+          <div
+            v-for="entry in entries.filter((e: any) => !e.key.endsWith('.models'))"
+            :key="entry.key"
+            class="px-4 py-2 flex items-center gap-3"
+          >
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0">{{ entry.key.split('.').slice(2).join('.') }}</span>
             <template v-if="editingKey === entry.key">
-              <input v-model="editValue"
-                     :type="isSensitive(entry.key) ? 'password' : 'text'"
-                     class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden" />
-              <button @click="updateEntry(entry.key)" class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              <input
+                v-model="editValue"
+                :type="isSensitive(entry.key) ? 'password' : 'text'"
+                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              >
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="updateEntry(entry.key)"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M5 13l4 4L19 7"
+                /></svg>
               </button>
-              <button @click="editingKey = null" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Cancel">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingKey = null"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                /></svg>
               </button>
             </template>
             <template v-else>
               <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ entry.value || '(empty)' }}</span>
-              <button @click="startEdit(entry)" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Edit">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Edit"
+                @click="startEdit(entry)"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                /></svg>
               </button>
             </template>
           </div>
           <!-- Ollama-specific: keepAlive setting -->
-          <div v-if="name.toLowerCase().includes('ollama')" class="px-4 py-2 flex items-center gap-3">
+          <div
+            v-if="name.toLowerCase().includes('ollama')"
+            class="px-4 py-2 flex items-center gap-3"
+          >
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
               keepAlive
               <span class="relative group/tip">
-                <svg class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2"/><path stroke-linecap="round" stroke-width="2" d="M12 16v-4m0-4h.01"/></svg>
+                <svg
+                  class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke-width="2"
+                /><path
+                  stroke-linecap="round"
+                  stroke-width="2"
+                  d="M12 16v-4m0-4h.01"
+                /></svg>
                 <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-56 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                   How long the model stays loaded between requests. Use <code class="font-mono text-fg-primary">30m</code> for 30 minutes, <code class="font-mono text-fg-primary">-1</code> to keep forever.
                 </span>
               </span>
             </span>
             <template v-if="editingKey === 'ollama.keepAlive'">
-              <input v-model="editValue"
-                     class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden" />
-              <button @click="updateEntry('ollama.keepAlive')" class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              <input
+                v-model="editValue"
+                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              >
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="updateEntry('ollama.keepAlive')"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M5 13l4 4L19 7"
+                /></svg>
               </button>
-              <button @click="editingKey = null" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Cancel">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingKey = null"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                /></svg>
               </button>
             </template>
             <template v-else>
               <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ ollamaKeepAlive }}</span>
-              <button @click="editingKey = 'ollama.keepAlive'; editValue = ollamaKeepAlive" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Edit">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Edit"
+                @click="editingKey = 'ollama.keepAlive'; editValue = ollamaKeepAlive"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                /></svg>
               </button>
             </template>
           </div>
@@ -854,83 +988,224 @@ const providerEntries = computed(() => {
           <div class="px-4 py-2 flex items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0">models</span>
             <span class="flex-1 text-sm text-fg-primary">{{ getProviderModels(name).length }} model{{ getProviderModels(name).length !== 1 ? 's' : '' }}</span>
-            <button @click="startDiscovery(name)"
-                    :disabled="discoveryLoading && discoveryProvider === name"
-                    class="p-1 text-fg-muted hover:text-blue-400 disabled:animate-spin transition-colors"
-                    title="Discover models from provider">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+            <button
+              :disabled="discoveryLoading && discoveryProvider === name"
+              class="p-1 text-fg-muted hover:text-blue-400 disabled:animate-spin transition-colors"
+              title="Discover models from provider"
+              @click="startDiscovery(name)"
+            >
+              <svg
+                class="w-3.5 h-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              ><path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              /></svg>
             </button>
-            <button @click="toggleModelsPanel(name)"
-                    class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                    :title="expandedModelsProvider === name ? 'Close models' : 'Manage models'">
-              <svg v-if="expandedModelsProvider === name" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" /></svg>
-              <svg v-else class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+            <button
+              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+              :title="expandedModelsProvider === name ? 'Close models' : 'Manage models'"
+              @click="toggleModelsPanel(name)"
+            >
+              <svg
+                v-if="expandedModelsProvider === name"
+                class="w-3.5 h-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              ><path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M5 15l7-7 7 7"
+              /></svg>
+              <svg
+                v-else
+                class="w-3.5 h-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              ><path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+              /><path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+              /></svg>
             </button>
           </div>
         </div>
 
         <!-- Expanded model management panel -->
-        <div v-if="expandedModelsProvider === name" class="border-t border-input">
+        <div
+          v-if="expandedModelsProvider === name"
+          class="border-t border-input"
+        >
           <div class="divide-y divide-border">
-            <div v-for="(model, idx) in getProviderModels(name)" :key="model.id"
-                 class="px-4 py-2.5">
+            <div
+              v-for="(model, idx) in getProviderModels(name)"
+              :key="model.id"
+              class="px-4 py-2.5"
+            >
               <!-- Editing a model -->
               <template v-if="editingModelIdx === idx">
                 <div class="grid grid-cols-2 gap-2 mb-2">
                   <div>
                     <label class="block text-[10px] text-fg-muted mb-0.5">ID</label>
-                    <input v-model="modelForm.id" class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden" />
+                    <input
+                      v-model="modelForm.id"
+                      class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                    >
                   </div>
                   <div>
                     <label class="block text-[10px] text-fg-muted mb-0.5">Display Name</label>
-                    <input v-model="modelForm.name" class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong focus:outline-hidden" />
+                    <input
+                      v-model="modelForm.name"
+                      class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong focus:outline-hidden"
+                    >
                   </div>
                   <div>
                     <label class="block text-[10px] text-fg-muted mb-0.5">Context Window</label>
-                    <input v-model.number="modelForm.contextWindow" type="number" class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden" />
+                    <input
+                      v-model.number="modelForm.contextWindow"
+                      type="number"
+                      class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                    >
                   </div>
                   <div>
                     <label class="block text-[10px] text-fg-muted mb-0.5">Max Tokens</label>
-                    <input v-model.number="modelForm.maxTokens" type="number" class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden" />
+                    <input
+                      v-model.number="modelForm.maxTokens"
+                      type="number"
+                      class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                    >
                   </div>
                   <div>
                     <label class="block text-[10px] text-fg-muted mb-0.5">Input $/M tokens</label>
-                    <input v-model.number="modelForm.promptPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden" />
+                    <input
+                      v-model.number="modelForm.promptPrice"
+                      type="number"
+                      step="0.01"
+                      class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                    >
                   </div>
                   <div>
                     <label class="block text-[10px] text-fg-muted mb-0.5">Output $/M tokens</label>
-                    <input v-model.number="modelForm.completionPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden" />
+                    <input
+                      v-model.number="modelForm.completionPrice"
+                      type="number"
+                      step="0.01"
+                      class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                    >
                   </div>
                   <div>
-                    <label class="block text-[10px] text-fg-muted mb-0.5" title="Anthropic: ~0.1× input. OpenAI: ~0.5× input. Leave -1 to auto-default.">Cache read $/M</label>
-                    <input v-model.number="modelForm.cachedReadPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden" />
+                    <label
+                      class="block text-[10px] text-fg-muted mb-0.5"
+                      title="Anthropic: ~0.1× input. OpenAI: ~0.5× input. Leave -1 to auto-default."
+                    >Cache read $/M</label>
+                    <input
+                      v-model.number="modelForm.cachedReadPrice"
+                      type="number"
+                      step="0.01"
+                      class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                    >
                   </div>
                   <div>
-                    <label class="block text-[10px] text-fg-muted mb-0.5" title="Anthropic 5-min TTL: ~1.25× input. OpenAI: n/a. Leave -1 to auto-default.">Cache write $/M</label>
-                    <input v-model.number="modelForm.cacheWritePrice" type="number" step="0.01" class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden" />
+                    <label
+                      class="block text-[10px] text-fg-muted mb-0.5"
+                      title="Anthropic 5-min TTL: ~1.25× input. OpenAI: n/a. Leave -1 to auto-default."
+                    >Cache write $/M</label>
+                    <input
+                      v-model.number="modelForm.cacheWritePrice"
+                      type="number"
+                      step="0.01"
+                      class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                    >
                   </div>
                 </div>
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-3 flex-wrap">
                     <label class="flex items-center gap-1.5 text-xs text-fg-muted">
-                      <input type="checkbox" v-model="modelForm.supportsThinking" class="accent-white" /> Supports Thinking
+                      <input
+                        v-model="modelForm.supportsThinking"
+                        type="checkbox"
+                        class="accent-white"
+                      > Supports Thinking
                     </label>
                     <label class="flex items-center gap-1.5 text-xs text-fg-muted">
-                      <input type="checkbox" v-model="modelForm.supportsVision" class="accent-white" /> Supports Vision
+                      <input
+                        v-model="modelForm.supportsVision"
+                        type="checkbox"
+                        class="accent-white"
+                      > Supports Vision
                     </label>
                     <label class="flex items-center gap-1.5 text-xs text-fg-muted">
-                      <input type="checkbox" v-model="modelForm.supportsAudio" class="accent-white" /> Supports Audio
+                      <input
+                        v-model="modelForm.supportsAudio"
+                        type="checkbox"
+                        class="accent-white"
+                      > Supports Audio
                     </label>
                   </div>
                   <div class="flex items-center gap-1">
-                    <button @click="saveEditedModel(name)" class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
-                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                    <button
+                      class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                      title="Save"
+                      @click="saveEditedModel(name)"
+                    >
+                      <svg
+                        class="w-3.5 h-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M5 13l4 4L19 7"
+                      /></svg>
                     </button>
-                    <button @click="editingModelIdx = null" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Cancel">
-                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    <button
+                      class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                      title="Cancel"
+                      @click="editingModelIdx = null"
+                    >
+                      <svg
+                        class="w-3.5 h-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M6 18L18 6M6 6l12 12"
+                      /></svg>
                     </button>
-                    <button @click="deleteModel(name, idx)" class="p-1 text-fg-muted hover:text-red-400 transition-colors" title="Delete model">
-                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    <button
+                      class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+                      title="Delete model"
+                      @click="deleteModel(name, idx)"
+                    >
+                      <svg
+                        class="w-3.5 h-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      /></svg>
                     </button>
                   </div>
                 </div>
@@ -939,29 +1214,60 @@ const providerEntries = computed(() => {
               <template v-else>
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-2">
-                    <span v-if="getModelRank(name, model.id)" class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded"
-                          :class="getModelRank(name, model.id)! <= 3 ? 'text-amber-400 bg-amber-400/10 border border-amber-400/30' : 'text-fg-muted bg-muted border border-input'"
-                          :title="`#${getModelRank(name, model.id)} on provider leaderboard`">
+                    <span
+                      v-if="getModelRank(name, model.id)"
+                      class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded"
+                      :class="getModelRank(name, model.id)! <= 3 ? 'text-amber-400 bg-amber-400/10 border border-amber-400/30' : 'text-fg-muted bg-muted border border-input'"
+                      :title="`#${getModelRank(name, model.id)} on provider leaderboard`"
+                    >
                       #{{ getModelRank(name, model.id) }}
                     </span>
                     <div>
                       <span class="text-sm text-fg-strong font-mono">{{ model.id }}</span>
-                      <span v-if="model.name" class="ml-2 text-xs text-fg-muted">{{ model.name }}</span>
-                      <span v-if="model.supportsThinking" class="ml-2 text-[10px] text-blue-400 border border-blue-400/30 px-1">thinking</span>
-                      <span v-if="model.supportsVision" class="ml-2 text-[10px] text-amber-400 border border-amber-400/30 px-1">vision</span>
-                      <span v-if="model.supportsAudio" class="ml-2 text-[10px] text-violet-400 border border-violet-400/30 px-1">audio</span>
+                      <span
+                        v-if="model.name"
+                        class="ml-2 text-xs text-fg-muted"
+                      >{{ model.name }}</span>
+                      <span
+                        v-if="model.supportsThinking"
+                        class="ml-2 text-[10px] text-blue-400 border border-blue-400/30 px-1"
+                      >thinking</span>
+                      <span
+                        v-if="model.supportsVision"
+                        class="ml-2 text-[10px] text-amber-400 border border-amber-400/30 px-1"
+                      >vision</span>
+                      <span
+                        v-if="model.supportsAudio"
+                        class="ml-2 text-[10px] text-violet-400 border border-violet-400/30 px-1"
+                      >audio</span>
                     </div>
                   </div>
                   <div class="flex items-center gap-2">
-                    <span v-if="model.promptPrice > 0"
-                          class="text-xs text-amber-500/70 font-mono"
-                          :title="`Input: $${model.promptPrice}/M tokens, Output: $${model.completionPrice}/M tokens`">
+                    <span
+                      v-if="model.promptPrice > 0"
+                      class="text-xs text-amber-500/70 font-mono"
+                      :title="`Input: $${model.promptPrice}/M tokens, Output: $${model.completionPrice}/M tokens`"
+                    >
                       ${{ model.promptPrice < 1 ? model.promptPrice.toFixed(2) : model.promptPrice.toFixed(0) }}/M
                     </span>
                     <span class="text-xs text-fg-muted font-mono">{{ (model.contextWindow / 1024).toFixed(0) }}K ctx</span>
                     <span class="text-xs text-fg-muted font-mono">{{ (model.maxTokens / 1024).toFixed(0) }}K out</span>
-                    <button @click="startEditModel(name, idx)" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Edit model">
-                      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+                    <button
+                      class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                      title="Edit model"
+                      @click="startEditModel(name, idx)"
+                    >
+                      <svg
+                        class="w-3.5 h-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                      /></svg>
                     </button>
                   </div>
                 </div>
@@ -975,93 +1281,219 @@ const providerEntries = computed(() => {
               <div class="grid grid-cols-2 gap-2 mb-2">
                 <div>
                   <label class="block text-[10px] text-fg-muted mb-0.5">ID</label>
-                  <input v-model="modelForm.id" placeholder="model-id" class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden" />
+                  <input
+                    v-model="modelForm.id"
+                    placeholder="model-id"
+                    class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                  >
                 </div>
                 <div>
                   <label class="block text-[10px] text-fg-muted mb-0.5">Display Name</label>
-                  <input v-model="modelForm.name" placeholder="Model Name" class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong focus:outline-hidden" />
+                  <input
+                    v-model="modelForm.name"
+                    placeholder="Model Name"
+                    class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong focus:outline-hidden"
+                  >
                 </div>
                 <div>
                   <label class="block text-[10px] text-fg-muted mb-0.5">Context Window</label>
-                  <input v-model.number="modelForm.contextWindow" type="number" class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden" />
+                  <input
+                    v-model.number="modelForm.contextWindow"
+                    type="number"
+                    class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                  >
                 </div>
                 <div>
                   <label class="block text-[10px] text-fg-muted mb-0.5">Max Tokens</label>
-                  <input v-model.number="modelForm.maxTokens" type="number" class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden" />
+                  <input
+                    v-model.number="modelForm.maxTokens"
+                    type="number"
+                    class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                  >
                 </div>
                 <div>
                   <label class="block text-[10px] text-fg-muted mb-0.5">Input $/M tokens</label>
-                  <input v-model.number="modelForm.promptPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden" />
+                  <input
+                    v-model.number="modelForm.promptPrice"
+                    type="number"
+                    step="0.01"
+                    class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                  >
                 </div>
                 <div>
                   <label class="block text-[10px] text-fg-muted mb-0.5">Output $/M tokens</label>
-                  <input v-model.number="modelForm.completionPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden" />
+                  <input
+                    v-model.number="modelForm.completionPrice"
+                    type="number"
+                    step="0.01"
+                    class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                  >
                 </div>
                 <div>
-                  <label class="block text-[10px] text-fg-muted mb-0.5" title="Anthropic: ~0.1× input. OpenAI: ~0.5× input. Leave -1 to auto-default.">Cache read $/M</label>
-                  <input v-model.number="modelForm.cachedReadPrice" type="number" step="0.01" class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden" />
+                  <label
+                    class="block text-[10px] text-fg-muted mb-0.5"
+                    title="Anthropic: ~0.1× input. OpenAI: ~0.5× input. Leave -1 to auto-default."
+                  >Cache read $/M</label>
+                  <input
+                    v-model.number="modelForm.cachedReadPrice"
+                    type="number"
+                    step="0.01"
+                    class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                  >
                 </div>
                 <div>
-                  <label class="block text-[10px] text-fg-muted mb-0.5" title="Anthropic 5-min TTL: ~1.25× input. OpenAI: n/a. Leave -1 to auto-default.">Cache write $/M</label>
-                  <input v-model.number="modelForm.cacheWritePrice" type="number" step="0.01" class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden" />
+                  <label
+                    class="block text-[10px] text-fg-muted mb-0.5"
+                    title="Anthropic 5-min TTL: ~1.25× input. OpenAI: n/a. Leave -1 to auto-default."
+                  >Cache write $/M</label>
+                  <input
+                    v-model.number="modelForm.cacheWritePrice"
+                    type="number"
+                    step="0.01"
+                    class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                  >
                 </div>
               </div>
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-3 flex-wrap">
                   <label class="flex items-center gap-1.5 text-xs text-fg-muted">
-                    <input type="checkbox" v-model="modelForm.supportsThinking" class="accent-white" /> Supports Thinking
+                    <input
+                      v-model="modelForm.supportsThinking"
+                      type="checkbox"
+                      class="accent-white"
+                    > Supports Thinking
                   </label>
                   <label class="flex items-center gap-1.5 text-xs text-fg-muted">
-                    <input type="checkbox" v-model="modelForm.supportsVision" class="accent-white" /> Supports Vision
+                    <input
+                      v-model="modelForm.supportsVision"
+                      type="checkbox"
+                      class="accent-white"
+                    > Supports Vision
                   </label>
                   <label class="flex items-center gap-1.5 text-xs text-fg-muted">
-                    <input type="checkbox" v-model="modelForm.supportsAudio" class="accent-white" /> Supports Audio
+                    <input
+                      v-model="modelForm.supportsAudio"
+                      type="checkbox"
+                      class="accent-white"
+                    > Supports Audio
                   </label>
                 </div>
                 <div class="flex items-center gap-1">
-                  <button @click="saveNewModel(name)" :disabled="!modelForm.id.trim()" class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 disabled:opacity-40 transition-colors" title="Add model">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                  <button
+                    :disabled="!modelForm.id.trim()"
+                    class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 disabled:opacity-40 transition-colors"
+                    title="Add model"
+                    @click="saveNewModel(name)"
+                  >
+                    <svg
+                      class="w-3.5 h-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    ><path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M5 13l4 4L19 7"
+                    /></svg>
                   </button>
-                  <button @click="addingModel = false" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Cancel">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                  <button
+                    class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                    title="Cancel"
+                    @click="addingModel = false"
+                  >
+                    <svg
+                      class="w-3.5 h-3.5"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    ><path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M6 18L18 6M6 6l12 12"
+                    /></svg>
                   </button>
                 </div>
               </div>
             </template>
             <template v-else>
-              <button @click="startAddModel" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Add model">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Add model"
+                @click="startAddModel"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 4v16m8-8H4"
+                /></svg>
               </button>
             </template>
           </div>
 
           <!-- No models -->
-          <div v-if="!getProviderModels(name).length && !addingModel" class="px-4 py-4 text-xs text-fg-muted text-center">
+          <div
+            v-if="!getProviderModels(name).length && !addingModel"
+            class="px-4 py-4 text-xs text-fg-muted text-center"
+          >
             No models configured
           </div>
         </div>
 
         <!-- Model discovery panel -->
-        <div v-if="discoveryProvider === name" class="border-t border-blue-200 dark:border-blue-800/40 bg-blue-50 dark:bg-blue-950/20">
+        <div
+          v-if="discoveryProvider === name"
+          class="border-t border-blue-200 dark:border-blue-800/40 bg-blue-50 dark:bg-blue-950/20"
+        >
           <div class="px-4 py-3 flex items-center justify-between border-b border-border">
             <div class="flex items-center gap-2">
               <span class="text-xs font-medium text-blue-700 dark:text-blue-400">Discover Models</span>
-              <span v-if="!discoveryLoading && discoveredModels.length" class="text-[10px] text-fg-muted">
+              <span
+                v-if="!discoveryLoading && discoveredModels.length"
+                class="text-[10px] text-fg-muted"
+              >
                 {{ discoveredModels.length }} available
               </span>
             </div>
-            <button @click="closeDiscovery" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Close">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+            <button
+              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+              title="Close"
+              @click="closeDiscovery"
+            >
+              <svg
+                class="w-3.5 h-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              ><path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M6 18L18 6M6 6l12 12"
+              /></svg>
             </button>
           </div>
 
           <!-- Loading -->
-          <div v-if="discoveryLoading" class="px-4 py-6 text-center">
+          <div
+            v-if="discoveryLoading"
+            class="px-4 py-6 text-center"
+          >
             <span class="text-xs text-fg-muted animate-pulse">Fetching models from {{ name }}...</span>
           </div>
 
           <!-- Error -->
-          <div v-else-if="discoveryError" class="px-4 py-4 text-center">
+          <div
+            v-else-if="discoveryError"
+            class="px-4 py-4 text-center"
+          >
             <span class="text-xs text-red-400">{{ discoveryError }}</span>
           </div>
 
@@ -1069,71 +1501,154 @@ const providerEntries = computed(() => {
           <template v-else-if="discoveredModels.length">
             <!-- Search + filters -->
             <div class="px-4 py-2 flex items-center gap-2 border-b border-border">
-              <svg class="w-3.5 h-3.5 text-fg-muted shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-              <input v-model="discoverySearch" placeholder="Search models..."
-                     class="flex-1 px-2 py-1 bg-transparent text-xs text-fg-strong placeholder-fg-muted focus:outline-hidden" />
-              <select v-model="discoveryFilterThinking"
-                      class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden">
-                <option value="all">Thinking: All</option>
-                <option value="yes">Thinking: Yes</option>
-                <option value="no">Thinking: No</option>
+              <svg
+                class="w-3.5 h-3.5 text-fg-muted shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              ><path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+              /></svg>
+              <input
+                v-model="discoverySearch"
+                placeholder="Search models..."
+                class="flex-1 px-2 py-1 bg-transparent text-xs text-fg-strong placeholder-fg-muted focus:outline-hidden"
+              >
+              <select
+                v-model="discoveryFilterThinking"
+                class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
+              >
+                <option value="all">
+                  Thinking: All
+                </option>
+                <option value="yes">
+                  Thinking: Yes
+                </option>
+                <option value="no">
+                  Thinking: No
+                </option>
               </select>
-              <select v-if="discoveryHasPricing" v-model="discoveryFilterCost"
-                      class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden">
-                <option value="all">Cost: All</option>
-                <option value="free">Free</option>
-                <option value="paid">Paid</option>
+              <select
+                v-if="discoveryHasPricing"
+                v-model="discoveryFilterCost"
+                class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
+              >
+                <option value="all">
+                  Cost: All
+                </option>
+                <option value="free">
+                  Free
+                </option>
+                <option value="paid">
+                  Paid
+                </option>
               </select>
-              <select v-if="discoveryHasRankings" v-model="discoveryFilterPopular"
-                      class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden">
-                <option value="all">Rank: All</option>
-                <option value="top10">Top 10</option>
-                <option value="top25">Top 25</option>
-                <option value="ranked">All Ranked</option>
+              <select
+                v-if="discoveryHasRankings"
+                v-model="discoveryFilterPopular"
+                class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
+              >
+                <option value="all">
+                  Rank: All
+                </option>
+                <option value="top10">
+                  Top 10
+                </option>
+                <option value="top25">
+                  Top 25
+                </option>
+                <option value="ranked">
+                  All Ranked
+                </option>
               </select>
               <span class="text-[10px] text-fg-muted shrink-0">{{ filteredDiscoveredModels.length }}</span>
-              <button @click="selectAllDiscovered" class="text-[10px] text-fg-muted hover:text-fg-strong transition-colors shrink-0">
+              <button
+                class="text-[10px] text-fg-muted hover:text-fg-strong transition-colors shrink-0"
+                @click="selectAllDiscovered"
+              >
                 {{ discoverySelected.size === filteredDiscoveredModels.length ? 'None' : 'All' }}
               </button>
             </div>
 
             <!-- Model list -->
             <div class="max-h-72 overflow-y-auto divide-y divide-border">
-              <div v-for="model in filteredDiscoveredModels" :key="model.id"
-                   @click="toggleDiscoverySelect(model.id)"
-                   :class="discoverySelected.has(model.id) ? 'bg-blue-100 dark:bg-blue-900/20' : ''"
-                   class="px-4 py-1.5 flex items-center gap-3 hover:bg-muted cursor-pointer transition-colors">
-                <span class="shrink-0 w-3.5 h-3.5 border border-input flex items-center justify-center text-[10px]"
-                      :class="discoverySelected.has(model.id) ? 'bg-blue-500 border-blue-500 text-white' : ''">
+              <div
+                v-for="model in filteredDiscoveredModels"
+                :key="model.id"
+                :class="discoverySelected.has(model.id) ? 'bg-blue-100 dark:bg-blue-900/20' : ''"
+                class="px-4 py-1.5 flex items-center gap-3 hover:bg-muted cursor-pointer transition-colors"
+                @click="toggleDiscoverySelect(model.id)"
+              >
+                <span
+                  class="shrink-0 w-3.5 h-3.5 border border-input flex items-center justify-center text-[10px]"
+                  :class="discoverySelected.has(model.id) ? 'bg-blue-500 border-blue-500 text-white' : ''"
+                >
                   <span v-if="discoverySelected.has(model.id)">&#10003;</span>
                 </span>
-                <span v-if="model.leaderboardRank" class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded"
-                      :class="model.leaderboardRank <= 3 ? 'text-amber-400 bg-amber-400/10 border border-amber-400/30' : 'text-fg-muted bg-muted border border-input'"
-                      :title="`#${model.leaderboardRank} on provider leaderboard`">
+                <span
+                  v-if="model.leaderboardRank"
+                  class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded"
+                  :class="model.leaderboardRank <= 3 ? 'text-amber-400 bg-amber-400/10 border border-amber-400/30' : 'text-fg-muted bg-muted border border-input'"
+                  :title="`#${model.leaderboardRank} on provider leaderboard`"
+                >
                   #{{ model.leaderboardRank }}
                 </span>
                 <div class="flex-1 min-w-0">
                   <span class="text-xs text-fg-strong font-mono truncate block">{{ model.id }}</span>
-                  <span v-if="model.name && model.name !== model.id" class="text-[10px] text-fg-muted">{{ model.name }}</span>
+                  <span
+                    v-if="model.name && model.name !== model.id"
+                    class="text-[10px] text-fg-muted"
+                  >{{ model.name }}</span>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
-                  <span v-if="model.isFree" class="text-[10px] text-green-400 border border-green-400/30 px-1">free</span>
-                  <span v-else-if="model.promptPrice >= 0" class="text-[10px] text-fg-muted font-mono" :title="`$${model.promptPrice.toFixed(2)}/M in, $${model.completionPrice.toFixed(2)}/M out`">
+                  <span
+                    v-if="model.isFree"
+                    class="text-[10px] text-green-400 border border-green-400/30 px-1"
+                  >free</span>
+                  <span
+                    v-else-if="model.promptPrice >= 0"
+                    class="text-[10px] text-fg-muted font-mono"
+                    :title="`$${model.promptPrice.toFixed(2)}/M in, $${model.completionPrice.toFixed(2)}/M out`"
+                  >
                     ${{ model.promptPrice < 1 ? model.promptPrice.toFixed(2) : model.promptPrice.toFixed(0) }}/M
                   </span>
-                  <span v-if="model.supportsThinking && model.thinkingDetectedFromProvider"
-                        class="text-[10px] text-blue-400 border border-blue-400/30 px-1" title="Thinking support confirmed by provider">thinking</span>
-                  <span v-else-if="model.supportsThinking"
-                        class="text-[10px] text-fg-muted border border-input px-1" title="Thinking support guessed from model name (not confirmed by provider)">thinking?</span>
-                  <span v-if="model.supportsVision && model.visionDetectedFromProvider"
-                        class="text-[10px] text-amber-400 border border-amber-400/30 px-1" title="Vision support confirmed by provider">vision</span>
-                  <span v-else-if="model.supportsVision"
-                        class="text-[10px] text-fg-muted border border-input px-1" title="Vision support guessed from model name (not confirmed by provider)">vision?</span>
-                  <span v-if="model.supportsAudio && model.audioDetectedFromProvider"
-                        class="text-[10px] text-violet-400 border border-violet-400/30 px-1" title="Audio support confirmed by provider">audio</span>
-                  <span v-else-if="model.supportsAudio"
-                        class="text-[10px] text-fg-muted border border-input px-1" title="Audio support guessed from model name (not confirmed by provider)">audio?</span>
-                  <span v-if="model.contextWindow" class="text-[10px] text-fg-muted font-mono">{{ (model.contextWindow / 1024).toFixed(0) }}K</span>
+                  <span
+                    v-if="model.supportsThinking && model.thinkingDetectedFromProvider"
+                    class="text-[10px] text-blue-400 border border-blue-400/30 px-1"
+                    title="Thinking support confirmed by provider"
+                  >thinking</span>
+                  <span
+                    v-else-if="model.supportsThinking"
+                    class="text-[10px] text-fg-muted border border-input px-1"
+                    title="Thinking support guessed from model name (not confirmed by provider)"
+                  >thinking?</span>
+                  <span
+                    v-if="model.supportsVision && model.visionDetectedFromProvider"
+                    class="text-[10px] text-amber-400 border border-amber-400/30 px-1"
+                    title="Vision support confirmed by provider"
+                  >vision</span>
+                  <span
+                    v-else-if="model.supportsVision"
+                    class="text-[10px] text-fg-muted border border-input px-1"
+                    title="Vision support guessed from model name (not confirmed by provider)"
+                  >vision?</span>
+                  <span
+                    v-if="model.supportsAudio && model.audioDetectedFromProvider"
+                    class="text-[10px] text-violet-400 border border-violet-400/30 px-1"
+                    title="Audio support confirmed by provider"
+                  >audio</span>
+                  <span
+                    v-else-if="model.supportsAudio"
+                    class="text-[10px] text-fg-muted border border-input px-1"
+                    title="Audio support guessed from model name (not confirmed by provider)"
+                  >audio?</span>
+                  <span
+                    v-if="model.contextWindow"
+                    class="text-[10px] text-fg-muted font-mono"
+                  >{{ (model.contextWindow / 1024).toFixed(0) }}K</span>
                 </div>
               </div>
             </div>
@@ -1141,15 +1656,21 @@ const providerEntries = computed(() => {
             <!-- Add selected -->
             <div class="px-4 py-2.5 border-t border-border flex items-center justify-between">
               <span class="text-[10px] text-fg-muted">{{ discoverySelected.size }} selected</span>
-              <button @click="addDiscoveredModels" :disabled="discoverySelected.size === 0"
-                      class="px-3 py-1 bg-blue-600 text-white text-xs font-medium hover:bg-blue-500 disabled:opacity-40 transition-colors">
+              <button
+                :disabled="discoverySelected.size === 0"
+                class="px-3 py-1 bg-blue-600 text-white text-xs font-medium hover:bg-blue-500 disabled:opacity-40 transition-colors"
+                @click="addDiscoveredModels"
+              >
                 Add Selected
               </button>
             </div>
           </template>
 
           <!-- Empty results -->
-          <div v-else-if="!discoveryLoading" class="px-4 py-6 text-center">
+          <div
+            v-else-if="!discoveryLoading"
+            class="px-4 py-6 text-center"
+          >
             <span class="text-xs text-fg-muted">All available models are already configured</span>
           </div>
         </div>
@@ -1158,68 +1679,137 @@ const providerEntries = computed(() => {
 
     <!-- Search Providers -->
     <div class="mb-6 space-y-4">
-      <h2 class="text-sm font-medium text-fg-muted">Search Providers</h2>
+      <h2 class="text-sm font-medium text-fg-muted">
+        Search Providers
+      </h2>
       <p class="text-xs text-fg-muted">
         Web search engines that agents can call via the <span class="text-fg-muted">web_search</span> tool.
         Providers are tried in order — drag to reorder. If a provider fails, the next one is tried automatically.
         A provider is only active when both <span class="text-fg-muted">enabled</span> is on and its API key is configured.
       </p>
-      <div v-for="id in sortedSearchProviderIds" :key="id"
-           draggable="true"
-           @dragstart="onSearchDragStart($event, id)"
-           @dragover="onSearchDragOver($event, id)"
-           @dragleave="onSearchDragLeave()"
-           @drop="onSearchDrop($event, id)"
-           @dragend="onSearchDragEnd()"
-           :class="[
-             'bg-surface-elevated border transition-colors',
-             dropSearchTarget === id && dragSearchProvider !== id
-               ? 'border-emerald-600 dark:border-emerald-500/50'
-               : dragSearchProvider === id
-                 ? 'border-input opacity-50'
-                 : 'border-border'
-           ]">
+      <div
+        v-for="id in sortedSearchProviderIds"
+        :key="id"
+        draggable="true"
+        :class="[
+          'bg-surface-elevated border transition-colors',
+          dropSearchTarget === id && dragSearchProvider !== id
+            ? 'border-emerald-600 dark:border-emerald-500/50'
+            : dragSearchProvider === id
+              ? 'border-input opacity-50'
+              : 'border-border',
+        ]"
+        @dragstart="onSearchDragStart($event, id)"
+        @dragover="onSearchDragOver($event, id)"
+        @dragleave="onSearchDragLeave()"
+        @drop="onSearchDrop($event, id)"
+        @dragend="onSearchDragEnd()"
+      >
         <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <span class="cursor-grab active:cursor-grabbing text-fg-muted hover:text-fg-muted select-none" title="Drag to reorder priority">⠿</span>
+            <span
+              class="cursor-grab active:cursor-grabbing text-fg-muted hover:text-fg-muted select-none"
+              title="Drag to reorder priority"
+            >⠿</span>
             <span class="text-sm font-medium text-fg-strong">{{ SEARCH_PROVIDERS[id].label }}</span>
-            <span v-if="searchActive(id)" class="text-[10px] text-green-400 border border-green-400/30 px-1">active</span>
-            <span v-else-if="searchEnabled(id)" class="text-[10px] text-amber-400 border border-amber-400/30 px-1">needs API key</span>
-            <span v-else class="text-[10px] text-fg-muted border border-input px-1">disabled</span>
+            <span
+              v-if="searchActive(id)"
+              class="text-[10px] text-green-400 border border-green-400/30 px-1"
+            >active</span>
+            <span
+              v-else-if="searchEnabled(id)"
+              class="text-[10px] text-amber-400 border border-amber-400/30 px-1"
+            >needs API key</span>
+            <span
+              v-else
+              class="text-[10px] text-fg-muted border border-input px-1"
+            >disabled</span>
           </div>
-          <button @click="toggleSearchEnabled(id)"
-                  :class="searchEnabled(id) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
-                  class="relative w-9 h-5 rounded-full transition-colors"
-                  :title="searchEnabled(id) ? 'Disable provider' : 'Enable provider'">
-            <span :class="searchEnabled(id) ? 'translate-x-4' : 'translate-x-0.5'"
-                  class="block w-4 h-4 bg-white rounded-full transition-transform" />
+          <button
+            :class="searchEnabled(id) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+            class="relative w-9 h-5 rounded-full transition-colors"
+            :title="searchEnabled(id) ? 'Disable provider' : 'Enable provider'"
+            @click="toggleSearchEnabled(id)"
+          >
+            <span
+              :class="searchEnabled(id) ? 'translate-x-4' : 'translate-x-0.5'"
+              class="block w-4 h-4 bg-white rounded-full transition-transform"
+            />
           </button>
         </div>
         <div class="px-4 py-2.5 text-xs text-fg-muted leading-relaxed border-b border-border">
           {{ SEARCH_PROVIDERS[id].description }}
-          <a :href="SEARCH_PROVIDERS[id].signupUrl" target="_blank" rel="noopener"
-             class="text-fg-primary hover:text-fg-strong underline ml-1">Get an API key → {{ SEARCH_PROVIDERS[id].signupLabel }}</a>
+          <a
+            :href="SEARCH_PROVIDERS[id].signupUrl"
+            target="_blank"
+            rel="noopener"
+            class="text-fg-primary hover:text-fg-strong underline ml-1"
+          >Get an API key → {{ SEARCH_PROVIDERS[id].signupLabel }}</a>
         </div>
         <div class="divide-y divide-border">
           <!-- apiKey -->
           <div class="px-4 py-2 flex items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0">apiKey</span>
             <template v-if="editingKey === `search.${id}.apiKey`">
-              <input v-model="editValue"
-                     type="password"
-                     :placeholder="SEARCH_PROVIDERS[id].apiKeyPlaceholder"
-                     class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden" />
-              <button @click="updateEntry(`search.${id}.apiKey`)" class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              <input
+                v-model="editValue"
+                type="password"
+                :placeholder="SEARCH_PROVIDERS[id].apiKeyPlaceholder"
+                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              >
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="updateEntry(`search.${id}.apiKey`)"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M5 13l4 4L19 7"
+                /></svg>
               </button>
-              <button @click="editingKey = null" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Cancel">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingKey = null"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                /></svg>
               </button>
             </template>
             <template v-else>
               <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ searchApiKeyEntry(id).value || '(not set)' }}</span>
-              <button @click="startEdit(searchApiKeyEntry(id))" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Edit">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Edit"
+                @click="startEdit(searchApiKeyEntry(id))"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                /></svg>
               </button>
             </template>
           </div>
@@ -1227,34 +1817,99 @@ const providerEntries = computed(() => {
           <div class="px-4 py-2 flex items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0">baseUrl</span>
             <template v-if="editingKey === `search.${id}.baseUrl`">
-              <input v-model="editValue" type="text"
-                     class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden" />
-              <button @click="updateEntry(`search.${id}.baseUrl`)" class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              <input
+                v-model="editValue"
+                type="text"
+                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              >
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="updateEntry(`search.${id}.baseUrl`)"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M5 13l4 4L19 7"
+                /></svg>
               </button>
-              <button @click="editingKey = null" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Cancel">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingKey = null"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                /></svg>
               </button>
             </template>
             <template v-else>
               <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ searchBaseUrl(id) || '(not set)' }}</span>
-              <button @click="startEdit(searchBaseUrlEntry(id))" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Edit">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Edit"
+                @click="startEdit(searchBaseUrlEntry(id))"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                /></svg>
               </button>
             </template>
           </div>
           <!-- recencyFilter (Perplexity only) -->
-          <div v-if="id === 'perplexity'" class="px-4 py-2 flex items-center gap-3">
-            <span class="text-xs font-mono text-fg-muted w-48 shrink-0" title="Server-side recency filter on Perplexity /search. Narrows results to content indexed within the selected window; 'none' disables filtering. Narrower windows prevent the LLM from echoing stale snippets.">recencyFilter</span>
-            <select :value="searchRecencyFilter(id)"
-                    @change="updateSearchRecencyFilter(id, ($event.target as HTMLSelectElement).value)"
-                    class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden">
-              <option value="hour">hour</option>
-              <option value="day">day</option>
-              <option value="week">week</option>
-              <option value="month">month</option>
-              <option value="year">year</option>
-              <option value="none">none (disable filter)</option>
+          <div
+            v-if="id === 'perplexity'"
+            class="px-4 py-2 flex items-center gap-3"
+          >
+            <span
+              class="text-xs font-mono text-fg-muted w-48 shrink-0"
+              title="Server-side recency filter on Perplexity /search. Narrows results to content indexed within the selected window; 'none' disables filtering. Narrower windows prevent the LLM from echoing stale snippets."
+            >recencyFilter</span>
+            <select
+              :value="searchRecencyFilter(id)"
+              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              @change="updateSearchRecencyFilter(id, ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="hour">
+                hour
+              </option>
+              <option value="day">
+                day
+              </option>
+              <option value="week">
+                week
+              </option>
+              <option value="month">
+                month
+              </option>
+              <option value="year">
+                year
+              </option>
+              <option value="none">
+                none (disable filter)
+              </option>
             </select>
           </div>
         </div>
@@ -1263,34 +1918,99 @@ const providerEntries = computed(() => {
 
     <!-- Chat Settings -->
     <div class="mb-6 space-y-4">
-      <h2 class="text-sm font-medium text-fg-muted">Chat</h2>
-      <p class="text-xs text-fg-muted">Configure chat behavior limits.</p>
+      <h2 class="text-sm font-medium text-fg-muted">
+        Chat
+      </h2>
+      <p class="text-xs text-fg-muted">
+        Configure chat behavior limits.
+      </p>
       <div class="bg-surface-elevated border border-border">
         <div class="divide-y divide-border">
           <div class="px-4 py-2.5 flex items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
               maxToolRounds
               <span class="relative group/tip">
-                <svg class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2"/><path stroke-linecap="round" stroke-width="2" d="M12 16v-4m0-4h.01"/></svg>
+                <svg
+                  class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke-width="2"
+                /><path
+                  stroke-linecap="round"
+                  stroke-width="2"
+                  d="M12 16v-4m0-4h.01"
+                /></svg>
                 <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-56 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                   Max tool calls the agent can make per turn. Once reached, it must give a final answer without calling more tools.
                 </span>
               </span>
             </span>
             <template v-if="editingChatField === 'maxToolRounds'">
-              <input v-model="chatFieldEdit" type="number" min="1" max="50"
-                     class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden" />
-              <button @click="saveChatField('chat.maxToolRounds', chatFieldEdit)" class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              <input
+                v-model="chatFieldEdit"
+                type="number"
+                min="1"
+                max="50"
+                class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              >
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="saveChatField('chat.maxToolRounds', chatFieldEdit)"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M5 13l4 4L19 7"
+                /></svg>
               </button>
-              <button @click="editingChatField = null" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Cancel">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingChatField = null"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                /></svg>
               </button>
             </template>
             <template v-else>
               <span class="flex-1 text-sm text-fg-primary font-mono">{{ chatMaxToolRounds }} rounds</span>
-              <button @click="editingChatField = 'maxToolRounds'; chatFieldEdit = chatMaxToolRounds" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Edit">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Edit"
+                @click="editingChatField = 'maxToolRounds'; chatFieldEdit = chatMaxToolRounds"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                /></svg>
               </button>
             </template>
           </div>
@@ -1298,26 +2018,87 @@ const providerEntries = computed(() => {
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
               maxContextMessages
               <span class="relative group/tip">
-                <svg class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2"/><path stroke-linecap="round" stroke-width="2" d="M12 16v-4m0-4h.01"/></svg>
+                <svg
+                  class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke-width="2"
+                /><path
+                  stroke-linecap="round"
+                  stroke-width="2"
+                  d="M12 16v-4m0-4h.01"
+                /></svg>
                 <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                   How many recent messages are sent with each LLM request. Older messages are dropped when the limit is reached to stay within the context window.
                 </span>
               </span>
             </span>
             <template v-if="editingChatField === 'maxContextMessages'">
-              <input v-model="chatFieldEdit" type="number" min="1" max="500"
-                     class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden" />
-              <button @click="saveChatField('chat.maxContextMessages', chatFieldEdit)" class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              <input
+                v-model="chatFieldEdit"
+                type="number"
+                min="1"
+                max="500"
+                class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              >
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="saveChatField('chat.maxContextMessages', chatFieldEdit)"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M5 13l4 4L19 7"
+                /></svg>
               </button>
-              <button @click="editingChatField = null" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Cancel">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingChatField = null"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                /></svg>
               </button>
             </template>
             <template v-else>
               <span class="flex-1 text-sm text-fg-primary font-mono">{{ chatMaxContextMessages }} messages</span>
-              <button @click="editingChatField = 'maxContextMessages'; chatFieldEdit = chatMaxContextMessages" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Edit">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Edit"
+                @click="editingChatField = 'maxContextMessages'; chatFieldEdit = chatMaxContextMessages"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                /></svg>
               </button>
             </template>
           </div>
@@ -1327,32 +2108,88 @@ const providerEntries = computed(() => {
 
     <!-- Skills Promotion -->
     <div class="mb-6 space-y-4">
-      <h2 class="text-sm font-medium text-fg-muted">Skills Promotion</h2>
-      <p class="text-xs text-fg-muted">LLM sanitization during skill promotion. Uses the main agent's model by default if not configured.</p>
+      <h2 class="text-sm font-medium text-fg-muted">
+        Skills Promotion
+      </h2>
+      <p class="text-xs text-fg-muted">
+        LLM sanitization during skill promotion. Uses the main agent's model by default if not configured.
+      </p>
       <div class="bg-surface-elevated border border-border">
         <div class="divide-y divide-border">
           <!-- Provider -->
           <div class="px-4 py-2.5 flex items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0">provider</span>
             <template v-if="editingSPField === 'provider'">
-              <select v-model="spFieldEdit"
-                      class="w-48 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden">
-                <option value="">Default (main agent)</option>
-                <option v-for="name in availableProviderNames" :key="name" :value="name">{{ name }}</option>
+              <select
+                v-model="spFieldEdit"
+                class="w-48 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              >
+                <option value="">
+                  Default (main agent)
+                </option>
+                <option
+                  v-for="name in availableProviderNames"
+                  :key="name"
+                  :value="name"
+                >
+                  {{ name }}
+                </option>
               </select>
-              <button @click="saveSPField('skillsPromotion.provider', spFieldEdit)" class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="saveSPField('skillsPromotion.provider', spFieldEdit)"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M5 13l4 4L19 7"
+                /></svg>
               </button>
-              <button @click="editingSPField = null" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Cancel">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingSPField = null"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                /></svg>
               </button>
             </template>
             <template v-else>
               <span class="flex-1 text-sm text-fg-primary font-mono">
                 {{ spProviderRaw ? spProviderRaw : spEffectiveProvider ? spEffectiveProvider + ' (from main agent)' : 'Not configured' }}
               </span>
-              <button @click="editingSPField = 'provider'; spFieldEdit = spProviderRaw" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Edit">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Edit"
+                @click="editingSPField = 'provider'; spFieldEdit = spProviderRaw"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                /></svg>
               </button>
             </template>
           </div>
@@ -1360,27 +2197,90 @@ const providerEntries = computed(() => {
           <div class="px-4 py-2.5 flex items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0">model</span>
             <template v-if="editingSPField === 'model'">
-              <select v-if="spAvailableModels.length"
-                      v-model="spFieldEdit"
-                      class="w-64 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden">
-                <option v-if="!spHasExplicitProvider" value="">Default (main agent)</option>
-                <option v-for="m in spAvailableModels" :key="m.id" :value="m.id">{{ m.name || m.id }}</option>
+              <select
+                v-if="spAvailableModels.length"
+                v-model="spFieldEdit"
+                class="w-64 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              >
+                <option
+                  v-if="!spHasExplicitProvider"
+                  value=""
+                >
+                  Default (main agent)
+                </option>
+                <option
+                  v-for="m in spAvailableModels"
+                  :key="m.id"
+                  :value="m.id"
+                >
+                  {{ m.name || m.id }}
+                </option>
               </select>
-              <input v-else v-model="spFieldEdit" type="text" placeholder="model-id"
-                     class="w-64 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden" />
-              <button @click="saveSPField('skillsPromotion.model', spFieldEdit)" class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              <input
+                v-else
+                v-model="spFieldEdit"
+                type="text"
+                placeholder="model-id"
+                class="w-64 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              >
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="saveSPField('skillsPromotion.model', spFieldEdit)"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M5 13l4 4L19 7"
+                /></svg>
               </button>
-              <button @click="editingSPField = null" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Cancel">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingSPField = null"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                /></svg>
               </button>
             </template>
             <template v-else>
-              <span class="flex-1 text-sm font-mono" :class="spModelRaw || !spHasExplicitProvider ? 'text-fg-primary' : 'text-amber-500'">
+              <span
+                class="flex-1 text-sm font-mono"
+                :class="spModelRaw || !spHasExplicitProvider ? 'text-fg-primary' : 'text-amber-500'"
+              >
                 {{ spModelRaw ? spModelRaw : spHasExplicitProvider ? 'Select a model' : spEffectiveModel ? spEffectiveModel + ' (from main agent)' : 'Not configured' }}
               </span>
-              <button @click="editingSPField = 'model'; spFieldEdit = spModelRaw || (spHasExplicitProvider && spAvailableModels.length ? spAvailableModels[0].id : '')" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Edit">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Edit"
+                @click="editingSPField = 'model'; spFieldEdit = spModelRaw || (spHasExplicitProvider && spAvailableModels.length ? spAvailableModels[0].id : '')"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                /></svg>
               </button>
             </template>
           </div>
@@ -1388,19 +2288,66 @@ const providerEntries = computed(() => {
           <div class="px-4 py-2.5 flex items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0">timeoutSeconds</span>
             <template v-if="editingSPField === 'timeout'">
-              <input v-model="spFieldEdit" type="number" min="30" max="900"
-                     class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden" />
-              <button @click="saveSPField('skillsPromotion.timeoutSeconds', spFieldEdit)" class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              <input
+                v-model="spFieldEdit"
+                type="number"
+                min="30"
+                max="900"
+                class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              >
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="saveSPField('skillsPromotion.timeoutSeconds', spFieldEdit)"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M5 13l4 4L19 7"
+                /></svg>
               </button>
-              <button @click="editingSPField = null" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Cancel">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingSPField = null"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                /></svg>
               </button>
             </template>
             <template v-else>
               <span class="flex-1 text-sm text-fg-primary font-mono">{{ spTimeout }}s</span>
-              <button @click="editingSPField = 'timeout'; spFieldEdit = spTimeout" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Edit">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Edit"
+                @click="editingSPField = 'timeout'; spFieldEdit = spTimeout"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                /></svg>
               </button>
             </template>
           </div>
@@ -1408,19 +2355,66 @@ const providerEntries = computed(() => {
           <div class="px-4 py-2.5 flex items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0">batchSizeKb</span>
             <template v-if="editingSPField === 'batchKb'">
-              <input v-model="spFieldEdit" type="number" min="10" max="1000"
-                     class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden" />
-              <button @click="saveSPField('skillsPromotion.batchSizeKb', spFieldEdit)" class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              <input
+                v-model="spFieldEdit"
+                type="number"
+                min="10"
+                max="1000"
+                class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              >
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="saveSPField('skillsPromotion.batchSizeKb', spFieldEdit)"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M5 13l4 4L19 7"
+                /></svg>
               </button>
-              <button @click="editingSPField = null" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Cancel">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingSPField = null"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                /></svg>
               </button>
             </template>
             <template v-else>
               <span class="flex-1 text-sm text-fg-primary font-mono">{{ spBatchKb }} KB</span>
-              <button @click="editingSPField = 'batchKb'; spFieldEdit = spBatchKb" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Edit">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Edit"
+                @click="editingSPField = 'batchKb'; spFieldEdit = spBatchKb"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                /></svg>
               </button>
             </template>
           </div>
@@ -1430,32 +2424,55 @@ const providerEntries = computed(() => {
 
     <!-- Browser (Playwright) -->
     <div class="mb-6 space-y-4">
-      <h2 class="text-sm font-medium text-fg-muted">Browser (Playwright)</h2>
-      <p class="text-xs text-fg-muted">Headless browser automation for JS-heavy pages. Requires the Playwright driver bundle.</p>
+      <h2 class="text-sm font-medium text-fg-muted">
+        Browser (Playwright)
+      </h2>
+      <p class="text-xs text-fg-muted">
+        Headless browser automation for JS-heavy pages. Requires the Playwright driver bundle.
+      </p>
       <div class="bg-surface-elevated border border-border">
         <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span class="text-sm font-medium text-fg-strong">Enabled</span>
-            <span v-if="playwrightEnabled" class="text-[10px] text-green-400 border border-green-400/30 px-1">active</span>
-            <span v-else class="text-[10px] text-fg-muted border border-input px-1">disabled</span>
+            <span
+              v-if="playwrightEnabled"
+              class="text-[10px] text-green-400 border border-green-400/30 px-1"
+            >active</span>
+            <span
+              v-else
+              class="text-[10px] text-fg-muted border border-input px-1"
+            >disabled</span>
           </div>
-          <button @click="togglePlaywrightEnabled"
-                  :class="playwrightEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
-                  class="relative w-9 h-5 rounded-full transition-colors">
-            <span :class="playwrightEnabled ? 'translate-x-4' : 'translate-x-0.5'"
-                  class="block w-4 h-4 bg-white rounded-full transition-transform" />
+          <button
+            :class="playwrightEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+            class="relative w-9 h-5 rounded-full transition-colors"
+            @click="togglePlaywrightEnabled"
+          >
+            <span
+              :class="playwrightEnabled ? 'translate-x-4' : 'translate-x-0.5'"
+              class="block w-4 h-4 bg-white rounded-full transition-transform"
+            />
           </button>
         </div>
         <div class="px-4 py-2.5 flex items-center justify-between">
           <div>
             <span class="text-xs font-mono text-fg-muted">headless</span>
-            <p v-if="!playwrightHeadless" class="text-[10px] text-amber-400 mt-0.5">Browser window will be visible on the host</p>
+            <p
+              v-if="!playwrightHeadless"
+              class="text-[10px] text-amber-400 mt-0.5"
+            >
+              Browser window will be visible on the host
+            </p>
           </div>
-          <button @click="togglePlaywrightHeadless"
-                  :class="playwrightHeadless ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
-                  class="relative w-9 h-5 rounded-full transition-colors">
-            <span :class="playwrightHeadless ? 'translate-x-4' : 'translate-x-0.5'"
-                  class="block w-4 h-4 bg-white rounded-full transition-transform" />
+          <button
+            :class="playwrightHeadless ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+            class="relative w-9 h-5 rounded-full transition-colors"
+            @click="togglePlaywrightHeadless"
+          >
+            <span
+              :class="playwrightHeadless ? 'translate-x-4' : 'translate-x-0.5'"
+              class="block w-4 h-4 bg-white rounded-full transition-transform"
+            />
           </button>
         </div>
       </div>
@@ -1463,20 +2480,34 @@ const providerEntries = computed(() => {
 
     <!-- Shell Execution -->
     <div class="mb-6 space-y-4">
-      <h2 class="text-sm font-medium text-fg-muted">Shell Execution</h2>
-      <p class="text-xs text-fg-muted">Allow agents to execute shell commands on the host.</p>
+      <h2 class="text-sm font-medium text-fg-muted">
+        Shell Execution
+      </h2>
+      <p class="text-xs text-fg-muted">
+        Allow agents to execute shell commands on the host.
+      </p>
       <div class="bg-surface-elevated border border-border">
         <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span class="text-sm font-medium text-fg-strong">Enabled</span>
-            <span v-if="shellEnabled" class="text-[10px] text-green-400 border border-green-400/30 px-1">active</span>
-            <span v-else class="text-[10px] text-fg-muted border border-input px-1">disabled</span>
+            <span
+              v-if="shellEnabled"
+              class="text-[10px] text-green-400 border border-green-400/30 px-1"
+            >active</span>
+            <span
+              v-else
+              class="text-[10px] text-fg-muted border border-input px-1"
+            >disabled</span>
           </div>
-          <button @click="toggleShellEnabled"
-                  :class="shellEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
-                  class="relative w-9 h-5 rounded-full transition-colors">
-            <span :class="shellEnabled ? 'translate-x-4' : 'translate-x-0.5'"
-                  class="block w-4 h-4 bg-white rounded-full transition-transform" />
+          <button
+            :class="shellEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+            class="relative w-9 h-5 rounded-full transition-colors"
+            @click="toggleShellEnabled"
+          >
+            <span
+              :class="shellEnabled ? 'translate-x-4' : 'translate-x-0.5'"
+              class="block w-4 h-4 bg-white rounded-full transition-transform"
+            />
           </button>
         </div>
         <div class="divide-y divide-border">
@@ -1484,21 +2515,66 @@ const providerEntries = computed(() => {
           <div class="px-4 py-2.5 flex items-start gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0 pt-0.5">allowlist</span>
             <template v-if="editingShellField === 'allowlist'">
-              <textarea v-model="shellAllowlistEdit" rows="3"
-                        class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden resize-none" />
+              <textarea
+                v-model="shellAllowlistEdit"
+                rows="3"
+                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden resize-none"
+              />
               <div class="flex flex-col gap-1">
-                <button @click="saveShellField('shell.allowlist', shellAllowlistEdit)" class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+                <button
+                  class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                  title="Save"
+                  @click="saveShellField('shell.allowlist', shellAllowlistEdit)"
+                >
+                  <svg
+                    class="w-3.5 h-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  ><path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M5 13l4 4L19 7"
+                  /></svg>
                 </button>
-                <button @click="editingShellField = null" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Cancel">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                <button
+                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                  title="Cancel"
+                  @click="editingShellField = null"
+                >
+                  <svg
+                    class="w-3.5 h-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  ><path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M6 18L18 6M6 6l12 12"
+                  /></svg>
                 </button>
               </div>
             </template>
             <template v-else>
               <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ shellConfig.allowlist || '(not set)' }}</span>
-              <button @click="startShellEdit('allowlist', shellConfig.allowlist)" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Edit">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Edit"
+                @click="startShellEdit('allowlist', shellConfig.allowlist)"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                /></svg>
               </button>
             </template>
           </div>
@@ -1506,19 +2582,66 @@ const providerEntries = computed(() => {
           <div class="px-4 py-2.5 flex items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0">defaultTimeoutSeconds</span>
             <template v-if="editingShellField === 'timeout'">
-              <input v-model="shellTimeoutEdit" type="number" min="1" max="300"
-                     class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden" />
-              <button @click="saveShellField('shell.defaultTimeoutSeconds', shellTimeoutEdit)" class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+              <input
+                v-model="shellTimeoutEdit"
+                type="number"
+                min="1"
+                max="300"
+                class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              >
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="saveShellField('shell.defaultTimeoutSeconds', shellTimeoutEdit)"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M5 13l4 4L19 7"
+                /></svg>
               </button>
-              <button @click="editingShellField = null" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Cancel">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingShellField = null"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                /></svg>
               </button>
             </template>
             <template v-else>
               <span class="flex-1 text-sm text-fg-primary font-mono">{{ shellConfig.defaultTimeout }}s</span>
-              <button @click="startShellEdit('timeout', shellConfig.defaultTimeout)" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Edit">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Edit"
+                @click="startShellEdit('timeout', shellConfig.defaultTimeout)"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                /></svg>
               </button>
             </template>
           </div>
@@ -1528,7 +2651,9 @@ const providerEntries = computed(() => {
 
     <!-- Malware Scanners -->
     <div class="mb-6 space-y-4">
-      <h2 class="text-sm font-medium text-fg-muted">Malware and Virus Scanners</h2>
+      <h2 class="text-sm font-medium text-fg-muted">
+        Malware and Virus Scanners
+      </h2>
       <p class="text-xs text-fg-muted">
         Hash-based reputation lookups that scan every binary inside a skill before it's installed.
         Each scanner hashes the file with SHA-256 and asks an external service whether that hash
@@ -1537,46 +2662,110 @@ const providerEntries = computed(() => {
         any binary. A scanner is only active when both <span class="text-fg-muted">enabled</span>
         is on and its API key is configured.
       </p>
-      <div v-for="(def, id) in SCANNER_PROVIDERS" :key="id"
-           class="bg-surface-elevated border border-border">
+      <div
+        v-for="(def, id) in SCANNER_PROVIDERS"
+        :key="id"
+        class="bg-surface-elevated border border-border"
+      >
         <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span class="text-sm font-medium text-fg-strong">{{ def.label }}</span>
-            <span v-if="scannerActive(id)" class="text-[10px] text-green-400 border border-green-400/30 px-1">active</span>
-            <span v-else-if="scannerEnabled(id)" class="text-[10px] text-amber-400 border border-amber-400/30 px-1">needs API key</span>
-            <span v-else class="text-[10px] text-fg-muted border border-input px-1">disabled</span>
+            <span
+              v-if="scannerActive(id)"
+              class="text-[10px] text-green-400 border border-green-400/30 px-1"
+            >active</span>
+            <span
+              v-else-if="scannerEnabled(id)"
+              class="text-[10px] text-amber-400 border border-amber-400/30 px-1"
+            >needs API key</span>
+            <span
+              v-else
+              class="text-[10px] text-fg-muted border border-input px-1"
+            >disabled</span>
           </div>
-          <button @click="toggleScannerEnabled(id)"
-                  :class="scannerEnabled(id) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
-                  class="relative w-9 h-5 rounded-full transition-colors"
-                  :title="scannerEnabled(id) ? 'Disable scanner' : 'Enable scanner'">
-            <span :class="scannerEnabled(id) ? 'translate-x-4' : 'translate-x-0.5'"
-                  class="block w-4 h-4 bg-white rounded-full transition-transform" />
+          <button
+            :class="scannerEnabled(id) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+            class="relative w-9 h-5 rounded-full transition-colors"
+            :title="scannerEnabled(id) ? 'Disable scanner' : 'Enable scanner'"
+            @click="toggleScannerEnabled(id)"
+          >
+            <span
+              :class="scannerEnabled(id) ? 'translate-x-4' : 'translate-x-0.5'"
+              class="block w-4 h-4 bg-white rounded-full transition-transform"
+            />
           </button>
         </div>
         <div class="px-4 py-2.5 text-xs text-fg-muted leading-relaxed border-b border-border">
           {{ def.description }}
-          <a :href="def.signupUrl" target="_blank" rel="noopener"
-             class="text-fg-primary hover:text-fg-strong underline ml-1">Get a free key → {{ def.signupLabel }}</a>
+          <a
+            :href="def.signupUrl"
+            target="_blank"
+            rel="noopener"
+            class="text-fg-primary hover:text-fg-strong underline ml-1"
+          >Get a free key → {{ def.signupLabel }}</a>
         </div>
         <div class="px-4 py-2 flex items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-48 shrink-0">{{ def.apiKey.label }}</span>
           <template v-if="editingKey === def.apiKey.key">
-            <input v-model="editValue"
-                   type="password"
-                   :placeholder="def.apiKey.placeholder"
-                   class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden" />
-            <button @click="updateEntry(def.apiKey.key)" class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
+            <input
+              v-model="editValue"
+              type="password"
+              :placeholder="def.apiKey.placeholder"
+              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+            >
+            <button
+              class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+              title="Save"
+              @click="updateEntry(def.apiKey.key)"
+            >
+              <svg
+                class="w-3.5 h-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              ><path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M5 13l4 4L19 7"
+              /></svg>
             </button>
-            <button @click="editingKey = null" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Cancel">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+            <button
+              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+              title="Cancel"
+              @click="editingKey = null"
+            >
+              <svg
+                class="w-3.5 h-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              ><path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M6 18L18 6M6 6l12 12"
+              /></svg>
             </button>
           </template>
           <template v-else>
             <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ scannerApiKeyEntry(id).value || '(not set)' }}</span>
-            <button @click="startEdit(scannerApiKeyEntry(id))" class="p-1 text-fg-muted hover:text-fg-strong transition-colors" title="Edit">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+            <button
+              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+              title="Edit"
+              @click="startEdit(scannerApiKeyEntry(id))"
+            >
+              <svg
+                class="w-3.5 h-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              ><path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+              /></svg>
             </button>
           </template>
         </div>
@@ -1587,17 +2776,25 @@ const providerEntries = computed(() => {
     <!-- Only rendered when the Config DB contains keys not owned by any managed UI
          section above. Typically shows stale rows from a prior schema or mid-migration
          state — a signal that something needs cleanup, not a place to add new config. -->
-    <div v-if="providerEntries.other.length" class="bg-surface-elevated border border-border">
+    <div
+      v-if="providerEntries.other.length"
+      class="bg-surface-elevated border border-border"
+    >
       <div class="px-4 py-3 border-b border-border">
-        <h2 class="text-sm font-medium text-fg-primary">Unmanaged keys</h2>
+        <h2 class="text-sm font-medium text-fg-primary">
+          Unmanaged keys
+        </h2>
         <p class="text-[11px] text-fg-muted mt-0.5">
           Config DB rows not owned by any section above — usually stale keys from a prior
           version. Safe to ignore; they're shown here so migrations don't hide data.
         </p>
       </div>
       <div class="divide-y divide-border">
-        <div v-for="entry in providerEntries.other" :key="entry.key"
-             class="px-4 py-2.5 flex items-center gap-3">
+        <div
+          v-for="entry in providerEntries.other"
+          :key="entry.key"
+          class="px-4 py-2.5 flex items-center gap-3"
+        >
           <span class="text-xs font-mono text-fg-muted w-64 shrink-0 truncate">{{ entry.key }}</span>
           <span class="flex-1 text-sm text-fg-muted font-mono truncate">{{ entry.value }}</span>
         </div>

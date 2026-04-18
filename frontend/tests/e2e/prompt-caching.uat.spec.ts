@@ -24,7 +24,7 @@ test.describe('prompt caching UAT', () => {
   test.beforeEach(async ({ page }) => {
     // Each test gets its own turn counter so the mock returns turn-1 then turn-2.
     let turn = 0
-    await page.route('**/api/chat/stream', async route => {
+    await page.route('**/api/chat/stream', async (route) => {
       turn += 1
       const isFirstTurn = turn === 1
       const ackContent = `ack ${turn}`
@@ -40,17 +40,17 @@ test.describe('prompt caching UAT', () => {
           durationMs: isFirstTurn ? 2000 : 1400,
         },
       })
-      const body =
-        `data: ${JSON.stringify({ type: 'init', conversationId: 9000 + turn })}\n` +
-        `data: ${JSON.stringify({ type: 'token', content: ackContent })}\n` +
-        `data: ${JSON.stringify({ type: 'status', content: usagePayload })}\n` +
-        `data: ${JSON.stringify({ type: 'complete', content: ackContent })}\n`
+      const body
+        = `data: ${JSON.stringify({ type: 'init', conversationId: 9000 + turn })}\n`
+          + `data: ${JSON.stringify({ type: 'token', content: ackContent })}\n`
+          + `data: ${JSON.stringify({ type: 'status', content: usagePayload })}\n`
+          + `data: ${JSON.stringify({ type: 'complete', content: ackContent })}\n`
       await route.fulfill({
         status: 200,
         contentType: 'text/event-stream',
         headers: {
           'Cache-Control': 'no-cache',
-          Connection: 'keep-alive',
+          'Connection': 'keep-alive',
         },
         body,
       })

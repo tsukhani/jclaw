@@ -183,7 +183,7 @@ describe('useTheme', () => {
 // ---------------------------------------------------------------------------
 
 describe('useProviders', () => {
-  function makeConfigRef(entries: { key: string; value: string }[]): Ref<ConfigData | null> {
+  function makeConfigRef(entries: { key: string, value: string }[]): Ref<ConfigData | null> {
     return ref({ entries })
   }
 

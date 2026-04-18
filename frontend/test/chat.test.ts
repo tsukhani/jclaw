@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mountSuspended } from '@nuxt/test-utils/runtime'
-import { registerEndpoint } from '@nuxt/test-utils/runtime'
+import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import Chat from '~/pages/chat.vue'
 
@@ -17,10 +16,10 @@ function setupChatApi() {
       { key: 'provider.openai.baseUrl', value: 'https://api.openai.com' },
       { key: 'provider.openai.apiKey', value: 'sk-xxxx****' },
       { key: 'provider.openai.models', value: '[{"id":"gpt-4","name":"GPT-4","supportsThinking":false}]' },
-    ]
+    ],
   }))
   registerEndpoint('/api/conversations', () => [
-    { id: 10, agentId: 1, agentName: 'main-agent', channelType: 'web', peerId: 'admin', messageCount: 2, preview: 'Hello world', createdAt: '2026-04-07T10:00:00Z', updatedAt: '2026-04-07T10:00:00Z' }
+    { id: 10, agentId: 1, agentName: 'main-agent', channelType: 'web', peerId: 'admin', messageCount: 2, preview: 'Hello world', createdAt: '2026-04-07T10:00:00Z', updatedAt: '2026-04-07T10:00:00Z' },
   ])
 }
 
@@ -127,7 +126,7 @@ describe('Chat page', () => {
         { key: 'provider.ollama-cloud.apiKey', value: 'xxxx****' },
         // Explicit thinkingLevels populate the dropdown; supportsThinking gates its visibility.
         { key: 'provider.ollama-cloud.models', value: '[{"id":"kimi-k2.5","name":"Kimi K2.5","supportsThinking":true,"thinkingLevels":["low","medium","high"]}]' },
-      ]
+      ],
     }))
     registerEndpoint('/api/conversations', () => [])
 

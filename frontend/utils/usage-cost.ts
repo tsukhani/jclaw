@@ -63,12 +63,12 @@ export function computeUsageCostBreakdown(usage: MessageUsage): UsageCostBreakdo
   const effectivePromptPrice = usage.promptPrice || 0
   // Fallback 0.1× for cache reads matches Anthropic (OpenAI is 0.5×, but OpenAI users
   // almost always have pricing populated by discovery, so the fallback rarely fires).
-  const effectiveCachedReadPrice =
-    usage.cachedReadPrice ?? effectivePromptPrice * 0.1
+  const effectiveCachedReadPrice
+    = usage.cachedReadPrice ?? effectivePromptPrice * 0.1
   // Fallback 1.25× for cache writes matches Anthropic 5-min TTL. Irrelevant on OpenAI
   // routes where cacheCreation is always 0.
-  const effectiveCacheWritePrice =
-    usage.cacheWritePrice ?? effectivePromptPrice * 1.25
+  const effectiveCacheWritePrice
+    = usage.cacheWritePrice ?? effectivePromptPrice * 1.25
   const effectiveCompletionPrice = usage.completionPrice || 0
 
   const uncachedInputCost = (uncachedInputTokens / 1_000_000) * effectivePromptPrice
