@@ -137,6 +137,10 @@ public class ApiConversationsController extends Controller {
             map.put("content", m.content);
             map.put("toolCalls", m.toolCalls);
             map.put("toolResults", m.toolResults);
+            // Include reasoning text so the collapsible thinking bubble
+            // re-renders identically after a conversation reload. Null for
+            // assistant turns without thinking and for user/tool rows.
+            if (m.reasoning != null) map.put("reasoning", m.reasoning);
             map.put("createdAt", m.createdAt.toString());
             if (m.usageJson != null) {
                 map.put("usage", jsonParser.parse(m.usageJson));

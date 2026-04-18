@@ -431,10 +431,11 @@ public class AgentRunner {
         emitUsageAndComplete(agent, channelType, content, turnUsage, streamStartMs, usageJson, cb);
 
         var finalContent = content;
+        var finalReasoning = turnUsage.reasoningText();
         long persistStartNs = System.nanoTime();
         services.Tx.run(() -> {
             var conv = ConversationService.findById(conversation.id);
-            ConversationService.appendAssistantMessage(conv, finalContent, null, usageJson);
+            ConversationService.appendAssistantMessage(conv, finalContent, null, usageJson, finalReasoning);
         });
         utils.LatencyStats.record("persist",
                 (System.nanoTime() - persistStartNs) / 1_000_000L);

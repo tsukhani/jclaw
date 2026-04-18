@@ -45,6 +45,7 @@ public class DefaultConfigJob extends Job<Void> {
             stmt.execute("ALTER TABLE agent DROP COLUMN IF EXISTS is_default");
             stmt.execute("ALTER TABLE conversation DROP COLUMN IF EXISTS title_generated");
             stmt.execute("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS title_generation_count INT NOT NULL DEFAULT 0");
+            stmt.execute("ALTER TABLE message ADD COLUMN IF NOT EXISTS reasoning TEXT");
         } catch (Exception e) {
             play.Logger.warn("Schema migration: %s", e.getMessage());
         }

@@ -37,6 +37,12 @@ public class ConversationService {
 
     public static Message appendMessage(Conversation conversation, MessageRole role, String content,
                                          String toolCalls, String toolResults, String usageJson) {
+        return appendMessage(conversation, role, content, toolCalls, toolResults, usageJson, null);
+    }
+
+    public static Message appendMessage(Conversation conversation, MessageRole role, String content,
+                                         String toolCalls, String toolResults, String usageJson,
+                                         String reasoning) {
         var msg = new Message();
         msg.conversation = conversation;
         msg.role = role.value;
@@ -44,6 +50,7 @@ public class ConversationService {
         msg.toolCalls = toolCalls;
         msg.toolResults = toolResults;
         msg.usageJson = usageJson;
+        msg.reasoning = reasoning;
         msg.save();
 
         conversation.messageCount++;
@@ -66,12 +73,17 @@ public class ConversationService {
 
     public static Message appendAssistantMessage(Conversation conversation, String content,
                                                    String toolCalls) {
-        return appendAssistantMessage(conversation, content, toolCalls, null);
+        return appendAssistantMessage(conversation, content, toolCalls, null, null);
     }
 
     public static Message appendAssistantMessage(Conversation conversation, String content,
                                                    String toolCalls, String usageJson) {
-        return appendMessage(conversation, MessageRole.ASSISTANT, content, toolCalls, null, usageJson);
+        return appendAssistantMessage(conversation, content, toolCalls, usageJson, null);
+    }
+
+    public static Message appendAssistantMessage(Conversation conversation, String content,
+                                                   String toolCalls, String usageJson, String reasoning) {
+        return appendMessage(conversation, MessageRole.ASSISTANT, content, toolCalls, null, usageJson, reasoning);
     }
 
     public static Message appendToolResult(Conversation conversation, String toolCallId, String result) {

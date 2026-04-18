@@ -29,6 +29,18 @@ public class Message extends Model {
     @Column(name = "tool_results", columnDefinition = "TEXT")
     public String toolResults;
 
+    /**
+     * Streamed reasoning / extended-thinking text for assistant turns that
+     * ran with thinking enabled. Persisted so the collapsible thinking
+     * bubble renders the same content after a conversation reload as it did
+     * during the live stream. Aggregated across every LLM round in the turn
+     * to match the visible live bubble (see JCLAW-76 for the round-folding
+     * behaviour on the token counts). Null for user/tool rows and for
+     * assistant turns that emitted no reasoning.
+     */
+    @Column(columnDefinition = "TEXT")
+    public String reasoning;
+
     /** JSON-serialized usage metrics (tokens, cost, duration) from the LLM response. */
     @Column(name = "usage_json", columnDefinition = "TEXT")
     public String usageJson;

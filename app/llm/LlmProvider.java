@@ -622,6 +622,14 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         public synchronized int reasoningChars() { return reasoningTextBuffer.length(); }
 
         /**
+         * Full streamed reasoning text for this round. Returned as a plain
+         * {@link String} (buffer is copied) so callers can hand it to JPA /
+         * downstream consumers without racing against concurrent appends on
+         * the streaming thread.
+         */
+        public synchronized String reasoningText() { return reasoningTextBuffer.toString(); }
+
+        /**
          * Milliseconds spent in the reasoning phase, or 0 when no reasoning was
          * streamed. Computed lazily so callers get a stable snapshot even if the
          * stream is still in flight.
@@ -669,6 +677,14 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         public boolean reasoningDetected;
         /** True once any round returned a non-null {@link Usage}. Gates the zero-usage JSON path. */
         public boolean hasProviderUsage;
+        /**
+         * Concatenated reasoning text across every LLM round in the turn.
+         * Matches what the frontend bubble displays live (reasoning SSE
+         * events stream in across all rounds before the first content byte)
+         * so persisting this and rendering it on conversation reload keeps
+         * historical bubbles consistent with how they first appeared.
+         */
+        private final StringBuilder reasoningText = new StringBuilder();
 
         public void addRound(StreamAccumulator acc) {
             if (acc == null) return;
@@ -684,6 +700,12 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
             }
             if (acc.reasoningDetected) reasoningDetected = true;
             reasoningChars += acc.reasoningChars();
+            reasoningText.append(acc.reasoningText());
+        }
+
+        /** Returns the aggregated reasoning text, or {@code null} if nothing was streamed. */
+        public String reasoningText() {
+            return reasoningText.length() == 0 ? null : reasoningText.toString();
         }
     }
 
