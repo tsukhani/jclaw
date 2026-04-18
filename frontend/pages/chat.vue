@@ -267,6 +267,22 @@ const conversationsUrl = computed(() =>
     : null
 )
 const { data: conversations, refresh: refreshConversations } = await useFetch<Conversation[]>(conversationsUrl)
+/**
+ * Defensive client-side re-sort by updatedAt DESC. The backend's ORDER BY
+ * already yields this shape, but a render-layer computed makes the invariant
+ * ("most recently modified on top") robust against fetch-race windows — the
+ * SSE `complete` frame fires before AgentRunner's persist Tx commits (see
+ * AgentRunner.streamLlmLoop), so a refresh triggered by onComplete can land
+ * before the DB write and read stale updatedAts. Cheap on a ≤50-row list.
+ */
+const sortedConversations = computed(() => {
+  const list = conversations.value ?? []
+  return [...list].sort((a, b) => {
+    const at = a.updatedAt ? new Date(a.updatedAt).getTime() : 0
+    const bt = b.updatedAt ? new Date(b.updatedAt).getTime() : 0
+    return bt - at
+  })
+})
 const selectedConvoId = ref<number | null>(null)
 const messages = ref<Message[]>([])
 const input = ref('')
@@ -688,7 +704,16 @@ async function sendMessage() {
         agentBusy.value = status.busy
       } catch { agentBusy.value = false }
     }
+    // Fire the refresh twice. Immediate: catches the common case where the
+    // backend persist already landed by the time onComplete fires. Delayed:
+    // catches the race where the SSE `complete` frame beat the persist Tx
+    // commit (see AgentRunner.streamLlmLoop — emitUsageAndComplete is
+    // intentionally called before the Tx.run persist block for latency).
+    // The sortedConversations computed handles display-layer ordering
+    // either way; this just ensures the updatedAt values we're sorting on
+    // reflect the turn that just finished.
     refreshConversations()
+    setTimeout(() => refreshConversations(), 600)
   }
 }
 
@@ -820,7 +845,7 @@ function exportConversation() {
       </div>
       <div class="flex-1 overflow-y-auto">
         <div
-          v-for="convo in conversations"
+          v-for="convo in sortedConversations"
           :key="convo.id"
           @click="selectMode ? toggleSelect(convo.id) : loadConversation(convo.id)"
           :class="[
