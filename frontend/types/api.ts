@@ -10,6 +10,12 @@ export interface Agent {
   isMain: boolean
   /** Persisted reasoning-effort level ("low" | "medium" | "high" | provider-specific), or null when reasoning is off. */
   thinkingMode: string | null
+  /** True when the selected provider has an API key configured (populated by GET /api/agents). */
+  providerConfigured?: boolean
+  /** Whether vision input is enabled for this agent (null when not applicable to the model). */
+  visionEnabled?: boolean | null
+  /** Whether audio input is enabled for this agent (null when not applicable to the model). */
+  audioEnabled?: boolean | null
 }
 
 /** A conversation between a user and an agent. */
@@ -26,14 +32,21 @@ export interface Conversation {
 
 /** A single message within a conversation. */
 export interface Message {
-  id: number
+  /** Server-assigned id. Absent on optimistic/streaming placeholders until the backend persists the row. */
+  id?: number
   role: 'user' | 'assistant' | 'tool'
   content: string | null
-  reasoning: string | null
+  reasoning?: string | null
   createdAt: string
-  usage: MessageUsage | null
+  usage?: MessageUsage | null
   /** Frontend-only key assigned to optimistic/streaming placeholders. */
   _key?: string
+  /** Client-only: whether the thinking/reasoning bubble is collapsed for this message. */
+  thinkingCollapsed?: boolean
+  /** Client-only: elapsed stream thinking duration in ms, persisted only for the current render. */
+  _thinkingDurationMs?: number | null
+  /** Client-only: wall-clock ms when the current assistant stream began producing reasoning. */
+  _thinkingStartedAt?: number
 }
 
 /** A config entry from /api/config. */
@@ -63,11 +76,20 @@ export interface LatencyHistogram {
 /** Map of segment name → histogram from GET /api/metrics/latency. */
 export type LatencyMetrics = Record<string, LatencyHistogram>
 
-/** A skill definition. */
+/** A skill definition (returned by /api/skills). */
 export interface Skill {
   name: string
   description: string | null
   version: string | null
+  /** Directory name on disk — typically the same as `name` but may differ for legacy skills. */
+  folderName?: string
+  author?: string
+  isGlobal?: boolean
+  location?: string
+  /** Tool names this skill depends on (from SKILL.md frontmatter). */
+  tools?: string[]
+  /** Shell commands this skill contributes to an installing agent's allowlist. */
+  commands?: string[]
   [key: string]: unknown
 }
 
@@ -76,6 +98,34 @@ export interface SkillFile {
   path: string
   size: number
   isText: boolean
+}
+
+/** Minimal tool reference as returned inside a SkillFilesResponse.tools array. */
+export interface SkillToolRef {
+  name: string
+  /** Optional short description provided by the backend for display. */
+  description?: string
+  [key: string]: unknown
+}
+
+/**
+ * Shape returned by GET /api/skills/:name/files (and the matching agent-scoped
+ * endpoint). Includes the file tree plus the tool dependencies and commands
+ * declared in the skill's SKILL.md frontmatter.
+ */
+export interface SkillFilesResponse {
+  files: SkillFile[]
+  tools: SkillToolRef[]
+  commands: string[]
+  author?: string
+}
+
+/**
+ * Shape returned by GET /api/skills/:name/files/:path (and the agent-scoped
+ * variant) — a single text file's contents for the inline file viewer.
+ */
+export interface SkillFileContent {
+  content: string
 }
 
 /** A channel configuration status. */
@@ -94,4 +144,107 @@ export interface LogEvent {
   details: string | null
   timestamp: string
   agentId?: number | null
+}
+
+/** A tool binding for a specific agent, as returned by GET /api/agents/:id/tools. */
+export interface AgentTool {
+  name: string
+  enabled: boolean
+  [key: string]: unknown
+}
+
+/** A skill binding for a specific agent, as returned by GET /api/agents/:id/skills. */
+export interface AgentSkill {
+  name: string
+  description?: string | null
+  enabled: boolean
+  isGlobal?: boolean
+  /** Tool names this skill depends on. */
+  tools?: string[]
+  /** Shell commands this skill contributes to the effective allowlist. */
+  commands?: string[]
+  [key: string]: unknown
+}
+
+/** Shape returned by GET /api/agents/:id/workspace/:file. */
+export interface WorkspaceFileContent {
+  content: string
+}
+
+/** Shape returned by GET /api/agents/:id/shell/effective-allowlist. */
+export interface EffectiveAllowlist {
+  global: string[]
+  bySkill: Record<string, string[]>
+}
+
+/** Single entry in the prompt-breakdown arrays. */
+export interface PromptBreakdownEntry {
+  name: string
+  chars: number
+  tokens: number
+}
+
+/** Shape returned by GET /api/agents/:id/prompt-breakdown. */
+export interface PromptBreakdown {
+  totalChars: number
+  totalTokenEstimate: number
+  cacheBoundaryMarker: string
+  cacheablePrefixChars: number
+  variableSuffixChars: number
+  sections: PromptBreakdownEntry[]
+  skills: PromptBreakdownEntry[]
+  tools: PromptBreakdownEntry[]
+}
+
+/** Shape returned by GET /api/config/:key — a single config entry. */
+export interface ConfigValueResponse {
+  value: string
+}
+
+/** A scheduled/run task row as returned by GET /api/tasks. */
+export interface Task {
+  id: number
+  name: string
+  type: string
+  status: string
+  agentName: string | null
+  nextRunAt: string | null
+  retryCount: number
+  maxRetries: number
+  [key: string]: unknown
+}
+
+/** A single persisted model on a provider (stored inside provider.{name}.models JSON). */
+export interface ProviderModelDef {
+  id: string
+  name?: string
+  contextWindow?: number
+  maxTokens?: number
+  supportsThinking?: boolean
+  supportsVision?: boolean
+  supportsAudio?: boolean
+  promptPrice?: number | null
+  completionPrice?: number | null
+  cachedReadPrice?: number | null
+  cacheWritePrice?: number | null
+  thinkingLevels?: string[]
+  [key: string]: unknown
+}
+
+/**
+ * Shape returned by POST /api/providers/:name/discover-models — includes the
+ * stored ProviderModelDef fields plus provider-detection hints and an
+ * optional ranking from the leaderboard.
+ */
+export interface DiscoveredModel extends ProviderModelDef {
+  isFree?: boolean
+  leaderboardRank?: number | null
+  thinkingDetectedFromProvider?: boolean
+  visionDetectedFromProvider?: boolean
+  audioDetectedFromProvider?: boolean
+}
+
+/** Shape returned by POST /api/providers/:name/discover-models. */
+export interface DiscoverModelsResponse {
+  models: DiscoveredModel[]
 }

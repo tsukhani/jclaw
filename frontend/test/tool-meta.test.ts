@@ -53,22 +53,22 @@ describe('useToolMeta (JCLAW-72 backend-driven metadata)', () => {
   it('fetches from /api/tools/meta and exposes tools keyed by name', async () => {
     const { TOOL_META } = await freshComposable()
     expect(TOOL_META.value.exec).toBeDefined()
-    expect(TOOL_META.value.exec.category).toBe('System')
-    expect(TOOL_META.value.exec.icon).toBe('terminal')
-    expect(TOOL_META.value.exec.requiresConfig).toBe('shell.enabled')
-    expect(TOOL_META.value.web_fetch.category).toBe('Web')
+    expect(TOOL_META.value.exec!.category).toBe('System')
+    expect(TOOL_META.value.exec!.icon).toBe('terminal')
+    expect(TOOL_META.value.exec!.requiresConfig).toBe('shell.enabled')
+    expect(TOOL_META.value.web_fetch!.category).toBe('Web')
   })
 
   it('derives Tailwind class names from category on the client side', async () => {
     const { TOOL_META } = await freshComposable()
-    expect(TOOL_META.value.exec.iconBg).toContain('neutral')
-    expect(TOOL_META.value.web_fetch.iconBg).toContain('blue')
-    expect(TOOL_META.value.introspect.iconBg).toContain('emerald')
+    expect(TOOL_META.value.exec!.iconBg).toContain('neutral')
+    expect(TOOL_META.value.web_fetch!.iconBg).toContain('blue')
+    expect(TOOL_META.value.introspect!.iconBg).toContain('emerald')
   })
 
   it('preserves the legacy "functions" alias for pages/tools.vue compatibility', async () => {
     const { TOOL_META } = await freshComposable()
-    expect(TOOL_META.value.exec.functions).toEqual(TOOL_META.value.exec.actions)
+    expect(TOOL_META.value.exec!.functions).toEqual(TOOL_META.value.exec!.actions)
   })
 
   it('getPillClass returns the right category pill classes', async () => {

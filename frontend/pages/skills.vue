@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import type {
+  Agent,
+  AgentSkill,
+  Skill,
+  SkillFile,
+  SkillFileContent,
+  SkillFilesResponse,
+  SkillToolRef,
+} from '~/types/api'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -8,20 +17,20 @@ marked.setOptions({ breaks: true, gfm: true })
 // consistent between the Agent detail page and these skill cards.
 const { getPillClass } = useToolMeta()
 
-const { data: skills, refresh: refreshSkills } = await useFetch<any[]>('/api/skills')
-const { data: agents } = await useFetch<any[]>('/api/agents')
+const { data: skills, refresh: refreshSkills } = await useFetch<Skill[]>('/api/skills')
+const { data: agents } = await useFetch<Agent[]>('/api/agents')
 
 // Skills per agent, keyed by agent id
-const agentSkillsMap = ref<Record<number, any[]>>({})
+const agentSkillsMap = ref<Record<number, AgentSkill[]>>({})
 const loadingAgents = ref(true)
 
 async function loadAllAgentSkills() {
   loadingAgents.value = true
-  const map: Record<number, any[]> = {}
+  const map: Record<number, AgentSkill[]> = {}
   if (agents.value?.length) {
     await Promise.all(agents.value.map(async (agent) => {
       try {
-        map[agent.id] = await $fetch<any[]>(`/api/agents/${agent.id}/skills`)
+        map[agent.id] = await $fetch<AgentSkill[]>(`/api/agents/${agent.id}/skills`)
       }
       catch {
         map[agent.id] = []
@@ -37,8 +46,12 @@ watch(agents, () => loadAllAgentSkills(), { immediate: true })
 // Confirm dialog (replaces native window.confirm for destructive actions)
 const { confirm } = useConfirm()
 
+// A skill being dragged can originate from either the global list or an agent
+// card; the union here keeps drag metadata readable without threading two refs.
+type DraggingSkill = Skill | AgentSkill
+
 // Drag state — supports both directions
-const dragging = ref<any>(null)
+const dragging = ref<DraggingSkill | null>(null)
 const dragSource = ref<'global' | 'agent' | null>(null)
 const dragSourceAgentId = ref<number | null>(null)
 const dropTarget = ref<number | null>(null)
@@ -50,7 +63,9 @@ let dragErrorTimer: ReturnType<typeof setTimeout> | null = null
 function showDragError(msg: string) {
   dragError.value = msg
   if (dragErrorTimer) clearTimeout(dragErrorTimer)
-  dragErrorTimer = setTimeout(() => { dragError.value = null }, 8000)
+  dragErrorTimer = setTimeout(() => {
+    dragError.value = null
+  }, 8000)
 }
 
 // Info banner for non-error events (e.g. promote no-op when workspace matches global)
@@ -59,10 +74,15 @@ let infoBannerTimer: ReturnType<typeof setTimeout> | null = null
 function showInfo(msg: string) {
   infoBanner.value = msg
   if (infoBannerTimer) clearTimeout(infoBannerTimer)
-  infoBannerTimer = setTimeout(() => { infoBanner.value = null }, 6000)
+  infoBannerTimer = setTimeout(() => {
+    infoBanner.value = null
+  }, 6000)
 }
 
-onUnmounted(() => { if (dragErrorTimer) clearTimeout(dragErrorTimer); if (infoBannerTimer) clearTimeout(infoBannerTimer) })
+onUnmounted(() => {
+  if (dragErrorTimer) clearTimeout(dragErrorTimer)
+  if (infoBannerTimer) clearTimeout(infoBannerTimer)
+})
 
 // Track multiple concurrent promotions by skill name (survives navigation via useState)
 const promotingSkills = useState<Set<string>>('promotingSkills', () => new Set())
@@ -71,7 +91,7 @@ const promotingSkills = useState<Set<string>>('promotingSkills', () => new Set()
 // Handles SSE events missed due to timing, reconnect, or component remount.
 watch(skills, (globalSkills) => {
   if (!globalSkills || promotingSkills.value.size === 0) return
-  const globalNames = new Set(globalSkills.map((s: any) => s.folderName || s.name))
+  const globalNames = new Set(globalSkills.map(s => s.folderName || s.name))
   const stillPromoting = new Set<string>()
   for (const name of promotingSkills.value) {
     if (!globalNames.has(name)) stillPromoting.add(name)
@@ -81,32 +101,52 @@ watch(skills, (globalSkills) => {
   }
 }, { immediate: true })
 
+// SSE events from the skill-promotion pipeline carry the skill's folder name
+// and optional status text. Narrowing at each handler avoids an `any` leak.
+interface SkillPromoteEvent {
+  skillName: string
+  error?: string
+  reason?: string
+}
+
+function asSkillPromoteEvent(data: unknown): SkillPromoteEvent {
+  const d = (data ?? {}) as Partial<SkillPromoteEvent>
+  return {
+    skillName: typeof d.skillName === 'string' ? d.skillName : '',
+    error: typeof d.error === 'string' ? d.error : undefined,
+    reason: typeof d.reason === 'string' ? d.reason : undefined,
+  }
+}
+
 // Listen for promotion completion via SSE
 const { onEvent } = useEventBus()
-onEvent('skill.promoted', (data: any) => {
+onEvent('skill.promoted', (data) => {
+  const evt = asSkillPromoteEvent(data)
   refreshSkills()
   loadAllAgentSkills()
   const s = new Set(promotingSkills.value)
-  s.delete(data.skillName)
+  s.delete(evt.skillName)
   promotingSkills.value = s
 })
-onEvent('skill.promote_failed', (data: any) => {
-  console.error('Skill promotion failed:', data.skillName, data.error)
-  showDragError(data.error || `Failed to promote '${data.skillName}'`)
+onEvent('skill.promote_failed', (data) => {
+  const evt = asSkillPromoteEvent(data)
+  console.error('Skill promotion failed:', evt.skillName, evt.error)
+  showDragError(evt.error || `Failed to promote '${evt.skillName}'`)
   const s = new Set(promotingSkills.value)
-  s.delete(data.skillName)
+  s.delete(evt.skillName)
   promotingSkills.value = s
 })
-onEvent('skill.promote_noop', (data: any) => {
-  showInfo(data.reason || `Nothing to promote for '${data.skillName}'`)
+onEvent('skill.promote_noop', (data) => {
+  const evt = asSkillPromoteEvent(data)
+  showInfo(evt.reason || `Nothing to promote for '${evt.skillName}'`)
   const s = new Set(promotingSkills.value)
-  s.delete(data.skillName)
+  s.delete(evt.skillName)
   promotingSkills.value = s
 })
 
 // Look up the current global version of a skill by folder name
 function globalVersionOf(folderName: string): string | null {
-  const s = skills.value?.find((x: any) => (x.folderName || x.name) === folderName)
+  const s = skills.value?.find(x => (x.folderName || x.name) === folderName)
   return s?.version ?? null
 }
 
@@ -115,31 +155,42 @@ function compareVersions(a: string, b: string): number {
   const pa = (a || '0.0.0').split('.').map(n => parseInt(n) || 0)
   const pb = (b || '0.0.0').split('.').map(n => parseInt(n) || 0)
   for (let i = 0; i < 3; i++) {
-    const x = pa[i] || 0, y = pb[i] || 0
+    const x = pa[i] || 0
+    const y = pb[i] || 0
     if (x !== y) return x - y
   }
   return 0
 }
 
 // Returns the global version if an update is available, else null
-function updateAvailable(skill: any): string | null {
-  const gv = globalVersionOf(skill.folderName || skill.name)
+function updateAvailable(skill: AgentSkill): string | null {
+  const gv = globalVersionOf(skill.folderName as string || skill.name)
   if (gv == null) return null
-  return compareVersions(skill.version || '0.0.0', gv) < 0 ? gv : null
+  return compareVersions(skill.version as string || '0.0.0', gv) < 0 ? gv : null
 }
 
-async function updateAgentSkillFromGlobal(agentId: number, skill: any) {
-  const skillName = skill.folderName || skill.name
+// Extract a human-readable message from a $fetch error, which may carry the
+// server-rendered text on either `.response._data` or `.data`.
+function asFetchErrorMessage(err: unknown, fallback: string): string {
+  const e = err as { response?: { status?: number, _data?: unknown }, data?: unknown, message?: string } | undefined
+  const msg = e?.response?._data ?? e?.data ?? e?.message
+  return typeof msg === 'string' ? msg : fallback
+}
+
+function fetchErrorStatus(err: unknown): number | undefined {
+  return (err as { response?: { status?: number } } | undefined)?.response?.status
+}
+
+async function updateAgentSkillFromGlobal(agentId: number, skill: AgentSkill) {
+  const skillName = (skill.folderName as string) || skill.name
   try {
     await $fetch(`/api/agents/${agentId}/skills/${skillName}/copy`, { method: 'POST' })
-    agentSkillsMap.value[agentId] = await $fetch<any[]>(`/api/agents/${agentId}/skills`)
+    agentSkillsMap.value[agentId] = await $fetch<AgentSkill[]>(`/api/agents/${agentId}/skills`)
     showInfo(`Updated '${skillName}' for this agent`)
   }
-  catch (err: any) {
-    const status = err?.response?.status
-    if (status === 400) {
-      const msg = err?.response?._data || err?.data || err?.message || 'Update failed'
-      showDragError(typeof msg === 'string' ? msg : 'Update failed')
+  catch (err: unknown) {
+    if (fetchErrorStatus(err) === 400) {
+      showDragError(asFetchErrorMessage(err, 'Update failed'))
     }
     else {
       console.error('Failed to update skill from global:', err)
@@ -150,7 +201,7 @@ async function updateAgentSkillFromGlobal(agentId: number, skill: any) {
 
 // --- Global skill → Agent card (copy to workspace) ---
 
-function onGlobalDragStart(e: DragEvent, skill: any) {
+function onGlobalDragStart(e: DragEvent, skill: Skill) {
   dragging.value = skill
   dragSource.value = 'global'
   dragSourceAgentId.value = null
@@ -160,7 +211,7 @@ function onGlobalDragStart(e: DragEvent, skill: any) {
   }
 }
 
-function onAgentSkillDragStart(e: DragEvent, skill: any, agentId: number) {
+function onAgentSkillDragStart(e: DragEvent, skill: AgentSkill, agentId: number) {
   dragging.value = skill
   dragSource.value = 'agent'
   dragSourceAgentId.value = agentId
@@ -189,26 +240,27 @@ function onAgentDragLeave(agentId: number) {
   if (dropTarget.value === agentId) dropTarget.value = null
 }
 
-async function onAgentDrop(e: DragEvent, agent: any) {
+async function onAgentDrop(e: DragEvent, agent: Agent) {
   e.preventDefault()
   dropTarget.value = null
   if (!dragging.value || dragSource.value !== 'global') return
 
-  const skillName = dragging.value.folderName || dragging.value.name
-  const globalVersion = dragging.value.version || '0.0.0'
-  const existing = agentSkillsMap.value[agent.id]?.find((s: any) => s.name === dragging.value.name)
+  const dragged = dragging.value
+  const skillName = (dragged.folderName as string) || dragged.name
+  const globalVersion = (dragged.version as string) || '0.0.0'
+  const existing = agentSkillsMap.value[agent.id]?.find(s => s.name === dragged.name)
 
   // If the agent already has this skill at the same or newer version, just ensure it's
   // enabled and move on — no point overwriting identical content.
   if (existing) {
-    const cmp = compareVersions(existing.version || '0.0.0', globalVersion)
+    const cmp = compareVersions((existing.version as string) || '0.0.0', globalVersion)
     if (cmp >= 0) {
       if (!existing.enabled) {
         try {
           await $fetch(`/api/agents/${agent.id}/skills/${skillName}`, {
             method: 'PUT', body: { enabled: true },
           })
-          agentSkillsMap.value[agent.id] = await $fetch<any[]>(`/api/agents/${agent.id}/skills`)
+          agentSkillsMap.value[agent.id] = await $fetch<AgentSkill[]>(`/api/agents/${agent.id}/skills`)
         }
         catch (err) {
           console.error('Failed to re-enable skill:', err)
@@ -233,15 +285,13 @@ async function onAgentDrop(e: DragEvent, agent: any) {
 
   try {
     await $fetch(`/api/agents/${agent.id}/skills/${skillName}/copy`, { method: 'POST' })
-    agentSkillsMap.value[agent.id] = await $fetch<any[]>(`/api/agents/${agent.id}/skills`)
+    agentSkillsMap.value[agent.id] = await $fetch<AgentSkill[]>(`/api/agents/${agent.id}/skills`)
     if (existing) showInfo(`Updated '${skillName}' on agent '${agent.name}' to version ${globalVersion}`)
   }
-  catch (err: any) {
-    const status = err?.response?.status
-    if (status === 400) {
+  catch (err: unknown) {
+    if (fetchErrorStatus(err) === 400) {
       // Missing tools — surface the server's error message to the user
-      const msg = err?.response?._data || err?.data || err?.message || 'Cannot add skill to this agent.'
-      showDragError(typeof msg === 'string' ? msg : 'Cannot add skill to this agent.')
+      showDragError(asFetchErrorMessage(err, 'Cannot add skill to this agent.'))
     }
     else {
       console.error('Failed to copy skill:', err)
@@ -269,7 +319,7 @@ async function onGlobalSectionDrop(e: DragEvent) {
   dropTargetGlobal.value = false
   if (!dragging.value || dragSource.value !== 'agent' || dragSourceAgentId.value === null) return
 
-  const skillName = dragging.value.folderName || dragging.value.name
+  const skillName = (dragging.value.folderName as string) || dragging.value.name
   const agentId = dragSourceAgentId.value
   dragging.value = null
 
@@ -278,7 +328,7 @@ async function onGlobalSectionDrop(e: DragEvent) {
 
   // If a global skill with this name already exists, confirm replacement before
   // firing the promote — the backend will overwrite it in place.
-  const existingGlobal = skills.value?.find((s: any) => (s.folderName || s.name) === skillName)
+  const existingGlobal = skills.value?.find(s => (s.folderName || s.name) === skillName)
   if (existingGlobal) {
     const ok = await confirm({
       title: 'Replace global skill',
@@ -312,7 +362,7 @@ async function toggleAgentSkill(agentId: number, skillName: string, enabled: boo
     await $fetch(`/api/agents/${agentId}/skills/${skillName}`, {
       method: 'PUT', body: { enabled },
     })
-    agentSkillsMap.value[agentId] = await $fetch<any[]>(`/api/agents/${agentId}/skills`)
+    agentSkillsMap.value[agentId] = await $fetch<AgentSkill[]>(`/api/agents/${agentId}/skills`)
   }
   catch (e) {
     console.error('Failed to toggle skill:', e)
@@ -324,7 +374,7 @@ async function toggleAgentSkill(agentId: number, skillName: string, enabled: boo
 const renamingSkill = ref<string | null>(null)
 const renameValue = ref('')
 
-function startRename(skill: any) {
+function startRename(skill: Skill) {
   renamingSkill.value = skill.folderName || skill.name
   renameValue.value = skill.folderName || skill.name
 }
@@ -334,7 +384,7 @@ function cancelRename() {
   renameValue.value = ''
 }
 
-async function commitRename(skill: any) {
+async function commitRename(skill: Skill) {
   const oldName = skill.folderName || skill.name
   const newName = renameValue.value.trim()
   if (!newName || newName === oldName) {
@@ -347,7 +397,7 @@ async function commitRename(skill: any) {
     })
     refreshSkills()
   }
-  catch (err: any) {
+  catch (err: unknown) {
     console.error('Failed to rename skill:', err)
   }
   finally {
@@ -358,12 +408,14 @@ async function commitRename(skill: any) {
 
 // --- Skill editing (create / edit form) ---
 
-const editing = ref<any>(null)
+// The editing target is whichever skill was clicked — global Skill or per-agent
+// AgentSkill. Both flows set `folderName` explicitly so the API path is stable.
+const editing = ref<(Skill | AgentSkill) & { folderName?: string } | null>(null)
 
 // File browser state for view mode — skill file contents are read-only; authoring
 // happens exclusively via the skill-creator skill (using the filesystem tool).
-const skillFiles = ref<any[]>([])
-const skillTools = ref<any[]>([])
+const skillFiles = ref<SkillFile[]>([])
+const skillTools = ref<SkillToolRef[]>([])
 // Shell commands this skill contributes to an installing agent's allowlist.
 // Populated from the SKILL.md `commands:` frontmatter via the files API.
 const skillCommands = ref<string[]>([])
@@ -383,25 +435,25 @@ const renderedMarkdown = computed(() => {
 })
 const editingAgentId = ref<number | null>(null) // null = global skill, number = agent workspace skill
 
-async function editSkill(skill: any) {
+async function editSkill(skill: Skill) {
   try {
     const folderName = skill.folderName || skill.name
     editing.value = { ...skill, folderName }
 
     // Load file listing and tool dependencies
-    const res = await $fetch<any>(`/api/skills/${folderName}/files`)
+    const res = await $fetch<SkillFilesResponse>(`/api/skills/${folderName}/files`)
     skillFiles.value = res.files || []
     skillTools.value = res.tools || []
     skillCommands.value = res.commands || []
     skillAuthor.value = res.author || ''
 
     // Auto-select SKILL.md
-    const skillMd = skillFiles.value.find((f: any) => f.path === 'SKILL.md')
+    const skillMd = skillFiles.value.find(f => f.path === 'SKILL.md')
     if (skillMd) {
       await selectFile(skillMd)
     }
-    else if (skillFiles.value.length > 0 && skillFiles.value[0].isText) {
-      await selectFile(skillFiles.value[0])
+    else if (skillFiles.value.length > 0 && skillFiles.value[0]!.isText) {
+      await selectFile(skillFiles.value[0]!)
     }
     else {
       activeFile.value = null
@@ -421,10 +473,10 @@ function skillFileApiBase() {
   return `/api/skills/${folderName}/files`
 }
 
-async function selectFile(file: any) {
+async function selectFile(file: SkillFile) {
   if (!file.isText) return
   try {
-    const res = await $fetch<any>(`${skillFileApiBase()}/${file.path}`)
+    const res = await $fetch<SkillFileContent>(`${skillFileApiBase()}/${file.path}`)
     activeFile.value = file.path
     fileContent.value = res.content
   }
@@ -433,8 +485,8 @@ async function selectFile(file: any) {
   }
 }
 
-async function deleteSkill(skill: any) {
-  const folderName = skill.folderName || skill.name
+async function deleteSkill(skill: Skill | AgentSkill) {
+  const folderName = (skill.folderName as string) || skill.name
   try {
     await $fetch(`/api/skills/${folderName}`, { method: 'DELETE' })
     editing.value = null
@@ -448,24 +500,24 @@ async function deleteSkill(skill: any) {
   }
 }
 
-async function editAgentSkill(agentId: number, skill: any) {
+async function editAgentSkill(agentId: number, skill: AgentSkill) {
   try {
-    const name = skill.folderName || skill.name
+    const name = (skill.folderName as string) || skill.name
     editing.value = { ...skill, folderName: name }
     editingAgentId.value = agentId
 
-    const res = await $fetch<any>(`/api/agents/${agentId}/skills/${name}/files`)
+    const res = await $fetch<SkillFilesResponse>(`/api/agents/${agentId}/skills/${name}/files`)
     skillFiles.value = res.files || []
     skillTools.value = res.tools || []
     skillCommands.value = res.commands || []
     skillAuthor.value = res.author || ''
 
-    const skillMd = skillFiles.value.find((f: any) => f.path === 'SKILL.md')
+    const skillMd = skillFiles.value.find(f => f.path === 'SKILL.md')
     if (skillMd) {
       await selectFile(skillMd)
     }
-    else if (skillFiles.value.length > 0 && skillFiles.value[0].isText) {
-      await selectFile(skillFiles.value[0])
+    else if (skillFiles.value.length > 0 && skillFiles.value[0]!.isText) {
+      await selectFile(skillFiles.value[0]!)
     }
     else {
       activeFile.value = null
@@ -477,8 +529,8 @@ async function editAgentSkill(agentId: number, skill: any) {
   }
 }
 
-async function deleteAgentSkill(agentId: number, skill: any) {
-  const name = skill.folderName || skill.name
+async function deleteAgentSkill(agentId: number, skill: Skill | AgentSkill) {
+  const name = (skill.folderName as string) || skill.name
   try {
     await $fetch(`/api/agents/${agentId}/skills/${name}/delete`, { method: 'DELETE' })
     editing.value = null
@@ -507,7 +559,7 @@ type FileNode = {
   name: string
   isDir: boolean
   path?: string
-  file?: any
+  file?: SkillFile
   children?: FileNode[]
 }
 
@@ -518,7 +570,7 @@ const fileTree = computed<FileNode[]>(() => {
     if (!parts.length) continue
     let node = root
     for (let i = 0; i < parts.length; i++) {
-      const part = parts[i]
+      const part = parts[i]!
       const isLast = i === parts.length - 1
       if (isLast) {
         node.children!.push({ name: part, isDir: false, path: file.path, file })
@@ -546,7 +598,7 @@ const fileTree = computed<FileNode[]>(() => {
 })
 
 function enabledSkillCount(agentId: number) {
-  return agentSkillsMap.value[agentId]?.filter((s: any) => s.enabled).length ?? 0
+  return agentSkillsMap.value[agentId]?.filter(s => s.enabled).length ?? 0
 }
 
 function totalSkillCount(agentId: number) {
@@ -603,6 +655,7 @@ function totalSkillCount(agentId: number) {
           No agents configured
         </div>
         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drop target for drag-to-promote; HTML5 drag events have no keyboard equivalent -->
           <div
             v-for="agent in agents"
             :key="agent.id"
@@ -638,6 +691,7 @@ function totalSkillCount(agentId: number) {
               v-if="agentSkillsMap[agent.id]?.length"
               class="space-y-1"
             >
+              <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drag source for skill promotion; HTML5 drag events have no keyboard equivalent -->
               <div
                 v-for="skill in agentSkillsMap[agent.id]"
                 :key="skill.name"
@@ -699,10 +753,13 @@ function totalSkillCount(agentId: number) {
                     /></svg>
                   </button>
                   <label
+                    :for="`skill-toggle-${agent.id}-${skill.name}`"
                     class="flex items-center"
                     @click.stop
                   >
+                    <span class="sr-only">Enable skill {{ skill.name }}</span>
                     <input
+                      :id="`skill-toggle-${agent.id}-${skill.name}`"
                       type="checkbox"
                       :checked="skill.enabled"
                       class="accent-emerald-500 scale-90"
@@ -737,6 +794,7 @@ function totalSkillCount(agentId: number) {
       </div>
 
       <!-- Global skills (draggable + drop target for promotion) -->
+      <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drop target for drag-to-promote; HTML5 drag events have no keyboard equivalent -->
       <div
         :class="[
           'transition-all duration-150 p-4 -m-4',
@@ -805,6 +863,7 @@ function totalSkillCount(agentId: number) {
             alignment holds uniformly across the whole grid — empty state is a
             dimmed em-dash, not a hidden block.
           -->
+          <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drag source for skill promotion; HTML5 drag events have no keyboard equivalent -->
           <div
             v-for="skill in skills"
             :key="skill.folderName || skill.name"
@@ -825,6 +884,7 @@ function totalSkillCount(agentId: number) {
                   <input
                     ref="renameInput"
                     v-model="renameValue"
+                    :aria-label="`Rename skill ${skill.folderName || skill.name}`"
                     class="text-sm text-fg-strong font-mono bg-muted border border-input px-1.5 py-0.5 w-full mr-2 focus:outline-hidden focus:border-emerald-600 dark:focus:border-emerald-500"
                     @keydown.enter="commitRename(skill)"
                     @keydown.escape="cancelRename"
@@ -834,6 +894,7 @@ function totalSkillCount(agentId: number) {
                   >
                 </template>
                 <template v-else>
+                  <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- double-click to rename is a desktop-style affordance; dblclick has no keyboard equivalent -->
                   <span
                     class="text-sm text-fg-strong font-mono cursor-text min-w-0 break-all"
                     @dblclick.stop="startRename(skill)"
@@ -1175,15 +1236,18 @@ function totalSkillCount(agentId: number) {
                 </button>
               </div>
             </div>
+            <!-- eslint-disable vue/no-v-html -- renderedMarkdown runs the file through DOMPurify.sanitize (see computed above) before returning. -->
             <div
               v-if="isMarkdownFile && fileViewMode === 'rendered'"
               class="prose-skill flex-1 overflow-y-auto px-6 py-4 text-sm text-fg-primary"
               v-html="renderedMarkdown"
             />
+            <!-- eslint-enable vue/no-v-html -->
             <textarea
               v-else
               :value="fileContent"
               readonly
+              aria-label="Skill file contents"
               class="flex-1 w-full px-4 py-3 bg-transparent text-sm text-fg-primary font-mono resize-none focus:outline-hidden cursor-default opacity-80"
               spellcheck="false"
             />
@@ -1200,7 +1264,7 @@ function totalSkillCount(agentId: number) {
 </template>
 
 <style>
-.prose-skill { overflow-wrap: break-word; word-break: break-word; line-height: 1.7; }
+.prose-skill { overflow-wrap: anywhere; line-height: 1.7; }
 .prose-skill p { margin: 0.6em 0; }
 .prose-skill p:first-child { margin-top: 0; }
 .prose-skill p:last-child { margin-bottom: 0; }

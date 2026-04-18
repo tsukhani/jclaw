@@ -5,15 +5,30 @@ import { formatUsageCost, formatUsageCostTooltip, type MessageUsage } from '~/ut
 import { formatSize } from '~/utils/format'
 import { thinkingHeaderLabel, initCollapsedState } from '~/utils/thinking'
 import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
-
-import type { Agent, Conversation, Message, ConfigResponse } from '~/types/api'
-import { effectiveThinkingLevels } from '~/composables/useProviders'
-
 // Filter out tool messages and empty assistant messages (tool call records) from display.
 // The predicate lives in ~/utils/display-message-filter for unit-testability; see
 // JCLAW-75 for the specific reasoning-stream regression the reasoning-aware
 // suppression rule closes.
 import { shouldDisplayMessage } from '~/utils/display-message-filter'
+
+import type { Agent, Conversation, Message, ConfigResponse } from '~/types/api'
+import { effectiveThinkingLevels, type ProviderModel } from '~/composables/useProviders'
+
+// Local helpers for fields that streaming/optimistic bubbles carry in addition
+// to the persisted Message shape. Kept co-located rather than in types/api.ts
+// because these are client-only stream-state fields, not part of the wire
+// contract.
+interface StreamingMessage extends Message {
+  _thinkingInProgress?: boolean
+}
+
+// Queue status returned by GET /api/conversations/:id/queue — the chat page
+// uses this to decide whether to keep the "agent busy" banner showing after a
+// stream completes.
+interface ConversationQueueStatus {
+  busy: boolean
+  [key: string]: unknown
+}
 
 // Configure marked for safe rendering
 marked.setOptions({
@@ -94,23 +109,29 @@ const { data: configData } = await useFetch<ConfigResponse>('/api/config')
 
 const selectedAgentId = ref<number | null>(null)
 
+// A11y: generated ids for label/control association
+const agentSelectId = useId()
+const modelSelectId = useId()
+const thinkingSelectId = useId()
+
 // Extract configured providers and their models from config
-const { providers } = useProviders(configData)
+const configDataRef = computed(() => configData.value ?? null)
+const { providers } = useProviders(configDataRef)
 
 // The currently selected agent object
-const selectedAgent = computed(() => agents.value?.find((a: any) => a.id === selectedAgentId.value))
+const selectedAgent = computed(() => agents.value?.find(a => a.id === selectedAgentId.value))
 
 // Current model info for the selected agent. Looks up across ALL configured
 // providers — not just the agent's own provider — because the chat dropdown
 // lets the user pick any model from any enabled provider without going back
 // to the Agents page. Encoded provider + id avoids ambiguity when two
 // providers happen to expose the same model id (e.g. "kimi-k2.5").
-const selectedModelInfo = computed(() => {
+const selectedModelInfo = computed<ProviderModel | null>(() => {
   const providerName = selectedAgent.value?.modelProvider
   const modelId = selectedAgent.value?.modelId
   if (!providerName || !modelId) return null
   const provider = providers.value.find(p => p.name === providerName)
-  return provider?.models.find((m: any) => m.id === modelId) ?? null
+  return provider?.models.find(m => m.id === modelId) ?? null
 })
 
 // Compound key used as the <option> value so the change handler can read
@@ -128,15 +149,15 @@ const thinkingSupported = computed(() => selectedModelInfo.value?.supportsThinki
 
 // Thinking levels advertised by the currently selected model. Empty for
 // non-thinking models — the toolbar hides the selector in that case.
-const thinkingLevels = computed<string[]>(() => effectiveThinkingLevels(selectedModelInfo.value as any))
+const thinkingLevels = computed<string[]>(() => effectiveThinkingLevels(selectedModelInfo.value))
 
 // Model capability flags surfaced as pills next to the paperclip. Mirrors LM
 // Studio's "Think / Vision" chip row so users can see at a glance which input
 // types the currently-selected model accepts. Flags originate in provider
 // metadata (OpenRouter architecture.input_modalities, Ollama capabilities)
 // or the operator-toggled checkbox in Settings; see ModelDiscoveryService.
-const visionSupported = computed(() => (selectedModelInfo.value as any)?.supportsVision === true)
-const audioSupported = computed(() => (selectedModelInfo.value as any)?.supportsAudio === true)
+const visionSupported = computed(() => selectedModelInfo.value?.supportsVision === true)
+const audioSupported = computed(() => selectedModelInfo.value?.supportsAudio === true)
 
 // --- Pill toggle state ---
 
@@ -187,7 +208,7 @@ function toggleAudioPill() {
 }
 
 // Sync model or thinking mode change back to the agent
-async function updateAgentSetting(updates: Record<string, any>) {
+async function updateAgentSetting(updates: Partial<Agent>) {
   if (!selectedAgentId.value) return
   try {
     await $fetch(`/api/agents/${selectedAgentId.value}`, { method: 'PUT', body: updates })
@@ -203,16 +224,16 @@ function onModelChange(event: Event) {
   const modelProvider = value.slice(0, sepIdx)
   const modelId = value.slice(sepIdx + 2)
   const provider = providers.value.find(p => p.name === modelProvider)
-  const model = provider?.models.find((m: any) => m.id === modelId)
+  const model = provider?.models.find(m => m.id === modelId) ?? null
   // Send both fields so a cross-provider pick (e.g. ollama-cloud → openrouter)
   // lands atomically; sending only modelId would leave the agent pointing a
   // stale modelProvider at a model that doesn't exist there.
-  const updates: Record<string, any> = { modelProvider, modelId }
+  const updates: Partial<Agent> = { modelProvider, modelId }
   // If the new model doesn't advertise the current thinking level, clear it in
   // the same PUT so the backend doesn't have to normalize the mismatch. The
   // backend also collapses unknown levels to null defensively, but sending the
   // cleared value keeps the optimistic UI and the persisted state aligned.
-  const nextLevels = effectiveThinkingLevels(model as any)
+  const nextLevels = effectiveThinkingLevels(model)
   const current = selectedAgent.value?.thinkingMode
   if (current && !nextLevels.includes(current)) {
     updates.thinkingMode = null
@@ -232,7 +253,7 @@ function onThinkingModeChange(event: Event) {
 // Per-bubble collapse toggle handler. Header label + default-collapse rules
 // live in ~/utils/thinking.ts (thinkingHeaderLabel, initCollapsedState) so
 // they are unit-testable without mounting the page.
-function toggleThinking(msg: any) {
+function toggleThinking(msg: Message) {
   msg.thinkingCollapsed = !msg.thinkingCollapsed
 }
 
@@ -241,7 +262,12 @@ const conversationsUrl = computed(() =>
     ? `/api/conversations?channel=web&agentId=${selectedAgentId.value}&limit=50`
     : null,
 )
-const { data: conversations, refresh: refreshConversations } = await useFetch<Conversation[]>(conversationsUrl)
+// `conversationsUrl` is nullable — when null we want useFetch to skip, which
+// Nuxt supports at runtime. The public type signature doesn't model null, so
+// we cast the Ref down to the narrower runtime contract.
+const { data: conversations, refresh: refreshConversations } = await useFetch<Conversation[]>(
+  conversationsUrl as unknown as Ref<string>,
+)
 /**
  * Defensive client-side re-sort by updatedAt DESC. The backend's ORDER BY
  * already yields this shape, but a render-layer computed makes the invariant
@@ -274,7 +300,7 @@ function autoResize() {
 
 // Per-message "just copied" flash so the user gets visual feedback without a toast.
 const copiedMessageId = ref<string | number | null>(null)
-async function copyMessage(msg: any) {
+async function copyMessage(msg: Message) {
   try {
     // Copy the raw source — for assistant turns that means the markdown, not
     // the rendered HTML. Pasting into a doc or another chat stays faithful to
@@ -289,7 +315,7 @@ async function copyMessage(msg: any) {
     console.error('Failed to copy message:', e)
   }
 }
-async function deleteMessage(msg: any) {
+async function deleteMessage(msg: Message) {
   // Skip mid-stream placeholders that have no server-side row yet — the
   // outer stop-streaming path already handles those.
   if (!msg.id) return
@@ -300,14 +326,14 @@ async function deleteMessage(msg: any) {
     // Splice optimistically rather than refetching the whole transcript —
     // keeps the remaining messages' thinkingCollapsed / _thinkingDurationMs
     // bubble state intact (they're client-only refs that a refetch would lose).
-    const idx = messages.value.findIndex((m: any) => m.id === msg.id)
+    const idx = messages.value.findIndex(m => m.id === msg.id)
     if (idx >= 0) messages.value.splice(idx, 1)
   }
   catch (e) {
     console.error('Failed to delete message:', e)
   }
 }
-async function editUserMessage(msg: any) {
+async function editUserMessage(msg: Message) {
   if (streaming.value) return
   input.value = msg.content ?? ''
   await nextTick()
@@ -345,7 +371,10 @@ function startResize(e: MouseEvent) {
   }
   document.addEventListener('mousemove', onMove)
   document.addEventListener('mouseup', onUp)
-  cleanupResize = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp) }
+  cleanupResize = () => {
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onUp)
+  }
 }
 
 const selectMode = ref(false)
@@ -353,7 +382,8 @@ const selectedIds = ref<Set<number>>(new Set())
 
 function toggleSelect(id: number) {
   const s = new Set(selectedIds.value)
-  if (s.has(id)) s.delete(id); else s.add(id)
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
   selectedIds.value = s
 }
 
@@ -363,7 +393,7 @@ function selectAll() {
     selectedIds.value = new Set()
   }
   else {
-    selectedIds.value = new Set(conversations.value.map((c: any) => c.id))
+    selectedIds.value = new Set(conversations.value.map(c => c.id))
   }
 }
 
@@ -412,7 +442,7 @@ function stopStreaming() {
   streamStatus.value = ''
 }
 const displayMessages = computed(() =>
-  messages.value.filter(m => shouldDisplayMessage(m as any, streaming.value)),
+  messages.value.filter(m => shouldDisplayMessage(m, streaming.value)),
 )
 
 // Deep-link: if ?conversation=ID is present, load that conversation and switch
@@ -424,7 +454,8 @@ const initializing = ref(true) // suppresses agent-change clear during setup
 // Auto-select agent on load
 watch(agents, (val) => {
   if (!val?.length || selectedAgentId.value) return
-  const def = val.find((a: any) => a.isMain) || val[0]
+  const def = val.find(a => a.isMain) || val[0]
+  if (!def) return
   selectedAgentId.value = def.id
 }, { immediate: true })
 
@@ -443,7 +474,7 @@ if (deepLinkConvoId) {
     if (!convos || !agents.value?.length) return
 
     // Check if the target conversation is in the current agent's list
-    const found = convos.find((c: any) => c.id === deepLinkConvoId)
+    const found = convos.find(c => c.id === deepLinkConvoId)
     if (found) {
       // It's in the current list — select it
       selectedConvoId.value = deepLinkConvoId
@@ -459,9 +490,9 @@ if (deepLinkConvoId) {
     if (initializing.value) {
       try {
         const allConvos = await $fetch<Conversation[]>('/api/conversations?channel=web&limit=100')
-        const convo = allConvos?.find((c: any) => c.id === deepLinkConvoId)
+        const convo = allConvos?.find(c => c.id === deepLinkConvoId)
         if (convo) {
-          const agent = agents.value.find((a: any) => a.name === convo.agentName)
+          const agent = agents.value.find(a => a.name === convo.agentName)
           if (agent && agent.id !== selectedAgentId.value) {
             // Switch agent — this triggers conversationsUrl to change, which
             // triggers useFetch to refetch, which triggers this watcher again
@@ -511,8 +542,9 @@ async function sendMessage() {
     try {
       uploadedPaths = await uploadAttachments(selectedAgentId.value)
     }
-    catch (e: any) {
-      attachError.value = 'Upload failed: ' + (e?.data?.error || e?.message || 'unknown error')
+    catch (e: unknown) {
+      const err = e as { data?: { error?: string }, message?: string } | undefined
+      attachError.value = 'Upload failed: ' + (err?.data?.error || err?.message || 'unknown error')
       return
     }
   }
@@ -584,7 +616,7 @@ async function sendMessage() {
             if (event.content?.startsWith('{') && event.content.includes('"usage"')) {
               try {
                 const parsed = JSON.parse(event.content)
-                if (parsed.usage) messages.value[assistantIdx].usage = parsed.usage
+                if (parsed.usage) messages.value[assistantIdx]!.usage = parsed.usage
               }
               catch { /* not JSON, treat as status text */ }
             }
@@ -593,7 +625,7 @@ async function sendMessage() {
             }
           }
           else if (event.type === 'reasoning') {
-            const m = messages.value[assistantIdx] as any
+            const m = messages.value[assistantIdx] as StreamingMessage
             // Bubble state is set once on the first reasoning chunk. Writing
             // these properties again on every subsequent chunk — even to the
             // same value — triggers Vue reactivity and makes the bubble
@@ -626,7 +658,7 @@ async function sendMessage() {
             // entirely so the transition fires only on the first byte of
             // genuine content.
             if (!event.content) continue
-            const m = messages.value[assistantIdx] as any
+            const m = messages.value[assistantIdx] as StreamingMessage
             // Reasoning→content transition: stamp duration, flip flag,
             // auto-collapse. Guarded by _thinkingInProgress so the stamp
             // fires exactly once at the transition — subsequent content
@@ -643,7 +675,7 @@ async function sendMessage() {
             scrollToBottom()
           }
           else if (event.type === 'complete') {
-            const m = messages.value[assistantIdx] as any
+            const m = messages.value[assistantIdx] as StreamingMessage
             // Reasoning-only turn (no content streamed): finalize duration here.
             if (m._thinkingInProgress) {
               m._thinkingDurationMs = Date.now() - (m._thinkingStartedAt ?? Date.now())
@@ -654,10 +686,10 @@ async function sendMessage() {
             m.content = event.content || streamContent.value
           }
           else if (event.type === 'error') {
-            messages.value[assistantIdx].content = event.content
+            messages.value[assistantIdx]!.content = event.content
           }
           else if (event.type === 'queued') {
-            messages.value[assistantIdx].content = 'Your message has been queued (position: ' + (event.position || '?') + '). Processing shortly...'
+            messages.value[assistantIdx]!.content = 'Your message has been queued (position: ' + (event.position || '?') + '). Processing shortly...'
           }
         }
         catch {
@@ -666,18 +698,19 @@ async function sendMessage() {
       }
     }
   }
-  catch (e: any) {
+  catch (e: unknown) {
     // AbortError is expected when the user clicks Stop — preserve any content
     // that was already streamed and append a small "(stopped)" marker instead
     // of replacing the bubble with a scary error.
-    if (e?.name === 'AbortError') {
-      const existing = messages.value[assistantIdx].content || streamContent.value || ''
-      messages.value[assistantIdx].content = existing
+    const err = e as { name?: string, message?: string } | undefined
+    if (err?.name === 'AbortError') {
+      const existing = messages.value[assistantIdx]!.content || streamContent.value || ''
+      messages.value[assistantIdx]!.content = existing
         ? existing.replace(/\s*$/, '') + '\n\n_(stopped)_'
         : '_(stopped before any response)_'
     }
     else {
-      messages.value[assistantIdx].content = 'Error: ' + (e.message || 'Failed to get response')
+      messages.value[assistantIdx]!.content = 'Error: ' + (err?.message || 'Failed to get response')
     }
   }
   finally {
@@ -686,7 +719,7 @@ async function sendMessage() {
     // Check if agent is still processing queued messages
     if (selectedConvoId.value) {
       try {
-        const status = await $fetch<any>(`/api/conversations/${selectedConvoId.value}/queue`)
+        const status = await $fetch<ConversationQueueStatus>(`/api/conversations/${selectedConvoId.value}/queue`)
         agentBusy.value = status.busy
       }
       catch { agentBusy.value = false }
@@ -779,7 +812,7 @@ async function uploadAttachments(agentId: number): Promise<string[]> {
 
 function exportConversation() {
   if (!displayMessages.value.length) return
-  const convo = conversations.value?.find((c: any) => c.id === selectedConvoId.value)
+  const convo = conversations.value?.find(c => c.id === selectedConvoId.value)
   const title = convo?.preview || 'conversation'
   const lines: string[] = [`# ${title}\n`]
   for (const msg of displayMessages.value) {
@@ -860,14 +893,15 @@ function exportConversation() {
         </template>
       </div>
       <div class="flex-1 overflow-y-auto">
-        <div
+        <button
           v-for="convo in sortedConversations"
           :key="convo.id"
+          type="button"
           :class="[
             selectMode && selectedIds.has(convo.id) ? 'bg-muted text-fg-strong'
             : selectedConvoId === convo.id ? 'bg-muted text-fg-strong' : 'text-fg-muted',
           ]"
-          class="w-full text-left px-3 py-2 text-xs hover:bg-muted transition-colors truncate flex items-center gap-2 cursor-pointer"
+          class="w-full text-left px-3 py-2 text-xs hover:bg-muted transition-colors truncate flex items-center gap-2 cursor-pointer bg-transparent border-0"
           @click="selectMode ? toggleSelect(convo.id) : loadConversation(convo.id)"
         >
           <span
@@ -878,13 +912,17 @@ function exportConversation() {
             <span v-if="selectedIds.has(convo.id)">&#10003;</span>
           </span>
           <span class="truncate">{{ convo.preview || convo.agentName }} &middot; {{ new Date(convo.updatedAt).toLocaleDateString() }}</span>
-        </div>
+        </button>
       </div>
     </div>
 
     <!-- Resize handle -->
+    <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- pointer-only resize affordance with ARIA separator role -->
     <div
       class="w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-muted active:bg-neutral-500 transition-colors"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize conversation sidebar"
       @mousedown="startResize"
     />
 
@@ -892,42 +930,54 @@ function exportConversation() {
     <div class="flex-1 flex flex-col">
       <!-- Agent / Model / Thinking selector -->
       <div class="px-4 py-2.5 border-b border-border flex items-center gap-3 flex-wrap">
-        <label class="text-xs text-fg-muted">Agent:</label>
-        <select
-          v-model="selectedAgentId"
-          class="bg-muted border border-input text-sm text-fg-strong px-2 py-1
-                 focus:outline-hidden focus:border-ring"
+        <label
+          :for="agentSelectId"
+          class="text-xs text-fg-muted flex items-center gap-2"
         >
-          <option
-            v-for="agent in agents"
-            :key="agent.id"
-            :value="agent.id"
-          >
-            {{ agent.name }}
-          </option>
-        </select>
-
-        <label class="text-xs text-fg-muted">Model:</label>
-        <select
-          :value="selectedModelKey"
-          class="bg-muted border border-input text-sm text-fg-strong px-2 py-1
-                 focus:outline-hidden focus:border-ring"
-          @change="onModelChange"
-        >
-          <optgroup
-            v-for="p in providers"
-            :key="p.name"
-            :label="p.name"
+          <span>Agent:</span>
+          <select
+            :id="agentSelectId"
+            v-model="selectedAgentId"
+            class="bg-muted border border-input text-sm text-fg-strong px-2 py-1
+                   focus:outline-hidden focus:border-ring"
           >
             <option
-              v-for="m in p.models"
-              :key="`${p.name}::${m.id}`"
-              :value="`${p.name}::${m.id}`"
+              v-for="agent in agents"
+              :key="agent.id"
+              :value="agent.id"
             >
-              {{ m.name || m.id }}
+              {{ agent.name }}
             </option>
-          </optgroup>
-        </select>
+          </select>
+        </label>
+
+        <label
+          :for="modelSelectId"
+          class="text-xs text-fg-muted flex items-center gap-2"
+        >
+          <span>Model:</span>
+          <select
+            :id="modelSelectId"
+            :value="selectedModelKey"
+            class="bg-muted border border-input text-sm text-fg-strong px-2 py-1
+                   focus:outline-hidden focus:border-ring"
+            @change="onModelChange"
+          >
+            <optgroup
+              v-for="p in providers"
+              :key="p.name"
+              :label="p.name"
+            >
+              <option
+                v-for="m in p.models"
+                :key="`${p.name}::${m.id}`"
+                :value="`${p.name}::${m.id}`"
+              >
+                {{ m.name || m.id }}
+              </option>
+            </optgroup>
+          </select>
+        </label>
 
         <!--
           Thinking-level selector. Options come from the selected model's
@@ -943,22 +993,28 @@ function exportConversation() {
           switching back on snaps to a meaningful choice rather than a blank.
         -->
         <template v-if="thinkingSupported && thinkingLevels.length">
-          <label class="text-xs text-fg-muted">Thinking:</label>
-          <select
-            :value="selectedAgent?.thinkingMode || lastThinkingLevel"
-            :disabled="!thinkingActive"
-            class="bg-muted border border-input text-sm text-fg-strong px-2 py-1
-                   focus:outline-hidden focus:border-ring disabled:opacity-50 disabled:cursor-not-allowed"
-            @change="onThinkingModeChange"
+          <label
+            :for="thinkingSelectId"
+            class="text-xs text-fg-muted flex items-center gap-2"
           >
-            <option
-              v-for="level in thinkingLevels"
-              :key="level"
-              :value="level"
+            <span>Thinking:</span>
+            <select
+              :id="thinkingSelectId"
+              :value="selectedAgent?.thinkingMode || lastThinkingLevel"
+              :disabled="!thinkingActive"
+              class="bg-muted border border-input text-sm text-fg-strong px-2 py-1
+                     focus:outline-hidden focus:border-ring disabled:opacity-50 disabled:cursor-not-allowed"
+              @change="onThinkingModeChange"
             >
-              {{ level.charAt(0).toUpperCase() + level.slice(1) }}
-            </option>
-          </select>
+              <option
+                v-for="level in thinkingLevels"
+                :key="level"
+                :value="level"
+              >
+                {{ level.charAt(0).toUpperCase() + level.slice(1) }}
+              </option>
+            </select>
+          </label>
         </template>
 
         <span
@@ -1108,11 +1164,13 @@ function exportConversation() {
                 </div>
               </div>
               <!-- Response content -->
+              <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify (see renderMarkdown above) before returning. -->
               <div
                 v-if="msg.content"
                 class="prose-chat bg-muted border border-input rounded-2xl rounded-tl-sm text-fg-primary px-4 py-2.5 text-sm overflow-x-auto break-words"
                 v-html="renderMarkdown(msg.content, selectedAgentId)"
               />
+              <!-- eslint-enable vue/no-v-html -->
               <div
                 v-else-if="!msg.reasoning"
                 class="bg-muted border border-input rounded-2xl rounded-tl-sm text-fg-muted px-4 py-2.5 text-sm italic"
@@ -1440,6 +1498,7 @@ function exportConversation() {
             placeholder="Type a message..."
             :disabled="streaming"
             rows="1"
+            aria-label="Message input"
             class="w-full px-4 pt-3 pb-2 bg-transparent text-sm text-fg-strong
                    placeholder-fg-muted focus:outline-hidden resize-none overflow-hidden"
             @keydown.enter.exact.prevent="sendMessage()"
@@ -1449,6 +1508,7 @@ function exportConversation() {
             ref="fileInput"
             type="file"
             multiple
+            aria-label="Upload files"
             class="hidden"
             @change="handleFileUpload"
           >
@@ -1649,7 +1709,7 @@ function exportConversation() {
  * The outer `.prose-chat` wrapper already uses Tailwind `dark:` utilities for
  * the surface bg/border/text — these rules only target nested markdown output
  * that the Vue template can't reach directly. */
-.prose-chat { overflow-wrap: break-word; word-break: break-word; }
+.prose-chat { overflow-wrap: anywhere; }
 .prose-chat p { margin: 0.5em 0; }
 .prose-chat p:first-child { margin-top: 0; }
 .prose-chat p:last-child { margin-bottom: 0; }

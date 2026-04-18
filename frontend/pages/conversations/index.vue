@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Agent, Conversation, Message } from '~/types/api'
 import type { Filter } from '~/components/FilterBar.vue'
-import { h, type VNode } from 'vue'
+import { h } from 'vue'
 import type { ColumnDef } from '@tanstack/vue-table'
 
 const { confirm } = useConfirm()
@@ -103,7 +103,8 @@ const someSelected = computed(() => selectedIds.value.size > 0 && !allSelected.v
 
 function toggleSelection(id: number) {
   const next = new Set(selectedIds.value)
-  if (next.has(id)) next.delete(id); else next.add(id)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
   selectedIds.value = next
 }
 
@@ -186,7 +187,7 @@ function exportConversation() {
     '',
   ].join('\n')
 
-  const body = messages.value.map((m: any) => {
+  const body = messages.value.map((m) => {
     const ts = new Date(m.createdAt).toLocaleString()
     return `## ${m.role} — ${ts}\n\n${m.content || '(tool call)'}\n`
   }).join('\n')
@@ -203,7 +204,7 @@ function exportConversation() {
 }
 
 // ── DataTable column definitions ────────────────────────────────────────────
-const columns: ColumnDef<Conversation, any>[] = [
+const columns: ColumnDef<Conversation, unknown>[] = [
   {
     id: 'select',
     header: () => h('input', {

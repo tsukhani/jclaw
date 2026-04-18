@@ -28,7 +28,7 @@ const PALETTE = [
   'hsl(215 20% 65%)', // slate
 ]
 function colorForIndex(i: number): string {
-  return PALETTE[((i % PALETTE.length) + PALETTE.length) % PALETTE.length]
+  return PALETTE[((i % PALETTE.length) + PALETTE.length) % PALETTE.length]!
 }
 function colorFor(key: string): string {
   return colorForIndex(props.series.findIndex(s => s.key === key))
@@ -114,13 +114,13 @@ interface PercentileMarker {
  */
 function catmullRomPath(pts: Array<{ x: number, y: number }>): string {
   if (pts.length === 0) return ''
-  if (pts.length === 1) return `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`
-  let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`
+  if (pts.length === 1) return `M${pts[0]!.x.toFixed(1)},${pts[0]!.y.toFixed(1)}`
+  let d = `M${pts[0]!.x.toFixed(1)},${pts[0]!.y.toFixed(1)}`
   for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[Math.max(0, i - 1)]
-    const p1 = pts[i]
-    const p2 = pts[i + 1]
-    const p3 = pts[Math.min(pts.length - 1, i + 2)]
+    const p0 = pts[Math.max(0, i - 1)]!
+    const p1 = pts[i]!
+    const p2 = pts[i + 1]!
+    const p3 = pts[Math.min(pts.length - 1, i + 2)]!
     const cp1x = p1.x + (p2.x - p0.x) / 6
     const cp1y = p1.y + (p2.y - p0.y) / 6
     const cp2x = p2.x - (p3.x - p1.x) / 6
@@ -191,12 +191,12 @@ const plot = computed(() => {
       row = 0
     }
     else {
-      const distance = m.x - percentileBase[i - 1].x
+      const distance = m.x - percentileBase[i - 1]!.x
       row = distance < LABEL_OVERLAP_THRESHOLD
         ? Math.min(row + 1, ROW_OFFSETS.length - 1)
         : 0
     }
-    const offset = ROW_OFFSETS[row]
+    const offset = ROW_OFFSETS[row]!
     return {
       ...m,
       nameY: PAD_T + offset.nameDY,
@@ -213,7 +213,7 @@ const plot = computed(() => {
   const raw = (selected.histogram.buckets ?? []).filter(b => b.le_ms > 0)
   const withLow = raw.map((b, i) => ({
     ...b,
-    lo_ms: i > 0 ? raw[i - 1].le_ms : 0,
+    lo_ms: i > 0 ? raw[i - 1]!.le_ms : 0,
   }))
   const relevant = withLow.filter(b => b.le_ms >= min_ms && b.lo_ms <= max_ms)
 
@@ -244,9 +244,9 @@ const plot = computed(() => {
   // outer bar edges so the density curve reads as a bounded distribution.
   const curvePath = bars.length >= 1
     ? catmullRomPath([
-        { x: bars[0].x1, y: baseline },
+        { x: bars[0]!.x1, y: baseline },
         ...bars.map(b => ({ x: (b.x1 + b.x2) / 2, y: b.y })),
-        { x: bars[bars.length - 1].x2, y: baseline },
+        { x: bars[bars.length - 1]!.x2, y: baseline },
       ])
     : ''
 
@@ -414,14 +414,14 @@ const plot = computed(() => {
       <g data-testid="bar-counts">
         <text
           v-if="hoveredBarIdx !== null && plot.bars[hoveredBarIdx]"
-          :x="plot.bars[hoveredBarIdx].labelX"
-          :y="Math.max(PAD_T + 10, plot.bars[hoveredBarIdx].y - 4)"
+          :x="plot.bars[hoveredBarIdx]!.labelX"
+          :y="Math.max(PAD_T + 10, plot.bars[hoveredBarIdx]!.y - 4)"
           fill="var(--color-fg-strong)"
           font-size="10"
           font-family="ui-monospace, SFMono-Regular, monospace"
           text-anchor="middle"
           font-weight="600"
-        >{{ plot.bars[hoveredBarIdx].count }}</text>
+        >{{ plot.bars[hoveredBarIdx]!.count }}</text>
       </g>
 
       <!-- Percentile markers — always visible since only one series is in view.
@@ -482,6 +482,7 @@ const plot = computed(() => {
            sit above bars/curve/markers and always receive pointer events, even
            over zero-count buckets where no visible bar exists. -->
       <g data-testid="bar-hit-targets">
+        <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions, vuejs-accessibility/mouse-events-have-key-events -- SVG chart hit targets for pointer-only tooltip; chart is decorative (stats visible below in dl) -->
         <rect
           v-for="(b, bi) in plot.bars"
           :key="`hit-${bi}`"

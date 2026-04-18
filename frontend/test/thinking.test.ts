@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { thinkingHeaderLabel, initCollapsedState } from '~/utils/thinking'
+import { thinkingHeaderLabel, initCollapsedState, type ThinkingMessage } from '~/utils/thinking'
 
 describe('thinkingHeaderLabel', () => {
   it('formats persisted backend duration to two decimals', () => {
@@ -61,7 +61,7 @@ describe('thinkingHeaderLabel', () => {
   })
 
   it('flips to "Thought for …" once _thinkingInProgress flips to false', () => {
-    const msg: any = {
+    const msg: ThinkingMessage = {
       _thinkingInProgress: true,
       _thinkingDurationMs: 9780,
     }
@@ -72,41 +72,46 @@ describe('thinkingHeaderLabel', () => {
 })
 
 describe('initCollapsedState', () => {
+  // ThinkingMessage doesn't declare role/content (they live on a different
+  // interface); include them via intersection so these fixtures match the
+  // actual chat-message shape the helper is wired against.
+  type TestMsg = ThinkingMessage & { role?: string, content?: string }
+
   it('collapses messages carrying persisted reasoning duration', () => {
-    const msgs: any[] = [
+    const msgs: TestMsg[] = [
       { role: 'user', content: 'Why is the sky blue?' },
       { role: 'assistant', reasoning: 'Rayleigh scattering...', usage: { reasoningDurationMs: 16780 } },
     ]
     initCollapsedState(msgs)
-    expect(msgs[0].thinkingCollapsed).toBeUndefined()
-    expect(msgs[1].thinkingCollapsed).toBe(true)
+    expect(msgs[0]!.thinkingCollapsed).toBeUndefined()
+    expect(msgs[1]!.thinkingCollapsed).toBe(true)
   })
 
   it('collapses pre-feature messages that carry only reasoning text', () => {
-    const msgs: any[] = [
+    const msgs: TestMsg[] = [
       { role: 'assistant', reasoning: 'some text' },
     ]
     initCollapsedState(msgs)
-    expect(msgs[0].thinkingCollapsed).toBe(true)
+    expect(msgs[0]!.thinkingCollapsed).toBe(true)
   })
 
   it('leaves non-reasoning messages untouched', () => {
-    const msgs: any[] = [
+    const msgs: TestMsg[] = [
       { role: 'user', content: 'Hello' },
       { role: 'assistant', content: 'Hi there' },
     ]
     initCollapsedState(msgs)
-    expect(msgs[0].thinkingCollapsed).toBeUndefined()
-    expect(msgs[1].thinkingCollapsed).toBeUndefined()
+    expect(msgs[0]!.thinkingCollapsed).toBeUndefined()
+    expect(msgs[1]!.thinkingCollapsed).toBeUndefined()
   })
 
   it('is idempotent — calling twice does not re-open already-collapsed bubbles', () => {
-    const msgs: any[] = [
+    const msgs: TestMsg[] = [
       { role: 'assistant', reasoning: 'text', usage: { reasoningDurationMs: 500 }, thinkingCollapsed: false },
     ]
     initCollapsedState(msgs)
-    expect(msgs[0].thinkingCollapsed).toBe(true)
+    expect(msgs[0]!.thinkingCollapsed).toBe(true)
     initCollapsedState(msgs)
-    expect(msgs[0].thinkingCollapsed).toBe(true)
+    expect(msgs[0]!.thinkingCollapsed).toBe(true)
   })
 })

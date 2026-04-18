@@ -18,7 +18,7 @@ import {
 } from '~/components/ui/table'
 
 const props = withDefaults(defineProps<{
-  columns: ColumnDef<TData, any>[]
+  columns: ColumnDef<TData, unknown>[]
   data: TData[]
   loading?: boolean
   emptyMessage?: string
@@ -98,6 +98,7 @@ function sortIcon(sorted: false | 'asc' | 'desc') {
 </script>
 
 <template>
+  <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- focus-trap wrapper around semantic <Table>; tabindex + keydown provides arrow-key row navigation -->
   <div
     ref="tableRef"
     tabindex="0"

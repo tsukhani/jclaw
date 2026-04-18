@@ -26,10 +26,10 @@ export interface LatencyHistogram {
   max?: number
 }
 
-export interface LatencyRow {
+export interface LatencyRow<H extends { count: number } = LatencyHistogram> {
   key: string
   label: string
-  h: LatencyHistogram
+  h: H
   /** True when this row is a `prologue_*` child decomposition. Drives indentation. */
   isChild: boolean
 }
@@ -84,7 +84,7 @@ function labelForChild(key: string): string {
   return PROLOGUE_CHILD_LABELS[key] ?? key.replace(/^prologue_/, '')
 }
 
-function hasSamples(h: LatencyHistogram | undefined | null): h is LatencyHistogram {
+function hasSamples<H extends { count: number }>(h: H | undefined | null): h is H {
   return !!h && typeof h.count === 'number' && h.count > 0
 }
 
@@ -93,10 +93,10 @@ function hasSamples(h: LatencyHistogram | undefined | null): h is LatencyHistogr
  * immediately after the `prologue` row (if present), in PROLOGUE_CHILDREN_ORDER
  * followed by any unknown prologue_* keys in encounter order.
  */
-export function buildLatencyRows(
-  metrics: Record<string, LatencyHistogram | undefined>,
-): LatencyRow[] {
-  const rows: LatencyRow[] = []
+export function buildLatencyRows<H extends { count: number } = LatencyHistogram>(
+  metrics: Record<string, H | undefined>,
+): LatencyRow<H>[] {
+  const rows: LatencyRow<H>[] = []
   const seen = new Set<string>()
 
   const emitChild = (key: string) => {
@@ -110,7 +110,7 @@ export function buildLatencyRows(
     const h = metrics[key]
     const parentEmitted = hasSamples(h)
     if (parentEmitted) {
-      rows.push({ key, label: TOP_LEVEL_LABELS[key] ?? key, h, isChild: false })
+      rows.push({ key, label: TOP_LEVEL_LABELS[key] ?? key, h: h as H, isChild: false })
       seen.add(key)
     }
     // Nest prologue children immediately under the parent — only when the
@@ -143,10 +143,10 @@ export function buildLatencyRows(
  * Build the series list the overlay chart consumes — top-level rows only.
  * Suppresses `prologue_*` children to avoid double-plotting the prologue sum.
  */
-export function buildChartSeries(
-  metrics: Record<string, LatencyHistogram | undefined>,
-): Array<{ key: string, label: string, histogram: LatencyHistogram }> {
-  return buildLatencyRows(metrics)
+export function buildChartSeries<H extends { count: number } = LatencyHistogram>(
+  metrics: Record<string, H | undefined>,
+): Array<{ key: string, label: string, histogram: H }> {
+  return buildLatencyRows<H>(metrics)
     .filter(r => !r.isChild)
     .map(r => ({ key: r.key, label: r.label, histogram: r.h }))
 }

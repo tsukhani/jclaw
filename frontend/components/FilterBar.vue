@@ -165,6 +165,7 @@ function handleInputKeydown(e: KeyboardEvent) {
         v-model="queryInput"
         type="text"
         :placeholder="filters.length ? 'Add filter...' : placeholder"
+        aria-label="Filter query"
         class="flex-1 min-w-32 bg-transparent text-sm text-fg-strong placeholder-fg-muted focus:outline-hidden"
         @keydown="handleInputKeydown"
       >
@@ -226,6 +227,7 @@ function handleInputKeydown(e: KeyboardEvent) {
               v-model="saveName"
               type="text"
               placeholder="View name..."
+              aria-label="Saved view name"
               class="flex-1 px-2 py-1 bg-muted border border-border rounded-sm text-xs text-fg-strong placeholder-fg-muted focus:outline-hidden focus:border-ring"
               @keydown.enter="saveCurrentView"
               @keydown.escape="showSaveInput = false"

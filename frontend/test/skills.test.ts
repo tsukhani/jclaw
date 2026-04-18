@@ -5,8 +5,11 @@ import Skills from '~/pages/skills.vue'
 // Stub EventSource since happy-dom doesn't provide it and
 // the skills page uses useEventBus which creates an EventSource.
 if (typeof globalThis.EventSource === 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: test mock patching a browser global with a minimal stand-in; narrowing adds no value here.
   ;(globalThis as any).EventSource = class MockEventSource {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: mirrors the DOM EventSource handler signature (MessageEvent/Event) without importing the DOM types into this test.
     onmessage: ((e: any) => void) | null = null
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: same — onerror takes Event in the real API, but tests only ever call it with synthetic stubs.
     onerror: ((e: any) => void) | null = null
     close() {}
   }

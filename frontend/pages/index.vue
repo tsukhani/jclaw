@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Agent, LatencyMetrics, LogEvent } from '~/types/api'
+import type { Agent, LatencyHistogram, LatencyMetrics, LogEvent } from '~/types/api'
 
 // --- Latency metrics (chat performance panel) ---
 // Row assembly (top-level order, prologue_* child nesting, chart-vs-table
@@ -34,8 +34,8 @@ const { data: latency, refresh: refreshLatency } = useFetch<LatencyMetrics>(
   { default: () => ({}) },
 )
 
-const latencyRows = computed(() => buildLatencyRows((latency.value ?? {}) as any))
-const latencyChartSeries = computed(() => buildChartSeries((latency.value ?? {}) as any))
+const latencyRows = computed(() => buildLatencyRows<LatencyHistogram>((latency.value ?? {}) as LatencyMetrics))
+const latencyChartSeries = computed(() => buildChartSeries<LatencyHistogram>((latency.value ?? {}) as LatencyMetrics))
 
 const hasLatencyData = computed(() => latencyRows.value.length > 0)
 

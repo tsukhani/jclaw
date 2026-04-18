@@ -232,14 +232,14 @@ describe('LatencyOverlayChart — chart rendering', () => {
     const hitTargets = wrapper.findAll('[data-testid="bar-hit-targets"] rect')
     expect(hitTargets.length).toBeGreaterThan(0)
 
-    await hitTargets[0].trigger('mouseenter')
+    await hitTargets[0]!.trigger('mouseenter')
 
     const countTexts = wrapper.findAll('[data-testid="bar-counts"] text')
     expect(countTexts).toHaveLength(1)
     // Should be one of the bucket counts from the fixture (1, 2, or 3).
-    expect(Number(countTexts[0].text())).toBeGreaterThan(0)
+    expect(Number(countTexts[0]!.text())).toBeGreaterThan(0)
 
-    await hitTargets[0].trigger('mouseleave')
+    await hitTargets[0]!.trigger('mouseleave')
     expect(wrapper.findAll('[data-testid="bar-counts"] text')).toHaveLength(0)
   })
 
@@ -288,8 +288,8 @@ describe('LatencyOverlayChart — chart rendering', () => {
     // Hover the first hit target; the revealed count should be one of the
     // retained bucket counts (60 or 40), never a number derived from le/2.
     const hitTargets = wrapper.findAll('[data-testid="bar-hit-targets"] rect')
-    await hitTargets[0].trigger('mouseenter')
-    const countText = wrapper.findAll('[data-testid="bar-counts"] text')[0].text()
+    await hitTargets[0]!.trigger('mouseenter')
+    const countText = wrapper.findAll('[data-testid="bar-counts"] text')[0]!.text()
     expect([60, 40]).toContain(Number(countText))
   })
 })

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { Task } from '~/types/api'
+
 const statusFilter = ref('')
 const typeFilter = ref('')
 
@@ -10,7 +12,7 @@ const url = computed(() => {
   return `/api/tasks?${params}`
 })
 
-const { data: tasks, refresh } = await useFetch<any[]>(url)
+const { data: tasks, refresh } = await useFetch<Task[]>(url)
 const { mutate } = useApiMutation()
 
 async function cancelTask(id: number) {
@@ -30,6 +32,10 @@ const statusColors: Record<string, string> = {
   FAILED: 'text-red-400',
   CANCELLED: 'text-neutral-600',
 }
+
+// A11y: stable ids for filter selects
+const statusSelectId = useId()
+const typeSelectId = useId()
 </script>
 
 <template>
@@ -40,36 +46,44 @@ const statusColors: Record<string, string> = {
 
     <!-- Filters -->
     <div class="flex gap-3 mb-4">
-      <select
-        v-model="statusFilter"
-        class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
-      >
-        <option value="">
-          All statuses
-        </option>
-        <option
-          v-for="s in ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED']"
-          :key="s"
-          :value="s"
+      <label :for="statusSelectId">
+        <span class="sr-only">Status filter</span>
+        <select
+          :id="statusSelectId"
+          v-model="statusFilter"
+          class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
         >
-          {{ s }}
-        </option>
-      </select>
-      <select
-        v-model="typeFilter"
-        class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
-      >
-        <option value="">
-          All types
-        </option>
-        <option
-          v-for="t in ['IMMEDIATE', 'SCHEDULED', 'CRON']"
-          :key="t"
-          :value="t"
+          <option value="">
+            All statuses
+          </option>
+          <option
+            v-for="s in ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED']"
+            :key="s"
+            :value="s"
+          >
+            {{ s }}
+          </option>
+        </select>
+      </label>
+      <label :for="typeSelectId">
+        <span class="sr-only">Type filter</span>
+        <select
+          :id="typeSelectId"
+          v-model="typeFilter"
+          class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
         >
-          {{ t }}
-        </option>
-      </select>
+          <option value="">
+            All types
+          </option>
+          <option
+            v-for="t in ['IMMEDIATE', 'SCHEDULED', 'CRON']"
+            :key="t"
+            :value="t"
+          >
+            {{ t }}
+          </option>
+        </select>
+      </label>
     </div>
 
     <div class="bg-surface-elevated border border-border">

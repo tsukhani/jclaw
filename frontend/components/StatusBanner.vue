@@ -17,8 +17,7 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{
-  (e: 'action'): void
-  (e: 'dismiss'): void
+  (e: 'action' | 'dismiss'): void
 }>()
 
 const dismissed = ref(false)

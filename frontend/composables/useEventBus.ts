@@ -34,7 +34,9 @@ function connect() {
       const typeHandlers = handlers.get(event.type)
       if (typeHandlers) {
         for (const handler of typeHandlers) {
-          try { handler(event.data) }
+          try {
+            handler(event.data)
+          }
           catch { /* ignore handler errors */ }
         }
       }

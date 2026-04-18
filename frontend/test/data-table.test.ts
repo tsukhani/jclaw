@@ -1,6 +1,5 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
-import { h } from 'vue'
 import type { ColumnDef } from '@tanstack/vue-table'
 import DataTable from '~/components/DataTable.vue'
 
@@ -10,7 +9,7 @@ interface TestRow {
   status: string
 }
 
-const testColumns: ColumnDef<TestRow, any>[] = [
+const testColumns: ColumnDef<TestRow, unknown>[] = [
   { accessorKey: 'name', header: 'Name' },
   { accessorKey: 'status', header: 'Status' },
 ]
@@ -24,7 +23,7 @@ const testData: TestRow[] = [
 describe('DataTable', () => {
   it('renders table headers', async () => {
     const component = await mountSuspended(DataTable, {
-      props: { columns: testColumns, data: testData },
+      props: { columns: testColumns as ColumnDef<unknown, unknown>[], data: testData },
     })
     expect(component.text()).toContain('Name')
     expect(component.text()).toContain('Status')
@@ -32,7 +31,7 @@ describe('DataTable', () => {
 
   it('renders data rows', async () => {
     const component = await mountSuspended(DataTable, {
-      props: { columns: testColumns, data: testData },
+      props: { columns: testColumns as ColumnDef<unknown, unknown>[], data: testData },
     })
     expect(component.text()).toContain('Alpha')
     expect(component.text()).toContain('Beta')
@@ -41,21 +40,21 @@ describe('DataTable', () => {
 
   it('shows empty message when no data', async () => {
     const component = await mountSuspended(DataTable, {
-      props: { columns: testColumns, data: [], emptyMessage: 'Nothing here' },
+      props: { columns: testColumns as ColumnDef<unknown, unknown>[], data: [] as TestRow[], emptyMessage: 'Nothing here' },
     })
     expect(component.text()).toContain('Nothing here')
   })
 
   it('shows empty action button when provided', async () => {
     const component = await mountSuspended(DataTable, {
-      props: { columns: testColumns, data: [], emptyMessage: 'Empty', emptyAction: 'Create one' },
+      props: { columns: testColumns as ColumnDef<unknown, unknown>[], data: [] as TestRow[], emptyMessage: 'Empty', emptyAction: 'Create one' },
     })
     expect(component.text()).toContain('Create one')
   })
 
   it('shows skeleton rows when loading', async () => {
     const component = await mountSuspended(DataTable, {
-      props: { columns: testColumns, data: [], loading: true },
+      props: { columns: testColumns as ColumnDef<unknown, unknown>[], data: [] as TestRow[], loading: true },
     })
     const skeletons = component.findAll('.animate-pulse')
     expect(skeletons.length).toBe(10) // 5 rows × 2 columns
@@ -63,22 +62,22 @@ describe('DataTable', () => {
 
   it('emits row-click when row is clicked', async () => {
     const component = await mountSuspended(DataTable, {
-      props: { columns: testColumns, data: testData },
+      props: { columns: testColumns as ColumnDef<unknown, unknown>[], data: testData },
     })
     const rows = component.findAll('tbody tr')
-    await rows[0].trigger('click')
+    await rows[0]!.trigger('click')
     const emitted = component.emitted('row-click')
     expect(emitted).toBeTruthy()
-    expect(emitted![0][0]).toEqual(testData[0])
+    expect(emitted![0]![0]).toEqual(testData[0])
   })
 
   it('renders sort indicators on sortable columns', async () => {
     const component = await mountSuspended(DataTable, {
-      props: { columns: testColumns, data: testData },
+      props: { columns: testColumns as ColumnDef<unknown, unknown>[], data: testData },
     })
     // Click the Name header to sort
     const headers = component.findAll('th')
-    await headers[0].trigger('click')
+    await headers[0]!.trigger('click')
     // Should show an arrow indicator
     expect(component.text()).toMatch(/[↑↓]/)
   })

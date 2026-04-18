@@ -43,23 +43,25 @@ export function useProviders(configData: Ref<ConfigData | null>) {
 
     for (const e of entries) {
       if (!e.key.startsWith('provider.')) continue
-      const name = e.key.split('.')[1]
+      const name = e.key.split('.')[1]!
       if (!providerMap.has(name)) providerMap.set(name, { name, models: [] })
     }
 
     for (const e of entries) {
       if (e.key.endsWith('.apiKey') && e.key.startsWith('provider.')) {
-        const name = e.key.split('.')[1]
+        const name = e.key.split('.')[1]!
         if (!e.value || e.value === '(empty)') providerMap.delete(name)
       }
     }
 
     for (const e of entries) {
       if (e.key.endsWith('.models') && e.key.startsWith('provider.')) {
-        const name = e.key.split('.')[1]
+        const name = e.key.split('.')[1]!
         const provider = providerMap.get(name)
         if (provider) {
-          try { provider.models = JSON.parse(e.value) }
+          try {
+            provider.models = JSON.parse(e.value)
+          }
           catch { provider.models = [] }
         }
       }

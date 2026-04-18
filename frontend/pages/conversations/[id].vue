@@ -88,7 +88,7 @@ function exportConversation() {
     '',
   ].join('\n')
 
-  const body = messages.value.map((m: any) => {
+  const body = messages.value.map((m) => {
     const ts = new Date(m.createdAt).toLocaleString()
     return `## ${m.role} — ${ts}\n\n${m.content || '(tool call)'}\n`
   }).join('\n')

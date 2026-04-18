@@ -22,7 +22,9 @@ export function useTheme() {
 
     // Listen for system theme changes when in system mode
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const handler = () => { if (themeMode.value === 'system') applyTheme('system') }
+    const handler = () => {
+      if (themeMode.value === 'system') applyTheme('system')
+    }
     mq.addEventListener('change', handler)
     cleanup = () => mq.removeEventListener('change', handler)
   })

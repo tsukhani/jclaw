@@ -42,6 +42,29 @@ export default {
     'selector-pseudo-class-no-unknown': [true, {
       ignorePseudoClasses: ['deep', 'slotted', 'global'],
     }],
+    // Compact one-liner rules (e.g. `.x { color: red; background: blue; }`)
+    // are an intentional style choice in the prose-chat palette — splitting
+    // them adds vertical bulk without improving scanability.
+    'declaration-block-single-line-max-declarations': null,
+    // `.foo { structure } … .foo { palette }` is a deliberate pattern: layout
+    // rules are declared once, then light/dark palette overrides re-open the
+    // selector with color-only declarations. Flagging this as "duplicate"
+    // would force consolidation that obscures intent.
+    'no-duplicate-selectors': null,
+    // Cascade order in prose-chat is intentional; the base selector appears
+    // after more-specific ones because later rules only override color, never
+    // properties the specific selector already set. Treat this as a case-by-
+    // case review concern, not a blocker.
+    'no-descending-specificity': null,
+    // False-positive on Vue inline `style="…"` attributes — postcss-html
+    // parses them as declarations adjacent to nested sibling elements and
+    // flags the position. Nothing to fix in real CSS terms.
+    'no-invalid-position-declaration': null,
+    // Tailwind v4's `@tailwindcss/vite` plugin intercepts `@import "tailwindcss"`
+    // and only in bare-string form. `--fix` rewriting it to `@import url(...)`
+    // makes the plugin skip the file and no utility classes are generated,
+    // silently breaking the entire site's styling. Force bare-string form.
+    'import-notation': ['string'],
   },
   overrides: [
     {

@@ -1,6 +1,15 @@
 <script setup lang="ts">
-import type { Agent, ConfigResponse } from '~/types/api'
-import { effectiveThinkingLevels } from '~/composables/useProviders'
+import type {
+  Agent,
+  AgentSkill,
+  AgentTool,
+  ConfigResponse,
+  ConfigValueResponse,
+  EffectiveAllowlist,
+  PromptBreakdown,
+  WorkspaceFileContent,
+} from '~/types/api'
+import { effectiveThinkingLevels, type ProviderModel } from '~/composables/useProviders'
 
 const { confirm } = useConfirm()
 
@@ -15,13 +24,13 @@ const creating = ref(false)
 const workspaceTab = ref('AGENT.md')
 const workspaceContent = ref('')
 const form = ref({ name: '', modelProvider: '', modelId: '', enabled: true, thinkingMode: '' })
-const agentTools = ref<any[]>([])
-const agentSkills = ref<any[]>([])
+const agentTools = ref<AgentTool[]>([])
+const agentSkills = ref<AgentSkill[]>([])
 // Effective shell allowlist for the current agent: global entries + per-skill
 // contributions. Derived server-side so the UI doesn't have to re-compute the
 // join. Populated on agent edit and refreshed whenever skill enable/disable or
 // install actions happen — i.e., any time the union could change.
-const effectiveAllowlist = ref<{ global: string[], bySkill: Record<string, string[]> } | null>(null)
+const effectiveAllowlist = ref<EffectiveAllowlist | null>(null)
 const allowlistExpanded = ref(false)
 
 // Group agentTools by category, in the canonical order from useToolMeta.
@@ -63,21 +72,18 @@ const selectMode = ref(false)
 const selectedIds = ref<Set<number>>(new Set())
 const deletingBulk = ref(false)
 
+// A11y: stable ids for label/control association in the edit form
+const agentNameId = useId()
+const agentProviderId = useId()
+const agentModelId = useId()
+const agentThinkingId = useId()
+const agentQueueModeId = useId()
+const agentWorkspaceTextareaId = useId()
+
 // --- System prompt breakdown dialog state ---
 // Scoped to a single agent: opened from a per-row button on the agent list, so
 // there's no picker — the agent is known at open-time. Closing does not reset
 // `promptBreakdownAgent` so re-opening the same agent's dialog feels instant.
-interface PromptBreakdownEntry { name: string, chars: number, tokens: number }
-interface PromptBreakdown {
-  totalChars: number
-  totalTokenEstimate: number
-  cacheBoundaryMarker: string
-  cacheablePrefixChars: number
-  variableSuffixChars: number
-  sections: PromptBreakdownEntry[]
-  skills: PromptBreakdownEntry[]
-  tools: PromptBreakdownEntry[]
-}
 const promptBreakdownOpen = ref(false)
 const promptBreakdownAgent = ref<Agent | null>(null)
 const promptBreakdownData = ref<PromptBreakdown | null>(null)
@@ -93,8 +99,8 @@ async function openPromptBreakdown(agent: Agent) {
   try {
     promptBreakdownData.value = await $fetch<PromptBreakdown>(`/api/agents/${agent.id}/prompt-breakdown`)
   }
-  catch (e: any) {
-    promptBreakdownError.value = e?.message ?? 'Failed to load prompt breakdown'
+  catch (e: unknown) {
+    promptBreakdownError.value = e instanceof Error ? e.message : 'Failed to load prompt breakdown'
   }
   finally {
     promptBreakdownLoading.value = false
@@ -104,6 +110,17 @@ async function openPromptBreakdown(agent: Agent) {
 function closePromptBreakdown() {
   promptBreakdownOpen.value = false
 }
+
+// Global Escape handler so the modal dismisses via keyboard (the overlay is
+// click-to-dismiss, so this keeps keyboard parity for a11y).
+function handlePromptBreakdownEscape(e: KeyboardEvent) {
+  if (promptBreakdownOpen.value && e.key === 'Escape') {
+    e.preventDefault()
+    closePromptBreakdown()
+  }
+}
+onMounted(() => document.addEventListener('keydown', handlePromptBreakdownEscape))
+onBeforeUnmount(() => document.removeEventListener('keydown', handlePromptBreakdownEscape))
 
 function copyPromptBreakdownJson() {
   if (!promptBreakdownData.value) return
@@ -127,11 +144,12 @@ function percentOfTotal(chars: number, total: number): string {
 // renamed or deleted, always enabled). Splitting it out of the list keeps the
 // Custom Agents section focused on user-created agents and lets the New Agent
 // button sit where it's actually applicable.
-const mainAgent = computed(() => (agents.value ?? []).find((a: any) => a.isMain))
-const customAgents = computed(() => (agents.value ?? []).filter((a: any) => !a.isMain))
+const mainAgent = computed(() => (agents.value ?? []).find(a => a.isMain))
+const customAgents = computed(() => (agents.value ?? []).filter(a => !a.isMain))
 
 // Extract configured providers (those with non-empty API keys)
-const { providers } = useProviders(configData)
+const configDataRef = computed(() => configData.value ?? null)
+const { providers } = useProviders(configDataRef)
 
 // Models for the currently selected provider
 const availableModels = computed(() => {
@@ -140,19 +158,21 @@ const availableModels = computed(() => {
 })
 
 // The currently selected model's full metadata — drives the thinking-level dropdown.
-const selectedModel = computed(() =>
-  availableModels.value.find((m: any) => m.id === form.value.modelId) ?? null,
+const selectedModel = computed<ProviderModel | null>(() =>
+  availableModels.value.find(m => m.id === form.value.modelId) ?? null,
 )
 
 // Thinking levels the selected provider+model pair accepts. Empty when the
 // model doesn't support reasoning — the UI hides the selector in that case.
-const thinkingLevels = computed<string[]>(() => effectiveThinkingLevels(selectedModel.value as any))
+const thinkingLevels = computed<string[]>(() => effectiveThinkingLevels(selectedModel.value))
 
-// Whether the selected provider is configured and the selected model is available
-const providerValid = computed(() => {
+// Whether the selected provider is configured and the selected model is available.
+// Kept with `_` prefix so the unused-vars rule is satisfied while the logic
+// remains available for when the UI re-surfaces provider-mismatch warnings.
+const _providerValid = computed(() => {
   const provider = providers.value.find(p => p.name === form.value.modelProvider)
   if (!provider) return false
-  return !form.value.modelId || provider.models.some((m: any) => m.id === form.value.modelId)
+  return !form.value.modelId || provider.models.some(m => m.id === form.value.modelId)
 })
 
 // Auto-select first provider when creating
@@ -164,7 +184,7 @@ function newAgent() {
   editing.value = null
 }
 
-function editAgent(agent: any) {
+function editAgent(agent: Agent) {
   form.value = {
     name: agent.name,
     modelProvider: agent.modelProvider,
@@ -193,7 +213,7 @@ watch(() => [form.value.modelProvider, form.value.modelId], () => {
 
 async function loadAgentTools(agentId: number) {
   try {
-    agentTools.value = await $fetch<any[]>(`/api/agents/${agentId}/tools`)
+    agentTools.value = await $fetch<AgentTool[]>(`/api/agents/${agentId}/tools`)
   }
   catch {
     agentTools.value = []
@@ -214,30 +234,32 @@ async function toggleTool(toolName: string, enabled: boolean) {
 }
 
 const toggleableAgentTools = computed(() =>
-  agentTools.value.filter((t: any) => !TOOL_META.value[t.name]?.system),
+  agentTools.value.filter(t => !TOOL_META.value[t.name]?.system),
 )
 
 const allAgentToolsEnabled = computed(() =>
-  toggleableAgentTools.value.length > 0 && toggleableAgentTools.value.every((t: any) => t.enabled),
+  toggleableAgentTools.value.length > 0 && toggleableAgentTools.value.every(t => t.enabled),
 )
 
 async function toggleAllAgentTools() {
   const next = !allAgentToolsEnabled.value
-  toggleableAgentTools.value.forEach((t: any) => { t.enabled = next })
-  await Promise.all(toggleableAgentTools.value.map((t: any) => toggleTool(t.name, next)))
+  toggleableAgentTools.value.forEach((t) => {
+    t.enabled = next
+  })
+  await Promise.all(toggleableAgentTools.value.map(t => toggleTool(t.name, next)))
 }
 
 // Returns the tool names that a skill depends on but are currently disabled for this agent.
 // Only flags tools that are registered (present in agentTools) — unknown tools are ignored.
-function skillDisabledTools(skill: any): string[] {
+function skillDisabledTools(skill: AgentSkill): string[] {
   if (!skill.tools?.length) return []
-  const toolMap = new Map(agentTools.value.map((t: any) => [t.name, t.enabled as boolean]))
-  return (skill.tools as string[]).filter(name => toolMap.has(name) && !toolMap.get(name))
+  const toolMap = new Map(agentTools.value.map(t => [t.name, t.enabled]))
+  return skill.tools.filter(name => toolMap.has(name) && !toolMap.get(name))
 }
 
 async function loadAgentSkills(agentId: number) {
   try {
-    agentSkills.value = await $fetch<any[]>(`/api/agents/${agentId}/skills`)
+    agentSkills.value = await $fetch<AgentSkill[]>(`/api/agents/${agentId}/skills`)
   }
   catch {
     agentSkills.value = []
@@ -246,7 +268,7 @@ async function loadAgentSkills(agentId: number) {
 
 async function loadEffectiveAllowlist(agentId: number) {
   try {
-    effectiveAllowlist.value = await $fetch(`/api/agents/${agentId}/shell/effective-allowlist`)
+    effectiveAllowlist.value = await $fetch<EffectiveAllowlist>(`/api/agents/${agentId}/shell/effective-allowlist`)
   }
   catch {
     effectiveAllowlist.value = null
@@ -255,7 +277,7 @@ async function loadEffectiveAllowlist(agentId: number) {
 
 async function loadQueueMode(agentName: string) {
   try {
-    const config = await $fetch<any>(`/api/config/agent.${agentName}.queue.mode`)
+    const config = await $fetch<ConfigValueResponse>(`/api/config/agent.${agentName}.queue.mode`)
     queueMode.value = config.value || 'queue'
   }
   catch {
@@ -278,9 +300,9 @@ async function saveQueueMode() {
 
 async function loadExecConfig(agentName: string) {
   try {
-    const bypass = await $fetch<any>(`/api/config/agent.${agentName}.shell.bypassAllowlist`).catch(() => null)
+    const bypass = await $fetch<ConfigValueResponse>(`/api/config/agent.${agentName}.shell.bypassAllowlist`).catch(() => null)
     execBypassAllowlist.value = bypass?.value === 'true'
-    const globalPaths = await $fetch<any>(`/api/config/agent.${agentName}.shell.allowGlobalPaths`).catch(() => null)
+    const globalPaths = await $fetch<ConfigValueResponse>(`/api/config/agent.${agentName}.shell.allowGlobalPaths`).catch(() => null)
     execAllowGlobalPaths.value = globalPaths?.value === 'true'
   }
   catch {
@@ -322,7 +344,7 @@ async function toggleSkill(skillName: string, enabled: boolean) {
 // When provider changes, reset model to first available and disable if provider invalid
 watch(() => form.value.modelProvider, (newProvider) => {
   const provider = providers.value.find(p => p.name === newProvider)
-  const currentModelValid = provider?.models?.some((m: any) => m.id === form.value.modelId)
+  const currentModelValid = provider?.models?.some(m => m.id === form.value.modelId)
   if (!currentModelValid) {
     form.value.modelId = provider?.models?.[0]?.id ?? ''
   }
@@ -362,7 +384,7 @@ async function saveAgent() {
 // Toggle a custom agent's enabled flag from the list view without opening the
 // edit form. The PUT endpoint accepts partial updates, so we only send the
 // enabled field — other fields fall through to their existing values.
-async function toggleAgentEnabled(agent: any) {
+async function toggleAgentEnabled(agent: Agent) {
   try {
     await $fetch(`/api/agents/${agent.id}`, {
       method: 'PUT',
@@ -387,7 +409,8 @@ function exitSelectMode() {
 
 function toggleSelection(id: number) {
   const next = new Set(selectedIds.value)
-  if (next.has(id)) next.delete(id); else next.add(id)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
   selectedIds.value = next
 }
 
@@ -422,7 +445,7 @@ async function deleteSelected() {
 async function loadWorkspaceFile(agentId: number, filename: string) {
   workspaceTab.value = filename
   try {
-    const data = await $fetch<any>(`/api/agents/${agentId}/workspace/${filename}`)
+    const data = await $fetch<WorkspaceFileContent>(`/api/agents/${agentId}/workspace/${filename}`)
     workspaceContent.value = data.content ?? ''
   }
   catch {
@@ -539,8 +562,12 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
       <div class="bg-surface-elevated border border-border">
         <div
           v-if="mainAgent"
+          role="button"
+          tabindex="0"
           class="px-4 py-3 flex items-center justify-between hover:bg-muted cursor-pointer transition-colors"
           @click="editAgent(mainAgent)"
+          @keydown.enter.prevent="editAgent(mainAgent)"
+          @keydown.space.prevent="editAgent(mainAgent)"
         >
           <div>
             <span class="text-sm text-fg-strong">{{ mainAgent.name }}</span>
@@ -580,14 +607,19 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
         <div
           v-for="agent in customAgents"
           :key="agent.id"
+          role="button"
+          tabindex="0"
           class="px-4 py-3 border-b border-border last:border-b-0 flex items-center justify-between hover:bg-muted cursor-pointer transition-colors"
           @click="selectMode ? toggleSelection(agent.id) : editAgent(agent)"
+          @keydown.enter.prevent="selectMode ? toggleSelection(agent.id) : editAgent(agent)"
+          @keydown.space.prevent="selectMode ? toggleSelection(agent.id) : editAgent(agent)"
         >
           <div class="flex items-center gap-3 min-w-0">
             <input
               v-if="selectMode"
               type="checkbox"
               :checked="selectedIds.has(agent.id)"
+              :aria-label="`Select ${agent.name}`"
               class="accent-red-500 shrink-0"
               @click.stop="toggleSelection(agent.id)"
             >
@@ -652,23 +684,31 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
           {{ creating ? 'New Agent' : 'Edit Agent' }}
         </h2>
         <div class="grid grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs text-neutral-500 mb-1">
+          <label
+            :for="agentNameId"
+            class="block"
+          >
+            <span class="block text-xs text-neutral-500 mb-1">
               Name
               <span
                 v-if="editing?.isMain"
                 class="ml-1 text-fg-muted"
               >(locked)</span>
-            </label>
+            </span>
             <input
+              :id="agentNameId"
               v-model="form.name"
               :disabled="editing?.isMain"
               class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring disabled:opacity-50 disabled:cursor-not-allowed"
             >
-          </div>
-          <div>
-            <label class="block text-xs text-neutral-500 mb-1">Model Provider</label>
+          </label>
+          <label
+            :for="agentProviderId"
+            class="block"
+          >
+            <span class="block text-xs text-neutral-500 mb-1">Model Provider</span>
             <select
+              :id="agentProviderId"
               v-model="form.modelProvider"
               class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring"
             >
@@ -680,10 +720,14 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
                 {{ p.name }}
               </option>
             </select>
-          </div>
-          <div>
-            <label class="block text-xs text-neutral-500 mb-1">Model</label>
+          </label>
+          <label
+            :for="agentModelId"
+            class="block"
+          >
+            <span class="block text-xs text-neutral-500 mb-1">Model</span>
             <select
+              :id="agentModelId"
               v-model="form.modelId"
               class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring"
             >
@@ -695,7 +739,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
                 {{ m.name || m.id }}
               </option>
             </select>
-          </div>
+          </label>
           <!--
             Thinking mode selector. The available options come from the selected
             model's `thinkingLevels` metadata (falling back to low/medium/high for
@@ -703,14 +747,18 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
             models render the selector disabled with "Not supported" so the agent
             form shape stays consistent across rows.
           -->
-          <div>
-            <label
+          <label
+            :for="agentThinkingId"
+            class="block"
+          >
+            <span
               class="block text-xs text-neutral-500 mb-1"
               :class="{ 'opacity-40': !thinkingLevels.length }"
             >
               Thinking
-            </label>
+            </span>
             <select
+              :id="agentThinkingId"
               v-model="form.thinkingMode"
               :disabled="!thinkingLevels.length"
               class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring
@@ -735,7 +783,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
                 </option>
               </template>
             </select>
-          </div>
+          </label>
         </div>
         <div class="flex mt-4">
           <button
@@ -777,21 +825,25 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
             </div>
           </div>
           <div class="flex items-center gap-2">
-            <select
-              v-model="queueMode"
-              class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden focus:border-ring"
-              @change="saveQueueMode"
-            >
-              <option value="queue">
-                Queue (FIFO)
-              </option>
-              <option value="collect">
-                Collect (batch)
-              </option>
-              <option value="interrupt">
-                Interrupt
-              </option>
-            </select>
+            <label :for="agentQueueModeId">
+              <span class="sr-only">Queue mode</span>
+              <select
+                :id="agentQueueModeId"
+                v-model="queueMode"
+                class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden focus:border-ring"
+                @change="saveQueueMode"
+              >
+                <option value="queue">
+                  Queue (FIFO)
+                </option>
+                <option value="collect">
+                  Collect (batch)
+                </option>
+                <option value="interrupt">
+                  Interrupt
+                </option>
+              </select>
+            </label>
           </div>
         </div>
       </div>
@@ -804,7 +856,7 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
         <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span class="text-sm font-medium text-fg-strong">Tools</span>
-            <span class="text-xs text-neutral-500">{{ toggleableAgentTools.filter((t: any) => t.enabled).length }}/{{ toggleableAgentTools.length }} enabled</span>
+            <span class="text-xs text-neutral-500">{{ toggleableAgentTools.filter(t => t.enabled).length }}/{{ toggleableAgentTools.length }} enabled</span>
           </div>
           <button
             v-if="toggleableAgentTools.length"
@@ -1227,12 +1279,16 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
             {{ file }}
           </button>
         </div>
-        <textarea
-          v-model="workspaceContent"
-          rows="16"
-          class="w-full px-4 py-3 bg-transparent text-sm text-fg-primary font-mono
-                 resize-y focus:outline-hidden"
-        />
+        <label :for="agentWorkspaceTextareaId">
+          <span class="sr-only">Workspace file contents</span>
+          <textarea
+            :id="agentWorkspaceTextareaId"
+            v-model="workspaceContent"
+            rows="16"
+            class="w-full px-4 py-3 bg-transparent text-sm text-fg-primary font-mono
+                   resize-y focus:outline-hidden"
+          />
+        </label>
         <div class="px-4 py-2 border-t border-border flex">
           <button
             class="p-1.5 text-emerald-700 dark:text-emerald-400 hover:text-emerald-600 dark:hover:text-emerald-300 transition-colors"
@@ -1261,9 +1317,12 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
     </div>
 
     <!-- System prompt breakdown dialog -->
+    <!-- eslint-disable-next-line vuejs-accessibility/click-events-have-key-events, vuejs-accessibility/no-static-element-interactions -- modal backdrop; Escape is handled globally via document keydown listener -->
     <div
       v-if="promptBreakdownOpen"
       class="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-6 overflow-y-auto"
+      role="dialog"
+      aria-modal="true"
       @click.self="closePromptBreakdown()"
     >
       <div class="bg-surface-elevated border border-border w-full max-w-4xl my-6 text-fg-primary">

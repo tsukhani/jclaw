@@ -43,6 +43,12 @@ const levelColors: Record<string, string> = {
 }
 
 const categories = ['llm', 'channel', 'tool', 'task', 'agent', 'auth', 'system']
+
+// A11y: stable ids for label/control association
+const autoRefreshId = useId()
+const categorySelectId = useId()
+const levelSelectId = useId()
+const searchInputId = useId()
 </script>
 
 <template>
@@ -51,8 +57,12 @@ const categories = ['llm', 'channel', 'tool', 'task', 'agent', 'auth', 'system']
       <h1 class="text-lg font-semibold text-fg-strong">
         Logs
       </h1>
-      <label class="flex items-center gap-1.5 text-xs text-fg-muted">
+      <label
+        :for="autoRefreshId"
+        class="flex items-center gap-1.5 text-xs text-fg-muted"
+      >
         <input
+          :id="autoRefreshId"
           v-model="autoRefresh"
           type="checkbox"
           class="accent-white"
@@ -63,44 +73,59 @@ const categories = ['llm', 'channel', 'tool', 'task', 'agent', 'auth', 'system']
 
     <!-- Filters -->
     <div class="flex gap-3 mb-4">
-      <select
-        v-model="categoryFilter"
-        class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
-      >
-        <option value="">
-          All categories
-        </option>
-        <option
-          v-for="c in categories"
-          :key="c"
-          :value="c"
+      <label :for="categorySelectId">
+        <span class="sr-only">Category filter</span>
+        <select
+          :id="categorySelectId"
+          v-model="categoryFilter"
+          class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
         >
-          {{ c }}
-        </option>
-      </select>
-      <select
-        v-model="levelFilter"
-        class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
+          <option value="">
+            All categories
+          </option>
+          <option
+            v-for="c in categories"
+            :key="c"
+            :value="c"
+          >
+            {{ c }}
+          </option>
+        </select>
+      </label>
+      <label :for="levelSelectId">
+        <span class="sr-only">Level filter</span>
+        <select
+          :id="levelSelectId"
+          v-model="levelFilter"
+          class="bg-muted border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
+        >
+          <option value="">
+            All levels
+          </option>
+          <option value="ERROR">
+            ERROR
+          </option>
+          <option value="WARN">
+            WARN
+          </option>
+          <option value="INFO">
+            INFO
+          </option>
+        </select>
+      </label>
+      <label
+        :for="searchInputId"
+        class="flex-1 max-w-xs"
       >
-        <option value="">
-          All levels
-        </option>
-        <option value="ERROR">
-          ERROR
-        </option>
-        <option value="WARN">
-          WARN
-        </option>
-        <option value="INFO">
-          INFO
-        </option>
-      </select>
-      <input
-        v-model="searchFilter"
-        placeholder="Search messages..."
-        class="flex-1 max-w-xs px-2 py-1 bg-muted border border-input text-sm text-fg-strong
-                    placeholder-fg-muted focus:outline-hidden focus:border-ring transition-colors"
-      >
+        <span class="sr-only">Search log messages</span>
+        <input
+          :id="searchInputId"
+          v-model="searchFilter"
+          placeholder="Search messages..."
+          class="w-full px-2 py-1 bg-muted border border-input text-sm text-fg-strong
+                      placeholder-fg-muted focus:outline-hidden focus:border-ring transition-colors"
+        >
+      </label>
     </div>
 
     <!-- Events -->
@@ -109,31 +134,51 @@ const categories = ['llm', 'channel', 'tool', 'task', 'agent', 'auth', 'system']
         v-if="logs?.events?.length"
         class="divide-y divide-border"
       >
-        <div
+        <template
           v-for="event in logs.events"
           :key="event.id"
-          :class="event.details ? 'cursor-pointer' : ''"
-          class="px-4 py-2 hover:bg-muted transition-colors"
-          @click="event.details ? toggleExpand(event.id) : null"
         >
-          <div class="flex items-start gap-3">
-            <span class="text-xs text-fg-muted shrink-0 w-20 font-mono mt-0.5">
-              {{ new Date(event.timestamp).toLocaleTimeString() }}
-            </span>
-            <span
-              :class="levelColors[event.level]"
-              class="text-[10px] font-mono px-1.5 py-0.5 border shrink-0"
-            >{{ event.level }}</span>
-            <span class="text-xs text-fg-muted shrink-0 w-14 font-mono mt-0.5">{{ event.category }}</span>
-            <span class="text-sm text-fg-primary min-w-0">{{ event.message }}</span>
-          </div>
-          <div
-            v-if="expandedId === event.id && event.details"
-            class="mt-2 ml-[8.5rem] text-xs font-mono text-fg-muted bg-muted p-2 whitespace-pre-wrap"
+          <button
+            v-if="event.details"
+            type="button"
+            class="w-full block text-left px-4 py-2 hover:bg-muted transition-colors cursor-pointer bg-transparent border-0"
+            @click="toggleExpand(event.id)"
           >
-            {{ event.details }}
+            <div class="flex items-start gap-3">
+              <span class="text-xs text-fg-muted shrink-0 w-20 font-mono mt-0.5">
+                {{ new Date(event.timestamp).toLocaleTimeString() }}
+              </span>
+              <span
+                :class="levelColors[event.level]"
+                class="text-[10px] font-mono px-1.5 py-0.5 border shrink-0"
+              >{{ event.level }}</span>
+              <span class="text-xs text-fg-muted shrink-0 w-14 font-mono mt-0.5">{{ event.category }}</span>
+              <span class="text-sm text-fg-primary min-w-0">{{ event.message }}</span>
+            </div>
+            <div
+              v-if="expandedId === event.id"
+              class="mt-2 ml-[8.5rem] text-xs font-mono text-fg-muted bg-muted p-2 whitespace-pre-wrap"
+            >
+              {{ event.details }}
+            </div>
+          </button>
+          <div
+            v-else
+            class="px-4 py-2 hover:bg-muted transition-colors"
+          >
+            <div class="flex items-start gap-3">
+              <span class="text-xs text-fg-muted shrink-0 w-20 font-mono mt-0.5">
+                {{ new Date(event.timestamp).toLocaleTimeString() }}
+              </span>
+              <span
+                :class="levelColors[event.level]"
+                class="text-[10px] font-mono px-1.5 py-0.5 border shrink-0"
+              >{{ event.level }}</span>
+              <span class="text-xs text-fg-muted shrink-0 w-14 font-mono mt-0.5">{{ event.category }}</span>
+              <span class="text-sm text-fg-primary min-w-0">{{ event.message }}</span>
+            </div>
           </div>
-        </div>
+        </template>
       </div>
       <div
         v-else

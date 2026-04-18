@@ -38,7 +38,8 @@ onMounted(() => {
   statusInterval = setInterval(checkStatus, 30_000)
   // userAgentData.platform returns "macOS" (lowercase m); navigator.userAgent
   // contains "Macintosh". Normalize before matching so both paths agree.
-  isMac.value = ((navigator as any).userAgentData?.platform ?? navigator.userAgent)
+  const uaData = (navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData
+  isMac.value = (uaData?.platform ?? navigator.userAgent)
     .toLowerCase().includes('mac')
   document.addEventListener('keydown', handleKeydown)
 })

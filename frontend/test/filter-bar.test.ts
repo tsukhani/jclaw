@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import FilterBar from '~/components/FilterBar.vue'
 
@@ -58,7 +58,7 @@ describe('FilterBar', () => {
     await input.trigger('keydown', { key: 'Enter' })
     const emitted = component.emitted('update:filters')
     expect(emitted).toBeTruthy()
-    expect(emitted![0][0]).toEqual([{ key: 'agent', value: 'main' }])
+    expect(emitted![0]![0]).toEqual([{ key: 'agent', value: 'main' }])
   })
 
   it('treats bare words as name filter', async () => {
@@ -69,7 +69,7 @@ describe('FilterBar', () => {
     await input.setValue('hello')
     await input.trigger('keydown', { key: 'Enter' })
     const emitted = component.emitted('update:filters')
-    expect(emitted![0][0]).toEqual([{ key: 'name', value: 'hello' }])
+    expect(emitted![0]![0]).toEqual([{ key: 'name', value: 'hello' }])
   })
 
   it('removes a chip when × is clicked', async () => {
@@ -82,12 +82,12 @@ describe('FilterBar', () => {
     // Find and click the first × button
     const removeButtons = component.findAll('[aria-label^="Remove filter"]')
     expect(removeButtons.length).toBe(2)
-    await removeButtons[0].trigger('click')
+    await removeButtons[0]!.trigger('click')
     // Should have emitted with only one filter remaining
     const emitted = component.emitted('update:filters')
-    const lastEmit = emitted![emitted!.length - 1][0] as any[]
+    const lastEmit = emitted![emitted!.length - 1]![0] as Array<{ key: string, value: string }>
     expect(lastEmit.length).toBe(1)
-    expect(lastEmit[0].key).toBe('channel')
+    expect(lastEmit[0]!.key).toBe('channel')
   })
 
   it('renders saved views button', async () => {

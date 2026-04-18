@@ -31,7 +31,7 @@ const periods: TimeOfDay[] = ['morning', 'afternoon', 'evening']
 const mascotPeriod = ref<TimeOfDay>(period)
 function cycleMascot() {
   const next = (periods.indexOf(mascotPeriod.value) + 1) % periods.length
-  mascotPeriod.value = periods[next]
+  mascotPeriod.value = periods[next]!
 }
 
 // The login screen is always light, regardless of the OS color scheme or
@@ -54,18 +54,28 @@ async function handleLogin() {
     error.value = 'Invalid username or password'
   }
 }
+
+// A11y: stable ids for label/control association
+const usernameId = useId()
+const passwordId = useId()
 </script>
 
 <template>
   <div class="min-h-screen bg-surface flex items-center justify-center">
     <div class="w-full max-w-sm">
       <div class="mb-4 flex items-center justify-center gap-4">
-        <img
-          :src="mascotSrc[mascotPeriod]"
-          alt="JClaw"
-          class="w-32 h-32 rounded-full shrink-0 cursor-pointer select-none"
+        <button
+          type="button"
+          class="bg-transparent p-0 border-0 cursor-pointer"
+          aria-label="Cycle mascot avatar"
           @click="cycleMascot"
         >
+          <img
+            :src="mascotSrc[mascotPeriod]"
+            alt="JClaw"
+            class="w-32 h-32 rounded-full shrink-0 select-none"
+          >
+        </button>
         <h1 class="text-4xl font-semibold tracking-wider">
           <span class="text-emerald-700 dark:text-emerald-400">J</span><span class="text-red-600 dark:text-red-500">Claw</span>
         </h1>
@@ -78,9 +88,13 @@ async function handleLogin() {
         class="space-y-4"
         @submit.prevent="handleLogin"
       >
-        <div>
-          <label class="block text-xs font-medium text-fg-muted mb-1.5">Username</label>
+        <label
+          :for="usernameId"
+          class="block"
+        >
+          <span class="block text-xs font-medium text-fg-muted mb-1.5">Username</span>
           <input
+            :id="usernameId"
             v-model="username"
             type="text"
             autocomplete="username"
@@ -88,18 +102,22 @@ async function handleLogin() {
                    focus:outline-hidden focus:border-input transition-colors"
             placeholder="admin"
           >
-        </div>
+        </label>
 
-        <div>
-          <label class="block text-xs font-medium text-fg-muted mb-1.5">Password</label>
+        <label
+          :for="passwordId"
+          class="block"
+        >
+          <span class="block text-xs font-medium text-fg-muted mb-1.5">Password</span>
           <input
+            :id="passwordId"
             v-model="password"
             type="password"
             autocomplete="current-password"
             class="w-full px-3 py-2 bg-surface-elevated border border-border text-fg-strong text-sm
                    focus:outline-hidden focus:border-input transition-colors"
           >
-        </div>
+        </label>
 
         <p
           v-if="error"

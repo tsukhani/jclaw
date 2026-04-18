@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ref, type Ref } from 'vue'
 import { useConfirm } from '~/composables/useConfirm'
 import { useProviders, type ConfigData } from '~/composables/useProviders'
@@ -101,8 +101,11 @@ describe('useConfirm', () => {
 // useEventBus is a module-level singleton that connects on first call,
 // so the stub must be installed before any test imports the composable.
 if (typeof globalThis.EventSource === 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: test mock patching a browser global with a minimal stand-in; narrowing adds no value here.
   ;(globalThis as any).EventSource = class MockEventSource {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: mirrors the DOM EventSource handler signature (MessageEvent/Event) without importing the DOM types into this test.
     onmessage: ((e: any) => void) | null = null
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: same — onerror takes Event in the real API, but tests only ever call it with synthetic stubs.
     onerror: ((e: any) => void) | null = null
     close() {}
   }
@@ -196,9 +199,9 @@ describe('useProviders', () => {
 
     const { providers } = useProviders(configData)
     expect(providers.value).toHaveLength(1)
-    expect(providers.value[0].name).toBe('openai')
-    expect(providers.value[0].models).toHaveLength(1)
-    expect(providers.value[0].models[0].id).toBe('gpt-4')
+    expect(providers.value[0]!.name).toBe('openai')
+    expect(providers.value[0]!.models).toHaveLength(1)
+    expect(providers.value[0]!.models[0]!.id).toBe('gpt-4')
   })
 
   it('returns empty array for null config', () => {
@@ -260,7 +263,7 @@ describe('useProviders', () => {
 
     const { providers } = useProviders(configData)
     expect(providers.value).toHaveLength(1)
-    expect(providers.value[0].models).toEqual([])
+    expect(providers.value[0]!.models).toEqual([])
   })
 
   it('detects masked API key (xxxx****) as configured', () => {
@@ -273,7 +276,7 @@ describe('useProviders', () => {
     const { providers } = useProviders(configData)
     // Masked key is non-empty and not "(empty)", so provider should be included
     expect(providers.value).toHaveLength(1)
-    expect(providers.value[0].name).toBe('ollama')
+    expect(providers.value[0]!.name).toBe('ollama')
   })
 
   it('ignores non-provider config entries', () => {
@@ -285,6 +288,6 @@ describe('useProviders', () => {
 
     const { providers } = useProviders(configData)
     expect(providers.value).toHaveLength(1)
-    expect(providers.value[0].name).toBe('openai')
+    expect(providers.value[0]!.name).toBe('openai')
   })
 })

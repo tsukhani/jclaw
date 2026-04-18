@@ -1,4 +1,9 @@
-@import url("tailwindcss");
+/* Tailwind v4 CSS-first entry point. MUST stay in bare-string form —
+   `@tailwindcss/vite` only intercepts `@import "tailwindcss"`. Rewriting to
+   `@import url("tailwindcss")` (what stylelint's default `import-notation`
+   rule prefers) makes the plugin skip the file, so no utility classes are
+   ever generated and the whole site renders unstyled. */
+@import "tailwindcss";
 
 /* Class-based dark mode (preserves v3 darkMode: 'class' behavior).
    The <html> element carries the 'dark' class; useTheme() manages it. */

@@ -49,9 +49,10 @@ function iconFor(file: SkillFile | undefined) {
       :key="(node.path ?? node.name) + (node.isDir ? '/' : '')"
     >
       <!-- Directory row -->
-      <div
+      <button
         v-if="node.isDir"
-        class="flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-fg-muted hover:bg-muted/50 transition-colors select-none"
+        type="button"
+        class="w-full flex items-center gap-1.5 px-3 py-1.5 cursor-pointer text-fg-muted hover:bg-muted/50 transition-colors select-none bg-transparent border-0 text-left"
         :style="{ paddingLeft: `${12 + (depth ?? 0) * 12}px` }"
         @click="toggle(node.path ?? (node.name + (depth ?? 0)))"
       >
@@ -77,7 +78,7 @@ function iconFor(file: SkillFile | undefined) {
           <path d="M2 6a2 2 0 012-2h3.172a2 2 0 011.414.586l1.828 1.828A2 2 0 0011.828 7H16a2 2 0 012 2v5a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
         </svg>
         <span class="text-xs truncate">{{ node.name }}</span>
-      </div>
+      </button>
 
       <!-- Children -->
       <SkillFileTree
@@ -89,10 +90,12 @@ function iconFor(file: SkillFile | undefined) {
       />
 
       <!-- File row -->
-      <div
+      <button
         v-else-if="!node.isDir"
+        type="button"
+        :disabled="!node.file?.isText"
         :class="[
-          'flex items-center gap-2 px-3 py-1.5 transition-colors',
+          'w-full flex items-center gap-2 px-3 py-1.5 transition-colors bg-transparent border-0 text-left',
           activePath === node.path ? 'bg-muted text-fg-strong' : 'text-fg-muted hover:bg-muted/50',
           node.file?.isText ? 'cursor-pointer' : 'cursor-default opacity-60',
         ]"
@@ -113,7 +116,7 @@ function iconFor(file: SkillFile | undefined) {
             {{ formatSize(node.file?.size ?? 0) }}
           </div>
         </div>
-      </div>
+      </button>
     </template>
   </div>
 </template>

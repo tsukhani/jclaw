@@ -76,14 +76,20 @@ async function toggleTool(toolName: string, enabled: boolean) {
 
 const registeredNames = computed(() => new Set((apiTools.value ?? []).map(t => t.name)))
 
-const allTools = computed(() =>
+interface ToolCard {
+  name: string
+  registered: boolean
+  meta: ToolMeta
+}
+
+const allTools = computed<ToolCard[]>(() =>
   ORDERED_TOOLS.value
     .map(name => ({
       name,
       registered: registeredNames.value.has(name),
       meta: TOOL_META.value[name],
     }))
-    .filter(t => t.meta && !t.meta.system),
+    .filter((t): t is ToolCard => !!t.meta && !t.meta.system),
 )
 
 const activeCategory = ref<typeof CATEGORIES[number]>('All')
@@ -138,7 +144,8 @@ const expandedSet = ref(new Set<string>())
 
 function toggleExpand(name: string) {
   const s = new Set(expandedSet.value)
-  s.has(name) ? s.delete(name) : s.add(name)
+  if (s.has(name)) s.delete(name)
+  else s.add(name)
   expandedSet.value = s
 }
 

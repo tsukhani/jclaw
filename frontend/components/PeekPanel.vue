@@ -20,8 +20,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:open', value: boolean): void
-  (e: 'next'): void
-  (e: 'prev'): void
+  (e: 'next' | 'prev'): void
 }>()
 
 const router = useRouter()
@@ -95,8 +94,12 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
       :style="{ width: `${panelWidth}px` }"
     >
       <!-- Resize handle -->
+      <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- pointer-only resize affordance; panel width also has sensible default and can be adjusted by dragging -->
       <div
         class="absolute inset-y-0 left-0 w-1.5 cursor-col-resize hover:bg-emerald-500/30 active:bg-emerald-500/50 transition-colors z-10"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize panel"
         @mousedown="onResizeStart"
       />
 

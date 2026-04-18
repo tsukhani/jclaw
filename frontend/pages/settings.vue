@@ -1,5 +1,14 @@
 <script setup lang="ts">
-const { data: configData, refresh } = await useFetch<{ entries: any[] }>('/api/config')
+import type {
+  Agent,
+  ConfigEntry,
+  ConfigResponse,
+  DiscoveredModel,
+  DiscoverModelsResponse,
+  ProviderModelDef,
+} from '~/types/api'
+
+const { data: configData, refresh } = await useFetch<ConfigResponse>('/api/config')
 const saving = ref(false)
 const editingKey = ref<string | null>(null)
 const editValue = ref('')
@@ -22,7 +31,7 @@ async function updateEntry(key: string) {
   }
 }
 
-function startEdit(entry: any) {
+function startEdit(entry: ConfigEntry) {
   editingKey.value = entry.key
   editValue.value = entry.value
 }
@@ -55,12 +64,12 @@ function isManagedKey(key: string): boolean {
 // Chat config
 const chatMaxToolRounds = computed(() => {
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === 'chat.maxToolRounds')?.value ?? '10'
+  return entries.find(e => e.key === 'chat.maxToolRounds')?.value ?? '10'
 })
 
 const chatMaxContextMessages = computed(() => {
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === 'chat.maxContextMessages')?.value ?? '50'
+  return entries.find(e => e.key === 'chat.maxContextMessages')?.value ?? '50'
 })
 
 const editingChatField = ref<string | null>(null)
@@ -79,16 +88,16 @@ async function saveChatField(configKey: string, value: string) {
 }
 
 // Skills Promotion config
-const { data: agentsList } = await useFetch<any[]>('/api/agents')
-const mainAgent = computed(() => agentsList.value?.find((a: any) => a.name === 'main') ?? null)
+const { data: agentsList } = await useFetch<Agent[]>('/api/agents')
+const mainAgent = computed(() => agentsList.value?.find(a => a.name === 'main') ?? null)
 
 const spProviderRaw = computed(() => {
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === 'skillsPromotion.provider')?.value ?? ''
+  return entries.find(e => e.key === 'skillsPromotion.provider')?.value ?? ''
 })
 const spModelRaw = computed(() => {
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === 'skillsPromotion.model')?.value ?? ''
+  return entries.find(e => e.key === 'skillsPromotion.model')?.value ?? ''
 })
 
 // Effective provider/model — resolve defaults from main agent
@@ -97,17 +106,17 @@ const spEffectiveModel = computed(() => spModelRaw.value || mainAgent.value?.mod
 
 const spTimeout = computed(() => {
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === 'skillsPromotion.timeoutSeconds')?.value ?? '300'
+  return entries.find(e => e.key === 'skillsPromotion.timeoutSeconds')?.value ?? '300'
 })
 const spBatchKb = computed(() => {
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === 'skillsPromotion.batchSizeKb')?.value ?? '100'
+  return entries.find(e => e.key === 'skillsPromotion.batchSizeKb')?.value ?? '100'
 })
 
 // Ollama-specific settings (rendered inside the provider section when provider name contains "ollama")
 const ollamaKeepAlive = computed(() => {
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === 'ollama.keepAlive')?.value ?? '30m'
+  return entries.find(e => e.key === 'ollama.keepAlive')?.value ?? '30m'
 })
 
 const editingSPField = ref<string | null>(null)
@@ -147,12 +156,12 @@ async function saveSPField(configKey: string, value: string) {
 // Playwright config
 const playwrightEnabled = computed(() => {
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === 'playwright.enabled')?.value === 'true'
+  return entries.find(e => e.key === 'playwright.enabled')?.value === 'true'
 })
 
 const playwrightHeadless = computed(() => {
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === 'playwright.headless')?.value !== 'false'
+  return entries.find(e => e.key === 'playwright.headless')?.value !== 'false'
 })
 
 async function togglePlaywrightEnabled() {
@@ -172,14 +181,14 @@ const SHELL_KEYS = ['shell.allowlist', 'shell.defaultTimeoutSeconds', 'shell.max
 
 const shellEnabled = computed(() => {
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === 'shell.enabled')?.value === 'true'
+  return entries.find(e => e.key === 'shell.enabled')?.value === 'true'
 })
 
 const shellConfig = computed(() => {
   const entries = configData.value?.entries ?? []
   const map = new Map<string, string>()
   for (const e of entries) {
-    if (SHELL_KEYS.includes(e.key as any)) {
+    if ((SHELL_KEYS as readonly string[]).includes(e.key)) {
       map.set(e.key, e.value)
     }
   }
@@ -277,19 +286,19 @@ const SEARCH_PROVIDERS: Record<string, {
 
 function searchApiKey(providerId: string): string {
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === `search.${providerId}.apiKey`)?.value ?? ''
+  return entries.find(e => e.key === `search.${providerId}.apiKey`)?.value ?? ''
 }
 
 function searchBaseUrl(providerId: string): string {
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === `search.${providerId}.baseUrl`)?.value ?? ''
+  return entries.find(e => e.key === `search.${providerId}.baseUrl`)?.value ?? ''
 }
 
 function searchApiKeyEntry(providerId: string) {
-  const def = SEARCH_PROVIDERS[providerId]
+  const def = SEARCH_PROVIDERS[providerId]!
   const key = `search.${providerId}.apiKey`
   const entries = configData.value?.entries ?? []
-  const existing = entries.find((e: any) => e.key === key)
+  const existing = entries.find(e => e.key === key)
   return existing
     ? { ...existing, label: 'apiKey', placeholder: def.apiKeyPlaceholder }
     : { key, value: '', label: 'apiKey', placeholder: def.apiKeyPlaceholder }
@@ -298,7 +307,7 @@ function searchApiKeyEntry(providerId: string) {
 function searchBaseUrlEntry(providerId: string) {
   const key = `search.${providerId}.baseUrl`
   const entries = configData.value?.entries ?? []
-  const existing = entries.find((e: any) => e.key === key)
+  const existing = entries.find(e => e.key === key)
   return existing
     ? { ...existing, label: 'baseUrl', placeholder: '' }
     : { key, value: '', label: 'baseUrl', placeholder: '' }
@@ -307,7 +316,7 @@ function searchBaseUrlEntry(providerId: string) {
 function searchEnabled(providerId: string): boolean {
   const entries = configData.value?.entries ?? []
   // Default to true when the key is absent — matches WebSearchTool default.
-  const entry = entries.find((e: any) => e.key === `search.${providerId}.enabled`)
+  const entry = entries.find(e => e.key === `search.${providerId}.enabled`)
   return entry ? entry.value === 'true' : true
 }
 
@@ -332,7 +341,7 @@ async function toggleSearchEnabled(providerId: string) {
 // so this UI row is gated to id === 'perplexity'.
 function searchRecencyFilter(providerId: string): string {
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === `search.${providerId}.recencyFilter`)?.value ?? 'month'
+  return entries.find(e => e.key === `search.${providerId}.recencyFilter`)?.value ?? 'month'
 }
 
 async function updateSearchRecencyFilter(providerId: string, value: string) {
@@ -342,7 +351,7 @@ async function updateSearchRecencyFilter(providerId: string, value: string) {
 
 function searchPriority(providerId: string): number {
   const entries = configData.value?.entries ?? []
-  const entry = entries.find((e: any) => e.key === `search.${providerId}.priority`)
+  const entry = entries.find(e => e.key === `search.${providerId}.priority`)
   return entry ? parseInt(entry.value, 10) : 99
 }
 
@@ -451,25 +460,25 @@ const SCANNER_PROVIDERS: Record<string, {
 }
 
 function scannerApiKeyValue(scannerId: string): string {
-  const def = SCANNER_PROVIDERS[scannerId]
+  const def = SCANNER_PROVIDERS[scannerId]!
   const entries = configData.value?.entries ?? []
-  return entries.find((e: any) => e.key === def.apiKey.key)?.value ?? ''
+  return entries.find(e => e.key === def.apiKey.key)?.value ?? ''
 }
 
 function scannerApiKeyEntry(scannerId: string) {
-  const def = SCANNER_PROVIDERS[scannerId]
+  const def = SCANNER_PROVIDERS[scannerId]!
   const entries = configData.value?.entries ?? []
-  const existing = entries.find((e: any) => e.key === def.apiKey.key)
+  const existing = entries.find(e => e.key === def.apiKey.key)
   return existing
     ? { ...existing, label: def.apiKey.label, placeholder: def.apiKey.placeholder }
     : { key: def.apiKey.key, value: '', label: def.apiKey.label, placeholder: def.apiKey.placeholder }
 }
 
 function scannerEnabled(scannerId: string): boolean {
-  const def = SCANNER_PROVIDERS[scannerId]
+  const def = SCANNER_PROVIDERS[scannerId]!
   const entries = configData.value?.entries ?? []
   // Default to true when the key is absent — matches the Play config default.
-  const entry = entries.find((e: any) => e.key === def.enabledKey)
+  const entry = entries.find(e => e.key === def.enabledKey)
   return entry ? entry.value === 'true' : true
 }
 
@@ -484,7 +493,7 @@ function scannerActive(scannerId: string): boolean {
 }
 
 async function toggleScannerEnabled(scannerId: string) {
-  const def = SCANNER_PROVIDERS[scannerId]
+  const def = SCANNER_PROVIDERS[scannerId]!
   const next = scannerEnabled(scannerId) ? 'false' : 'true'
   await $fetch('/api/config', { method: 'POST', body: { key: def.enabledKey, value: next } })
   refresh()
@@ -496,11 +505,13 @@ const editingModelIdx = ref<number | null>(null)
 const modelForm = ref({ id: '', name: '', contextWindow: 131072, maxTokens: 8192, supportsThinking: false, supportsVision: false, supportsAudio: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 })
 const addingModel = ref(false)
 
-function getProviderModels(providerName: string): any[] {
+function getProviderModels(providerName: string): ProviderModelDef[] {
   const entries = configData.value?.entries ?? []
-  const modelsEntry = entries.find((e: any) => e.key === `provider.${providerName}.models`)
+  const modelsEntry = entries.find(e => e.key === `provider.${providerName}.models`)
   if (!modelsEntry?.value) return []
-  try { return JSON.parse(modelsEntry.value) }
+  try {
+    return JSON.parse(modelsEntry.value) as ProviderModelDef[]
+  }
   catch { return [] }
 }
 
@@ -522,9 +533,9 @@ function toggleModelsPanel(providerName: string) {
 async function fetchRanksForProvider(providerName: string) {
   if (configuredModelRanks.value.has(providerName)) return
   try {
-    const res = await $fetch<any>(`/api/providers/${providerName}/discover-models`, { method: 'POST' })
+    const res = await $fetch<DiscoverModelsResponse>(`/api/providers/${providerName}/discover-models`, { method: 'POST' })
     const rankMap = new Map<string, number>()
-    const discoveredMap = new Map<string, any>()
+    const discoveredMap = new Map<string, DiscoveredModel>()
     for (const m of (res.models || [])) {
       if (m.leaderboardRank) rankMap.set(m.id, m.leaderboardRank)
       discoveredMap.set(m.id, m)
@@ -537,19 +548,19 @@ async function fetchRanksForProvider(providerName: string) {
     for (const model of configured) {
       const discovered = discoveredMap.get(model.id)
       if (discovered) {
-        if (model.promptPrice == null && discovered.promptPrice >= 0) {
+        if (model.promptPrice == null && (discovered.promptPrice ?? -1) >= 0) {
           model.promptPrice = discovered.promptPrice
           updated = true
         }
-        if (model.completionPrice == null && discovered.completionPrice >= 0) {
+        if (model.completionPrice == null && (discovered.completionPrice ?? -1) >= 0) {
           model.completionPrice = discovered.completionPrice
           updated = true
         }
-        if (model.cachedReadPrice == null && discovered.cachedReadPrice >= 0) {
+        if (model.cachedReadPrice == null && (discovered.cachedReadPrice ?? -1) >= 0) {
           model.cachedReadPrice = discovered.cachedReadPrice
           updated = true
         }
-        if (model.cacheWritePrice == null && discovered.cacheWritePrice >= 0) {
+        if (model.cacheWritePrice == null && (discovered.cacheWritePrice ?? -1) >= 0) {
           model.cacheWritePrice = discovered.cacheWritePrice
           updated = true
         }
@@ -569,6 +580,7 @@ function getModelRank(providerName: string, modelId: string): number | null {
 function startEditModel(providerName: string, idx: number) {
   const models = getProviderModels(providerName)
   const m = models[idx]
+  if (!m) return
   modelForm.value = {
     id: m.id || '',
     name: m.name || '',
@@ -592,7 +604,7 @@ function startAddModel() {
   editingModelIdx.value = null
 }
 
-async function saveModels(providerName: string, models: any[]) {
+async function saveModels(providerName: string, models: ProviderModelDef[]) {
   await $fetch('/api/config', {
     method: 'POST',
     body: { key: `provider.${providerName}.models`, value: JSON.stringify(models) },
@@ -605,9 +617,9 @@ async function saveModels(providerName: string, models: any[]) {
  * for any of the four price fields; letting it reach the saved JSON would confuse
  * the cost-computation fallbacks on the frontend.
  */
-function modelFormToSaved(): Record<string, any> {
+function modelFormToSaved(): ProviderModelDef {
   const f = modelForm.value
-  const out: Record<string, any> = {
+  const out: ProviderModelDef = {
     id: f.id,
     name: f.name,
     contextWindow: f.contextWindow,
@@ -651,7 +663,7 @@ async function deleteModel(providerName: string, idx: number) {
 const discoveryProvider = ref<string | null>(null)
 const discoveryLoading = ref(false)
 const discoveryError = ref('')
-const discoveredModels = ref<any[]>([])
+const discoveredModels = ref<DiscoveredModel[]>([])
 const discoverySearch = ref('')
 const discoverySelected = ref<Set<string>>(new Set())
 const discoveryFilterThinking = ref('all') // 'all' | 'yes' | 'no'
@@ -664,36 +676,36 @@ const filteredDiscoveredModels = computed(() => {
   // Text search
   const q = discoverySearch.value.toLowerCase().trim()
   if (q) {
-    list = list.filter((m: any) =>
+    list = list.filter(m =>
       m.id.toLowerCase().includes(q) || (m.name || '').toLowerCase().includes(q),
     )
   }
 
   // Thinking filter
   if (discoveryFilterThinking.value === 'yes') {
-    list = list.filter((m: any) => m.supportsThinking)
+    list = list.filter(m => m.supportsThinking)
   }
   else if (discoveryFilterThinking.value === 'no') {
-    list = list.filter((m: any) => !m.supportsThinking)
+    list = list.filter(m => !m.supportsThinking)
   }
 
   // Cost filter
   if (discoveryFilterCost.value === 'free') {
-    list = list.filter((m: any) => m.isFree)
+    list = list.filter(m => m.isFree)
   }
   else if (discoveryFilterCost.value === 'paid') {
-    list = list.filter((m: any) => !m.isFree)
+    list = list.filter(m => !m.isFree)
   }
 
   // Popularity filter
   if (discoveryFilterPopular.value === 'ranked') {
-    list = list.filter((m: any) => m.leaderboardRank)
+    list = list.filter(m => m.leaderboardRank)
   }
   else if (discoveryFilterPopular.value === 'top10') {
-    list = list.filter((m: any) => m.leaderboardRank && m.leaderboardRank <= 10)
+    list = list.filter(m => m.leaderboardRank != null && m.leaderboardRank <= 10)
   }
   else if (discoveryFilterPopular.value === 'top25') {
-    list = list.filter((m: any) => m.leaderboardRank && m.leaderboardRank <= 25)
+    list = list.filter(m => m.leaderboardRank != null && m.leaderboardRank <= 25)
   }
 
   return list
@@ -701,12 +713,12 @@ const filteredDiscoveredModels = computed(() => {
 
 // Whether pricing data is available for this provider's models
 const discoveryHasPricing = computed(() =>
-  discoveredModels.value.some((m: any) => m.promptPrice >= 0),
+  discoveredModels.value.some(m => (m.promptPrice ?? -1) >= 0),
 )
 
 // Whether leaderboard ranking data is available
 const discoveryHasRankings = computed(() =>
-  discoveredModels.value.some((m: any) => m.leaderboardRank),
+  discoveredModels.value.some(m => m.leaderboardRank),
 )
 
 async function startDiscovery(providerName: string) {
@@ -722,13 +734,14 @@ async function startDiscovery(providerName: string) {
   expandedModelsProvider.value = null
 
   try {
-    const res = await $fetch<any>(`/api/providers/${providerName}/discover-models`, { method: 'POST' })
+    const res = await $fetch<DiscoverModelsResponse>(`/api/providers/${providerName}/discover-models`, { method: 'POST' })
     // Filter out models already configured
-    const existing = new Set(getProviderModels(providerName).map((m: any) => m.id))
-    discoveredModels.value = (res.models || []).filter((m: any) => !existing.has(m.id))
+    const existing = new Set(getProviderModels(providerName).map(m => m.id))
+    discoveredModels.value = (res.models || []).filter(m => !existing.has(m.id))
   }
-  catch (e: any) {
-    discoveryError.value = e.data?.message || e.message || 'Failed to fetch models'
+  catch (e: unknown) {
+    const err = e as { data?: { message?: string }, message?: string } | undefined
+    discoveryError.value = err?.data?.message || err?.message || 'Failed to fetch models'
   }
   finally {
     discoveryLoading.value = false
@@ -737,7 +750,8 @@ async function startDiscovery(providerName: string) {
 
 function toggleDiscoverySelect(modelId: string) {
   const s = new Set(discoverySelected.value)
-  if (s.has(modelId)) s.delete(modelId); else s.add(modelId)
+  if (s.has(modelId)) s.delete(modelId)
+  else s.add(modelId)
   discoverySelected.value = s
 }
 
@@ -746,16 +760,16 @@ function selectAllDiscovered() {
     discoverySelected.value = new Set()
   }
   else {
-    discoverySelected.value = new Set(filteredDiscoveredModels.value.map((m: any) => m.id))
+    discoverySelected.value = new Set(filteredDiscoveredModels.value.map(m => m.id))
   }
 }
 
 async function addDiscoveredModels() {
   if (!discoveryProvider.value || discoverySelected.value.size === 0) return
   const existing = getProviderModels(discoveryProvider.value)
-  const toAdd = discoveredModels.value
-    .filter((m: any) => discoverySelected.value.has(m.id))
-    .map((m: any) => ({
+  const toAdd: ProviderModelDef[] = discoveredModels.value
+    .filter(m => discoverySelected.value.has(m.id))
+    .map(m => ({
       id: m.id,
       name: m.name,
       contextWindow: m.contextWindow,
@@ -763,10 +777,10 @@ async function addDiscoveredModels() {
       supportsThinking: m.thinkingDetectedFromProvider ? m.supportsThinking : false,
       supportsVision: m.visionDetectedFromProvider ? m.supportsVision : false,
       supportsAudio: m.audioDetectedFromProvider ? m.supportsAudio : false,
-      ...(m.promptPrice >= 0 ? { promptPrice: m.promptPrice } : {}),
-      ...(m.completionPrice >= 0 ? { completionPrice: m.completionPrice } : {}),
-      ...(m.cachedReadPrice >= 0 ? { cachedReadPrice: m.cachedReadPrice } : {}),
-      ...(m.cacheWritePrice >= 0 ? { cacheWritePrice: m.cacheWritePrice } : {}),
+      ...((m.promptPrice ?? -1) >= 0 ? { promptPrice: m.promptPrice } : {}),
+      ...((m.completionPrice ?? -1) >= 0 ? { completionPrice: m.completionPrice } : {}),
+      ...((m.cachedReadPrice ?? -1) >= 0 ? { cachedReadPrice: m.cachedReadPrice } : {}),
+      ...((m.cacheWritePrice ?? -1) >= 0 ? { cacheWritePrice: m.cacheWritePrice } : {}),
     }))
   const merged = [...existing, ...toAdd]
   await saveModels(discoveryProvider.value, merged)
@@ -781,13 +795,13 @@ function closeDiscovery() {
 // to the generic Configuration list.
 const providerEntries = computed(() => {
   const entries = configData.value?.entries ?? []
-  const providers = new Map<string, any[]>()
-  const other: any[] = []
+  const providers = new Map<string, ConfigEntry[]>()
+  const other: ConfigEntry[] = []
 
   for (const e of entries) {
     if (e.key.startsWith('provider.')) {
       const parts = e.key.split('.')
-      const name = parts[1]
+      const name = parts[1]!
       if (!providers.has(name)) providers.set(name, [])
       providers.get(name)!.push(e)
     }
@@ -837,6 +851,7 @@ const providerEntries = computed(() => {
               <input
                 v-model="editValue"
                 :type="isSensitive(entry.key) ? 'password' : 'text'"
+                :aria-label="`Edit value for ${entry.key}`"
                 class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               >
               <button
@@ -1058,97 +1073,137 @@ const providerEntries = computed(() => {
               <!-- Editing a model -->
               <template v-if="editingModelIdx === idx">
                 <div class="grid grid-cols-2 gap-2 mb-2">
-                  <div>
-                    <label class="block text-[10px] text-fg-muted mb-0.5">ID</label>
+                  <label
+                    :for="`model-id-${name}`"
+                    class="block"
+                  >
+                    <span class="block text-[10px] text-fg-muted mb-0.5">ID</span>
                     <input
+                      :id="`model-id-${name}`"
                       v-model="modelForm.id"
                       class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                     >
-                  </div>
-                  <div>
-                    <label class="block text-[10px] text-fg-muted mb-0.5">Display Name</label>
+                  </label>
+                  <label
+                    :for="`model-name-${name}`"
+                    class="block"
+                  >
+                    <span class="block text-[10px] text-fg-muted mb-0.5">Display Name</span>
                     <input
+                      :id="`model-name-${name}`"
                       v-model="modelForm.name"
                       class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong focus:outline-hidden"
                     >
-                  </div>
-                  <div>
-                    <label class="block text-[10px] text-fg-muted mb-0.5">Context Window</label>
+                  </label>
+                  <label
+                    :for="`model-ctx-${name}`"
+                    class="block"
+                  >
+                    <span class="block text-[10px] text-fg-muted mb-0.5">Context Window</span>
                     <input
+                      :id="`model-ctx-${name}`"
                       v-model.number="modelForm.contextWindow"
                       type="number"
                       class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                     >
-                  </div>
-                  <div>
-                    <label class="block text-[10px] text-fg-muted mb-0.5">Max Tokens</label>
+                  </label>
+                  <label
+                    :for="`model-maxtok-${name}`"
+                    class="block"
+                  >
+                    <span class="block text-[10px] text-fg-muted mb-0.5">Max Tokens</span>
                     <input
+                      :id="`model-maxtok-${name}`"
                       v-model.number="modelForm.maxTokens"
                       type="number"
                       class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                     >
-                  </div>
-                  <div>
-                    <label class="block text-[10px] text-fg-muted mb-0.5">Input $/M tokens</label>
+                  </label>
+                  <label
+                    :for="`model-price-in-${name}`"
+                    class="block"
+                  >
+                    <span class="block text-[10px] text-fg-muted mb-0.5">Input $/M tokens</span>
                     <input
+                      :id="`model-price-in-${name}`"
                       v-model.number="modelForm.promptPrice"
                       type="number"
                       step="0.01"
                       class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                     >
-                  </div>
-                  <div>
-                    <label class="block text-[10px] text-fg-muted mb-0.5">Output $/M tokens</label>
+                  </label>
+                  <label
+                    :for="`model-price-out-${name}`"
+                    class="block"
+                  >
+                    <span class="block text-[10px] text-fg-muted mb-0.5">Output $/M tokens</span>
                     <input
+                      :id="`model-price-out-${name}`"
                       v-model.number="modelForm.completionPrice"
                       type="number"
                       step="0.01"
                       class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                     >
-                  </div>
-                  <div>
-                    <label
-                      class="block text-[10px] text-fg-muted mb-0.5"
-                      title="Anthropic: ~0.1× input. OpenAI: ~0.5× input. Leave -1 to auto-default."
-                    >Cache read $/M</label>
+                  </label>
+                  <label
+                    :for="`model-cache-read-${name}`"
+                    class="block"
+                    title="Anthropic: ~0.1× input. OpenAI: ~0.5× input. Leave -1 to auto-default."
+                  >
+                    <span class="block text-[10px] text-fg-muted mb-0.5">Cache read $/M</span>
                     <input
+                      :id="`model-cache-read-${name}`"
                       v-model.number="modelForm.cachedReadPrice"
                       type="number"
                       step="0.01"
                       class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                     >
-                  </div>
-                  <div>
-                    <label
-                      class="block text-[10px] text-fg-muted mb-0.5"
-                      title="Anthropic 5-min TTL: ~1.25× input. OpenAI: n/a. Leave -1 to auto-default."
-                    >Cache write $/M</label>
+                  </label>
+                  <label
+                    :for="`model-cache-write-${name}`"
+                    class="block"
+                    title="Anthropic 5-min TTL: ~1.25× input. OpenAI: n/a. Leave -1 to auto-default."
+                  >
+                    <span class="block text-[10px] text-fg-muted mb-0.5">Cache write $/M</span>
                     <input
+                      :id="`model-cache-write-${name}`"
                       v-model.number="modelForm.cacheWritePrice"
                       type="number"
                       step="0.01"
                       class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                     >
-                  </div>
+                  </label>
                 </div>
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-3 flex-wrap">
-                    <label class="flex items-center gap-1.5 text-xs text-fg-muted">
+                    <label
+                      :for="`model-thinking-${name}`"
+                      class="flex items-center gap-1.5 text-xs text-fg-muted"
+                    >
                       <input
+                        :id="`model-thinking-${name}`"
                         v-model="modelForm.supportsThinking"
                         type="checkbox"
                         class="accent-white"
                       > Supports Thinking
                     </label>
-                    <label class="flex items-center gap-1.5 text-xs text-fg-muted">
+                    <label
+                      :for="`model-vision-${name}`"
+                      class="flex items-center gap-1.5 text-xs text-fg-muted"
+                    >
                       <input
+                        :id="`model-vision-${name}`"
                         v-model="modelForm.supportsVision"
                         type="checkbox"
                         class="accent-white"
                       > Supports Vision
                     </label>
-                    <label class="flex items-center gap-1.5 text-xs text-fg-muted">
+                    <label
+                      :for="`model-audio-${name}`"
+                      class="flex items-center gap-1.5 text-xs text-fg-muted"
+                    >
                       <input
+                        :id="`model-audio-${name}`"
                         v-model="modelForm.supportsAudio"
                         type="checkbox"
                         class="accent-white"
@@ -1244,14 +1299,14 @@ const providerEntries = computed(() => {
                   </div>
                   <div class="flex items-center gap-2">
                     <span
-                      v-if="model.promptPrice > 0"
+                      v-if="(model.promptPrice ?? 0) > 0"
                       class="text-xs text-amber-500/70 font-mono"
                       :title="`Input: $${model.promptPrice}/M tokens, Output: $${model.completionPrice}/M tokens`"
                     >
-                      ${{ model.promptPrice < 1 ? model.promptPrice.toFixed(2) : model.promptPrice.toFixed(0) }}/M
+                      ${{ (model.promptPrice ?? 0) < 1 ? (model.promptPrice ?? 0).toFixed(2) : (model.promptPrice ?? 0).toFixed(0) }}/M
                     </span>
-                    <span class="text-xs text-fg-muted font-mono">{{ (model.contextWindow / 1024).toFixed(0) }}K ctx</span>
-                    <span class="text-xs text-fg-muted font-mono">{{ (model.maxTokens / 1024).toFixed(0) }}K out</span>
+                    <span class="text-xs text-fg-muted font-mono">{{ ((model.contextWindow ?? 0) / 1024).toFixed(0) }}K ctx</span>
+                    <span class="text-xs text-fg-muted font-mono">{{ ((model.maxTokens ?? 0) / 1024).toFixed(0) }}K out</span>
                     <button
                       class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                       title="Edit model"
@@ -1279,99 +1334,139 @@ const providerEntries = computed(() => {
           <div class="px-4 py-2.5 border-t border-border">
             <template v-if="addingModel">
               <div class="grid grid-cols-2 gap-2 mb-2">
-                <div>
-                  <label class="block text-[10px] text-fg-muted mb-0.5">ID</label>
+                <label
+                  :for="`addmodel-id-${name}`"
+                  class="block"
+                >
+                  <span class="block text-[10px] text-fg-muted mb-0.5">ID</span>
                   <input
+                    :id="`addmodel-id-${name}`"
                     v-model="modelForm.id"
                     placeholder="model-id"
                     class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                   >
-                </div>
-                <div>
-                  <label class="block text-[10px] text-fg-muted mb-0.5">Display Name</label>
+                </label>
+                <label
+                  :for="`addmodel-name-${name}`"
+                  class="block"
+                >
+                  <span class="block text-[10px] text-fg-muted mb-0.5">Display Name</span>
                   <input
+                    :id="`addmodel-name-${name}`"
                     v-model="modelForm.name"
                     placeholder="Model Name"
                     class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong focus:outline-hidden"
                   >
-                </div>
-                <div>
-                  <label class="block text-[10px] text-fg-muted mb-0.5">Context Window</label>
+                </label>
+                <label
+                  :for="`addmodel-ctx-${name}`"
+                  class="block"
+                >
+                  <span class="block text-[10px] text-fg-muted mb-0.5">Context Window</span>
                   <input
+                    :id="`addmodel-ctx-${name}`"
                     v-model.number="modelForm.contextWindow"
                     type="number"
                     class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                   >
-                </div>
-                <div>
-                  <label class="block text-[10px] text-fg-muted mb-0.5">Max Tokens</label>
+                </label>
+                <label
+                  :for="`addmodel-maxtok-${name}`"
+                  class="block"
+                >
+                  <span class="block text-[10px] text-fg-muted mb-0.5">Max Tokens</span>
                   <input
+                    :id="`addmodel-maxtok-${name}`"
                     v-model.number="modelForm.maxTokens"
                     type="number"
                     class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                   >
-                </div>
-                <div>
-                  <label class="block text-[10px] text-fg-muted mb-0.5">Input $/M tokens</label>
+                </label>
+                <label
+                  :for="`addmodel-price-in-${name}`"
+                  class="block"
+                >
+                  <span class="block text-[10px] text-fg-muted mb-0.5">Input $/M tokens</span>
                   <input
+                    :id="`addmodel-price-in-${name}`"
                     v-model.number="modelForm.promptPrice"
                     type="number"
                     step="0.01"
                     class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                   >
-                </div>
-                <div>
-                  <label class="block text-[10px] text-fg-muted mb-0.5">Output $/M tokens</label>
+                </label>
+                <label
+                  :for="`addmodel-price-out-${name}`"
+                  class="block"
+                >
+                  <span class="block text-[10px] text-fg-muted mb-0.5">Output $/M tokens</span>
                   <input
+                    :id="`addmodel-price-out-${name}`"
                     v-model.number="modelForm.completionPrice"
                     type="number"
                     step="0.01"
                     class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                   >
-                </div>
-                <div>
-                  <label
-                    class="block text-[10px] text-fg-muted mb-0.5"
-                    title="Anthropic: ~0.1× input. OpenAI: ~0.5× input. Leave -1 to auto-default."
-                  >Cache read $/M</label>
+                </label>
+                <label
+                  :for="`addmodel-cache-read-${name}`"
+                  class="block"
+                  title="Anthropic: ~0.1× input. OpenAI: ~0.5× input. Leave -1 to auto-default."
+                >
+                  <span class="block text-[10px] text-fg-muted mb-0.5">Cache read $/M</span>
                   <input
+                    :id="`addmodel-cache-read-${name}`"
                     v-model.number="modelForm.cachedReadPrice"
                     type="number"
                     step="0.01"
                     class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                   >
-                </div>
-                <div>
-                  <label
-                    class="block text-[10px] text-fg-muted mb-0.5"
-                    title="Anthropic 5-min TTL: ~1.25× input. OpenAI: n/a. Leave -1 to auto-default."
-                  >Cache write $/M</label>
+                </label>
+                <label
+                  :for="`addmodel-cache-write-${name}`"
+                  class="block"
+                  title="Anthropic 5-min TTL: ~1.25× input. OpenAI: n/a. Leave -1 to auto-default."
+                >
+                  <span class="block text-[10px] text-fg-muted mb-0.5">Cache write $/M</span>
                   <input
+                    :id="`addmodel-cache-write-${name}`"
                     v-model.number="modelForm.cacheWritePrice"
                     type="number"
                     step="0.01"
                     class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                   >
-                </div>
+                </label>
               </div>
               <div class="flex items-center justify-between">
                 <div class="flex items-center gap-3 flex-wrap">
-                  <label class="flex items-center gap-1.5 text-xs text-fg-muted">
+                  <label
+                    :for="`addmodel-thinking-${name}`"
+                    class="flex items-center gap-1.5 text-xs text-fg-muted"
+                  >
                     <input
+                      :id="`addmodel-thinking-${name}`"
                       v-model="modelForm.supportsThinking"
                       type="checkbox"
                       class="accent-white"
                     > Supports Thinking
                   </label>
-                  <label class="flex items-center gap-1.5 text-xs text-fg-muted">
+                  <label
+                    :for="`addmodel-vision-${name}`"
+                    class="flex items-center gap-1.5 text-xs text-fg-muted"
+                  >
                     <input
+                      :id="`addmodel-vision-${name}`"
                       v-model="modelForm.supportsVision"
                       type="checkbox"
                       class="accent-white"
                     > Supports Vision
                   </label>
-                  <label class="flex items-center gap-1.5 text-xs text-fg-muted">
+                  <label
+                    :for="`addmodel-audio-${name}`"
+                    class="flex items-center gap-1.5 text-xs text-fg-muted"
+                  >
                     <input
+                      :id="`addmodel-audio-${name}`"
                       v-model="modelForm.supportsAudio"
                       type="checkbox"
                       class="accent-white"
@@ -1515,10 +1610,12 @@ const providerEntries = computed(() => {
               <input
                 v-model="discoverySearch"
                 placeholder="Search models..."
+                aria-label="Search discovered models"
                 class="flex-1 px-2 py-1 bg-transparent text-xs text-fg-strong placeholder-fg-muted focus:outline-hidden"
               >
               <select
                 v-model="discoveryFilterThinking"
+                aria-label="Filter by thinking support"
                 class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
               >
                 <option value="all">
@@ -1534,6 +1631,7 @@ const providerEntries = computed(() => {
               <select
                 v-if="discoveryHasPricing"
                 v-model="discoveryFilterCost"
+                aria-label="Filter by cost"
                 class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
               >
                 <option value="all">
@@ -1549,6 +1647,7 @@ const providerEntries = computed(() => {
               <select
                 v-if="discoveryHasRankings"
                 v-model="discoveryFilterPopular"
+                aria-label="Filter by leaderboard rank"
                 class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
               >
                 <option value="all">
@@ -1575,11 +1674,12 @@ const providerEntries = computed(() => {
 
             <!-- Model list -->
             <div class="max-h-72 overflow-y-auto divide-y divide-border">
-              <div
+              <button
                 v-for="model in filteredDiscoveredModels"
                 :key="model.id"
+                type="button"
                 :class="discoverySelected.has(model.id) ? 'bg-blue-100 dark:bg-blue-900/20' : ''"
-                class="px-4 py-1.5 flex items-center gap-3 hover:bg-muted cursor-pointer transition-colors"
+                class="w-full text-left px-4 py-1.5 flex items-center gap-3 hover:bg-muted cursor-pointer transition-colors bg-transparent border-0"
                 @click="toggleDiscoverySelect(model.id)"
               >
                 <span
@@ -1609,11 +1709,11 @@ const providerEntries = computed(() => {
                     class="text-[10px] text-green-400 border border-green-400/30 px-1"
                   >free</span>
                   <span
-                    v-else-if="model.promptPrice >= 0"
+                    v-else-if="(model.promptPrice ?? -1) >= 0"
                     class="text-[10px] text-fg-muted font-mono"
-                    :title="`$${model.promptPrice.toFixed(2)}/M in, $${model.completionPrice.toFixed(2)}/M out`"
+                    :title="`$${(model.promptPrice ?? 0).toFixed(2)}/M in, $${(model.completionPrice ?? 0).toFixed(2)}/M out`"
                   >
-                    ${{ model.promptPrice < 1 ? model.promptPrice.toFixed(2) : model.promptPrice.toFixed(0) }}/M
+                    ${{ (model.promptPrice ?? 0) < 1 ? (model.promptPrice ?? 0).toFixed(2) : (model.promptPrice ?? 0).toFixed(0) }}/M
                   </span>
                   <span
                     v-if="model.supportsThinking && model.thinkingDetectedFromProvider"
@@ -1650,7 +1750,7 @@ const providerEntries = computed(() => {
                     class="text-[10px] text-fg-muted font-mono"
                   >{{ (model.contextWindow / 1024).toFixed(0) }}K</span>
                 </div>
-              </div>
+              </button>
             </div>
 
             <!-- Add selected -->
@@ -1687,6 +1787,7 @@ const providerEntries = computed(() => {
         Providers are tried in order — drag to reorder. If a provider fails, the next one is tried automatically.
         A provider is only active when both <span class="text-fg-muted">enabled</span> is on and its API key is configured.
       </p>
+      <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drag-drop reorder: HTML5 drag events have no keyboard equivalent; rule does not differentiate them from click -->
       <div
         v-for="id in sortedSearchProviderIds"
         :key="id"
@@ -1711,7 +1812,7 @@ const providerEntries = computed(() => {
               class="cursor-grab active:cursor-grabbing text-fg-muted hover:text-fg-muted select-none"
               title="Drag to reorder priority"
             >⠿</span>
-            <span class="text-sm font-medium text-fg-strong">{{ SEARCH_PROVIDERS[id].label }}</span>
+            <span class="text-sm font-medium text-fg-strong">{{ SEARCH_PROVIDERS[id]!.label }}</span>
             <span
               v-if="searchActive(id)"
               class="text-[10px] text-green-400 border border-green-400/30 px-1"
@@ -1738,13 +1839,13 @@ const providerEntries = computed(() => {
           </button>
         </div>
         <div class="px-4 py-2.5 text-xs text-fg-muted leading-relaxed border-b border-border">
-          {{ SEARCH_PROVIDERS[id].description }}
+          {{ SEARCH_PROVIDERS[id]!.description }}
           <a
-            :href="SEARCH_PROVIDERS[id].signupUrl"
+            :href="SEARCH_PROVIDERS[id]!.signupUrl"
             target="_blank"
             rel="noopener"
             class="text-fg-primary hover:text-fg-strong underline ml-1"
-          >Get an API key → {{ SEARCH_PROVIDERS[id].signupLabel }}</a>
+          >Get an API key → {{ SEARCH_PROVIDERS[id]!.signupLabel }}</a>
         </div>
         <div class="divide-y divide-border">
           <!-- apiKey -->
@@ -1754,7 +1855,8 @@ const providerEntries = computed(() => {
               <input
                 v-model="editValue"
                 type="password"
-                :placeholder="SEARCH_PROVIDERS[id].apiKeyPlaceholder"
+                :placeholder="SEARCH_PROVIDERS[id]!.apiKeyPlaceholder"
+                aria-label="API key"
                 class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               >
               <button
@@ -1820,6 +1922,7 @@ const providerEntries = computed(() => {
               <input
                 v-model="editValue"
                 type="text"
+                aria-label="Base URL"
                 class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
               >
               <button
@@ -1889,6 +1992,7 @@ const providerEntries = computed(() => {
             >recencyFilter</span>
             <select
               :value="searchRecencyFilter(id)"
+              aria-label="Recency filter"
               class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
               @change="updateSearchRecencyFilter(id, ($event.target as HTMLSelectElement).value)"
             >
@@ -1956,6 +2060,7 @@ const providerEntries = computed(() => {
                 type="number"
                 min="1"
                 max="50"
+                aria-label="Max tool rounds"
                 class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
               >
               <button
@@ -2044,6 +2149,7 @@ const providerEntries = computed(() => {
                 type="number"
                 min="1"
                 max="500"
+                aria-label="Max context messages"
                 class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
               >
               <button
@@ -2122,6 +2228,7 @@ const providerEntries = computed(() => {
             <template v-if="editingSPField === 'provider'">
               <select
                 v-model="spFieldEdit"
+                aria-label="Skills promotion provider"
                 class="w-48 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
               >
                 <option value="">
@@ -2200,6 +2307,7 @@ const providerEntries = computed(() => {
               <select
                 v-if="spAvailableModels.length"
                 v-model="spFieldEdit"
+                aria-label="Skills promotion model"
                 class="w-64 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
               >
                 <option
@@ -2221,6 +2329,7 @@ const providerEntries = computed(() => {
                 v-model="spFieldEdit"
                 type="text"
                 placeholder="model-id"
+                aria-label="Skills promotion model id"
                 class="w-64 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
               >
               <button
@@ -2268,7 +2377,7 @@ const providerEntries = computed(() => {
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Edit"
-                @click="editingSPField = 'model'; spFieldEdit = spModelRaw || (spHasExplicitProvider && spAvailableModels.length ? spAvailableModels[0].id : '')"
+                @click="editingSPField = 'model'; spFieldEdit = spModelRaw || (spHasExplicitProvider && spAvailableModels.length ? (spAvailableModels[0]?.id ?? '') : '')"
               >
                 <svg
                   class="w-3.5 h-3.5"
@@ -2293,6 +2402,7 @@ const providerEntries = computed(() => {
                 type="number"
                 min="30"
                 max="900"
+                aria-label="Skills promotion timeout seconds"
                 class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
               >
               <button
@@ -2360,6 +2470,7 @@ const providerEntries = computed(() => {
                 type="number"
                 min="10"
                 max="1000"
+                aria-label="Batch size KB"
                 class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
               >
               <button
@@ -2518,6 +2629,7 @@ const providerEntries = computed(() => {
               <textarea
                 v-model="shellAllowlistEdit"
                 rows="3"
+                aria-label="Shell allowlist"
                 class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden resize-none"
               />
               <div class="flex flex-col gap-1">
@@ -2587,6 +2699,7 @@ const providerEntries = computed(() => {
                 type="number"
                 min="1"
                 max="300"
+                aria-label="Shell default timeout seconds"
                 class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
               >
               <button
@@ -2711,6 +2824,7 @@ const providerEntries = computed(() => {
               v-model="editValue"
               type="password"
               :placeholder="def.apiKey.placeholder"
+              :aria-label="def.apiKey.label"
               class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
             >
             <button
