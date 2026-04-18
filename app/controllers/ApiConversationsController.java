@@ -157,6 +157,25 @@ public class ApiConversationsController extends Controller {
     }
 
     /**
+     * DELETE /api/conversations/{id}/messages/{mid} — Remove a single message
+     * from a conversation. Returns 404 when either the conversation or message
+     * is missing, and 400 when the message belongs to a different conversation
+     * (prevents a spoofed path from deleting a foreign message even if the
+     * mid were somehow known).
+     */
+    public static void deleteMessage(Long id, Long mid) {
+        Conversation conversation = Conversation.findById(id);
+        if (conversation == null) notFound();
+        Message message = Message.findById(mid);
+        if (message == null) notFound();
+        if (message.conversation == null || !message.conversation.id.equals(id)) {
+            badRequest();
+        }
+        services.Tx.run(() -> { message.delete(); });
+        renderJSON(gson.toJson(Map.of("status", "deleted")));
+    }
+
+    /**
      * DELETE /api/conversations/{id}
      */
     public static void deleteConversation(Long id) {

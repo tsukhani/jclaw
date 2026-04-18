@@ -87,6 +87,7 @@ POST    /api/chat/upload                        ApiChatController.uploadChatFile
 GET     /api/conversations                      ApiConversationsController.listConversations
 GET     /api/conversations/channels             ApiConversationsController.listConversationChannels
 GET     /api/conversations/{id}/messages        ApiConversationsController.getMessages
+DELETE  /api/conversations/{id}/messages/{mid}  ApiConversationsController.deleteMessage
 GET     /api/conversations/{id}/queue           ApiConversationsController.getQueueStatus
 POST    /api/conversations/{id}/generate-title  ApiConversationsController.generateTitle
 DELETE  /api/conversations/{id}                 ApiConversationsController.deleteConversation
