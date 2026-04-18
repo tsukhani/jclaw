@@ -96,6 +96,131 @@ public class ModelDiscoveryServiceTest extends UnitTest {
         assertFalse(result.fromProvider());
     }
 
+    // --- detectVisionSupport ---
+
+    @Test
+    public void detectVisionFromOpenRouterModalities() {
+        // OpenRouter's /api/v1/models puts input modalities under
+        // architecture.input_modalities as an array of tokens.
+        var obj = JsonParser.parseString("""
+                {"id": "anthropic/claude-sonnet-4-6",
+                 "architecture": {"input_modalities": ["text", "image"]}}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        assertTrue(result.confirmed());
+        assertTrue(result.fromProvider());
+    }
+
+    @Test
+    public void detectVisionFromOpenRouterModalitiesNegative() {
+        // Provider explicitly reports text-only input — confirmed absence.
+        var obj = JsonParser.parseString("""
+                {"id": "vendor/text-only-model",
+                 "architecture": {"input_modalities": ["text"]}}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        assertFalse(result.confirmed());
+        assertTrue(result.fromProvider());
+    }
+
+    @Test
+    public void detectVisionFromLegacyModalityString() {
+        // OpenRouter's older shape: a single modality string like "text+image->text".
+        var obj = JsonParser.parseString("""
+                {"id": "vendor/legacy",
+                 "architecture": {"modality": "text+image->text"}}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        assertTrue(result.confirmed());
+        assertTrue(result.fromProvider());
+    }
+
+    @Test
+    public void detectVisionFromOllamaCapabilities() {
+        // Ollama surfaces capabilities via /api/show; some /api/tags variants
+        // merge them in. "vision" is the canonical token.
+        var obj = JsonParser.parseString("""
+                {"id": "llava:13b", "capabilities": ["completion", "vision"]}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        assertTrue(result.confirmed());
+        assertTrue(result.fromProvider());
+    }
+
+    @Test
+    public void detectVisionFallbackGpt4o() {
+        // No architecture, no capabilities — ID heuristic kicks in.
+        var obj = JsonParser.parseString("""
+                {"id": "openai/gpt-4o"}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        assertTrue(result.confirmed());
+        assertFalse(result.fromProvider());
+    }
+
+    @Test
+    public void detectVisionFallbackClaudeSonnet() {
+        var obj = JsonParser.parseString("""
+                {"id": "anthropic/claude-sonnet-4-6"}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        assertTrue(result.confirmed());
+        assertFalse(result.fromProvider());
+    }
+
+    @Test
+    public void detectVisionUnknownModel() {
+        var obj = JsonParser.parseString("""
+                {"id": "vendor/plain-text-model"}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        assertFalse(result.confirmed());
+        assertFalse(result.fromProvider());
+    }
+
+    // --- detectAudioSupport ---
+
+    @Test
+    public void detectAudioFromOpenRouterModalities() {
+        var obj = JsonParser.parseString("""
+                {"id": "openai/gpt-4o-audio-preview",
+                 "architecture": {"input_modalities": ["text", "audio"]}}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectAudioSupport(obj);
+        assertTrue(result.confirmed());
+        assertTrue(result.fromProvider());
+    }
+
+    @Test
+    public void detectAudioFallbackGpt4oAudio() {
+        var obj = JsonParser.parseString("""
+                {"id": "openai/gpt-4o-audio-preview"}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectAudioSupport(obj);
+        assertTrue(result.confirmed());
+        assertFalse(result.fromProvider());
+    }
+
+    @Test
+    public void detectAudioFromOllamaCapabilities() {
+        var obj = JsonParser.parseString("""
+                {"id": "qwen2-audio:7b", "capabilities": ["completion", "audio"]}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectAudioSupport(obj);
+        assertTrue(result.confirmed());
+        assertTrue(result.fromProvider());
+    }
+
+    @Test
+    public void detectAudioUnknownModel() {
+        var obj = JsonParser.parseString("""
+                {"id": "vendor/text-only"}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectAudioSupport(obj);
+        assertFalse(result.confirmed());
+        assertFalse(result.fromProvider());
+    }
+
     // --- inferPrice ---
 
     @Test

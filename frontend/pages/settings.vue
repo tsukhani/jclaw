@@ -490,7 +490,7 @@ async function toggleScannerEnabled(scannerId: string) {
 // --- Model management ---
 const expandedModelsProvider = ref<string | null>(null)
 const editingModelIdx = ref<number | null>(null)
-const modelForm = ref({ id: '', name: '', contextWindow: 131072, maxTokens: 8192, supportsThinking: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 })
+const modelForm = ref({ id: '', name: '', contextWindow: 131072, maxTokens: 8192, supportsThinking: false, supportsVision: false, supportsAudio: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 })
 const addingModel = ref(false)
 
 function getProviderModels(providerName: string): any[] {
@@ -569,6 +569,8 @@ function startEditModel(providerName: string, idx: number) {
     contextWindow: m.contextWindow || 131072,
     maxTokens: m.maxTokens || 8192,
     supportsThinking: m.supportsThinking || false,
+    supportsVision: m.supportsVision || false,
+    supportsAudio: m.supportsAudio || false,
     promptPrice: m.promptPrice ?? -1,
     completionPrice: m.completionPrice ?? -1,
     cachedReadPrice: m.cachedReadPrice ?? -1,
@@ -579,7 +581,7 @@ function startEditModel(providerName: string, idx: number) {
 }
 
 function startAddModel() {
-  modelForm.value = { id: '', name: '', contextWindow: 131072, maxTokens: 8192, supportsThinking: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 }
+  modelForm.value = { id: '', name: '', contextWindow: 131072, maxTokens: 8192, supportsThinking: false, supportsVision: false, supportsAudio: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 }
   addingModel.value = true
   editingModelIdx.value = null
 }
@@ -605,6 +607,8 @@ function modelFormToSaved(): Record<string, any> {
     contextWindow: f.contextWindow,
     maxTokens: f.maxTokens,
     supportsThinking: f.supportsThinking,
+    supportsVision: f.supportsVision,
+    supportsAudio: f.supportsAudio,
   }
   if (f.promptPrice >= 0) out.promptPrice = f.promptPrice
   if (f.completionPrice >= 0) out.completionPrice = f.completionPrice
@@ -744,6 +748,8 @@ async function addDiscoveredModels() {
       contextWindow: m.contextWindow,
       maxTokens: m.maxTokens,
       supportsThinking: m.thinkingDetectedFromProvider ? m.supportsThinking : false,
+      supportsVision: m.visionDetectedFromProvider ? m.supportsVision : false,
+      supportsAudio: m.audioDetectedFromProvider ? m.supportsAudio : false,
       ...(m.promptPrice >= 0 ? { promptPrice: m.promptPrice } : {}),
       ...(m.completionPrice >= 0 ? { completionPrice: m.completionPrice } : {}),
       ...(m.cachedReadPrice >= 0 ? { cachedReadPrice: m.cachedReadPrice } : {}),
@@ -905,9 +911,17 @@ const providerEntries = computed(() => {
                   </div>
                 </div>
                 <div class="flex items-center justify-between">
-                  <label class="flex items-center gap-1.5 text-xs text-fg-muted">
-                    <input type="checkbox" v-model="modelForm.supportsThinking" class="accent-white" /> Supports Thinking
-                  </label>
+                  <div class="flex items-center gap-3 flex-wrap">
+                    <label class="flex items-center gap-1.5 text-xs text-fg-muted">
+                      <input type="checkbox" v-model="modelForm.supportsThinking" class="accent-white" /> Supports Thinking
+                    </label>
+                    <label class="flex items-center gap-1.5 text-xs text-fg-muted">
+                      <input type="checkbox" v-model="modelForm.supportsVision" class="accent-white" /> Supports Vision
+                    </label>
+                    <label class="flex items-center gap-1.5 text-xs text-fg-muted">
+                      <input type="checkbox" v-model="modelForm.supportsAudio" class="accent-white" /> Supports Audio
+                    </label>
+                  </div>
                   <div class="flex items-center gap-1">
                     <button @click="saveEditedModel(name)" class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors" title="Save">
                       <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
@@ -934,6 +948,8 @@ const providerEntries = computed(() => {
                       <span class="text-sm text-fg-strong font-mono">{{ model.id }}</span>
                       <span v-if="model.name" class="ml-2 text-xs text-fg-muted">{{ model.name }}</span>
                       <span v-if="model.supportsThinking" class="ml-2 text-[10px] text-blue-400 border border-blue-400/30 px-1">thinking</span>
+                      <span v-if="model.supportsVision" class="ml-2 text-[10px] text-amber-400 border border-amber-400/30 px-1">vision</span>
+                      <span v-if="model.supportsAudio" class="ml-2 text-[10px] text-violet-400 border border-violet-400/30 px-1">audio</span>
                     </div>
                   </div>
                   <div class="flex items-center gap-2">
@@ -991,9 +1007,17 @@ const providerEntries = computed(() => {
                 </div>
               </div>
               <div class="flex items-center justify-between">
-                <label class="flex items-center gap-1.5 text-xs text-fg-muted">
-                  <input type="checkbox" v-model="modelForm.supportsThinking" class="accent-white" /> Supports Thinking
-                </label>
+                <div class="flex items-center gap-3 flex-wrap">
+                  <label class="flex items-center gap-1.5 text-xs text-fg-muted">
+                    <input type="checkbox" v-model="modelForm.supportsThinking" class="accent-white" /> Supports Thinking
+                  </label>
+                  <label class="flex items-center gap-1.5 text-xs text-fg-muted">
+                    <input type="checkbox" v-model="modelForm.supportsVision" class="accent-white" /> Supports Vision
+                  </label>
+                  <label class="flex items-center gap-1.5 text-xs text-fg-muted">
+                    <input type="checkbox" v-model="modelForm.supportsAudio" class="accent-white" /> Supports Audio
+                  </label>
+                </div>
                 <div class="flex items-center gap-1">
                   <button @click="saveNewModel(name)" :disabled="!modelForm.id.trim()" class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 disabled:opacity-40 transition-colors" title="Add model">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>
@@ -1101,6 +1125,14 @@ const providerEntries = computed(() => {
                         class="text-[10px] text-blue-400 border border-blue-400/30 px-1" title="Thinking support confirmed by provider">thinking</span>
                   <span v-else-if="model.supportsThinking"
                         class="text-[10px] text-fg-muted border border-input px-1" title="Thinking support guessed from model name (not confirmed by provider)">thinking?</span>
+                  <span v-if="model.supportsVision && model.visionDetectedFromProvider"
+                        class="text-[10px] text-amber-400 border border-amber-400/30 px-1" title="Vision support confirmed by provider">vision</span>
+                  <span v-else-if="model.supportsVision"
+                        class="text-[10px] text-fg-muted border border-input px-1" title="Vision support guessed from model name (not confirmed by provider)">vision?</span>
+                  <span v-if="model.supportsAudio && model.audioDetectedFromProvider"
+                        class="text-[10px] text-violet-400 border border-violet-400/30 px-1" title="Audio support confirmed by provider">audio</span>
+                  <span v-else-if="model.supportsAudio"
+                        class="text-[10px] text-fg-muted border border-input px-1" title="Audio support guessed from model name (not confirmed by provider)">audio?</span>
                   <span v-if="model.contextWindow" class="text-[10px] text-fg-muted font-mono">{{ (model.contextWindow / 1024).toFixed(0) }}K</span>
                 </div>
               </div>

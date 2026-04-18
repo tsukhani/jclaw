@@ -210,6 +210,8 @@ public final class LlmTypes {
             int contextWindow,
             int maxTokens,
             boolean supportsThinking,
+            boolean supportsVision,
+            boolean supportsAudio,
             double promptPrice,
             double completionPrice,
             double cachedReadPrice,
@@ -218,14 +220,14 @@ public final class LlmTypes {
     ) {
         /** Backwards-compatible factory for callers that don't have pricing data. */
         public ModelInfo(String id, String name, int contextWindow, int maxTokens, boolean supportsThinking) {
-            this(id, name, contextWindow, maxTokens, supportsThinking, -1, -1, -1, -1, null);
+            this(id, name, contextWindow, maxTokens, supportsThinking, false, false, -1, -1, -1, -1, null);
         }
 
         /** Backwards-compatible factory for callers that have pricing but no explicit thinking levels. */
         public ModelInfo(String id, String name, int contextWindow, int maxTokens, boolean supportsThinking,
                          double promptPrice, double completionPrice,
                          double cachedReadPrice, double cacheWritePrice) {
-            this(id, name, contextWindow, maxTokens, supportsThinking,
+            this(id, name, contextWindow, maxTokens, supportsThinking, false, false,
                     promptPrice, completionPrice, cachedReadPrice, cacheWritePrice, null);
         }
 

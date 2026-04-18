@@ -111,6 +111,12 @@ public class ModelDiscoveryService {
             var thinking = detectThinkingSupport(obj);
             model.put("supportsThinking", thinking.confirmed());
             model.put("thinkingDetectedFromProvider", thinking.fromProvider());
+            var vision = detectVisionSupport(obj);
+            model.put("supportsVision", vision.confirmed());
+            model.put("visionDetectedFromProvider", vision.fromProvider());
+            var audio = detectAudioSupport(obj);
+            model.put("supportsAudio", audio.confirmed());
+            model.put("audioDetectedFromProvider", audio.fromProvider());
             model.put("promptPrice", inferPrice(obj, "prompt"));
             model.put("completionPrice", inferPrice(obj, "completion"));
             model.put("cachedReadPrice", inferPrice(obj, "input_cache_read"));
@@ -184,6 +190,103 @@ public class ModelDiscoveryService {
         }
 
         return new ThinkingDetection(false, false);
+    }
+
+    /**
+     * Shared return shape for capability detectors. {@code confirmed} is the
+     * best-effort final answer; {@code fromProvider} is true when the provider
+     * explicitly reported enough metadata to decide (so the UI can lock the
+     * corresponding checkbox), false when we fell back to an ID-based heuristic
+     * or defaulted to absence.
+     */
+    public record CapabilityDetection(boolean confirmed, boolean fromProvider) {}
+
+    /**
+     * Detect vision (image input) support. Primary signal is OpenRouter's
+     * {@code architecture.input_modalities} array (e.g. {@code ["text","image"]});
+     * secondary is Ollama's {@code capabilities} array from {@code /api/show}
+     * merged into the /models payload. Falls back to model-ID heuristics for
+     * well-known vision-capable families when the provider reports nothing.
+     */
+    public static CapabilityDetection detectVisionSupport(JsonObject obj) {
+        var provider = extractModalities(obj, "image");
+        if (provider != null) return provider;
+
+        if (obj.has("capabilities") && obj.get("capabilities").isJsonArray()) {
+            for (var c : obj.getAsJsonArray("capabilities")) {
+                if (c.isJsonPrimitive() && "vision".equalsIgnoreCase(c.getAsString())) {
+                    return new CapabilityDetection(true, true);
+                }
+            }
+            return new CapabilityDetection(false, true);
+        }
+
+        var id = getString(obj, "id", "").toLowerCase();
+        if (id.contains("gpt-4o") || id.contains("gpt-4.1") || id.contains("gpt-4-vision")
+                || id.contains("gpt-5") || id.contains("claude-3") || id.contains("claude-opus")
+                || id.contains("claude-sonnet") || id.contains("claude-haiku")
+                || id.contains("gemini") || id.contains("llava") || id.contains("-vl")
+                || id.contains("qwen2-vl") || id.contains("qwen3-vl") || id.contains("pixtral")
+                || id.contains("internvl")) {
+            return new CapabilityDetection(true, false);
+        }
+
+        return new CapabilityDetection(false, false);
+    }
+
+    /**
+     * Detect audio input support. Same precedence as vision: OpenRouter
+     * modality arrays → Ollama capabilities → model-ID heuristic. Audio is
+     * still rare across providers so the heuristic list is small.
+     */
+    public static CapabilityDetection detectAudioSupport(JsonObject obj) {
+        var provider = extractModalities(obj, "audio");
+        if (provider != null) return provider;
+
+        if (obj.has("capabilities") && obj.get("capabilities").isJsonArray()) {
+            for (var c : obj.getAsJsonArray("capabilities")) {
+                if (c.isJsonPrimitive() && "audio".equalsIgnoreCase(c.getAsString())) {
+                    return new CapabilityDetection(true, true);
+                }
+            }
+            return new CapabilityDetection(false, true);
+        }
+
+        var id = getString(obj, "id", "").toLowerCase();
+        if (id.contains("gpt-4o-audio") || id.contains("gpt-5-audio")
+                || id.contains("gemini-2.5-flash-audio") || id.contains("whisper")
+                || id.contains("qwen2-audio") || id.contains("voxtral")) {
+            return new CapabilityDetection(true, false);
+        }
+
+        return new CapabilityDetection(false, false);
+    }
+
+    /**
+     * Scan OpenRouter's {@code architecture.input_modalities} (preferred) and
+     * legacy {@code architecture.modality} string for a given modality token.
+     * Returns non-null only when the provider explicitly reports modality
+     * metadata — caller should fall through to other signals otherwise.
+     */
+    private static CapabilityDetection extractModalities(JsonObject obj, String modality) {
+        if (!obj.has("architecture") || !obj.get("architecture").isJsonObject()) return null;
+        var arch = obj.getAsJsonObject("architecture");
+
+        if (arch.has("input_modalities") && arch.get("input_modalities").isJsonArray()) {
+            for (var m : arch.getAsJsonArray("input_modalities")) {
+                if (m.isJsonPrimitive() && modality.equalsIgnoreCase(m.getAsString())) {
+                    return new CapabilityDetection(true, true);
+                }
+            }
+            return new CapabilityDetection(false, true);
+        }
+
+        if (arch.has("modality") && arch.get("modality").isJsonPrimitive()) {
+            var s = arch.get("modality").getAsString().toLowerCase();
+            return new CapabilityDetection(s.contains(modality), true);
+        }
+
+        return null;
     }
 
     public static double inferPrice(JsonObject obj, String type) {

@@ -32,11 +32,13 @@ public class ApiAgentsController extends Controller {
 
     private record AgentView(Long id, String name, String modelProvider, String modelId,
                              boolean enabled, boolean isMain, String thinkingMode,
+                             Boolean visionEnabled, Boolean audioEnabled,
                              String createdAt, String updatedAt, boolean providerConfigured) {
         static AgentView of(Agent a) {
             var configured = AgentService.isProviderConfigured(a.modelProvider, a.modelId);
             return new AgentView(a.id, a.name, a.modelProvider, a.modelId,
                     a.enabled, a.isMain(), a.thinkingMode,
+                    a.visionEnabled, a.audioEnabled,
                     a.createdAt.toString(), a.updatedAt.toString(), configured);
         }
     }
@@ -149,6 +151,18 @@ public class ApiAgentsController extends Controller {
         return (s == null || s.isBlank()) ? null : s;
     }
 
+    /**
+     * Read a JSON boolean field that may be missing or explicit {@code null},
+     * returning {@code null} in both cases so the caller can distinguish
+     * "operator cleared the override" from "operator picked false".
+     */
+    private static Boolean readOptionalBoolean(com.google.gson.JsonObject body, String key) {
+        if (!body.has(key)) return null;
+        var el = body.get(key);
+        if (el.isJsonNull()) return null;
+        return el.getAsBoolean();
+    }
+
     public static void update(Long id) {
         var agent = requireAgent(id);
 
@@ -185,7 +199,21 @@ public class ApiAgentsController extends Controller {
                 ? readOptionalString(body, "thinkingMode")
                 : agent.thinkingMode;
 
-        agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode);
+        // visionEnabled / audioEnabled follow the same absent-leaves-untouched
+        // convention as thinkingMode. Three-state semantics (null/true/false)
+        // are preserved end-to-end: a JSON null in the body clears the override
+        // (falling back to the model's capability default); true or false pins
+        // the operator's explicit choice. Both pills on the chat page PUT
+        // boolean values only; null arrives only from a rare API consumer.
+        var visionEnabled = body.has("visionEnabled")
+                ? readOptionalBoolean(body, "visionEnabled")
+                : agent.visionEnabled;
+        var audioEnabled = body.has("audioEnabled")
+                ? readOptionalBoolean(body, "audioEnabled")
+                : agent.audioEnabled;
+
+        agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode,
+                visionEnabled, audioEnabled);
         renderJSON(gson.toJson(AgentView.of(agent)));
     }
 

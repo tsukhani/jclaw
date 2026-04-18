@@ -6,6 +6,10 @@ export interface ProviderModel {
   supportsThinking?: boolean
   /** Reasoning-effort levels this model accepts, e.g. ["low","medium","high"]. */
   thinkingLevels?: string[]
+  /** True when the model accepts image inputs (vision). */
+  supportsVision?: boolean
+  /** True when the model accepts audio inputs. */
+  supportsAudio?: boolean
   [key: string]: unknown
 }
 

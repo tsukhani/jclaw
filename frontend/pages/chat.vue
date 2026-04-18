@@ -156,6 +156,61 @@ const thinkingSupported = computed(() => selectedModelInfo.value?.supportsThinki
 // non-thinking models — the toolbar hides the selector in that case.
 const thinkingLevels = computed<string[]>(() => effectiveThinkingLevels(selectedModelInfo.value as any))
 
+// Model capability flags surfaced as pills next to the paperclip. Mirrors LM
+// Studio's "Think / Vision" chip row so users can see at a glance which input
+// types the currently-selected model accepts. Flags originate in provider
+// metadata (OpenRouter architecture.input_modalities, Ollama capabilities)
+// or the operator-toggled checkbox in Settings; see ModelDiscoveryService.
+const visionSupported = computed(() => (selectedModelInfo.value as any)?.supportsVision === true)
+const audioSupported = computed(() => (selectedModelInfo.value as any)?.supportsAudio === true)
+
+// --- Pill toggle state ---
+
+// Think pill: active when the agent currently has a reasoning-effort level set.
+// Null/blank thinkingMode means thinking is off even on a capable model.
+const thinkingActive = computed(() => {
+  const mode = selectedAgent.value?.thinkingMode
+  return typeof mode === 'string' && mode.length > 0
+})
+
+// Remember the last non-off thinking level the operator picked for THIS session so
+// toggling the pill off → on restores "medium" or whatever they'd most recently
+// chosen, instead of always jumping back to the first advertised level. The ref
+// is intentionally module-local and not persisted — the next page load starts
+// fresh from whatever the agent's stored thinkingMode was.
+const lastThinkingLevel = ref<string>('medium')
+
+// Vision/Audio pills: active-by-default on a capable model (agent field null).
+// Only an explicit `false` on the agent record pins them off. This keeps the
+// UX aligned with the rest of jclaw — operators opt OUT of a capability, not
+// INTO one — and avoids a migration for existing agents on capable models.
+const visionActive = computed(() => selectedAgent.value?.visionEnabled !== false)
+const audioActive = computed(() => selectedAgent.value?.audioEnabled !== false)
+
+function toggleThinkingPill() {
+  if (!thinkingSupported.value) return
+  if (thinkingActive.value) {
+    updateAgentSetting({ thinkingMode: null })
+  } else {
+    // Prefer the session-remembered level if it's still a valid option on this
+    // model, otherwise fall back to the first advertised level so we never
+    // send an invalid enum value the backend would have to defensively reject.
+    const levels = thinkingLevels.value
+    const next = levels.includes(lastThinkingLevel.value) ? lastThinkingLevel.value : levels[0]
+    if (next) updateAgentSetting({ thinkingMode: next })
+  }
+}
+
+function toggleVisionPill() {
+  if (!visionSupported.value) return
+  updateAgentSetting({ visionEnabled: !visionActive.value })
+}
+
+function toggleAudioPill() {
+  if (!audioSupported.value) return
+  updateAgentSetting({ audioEnabled: !audioActive.value })
+}
+
 // Sync model or thinking mode change back to the agent
 async function updateAgentSetting(updates: Record<string, any>) {
   if (!selectedAgentId.value) return
@@ -191,10 +246,10 @@ function onModelChange(event: Event) {
 
 function onThinkingModeChange(event: Event) {
   const value = (event.target as HTMLSelectElement).value
-  // Empty string is "off" — send null so the backend clears the column.
-  // This setting only applies to future turns; existing rendered thinking
-  // bubbles are per-message and unaffected (each bubble carries its own
-  // collapse state).
+  // The dropdown no longer exposes an "Off" option — the Think pill owns
+  // on/off. So any value reaching this handler is a non-empty level. Remember
+  // it for subsequent toggle-on restores.
+  if (value) lastThinkingLevel.value = value
   updateAgentSetting({ thinkingMode: value || null })
 }
 
@@ -809,16 +864,21 @@ function exportConversation() {
           place. Hidden entirely for non-thinking models — the agent detail
           page renders a disabled placeholder, but the chat toolbar prioritizes
           compactness since non-reasoning is the common case.
+
+          On/off is owned by the Think pill in the input footer; this select
+          only picks the effort LEVEL and is disabled when the pill is off.
+          The value falls back to the last remembered level in that state so
+          switching back on snaps to a meaningful choice rather than a blank.
         -->
         <template v-if="thinkingSupported && thinkingLevels.length">
           <label class="text-xs text-fg-muted">Thinking:</label>
           <select
-            :value="selectedAgent?.thinkingMode || ''"
+            :value="selectedAgent?.thinkingMode || lastThinkingLevel"
+            :disabled="!thinkingActive"
             @change="onThinkingModeChange"
             class="bg-muted border border-input text-sm text-fg-strong px-2 py-1
-                   focus:outline-hidden focus:border-ring"
+                   focus:outline-hidden focus:border-ring disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <option value="">Off</option>
             <option v-for="level in thinkingLevels" :key="level" :value="level">
               {{ level.charAt(0).toUpperCase() + level.slice(1) }}
             </option>
@@ -879,11 +939,11 @@ function exportConversation() {
                 Body is suppressed when msg.thinkingCollapsed is true.
               -->
               <div v-if="msg.reasoning"
-                   class="bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/20 rounded-xl rounded-tl-sm text-emerald-800/80 dark:text-emerald-300/70 px-3 py-2 text-xs font-mono mb-1.5 whitespace-pre-wrap break-words"
+                   class="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/20 rounded-xl rounded-tl-sm text-blue-800/80 dark:text-blue-300/70 px-3 py-2 text-xs font-mono mb-1.5 whitespace-pre-wrap break-words"
                    :class="msg.thinkingCollapsed ? '' : 'max-h-48 overflow-y-auto'">
                 <button type="button"
                         @click="toggleThinking(msg)"
-                        class="flex items-center gap-1.5 w-full text-left text-emerald-700 dark:text-emerald-400/60 text-[10px] font-sans font-medium hover:text-emerald-600 dark:hover:text-emerald-400/90 focus:outline-none"
+                        class="flex items-center gap-1.5 w-full text-left text-blue-700 dark:text-blue-400/60 text-[10px] font-sans font-medium hover:text-blue-600 dark:hover:text-blue-400/90 focus:outline-none"
                         :class="msg.thinkingCollapsed ? '' : 'mb-1'"
                         :title="msg.thinkingCollapsed ? 'Expand reasoning' : 'Collapse reasoning'">
                   <svg class="w-3 h-3 transition-transform"
@@ -918,7 +978,7 @@ function exportConversation() {
                   {{ msg.usage.cached.toLocaleString() }}
                 </span>
                 <span v-if="msg.usage.reasoning"
-                      class="inline-flex items-center gap-1 text-xs text-emerald-700/80 dark:text-emerald-400/70"
+                      class="inline-flex items-center gap-1 text-xs text-blue-700/80 dark:text-blue-400/70"
                       :title="`${msg.usage.reasoning.toLocaleString()} reasoning tokens`">
                   <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
                   {{ msg.usage.reasoning.toLocaleString() }}
@@ -929,15 +989,18 @@ function exportConversation() {
                   {{ msg.usage.completion.toLocaleString() }}
                 </span>
                 <span class="text-border text-xs">|</span>
-                <span v-if="formatTokensPerSec(msg.usage)" class="text-xs text-fg-muted" title="Output tokens per second">
+                <span v-if="formatTokensPerSec(msg.usage)" class="inline-flex items-center gap-1 text-xs text-fg-muted" title="Output tokens per second">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
                   {{ formatTokensPerSec(msg.usage) }}
                 </span>
-                <span v-if="msg.usage.durationMs" class="text-xs text-fg-muted" title="Total response time">
+                <span v-if="msg.usage.durationMs" class="inline-flex items-center gap-1 text-xs text-fg-muted" title="Total response time">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                   {{ (msg.usage.durationMs / 1000).toFixed(1) }}s
                 </span>
                 <span v-if="formatUsageCost(msg.usage)"
-                      class="text-xs text-amber-500/80 font-medium"
+                      class="inline-flex items-center gap-1 text-xs text-amber-500/80 font-medium"
                       :title="formatUsageCostTooltip(msg.usage)">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                   {{ formatUsageCost(msg.usage) }}
                 </span>
               </div>
@@ -1021,9 +1084,50 @@ function exportConversation() {
           />
           <input ref="fileInput" type="file" multiple class="hidden" @change="handleFileUpload" />
           <div class="flex items-center justify-between px-3 pb-2.5">
-            <div class="flex items-center gap-1">
+            <div class="flex items-center gap-1.5 flex-wrap">
               <button type="button" @click="triggerFileUpload" class="p-1.5 text-fg-muted hover:text-fg-primary transition-colors" title="Attach file">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+              </button>
+              <!--
+                Model-capability toggles. LM Studio-style chips that both
+                reflect and control whether the corresponding capability is
+                currently active for the selected agent. Visible only when the
+                model advertises the capability (set via provider auto-detect
+                or manual override in Settings). Active state: solid coloured
+                chip; inactive state: outlined muted chip.
+                  - Think: flips agent.thinkingMode between null and the last
+                    remembered effort level (default "medium").
+                  - Vision / Audio: flip the matching agent.*Enabled override.
+              -->
+              <button v-if="thinkingSupported" type="button"
+                      @click="toggleThinkingPill"
+                      class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors"
+                      :class="thinkingActive
+                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-500/25'
+                        : 'border border-input text-fg-muted hover:text-fg-primary hover:border-ring'"
+                      :title="thinkingActive ? 'Thinking on — click to turn off' : 'Thinking off — click to turn on'">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+                Think
+              </button>
+              <button v-if="visionSupported" type="button"
+                      @click="toggleVisionPill"
+                      class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors"
+                      :class="visionActive
+                        ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-500/25'
+                        : 'border border-input text-fg-muted hover:text-fg-primary hover:border-ring'"
+                      :title="visionActive ? 'Vision on — click to turn off' : 'Vision off — click to turn on'">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                Vision
+              </button>
+              <button v-if="audioSupported" type="button"
+                      @click="toggleAudioPill"
+                      class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors"
+                      :class="audioActive
+                        ? 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400 hover:bg-violet-200 dark:hover:bg-violet-500/25'
+                        : 'border border-input text-fg-muted hover:text-fg-primary hover:border-ring'"
+                      :title="audioActive ? 'Audio on — click to turn off' : 'Audio off — click to turn on'">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-14 0m7 7v4m-4 0h8m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                Audio
               </button>
             </div>
             <div class="flex items-center gap-1">

@@ -138,7 +138,10 @@ describe('Chat page', () => {
     expect(component.text()).toContain('Low')
     expect(component.text()).toContain('Medium')
     expect(component.text()).toContain('High')
-    // "Off" is the always-present first option for reasoning-capable models.
-    expect(component.text()).toContain('Off')
+    // On/off is owned by the Think pill in the input footer, not by a dropdown
+    // option — so the dropdown must NOT contain an "Off" entry any more.
+    expect(component.text()).not.toContain('>Off<')
+    // The pill itself is a button labelled "Think".
+    expect(component.text()).toContain('Think')
   })
 })

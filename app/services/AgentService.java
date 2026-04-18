@@ -79,11 +79,19 @@ public class AgentService {
 
     public static Agent update(Agent agent, String name, String modelProvider, String modelId,
                                 boolean enabled) {
-        return update(agent, name, modelProvider, modelId, enabled, agent.thinkingMode);
+        return update(agent, name, modelProvider, modelId, enabled, agent.thinkingMode,
+                agent.visionEnabled, agent.audioEnabled);
     }
 
     public static Agent update(Agent agent, String name, String modelProvider, String modelId,
                                 boolean enabled, String thinkingMode) {
+        return update(agent, name, modelProvider, modelId, enabled, thinkingMode,
+                agent.visionEnabled, agent.audioEnabled);
+    }
+
+    public static Agent update(Agent agent, String name, String modelProvider, String modelId,
+                                boolean enabled, String thinkingMode,
+                                Boolean visionEnabled, Boolean audioEnabled) {
         agent.name = name;
         agent.modelProvider = modelProvider;
         agent.modelId = modelId;
@@ -93,6 +101,8 @@ public class AgentService {
         // layer additionally rejects such requests with 409 in ApiAgentsController.
         agent.enabled = agent.isMain() || (enabled && isProviderConfigured(modelProvider, modelId));
         agent.thinkingMode = normalizeThinkingMode(thinkingMode, modelProvider, modelId);
+        agent.visionEnabled = visionEnabled;
+        agent.audioEnabled = audioEnabled;
         agent.save();
         return agent;
     }

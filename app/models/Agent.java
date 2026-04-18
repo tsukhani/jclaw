@@ -34,6 +34,21 @@ public class Agent extends Model {
     @Column(name = "thinking_mode")
     public String thinkingMode;
 
+    /**
+     * Per-agent override for whether image inputs are permitted. {@code null}
+     * means "follow the model's {@code supportsVision} capability" — i.e. the
+     * Vision pill renders active on a vision-capable model by default.
+     * {@code false} means the operator explicitly turned the pill off. The
+     * column stays nullable so a future vision-capable model swap on an
+     * untouched agent inherits the enabled default without a migration.
+     */
+    @Column(name = "vision_enabled")
+    public Boolean visionEnabled;
+
+    /** Per-agent audio toggle; same three-state semantics as {@link #visionEnabled}. */
+    @Column(name = "audio_enabled")
+    public Boolean audioEnabled;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 
