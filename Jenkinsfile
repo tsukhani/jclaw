@@ -113,12 +113,22 @@ pipeline {
                                 --generate-notes
                         """
 
-                        // Docker image to GitHub Container Registry
+                        // Multi-arch Docker image to GitHub Container Registry.
+                        // buildx --push produces both linux/amd64 and
+                        // linux/arm64 manifests under a single tag, so
+                        // Apple Silicon users can `docker compose up -d`
+                        // the native variant without Rosetta translation.
+                        // Single-arch `docker build` was the prior shape;
+                        // kept in git history for reference if buildx ever
+                        // becomes unavailable on this agent.
                         sh """
                             echo \$GH_TOKEN | docker login ghcr.io -u tsukhani --password-stdin
-                            docker build -t ghcr.io/tsukhani/jclaw:${version} -t ghcr.io/tsukhani/jclaw:latest .
-                            docker push ghcr.io/tsukhani/jclaw:${version}
-                            docker push ghcr.io/tsukhani/jclaw:latest
+                            docker buildx create --use --name jclaw-builder --driver docker-container 2>/dev/null || docker buildx use jclaw-builder
+                            docker buildx build \\
+                                --platform linux/amd64,linux/arm64 \\
+                                -t ghcr.io/tsukhani/jclaw:${version} \\
+                                -t ghcr.io/tsukhani/jclaw:latest \\
+                                --push .
                         """
                     }
                 }
