@@ -169,6 +169,26 @@ pipeline {
                                     gh api -X DELETE "/user/packages/container/jclaw/versions/$id" || true
                                 done
                         '''
+
+                        // Prune BuildKit cache older than 30 days. The Release
+                        // stage uses `docker buildx` with the docker-container
+                        // driver, which stores per-platform layer cache inside
+                        // the `jclaw-builder` container's volume. That cache is
+                        // invisible to `docker system prune` unless we scope to
+                        // the named builder. Without this, the Threadripper
+                        // agent's BuildKit cache grows unbounded (up to
+                        // BuildKit's 10%-of-disk default) until LRU eviction
+                        // kicks in. 720h = 30 days keeps recent entries warm
+                        // for incremental builds while reaping fossils; adjust
+                        // `until=` down if disk pressure surfaces. The `|| true`
+                        // swallows transient prune failures so they don't mark
+                        // an otherwise-green release UNSTABLE.
+                        sh '''
+                            echo "Pruning BuildKit cache older than 30 days..."
+                            docker buildx prune --builder jclaw-builder \
+                                --filter 'until=720h' \
+                                --force || true
+                        '''
                     }
                 }
             }
