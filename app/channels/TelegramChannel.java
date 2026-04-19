@@ -80,9 +80,11 @@ public class TelegramChannel implements Channel {
     // ── Outbound sends ──
 
     /**
-     * Fire-and-retry outbound message send for a specific bot token. Chunks at 4000
-     * chars to stay under Telegram's 4096 limit and applies sendWithRetry per chunk
-     * so retry hints are honored independently.
+     * Fire-and-retry outbound message send for a specific bot token. The agent's
+     * markdown is converted to Telegram-safe HTML via {@link TelegramMarkdownFormatter}
+     * (post-JCLAW-91) so tables, headings, and lists render correctly instead of
+     * leaking raw pipes and hashes. Chunks at 4000 chars with HTML-tag-aware
+     * splitting so a chunk boundary never lands mid-{@code <pre>}.
      */
     public static boolean sendMessage(String botToken, String chatId, String text) {
         if (botToken == null || chatId == null || text == null) {
@@ -91,7 +93,9 @@ public class TelegramChannel implements Channel {
             return false;
         }
         var channel = forToken(botToken);
-        var chunks = chunk(text, 4000);
+        var html = TelegramMarkdownFormatter.toHtml(text);
+        var chunks = TelegramMarkdownFormatter.chunkHtml(html, 4000);
+        if (chunks.isEmpty()) return true; // nothing to send
         boolean allOk = true;
         for (var part : chunks) {
             if (!channel.sendWithRetry(chatId, part)) allOk = false;
@@ -176,7 +180,7 @@ public class TelegramChannel implements Channel {
         var request = SendMessage.builder()
                 .chatId(peerId)
                 .text(text)
-                .parseMode("Markdown")
+                .parseMode("HTML")
                 .build();
         try {
             client.execute(request);
