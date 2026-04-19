@@ -21,15 +21,27 @@ public interface Channel {
     boolean trySend(String peerId, String text);
 
     /**
-     * Send a message with a single retry on failure (1s backoff between attempts).
-     * Shared across all channel implementations to eliminate the duplicated
-     * retry/sleep/log skeleton.
+     * Retry delay hint (ms) from the most recent failed {@link #trySend} on THIS thread.
+     * Defaults to 1000 ms. Channels with platform-specific rate-limit signals
+     * (e.g. Telegram's {@code retry_after}, Slack's {@code Retry-After} header) should
+     * override to publish that hint to {@link #sendWithRetry}. Reading consumes the
+     * hint — a second call after a failure returns the default.
+     */
+    default long consumeRetryDelayMs() {
+        return 1000L;
+    }
+
+    /**
+     * Send a message with a single retry on failure. The delay between attempts is
+     * taken from {@link #consumeRetryDelayMs()} — capped at 60 s so a buggy platform
+     * response can't stall an agent response indefinitely.
      */
     default boolean sendWithRetry(String peerId, String text) {
         for (int attempt = 0; attempt < 2; attempt++) {
             if (trySend(peerId, text)) return true;
             if (attempt == 0) {
-                try { Thread.sleep(1000); } catch (InterruptedException _) {
+                long delayMs = Math.min(consumeRetryDelayMs(), 60_000L);
+                try { Thread.sleep(delayMs); } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                     return false;
                 }

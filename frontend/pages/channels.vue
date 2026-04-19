@@ -5,12 +5,59 @@ interface ChannelInfo {
   config: Record<string, string>
 }
 
+interface ChannelField {
+  name: string
+  type?: 'text' | 'password' | 'select'
+  options?: Array<{ value: string, label: string }>
+  default?: string
+  showWhen?: (form: Record<string, string>) => boolean
+}
+
+interface ChannelTypeDef {
+  type: string
+  label: string
+  fields: ChannelField[]
+}
+
 const { data: channels, refresh } = await useFetch<ChannelInfo[]>('/api/channels')
 
-const channelTypes = [
-  { type: 'telegram', label: 'Telegram', fields: ['botToken', 'webhookSecret', 'webhookUrl'] },
-  { type: 'slack', label: 'Slack', fields: ['botToken', 'signingSecret'] },
-  { type: 'whatsapp', label: 'WhatsApp', fields: ['phoneNumberId', 'accessToken', 'appSecret', 'verifyToken'] },
+const channelTypes: ChannelTypeDef[] = [
+  {
+    type: 'telegram',
+    label: 'Telegram',
+    fields: [
+      { name: 'botToken', type: 'password' },
+      {
+        name: 'transport',
+        type: 'select',
+        default: 'POLLING',
+        options: [
+          { value: 'POLLING', label: 'Polling (no public URL needed)' },
+          { value: 'WEBHOOK', label: 'Webhook (requires public HTTPS URL)' },
+        ],
+      },
+      { name: 'webhookSecret', type: 'password', showWhen: f => f.transport === 'WEBHOOK' },
+      { name: 'webhookUrl', type: 'text', showWhen: f => f.transport === 'WEBHOOK' },
+    ],
+  },
+  {
+    type: 'slack',
+    label: 'Slack',
+    fields: [
+      { name: 'botToken', type: 'password' },
+      { name: 'signingSecret', type: 'password' },
+    ],
+  },
+  {
+    type: 'whatsapp',
+    label: 'WhatsApp',
+    fields: [
+      { name: 'phoneNumberId', type: 'text' },
+      { name: 'accessToken', type: 'password' },
+      { name: 'appSecret', type: 'password' },
+      { name: 'verifyToken', type: 'password' },
+    ],
+  },
 ]
 
 const editing = ref<string | null>(null)
@@ -19,13 +66,18 @@ const enabled = ref(false)
 const { mutate, loading: saving } = useApiMutation()
 
 function editChannel(type: string) {
+  const def = channelTypes.find(c => c.type === type)
   const existing = channels.value?.find(c => c.channelType === type)
+  const base: Record<string, string> = {}
+  def?.fields.forEach((f) => {
+    if (f.default !== undefined) base[f.name] = f.default
+  })
   if (existing) {
-    form.value = { ...existing.config }
+    form.value = { ...base, ...existing.config }
     enabled.value = existing.enabled
   }
   else {
-    form.value = {}
+    form.value = base
     enabled.value = false
   }
   editing.value = type
@@ -46,6 +98,10 @@ async function saveChannel() {
 function getChannelStatus(type: string) {
   const ch = channels.value?.find(c => c.channelType === type)
   return ch?.enabled ? 'active' : 'inactive'
+}
+
+function visibleFields(def: ChannelTypeDef): ChannelField[] {
+  return def.fields.filter(f => !f.showWhen || f.showWhen(form.value))
 }
 </script>
 
@@ -88,21 +144,40 @@ function getChannelStatus(type: string) {
         Configure {{ channelTypes.find(c => c.type === editing)?.label }}
       </h2>
       <div class="space-y-3">
-        <label
-          v-for="field in channelTypes.find(c => c.type === editing)?.fields"
-          :key="field"
-          :for="`channel-field-${field}`"
-          class="block"
+        <template
+          v-for="field in visibleFields(channelTypes.find(c => c.type === editing)!)"
+          :key="field.name"
         >
-          <span class="block text-xs text-fg-muted mb-1">{{ field }}</span>
-          <input
-            :id="`channel-field-${field}`"
-            v-model="form[field]"
-            :type="field.toLowerCase().includes('token') || field.toLowerCase().includes('secret') ? 'password' : 'text'"
-            class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
-                   focus:outline-hidden focus:border-ring transition-colors"
+          <label
+            :for="`channel-field-${field.name}`"
+            class="block"
           >
-        </label>
+            <span class="block text-xs text-fg-muted mb-1">{{ field.name }}</span>
+            <select
+              v-if="field.type === 'select'"
+              :id="`channel-field-${field.name}`"
+              v-model="form[field.name]"
+              class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
+                     focus:outline-hidden focus:border-ring transition-colors"
+            >
+              <option
+                v-for="opt in field.options"
+                :key="opt.value"
+                :value="opt.value"
+              >
+                {{ opt.label }}
+              </option>
+            </select>
+            <input
+              v-else
+              :id="`channel-field-${field.name}`"
+              v-model="form[field.name]"
+              :type="field.type ?? 'text'"
+              class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
+                     focus:outline-hidden focus:border-ring transition-colors"
+            >
+          </label>
+        </template>
         <label
           for="channel-enabled"
           class="flex items-center gap-2 text-xs text-fg-muted"

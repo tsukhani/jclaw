@@ -1,140 +1,181 @@
 package channels;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.ChannelConfig;
+import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
+import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.updates.SetWebhook;
+import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.api.objects.message.Message;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
+import org.telegram.telegrambots.meta.generics.TelegramClient;
 import services.EventLogger;
 
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Telegram Bot API client. Sends messages via HTTP POST and registers webhooks.
+ * Telegram Bot API adapter backed by the {@code org.telegram:telegrambots-client}
+ * SDK. Exposes both a webhook path (via {@link #parseUpdate}) and a long-polling
+ * path (via {@link TelegramPollingRunner}); which one runs is decided by the
+ * {@link ChannelTransport} field on the stored config.
  */
 public class TelegramChannel implements Channel {
 
-    private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
-    private static final String API_BASE = "https://api.telegram.org/bot";
-
-    public record TelegramConfig(String botToken, String webhookSecret, String webhookUrl) {
+    /**
+     * Parsed snapshot of the Telegram channel's {@code configJson} blob. {@code transport}
+     * defaults to {@link ChannelTransport#POLLING} when the field is absent — this is the
+     * zero-config path for laptop development (no public URL needed).
+     */
+    public record TelegramConfig(String botToken, ChannelTransport transport,
+                                 String webhookSecret, String webhookUrl) {
         public static TelegramConfig load() {
             var cc = ChannelConfig.findByType("telegram");
             if (cc == null || !cc.enabled) return null;
             var json = JsonParser.parseString(cc.configJson).getAsJsonObject();
             return new TelegramConfig(
                     json.get("botToken").getAsString(),
+                    ChannelTransport.parse(
+                            json.has("transport") ? json.get("transport").getAsString() : null,
+                            ChannelTransport.POLLING),
                     json.has("webhookSecret") ? json.get("webhookSecret").getAsString() : null,
-                    json.has("webhookUrl") ? json.get("webhookUrl").getAsString() : null
-            );
+                    json.has("webhookUrl") ? json.get("webhookUrl").getAsString() : null);
         }
     }
+
+    /** Generic inbound shape consumed by {@link controllers.WebhookTelegramController}. */
+    public record InboundMessage(String chatId, String text, String fromId, String fromUsername) {}
+
+    private static final ObjectMapper JACKSON = new ObjectMapper();
+
+    private static final TelegramChannel INSTANCE = new TelegramChannel();
+    public static TelegramChannel instance() { return INSTANCE; }
+
+    // Cached SDK client keyed by bot token. OkHttpTelegramClient owns a dispatcher
+    // thread pool, so we reuse one per token across the lifetime of that token.
+    private record ClientHolder(String botToken, TelegramClient client) {}
+    private static final AtomicReference<ClientHolder> ACTIVE = new AtomicReference<>();
+
+    // retry_after delay hint, set by trySend on 429, consumed by Channel.sendWithRetry.
+    private static final ThreadLocal<Long> RETRY_HINT_MS = new ThreadLocal<>();
 
     @Override
     public String channelName() { return "telegram"; }
 
+    @Override
+    public long consumeRetryDelayMs() {
+        Long v = RETRY_HINT_MS.get();
+        RETRY_HINT_MS.remove();
+        return v != null ? v : Channel.super.consumeRetryDelayMs();
+    }
+
+    // ── Static facades used by webhook controller and agent runner ──
+
+    /** Fire-and-retry outbound message send. Returns true on success. */
     public static boolean sendMessage(String chatId, String text) {
         var config = TelegramConfig.load();
         if (config == null) {
             EventLogger.error("channel", null, "telegram", "Telegram not configured");
             return false;
         }
-        return new TelegramChannel().sendWithRetry(chatId, text);
+        return INSTANCE.sendWithRetry(chatId, text);
     }
+
+    /** Register the webhook URL with Telegram. Only meaningful in {@link ChannelTransport#WEBHOOK} mode. */
+    public static boolean setWebhook(TelegramConfig config) {
+        if (config.webhookUrl() == null) return false;
+        var builder = SetWebhook.builder().url(config.webhookUrl());
+        if (config.webhookSecret() != null) builder.secretToken(config.webhookSecret());
+        try {
+            clientFor(config.botToken()).execute(builder.build());
+            EventLogger.info("channel", null, "telegram",
+                    "Webhook registered: %s".formatted(config.webhookUrl()));
+            return true;
+        } catch (TelegramApiException e) {
+            EventLogger.error("channel", null, "telegram",
+                    "Webhook registration failed: %s".formatted(e.getMessage()));
+            return false;
+        }
+    }
+
+    /** Parse a Gson {@link JsonObject} update (webhook payload) into {@link InboundMessage}. */
+    public static InboundMessage parseUpdate(JsonObject update) {
+        try {
+            Update sdk = JACKSON.readValue(update.toString(), Update.class);
+            return parseUpdate(sdk);
+        } catch (Exception e) {
+            EventLogger.warn("channel", null, "telegram",
+                    "Update parse error: %s".formatted(e.getMessage()));
+            return null;
+        }
+    }
+
+    /** Parse an SDK {@link Update} (polling runner source) into {@link InboundMessage}. */
+    public static InboundMessage parseUpdate(Update update) {
+        if (update == null || update.getMessage() == null) return null;
+        Message msg = update.getMessage();
+        if (!msg.hasText()) return null;
+        String chatId = String.valueOf(msg.getChatId());
+        String text = msg.getText();
+        String fromId = null;
+        String fromUsername = null;
+        if (msg.getFrom() != null) {
+            fromId = String.valueOf(msg.getFrom().getId());
+            fromUsername = msg.getFrom().getUserName();
+        }
+        return new InboundMessage(chatId, text, fromId, fromUsername);
+    }
+
+    // ── Per-instance send path ──
 
     @Override
     public boolean trySend(String peerId, String text) {
         var config = TelegramConfig.load();
         if (config == null) return false;
-        var url = API_BASE + config.botToken() + "/sendMessage";
-        var body = gson.toJson(Map.of("chat_id", peerId, "text", text, "parse_mode", "Markdown"));
+        var request = SendMessage.builder()
+                .chatId(peerId)
+                .text(text)
+                .parseMode("Markdown")
+                .build();
         try {
-            var request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(15))
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build();
-
-            var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
-            var result = JsonParser.parseString(response.body()).getAsJsonObject();
-
-            if (result.get("ok").getAsBoolean()) {
-                EventLogger.info("channel", null, "telegram",
-                        "Message sent to chat %s".formatted(peerId));
-                return true;
+            clientFor(config.botToken()).execute(request);
+            EventLogger.info("channel", null, "telegram",
+                    "Message sent to chat %s".formatted(peerId));
+            return true;
+        } catch (TelegramApiRequestException e) {
+            var params = e.getParameters();
+            if (params != null && params.getRetryAfter() != null && params.getRetryAfter() > 0) {
+                int retryAfter = params.getRetryAfter();
+                RETRY_HINT_MS.set(retryAfter * 1000L);
+                EventLogger.warn("channel", null, "telegram",
+                        "Rate-limited; retry_after=%ds".formatted(retryAfter));
+            } else {
+                EventLogger.warn("channel", null, "telegram",
+                        "Telegram API error: %s".formatted(e.getMessage()));
             }
-
-            EventLogger.warn("channel", null, "telegram",
-                    "Telegram API error: %s".formatted(response.body()));
             return false;
-        } catch (Exception e) {
+        } catch (TelegramApiException e) {
             EventLogger.warn("channel", null, "telegram",
                     "Send failed: %s".formatted(e.getMessage()));
             return false;
         }
     }
 
-    public static boolean setWebhook(TelegramConfig config) {
-        if (config.webhookUrl() == null) return false;
-
-        var url = API_BASE + config.botToken() + "/setWebhook";
-        var params = new java.util.HashMap<String, String>();
-        params.put("url", config.webhookUrl());
-        if (config.webhookSecret() != null) {
-            params.put("secret_token", config.webhookSecret());
-        }
-        var body = gson.toJson(params);
-
-        try {
-            var request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Content-Type", "application/json")
-                    .timeout(Duration.ofSeconds(15))
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build();
-
-            var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
-            var result = JsonParser.parseString(response.body()).getAsJsonObject();
-
-            if (result.get("ok").getAsBoolean()) {
-                EventLogger.info("channel", null, "telegram", "Webhook registered: %s".formatted(config.webhookUrl()));
-                return true;
-            }
-            EventLogger.error("channel", null, "telegram", "Webhook registration failed: %s".formatted(response.body()));
-            return false;
-
-        } catch (Exception e) {
-            EventLogger.error("channel", null, "telegram", "Webhook registration error: %s".formatted(e.getMessage()));
-            return false;
-        }
-    }
+    // ── Client caching ──
 
     /**
-     * Parse an inbound Telegram Update JSON and extract chat_id, text, and from user info.
+     * Cached {@link TelegramClient} for {@code botToken}. When the token changes the
+     * prior client is dropped; OkHttp's dispatcher shuts down when garbage-collected.
      */
-    public record InboundMessage(String chatId, String text, String fromId, String fromUsername) {}
-
-    public static InboundMessage parseUpdate(JsonObject update) {
-        if (!update.has("message")) return null;
-        var message = update.getAsJsonObject("message");
-        if (!message.has("text")) return null;
-
-        var chat = message.getAsJsonObject("chat");
-        var chatId = chat.get("id").getAsString();
-        var text = message.get("text").getAsString();
-
-        String fromId = null;
-        String fromUsername = null;
-        if (message.has("from")) {
-            var from = message.getAsJsonObject("from");
-            fromId = from.get("id").getAsString();
-            fromUsername = from.has("username") ? from.get("username").getAsString() : null;
+    public static TelegramClient clientFor(String botToken) {
+        var existing = ACTIVE.get();
+        if (existing != null && existing.botToken().equals(botToken)) {
+            return existing.client();
         }
-
-        return new InboundMessage(chatId, text, fromId, fromUsername);
+        var fresh = new OkHttpTelegramClient(botToken);
+        ACTIVE.set(new ClientHolder(botToken, fresh));
+        return fresh;
     }
 }

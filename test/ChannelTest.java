@@ -56,6 +56,88 @@ public class ChannelTest extends UnitTest {
         assertNull(msg);
     }
 
+    // === ChannelTransport enum ===
+
+    @Test
+    public void channelTransportParsesFallbacks() {
+        assertEquals(ChannelTransport.POLLING, ChannelTransport.parse(null, ChannelTransport.POLLING));
+        assertEquals(ChannelTransport.WEBHOOK, ChannelTransport.parse("", ChannelTransport.WEBHOOK));
+        assertEquals(ChannelTransport.POLLING, ChannelTransport.parse("   ", ChannelTransport.POLLING));
+        assertEquals(ChannelTransport.POLLING, ChannelTransport.parse("bogus", ChannelTransport.POLLING));
+    }
+
+    @Test
+    public void channelTransportParsesValidValuesCaseInsensitive() {
+        assertEquals(ChannelTransport.POLLING, ChannelTransport.parse("POLLING", ChannelTransport.WEBHOOK));
+        assertEquals(ChannelTransport.POLLING, ChannelTransport.parse("polling", ChannelTransport.WEBHOOK));
+        assertEquals(ChannelTransport.WEBHOOK, ChannelTransport.parse(" WEBHOOK ", ChannelTransport.POLLING));
+        assertTrue(ChannelTransport.WEBHOOK.requiresPublicUrl());
+        assertTrue(ChannelTransport.HTTP.requiresPublicUrl());
+        assertFalse(ChannelTransport.POLLING.requiresPublicUrl());
+        assertFalse(ChannelTransport.SOCKET.requiresPublicUrl());
+    }
+
+    @Test
+    public void telegramConfigDefaultsTransportToPollingWhenAbsent() {
+        // Field-level parse check: when a configJson blob has no transport,
+        // TelegramConfig.load reads POLLING via ChannelTransport.parse(null, POLLING).
+        var withoutTransport = JsonParser.parseString("""
+                {"botToken": "abc:XYZ"}
+                """).getAsJsonObject();
+        var rawTransport = withoutTransport.has("transport")
+                ? withoutTransport.get("transport").getAsString()
+                : null;
+        assertEquals(ChannelTransport.POLLING,
+                ChannelTransport.parse(rawTransport, ChannelTransport.POLLING));
+
+        var explicitlyWebhook = JsonParser.parseString("""
+                {"botToken": "abc:XYZ", "transport": "WEBHOOK", "webhookUrl": "https://x.test/w"}
+                """).getAsJsonObject();
+        assertEquals(ChannelTransport.WEBHOOK,
+                ChannelTransport.parse(explicitlyWebhook.get("transport").getAsString(),
+                        ChannelTransport.POLLING));
+    }
+
+    // === Channel.sendWithRetry ===
+
+    @Test
+    public void channelSendWithRetryHonoursRetryDelayHint() {
+        var channel = new Channel() {
+            int attempts = 0;
+            @Override public String channelName() { return "test"; }
+            @Override public boolean trySend(String peer, String text) {
+                return ++attempts >= 2; // fail first, succeed second
+            }
+            @Override public long consumeRetryDelayMs() {
+                return 2000L; // hint: platform says wait 2s
+            }
+        };
+
+        long start = System.currentTimeMillis();
+        assertTrue(channel.sendWithRetry("peer", "hello"));
+        long elapsed = System.currentTimeMillis() - start;
+        assertTrue(elapsed >= 1800 && elapsed < 4000,
+                () -> "Expected ~2s sleep, got " + (System.currentTimeMillis() - start) + "ms");
+    }
+
+    @Test
+    public void channelSendWithRetryUsesDefaultWhenNoHintOverride() {
+        // Default Channel.consumeRetryDelayMs returns 1000ms; verify the
+        // generic retry sleeps roughly that long when the channel doesn't override.
+        var channel = new Channel() {
+            int attempts = 0;
+            @Override public String channelName() { return "test"; }
+            @Override public boolean trySend(String peer, String text) {
+                return ++attempts >= 2;
+            }
+        };
+        long start = System.currentTimeMillis();
+        assertTrue(channel.sendWithRetry("peer", "hello"));
+        long elapsed = System.currentTimeMillis() - start;
+        assertTrue(elapsed >= 800 && elapsed < 2500,
+                () -> "Expected ~1s sleep (default), got " + (System.currentTimeMillis() - start) + "ms");
+    }
+
     // === Slack ===
 
     @Test

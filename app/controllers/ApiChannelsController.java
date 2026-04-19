@@ -59,8 +59,21 @@ public class ApiChannelsController extends Controller {
         config.save();
         ChannelConfig.evictCache(channelType); // evict again so next read sees the update
 
+        reconcileRunner(channelType);
+
         services.EventLogger.info("channel", null, channelType, "Channel config updated");
         renderJSON(gson.toJson(ChannelView.of(config)));
+    }
+
+    /**
+     * Start/stop the channel's polling runner to match the newly-saved config.
+     * Today only Telegram has a polling transport; extend here as other channels
+     * (Slack Socket Mode — JCLAW-83) land.
+     */
+    private static void reconcileRunner(String channelType) {
+        if ("telegram".equals(channelType)) {
+            channels.TelegramPollingRunner.reconcile();
+        }
     }
 
 }

@@ -37,6 +37,17 @@ public class ChannelConfig extends Model {
         updatedAt = Instant.now();
     }
 
+    // Keep the TTL cache coherent with JPA lifecycle. Without this hook a test
+    // (or background job) that reads "telegram" before a row exists poisons the
+    // cache with a null snapshot for 60 s — subsequent writes inside that
+    // window are invisible to the next read.
+    @PostPersist
+    @PostUpdate
+    @PostRemove
+    void invalidateCache() {
+        evictCache(channelType);
+    }
+
     // ── TTL cache for channel configs (avoids DB hit on every message send) ──
     // Returns a transient (non-managed) copy to avoid detached-entity errors.
     // Callers only read configJson/enabled — they never persist the result.

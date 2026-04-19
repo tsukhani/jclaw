@@ -1,5 +1,6 @@
 package jobs;
 
+import channels.TelegramPollingRunner;
 import play.jobs.Job;
 import play.jobs.OnApplicationStop;
 import tools.PlaywrightBrowserTool;
@@ -11,5 +12,6 @@ public class ShutdownJob extends Job<Void> {
     public void doJob() {
         TaskPollerJob.shutdownGracefully();
         PlaywrightBrowserTool.closeAllSessions();
+        TelegramPollingRunner.stop();
     }
 }
