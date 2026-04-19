@@ -489,6 +489,83 @@ public class AgentSystemTest extends UnitTest {
         assertTrue(breakdown.totalTokenEstimate() > 0, "token estimate must be positive");
     }
 
+    // --- Channel-aware prompt sections (JCLAW-17) ---
+
+    @Test
+    public void assembleWithNullChannelSkipsChannelGuidance() {
+        var agent = AgentService.create("channel-null-agent", "openrouter", "gpt-4.1");
+        var prompt = SystemPromptAssembler.assemble(agent, null, null, null).systemPrompt();
+        assertFalse(prompt.contains("## Channel Guidance"),
+                "null channel must not inject a Channel Guidance section");
+    }
+
+    @Test
+    public void assembleWithWebChannelInjectsWebGuidance() {
+        var agent = AgentService.create("channel-web-agent", "openrouter", "gpt-4.1");
+        var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
+        assertTrue(prompt.contains("## Channel Guidance (web)"),
+                "web channel must inject a header");
+        assertTrue(prompt.contains("JClaw web admin chat UI"),
+                "web guidance body must mention the admin chat UI");
+        // Channel section sits in the stable prefix (above the cache boundary marker).
+        var markerIdx = prompt.indexOf(SystemPromptAssembler.CACHE_BOUNDARY_MARKER);
+        var guidanceIdx = prompt.indexOf("## Channel Guidance");
+        assertTrue(markerIdx > 0, "marker must be present");
+        assertTrue(guidanceIdx > 0 && guidanceIdx < markerIdx,
+                "Channel Guidance must live above the cache boundary so it contributes to the cacheable prefix");
+    }
+
+    @Test
+    public void assembleWithTelegramChannelInjectsTelegramGuidance() {
+        var agent = AgentService.create("channel-tg-agent", "openrouter", "gpt-4.1");
+        var prompt = SystemPromptAssembler.assemble(agent, null, null, "telegram").systemPrompt();
+        assertTrue(prompt.contains("## Channel Guidance (telegram)"),
+                "telegram channel must inject a header");
+        assertTrue(prompt.contains("responding via a Telegram bot"),
+                "telegram guidance body must identify the channel");
+        assertTrue(prompt.contains("Markdown tables"),
+                "telegram guidance must call out the table limitation explicitly");
+    }
+
+    @Test
+    public void assembleWithChannelTypeCaseInsensitive() {
+        var agent = AgentService.create("channel-case-agent", "openrouter", "gpt-4.1");
+        var upper = SystemPromptAssembler.assemble(agent, null, null, "TELEGRAM").systemPrompt();
+        var lower = SystemPromptAssembler.assemble(agent, null, null, "telegram").systemPrompt();
+        assertTrue(upper.contains("responding via a Telegram bot"),
+                "uppercase channelType must resolve the same guidance as lowercase");
+        // Headers are lowercased for consistency with the channel_type DB convention.
+        assertTrue(upper.contains("## Channel Guidance (telegram)"),
+                "header channel label must be lowercased regardless of input case");
+        assertEquals(upper, lower,
+                "channelType resolution must be case-insensitive end-to-end");
+    }
+
+    @Test
+    public void assembleWithUnregisteredChannelSkipsSection() {
+        // Slack and WhatsApp have no registered guidance yet — they should produce
+        // the same prompt as a null channelType (no section at all).
+        var agent = AgentService.create("channel-unregistered-agent", "openrouter", "gpt-4.1");
+        var slack = SystemPromptAssembler.assemble(agent, null, null, "slack").systemPrompt();
+        var whatsapp = SystemPromptAssembler.assemble(agent, null, null, "whatsapp").systemPrompt();
+        var baseline = SystemPromptAssembler.assemble(agent, null, null, null).systemPrompt();
+        assertEquals(baseline, slack,
+                "slack has no registered guidance yet; prompt should match the null baseline");
+        assertEquals(baseline, whatsapp,
+                "whatsapp has no registered guidance yet; prompt should match the null baseline");
+    }
+
+    @Test
+    public void breakdownReportsChannelGuidanceAsItsOwnSection() {
+        var agent = AgentService.create("channel-breakdown-agent", "openrouter", "gpt-4.1");
+        var breakdown = SystemPromptAssembler.breakdown(agent, null, "telegram");
+        var names = breakdown.sections().stream()
+                .map(SystemPromptAssembler.PromptBreakdown.Entry::name)
+                .toList();
+        assertTrue(names.stream().anyMatch(n -> n.startsWith("Channel Guidance")),
+                "breakdown must expose the channel section so the UI can show it");
+    }
+
     /**
      * The cache-boundary marker separates the byte-stable prefix from the per-turn-variable
      * tail. This test asserts (1) the marker is present, (2) nothing above it varies even

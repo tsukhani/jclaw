@@ -60,10 +60,11 @@ public class SystemPromptAssembler {
 
     /**
      * Assemble the full system prompt for an agent, given the user's latest message
-     * for memory recall. Byte-for-byte identical to the breakdown path.
+     * for memory recall. Byte-for-byte identical to the breakdown path. Backward-
+     * compatible shim that assembles with no channel context.
      */
     public static AssembledPrompt assemble(Agent agent, String userMessage) {
-        return assemble(agent, userMessage, null);
+        return assemble(agent, userMessage, null, null);
     }
 
     /**
@@ -74,8 +75,21 @@ public class SystemPromptAssembler {
      * legacy behavior that loads the set internally.
      */
     public static AssembledPrompt assemble(Agent agent, String userMessage, Set<String> disabledTools) {
+        return assemble(agent, userMessage, disabledTools, null);
+    }
+
+    /**
+     * Canonical {@code assemble} entry point. {@code channelType} is the inbound
+     * channel identity (see {@link models.ChannelType}) the prompt is being
+     * assembled for; when non-null the builder injects a channel-specific guidance
+     * section that tailors the agent's response style (e.g. "no markdown tables
+     * on Telegram"). Pass {@code null} when no channel context is available —
+     * tests and administrative paths do this.
+     */
+    public static AssembledPrompt assemble(Agent agent, String userMessage,
+                                            Set<String> disabledTools, String channelType) {
         var builder = new SectionedBuilder();
-        var skills = buildPrompt(agent, userMessage, builder, disabledTools);
+        var skills = buildPrompt(agent, userMessage, builder, disabledTools, channelType);
         return new AssembledPrompt(builder.sb.toString(), skills);
     }
 
@@ -87,8 +101,17 @@ public class SystemPromptAssembler {
      * prompt over time.
      */
     public static PromptBreakdown breakdown(Agent agent, String userMessage) {
+        return breakdown(agent, userMessage, null);
+    }
+
+    /**
+     * Channel-aware {@link #breakdown} variant. Lets the agent edit page preview
+     * how the prompt changes per channel by passing a {@code channelType} hint;
+     * null produces the channel-less baseline.
+     */
+    public static PromptBreakdown breakdown(Agent agent, String userMessage, String channelType) {
         var builder = new SectionedBuilder();
-        var skills = buildPrompt(agent, userMessage, builder, null);
+        var skills = buildPrompt(agent, userMessage, builder, null, channelType);
         var sectionEntries = builder.finish().stream()
                 .map(s -> new PromptBreakdown.Entry(s.name, s.chars, approxTokens(s.chars)))
                 .toList();
@@ -153,7 +176,7 @@ public class SystemPromptAssembler {
      * entry points cannot drift.
      */
     private static List<SkillLoader.SkillInfo> buildPrompt(Agent agent, String userMessage, SectionedBuilder b,
-                                                           Set<String> disabledTools) {
+                                                           Set<String> disabledTools, String channelType) {
         // 1. AGENT.md content
         b.startSection("AGENT.md");
         appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "AGENT.md"));
@@ -207,7 +230,20 @@ public class SystemPromptAssembler {
         b.startSection("Execution Bias");
         appendExecutionBiasSection(b.sb);
 
-        // 8. Environment info — date-only resolution and JVM-stable values so the
+        // 8. Channel guidance — per-channel formatting and response-style hints
+        // (e.g. "no markdown tables on Telegram"). Only emitted when the caller
+        // passes a channelType AND that channel has a registered guidance body;
+        // unknown or null channels skip the section so the prompt stays clean.
+        // Sits in the cacheable prefix because the guidance is static per channel;
+        // different channels produce different cache keys, which is the intended
+        // trade-off for per-channel tuning.
+        var guidance = channelGuidanceFor(channelType);
+        if (guidance != null) {
+            b.startSection("Channel Guidance (" + channelType.toLowerCase() + ")");
+            appendChannelGuidanceSection(b.sb, channelType, guidance);
+        }
+
+        // 9. Environment info — date-only resolution and JVM-stable values so the
         // section does not bust the LLM prompt-prefix cache on every request.
         b.startSection("Environment");
         appendEnvironmentSection(b.sb, agent);
@@ -236,6 +272,70 @@ public class SystemPromptAssembler {
                 - If a request is ambiguous between a safe interpretation and a dangerous one, pick the safe one and flag the ambiguity rather than silently guessing.
                 """);
     }
+
+    /**
+     * Resolve a per-channel guidance body, or {@code null} when the channel has
+     * no registered section (Slack, WhatsApp, unknown types). Telegram and Web
+     * are the two cases that ship today — Slack and WhatsApp can be added here
+     * once we decide what prompt-level tuning they need.
+     */
+    private static String channelGuidanceFor(String channelType) {
+        if (channelType == null) return null;
+        return switch (channelType.toLowerCase()) {
+            case "web" -> WEB_CHANNEL_GUIDANCE;
+            case "telegram" -> TELEGRAM_CHANNEL_GUIDANCE;
+            default -> null;
+        };
+    }
+
+    private static void appendChannelGuidanceSection(StringBuilder sb, String channelType, String body) {
+        sb.append("\n## Channel Guidance (").append(channelType.toLowerCase()).append(")\n");
+        sb.append(body);
+    }
+
+    private static final String WEB_CHANNEL_GUIDANCE = """
+            You're responding in the JClaw web admin chat UI. The UI renders the full
+            GitHub-flavored markdown surface: headings, tables, bullet and numbered lists,
+            fenced code blocks with syntax highlighting, blockquotes, inline code, links,
+            and task lists. Reasoning blocks are visible when the agent has thinking
+            enabled.
+
+            Workspace files delivered as relative markdown links per the Workspace File
+            Delivery convention render as clickable download chips — the user saves them
+            locally with one click. Use that convention freely.
+
+            Format output for readability. Prefer tables for tabular data, code blocks
+            with language hints for code, and inline code for identifiers and short
+            snippets. The UI has plenty of width and scroll — do not artificially shorten
+            responses. Length is cheap here.
+            """;
+
+    private static final String TELEGRAM_CHANNEL_GUIDANCE = """
+            You're responding via a Telegram bot. Telegram's client renders only a small
+            subset of markdown — plan your output accordingly.
+
+            Supported inline formatting:
+            - Bold with double asterisks
+            - Italic with underscores
+            - Inline code with backticks
+            - Fenced code blocks with triple backticks (language hint optional)
+            - Links in the [text](url) form
+
+            NOT supported — will render as literal characters if emitted:
+            - Markdown tables. Present tabular data as bulleted lines instead, one row per
+              line. Example: "• Name: Foo — Status: active".
+            - Headings (#, ##, ###). For section breaks, use a short bold label on its own
+              line.
+            - Task list checkboxes. Use plain bullets.
+
+            Length: each Telegram message caps near 4000 characters; longer replies get
+            split automatically at paragraph boundaries. Prefer concise answers — Telegram
+            is a chat channel, not a long-form document surface.
+
+            File delivery: the download-chip convention from the Workspace File Delivery
+            section does NOT apply here. Relative markdown links render as broken links
+            in Telegram. If the user asks for a file, describe it in plain text instead.
+            """;
 
     private static void appendExecutionBiasSection(StringBuilder sb) {
         sb.append("\n## Execution Bias\n");

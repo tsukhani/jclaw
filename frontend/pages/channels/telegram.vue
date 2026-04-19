@@ -237,7 +237,7 @@ async function remove(binding: TelegramBindingSummary) {
           ← Channels
         </NuxtLink>
         <h1 class="text-lg font-semibold text-fg-strong mt-1">
-          Telegram bindings
+          Telegram
         </h1>
       </div>
       <button

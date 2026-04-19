@@ -169,7 +169,7 @@ public class AgentRunner {
                 var conv = ConversationService.findById(conversationId);
                 ConversationService.appendUserMessage(conv, userMessage);
 
-                var assembled = SystemPromptAssembler.assemble(agent, userMessage);
+                var assembled = SystemPromptAssembler.assemble(agent, userMessage, null, conv.channelType);
                 var messages = buildMessages(assembled.systemPrompt(), conv);
 
                 var agentProvider = ProviderRegistry.get(agent.modelProvider);
@@ -334,8 +334,8 @@ public class AgentRunner {
         final LlmProvider primaryRef = primary;
         var prepared = services.Tx.run(() -> {
             var disabledTools = ToolRegistry.loadDisabledTools(agent);
-            var assembled0 = SystemPromptAssembler.assemble(agent, userMessage, disabledTools);
             var convo = ConversationService.findById(conversation.id);
+            var assembled0 = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, convo.channelType);
             var msgs = buildMessages(assembled0.systemPrompt(), convo);
             msgs = trimToContextWindow(msgs, agent, primaryRef);
             var toolDefs = ToolRegistry.getToolDefsForAgent(disabledTools);

@@ -110,14 +110,26 @@ const promptBreakdownData = ref<PromptBreakdown | null>(null)
 const promptBreakdownLoading = ref(false)
 const promptBreakdownError = ref('')
 
-async function openPromptBreakdown(agent: Agent) {
-  promptBreakdownAgent.value = agent
-  promptBreakdownOpen.value = true
+/**
+ * Which channel's prompt the dialog is currently previewing. Empty string =
+ * channel-less baseline (matches {@code channelType: null} on the backend).
+ * The breakdown refetches whenever this changes so each channel's injected
+ * guidance section is visible in the section list.
+ */
+const promptBreakdownChannel = ref<'' | 'web' | 'telegram' | 'slack' | 'whatsapp'>('')
+
+async function loadPromptBreakdown() {
+  if (!promptBreakdownAgent.value) return
   promptBreakdownData.value = null
   promptBreakdownError.value = ''
   promptBreakdownLoading.value = true
   try {
-    promptBreakdownData.value = await $fetch<PromptBreakdown>(`/api/agents/${agent.id}/prompt-breakdown`)
+    const query = promptBreakdownChannel.value
+      ? `?channelType=${encodeURIComponent(promptBreakdownChannel.value)}`
+      : ''
+    promptBreakdownData.value = await $fetch<PromptBreakdown>(
+      `/api/agents/${promptBreakdownAgent.value.id}/prompt-breakdown${query}`,
+    )
   }
   catch (e: unknown) {
     promptBreakdownError.value = e instanceof Error ? e.message : 'Failed to load prompt breakdown'
@@ -125,6 +137,13 @@ async function openPromptBreakdown(agent: Agent) {
   finally {
     promptBreakdownLoading.value = false
   }
+}
+
+async function openPromptBreakdown(agent: Agent) {
+  promptBreakdownAgent.value = agent
+  promptBreakdownOpen.value = true
+  promptBreakdownChannel.value = ''
+  await loadPromptBreakdown()
 }
 
 function closePromptBreakdown() {
@@ -700,9 +719,22 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
         &larr; Back to agents
       </button>
       <div class="bg-surface-elevated border border-border p-4">
-        <h2 class="text-sm font-medium text-fg-strong mb-4">
-          {{ creating ? 'New Agent' : 'Edit Agent' }}
-        </h2>
+        <div class="flex items-center justify-between mb-4 gap-2">
+          <h2 class="text-sm font-medium text-fg-strong">
+            {{ creating ? 'New Agent' : 'Edit Agent' }}
+          </h2>
+          <button
+            v-if="editing"
+            class="px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400
+                   bg-emerald-500/10 border border-emerald-600/30 hover:bg-emerald-500/20
+                   hover:text-emerald-600 dark:hover:text-emerald-300 hover:border-emerald-600
+                   dark:hover:border-emerald-500/50 transition-colors"
+            title="Inspect the system prompt this agent receives — per-section char + token breakdown"
+            @click="openPromptBreakdown(editing)"
+          >
+            Inspect prompt
+          </button>
+        </div>
         <div class="grid grid-cols-2 gap-3">
           <label
             :for="agentNameId"
@@ -1356,6 +1388,36 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
             </p>
           </div>
           <div class="flex items-center gap-2 shrink-0">
+            <label
+              for="prompt-breakdown-channel"
+              class="flex items-center gap-1.5 text-[10px] text-fg-muted"
+            >
+              <span>channel</span>
+              <select
+                id="prompt-breakdown-channel"
+                v-model="promptBreakdownChannel"
+                class="px-2 py-1 bg-muted border border-input text-[10px] text-fg-strong
+                       focus:outline-hidden focus:border-ring transition-colors"
+                title="Preview the prompt as assembled for a specific channel"
+                @change="loadPromptBreakdown()"
+              >
+                <option value="">
+                  (none)
+                </option>
+                <option value="web">
+                  web
+                </option>
+                <option value="telegram">
+                  telegram
+                </option>
+                <option value="slack">
+                  slack
+                </option>
+                <option value="whatsapp">
+                  whatsapp
+                </option>
+              </select>
+            </label>
             <button
               v-if="promptBreakdownData"
               class="px-2 py-1 text-[10px] text-fg-muted border border-input hover:text-fg-strong hover:border-neutral-500"

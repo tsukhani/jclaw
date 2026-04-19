@@ -65,7 +65,12 @@ public class ApiAgentsController extends Controller {
      */
     public static void promptBreakdown(Long id) {
         var agent = requireAgent(id);
-        var breakdown = agents.SystemPromptAssembler.breakdown(agent, null);
+        // Optional ?channelType=web|telegram|slack|whatsapp param lets the UI
+        // preview each channel's prompt; absent/blank means the channel-less
+        // baseline (what tests and admin introspection see by default).
+        var rawChannel = params.get("channelType");
+        String channelType = (rawChannel == null || rawChannel.isBlank()) ? null : rawChannel.trim();
+        var breakdown = agents.SystemPromptAssembler.breakdown(agent, null, channelType);
         renderJSON(gson.toJson(breakdown));
     }
 
