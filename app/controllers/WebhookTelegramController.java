@@ -3,73 +3,118 @@ package controllers;
 import agents.AgentRunner;
 import channels.TelegramChannel;
 import com.google.gson.JsonParser;
+import models.Agent;
+import models.TelegramBinding;
 import play.mvc.Controller;
 import play.mvc.Http;
 import services.EventLogger;
 import utils.WebhookUtil;
 
+/**
+ * Webhook receiver for per-user Telegram bindings (JCLAW-89). The route carries
+ * the {@code bindingId} so the controller can look up the matching
+ * {@link TelegramBinding} without a global "current telegram config" read; the
+ * {@code secret} path segment is the per-binding {@code webhook_secret} for
+ * signature verification. Unknown or disabled bindings get dropped at 404/403
+ * rather than being silently accepted.
+ */
 public class WebhookTelegramController extends Controller {
 
-    public static void webhook(String secret) {
-        // Verify secret path
-        var config = TelegramChannel.TelegramConfig.load();
-        if (config == null) {
-            EventLogger.warn("channel", null, "telegram", "Webhook received but Telegram not configured");
+    /** Snapshot of the fields {@link #webhook} needs off the request thread. */
+    private record BindingCtx(Long bindingId, String botToken, String telegramUserId,
+                              Agent agent, String webhookSecret, boolean enabled) {}
+
+    public static void webhook(Long bindingId, String secret) {
+        BindingCtx ctx = services.Tx.run(() -> {
+            TelegramBinding b = TelegramBinding.findById(bindingId);
+            if (b == null) return null;
+            if (b.agent != null) {
+                var _ = b.agent.name; // touch inside tx to avoid detached-proxy access later
+            }
+            return new BindingCtx(b.id, b.botToken, b.telegramUserId, b.agent,
+                    b.webhookSecret, b.enabled);
+        });
+
+        if (ctx == null) {
+            EventLogger.warn("channel", null, "telegram",
+                    "Webhook for unknown binding id=%s".formatted(bindingId));
+            notFound();
+            return;
+        }
+        if (!ctx.enabled()) {
+            EventLogger.warn("channel", null, "telegram",
+                    "Webhook for disabled binding %d".formatted(bindingId));
             ok();
             return;
         }
 
-        if (config.webhookSecret() != null && !config.webhookSecret().equals(secret)) {
-            EventLogger.warn("channel", null, "telegram", "Invalid webhook secret");
+        // Secret verification. Path segment is the primary check; the optional
+        // x-telegram-bot-api-secret-token header is verified when present.
+        if (ctx.webhookSecret() == null || !ctx.webhookSecret().equals(secret)) {
+            EventLogger.warn("channel", ctx.agent() != null ? ctx.agent().name : null, "telegram",
+                    "Invalid webhook secret for binding %d".formatted(bindingId));
             forbidden();
             return;
         }
-
-        // Verify X-Telegram-Bot-Api-Secret-Token header if present
         var secretHeader = Http.Request.current().headers.get("x-telegram-bot-api-secret-token");
-        if (secretHeader != null && config.webhookSecret() != null
-                && !config.webhookSecret().equals(secretHeader.value())) {
-            EventLogger.warn("channel", null, "telegram", "Invalid secret token header");
+        if (secretHeader != null && !ctx.webhookSecret().equals(secretHeader.value())) {
+            EventLogger.warn("channel", ctx.agent() != null ? ctx.agent().name : null, "telegram",
+                    "Invalid secret-token header for binding %d".formatted(bindingId));
             forbidden();
             return;
         }
 
-        // Parse update
         try {
             var update = JsonParser.parseString(WebhookUtil.readRawBody()).getAsJsonObject();
             var message = TelegramChannel.parseUpdate(update);
-
             if (message == null) {
-                ok(); // Non-message update (e.g., edited_message, callback_query)
+                ok(); // non-message update (edited_message, callback_query, etc.)
                 return;
             }
 
-            EventLogger.info("channel", null, "telegram",
-                    "Message received from %s: %s".formatted(
+            // Peer-level authorization: only the bound user may reach this bot.
+            if (!ctx.telegramUserId().equals(message.fromId())) {
+                EventLogger.warn("channel",
+                        ctx.agent() != null ? ctx.agent().name : null, "telegram",
+                        "Rejected inbound from %s (id=%s): binding %d is bound to user %s".formatted(
+                                message.fromUsername() != null ? message.fromUsername() : "?",
+                                message.fromId(), bindingId, ctx.telegramUserId()));
+                ok();
+                return;
+            }
+
+            EventLogger.info("channel",
+                    ctx.agent() != null ? ctx.agent().name : null, "telegram",
+                    "Webhook received from %s: %s".formatted(
                             message.fromUsername() != null ? message.fromUsername() : message.fromId(),
-                            message.text().length() > 50 ? message.text().substring(0, 50) + "..." : message.text()));
+                            truncate(message.text())));
 
-            // Process async in virtual thread
-            Thread.ofVirtual().start(() -> processMessage(config, message));
-
+            // Off-request virtual thread so the HTTP 200 returns immediately.
+            Thread.ofVirtual().start(() -> processMessage(ctx, message));
         } catch (Exception e) {
-            EventLogger.error("channel", null, "telegram", "Webhook parse error: %s".formatted(e.getMessage()));
+            EventLogger.error("channel", null, "telegram",
+                    "Webhook parse error for binding %d: %s".formatted(bindingId, e.getMessage()));
         }
 
         ok();
     }
 
-    private static void processMessage(TelegramChannel.TelegramConfig config,
-                                        TelegramChannel.InboundMessage message) {
+    private static void processMessage(BindingCtx ctx, TelegramChannel.InboundMessage message) {
+        final String sendToken = ctx.botToken();
+        final String sendChatId = message.chatId();
         try {
-            AgentRunner.processWebhookMessage("telegram", message.chatId(), message.text(),
-                    (peerId, response) -> TelegramChannel.sendMessage(peerId, response),
-                    peerId -> TelegramChannel.sendMessage(peerId, "No agent configured for this chat."));
+            AgentRunner.processInboundForAgent(ctx.agent(), "telegram", ctx.telegramUserId(),
+                    message.text(),
+                    (peerId, response) -> TelegramChannel.sendMessage(sendToken, sendChatId, response));
         } catch (Exception e) {
-            EventLogger.error("channel", null, "telegram",
-                    "Error processing message: %s".formatted(e.getMessage()));
-            TelegramChannel.sendMessage(message.chatId(),
+            EventLogger.error("channel", ctx.agent() != null ? ctx.agent().name : null, "telegram",
+                    "Error processing message for binding %d: %s".formatted(ctx.bindingId(), e.getMessage()));
+            TelegramChannel.sendMessage(sendToken, sendChatId,
                     "Sorry, an error occurred processing your message.");
         }
+    }
+
+    private static String truncate(String s) {
+        return s.length() > 50 ? s.substring(0, 50) + "..." : s;
     }
 }

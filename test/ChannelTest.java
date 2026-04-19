@@ -136,25 +136,78 @@ public class ChannelTest extends UnitTest {
         assertFalse(ChannelTransport.SOCKET.requiresPublicUrl());
     }
 
-    @Test
-    public void telegramConfigDefaultsTransportToPollingWhenAbsent() {
-        // Field-level parse check: when a configJson blob has no transport,
-        // TelegramConfig.load reads POLLING via ChannelTransport.parse(null, POLLING).
-        var withoutTransport = JsonParser.parseString("""
-                {"botToken": "abc:XYZ"}
-                """).getAsJsonObject();
-        var rawTransport = withoutTransport.has("transport")
-                ? withoutTransport.get("transport").getAsString()
-                : null;
-        assertEquals(ChannelTransport.POLLING,
-                ChannelTransport.parse(rawTransport, ChannelTransport.POLLING));
+    // === Telegram bindings (JCLAW-89) ===
 
-        var explicitlyWebhook = JsonParser.parseString("""
-                {"botToken": "abc:XYZ", "transport": "WEBHOOK", "webhookUrl": "https://x.test/w"}
-                """).getAsJsonObject();
-        assertEquals(ChannelTransport.WEBHOOK,
-                ChannelTransport.parse(explicitlyWebhook.get("transport").getAsString(),
-                        ChannelTransport.POLLING));
+    @Test
+    public void telegramBindingPersistsAndQueriesByToken() {
+        var agent = findOrCreateAgent("test-bindings-agent");
+        var binding = new models.TelegramBinding();
+        binding.botToken = "tok-" + System.nanoTime();
+        binding.agent = agent;
+        binding.telegramUserId = "111111";
+        binding.transport = ChannelTransport.POLLING;
+        binding.enabled = true;
+        binding.save();
+
+        var fetched = models.TelegramBinding.findByBotToken(binding.botToken);
+        assertNotNull(fetched);
+        assertEquals(binding.id, fetched.id);
+        assertEquals("111111", fetched.telegramUserId);
+        assertEquals(agent.id, fetched.agent.id);
+
+        binding.delete();
+        assertNull(models.TelegramBinding.findByBotToken(binding.botToken));
+    }
+
+    @Test
+    public void telegramBindingFindAllEnabledIsScopedToEnabled() {
+        // Agent uniqueness is enforced at the schema (privacy constraint:
+        // agent memory is per-agent, so binding one agent to two users would
+        // share memories). Use distinct agents for the two bindings.
+        var agentOn = findOrCreateAgent("test-bindings-enabled-on");
+        var agentOff = findOrCreateAgent("test-bindings-enabled-off");
+
+        var on = new models.TelegramBinding();
+        on.botToken = "on-" + System.nanoTime();
+        on.agent = agentOn;
+        on.telegramUserId = "444444";
+        on.transport = ChannelTransport.POLLING;
+        on.enabled = true;
+        on.save();
+
+        var off = new models.TelegramBinding();
+        off.botToken = "off-" + System.nanoTime();
+        off.agent = agentOff;
+        off.telegramUserId = "555555";
+        off.transport = ChannelTransport.POLLING;
+        off.enabled = false;
+        off.save();
+
+        var enabledIds = models.TelegramBinding.findAllEnabled().stream()
+                .map(b -> b.id)
+                .toList();
+        assertTrue(enabledIds.contains(on.id));
+        assertFalse(enabledIds.contains(off.id));
+
+        on.delete();
+        off.delete();
+    }
+
+    /**
+     * Lookup helper: return a reusable test agent with the given name, creating
+     * it if absent. Test agents are plain rows; the LoadTest reserved-name guard
+     * doesn't apply here.
+     */
+    private static models.Agent findOrCreateAgent(String name) {
+        var existing = models.Agent.findByName(name);
+        if (existing != null) return existing;
+        var a = new models.Agent();
+        a.name = name;
+        a.modelProvider = "test-provider";
+        a.modelId = "test-model";
+        a.enabled = true;
+        a.save();
+        return a;
     }
 
     // === ChannelConfig cache-miss from non-request threads ===

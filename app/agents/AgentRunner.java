@@ -1001,7 +1001,7 @@ public class AgentRunner {
                 var conversation = services.Tx.run(() -> ConversationService.findById(conversationId));
                 if (conversation == null) return;
                 var result = run(msg.agent(), conversation, combined);
-                dispatchToChannel(msg.channelType(), msg.peerId(), result.response());
+                dispatchToChannel(msg.agent(), msg.channelType(), msg.peerId(), result.response());
             } catch (Exception e) {
                 EventLogger.error("queue", msg.agent().name, msg.channelType(),
                         "Failed to process queued message: %s".formatted(e.getMessage()));
@@ -1036,16 +1036,47 @@ public class AgentRunner {
     }
 
     /**
+     * Binding-first inbound dispatch used by the Telegram channel. The caller has
+     * already resolved (bot token → binding → agent) and verified the sender, so
+     * we skip {@link AgentRouter} entirely and hand the message straight to the
+     * bound agent. Conversation persistence still keys on (agent, channelType,
+     * peerId) so history per end-user is preserved.
+     */
+    public static void processInboundForAgent(Agent agent, String channelType, String peerId,
+                                               String text, BiConsumer<String, String> sendResponse) {
+        var conversation = services.Tx.run(() ->
+                ConversationService.findOrCreate(agent, channelType, peerId));
+        var result = run(agent, conversation, text);
+        sendResponse.accept(peerId, result.response());
+    }
+
+    /**
      * Best-effort delivery of a response to an external channel. Web channel
      * responses are already persisted to the DB by {@link #run} — the user sees
      * them on next conversation load or refresh. External channels need explicit
      * dispatch because there is no persistent connection to push through.
+     *
+     * <p>Telegram is special: outbound needs a specific bot token, so we look up
+     * the matching {@link models.TelegramBinding} by (agent, peerId) instead of
+     * using the generic {@link Channel} interface.
      */
-    private static void dispatchToChannel(String channelType, String peerId, String text) {
+    private static void dispatchToChannel(Agent agent, String channelType, String peerId, String text) {
         if (peerId == null || text == null) return;
         try {
             var type = ChannelType.fromValue(channelType);
             if (type == null) return;
+            if (type == ChannelType.TELEGRAM) {
+                var binding = services.Tx.run(() ->
+                        models.TelegramBinding.findEnabledByAgentAndUser(agent, peerId));
+                if (binding == null) {
+                    EventLogger.warn("channel", agent != null ? agent.name : null, "telegram",
+                            "No enabled binding for (agent=%s, userId=%s); dropping queued response"
+                                    .formatted(agent != null ? agent.name : "?", peerId));
+                    return;
+                }
+                channels.TelegramChannel.sendMessage(binding.botToken, peerId, text);
+                return;
+            }
             var channel = type.resolve();
             if (channel != null) {
                 channel.sendWithRetry(peerId, text);

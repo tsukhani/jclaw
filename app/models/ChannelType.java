@@ -26,12 +26,15 @@ public enum ChannelType {
 
     /**
      * Return a {@link Channel} implementation for this type, or {@code null}
-     * for types that don't support outbound push (e.g. WEB — responses are
-     * DB-persisted and fetched by the frontend on refresh).
+     * for types that don't support context-free outbound push. WEB responses
+     * are DB-persisted and fetched on refresh; TELEGRAM needs a per-binding
+     * bot token that the generic Channel contract can't carry, so callers
+     * must route Telegram outbound through {@link TelegramChannel#forToken}
+     * with the binding resolved from (agent, peerId).
      */
     public Channel resolve() {
         return switch (this) {
-            case TELEGRAM -> new TelegramChannel();
+            case TELEGRAM -> null;
             case SLACK -> new SlackChannel();
             case WHATSAPP -> new WhatsAppChannel();
             case WEB -> null;

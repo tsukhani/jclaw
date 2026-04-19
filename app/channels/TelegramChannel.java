@@ -2,8 +2,7 @@ package channels;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import models.ChannelConfig;
+import models.TelegramBinding;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.updates.SetWebhook;
@@ -14,79 +13,88 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 import services.EventLogger;
 
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Telegram Bot API adapter backed by the {@code org.telegram:telegrambots-client}
- * SDK. Exposes both a webhook path (via {@link #parseUpdate}) and a long-polling
- * path (via {@link TelegramPollingRunner}); which one runs is decided by the
- * {@link ChannelTransport} field on the stored config.
+ * Telegram Bot API adapter backed by the {@code org.telegram:telegrambots-client} SDK.
+ * Post-JCLAW-89 each operator-managed bot token has its own {@link TelegramChannel}
+ * instance (cached in {@link #INSTANCES}) so send paths carry the correct token
+ * without a global "current bot" lookup. Instances are created on demand via
+ * {@link #forToken(String)} and evicted via {@link #evictToken(String)} when the
+ * polling runner unregisters a binding.
+ *
+ * <p>{@link models.ChannelType#resolve()} returns {@code null} for Telegram because
+ * the outbound path needs a per-binding bot token that the generic Channel contract
+ * can't carry. Dispatch flows through {@link #sendMessage(String, String, String)}
+ * or {@link #forToken(String)} directly, with the binding looked up from the
+ * conversation's (agent, peerId) pair at queue-dispatch time.
  */
 public class TelegramChannel implements Channel {
-
-    /**
-     * Parsed snapshot of the Telegram channel's {@code configJson} blob. {@code transport}
-     * defaults to {@link ChannelTransport#POLLING} when the field is absent — this is the
-     * zero-config path for laptop development (no public URL needed).
-     */
-    public record TelegramConfig(String botToken, ChannelTransport transport,
-                                 String webhookSecret, String webhookUrl) {
-        public static TelegramConfig load() {
-            var cc = ChannelConfig.findByType("telegram");
-            if (cc == null || !cc.enabled) return null;
-            var json = JsonParser.parseString(cc.configJson).getAsJsonObject();
-            return new TelegramConfig(
-                    json.get("botToken").getAsString(),
-                    ChannelTransport.parse(
-                            json.has("transport") ? json.get("transport").getAsString() : null,
-                            ChannelTransport.POLLING),
-                    json.has("webhookSecret") ? json.get("webhookSecret").getAsString() : null,
-                    json.has("webhookUrl") ? json.get("webhookUrl").getAsString() : null);
-        }
-    }
 
     /** Generic inbound shape consumed by {@link controllers.WebhookTelegramController}. */
     public record InboundMessage(String chatId, String text, String fromId, String fromUsername) {}
 
     private static final ObjectMapper JACKSON = new ObjectMapper();
 
-    private static final TelegramChannel INSTANCE = new TelegramChannel();
-    public static TelegramChannel instance() { return INSTANCE; }
+    /** Per-token instances. OkHttpTelegramClient owns a dispatcher thread pool, so
+     *  we reuse one instance per token across the lifetime of that token. */
+    private static final ConcurrentHashMap<String, TelegramChannel> INSTANCES = new ConcurrentHashMap<>();
 
-    // Cached SDK client keyed by bot token. OkHttpTelegramClient owns a dispatcher
-    // thread pool, so we reuse one per token across the lifetime of that token.
-    private record ClientHolder(String botToken, TelegramClient client) {}
-    private static final AtomicReference<ClientHolder> ACTIVE = new AtomicReference<>();
+    private final String botToken;
+    private final TelegramClient client;
 
-    // retry_after delay hint, set by trySend on 429, consumed by Channel.sendWithRetry.
-    private static final ThreadLocal<Long> RETRY_HINT_MS = new ThreadLocal<>();
+    /** retry_after delay hint (ms), set by trySend on 429, consumed by Channel.sendWithRetry. */
+    private final ThreadLocal<Long> retryHintMs = new ThreadLocal<>();
+
+    private TelegramChannel(String botToken) {
+        this.botToken = botToken;
+        this.client = new OkHttpTelegramClient(botToken);
+    }
+
+    /** Resolve (or lazily create) the singleton for {@code botToken}. */
+    public static TelegramChannel forToken(String botToken) {
+        if (botToken == null || botToken.isBlank()) {
+            throw new IllegalArgumentException("botToken required");
+        }
+        return INSTANCES.computeIfAbsent(botToken, TelegramChannel::new);
+    }
+
+    /** Drop the cached instance for a token. Call when a binding is deleted or its token rotated. */
+    public static void evictToken(String botToken) {
+        if (botToken != null) INSTANCES.remove(botToken);
+    }
+
+    public String botToken() { return botToken; }
+    TelegramClient client() { return client; }
 
     @Override
     public String channelName() { return "telegram"; }
 
     @Override
     public long consumeRetryDelayMs() {
-        Long v = RETRY_HINT_MS.get();
-        RETRY_HINT_MS.remove();
+        Long v = retryHintMs.get();
+        retryHintMs.remove();
         return v != null ? v : Channel.super.consumeRetryDelayMs();
     }
 
-    // ── Static facades used by webhook controller and agent runner ──
+    // ── Outbound sends ──
 
-    /** Fire-and-retry outbound message send. Returns true on success. */
-    public static boolean sendMessage(String chatId, String text) {
-        var config = TelegramConfig.load();
-        if (config == null) {
-            EventLogger.error("channel", null, "telegram", "Telegram not configured");
+    /**
+     * Fire-and-retry outbound message send for a specific bot token. Chunks at 4000
+     * chars to stay under Telegram's 4096 limit and applies sendWithRetry per chunk
+     * so retry hints are honored independently.
+     */
+    public static boolean sendMessage(String botToken, String chatId, String text) {
+        if (botToken == null || chatId == null || text == null) {
+            EventLogger.error("channel", null, "telegram",
+                    "sendMessage called with null argument");
             return false;
         }
-        // Telegram rejects sendMessage payloads over 4096 characters with HTTP 400.
-        // Chunk at 4000 to leave headroom for any parse-mode expansion on the server
-        // side. Each chunk is delivered via sendWithRetry so retries apply per-chunk.
+        var channel = forToken(botToken);
         var chunks = chunk(text, 4000);
         boolean allOk = true;
         for (var part : chunks) {
-            if (!INSTANCE.sendWithRetry(chatId, part)) allOk = false;
+            if (!channel.sendWithRetry(chatId, part)) allOk = false;
         }
         return allOk;
     }
@@ -94,9 +102,8 @@ public class TelegramChannel implements Channel {
     /**
      * Split {@code text} into chunks at most {@code maxLen} characters long, biasing
      * breaks toward paragraph → line → word boundaries before a hard cut. Markdown
-     * formatting that spans a chunk boundary (e.g. an unclosed code fence) may render
-     * awkwardly — acceptable for an MVP chunker; a per-channel formatter (§4.4 of
-     * JCLAW-14 report) is the cleaner long-term fix.
+     * formatting that spans a chunk boundary may render awkwardly — acceptable for an
+     * MVP chunker; a per-channel formatter is the cleaner long-term fix.
      */
     public static java.util.List<String> chunk(String text, int maxLen) {
         if (text == null || text.isEmpty()) return java.util.List.of(text == null ? "" : text);
@@ -117,19 +124,19 @@ public class TelegramChannel implements Channel {
         return out;
     }
 
-    /** Register the webhook URL with Telegram. Only meaningful in {@link ChannelTransport#WEBHOOK} mode. */
-    public static boolean setWebhook(TelegramConfig config) {
-        if (config.webhookUrl() == null) return false;
-        var builder = SetWebhook.builder().url(config.webhookUrl());
-        if (config.webhookSecret() != null) builder.secretToken(config.webhookSecret());
+    /** Register the webhook URL with Telegram for a specific binding. */
+    public static boolean setWebhook(TelegramBinding binding) {
+        if (binding == null || binding.webhookUrl == null) return false;
+        var builder = SetWebhook.builder().url(binding.webhookUrl);
+        if (binding.webhookSecret != null) builder.secretToken(binding.webhookSecret);
         try {
-            clientFor(config.botToken()).execute(builder.build());
+            forToken(binding.botToken).client.execute(builder.build());
             EventLogger.info("channel", null, "telegram",
-                    "Webhook registered: %s".formatted(config.webhookUrl()));
+                    "Webhook registered for binding %d: %s".formatted(binding.id, binding.webhookUrl));
             return true;
         } catch (TelegramApiException e) {
             EventLogger.error("channel", null, "telegram",
-                    "Webhook registration failed: %s".formatted(e.getMessage()));
+                    "Webhook registration failed for binding %d: %s".formatted(binding.id, e.getMessage()));
             return false;
         }
     }
@@ -166,15 +173,13 @@ public class TelegramChannel implements Channel {
 
     @Override
     public boolean trySend(String peerId, String text) {
-        var config = TelegramConfig.load();
-        if (config == null) return false;
         var request = SendMessage.builder()
                 .chatId(peerId)
                 .text(text)
                 .parseMode("Markdown")
                 .build();
         try {
-            clientFor(config.botToken()).execute(request);
+            client.execute(request);
             EventLogger.info("channel", null, "telegram",
                     "Message sent to chat %s".formatted(peerId));
             return true;
@@ -182,7 +187,7 @@ public class TelegramChannel implements Channel {
             var params = e.getParameters();
             if (params != null && params.getRetryAfter() != null && params.getRetryAfter() > 0) {
                 int retryAfter = params.getRetryAfter();
-                RETRY_HINT_MS.set(retryAfter * 1000L);
+                retryHintMs.set(retryAfter * 1000L);
                 EventLogger.warn("channel", null, "telegram",
                         "Rate-limited; retry_after=%ds".formatted(retryAfter));
             } else {
@@ -195,21 +200,5 @@ public class TelegramChannel implements Channel {
                     "Send failed: %s".formatted(e.getMessage()));
             return false;
         }
-    }
-
-    // ── Client caching ──
-
-    /**
-     * Cached {@link TelegramClient} for {@code botToken}. When the token changes the
-     * prior client is dropped; OkHttp's dispatcher shuts down when garbage-collected.
-     */
-    public static TelegramClient clientFor(String botToken) {
-        var existing = ACTIVE.get();
-        if (existing != null && existing.botToken().equals(botToken)) {
-            return existing.client();
-        }
-        var fresh = new OkHttpTelegramClient(botToken);
-        ACTIVE.set(new ClientHolder(botToken, fresh));
-        return fresh;
     }
 }

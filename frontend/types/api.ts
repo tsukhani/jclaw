@@ -18,6 +18,32 @@ export interface Agent {
   audioEnabled?: boolean | null
 }
 
+/**
+ * One Telegram bot-agent-user binding, as surfaced by
+ * {@code GET /api/channels/telegram/bindings}. The full bot token and webhook
+ * secret are never returned by the API. {@link hasWebhookSecret} lets the UI
+ * render a "leave blank to keep existing" hint when editing a webhook binding.
+ */
+export interface TelegramBindingSummary {
+  id: number
+  agentId: number | null
+  agentName: string | null
+  telegramUserId: string
+  transport: string
+  webhookUrl: string | null
+  hasWebhookSecret: boolean
+  enabled: boolean
+  /**
+   * ISO-8601 instant until which the binding's bot token is in post-unregister
+   * cooldown (Telegram's long-poll takes up to ~30 s to drain server-side).
+   * While this is set and in the future, the frontend locks the enable toggle
+   * and shows a countdown so the operator knows why they can't re-enable yet.
+   */
+  cooldownUntil: string | null
+  createdAt: string | null
+  updatedAt: string | null
+}
+
 /** A conversation between a user and an agent. */
 export interface Conversation {
   id: number

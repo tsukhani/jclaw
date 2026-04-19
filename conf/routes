@@ -95,11 +95,15 @@ DELETE  /api/conversations                      ApiConversationsController.delet
 
 # Channels API
 GET     /api/channels                           ApiChannelsController.list
+GET     /api/channels/telegram/bindings         ApiTelegramBindingsController.list
+POST    /api/channels/telegram/bindings         ApiTelegramBindingsController.create
+PUT     /api/channels/telegram/bindings/{id}    ApiTelegramBindingsController.update
+DELETE  /api/channels/telegram/bindings/{id}    ApiTelegramBindingsController.delete
 GET     /api/channels/{channelType}             ApiChannelsController.get
 PUT     /api/channels/{channelType}             ApiChannelsController.save
 
 # Webhooks (no auth — verified by their own mechanisms)
-POST    /api/webhooks/telegram/{secret}         WebhookTelegramController.webhook
+POST    /api/webhooks/telegram/{bindingId}/{secret}  WebhookTelegramController.webhook
 POST    /api/webhooks/slack                     WebhookSlackController.webhook
 GET     /api/webhooks/whatsapp                  WebhookWhatsAppController.verify
 POST    /api/webhooks/whatsapp                  WebhookWhatsAppController.webhook
