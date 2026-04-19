@@ -1074,7 +1074,7 @@ public class AgentRunner {
                                     .formatted(agent != null ? agent.name : "?", peerId));
                     return;
                 }
-                channels.TelegramChannel.sendMessage(binding.botToken, peerId, text);
+                channels.TelegramChannel.sendMessage(binding.botToken, peerId, text, agent);
                 return;
             }
             var channel = type.resolve();

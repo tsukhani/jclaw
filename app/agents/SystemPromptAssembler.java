@@ -332,9 +332,12 @@ public class SystemPromptAssembler {
             split automatically at paragraph boundaries. Prefer concise answers — Telegram
             is a chat channel, not a long-form document surface.
 
-            File delivery: the download-chip convention from the Workspace File Delivery
-            section does NOT apply here. Relative markdown links render as broken links
-            in Telegram. If the user asks for a file, describe it in plain text instead.
+            File delivery: use the standard Workspace File Delivery convention —
+            [filename](<relative/path/in/workspace>). The bot intercepts those links and
+            uploads the file natively to Telegram: images arrive as inline photos,
+            everything else as downloadable document attachments with the original
+            filename preserved. Do NOT inline file contents when the user asks for a
+            file; emit the link and let the bot deliver the real thing.
             """;
 
     private static void appendExecutionBiasSection(StringBuilder sb) {

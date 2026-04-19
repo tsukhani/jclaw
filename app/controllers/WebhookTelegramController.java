@@ -102,10 +102,11 @@ public class WebhookTelegramController extends Controller {
     private static void processMessage(BindingCtx ctx, TelegramChannel.InboundMessage message) {
         final String sendToken = ctx.botToken();
         final String sendChatId = message.chatId();
+        final Agent sendAgent = ctx.agent();
         try {
-            AgentRunner.processInboundForAgent(ctx.agent(), "telegram", ctx.telegramUserId(),
+            AgentRunner.processInboundForAgent(sendAgent, "telegram", ctx.telegramUserId(),
                     message.text(),
-                    (peerId, response) -> TelegramChannel.sendMessage(sendToken, sendChatId, response));
+                    (peerId, response) -> TelegramChannel.sendMessage(sendToken, sendChatId, response, sendAgent));
         } catch (Exception e) {
             EventLogger.error("channel", ctx.agent() != null ? ctx.agent().name : null, "telegram",
                     "Error processing message for binding %d: %s".formatted(ctx.bindingId(), e.getMessage()));

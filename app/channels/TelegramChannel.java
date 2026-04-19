@@ -2,10 +2,14 @@ package channels;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.JsonObject;
+import models.Agent;
 import models.TelegramBinding;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
+import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.updates.SetWebhook;
+import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
@@ -80,27 +84,75 @@ public class TelegramChannel implements Channel {
     // ── Outbound sends ──
 
     /**
-     * Fire-and-retry outbound message send for a specific bot token. The agent's
-     * markdown is converted to Telegram-safe HTML via {@link TelegramMarkdownFormatter}
-     * (post-JCLAW-91) so tables, headings, and lists render correctly instead of
-     * leaking raw pipes and hashes. Chunks at 4000 chars with HTML-tag-aware
-     * splitting so a chunk boundary never lands mid-{@code <pre>}.
+     * Text-only send path. Agent markdown converts to Telegram-safe HTML via
+     * {@link TelegramMarkdownFormatter} and chunks at 4000 chars with HTML-tag-aware
+     * splitting. No workspace file resolution is attempted — use the
+     * {@code Agent}-aware overload when the caller has that context.
      */
     public static boolean sendMessage(String botToken, String chatId, String text) {
+        return sendMessage(botToken, chatId, text, null);
+    }
+
+    /**
+     * Agent-aware outbound dispatch (JCLAW-93). {@link TelegramOutboundPlanner}
+     * splits the markdown into text and file segments; text segments flow through
+     * the HTML formatter as before, while file segments are uploaded via
+     * {@link #trySendPhoto} (images) or {@link #trySendDocument} (everything else).
+     * Segments emit in order so prose, photo, prose sequences arrive the way the
+     * agent composed them.
+     */
+    public static boolean sendMessage(String botToken, String chatId, String text, Agent agent) {
         if (botToken == null || chatId == null || text == null) {
             EventLogger.error("channel", null, "telegram",
                     "sendMessage called with null argument");
             return false;
         }
         var channel = forToken(botToken);
-        var html = TelegramMarkdownFormatter.toHtml(text);
+        var segments = TelegramOutboundPlanner.plan(text, agent != null ? agent.name : null);
+        if (segments.isEmpty()) return true; // nothing to send
+
+        boolean allOk = true;
+        for (var segment : segments) {
+            if (segment instanceof TelegramOutboundPlanner.TextSegment ts) {
+                if (!sendTextSegment(channel, chatId, ts.markdown())) allOk = false;
+            }
+            else if (segment instanceof TelegramOutboundPlanner.FileSegment fs) {
+                if (!sendFileSegment(channel, chatId, fs)) allOk = false;
+            }
+        }
+        return allOk;
+    }
+
+    /**
+     * Render a markdown text segment through the formatter and dispatch its
+     * chunks. Blank segments (e.g. the whitespace between two adjacent file
+     * references) are no-ops so we don't fire off empty sendMessage calls.
+     */
+    private static boolean sendTextSegment(TelegramChannel channel, String chatId, String markdown) {
+        if (markdown == null || markdown.isBlank()) return true;
+        var html = TelegramMarkdownFormatter.toHtml(markdown);
+        if (html.isBlank()) return true;
         var chunks = TelegramMarkdownFormatter.chunkHtml(html, 4000);
-        if (chunks.isEmpty()) return true; // nothing to send
         boolean allOk = true;
         for (var part : chunks) {
             if (!channel.sendWithRetry(chatId, part)) allOk = false;
         }
         return allOk;
+    }
+
+    /** Dispatch a file segment through sendPhoto or sendDocument depending on type. */
+    private static boolean sendFileSegment(TelegramChannel channel, String chatId,
+                                            TelegramOutboundPlanner.FileSegment fs) {
+        try {
+            if (fs.isImage()) {
+                return channel.trySendPhoto(chatId, fs.file(), fs.displayName());
+            }
+            return channel.trySendDocument(chatId, fs.file(), fs.displayName());
+        } catch (Exception e) {
+            EventLogger.error("channel", null, "telegram",
+                    "File send failed for %s: %s".formatted(fs.displayName(), e.getMessage()));
+            return false;
+        }
     }
 
     /**
@@ -174,6 +226,50 @@ public class TelegramChannel implements Channel {
     }
 
     // ── Per-instance send path ──
+
+    /**
+     * Upload {@code file} as a Telegram photo. The {@code displayName} is shown
+     * to the user as the filename hint; Telegram renders images inline, so
+     * captions aren't used in this MVP — prose accompanying the photo arrives as
+     * a separate text message above or below it.
+     */
+    public boolean trySendPhoto(String peerId, java.io.File file, String displayName) {
+        var request = SendPhoto.builder()
+                .chatId(peerId)
+                .photo(new InputFile(file, displayName != null ? displayName : file.getName()))
+                .build();
+        try {
+            client.execute(request);
+            EventLogger.info("channel", null, "telegram",
+                    "Photo sent to chat %s: %s".formatted(peerId, displayName));
+            return true;
+        } catch (TelegramApiException e) {
+            EventLogger.warn("channel", null, "telegram",
+                    "Photo send failed for %s: %s".formatted(displayName, e.getMessage()));
+            return false;
+        }
+    }
+
+    /**
+     * Upload {@code file} as a Telegram document (download attachment). Covers
+     * anything that isn't one of the image extensions Telegram renders inline.
+     */
+    public boolean trySendDocument(String peerId, java.io.File file, String displayName) {
+        var request = SendDocument.builder()
+                .chatId(peerId)
+                .document(new InputFile(file, displayName != null ? displayName : file.getName()))
+                .build();
+        try {
+            client.execute(request);
+            EventLogger.info("channel", null, "telegram",
+                    "Document sent to chat %s: %s".formatted(peerId, displayName));
+            return true;
+        } catch (TelegramApiException e) {
+            EventLogger.warn("channel", null, "telegram",
+                    "Document send failed for %s: %s".formatted(displayName, e.getMessage()));
+            return false;
+        }
+    }
 
     @Override
     public boolean trySend(String peerId, String text) {

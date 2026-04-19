@@ -257,8 +257,9 @@ public final class TelegramPollingRunner {
 
             final String sendToken = ctx.botToken();
             final String sendChatId = msg.chatId();
-            AgentRunner.processInboundForAgent(ctx.agent(), "telegram", ctx.telegramUserId(), msg.text(),
-                    (peer, resp) -> TelegramChannel.sendMessage(sendToken, sendChatId, resp));
+            final Agent sendAgent = ctx.agent();
+            AgentRunner.processInboundForAgent(sendAgent, "telegram", ctx.telegramUserId(), msg.text(),
+                    (peer, resp) -> TelegramChannel.sendMessage(sendToken, sendChatId, resp, sendAgent));
         } catch (Exception e) {
             EventLogger.error("channel", null, "telegram",
                     "Polling update processing error for binding %d: %s".formatted(
