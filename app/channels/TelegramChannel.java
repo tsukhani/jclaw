@@ -80,7 +80,41 @@ public class TelegramChannel implements Channel {
             EventLogger.error("channel", null, "telegram", "Telegram not configured");
             return false;
         }
-        return INSTANCE.sendWithRetry(chatId, text);
+        // Telegram rejects sendMessage payloads over 4096 characters with HTTP 400.
+        // Chunk at 4000 to leave headroom for any parse-mode expansion on the server
+        // side. Each chunk is delivered via sendWithRetry so retries apply per-chunk.
+        var chunks = chunk(text, 4000);
+        boolean allOk = true;
+        for (var part : chunks) {
+            if (!INSTANCE.sendWithRetry(chatId, part)) allOk = false;
+        }
+        return allOk;
+    }
+
+    /**
+     * Split {@code text} into chunks at most {@code maxLen} characters long, biasing
+     * breaks toward paragraph → line → word boundaries before a hard cut. Markdown
+     * formatting that spans a chunk boundary (e.g. an unclosed code fence) may render
+     * awkwardly — acceptable for an MVP chunker; a per-channel formatter (§4.4 of
+     * JCLAW-14 report) is the cleaner long-term fix.
+     */
+    public static java.util.List<String> chunk(String text, int maxLen) {
+        if (text == null || text.isEmpty()) return java.util.List.of(text == null ? "" : text);
+        if (text.length() <= maxLen) return java.util.List.of(text);
+        var out = new java.util.ArrayList<String>();
+        int start = 0;
+        while (text.length() - start > maxLen) {
+            int end = start + maxLen;
+            int split = text.lastIndexOf("\n\n", end);
+            int skip = 2;
+            if (split <= start) { split = text.lastIndexOf('\n', end); skip = 1; }
+            if (split <= start) { split = text.lastIndexOf(' ', end); skip = 1; }
+            if (split <= start) { split = end; skip = 0; }
+            out.add(text.substring(start, split));
+            start = split + skip;
+        }
+        if (start < text.length()) out.add(text.substring(start));
+        return out;
     }
 
     /** Register the webhook URL with Telegram. Only meaningful in {@link ChannelTransport#WEBHOOK} mode. */

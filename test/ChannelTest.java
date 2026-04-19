@@ -56,6 +56,65 @@ public class ChannelTest extends UnitTest {
         assertNull(msg);
     }
 
+    // === Telegram outbound chunker ===
+
+    @Test
+    public void telegramChunkShortTextReturnsSingleChunk() {
+        var chunks = TelegramChannel.chunk("hello world", 4000);
+        assertEquals(1, chunks.size());
+        assertEquals("hello world", chunks.getFirst());
+    }
+
+    @Test
+    public void telegramChunkSplitsAtParagraphBoundaries() {
+        var text = "A".repeat(100) + "\n\n" + "B".repeat(100) + "\n\n" + "C".repeat(100);
+        var chunks = TelegramChannel.chunk(text, 150);
+        assertEquals(3, chunks.size());
+        assertTrue(chunks.get(0).startsWith("A"));
+        assertTrue(chunks.get(1).startsWith("B"));
+        assertTrue(chunks.get(2).startsWith("C"));
+        for (var c : chunks) {
+            assertTrue(c.length() <= 150, () -> "chunk too long: " + c.length());
+        }
+    }
+
+    @Test
+    public void telegramChunkFallsBackToLineBoundary() {
+        // No paragraph break within 50 chars, but newlines are available.
+        var text = "line1\n" + "line2\n" + "line3\n" + "x".repeat(100);
+        var chunks = TelegramChannel.chunk(text, 50);
+        assertTrue(chunks.size() >= 2);
+        for (var c : chunks) {
+            assertTrue(c.length() <= 50, () -> "chunk too long: " + c.length());
+        }
+    }
+
+    @Test
+    public void telegramChunkHardCutsWhenNoBoundary() {
+        var text = "X".repeat(12000);
+        var chunks = TelegramChannel.chunk(text, 4000);
+        assertEquals(3, chunks.size());
+        for (var c : chunks) {
+            assertTrue(c.length() <= 4000, () -> "chunk too long: " + c.length());
+        }
+    }
+
+    @Test
+    public void telegramChunkRealAgentReply() {
+        // The production failure: a 4285-char agent response exceeded Telegram's
+        // 4096 limit by ~200 chars. Verify a similar payload splits cleanly.
+        var sb = new StringBuilder();
+        for (int i = 0; i < 60; i++) {
+            sb.append("### Section ").append(i).append("\n\n");
+            sb.append("A".repeat(50)).append(' ').append("B".repeat(10)).append("\n\n");
+        }
+        var chunks = TelegramChannel.chunk(sb.toString(), 4000);
+        assertTrue(chunks.size() >= 2, () -> "expected multiple chunks, got " + chunks.size());
+        for (var c : chunks) {
+            assertTrue(c.length() <= 4000, () -> "chunk too long: " + c.length());
+        }
+    }
+
     // === ChannelTransport enum ===
 
     @Test
@@ -96,6 +155,34 @@ public class ChannelTest extends UnitTest {
         assertEquals(ChannelTransport.WEBHOOK,
                 ChannelTransport.parse(explicitlyWebhook.get("transport").getAsString(),
                         ChannelTransport.POLLING));
+    }
+
+    // === ChannelConfig cache-miss from non-request threads ===
+
+    @Test
+    public void channelConfigFindByTypeSurvivesCacheMissFromBackgroundThread() throws Exception {
+        // Regression for the JPA "No active EntityManager" error seen in polling
+        // flows after the 60s cache TTL expired: findByType must work from a
+        // thread without a request-level transaction (SDK executor threads,
+        // virtual threads spawned from webhook controllers).
+        models.ChannelConfig.evictAllCache();
+
+        var thrown = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var thread = new Thread(() -> {
+            try {
+                // Not inside a transaction — the wrapper in findByType must
+                // establish one on our behalf. Null result is fine; no throw.
+                models.ChannelConfig.findByType("nonexistent-channel-for-test");
+            } catch (Throwable t) {
+                thrown.set(t);
+            }
+        });
+        thread.start();
+        thread.join(5_000);
+
+        if (thrown.get() != null) {
+            throw new AssertionError("findByType threw from a background thread: " + thrown.get().getMessage(), thrown.get());
+        }
     }
 
     // === Channel.sendWithRetry ===

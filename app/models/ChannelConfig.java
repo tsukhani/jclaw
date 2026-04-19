@@ -74,16 +74,23 @@ public class ChannelConfig extends Model {
         if (cached != null && !cached.isExpired()) {
             return cached.configJson() != null ? cached.toTransient() : null;
         }
-        ChannelConfig config = ChannelConfig.find("channelType", channelType).first();
-        cache.put(channelType, new CachedSnapshot(
-                config != null ? config.id : null,
-                channelType,
-                config != null ? config.configJson : null,
-                config != null && config.enabled,
-                config != null ? config.createdAt : null,
-                config != null ? config.updatedAt : null,
-                System.currentTimeMillis() + CACHE_TTL_MS));
-        return config;
+        // Callers on SDK threads (Telegram long-polling executor) and virtual
+        // threads spawned from webhook controllers have no JPA transaction
+        // bound. Wrap the cache-miss DB read in Tx.run — it short-circuits
+        // when the caller is already inside a transaction (the admin save
+        // path), so managed-entity semantics are preserved there.
+        return services.Tx.run(() -> {
+            ChannelConfig config = ChannelConfig.find("channelType", channelType).first();
+            cache.put(channelType, new CachedSnapshot(
+                    config != null ? config.id : null,
+                    channelType,
+                    config != null ? config.configJson : null,
+                    config != null && config.enabled,
+                    config != null ? config.createdAt : null,
+                    config != null ? config.updatedAt : null,
+                    System.currentTimeMillis() + CACHE_TTL_MS));
+            return config;
+        });
     }
 
     /** Evict the cache for a specific channel type (call after admin updates). */
