@@ -45,5 +45,11 @@ require:
     # typed API models (SendMessage, Update, etc); telegrambots-longpolling is
     # the framework-agnostic runner used when transport=POLLING (no Spring).
     # telegrambots-meta is pulled transitively — no need to declare.
-    - org.telegram -> telegrambots-client 9.5.0
-    - org.telegram -> telegrambots-longpolling 9.5.0
+    - org.telegram -> telegrambots-client 9.5.0:
+        exclude:
+            - ch.qos.logback -> *
+            - org.awaitility -> *
+    - org.telegram -> telegrambots-longpolling 9.5.0:
+        exclude:
+            - ch.qos.logback -> *
+            - org.awaitility -> *
