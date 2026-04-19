@@ -415,9 +415,9 @@ async function remove(binding: TelegramBindingSummary) {
             <code class="font-mono px-1 bg-muted text-fg-strong">telegramUserId</code>.
           </li>
           <li>
-            Pick an agent from the autocomplete, leave
-            <span class="text-fg-strong">Enabled</span>
-            ticked, and save.
+            Pick an agent from the autocomplete and save. New bindings are
+            enabled by default — use the toggle on the card if you want to
+            disable it later.
           </li>
         </ol>
       </div>

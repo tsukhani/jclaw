@@ -21,6 +21,26 @@ const [{ data: agents, refresh }, { data: configData }] = await Promise.all([
 
 const editing = ref<Agent | null>(null)
 const creating = ref(false)
+
+// Feed the layout breadcrumb: when editing, show "Agents > {name}"; when
+// creating, show "Agents > New agent"; otherwise just "Agents". The reverse
+// direction closes the edit form when the layout clears the extra (user
+// clicked the "Agents" crumb while already on /agents).
+const breadcrumbExtra = useBreadcrumbExtra()
+watch([editing, creating], ([agent, isCreating]) => {
+  if (agent) breadcrumbExtra.value = agent.name
+  else if (isCreating) breadcrumbExtra.value = 'New agent'
+  else breadcrumbExtra.value = null
+}, { immediate: true })
+watch(breadcrumbExtra, (value) => {
+  if (value === null && (editing.value || creating.value)) {
+    editing.value = null
+    creating.value = false
+  }
+})
+onUnmounted(() => {
+  breadcrumbExtra.value = null
+})
 const workspaceTab = ref('AGENT.md')
 const workspaceContent = ref('')
 const form = ref({ name: '', modelProvider: '', modelId: '', enabled: true, thinkingMode: '' })

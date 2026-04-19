@@ -50,15 +50,61 @@ onUnmounted(() => {
 })
 
 const route = useRoute()
+const breadcrumbExtra = useBreadcrumbExtra()
 
-const currentPageLabel = computed(() => {
-  const path = route.path
-  for (const group of navGroups) {
-    for (const item of group.items) {
-      if (item.to === path) return item.label
-    }
+/**
+ * When the user clicks a breadcrumb crumb that already matches the current
+ * route, NuxtLink skips navigation and the page's local edit state would
+ * otherwise stay open. Clearing {@code breadcrumbExtra} lets the page reset
+ * its own state (pages watch this ref and collapse their edit UI when it
+ * drops to null). No-op when clicking a crumb that actually changes routes —
+ * the target page's mount (or our own route watcher) takes care of that.
+ */
+function onCrumbClick(to: string) {
+  if (to === route.path) {
+    breadcrumbExtra.value = null
   }
-  return 'Dashboard'
+}
+
+interface Crumb { label: string, to?: string }
+
+/**
+ * Breadcrumb trail for the current route, rooted at the nav entry that matches
+ * the first path segment and descending through nested segments. Pages that
+ * edit in-place (no URL change) can append a sub-crumb via
+ * {@link useBreadcrumbExtra} — e.g. {@code /agents} + extra "main" renders as
+ * {@code Agents > main}. The last crumb (route segment or sub-crumb, whichever
+ * comes last) is the current page, rendered plain; preceding crumbs link back.
+ */
+const crumbs = computed<Crumb[]>(() => {
+  const path = route.path
+  const allItems = navGroups.flatMap(g => g.items)
+  const trail: Crumb[] = []
+
+  if (path === '/') {
+    trail.push({ label: 'Dashboard', to: '/' })
+  }
+  else {
+    const segments = path.split('/').filter(Boolean)
+    let acc = ''
+    segments.forEach((seg) => {
+      acc += `/${seg}`
+      const match = allItems.find(item => item.to === acc)
+      const label = match?.label ?? seg.charAt(0).toUpperCase() + seg.slice(1)
+      trail.push({ label, to: acc })
+    })
+  }
+
+  if (breadcrumbExtra.value) {
+    trail.push({ label: breadcrumbExtra.value })
+  }
+
+  // The last crumb is the current page — strip its link so it renders plain
+  // and carries aria-current.
+  const last = trail[trail.length - 1]
+  if (last) delete last.to
+
+  return trail
 })
 
 const navGroups = [
@@ -72,15 +118,15 @@ const navGroups = [
     label: 'Chat',
     items: [
       { label: 'Chat', to: '/chat', icon: 'svg-chat' },
-      { label: 'Channels', to: '/channels', icon: 'svg-channels' },
       { label: 'Conversations', to: '/conversations', icon: 'svg-conversations' },
+      { label: 'Channels', to: '/channels', icon: 'svg-channels' },
     ],
   },
   {
     label: 'Ops',
     items: [
-      { label: 'Tasks', to: '/tasks', icon: 'svg-tasks' },
       { label: 'Agents', to: '/agents', icon: 'svg-agents' },
+      { label: 'Tasks', to: '/tasks', icon: 'svg-tasks' },
       { label: 'Skills', to: '/skills', icon: 'svg-skills' },
       { label: 'Tools', to: '/tools', icon: 'svg-tools' },
     ],
@@ -308,10 +354,36 @@ const navGroups = [
           >
             <span class="text-lg">☰</span>
           </button>
-          <nav class="text-sm">
-            <span class="text-fg-muted">JClaw</span>
-            <span class="text-fg-muted mx-1.5">›</span>
-            <span class="text-emerald-700 dark:text-emerald-400 font-medium">{{ currentPageLabel }}</span>
+          <nav
+            class="text-sm"
+            aria-label="Breadcrumb"
+          >
+            <NuxtLink
+              to="/"
+              class="text-fg-muted hover:text-fg-strong transition-colors"
+              @click="onCrumbClick('/')"
+            >
+              JClaw
+            </NuxtLink>
+            <template
+              v-for="(crumb, i) in crumbs"
+              :key="i"
+            >
+              <span class="text-fg-muted mx-1.5">›</span>
+              <NuxtLink
+                v-if="crumb.to"
+                :to="crumb.to"
+                class="text-fg-muted hover:text-fg-strong transition-colors"
+                @click="onCrumbClick(crumb.to)"
+              >
+                {{ crumb.label }}
+              </NuxtLink>
+              <span
+                v-else
+                class="text-emerald-700 dark:text-emerald-400 font-medium"
+                aria-current="page"
+              >{{ crumb.label }}</span>
+            </template>
           </nav>
         </div>
 

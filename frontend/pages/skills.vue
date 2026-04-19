@@ -412,6 +412,22 @@ async function commitRename(skill: Skill) {
 // AgentSkill. Both flows set `folderName` explicitly so the API path is stable.
 const editing = ref<(Skill | AgentSkill) & { folderName?: string } | null>(null)
 
+// Feed the layout breadcrumb: show "Skills > {name}" when a skill is open;
+// reverse direction closes the viewer when the layout clears the extra (user
+// clicked the "Skills" crumb while already on /skills).
+const breadcrumbExtra = useBreadcrumbExtra()
+watch(editing, (skill) => {
+  breadcrumbExtra.value = skill ? (skill.folderName ?? skill.name) : null
+}, { immediate: true })
+watch(breadcrumbExtra, (value) => {
+  if (value === null && editing.value) {
+    editing.value = null
+  }
+})
+onUnmounted(() => {
+  breadcrumbExtra.value = null
+})
+
 // File browser state for view mode — skill file contents are read-only; authoring
 // happens exclusively via the skill-creator skill (using the filesystem tool).
 const skillFiles = ref<SkillFile[]>([])
