@@ -143,6 +143,55 @@ function visibleFields(def: ChannelTypeDef): ChannelField[] {
       <h2 class="text-sm font-medium text-fg-strong mb-4">
         Configure {{ channelTypes.find(c => c.type === editing)?.label }}
       </h2>
+      <div
+        v-if="editing === 'telegram'"
+        class="mb-4 p-3 border border-border text-xs text-fg-muted"
+      >
+        <p class="text-fg-strong font-medium mb-2">
+          How to get a bot token
+        </p>
+        <ol class="list-decimal pl-5 space-y-1">
+          <li>
+            Open Telegram and start a chat with
+            <a
+              href="https://t.me/BotFather"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="text-fg-strong underline hover:text-emerald-400"
+            >@BotFather</a>.
+          </li>
+          <li>
+            Send <code class="font-mono px-1 bg-muted text-fg-strong">/newbot</code>
+            and follow the prompts: pick a display name, then a username ending in
+            <code class="font-mono px-1 bg-muted text-fg-strong">bot</code>.
+          </li>
+          <li>
+            BotFather replies with a token like
+            <code class="font-mono px-1 bg-muted text-fg-strong">123456:ABC-DEF…</code>.
+            Copy it.
+          </li>
+          <li>
+            Paste it into the
+            <code class="font-mono px-1 bg-muted text-fg-strong">botToken</code>
+            field below.
+          </li>
+          <li>
+            Optional: in BotFather, use
+            <code class="font-mono px-1 bg-muted text-fg-strong">/setdescription</code>,
+            <code class="font-mono px-1 bg-muted text-fg-strong">/setuserpic</code>, and
+            <code class="font-mono px-1 bg-muted text-fg-strong">/setcommands</code>
+            to polish your bot's profile.
+          </li>
+          <li>
+            Choose <span class="text-fg-strong">Polling</span> if this JClaw instance
+            isn't publicly reachable; otherwise <span class="text-fg-strong">Webhook</span>
+            with an HTTPS URL and shared secret.
+          </li>
+          <li>
+            Tick <span class="text-fg-strong">Enabled</span> and save.
+          </li>
+        </ol>
+      </div>
       <div class="space-y-3">
         <template
           v-for="field in visibleFields(channelTypes.find(c => c.type === editing)!)"
