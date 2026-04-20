@@ -111,12 +111,11 @@ const promptBreakdownLoading = ref(false)
 const promptBreakdownError = ref('')
 
 /**
- * Which channel's prompt the dialog is currently previewing. Empty string =
- * channel-less baseline (matches {@code channelType: null} on the backend).
- * The breakdown refetches whenever this changes so each channel's injected
- * guidance section is visible in the section list.
+ * Which channel's prompt the dialog is currently previewing. Every real chat
+ * lives on a channel, so we default to `web` — the admin chat UI — rather
+ * than exposing a meaningless channel-less baseline.
  */
-const promptBreakdownChannel = ref<'' | 'web' | 'telegram' | 'slack' | 'whatsapp'>('')
+const promptBreakdownChannel = ref<'web' | 'telegram' | 'slack' | 'whatsapp'>('web')
 
 async function loadPromptBreakdown() {
   if (!promptBreakdownAgent.value) return
@@ -124,11 +123,8 @@ async function loadPromptBreakdown() {
   promptBreakdownError.value = ''
   promptBreakdownLoading.value = true
   try {
-    const query = promptBreakdownChannel.value
-      ? `?channelType=${encodeURIComponent(promptBreakdownChannel.value)}`
-      : ''
     promptBreakdownData.value = await $fetch<PromptBreakdown>(
-      `/api/agents/${promptBreakdownAgent.value.id}/prompt-breakdown${query}`,
+      `/api/agents/${promptBreakdownAgent.value.id}/prompt-breakdown?channelType=${encodeURIComponent(promptBreakdownChannel.value)}`,
     )
   }
   catch (e: unknown) {
@@ -142,7 +138,7 @@ async function loadPromptBreakdown() {
 async function openPromptBreakdown(agent: Agent) {
   promptBreakdownAgent.value = agent
   promptBreakdownOpen.value = true
-  promptBreakdownChannel.value = ''
+  promptBreakdownChannel.value = 'web'
   await loadPromptBreakdown()
 }
 
@@ -1385,9 +1381,6 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
                 title="Preview the prompt as assembled for a specific channel"
                 @change="loadPromptBreakdown()"
               >
-                <option value="">
-                  (none)
-                </option>
                 <option value="web">
                   web
                 </option>
