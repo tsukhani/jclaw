@@ -101,6 +101,26 @@ public final class TelegramStreamingSink {
     private ScheduledFuture<?> scheduledFlush;
     private final AtomicBoolean sealed = new AtomicBoolean(false);
 
+    /**
+     * {@code true} while a flush's network call is in progress (between the
+     * first sync block and the post-network sync block). Volatile so
+     * {@link #seal(String)} on a different thread can observe it without
+     * taking the monitor. Needed to prevent a race where seal's final HTML
+     * edit is submitted to Telegram before an in-flight plain-text flush
+     * completes — Telegram processes edits in network-arrival order, not
+     * submission order, so an HTML seal that wins the race on submission
+     * can still be overwritten by a slower plain-text flush.
+     */
+    private volatile boolean flushInFlight = false;
+
+    /**
+     * Bounded spin-wait deadline for {@link #seal(String)} observing
+     * {@link #flushInFlight}. 2s is long enough to cover p99 Telegram edit
+     * latency but short enough that a stuck flush doesn't hold up seal
+     * indefinitely.
+     */
+    private static final long SEAL_INFLIGHT_WAIT_MS = 2_000;
+
     public TelegramStreamingSink(String botToken, String chatId, Agent agent) {
         this.botToken = botToken;
         this.chatId = chatId;
@@ -141,6 +161,9 @@ public final class TelegramStreamingSink {
         synchronized (this) {
             cancelScheduledLocked();
         }
+        // Wait for any in-flight flush to complete so its plain-text edit
+        // can't race past our HTML final edit.
+        awaitInFlightFlush();
         if (finalResponse == null) finalResponse = "";
 
         // If we never got to send a placeholder (no tokens, or instant cap
@@ -188,6 +211,9 @@ public final class TelegramStreamingSink {
         synchronized (this) {
             cancelScheduledLocked();
         }
+        // Same race window as seal(): an in-flight flush's edit could land
+        // after our delete, resurrecting the placeholder with stale text.
+        awaitInFlightFlush();
         if (messageId != null) deletePlaceholderSafely();
         TelegramChannel.sendMessage(botToken, chatId,
                 "Sorry, an error occurred processing your message.", agent);
@@ -234,6 +260,7 @@ public final class TelegramStreamingSink {
             toShow = stripImageRefs(pending.toString());
             if (toShow.length() < MIN_FLUSH_CHARS) return;
             if (toShow.equals(lastSentText)) return;
+            flushInFlight = true;
         }
         try {
             if (messageId == null) {
@@ -257,6 +284,27 @@ public final class TelegramStreamingSink {
             // we'd rather drop one frame than surface an error.
             EventLogger.warn("channel", agentName(), "telegram",
                     "Streaming flush failed (will retry): " + e.getMessage());
+        } finally {
+            flushInFlight = false;
+        }
+    }
+
+    /**
+     * Spin-wait (bounded) for any in-flight flush to complete. Called from
+     * {@link #seal(String)} and {@link #errorFallback(Exception)} so their
+     * final network call isn't racing against a slower flush whose edit
+     * lands on Telegram after ours — Telegram applies edits in the order
+     * they arrive at its servers, not the order we submit them.
+     */
+    private void awaitInFlightFlush() {
+        long deadline = System.currentTimeMillis() + SEAL_INFLIGHT_WAIT_MS;
+        while (flushInFlight && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+                return;
+            }
         }
     }
 
