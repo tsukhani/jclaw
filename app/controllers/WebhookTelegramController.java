@@ -10,6 +10,9 @@ import play.mvc.Http;
 import services.EventLogger;
 import utils.WebhookUtil;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+
 /**
  * Webhook receiver for per-user Telegram bindings (JCLAW-89). The route carries
  * the {@code bindingId} so the controller can look up the matching
@@ -48,19 +51,29 @@ public class WebhookTelegramController extends Controller {
             return;
         }
 
-        // Secret verification. Path segment is the primary check; the optional
-        // x-telegram-bot-api-secret-token header is verified when present.
-        if (ctx.webhookSecret() == null || !ctx.webhookSecret().equals(secret)) {
-            EventLogger.warn("channel", ctx.agent() != null ? ctx.agent().name : null, "telegram",
+        // JCLAW-16: Telegram's published auth mechanism is the secret_token
+        // registered with setWebhook and echoed back as
+        // X-Telegram-Bot-Api-Secret-Token. We also require the path segment
+        // to match — it's a local routing convention, but rejecting a wrong
+        // one costs nothing and fails fast before the header compare.
+        var agentName = ctx.agent() != null ? ctx.agent().name : null;
+        if (ctx.webhookSecret() == null
+                || !MessageDigest.isEqual(
+                        ctx.webhookSecret().getBytes(StandardCharsets.UTF_8),
+                        secret == null ? new byte[0] : secret.getBytes(StandardCharsets.UTF_8))) {
+            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, agentName, "telegram",
                     "Invalid webhook secret for binding %d".formatted(bindingId));
-            forbidden();
+            unauthorized("Invalid signature");
             return;
         }
         var secretHeader = Http.Request.current().headers.get("x-telegram-bot-api-secret-token");
-        if (secretHeader != null && !ctx.webhookSecret().equals(secretHeader.value())) {
-            EventLogger.warn("channel", ctx.agent() != null ? ctx.agent().name : null, "telegram",
-                    "Invalid secret-token header for binding %d".formatted(bindingId));
-            forbidden();
+        if (secretHeader == null
+                || !MessageDigest.isEqual(
+                        ctx.webhookSecret().getBytes(StandardCharsets.UTF_8),
+                        secretHeader.value().getBytes(StandardCharsets.UTF_8))) {
+            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, agentName, "telegram",
+                    "Missing or invalid secret-token header for binding %d".formatted(bindingId));
+            unauthorized("Invalid signature");
             return;
         }
 

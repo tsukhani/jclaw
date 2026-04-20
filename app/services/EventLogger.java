@@ -8,6 +8,9 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class EventLogger {
 
+    /** Category for rejected webhooks that failed platform signature verification (JCLAW-16). */
+    public static final String WEBHOOK_SIGNATURE_FAILURE = "WEBHOOK_SIGNATURE_FAILURE";
+
     private static final ConcurrentLinkedQueue<EventLog> pending = new ConcurrentLinkedQueue<>();
     private static final int BATCH_SIZE = 20;
 

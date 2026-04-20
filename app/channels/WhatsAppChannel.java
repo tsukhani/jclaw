@@ -11,6 +11,7 @@ import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.HexFormat;
 import java.util.Map;
@@ -111,13 +112,15 @@ public class WhatsAppChannel implements Channel {
     // --- HMAC-SHA256 signature verification ---
 
     public static boolean verifySignature(String appSecret, String rawBody, String signatureHeader) {
-        if (appSecret == null || signatureHeader == null) return false;
+        if (appSecret == null || signatureHeader == null || !signatureHeader.startsWith("sha256=")) {
+            return false;
+        }
         try {
             var mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(appSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            var hash = mac.doFinal(rawBody.getBytes(StandardCharsets.UTF_8));
-            var computed = "sha256=" + HexFormat.of().formatHex(hash);
-            return computed.equals(signatureHeader);
+            var expected = mac.doFinal(rawBody.getBytes(StandardCharsets.UTF_8));
+            var received = HexFormat.of().parseHex(signatureHeader.substring(7));
+            return MessageDigest.isEqual(expected, received);
         } catch (Exception _) {
             return false;
         }

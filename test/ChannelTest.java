@@ -474,4 +474,68 @@ public class ChannelTest extends UnitTest {
         var msg = WhatsAppChannel.parseWebhook(json);
         assertNull(msg); // Image messages not supported yet
     }
+
+    // === JCLAW-16: platform signature verification edge cases ===
+
+    @Test
+    public void slackRejectMissingPrefix() {
+        // Slack spec requires "v0=" prefix; a raw hex digest without it must fail.
+        assertFalse(SlackChannel.verifySignature("secret",
+                String.valueOf(Instant.now().getEpochSecond()),
+                "body", "abcdef0123456789"));
+    }
+
+    @Test
+    public void slackRejectNullInputs() {
+        var ts = String.valueOf(Instant.now().getEpochSecond());
+        assertFalse(SlackChannel.verifySignature(null, ts, "body", "v0=abcd"));
+        assertFalse(SlackChannel.verifySignature("secret", null, "body", "v0=abcd"));
+        assertFalse(SlackChannel.verifySignature("secret", ts, "body", null));
+    }
+
+    @Test
+    public void slackRejectTamperedByte() throws Exception {
+        // Flip one hex nibble in a valid signature — constant-time compare
+        // must still return false.
+        var secret = "test_signing_secret";
+        var ts = String.valueOf(Instant.now().getEpochSecond());
+        var body = "{\"ok\":1}";
+        var mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        var hash = mac.doFinal("v0:%s:%s".formatted(ts, body).getBytes(StandardCharsets.UTF_8));
+        var hex = HexFormat.of().formatHex(hash);
+        var tampered = "v0=" + flipFirstHexNibble(hex);
+        assertFalse(SlackChannel.verifySignature(secret, ts, body, tampered));
+    }
+
+    @Test
+    public void whatsappRejectNullAppSecret() {
+        // Controller guards against null appSecret, but the verify helper must
+        // also reject it defensively so no future caller can bypass.
+        assertFalse(WhatsAppChannel.verifySignature(null, "body", "sha256=abcd"));
+    }
+
+    @Test
+    public void whatsappRejectMissingPrefix() {
+        // Meta spec requires "sha256=" prefix; raw hex must fail.
+        assertFalse(WhatsAppChannel.verifySignature("secret", "body", "abcdef0123456789"));
+    }
+
+    @Test
+    public void whatsappRejectTamperedByte() throws Exception {
+        var secret = "test_app_secret";
+        var body = "{\"entry\":[]}";
+        var mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+        var hash = mac.doFinal(body.getBytes(StandardCharsets.UTF_8));
+        var hex = HexFormat.of().formatHex(hash);
+        var tampered = "sha256=" + flipFirstHexNibble(hex);
+        assertFalse(WhatsAppChannel.verifySignature(secret, body, tampered));
+    }
+
+    private static String flipFirstHexNibble(String hex) {
+        var first = hex.charAt(0);
+        var flipped = first == '0' ? '1' : '0';
+        return flipped + hex.substring(1);
+    }
 }

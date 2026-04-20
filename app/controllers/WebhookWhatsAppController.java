@@ -41,6 +41,16 @@ public class WebhookWhatsAppController extends Controller {
     public static void webhook() {
         var config = WhatsAppChannel.WhatsAppConfig.load();
 
+        // JCLAW-16: reject before any body read / agent invocation when the
+        // app is unconfigured — an absent appSecret previously became a silent
+        // bypass path, which is exactly what FR33/NFR12 forbids.
+        if (config == null || config.appSecret() == null) {
+            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, "whatsapp",
+                    "Webhook rejected: WhatsApp appSecret not configured");
+            unauthorized("Invalid signature");
+            return;
+        }
+
         String rawBody;
         try {
             rawBody = WebhookUtil.readRawBody();
@@ -50,15 +60,13 @@ public class WebhookWhatsAppController extends Controller {
             return;
         }
 
-        // Verify signature
-        if (config != null && config.appSecret() != null) {
-            var signatureHeader = Http.Request.current().headers.get("x-hub-signature-256");
-            if (signatureHeader == null || !WhatsAppChannel.verifySignature(
-                    config.appSecret(), rawBody, signatureHeader.value())) {
-                EventLogger.warn("channel", null, "whatsapp", "Invalid webhook signature");
-                unauthorized("Invalid signature");
-                return;
-            }
+        var signatureHeader = Http.Request.current().headers.get("x-hub-signature-256");
+        if (signatureHeader == null || !WhatsAppChannel.verifySignature(
+                config.appSecret(), rawBody, signatureHeader.value())) {
+            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, "whatsapp",
+                    "Invalid webhook signature");
+            unauthorized("Invalid signature");
+            return;
         }
 
         var payload = JsonParser.parseString(rawBody).getAsJsonObject();

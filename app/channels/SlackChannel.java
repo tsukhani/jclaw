@@ -11,6 +11,7 @@ import java.net.URI;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
@@ -88,6 +89,10 @@ public class SlackChannel implements Channel {
     // --- HMAC-SHA256 signature verification ---
 
     public static boolean verifySignature(String signingSecret, String timestamp, String body, String signature) {
+        if (signingSecret == null || timestamp == null || signature == null
+                || !signature.startsWith("v0=")) {
+            return false;
+        }
         // Replay attack prevention
         try {
             var ts = Long.parseLong(timestamp);
@@ -103,9 +108,9 @@ public class SlackChannel implements Channel {
             var baseString = "v0:%s:%s".formatted(timestamp, body);
             var mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(signingSecret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            var hash = mac.doFinal(baseString.getBytes(StandardCharsets.UTF_8));
-            var computed = "v0=" + HexFormat.of().formatHex(hash);
-            return computed.equals(signature);
+            var expected = mac.doFinal(baseString.getBytes(StandardCharsets.UTF_8));
+            var received = HexFormat.of().parseHex(signature.substring(3));
+            return MessageDigest.isEqual(expected, received);
         } catch (Exception _) {
             return false;
         }
