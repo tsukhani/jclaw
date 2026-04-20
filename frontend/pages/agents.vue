@@ -613,13 +613,6 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
             <div class="text-xs text-neutral-500 mt-0.5">
               {{ mainAgent.modelProvider }} / {{ mainAgent.modelId }}
             </div>
-            <button
-              class="mt-2 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-600/30 hover:bg-emerald-500/20 hover:text-emerald-600 dark:hover:text-emerald-300 hover:border-emerald-600 dark:hover:border-emerald-500/50 transition-colors"
-              title="Inspect the system prompt this agent receives — per-section char + token breakdown"
-              @click.stop="openPromptBreakdown(mainAgent)"
-            >
-              Inspect prompt
-            </button>
           </div>
           <div class="flex items-center gap-3 shrink-0">
             <span
@@ -667,15 +660,6 @@ const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
               <div class="text-xs text-neutral-500 mt-0.5">
                 {{ agent.modelProvider }} / {{ agent.modelId }}
               </div>
-              <!-- Inspect prompt: below model line, hidden in select mode -->
-              <button
-                v-if="!selectMode"
-                class="mt-2 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-600/30 hover:bg-emerald-500/20 hover:text-emerald-600 dark:hover:text-emerald-300 hover:border-emerald-600 dark:hover:border-emerald-500/50 transition-colors"
-                title="Inspect the system prompt this agent receives — per-section char + token breakdown"
-                @click.stop="openPromptBreakdown(agent)"
-              >
-                Inspect prompt
-              </button>
             </div>
           </div>
           <div class="flex items-center gap-3 shrink-0">
