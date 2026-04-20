@@ -55,13 +55,24 @@ public final class Commands {
             • /reset — clear the LLM's memory for this conversation (keeps the thread)
             • /help — show this message""";
 
-    /** Canned response text for {@link Command#NEW}. Persisted as the first assistant message in the new conversation. */
-    public static final String NEW_TEXT =
-            "New conversation started. What would you like to discuss?";
+    /**
+     * Canned response for {@link Command#NEW}. The leading {@code >} line
+     * becomes an HTML {@code <blockquote>} via {@code TelegramMarkdownFormatter},
+     * which Telegram renders with a colored vertical bar on the left edge —
+     * a native, unmistakable session-boundary marker. Web chat renders the
+     * same markdown with its own blockquote styling, so the visual cue
+     * works across both channels without channel-specific content.
+     */
+    public static final String NEW_TEXT = """
+            > New Conversation
 
-    /** Canned response text for {@link Command#RESET}. */
-    public static final String RESET_TEXT =
-            "Context cleared. I no longer remember our earlier exchange in this conversation.";
+            What would you like to discuss?""";
+
+    /** Canned response for {@link Command#RESET}. See {@link #NEW_TEXT} for the blockquote rationale. */
+    public static final String RESET_TEXT = """
+            > Context Cleared
+
+            I no longer remember our earlier exchange in this conversation.""";
 
     /** Outcome of handling a slash command. */
     public record Result(Conversation conversation, String responseText, Command command) {}
