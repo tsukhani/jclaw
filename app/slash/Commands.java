@@ -165,14 +165,15 @@ public final class Commands {
         var updated = Tx.run(() -> {
             var conv = (Conversation) Conversation.findById(convId);
             if (conv == null) return null;
-            // Persist the acknowledgement first and use its createdAt as the
-            // contextSince watermark. Combined with the strict ">" filter in
-            // Message.findRecent, this leaves the ack visible in the UI but
-            // excludes it (and everything older) from the next LLM context,
-            // without relying on Instant.now() having sub-ms precision
-            // between two consecutive calls.
-            var ack = ConversationService.appendAssistantMessage(conv, RESET_TEXT, null);
-            conv.contextSince = ack.createdAt;
+            // The ack text is delivered to the user by the caller (via SSE
+            // complete frame on web, sink.seal on Telegram) but NOT persisted
+            // as a Message row. /reset is a control signal; storing it as
+            // content created a timing-sensitive filter rule (the ack's
+            // createdAt had to align with contextSince across JDBC driver
+            // rounding) that flaked on lower-resolution Linux clocks.
+            // Keeping it transient sidesteps the problem entirely — the
+            // event_log entry below is the durable record of the reset.
+            conv.contextSince = Instant.now();
             conv.save();
             return conv;
         });

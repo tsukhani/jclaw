@@ -150,17 +150,23 @@ public class SlashCommandsTest extends UnitTest {
         ConversationService.appendUserMessage(reloaded, "post-reset question");
 
         var llmContext = ConversationService.loadRecentMessages(reloaded);
-        // loadRecentMessages must return ONLY the post-reset user message —
-        // the pre-reset pair AND the /reset acknowledgement must be filtered.
+        // /reset doesn't persist any new Message (the ack is transient —
+        // delivered via the channel's response mechanism only). So the only
+        // message strictly newer than contextSince is the post-reset turn.
         assertEquals(1, llmContext.size(),
-                "LLM context must exclude pre-reset messages and the reset ack");
+                "LLM context must exclude pre-reset messages");
         assertEquals("post-reset question", llmContext.getFirst().content);
     }
 
     @Test
-    public void resetKeepsPriorMessagesVisibleInDb() {
-        // The filter is a watermark, not a delete — /reset mustn't destroy
-        // history. Web sidebar / Telegram scrollback still show the turns.
+    public void resetDoesNotPersistAck() {
+        // /reset is a control signal — the ack text is delivered to the
+        // user via the channel's response path (SSE complete frame / sink
+        // seal) but must not enter Message history. Persisting it created
+        // a clock-alignment bug on Linux where the ack.createdAt and
+        // contextSince rounded to the same TIMESTAMP and the ">" filter
+        // flaked depending on driver rounding direction. The invariant
+        // that prevents it: no new rows from /reset at all.
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
         ConversationService.appendUserMessage(convo, "first");
         ConversationService.appendAssistantMessage(convo, "second", null);
@@ -169,8 +175,8 @@ public class SlashCommandsTest extends UnitTest {
         Commands.execute(Commands.Command.RESET, agent, "web", "admin", convo);
 
         var countAfter = Message.count("conversation = ?1", convo);
-        assertEquals(countBefore + 1, countAfter,
-                "the /reset ack is the only new row; prior messages stay");
+        assertEquals(countBefore, countAfter,
+                "/reset must not persist any new Message row");
     }
 
     @Test

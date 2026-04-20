@@ -69,11 +69,13 @@ public class Message extends Model {
             return Message.find("conversation = ?1 ORDER BY createdAt DESC", conversation)
                     .fetch(limit);
         }
-        // Strict ">" so the /reset acknowledgement (whose createdAt equals
-        // the watermark it was used to set) is itself excluded from the
-        // next LLM context window. See {@code Commands.executeReset}.
+        // Inclusive ">=" so a post-reset user message that lands in the
+        // same clock tick as {@code contextSince} (low-resolution Linux
+        // clocks can collide within a microsecond) is still included.
+        // /reset no longer persists its ack (see Commands.executeReset),
+        // so there's no equal-to-watermark ack to exclude.
         return Message.find(
-                "conversation = ?1 AND createdAt > ?2 ORDER BY createdAt DESC",
+                "conversation = ?1 AND createdAt >= ?2 ORDER BY createdAt DESC",
                 conversation, since).fetch(limit);
     }
 }
