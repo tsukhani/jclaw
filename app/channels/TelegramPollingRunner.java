@@ -260,10 +260,12 @@ public final class TelegramPollingRunner {
             final Agent sendAgent = ctx.agent();
             // JCLAW-94: stream via the same sink as the webhook path. Sink
             // owns the placeholder/edit/delete lifecycle; the planner takes
-            // over on seal for media-rich or oversize responses.
-            var sink = new TelegramStreamingSink(sendToken, sendChatId, sendAgent);
+            // over on seal for media-rich or oversize responses. JCLAW-95:
+            // factory defers construction until the conversation id is known.
             AgentRunner.processInboundForAgentStreaming(
-                    sendAgent, "telegram", ctx.telegramUserId(), msg.text(), sink);
+                    sendAgent, "telegram", ctx.telegramUserId(), msg.text(),
+                    convId -> new TelegramStreamingSink(
+                            sendToken, sendChatId, sendAgent, convId));
         } catch (Exception e) {
             EventLogger.error("channel", null, "telegram",
                     "Polling update processing error for binding %d: %s".formatted(

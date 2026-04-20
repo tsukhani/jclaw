@@ -178,4 +178,48 @@ public class TelegramStreamingSinkTest extends UnitTest {
         assertTrue(sink.sealedForTest(),
                 "sealed state holds against a trailing error callback");
     }
+
+    // === JCLAW-95: flushInFlight re-entrance ===
+
+    @Test
+    public void flushInFlightGuardPreventsReentranceForSameSink() throws Exception {
+        // JCLAW-95 moves flush work to virtual threads for cross-sink
+        // parallelism. With per-flush VTs, nothing at the scheduler level
+        // prevents a SAME-sink flush from racing an in-flight flush on the
+        // same sink — and concurrent editMessageText against one message
+        // would violate Telegram's 1/sec per-message rate limit. The
+        // re-entrance guard in flush()'s first sync block must short-circuit
+        // any overlapping flush.
+        //
+        // We can't call flush() directly here (it's private), so we exercise
+        // the invariant by checking that the guard reads flushInFlight via
+        // reflection and that setting it to true makes a second flush()
+        // call a no-op. The test uses reflection so it doesn't require
+        // the real flush to go over the network.
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+
+        // Grab the flushInFlight field and set it to true — simulates a
+        // flush currently in its network-call phase.
+        var flushInFlight = TelegramStreamingSink.class.getDeclaredField("flushInFlight");
+        flushInFlight.setAccessible(true);
+        flushInFlight.set(sink, true);
+
+        // Load up pending content so a real flush would otherwise try to
+        // send. No network call happens because the guard returns first.
+        sink.update("content that would otherwise flush");
+
+        // Invoke flush() via reflection. With flushInFlight=true, the first
+        // sync block returns immediately without touching pending or making
+        // any network calls.
+        var flush = TelegramStreamingSink.class.getDeclaredMethod("flush");
+        flush.setAccessible(true);
+        flush.invoke(sink);
+
+        // The invariant: no state changed. messageId still null (no
+        // placeholder was sent), lastSentText still empty.
+        assertNull(sink.messageIdForTest(),
+                "re-entrant flush must not send a placeholder when the guard trips");
+        assertEquals("", sink.lastSentTextForTest(),
+                "re-entrant flush must not update lastSentText");
+    }
 }

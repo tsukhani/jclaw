@@ -148,4 +148,61 @@ public class JobLifecycleTest extends UnitTest {
         // those running, the job must still complete cleanly.
         new jobs.ShutdownJob().doJob();
     }
+
+    // === TelegramStreamingRecoveryJob (JCLAW-95) ===
+
+    @Test
+    public void streamingRecoveryIsNoOpWithNoOrphans() {
+        // Empty DB — nothing to recover. Must not throw; must not log any
+        // "recovery: N orphaned..." line.
+        new jobs.TelegramStreamingRecoveryJob().doJob();
+        // If it threw, the test would already have failed.
+    }
+
+    @Test
+    public void streamingRecoveryClearsCheckpointEvenWithoutEnabledBinding() {
+        // When a conversation has a dangling checkpoint but no TelegramBinding
+        // exists for the agent (e.g. binding was deleted between crash and
+        // recovery), the job must still clear the checkpoint columns.
+        // Otherwise the next boot re-tries an un-editable placeholder forever.
+        var agent = services.AgentService.create(
+                "recovery-agent", "openrouter", "gpt-4.1");
+        var convId = services.Tx.run(() -> {
+            var conv = services.ConversationService.create(
+                    agent, "telegram", "999999");
+            conv.activeStreamMessageId = 42;
+            conv.activeStreamChatId = "999999";
+            conv.save();
+            return conv.id;
+        });
+
+        jobs.TelegramStreamingRecoveryJob.recoverAll();
+
+        var after = services.Tx.run(() ->
+                (models.Conversation) models.Conversation.findById(convId));
+        assertNull(after.activeStreamMessageId,
+                "checkpoint columns must be cleared even when no binding exists");
+        assertNull(after.activeStreamChatId);
+    }
+
+    @Test
+    public void streamingRecoverySkipsConversationsWithoutCheckpoint() {
+        // Conversations without a checkpoint (the normal case) must not be
+        // touched by the recovery pass — it's selected explicitly by the
+        // activeStreamMessageId IS NOT NULL query.
+        var agent = services.AgentService.create(
+                "no-checkpoint-agent", "openrouter", "gpt-4.1");
+        var convId = services.Tx.run(() -> {
+            var conv = services.ConversationService.create(
+                    agent, "web", "admin");
+            return conv.id;
+        });
+
+        jobs.TelegramStreamingRecoveryJob.recoverAll();
+
+        var after = services.Tx.run(() ->
+                (models.Conversation) models.Conversation.findById(convId));
+        assertNull(after.activeStreamMessageId);
+        assertNull(after.activeStreamChatId);
+    }
 }

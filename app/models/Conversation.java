@@ -45,6 +45,30 @@ public class Conversation extends Model {
     /** Upper bound on how many times a conversation's title will be LLM-regenerated. */
     public static final int MAX_TITLE_GENERATIONS = 2;
 
+    /**
+     * Streaming checkpoint (JCLAW-95). Set when the Telegram streaming sink
+     * sends a placeholder message for this conversation; cleared when the
+     * stream seals or errors. Non-null on startup means the prior JVM crashed
+     * mid-stream — {@code TelegramStreamingRecoveryJob} edits the orphaned
+     * placeholder with an interrupt note and clears the field.
+     *
+     * <p>Scoped to Conversation (not a separate entity) because the
+     * 1:1:1 binding model (one bot per agent per user, JCLAW-89) guarantees at
+     * most one active stream per conversation row at any time.
+     */
+    @Column(name = "active_stream_message_id")
+    public Integer activeStreamMessageId;
+
+    /**
+     * Companion to {@link #activeStreamMessageId}: the Telegram chat id the
+     * placeholder lives in. Stored explicitly so the recovery job doesn't
+     * have to re-derive it from the peerId column (in practice they're the
+     * same value, but making the coupling explicit survives any future
+     * peerId-semantics shift).
+     */
+    @Column(name = "active_stream_chat_id")
+    public String activeStreamChatId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 

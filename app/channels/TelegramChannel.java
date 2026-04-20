@@ -71,6 +71,22 @@ public class TelegramChannel implements Channel {
     public String botToken() { return botToken; }
     TelegramClient client() { return client; }
 
+    /**
+     * Public helper for callers outside the {@code channels} package that
+     * need to edit a specific Telegram message by id (e.g. JCLAW-95's
+     * streaming-recovery job). Exceptions propagate so callers can decide
+     * whether to retry or log-and-continue.
+     */
+    public static void editMessageText(String botToken, String chatId,
+                                       Integer messageId, String text) throws Exception {
+        forToken(botToken).client.execute(
+                org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText.builder()
+                        .chatId(chatId)
+                        .messageId(messageId)
+                        .text(text)
+                        .build());
+    }
+
     @Override
     public String channelName() { return "telegram"; }
 

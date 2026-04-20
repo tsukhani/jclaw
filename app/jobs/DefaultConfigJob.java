@@ -46,6 +46,11 @@ public class DefaultConfigJob extends Job<Void> {
             stmt.execute("ALTER TABLE conversation DROP COLUMN IF EXISTS title_generated");
             stmt.execute("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS title_generation_count INT NOT NULL DEFAULT 0");
             stmt.execute("ALTER TABLE message ADD COLUMN IF NOT EXISTS reasoning TEXT");
+            // JCLAW-95: Telegram streaming checkpoint. Non-null rows indicate
+            // a placeholder message left dangling by a prior JVM crash — the
+            // recovery job edits them on startup.
+            stmt.execute("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS active_stream_message_id INT");
+            stmt.execute("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS active_stream_chat_id VARCHAR(255)");
         } catch (Exception e) {
             play.Logger.warn("Schema migration: %s", e.getMessage());
         }

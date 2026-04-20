@@ -1066,9 +1066,13 @@ public class AgentRunner {
      */
     public static void processInboundForAgentStreaming(
             Agent agent, String channelType, String peerId, String text,
-            channels.TelegramStreamingSink sink) {
+            java.util.function.Function<Long, channels.TelegramStreamingSink> sinkFactory) {
         var conversation = services.Tx.run(() ->
                 ConversationService.findOrCreate(agent, channelType, peerId));
+        // The sink needs the conversation id so it can persist / clear the
+        // stream checkpoint (JCLAW-95). Callers supply a factory — they own
+        // botToken / chatId, we own conversation lookup.
+        var sink = sinkFactory.apply(conversation.id);
         var isCancelled = services.ConversationQueue.cancellationFlag(conversation.id);
         var cb = new StreamingCallbacks(
                 _ -> {},                 // onInit — nothing to do for Telegram

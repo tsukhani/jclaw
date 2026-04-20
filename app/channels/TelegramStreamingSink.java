@@ -1,13 +1,15 @@
 package channels;
 
 import models.Agent;
+import models.Conversation;
 import org.telegram.telegrambots.meta.api.methods.ParseMode;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import services.EventLogger;
+import services.Tx;
+import utils.VirtualThreads;
 
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -78,20 +80,27 @@ public final class TelegramStreamingSink {
     private static final Pattern IMAGE_MD = Pattern.compile("!\\[[^\\]]*\\]\\([^)]*\\)");
 
     /**
-     * Single shared scheduler. One thread is plenty — flush operations are
-     * cheap (Telegram HTTP call), and a single thread guarantees per-sink
-     * edit ordering without extra locking.
+     * Single-thread scheduler used ONLY to dispatch throttled flush tasks.
+     * The scheduler thread itself never performs network I/O — it spawns a
+     * fresh virtual thread for each flush. Keeping one scheduler thread
+     * preserves the "one scheduled flush per sink in flight" invariant (via
+     * {@link #scheduledFlush} comparison), while virtual-thread-per-flush
+     * gives cross-sink parallelism so N concurrent streams don't serialize
+     * behind a single carrier (JCLAW-95).
      */
     private static final ScheduledExecutorService SCHEDULER =
-            Executors.newSingleThreadScheduledExecutor(r -> {
-                var t = new Thread(r, "telegram-streaming-flush");
-                t.setDaemon(true);
-                return t;
-            });
+            VirtualThreads.newSingleThreadScheduledExecutor();
 
     private final String botToken;
     private final String chatId;
     private final Agent agent;
+    /**
+     * Conversation the sink is streaming into. Kept as a nullable field so
+     * tests and admin paths that construct a sink without a conversation
+     * (e.g. pure-logic unit tests) still compile; checkpoint persistence
+     * is a no-op when null.
+     */
+    private final Long conversationId;
 
     private final StringBuilder pending = new StringBuilder();
     private Integer messageId = null;
@@ -121,10 +130,20 @@ public final class TelegramStreamingSink {
      */
     private static final long SEAL_INFLIGHT_WAIT_MS = 2_000;
 
+    /**
+     * Test-friendly constructor: no conversation id, so checkpoint
+     * persistence is a no-op. Production call sites should use
+     * {@link #TelegramStreamingSink(String, String, Agent, Long)}.
+     */
     public TelegramStreamingSink(String botToken, String chatId, Agent agent) {
+        this(botToken, chatId, agent, null);
+    }
+
+    public TelegramStreamingSink(String botToken, String chatId, Agent agent, Long conversationId) {
         this.botToken = botToken;
         this.chatId = chatId;
         this.agent = agent;
+        this.conversationId = conversationId;
     }
 
     // ── Public API ─────────────────────────────────────────────────────
@@ -179,6 +198,7 @@ public final class TelegramStreamingSink {
         if (needsPlanner) {
             if (messageId != null) deletePlaceholderSafely();
             TelegramChannel.sendMessage(botToken, chatId, finalResponse, agent);
+            clearStreamCheckpoint();
             return;
         }
 
@@ -191,6 +211,7 @@ public final class TelegramStreamingSink {
             // the cap even when the raw markdown fit — fall back to planner.
             deletePlaceholderSafely();
             TelegramChannel.sendMessage(botToken, chatId, finalResponse, agent);
+            clearStreamCheckpoint();
             return;
         }
         try {
@@ -200,6 +221,7 @@ public final class TelegramStreamingSink {
                     "Streaming seal edit failed (plain text remains visible): "
                             + e.getMessage());
         }
+        clearStreamCheckpoint();
     }
 
     /**
@@ -217,6 +239,7 @@ public final class TelegramStreamingSink {
         if (messageId != null) deletePlaceholderSafely();
         TelegramChannel.sendMessage(botToken, chatId,
                 "Sorry, an error occurred processing your message.", agent);
+        clearStreamCheckpoint();
         EventLogger.error("channel", agentName(), "telegram",
                 "Streaming error: " + (e != null ? e.getMessage() : "(null)"));
     }
@@ -243,7 +266,11 @@ public final class TelegramStreamingSink {
     private void scheduleFlushLocked() {
         if (scheduledFlush != null && !scheduledFlush.isDone()) return;
         long wait = Math.max(0, THROTTLE_MS - (System.currentTimeMillis() - lastSentAt));
-        scheduledFlush = SCHEDULER.schedule(this::flush, wait, TimeUnit.MILLISECONDS);
+        // Scheduler thread only spawns the flush; the flush itself runs on a
+        // fresh virtual thread so cross-sink flushes don't serialize (JCLAW-95).
+        scheduledFlush = SCHEDULER.schedule(
+                () -> Thread.ofVirtual().start(this::flush),
+                wait, TimeUnit.MILLISECONDS);
     }
 
     private void cancelScheduledLocked() {
@@ -255,26 +282,38 @@ public final class TelegramStreamingSink {
 
     private void flush() {
         String toShow;
+        boolean wasFirstSend;
         synchronized (this) {
             if (sealed.get() || streamCapReached) return;
+            // Re-entrance guard (JCLAW-95): virtual-thread-per-flush means a
+            // newly-scheduled flush could fire while a previous one is still
+            // mid-HTTP for this same sink. Skip and rely on the in-flight
+            // flush's post-network reschedule to pick up the pending.
+            if (flushInFlight) return;
             toShow = stripImageRefs(pending.toString());
             if (toShow.length() < MIN_FLUSH_CHARS) return;
             if (toShow.equals(lastSentText)) return;
+            wasFirstSend = (messageId == null);
             flushInFlight = true;
         }
         try {
-            if (messageId == null) {
+            if (wasFirstSend) {
                 messageId = sendPlaceholder(toShow);
+                // JCLAW-95: persist the checkpoint so a crash between here and
+                // seal() leaves a recoverable breadcrumb.
+                persistStreamCheckpoint();
             } else {
                 editMessage(toShow, false);
             }
             synchronized (this) {
                 lastSentText = toShow;
                 lastSentAt = System.currentTimeMillis();
-                // If more tokens arrived during the call, schedule the next flush.
+                // If more tokens arrived during the call, schedule the next flush
+                // on a fresh virtual thread (same pattern as scheduleFlushLocked).
                 if (pending.length() > lastSentText.length() && !sealed.get() && !streamCapReached) {
                     scheduledFlush = SCHEDULER.schedule(
-                            this::flush, THROTTLE_MS, TimeUnit.MILLISECONDS);
+                            () -> Thread.ofVirtual().start(this::flush),
+                            THROTTLE_MS, TimeUnit.MILLISECONDS);
                 }
             }
         } catch (Exception e) {
@@ -353,6 +392,56 @@ public final class TelegramStreamingSink {
         return response != null
                 && (IMAGE_MD.matcher(response).find()
                         || response.contains("](<"));
+    }
+
+    /**
+     * JCLAW-95: write the placeholder (messageId, chatId) onto the
+     * conversation row so a JVM restart mid-stream can find and finalize
+     * the orphan. No-op when the sink was constructed without a
+     * conversation id (test/admin paths).
+     */
+    private void persistStreamCheckpoint() {
+        if (conversationId == null || messageId == null) return;
+        try {
+            final Integer mid = messageId;
+            final String cid = chatId;
+            final Long conv = conversationId;
+            Tx.run(() -> {
+                var row = (Conversation) Conversation.findById(conv);
+                if (row != null) {
+                    row.activeStreamMessageId = mid;
+                    row.activeStreamChatId = cid;
+                    row.save();
+                }
+            });
+        } catch (Exception e) {
+            // Non-fatal — we lose crash recovery for this stream but the
+            // live session keeps working. Log and proceed.
+            EventLogger.warn("channel", agentName(), "telegram",
+                    "Failed to persist stream checkpoint: " + e.getMessage());
+        }
+    }
+
+    /**
+     * JCLAW-95: clear the checkpoint on normal seal / error so the recovery
+     * job doesn't re-process an already-finalized stream.
+     */
+    private void clearStreamCheckpoint() {
+        if (conversationId == null) return;
+        try {
+            final Long conv = conversationId;
+            Tx.run(() -> {
+                var row = (Conversation) Conversation.findById(conv);
+                if (row != null && row.activeStreamMessageId != null) {
+                    row.activeStreamMessageId = null;
+                    row.activeStreamChatId = null;
+                    row.save();
+                }
+            });
+        } catch (Exception e) {
+            EventLogger.warn("channel", agentName(), "telegram",
+                    "Failed to clear stream checkpoint: " + e.getMessage());
+        }
     }
 
     private String agentName() {
