@@ -65,14 +65,19 @@ public class ApiAgentsController extends Controller {
      */
     public static void promptBreakdown(Long id) {
         var agent = requireAgent(id);
-        // Optional ?channelType=web|telegram|slack|whatsapp param lets the UI
-        // preview each channel's prompt; absent/blank means the channel-less
-        // baseline (what tests and admin introspection see by default).
+        // channelType is required: every real chat lives on a channel, so the
+        // UI always sends one. Reject missing/unknown values up-front rather
+        // than silently assembling a prompt that doesn't match any runtime path.
         var rawChannel = params.get("channelType");
-        String channelType = (rawChannel == null || rawChannel.isBlank()) ? null : rawChannel.trim();
+        if (rawChannel == null || rawChannel.isBlank()) badRequest();
+        var channelType = rawChannel.trim().toLowerCase();
+        if (!VALID_BREAKDOWN_CHANNELS.contains(channelType)) badRequest();
         var breakdown = agents.SystemPromptAssembler.breakdown(agent, null, channelType);
         renderJSON(gson.toJson(breakdown));
     }
+
+    private static final java.util.Set<String> VALID_BREAKDOWN_CHANNELS =
+            java.util.Set.of("web", "telegram", "slack", "whatsapp");
 
     /**
      * GET /api/agents/{id}/shell/effective-allowlist — Derived view of the

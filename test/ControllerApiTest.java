@@ -184,9 +184,18 @@ public class ControllerApiTest extends FunctionalTest {
     public void agentsPromptBreakdown() {
         login();
         var id = createTestAgent();
-        var response = GET("/api/agents/" + id + "/prompt-breakdown");
+        var response = GET("/api/agents/" + id + "/prompt-breakdown?channelType=web");
         assertIsOk(response);
         assertContentType("application/json", response);
+    }
+
+    @Test
+    public void agentsPromptBreakdownRejectsMissingChannel() {
+        login();
+        var id = createTestAgent();
+        assertEquals(400, GET("/api/agents/" + id + "/prompt-breakdown").status.intValue());
+        assertEquals(400, GET("/api/agents/" + id + "/prompt-breakdown?channelType=").status.intValue());
+        assertEquals(400, GET("/api/agents/" + id + "/prompt-breakdown?channelType=bogus").status.intValue());
     }
 
     // =====================

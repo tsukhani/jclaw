@@ -96,18 +96,12 @@ public class SystemPromptAssembler {
     /**
      * Build the same prompt as {@link #assemble} and return a {@link PromptBreakdown}
      * describing its composition. Used by the Settings UI introspection dialog and
-     * debugging flows. This method is authoritative: it shares the exact same build
-     * sequence as the production path, so the breakdown cannot drift from the real
-     * prompt over time.
-     */
-    public static PromptBreakdown breakdown(Agent agent, String userMessage) {
-        return breakdown(agent, userMessage, null);
-    }
-
-    /**
-     * Channel-aware {@link #breakdown} variant. Lets the agent edit page preview
-     * how the prompt changes per channel by passing a {@code channelType} hint;
-     * null produces the channel-less baseline.
+     * debugging flows. Authoritative: shares the exact same build sequence as the
+     * production path, so the breakdown cannot drift from the real prompt over time.
+     *
+     * <p>{@code channelType} must be one of {@code web|telegram|slack|whatsapp}.
+     * Every real chat lives on a channel; the controller rejects missing values,
+     * and tests pick a channel explicitly.
      */
     public static PromptBreakdown breakdown(Agent agent, String userMessage, String channelType) {
         var builder = new SectionedBuilder();

@@ -459,8 +459,11 @@ public class AgentSystemTest extends UnitTest {
         var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile("prompt-agent", "AGENT.md", "# Be helpful");
 
-        var assembled = SystemPromptAssembler.assemble(agent, null).systemPrompt();
-        var breakdown = SystemPromptAssembler.breakdown(agent, null);
+        // "web" chosen arbitrarily — the symmetry check holds for any channel,
+        // and the introspection dialog defaults to web, so the numbers match
+        // what an operator sees in the UI.
+        var assembled = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
+        var breakdown = SystemPromptAssembler.breakdown(agent, null, "web");
 
         // Sum of section chars equals the real prompt length. If this drifts, the
         // build sequences have forked.
