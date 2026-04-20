@@ -131,6 +131,16 @@ public final class TelegramStreamingSink {
     private static final long SEAL_INFLIGHT_WAIT_MS = 2_000;
 
     /**
+     * Cadence for the "typing" chat-action heartbeat (JCLAW-98). Telegram's
+     * own indicator lasts ~5s per call; 4s keeps it continuous with a
+     * one-second margin for network jitter.
+     */
+    private static final long TYPING_HEARTBEAT_MS = 4_000;
+
+    /** Scheduled handle for the typing-heartbeat task, or null if not running. */
+    private ScheduledFuture<?> typingHeartbeat;
+
+    /**
      * Test-friendly constructor: no conversation id, so checkpoint
      * persistence is a no-op. Production call sites should use
      * {@link #TelegramStreamingSink(String, String, Agent, Long)}.
@@ -156,6 +166,10 @@ public final class TelegramStreamingSink {
      */
     public void update(String chunk) {
         if (chunk == null || chunk.isEmpty()) return;
+        // JCLAW-98: first visible content means the placeholder is about to
+        // replace the typing indicator anyway — stop the heartbeat so we
+        // don't waste API calls. Idempotent; safe to call on every update.
+        cancelTypingHeartbeatLocked();
         synchronized (this) {
             if (sealed.get() || streamCapReached) return;
             pending.append(chunk);
@@ -177,6 +191,10 @@ public final class TelegramStreamingSink {
      */
     public void seal(String finalResponse) {
         if (!sealed.compareAndSet(false, true)) return;
+        // JCLAW-98: terminal path — the final edit / planner send will
+        // replace the typing indicator. Cancel before the await so no
+        // stray heartbeat fires between here and message delivery.
+        cancelTypingHeartbeatLocked();
         synchronized (this) {
             cancelScheduledLocked();
         }
@@ -230,6 +248,7 @@ public final class TelegramStreamingSink {
      */
     public void errorFallback(Exception e) {
         if (!sealed.compareAndSet(false, true)) return;
+        cancelTypingHeartbeatLocked();
         synchronized (this) {
             cancelScheduledLocked();
         }
@@ -260,8 +279,53 @@ public final class TelegramStreamingSink {
     public boolean sealedForTest() { return sealed.get(); }
     public String lastSentTextForTest() { return lastSentText; }
     public long lastSentAtForTest() { return lastSentAt; }
+    /** True while the typing-indicator heartbeat (JCLAW-98) is scheduled. */
+    public boolean typingHeartbeatActiveForTest() {
+        synchronized (this) {
+            return typingHeartbeat != null && !typingHeartbeat.isDone();
+        }
+    }
 
     // ── Internals ──────────────────────────────────────────────────────
+
+    /**
+     * JCLAW-98: start a "• • • typing" indicator on the user's Telegram
+     * client that stays visible until the first real message lands.
+     * Fires one {@code sendChatAction} immediately, then re-fires every
+     * {@value #TYPING_HEARTBEAT_MS}ms on a virtual thread.
+     *
+     * <p>Called by {@code AgentRunner.processInboundForAgentStreaming}
+     * <i>after</i> sink construction and <i>before</i> {@code runStreaming}
+     * kicks off the LLM call. Safe to call once per sink; subsequent calls
+     * are no-ops. Cancelled automatically by the first {@link #update}
+     * call, by {@link #seal}, or by {@link #errorFallback}.
+     */
+    public void startTypingHeartbeat() {
+        if (sealed.get()) return;
+        synchronized (this) {
+            if (typingHeartbeat != null && !typingHeartbeat.isDone()) return;
+            // initialDelay=0 so the indicator shows up on the first tick
+            // without a 4s wait, but still lives inside the tracked future
+            // (not a separate fire-and-forget VT) — so a fast-path cancel
+            // from seal() / update() can suppress the first pulse if it
+            // hasn't landed yet. Each tick spawns a VT so the scheduler
+            // thread stays free for other sinks' flushes.
+            typingHeartbeat = SCHEDULER.scheduleAtFixedRate(
+                    () -> Thread.ofVirtual().start(() ->
+                            TelegramChannel.sendTypingAction(botToken, chatId)),
+                    0L, TYPING_HEARTBEAT_MS, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    /** Cancel the typing heartbeat if running. Idempotent. */
+    private void cancelTypingHeartbeatLocked() {
+        synchronized (this) {
+            if (typingHeartbeat != null) {
+                typingHeartbeat.cancel(false);
+                typingHeartbeat = null;
+            }
+        }
+    }
 
     private void scheduleFlushLocked() {
         if (scheduledFlush != null && !scheduledFlush.isDone()) return;

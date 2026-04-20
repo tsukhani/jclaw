@@ -222,4 +222,77 @@ public class TelegramStreamingSinkTest extends UnitTest {
         assertEquals("", sink.lastSentTextForTest(),
                 "re-entrant flush must not update lastSentText");
     }
+
+    // === JCLAW-98: typing heartbeat lifecycle ===
+
+    @Test
+    public void typingHeartbeatStartsAndIsCancelledBySeal() {
+        // startTypingHeartbeat must schedule the indicator; seal() must
+        // cancel it so no further sendChatAction calls fire after the
+        // response is delivered.
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        sink.startTypingHeartbeat();
+        assertTrue(sink.typingHeartbeatActiveForTest(),
+                "startTypingHeartbeat must schedule the heartbeat");
+
+        sink.seal("");
+        assertFalse(sink.typingHeartbeatActiveForTest(),
+                "seal must cancel the typing heartbeat");
+    }
+
+    @Test
+    public void typingHeartbeatCancelledByErrorFallback() {
+        // Error path must also cancel — the error message send will
+        // replace the typing indicator, so leaving the heartbeat running
+        // would produce stale "typing" pulses after the user already sees
+        // the error reply.
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        sink.startTypingHeartbeat();
+        assertTrue(sink.typingHeartbeatActiveForTest());
+
+        sink.errorFallback(new RuntimeException("boom"));
+        assertFalse(sink.typingHeartbeatActiveForTest(),
+                "errorFallback must cancel the typing heartbeat");
+    }
+
+    @Test
+    public void typingHeartbeatCancelledByFirstUpdate() {
+        // The first visible-content update means the placeholder is about
+        // to land and replace the indicator. Stop the heartbeat so we
+        // don't waste API calls during the subsequent edit-loop.
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        sink.startTypingHeartbeat();
+        assertTrue(sink.typingHeartbeatActiveForTest());
+
+        sink.update("first tokens");
+        assertFalse(sink.typingHeartbeatActiveForTest(),
+                "update must cancel the typing heartbeat on first call");
+    }
+
+    @Test
+    public void typingHeartbeatDoubleStartIsNoOp() {
+        // Idempotence: calling startTypingHeartbeat twice must not
+        // orphan the first scheduled future or produce two competing
+        // heartbeats.
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        sink.startTypingHeartbeat();
+        var firstActive = sink.typingHeartbeatActiveForTest();
+        sink.startTypingHeartbeat();  // no-op
+        assertTrue(firstActive && sink.typingHeartbeatActiveForTest(),
+                "second startTypingHeartbeat must be a no-op with the first still running");
+
+        sink.seal("");
+    }
+
+    @Test
+    public void typingHeartbeatNotStartedAfterSeal() {
+        // If something triggers startTypingHeartbeat after seal has
+        // completed, it must be a no-op — the conversation is already
+        // over, no need to show "typing".
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        sink.seal("");
+        sink.startTypingHeartbeat();
+        assertFalse(sink.typingHeartbeatActiveForTest(),
+                "startTypingHeartbeat must no-op when sink is already sealed");
+    }
 }

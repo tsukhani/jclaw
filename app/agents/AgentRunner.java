@@ -1100,6 +1100,12 @@ public class AgentRunner {
         // stream checkpoint (JCLAW-95). Callers supply a factory — they own
         // botToken / chatId, we own conversation lookup.
         var sink = sinkFactory.apply(conversation.id);
+        // JCLAW-98: show Telegram's native typing indicator during the
+        // prologue gap (request received → first token). Cancels itself
+        // on first sink.update(), seal(), or errorFallback(). Intentionally
+        // NOT started for slash commands above — their responses are
+        // instant and don't benefit from the indicator.
+        sink.startTypingHeartbeat();
         var isCancelled = services.ConversationQueue.cancellationFlag(conversation.id);
         var cb = new StreamingCallbacks(
                 _ -> {},                 // onInit — nothing to do for Telegram

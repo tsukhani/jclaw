@@ -87,6 +87,31 @@ public class TelegramChannel implements Channel {
                         .build());
     }
 
+    /**
+     * Fire a "typing" chat-action so the user's Telegram client shows the
+     * "• • • typing" indicator (JCLAW-98). The indicator lasts ~5 seconds
+     * or until the bot sends a real message — callers that want a
+     * continuous indicator must re-invoke this every 4 seconds.
+     *
+     * <p>Failures are swallowed: a typing-indicator call that can't reach
+     * Telegram (network blip, token revoked, chat deleted) must never
+     * abort the LLM flow that owns the actual response.
+     */
+    public static void sendTypingAction(String botToken, String chatId) {
+        if (botToken == null || chatId == null) return;
+        try {
+            forToken(botToken).client.execute(
+                    org.telegram.telegrambots.meta.api.methods.send.SendChatAction.builder()
+                            .chatId(chatId)
+                            .action("typing")
+                            .build());
+        } catch (Exception e) {
+            EventLogger.warn("channel", null, "telegram",
+                    "sendChatAction(typing) failed for chat %s: %s"
+                            .formatted(chatId, e.getMessage()));
+        }
+    }
+
     @Override
     public String channelName() { return "telegram"; }
 
