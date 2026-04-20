@@ -568,8 +568,15 @@ async function sendMessage() {
   streamReasoning.value = ''
   streamStatus.value = ''
 
+  // Capture the conversation id we're sending — if the server returns a
+  // DIFFERENT id in the init frame, the backend minted a new conversation
+  // (e.g. /new slash-command, JCLAW-26). We need to discard the stale
+  // visible history from the prior conversation so the view matches what
+  // the new conversation row actually contains on reload.
+  const sentConversationId = selectedConvoId.value
+
   // Add placeholder for streaming response
-  const assistantIdx = messages.value.length
+  let assistantIdx = messages.value.length
   messages.value.push({ _key: crypto.randomUUID(), role: 'assistant', content: '', createdAt: new Date().toISOString() })
 
   abortController.value?.abort() // cancel any orphaned previous stream
@@ -606,6 +613,18 @@ async function sendMessage() {
         try {
           const event = JSON.parse(line.slice(6))
           if (event.type === 'init' && event.conversationId) {
+            // JCLAW-26: if the server minted a new conversation (e.g.
+            // /new), reset the visible history to match what the new
+            // row actually contains — the assistant placeholder we're
+            // about to stream into. The optimistic user bubble and the
+            // prior conversation's loaded history get dropped.
+            if (sentConversationId !== null && sentConversationId !== event.conversationId) {
+              const placeholder = messages.value[assistantIdx]
+              if (placeholder) {
+                messages.value = [placeholder]
+                assistantIdx = 0
+              }
+            }
             selectedConvoId.value = event.conversationId
             if (event.thinkingMode) {
               streamStatus.value = `thinking (${event.thinkingMode})...`
