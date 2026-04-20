@@ -38,14 +38,28 @@ public final class Commands {
 
     private Commands() {}
 
-    /** Recognized commands. Unknown slash-prefixed input returns empty Optional from {@link #parse}. */
+    /**
+     * Recognized commands. Unknown slash-prefixed input returns empty
+     * Optional from {@link #parse}.
+     *
+     * <p>The {@code shortDescription} is the string shown in Telegram's
+     * native autocomplete dropdown when the user types {@code /}
+     * (JCLAW-99). Keep them short — Telegram truncates long descriptions.
+     */
     public enum Command {
-        NEW("/new"),
-        RESET("/reset"),
-        HELP("/help");
+        NEW("/new", "Start a fresh conversation"),
+        RESET("/reset", "Clear the LLM's memory for this conversation"),
+        HELP("/help", "Show available commands");
 
         public final String literal;
-        Command(String literal) { this.literal = literal; }
+        public final String shortDescription;
+        Command(String literal, String shortDescription) {
+            this.literal = literal;
+            this.shortDescription = shortDescription;
+        }
+
+        /** Name without the leading slash — the form Telegram's BotCommand expects. */
+        public String bareName() { return literal.substring(1); }
     }
 
     /** Canned response text for {@link Command#HELP}. */

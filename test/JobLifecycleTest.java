@@ -205,4 +205,41 @@ public class JobLifecycleTest extends UnitTest {
         assertNull(after.activeStreamMessageId);
         assertNull(after.activeStreamChatId);
     }
+
+    // === TelegramCommandsRegistrationJob (JCLAW-99) ===
+
+    @Test
+    public void commandsRegistrationIsNoOpWithNoBindings() {
+        // No bindings in DB → job must run cleanly without throwing or
+        // attempting any network calls. Mirrors TelegramStreamingRecoveryJob's
+        // empty-DB defensive posture.
+        new jobs.TelegramCommandsRegistrationJob().doJob();
+    }
+
+    @Test
+    public void commandsRegistrationMappingCoversEveryRegisteredCommand() {
+        // The BotCommand list derived from slash.Commands.Command must
+        // have one entry per enum value, with the leading "/" stripped
+        // from each name and the description populated. This is the
+        // guarantee callers need — adding a new command via the enum
+        // automatically makes it show up in Telegram autocomplete on
+        // the next restart, no separate registration to update.
+        var botCommands = jobs.TelegramCommandsRegistrationJob.toBotCommands();
+        assertEquals(slash.Commands.Command.values().length, botCommands.size(),
+                "one BotCommand per enum value");
+
+        for (var cmd : slash.Commands.Command.values()) {
+            var match = botCommands.stream()
+                    .filter(bc -> bc.getCommand().equals(cmd.bareName()))
+                    .findFirst();
+            assertTrue(match.isPresent(),
+                    "missing BotCommand for enum " + cmd.name());
+            assertEquals(cmd.shortDescription, match.get().getDescription());
+            // Telegram's BotCommand.command field must NOT include the
+            // leading slash — the client adds it at display time. Bugs
+            // here would produce broken "//new" entries in autocomplete.
+            assertFalse(match.get().getCommand().startsWith("/"),
+                    "BotCommand.command must be bare, without leading /");
+        }
+    }
 }

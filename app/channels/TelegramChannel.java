@@ -88,6 +88,30 @@ public class TelegramChannel implements Channel {
     }
 
     /**
+     * Register the bot's slash-command set with Telegram (JCLAW-99) so
+     * clients show a native autocomplete dropdown when the user types
+     * {@code /} in the compose field. Idempotent — safe to call on every
+     * application startup; Telegram overwrites the existing list without
+     * error.
+     *
+     * <p>Exceptions are swallowed and logged: a failed registration must
+     * not abort the caller's binding-activation loop.
+     */
+    public static void setMyCommands(String botToken,
+            java.util.List<org.telegram.telegrambots.meta.api.objects.commands.BotCommand> commands) {
+        if (botToken == null || commands == null || commands.isEmpty()) return;
+        try {
+            forToken(botToken).client.execute(
+                    org.telegram.telegrambots.meta.api.methods.commands.SetMyCommands.builder()
+                            .commands(commands)
+                            .build());
+        } catch (Exception e) {
+            EventLogger.warn("channel", null, "telegram",
+                    "setMyCommands failed: %s".formatted(e.getMessage()));
+        }
+    }
+
+    /**
      * Fire a "typing" chat-action so the user's Telegram client shows the
      * "• • • typing" indicator (JCLAW-98). The indicator lasts ~5 seconds
      * or until the bot sends a real message — callers that want a
