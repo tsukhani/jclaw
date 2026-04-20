@@ -329,4 +329,70 @@ public class ConversationQueueTest extends UnitTest {
         ConversationQueue.drain(convId);
         while (!ConversationQueue.drain(convId).isEmpty()) {}
     }
+
+    // --- Collect mode ---
+
+    @Test
+    public void collectModeReturnsAllPendingOnDrain() {
+        // In collect mode, drain must return the ENTIRE pending list (for the
+        // caller to fold into a single prompt) rather than a single message —
+        // contrast with queue mode which returns just the next one.
+        // Contract at ConversationQueue.java:133-137.
+        //
+        // Note: the first tryAcquire acquires processing without enqueueing;
+        // the caller processes "First" inline. Only subsequent messages land
+        // in the pending deque, so drain returns 2 (not 3) — this is the
+        // distinction collect mode makes: multiple-during-busy fold together.
+        services.ConfigService.set("agent.queue-test-agent.queue.mode", "collect");
+
+        long convId = 5000L;
+        assertTrue(ConversationQueue.tryAcquire(convId,
+                new QueuedMessage("First", "web", "admin", agent)));
+        assertFalse(ConversationQueue.tryAcquire(convId,
+                new QueuedMessage("Second", "web", "admin", agent)));
+        assertFalse(ConversationQueue.tryAcquire(convId,
+                new QueuedMessage("Third", "web", "admin", agent)));
+
+        var drained = ConversationQueue.drain(convId);
+        assertEquals(2, drained.size(),
+                "collect mode must return all pending messages in one batch");
+        assertEquals("Second", drained.get(0).text());
+        assertEquals("Third", drained.get(1).text());
+
+        // Contrast with queue mode: queue mode would return ["Second"] here,
+        // requiring a second drain to get "Third". Collect returns both
+        // in one shot so the caller can format them into a single prompt.
+        assertTrue(ConversationQueue.drain(convId).isEmpty(),
+                "collect drain must fully empty the pending deque");
+        services.ConfigService.delete("agent.queue-test-agent.queue.mode");
+    }
+
+    // --- Interrupt mode cancellation signal ---
+
+    @Test
+    public void interruptModeSetsCancellationFlagForActiveProcessor() {
+        // When interrupt fires, the in-flight processor must observe the
+        // cancelled flag via cancellationFlag(). Drain then clears it so
+        // the next run starts fresh. This is the contract AgentRunner
+        // relies on for barge-in behavior.
+        services.ConfigService.set("agent.queue-test-agent.queue.mode", "interrupt");
+
+        long convId = 5100L;
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("In-flight", "web", "admin", agent));
+
+        var flag = ConversationQueue.cancellationFlag(convId);
+        assertFalse(flag.get(), "flag starts clear");
+
+        // Second message in interrupt mode triggers cancellation
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("Barge-in", "web", "admin", agent));
+        assertTrue(flag.get(), "interrupt must raise cancellation flag");
+
+        // Drain clears the flag so the subsequent processing run is fresh
+        ConversationQueue.drain(convId);
+        assertFalse(flag.get(), "drain must reset cancellation flag");
+
+        // Cleanup any pending
+        while (!ConversationQueue.drain(convId).isEmpty()) {}
+        services.ConfigService.delete("agent.queue-test-agent.queue.mode");
+    }
 }
