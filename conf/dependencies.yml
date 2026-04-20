@@ -53,3 +53,8 @@ require:
         exclude:
             - ch.qos.logback -> *
             - org.awaitility -> *
+    # OkHttp is already pulled transitively by the Telegram SDK; we promote it
+    # to a direct dep so WebFetchTool can plug in a custom SSRF-safe Dns for
+    # LLM-supplied URLs. Pin the same 4.12.0 the SDK resolves to so the
+    # classpath stays single-versioned.
+    - com.squareup.okhttp3 -> okhttp 4.12.0

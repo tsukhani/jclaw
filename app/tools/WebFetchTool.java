@@ -3,12 +3,13 @@ package tools;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
 import org.jsoup.Jsoup;
+import utils.SsrfGuard;
 
 import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
+import java.net.UnknownHostException;
 import java.util.List;
 import java.util.Map;
 
@@ -16,12 +17,24 @@ import java.util.Map;
  * Fetch the content of a URL. Supports two modes:
  * - "text" (default): Extract readable text from HTML using Jsoup. Best for reading/summarizing.
  * - "html": Return raw HTML. Best for saving the actual page to a file.
+ *
+ * <p>Because this tool consumes URLs emitted by the LLM, every request goes
+ * through {@link SsrfGuard}: the scheme is pinned to http/https and the DNS
+ * resolver rejects loopback, link-local (cloud metadata), RFC-1918, and
+ * multicast ranges before any socket is opened. Redirects are followed
+ * manually so each hop can be re-validated — the built-in OkHttp redirect
+ * path is disabled.
  */
 public class WebFetchTool implements ToolRegistry.Tool {
 
     private static final int MAX_TEXT_LENGTH = 50_000;
     private static final int MAX_HTML_LENGTH = 100_000;
+    private static final int CONNECT_TIMEOUT_SECONDS = 10;
     private static final int TIMEOUT_SECONDS = 30;
+    private static final int MAX_REDIRECTS = 5;
+
+    private static final OkHttpClient GUARDED = SsrfGuard.buildGuardedClient(
+            CONNECT_TIMEOUT_SECONDS, TIMEOUT_SECONDS);
 
     @Override
     public String name() { return "web_fetch"; }
@@ -80,7 +93,13 @@ public class WebFetchTool implements ToolRegistry.Tool {
         try {
             var body = fetchUrl(url);
             return processResponse(body, mode, url, agent);
-        } catch (java.net.http.HttpTimeoutException _) {
+        } catch (SecurityException e) {
+            // SsrfGuard rejected a scheme or host — surface plainly so the LLM
+            // understands why and doesn't keep retrying the same URL.
+            return "Error: URL rejected by SSRF guard: %s".formatted(e.getMessage());
+        } catch (UnknownHostException e) {
+            return "Error: URL rejected: %s".formatted(e.getMessage());
+        } catch (java.net.SocketTimeoutException _) {
             return "Error: Request timed out after %d seconds fetching %s".formatted(TIMEOUT_SECONDS, url);
         } catch (javax.net.ssl.SSLException e) {
             return "Error: SSL/TLS certificate verification failed for %s: %s. The site may have an expired, self-signed, or invalid certificate."
@@ -94,21 +113,48 @@ public class WebFetchTool implements ToolRegistry.Tool {
         }
     }
 
+    /**
+     * Fetch a URL through the {@link SsrfGuard}ed client. Redirects are
+     * followed manually, up to {@link #MAX_REDIRECTS}, so each hop is
+     * re-validated through {@link SsrfGuard#assertSafeScheme(URI)} and
+     * re-resolved through the guarded DNS.
+     */
     private String fetchUrl(String url) throws Exception {
-        var request = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("User-Agent", "Mozilla/5.0 (compatible; JClaw/1.0)")
-                .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
-                .GET()
-                .build();
+        var current = URI.create(url);
+        SsrfGuard.assertSafeScheme(current);
 
-        var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
+        for (int hop = 0; hop <= MAX_REDIRECTS; hop++) {
+            var request = new Request.Builder()
+                    .url(current.toString())
+                    .header("User-Agent", "Mozilla/5.0 (compatible; JClaw/1.0)")
+                    .get()
+                    .build();
 
-        if (response.statusCode() >= 400) {
-            throw new RuntimeException("HTTP %d fetching %s".formatted(response.statusCode(), url));
+            try (var response = GUARDED.newCall(request).execute()) {
+                int code = response.code();
+
+                // Follow 3xx manually so every hop re-enters SsrfGuard.
+                if (code >= 300 && code < 400) {
+                    var location = response.header("Location");
+                    if (location == null || location.isBlank()) {
+                        throw new RuntimeException(
+                                "HTTP %d with no Location header for %s".formatted(code, current));
+                    }
+                    current = current.resolve(location);
+                    SsrfGuard.assertSafeScheme(current);
+                    continue;
+                }
+
+                if (code >= 400) {
+                    throw new RuntimeException("HTTP %d fetching %s".formatted(code, current));
+                }
+
+                var body = response.body();
+                return body != null ? body.string() : "";
+            }
         }
-
-        return response.body();
+        throw new RuntimeException("Too many redirects (>%d) fetching %s"
+                .formatted(MAX_REDIRECTS, url));
     }
 
     private String processResponse(String body, String mode, String url, Agent agent) {

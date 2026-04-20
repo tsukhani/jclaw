@@ -1052,6 +1052,57 @@ public class ToolSystemTest extends UnitTest {
         return sb.toString();
     }
 
+    // --- WebFetchTool SSRF guard ---
+
+    @Test
+    public void webFetchRejectsFileScheme() {
+        var result = ToolRegistry.execute("web_fetch",
+                "{\"url\": \"file:///etc/passwd\"}", agent);
+        assertTrue(result.contains("rejected by SSRF guard"),
+                "file:// scheme must hit the scheme allowlist, got: " + result);
+        assertTrue(result.contains("scheme not allowed"),
+                "error must name the scheme rule, got: " + result);
+    }
+
+    @Test
+    public void webFetchRejectsLocalhost() {
+        var result = ToolRegistry.execute("web_fetch",
+                "{\"url\": \"http://localhost:8080/admin\"}", agent);
+        // DNS-layer rejection surfaces as UnknownHostException wrapped through
+        // the tool's error handling, not SecurityException.
+        assertTrue(result.contains("rejected") || result.contains("SSRF guard"),
+                "localhost must be blocked by the SSRF DNS filter, got: " + result);
+    }
+
+    @Test
+    public void webFetchRejectsAwsMetadataIp() {
+        // The Capital One 2019 canary: 169.254.169.254 is AWS/GCP/Azure
+        // instance metadata. A prompt-injected LLM could use this to exfil
+        // IAM credentials. SsrfGuard must block it at the DNS layer.
+        var result = ToolRegistry.execute("web_fetch",
+                "{\"url\": \"http://169.254.169.254/latest/meta-data/\"}", agent);
+        assertTrue(result.contains("rejected"),
+                "cloud metadata IP must be blocked, got: " + result);
+    }
+
+    @Test
+    public void webFetchRejectsRfc1918Address() {
+        var result = ToolRegistry.execute("web_fetch",
+                "{\"url\": \"http://10.0.0.1/\"}", agent);
+        assertTrue(result.contains("rejected"),
+                "RFC-1918 range must be blocked, got: " + result);
+    }
+
+    @Test
+    public void webFetchRejectsGopherScheme() {
+        // gopher:// is a classic SSRF amplifier (Redis RCE). The scheme
+        // allowlist must reject it before any host lookup.
+        var result = ToolRegistry.execute("web_fetch",
+                "{\"url\": \"gopher://evil.example/\"}", agent);
+        assertTrue(result.contains("rejected by SSRF guard"),
+                "gopher:// must be rejected, got: " + result);
+    }
+
     // --- Helpers ---
 
     private static void deleteDir(Path dir) {
