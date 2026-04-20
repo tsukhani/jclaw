@@ -538,4 +538,85 @@ public class ChannelTest extends UnitTest {
         var flipped = first == '0' ? '1' : '0';
         return flipped + hex.substring(1);
     }
+
+    // === Telegram forToken caching (Phase 3) ===
+
+    @Test
+    public void telegramForTokenReturnsCachedInstancePerToken() {
+        // The token → instance cache is load-bearing: OkHttpTelegramClient owns
+        // a dispatcher thread pool, so new instances leak threads if the cache
+        // misses. Same token must return the same instance.
+        var tokenA = "123456:test-token-A-" + System.nanoTime();
+        var tokenB = "123456:test-token-B-" + System.nanoTime();
+        try {
+            var first = TelegramChannel.forToken(tokenA);
+            var second = TelegramChannel.forToken(tokenA);
+            var otherToken = TelegramChannel.forToken(tokenB);
+            assertSame(first, second, "same token must map to the same instance");
+            assertNotSame(first, otherToken, "different tokens must map to different instances");
+        } finally {
+            TelegramChannel.evictToken(tokenA);
+            TelegramChannel.evictToken(tokenB);
+        }
+    }
+
+    @Test
+    public void telegramForTokenRejectsNullAndBlank() {
+        assertThrows(IllegalArgumentException.class,
+                () -> TelegramChannel.forToken(null));
+        assertThrows(IllegalArgumentException.class,
+                () -> TelegramChannel.forToken(""));
+        assertThrows(IllegalArgumentException.class,
+                () -> TelegramChannel.forToken("   "));
+    }
+
+    @Test
+    public void telegramEvictTokenAllowsRebuildOnNextFetch() {
+        // Critical for token rotation: after evict, the next forToken call must
+        // hand back a fresh instance (the old OkHttpTelegramClient would still
+        // hold stale bearer auth).
+        var token = "evict-test-" + System.nanoTime();
+        var first = TelegramChannel.forToken(token);
+        TelegramChannel.evictToken(token);
+        var second = TelegramChannel.forToken(token);
+        assertNotSame(first, second, "evict + refetch must yield a new instance");
+        TelegramChannel.evictToken(token);
+    }
+
+    @Test
+    public void telegramEvictTokenIgnoresNull() {
+        // Defensive: the binding-delete path calls evictToken unconditionally.
+        // A null bot token (misconfigured binding) must not throw.
+        TelegramChannel.evictToken(null); // must not throw
+    }
+
+    // === ChannelType generic dispatch (Phase 3) ===
+
+    @Test
+    public void channelTypeResolveReturnsNullForTelegramAndWeb() {
+        // Contract documented at ChannelType.resolve: TELEGRAM needs a bot
+        // token (carried by TelegramBinding, not the generic Channel), and
+        // WEB is DB-polled not pushed. Callers rely on null to branch.
+        assertNull(models.ChannelType.TELEGRAM.resolve());
+        assertNull(models.ChannelType.WEB.resolve());
+    }
+
+    @Test
+    public void channelTypeResolveReturnsConcreteChannelsForSlackAndWhatsApp() {
+        assertNotNull(models.ChannelType.SLACK.resolve());
+        assertNotNull(models.ChannelType.WHATSAPP.resolve());
+        assertTrue(models.ChannelType.SLACK.resolve() instanceof SlackChannel);
+        assertTrue(models.ChannelType.WHATSAPP.resolve() instanceof WhatsAppChannel);
+    }
+
+    @Test
+    public void channelTypeFromValueReturnsNullForUnknownValues() {
+        // Null fall-through, not throw — callers route unknown channels into
+        // a default branch (e.g. treating as WEB) rather than crashing.
+        assertNull(models.ChannelType.fromValue(null));
+        assertNull(models.ChannelType.fromValue(""));
+        assertNull(models.ChannelType.fromValue("discord"));
+        assertNull(models.ChannelType.fromValue("WEB"),
+                "fromValue is case-sensitive by design to match DB rows — uppercase must miss");
+    }
 }

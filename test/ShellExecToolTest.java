@@ -197,6 +197,20 @@ public class ShellExecToolTest extends UnitTest {
         assertEquals("hello", env.get("MY_VAR"));
     }
 
+    @Test
+    public void hostEnvSensitiveVarsFilteredBeforeReachingChild() {
+        // buildEnvironment starts from System.getenv(), which in real
+        // deployments carries provider secrets (AWS_*, ANTHROPIC_*, ...).
+        // Those must be stripped before the map is handed to ProcessBuilder —
+        // otherwise a shell command could dump them with `env`.
+        var args = com.google.gson.JsonParser.parseString("{}").getAsJsonObject();
+        var env = tool.buildEnvironment(args);
+        for (var key : env.keySet()) {
+            assertFalse(ShellExecTool.isSensitiveEnvVar(key),
+                    "host env key " + key + " leaked through the filter");
+        }
+    }
+
     // ==================== End-to-End Execution ====================
 
     @Test

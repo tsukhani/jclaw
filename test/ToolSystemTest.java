@@ -237,6 +237,34 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
+    public void fileSystemReadFileRejectsOversizeFile() throws Exception {
+        // readFile caps at 1 MB; larger files must be rejected with a pointer
+        // to the documents tool instead of silently truncating (which would
+        // feed the agent half a file and make diffs nonsensical).
+        var workspace = services.AgentService.workspacePath(agent.name);
+        var bigFile = workspace.resolve("huge.txt");
+        java.nio.file.Files.createDirectories(workspace);
+        // 1_048_577 bytes = 1 MB + 1
+        var content = new byte[1_048_577];
+        java.util.Arrays.fill(content, (byte) 'A');
+        java.nio.file.Files.write(bigFile, content);
+        try {
+            var result = ToolRegistry.execute("filesystem",
+                    """
+                    {"action": "readFile", "path": "huge.txt"}
+                    """, agent);
+            assertTrue(result.startsWith("Error"),
+                    "oversize file must surface an error, not truncated content");
+            assertTrue(result.contains("exceeds read limit"),
+                    "error must explain the cap, got: " + result);
+            assertTrue(result.contains("documents"),
+                    "error must point the agent at the documents tool");
+        } finally {
+            java.nio.file.Files.deleteIfExists(bigFile);
+        }
+    }
+
+    @Test
     public void fileSystemAppendCreatesMissingFile() {
         // appendFile on a non-existent path should create it, letting the LLM
         // start a chunked build without first calling writeFile.

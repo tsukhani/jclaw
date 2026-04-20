@@ -228,6 +228,72 @@ public class AgentRunnerCoreTest extends UnitTest {
         t1.join(10_000);
     }
 
+    @Test
+    public void runHandlesMaxTokensFinishReason() throws Exception {
+        // JCLAW-76 ground: Bedrock / Anthropic return finish_reason="max_tokens"
+        // when output is cut off (vs OpenAI's "length"). Both must be treated as
+        // truncation — otherwise the incomplete tool-call JSON flows into Gson
+        // and throws EOFException downstream.
+        startLlmServer(exchange -> {
+            var body = """
+                {"choices":[{"index":0,"message":{"role":"assistant","content":"Partial answer about the weather",
+                "tool_calls":[{"id":"call_m","type":"function","function":{"name":"datetime","arguments":"{\\"act"}}]},
+                "finish_reason":"max_tokens"}],
+                "usage":{"prompt_tokens":10,"completion_tokens":4096}}""";
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.getBytes().length);
+            exchange.getResponseBody().write(body.getBytes());
+            exchange.close();
+        });
+        configureProvider();
+
+        var agent = createAgent("max-tokens-agent", "test-provider", "test-model");
+        var convo = ConversationService.create(agent, "web", "user1");
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var result = runOnVirtualThread(agent, convo, "Tell me a long story");
+
+        assertNotNull(result.response());
+        assertTrue(result.response().contains("Partial answer"),
+                "max_tokens finish_reason must behave like length — return partial, "
+                        + "don't run truncated tool, got: " + result.response());
+    }
+
+    @Test
+    public void runHandlesMalformedToolCallJson() throws Exception {
+        // Tool-call with a valid finish_reason="tool_calls" but syntactically
+        // broken JSON arguments. The runner must recover gracefully rather
+        // than bubble a parse exception to the caller.
+        startLlmServer(exchange -> {
+            var body = """
+                {"choices":[{"index":0,"message":{"role":"assistant","content":"",
+                "tool_calls":[{"id":"bad","type":"function","function":{"name":"datetime","arguments":"{not valid json"}}]},
+                "finish_reason":"tool_calls"}],
+                "usage":{"prompt_tokens":10,"completion_tokens":5}}""";
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.getBytes().length);
+            exchange.getResponseBody().write(body.getBytes());
+            exchange.close();
+        });
+        configureProvider();
+        new jobs.ToolRegistrationJob().doJob();
+
+        var agent = createAgent("bad-json-agent", "test-provider", "test-model");
+        var convo = ConversationService.create(agent, "web", "user1");
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        // The assertion we care about: runOnVirtualThread does not throw.
+        // Whatever response message the runner ends up with is less important
+        // than the invariant that malformed JSON doesn't crash the loop.
+        var result = runOnVirtualThread(agent, convo, "Do something");
+        assertNotNull(result);
+        assertNotNull(result.response());
+    }
+
     // --- LLM error handling ---
 
     @Test
