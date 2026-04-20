@@ -30,7 +30,7 @@ public class CheckListTool implements ToolRegistry.Tool {
     @Override
     public java.util.List<agents.ToolAction> actions() {
         return java.util.List.of(
-                new agents.ToolAction("update", "Submit a checklist with items and statuses; exactly one item must be in_progress at a time")
+                new agents.ToolAction("update", "Submit a checklist with items and statuses; at most one item may be in_progress at a time")
         );
     }
 
@@ -39,7 +39,7 @@ public class CheckListTool implements ToolRegistry.Tool {
         return """
                 Create and manage a structured checklist for tracking multi-step work. \
                 Submit a list of items with status (pending, in_progress, completed) and activeForm text. \
-                Exactly one item must be in_progress at a time.""";
+                At most one item may be in_progress at a time (zero is also valid, e.g. before starting or after finishing).""";
     }
 
     @Override
@@ -86,8 +86,8 @@ public class CheckListTool implements ToolRegistry.Tool {
             if ("in_progress".equals(status)) inProgressCount++;
         }
 
-        if (inProgressCount != 1) {
-            return "Error: Exactly one item must be in_progress. Found %d.".formatted(inProgressCount);
+        if (inProgressCount > 1) {
+            return "Error: At most one item may be in_progress. Found %d.".formatted(inProgressCount);
         }
 
         return "Checklist updated successfully (%d items).".formatted(itemsArray.size());

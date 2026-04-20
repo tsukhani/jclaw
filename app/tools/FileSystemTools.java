@@ -3,9 +3,11 @@ package tools;
 import agents.SkillLoader;
 import agents.ToolRegistry;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import services.AgentService;
+import services.EventLogger;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -46,6 +48,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
                 new agents.ToolAction("writeFile",  "Create or overwrite a file with full content"),
                 new agents.ToolAction("appendFile", "Append content to the end of a file, creating it if missing"),
                 new agents.ToolAction("editFile",   "Apply a batch of oldText → newText replacements atomically"),
+                new agents.ToolAction("editLines",  "Replace, insert, or delete specific 1-indexed line ranges atomically"),
                 new agents.ToolAction("applyPatch", "Apply a multi-file unified diff patch"),
                 new agents.ToolAction("listFiles",  "List the contents of a directory")
         );
@@ -60,6 +63,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
                 'writeFile' creates or overwrites a file with its full content — use only for brand-new files or wholesale replacement. \
                 'appendFile' appends content to the end of an existing file, or creates it if missing. Use this to build up large files across multiple tool calls when a single writeFile would exceed your output token budget (e.g. long markdown drafts, logs, incremental emission). The LLM picks the chunk size. \
                 'editFile' is the DEFAULT for modifying an existing file: it applies a batch of {oldText, newText} replacements. Each oldText must appear exactly once in the file; include enough surrounding context to disambiguate. Optionally set regex: true on an edit entry to treat oldText as a Java regex (with $1 backreferences in newText). Edits apply atomically — if any entry fails, nothing is written. \
+                'editLines' edits by 1-indexed inclusive line numbers when you already know which lines to change (e.g., after readFile). Operations array entries are {op, startLine, endLine?, content?} with op = 'replace' | 'insert' | 'delete'. Insert places content before startLine (use startLine = lineCount+1 to append). The file's native line endings (LF vs CRLF) and UTF-8 encoding are preserved. All operations validate before any are written; on success the edit is recorded in the event log. \
                 'applyPatch' applies a multi-file patch in OpenClaw/unified-diff format (*** Begin Patch / *** Update File: / *** Add File: / *** Delete File: / *** Move to: / *** End of File / *** End Patch). All files are validated before any are written. \
                 'listFiles' lists a directory. \
                 All paths are relative to the workspace. For rich document formats use the 'documents' tool — and for large rich documents, draft the markdown here via writeFile + appendFile, then call documents.renderDocument with the source path.""";
@@ -67,7 +71,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
 
     @Override
     public String summary() {
-        return "Read, write, edit, list, and patch plain text files via the 'action' parameter: readFile, writeFile, appendFile, editFile, applyPatch, listFiles.";
+        return "Read, write, edit, list, and patch plain text files via the 'action' parameter: readFile, writeFile, appendFile, editFile, editLines, applyPatch, listFiles.";
     }
 
     @Override
@@ -77,15 +81,15 @@ public class FileSystemTools implements ToolRegistry.Tool {
         // providers, so we keep `required` minimal and validate action-specific fields inside execute().
         return Map.of(
                 "type", "object",
-                "properties", Map.of(
-                        "action", Map.of("type", "string",
-                                "enum", List.of("readFile", "writeFile", "appendFile", "listFiles", "editFile", "applyPatch"),
-                                "description", "The file operation to perform"),
-                        "path", Map.of("type", "string",
-                                "description", "File or directory path relative to workspace (required for all actions except applyPatch)"),
-                        "content", Map.of("type", "string",
-                                "description", "Content to write (for writeFile and appendFile actions)"),
-                        "edits", Map.of("type", "array",
+                "properties", Map.ofEntries(
+                        Map.entry("action", Map.of("type", "string",
+                                "enum", List.of("readFile", "writeFile", "appendFile", "listFiles", "editFile", "editLines", "applyPatch"),
+                                "description", "The file operation to perform")),
+                        Map.entry("path", Map.of("type", "string",
+                                "description", "File or directory path relative to workspace (required for all actions except applyPatch)")),
+                        Map.entry("content", Map.of("type", "string",
+                                "description", "Content to write (for writeFile and appendFile actions)")),
+                        Map.entry("edits", Map.of("type", "array",
                                 "description", "List of {oldText, newText, regex?} replacements for editFile action",
                                 "items", Map.of(
                                         "type", "object",
@@ -96,9 +100,25 @@ public class FileSystemTools implements ToolRegistry.Tool {
                                                         "description", "If true, treat oldText as a Java regex with $N backreferences in newText. Default false.")
                                         ),
                                         "required", List.of("oldText", "newText")
-                                )),
-                        "patch", Map.of("type", "string",
-                                "description", "Patch body for applyPatch action, wrapped in *** Begin Patch / *** End Patch")
+                                ))),
+                        Map.entry("operations", Map.of("type", "array",
+                                "description", "Ordered list of line-range operations for editLines action. 1-indexed, inclusive endLine.",
+                                "items", Map.of(
+                                        "type", "object",
+                                        "properties", Map.of(
+                                                "op", Map.of("type", "string",
+                                                        "enum", List.of("replace", "insert", "delete")),
+                                                "startLine", Map.of("type", "integer", "minimum", 1,
+                                                        "description", "1-indexed line number. For insert, content is placed before this line; use lineCount+1 to append."),
+                                                "endLine", Map.of("type", "integer", "minimum", 1,
+                                                        "description", "Inclusive end line. Required for replace/delete; ignored for insert."),
+                                                "content", Map.of("type", "string",
+                                                        "description", "New text for replace/insert. Trailing newline is added automatically if missing. Ignored for delete.")
+                                        ),
+                                        "required", List.of("op", "startLine")
+                                ))),
+                        Map.entry("patch", Map.of("type", "string",
+                                "description", "Patch body for applyPatch action, wrapped in *** Begin Patch / *** End Patch"))
                 ),
                 "required", List.of("action")
         );
@@ -151,12 +171,19 @@ public class FileSystemTools implements ToolRegistry.Tool {
                 }
                 return editFile(target, args.getAsJsonArray("edits"));
             });
+            case "editLines" -> withLock(target, () -> {
+                if (!args.has("operations") || !args.get("operations").isJsonArray()) {
+                    return "Error: editLines requires an 'operations' array";
+                }
+                return editLines(agent, target, args.getAsJsonArray("operations"));
+            });
             default -> "Error: Unknown action '%s'".formatted(action);
         };
     }
 
     private static boolean isMutatingAction(String action) {
-        return "writeFile".equals(action) || "appendFile".equals(action) || "editFile".equals(action);
+        return "writeFile".equals(action) || "appendFile".equals(action)
+                || "editFile".equals(action) || "editLines".equals(action);
     }
 
     /**
@@ -517,6 +544,214 @@ public class FileSystemTools implements ToolRegistry.Tool {
     private static String capSnippet(String snippet) {
         if (snippet.length() <= MAX_ERROR_SNIPPET_CHARS) return snippet;
         return snippet.substring(0, MAX_ERROR_SNIPPET_CHARS) + "… (truncated)";
+    }
+
+    // === editLines ===
+
+    private sealed interface LineOp {
+        int startLine();
+        record Replace(int startLine, int endLine, String content) implements LineOp {}
+        record Insert(int startLine, String content) implements LineOp {}
+        record Delete(int startLine, int endLine) implements LineOp {}
+    }
+
+    /**
+     * Edit a file by 1-indexed inclusive line numbers. All operations validate before
+     * any mutation; on success the file's native line ending (LF or CRLF) and UTF-8
+     * encoding are preserved. An event-log entry describing the edit is emitted on
+     * successful write.
+     */
+    private String editLines(Agent agent, Path target, JsonArray opsJson) {
+        if (opsJson.size() == 0) {
+            return "Error: editLines requires a non-empty 'operations' array";
+        }
+        if (!Files.exists(target)) {
+            return "Error: File not found: %s".formatted(target.getFileName());
+        }
+
+        long size;
+        try {
+            size = Files.size(target);
+        } catch (IOException e) {
+            return "Error reading file size: %s".formatted(e.getMessage());
+        }
+        if (size > MAX_FILE_READ_BYTES) {
+            return "Error: File exceeds edit size limit (%d bytes). File size: %d bytes. Consider using writeFile for wholesale replacement instead."
+                    .formatted(MAX_FILE_READ_BYTES, size);
+        }
+
+        String original;
+        try {
+            original = Files.readString(target);
+        } catch (IOException e) {
+            return "Error reading file: %s".formatted(e.getMessage());
+        }
+
+        // Detect native line ending before splitting so we can preserve it on write.
+        var nativeEol = detectLineEnding(original);
+        var hadTrailingNewline = original.endsWith("\n") || original.endsWith("\r\n");
+        // split with -1 keeps trailing empty segments; we drop the final empty slot
+        // produced by a trailing newline so lineCount reflects authored lines.
+        var lines = new ArrayList<>(List.of(original.split("\r\n|\n|\r", -1)));
+        if (hadTrailingNewline && !lines.isEmpty() && lines.get(lines.size() - 1).isEmpty()) {
+            lines.remove(lines.size() - 1);
+        }
+        int lineCount = lines.size();
+
+        var parsed = new ArrayList<LineOp>();
+        for (int i = 0; i < opsJson.size(); i++) {
+            if (!opsJson.get(i).isJsonObject()) {
+                return "Error: operation #%d must be an object".formatted(i + 1);
+            }
+            var opObj = opsJson.get(i).getAsJsonObject();
+            if (!opObj.has("op") || !opObj.has("startLine")) {
+                return "Error: operation #%d must include 'op' and 'startLine' fields".formatted(i + 1);
+            }
+            var op = opObj.get("op").getAsString();
+            int startLine;
+            try {
+                startLine = opObj.get("startLine").getAsInt();
+            } catch (NumberFormatException | UnsupportedOperationException e) {
+                return "Error: operation #%d startLine must be an integer".formatted(i + 1);
+            }
+            if (startLine < 1) {
+                return "Error: operation #%d startLine must be ≥ 1 (got %d)".formatted(i + 1, startLine);
+            }
+
+            var parsedOp = parseLineOp(op, startLine, opObj, lineCount, i + 1);
+            if (parsedOp.error != null) return parsedOp.error;
+            parsed.add(parsedOp.op);
+        }
+
+        // Apply bottom-up so earlier operations don't shift the line indices
+        // referenced by later operations. For stable ordering when two ops share
+        // the same startLine, sort by the original array index as a tiebreaker.
+        var indexed = new ArrayList<int[]>();
+        for (int i = 0; i < parsed.size(); i++) indexed.add(new int[]{i});
+        indexed.sort((a, b) -> {
+            int cmp = Integer.compare(parsed.get(b[0]).startLine(), parsed.get(a[0]).startLine());
+            if (cmp != 0) return cmp;
+            return Integer.compare(b[0], a[0]);
+        });
+
+        int replaced = 0, inserted = 0, deleted = 0;
+        for (var entry : indexed) {
+            var op = parsed.get(entry[0]);
+            switch (op) {
+                case LineOp.Replace r -> {
+                    lines.subList(r.startLine() - 1, r.endLine()).clear();
+                    lines.addAll(r.startLine() - 1, splitContentLines(r.content()));
+                    replaced++;
+                }
+                case LineOp.Insert ins -> {
+                    lines.addAll(ins.startLine() - 1, splitContentLines(ins.content()));
+                    inserted++;
+                }
+                case LineOp.Delete d -> {
+                    lines.subList(d.startLine() - 1, d.endLine()).clear();
+                    deleted++;
+                }
+            }
+        }
+
+        var joined = String.join(nativeEol, lines);
+        // Preserve the file's trailing-newline convention: add one only if the file
+        // originally had one, or if the final line is non-empty and we had content.
+        if (hadTrailingNewline || (!joined.isEmpty() && !joined.endsWith(nativeEol))) {
+            joined = joined + nativeEol;
+        }
+
+        var writeResult = writeFile(target, joined);
+        if (writeResult.startsWith("Error")) return writeResult;
+
+        var summary = "editLines: %d replace / %d insert / %d delete on %s"
+                .formatted(replaced, inserted, deleted, target.getFileName());
+        EventLogger.info("Files", agent.name, null, summary);
+
+        return "File written successfully: " + target.getFileName()
+                + " (%d replace, %d insert, %d delete)".formatted(replaced, inserted, deleted);
+    }
+
+    private record ParsedOp(LineOp op, String error) {
+        static ParsedOp ok(LineOp op) { return new ParsedOp(op, null); }
+        static ParsedOp err(String error) { return new ParsedOp(null, error); }
+    }
+
+    private static ParsedOp parseLineOp(String op, int startLine, JsonObject opObj, int lineCount, int index) {
+        return switch (op) {
+            case "replace" -> {
+                if (!opObj.has("endLine")) {
+                    yield ParsedOp.err("Error: operation #%d (replace) requires 'endLine'".formatted(index));
+                }
+                if (!opObj.has("content")) {
+                    yield ParsedOp.err("Error: operation #%d (replace) requires 'content'".formatted(index));
+                }
+                int endLine = opObj.get("endLine").getAsInt();
+                var bounds = checkBounds(index, startLine, endLine, lineCount, "replace");
+                if (bounds != null) yield ParsedOp.err(bounds);
+                yield ParsedOp.ok(new LineOp.Replace(startLine, endLine, opObj.get("content").getAsString()));
+            }
+            case "delete" -> {
+                if (!opObj.has("endLine")) {
+                    yield ParsedOp.err("Error: operation #%d (delete) requires 'endLine'".formatted(index));
+                }
+                int endLine = opObj.get("endLine").getAsInt();
+                var bounds = checkBounds(index, startLine, endLine, lineCount, "delete");
+                if (bounds != null) yield ParsedOp.err(bounds);
+                yield ParsedOp.ok(new LineOp.Delete(startLine, endLine));
+            }
+            case "insert" -> {
+                if (!opObj.has("content")) {
+                    yield ParsedOp.err("Error: operation #%d (insert) requires 'content'".formatted(index));
+                }
+                // insert allows startLine == lineCount + 1 to append at the end.
+                if (startLine > lineCount + 1) {
+                    yield ParsedOp.err("Error: operation #%d (insert) startLine %d is beyond end of file (%d lines; max allowed %d for append)"
+                            .formatted(index, startLine, lineCount, lineCount + 1));
+                }
+                yield ParsedOp.ok(new LineOp.Insert(startLine, opObj.get("content").getAsString()));
+            }
+            default -> ParsedOp.err("Error: operation #%d has unknown op '%s' (expected replace, insert, or delete)"
+                    .formatted(index, op));
+        };
+    }
+
+    private static String checkBounds(int index, int startLine, int endLine, int lineCount, String opName) {
+        if (endLine < startLine) {
+            return "Error: operation #%d (%s) endLine %d < startLine %d".formatted(index, opName, endLine, startLine);
+        }
+        if (startLine > lineCount) {
+            return "Error: operation #%d (%s) startLine %d exceeds file length (%d lines)"
+                    .formatted(index, opName, startLine, lineCount);
+        }
+        if (endLine > lineCount) {
+            return "Error: operation #%d (%s) endLine %d exceeds file length (%d lines)"
+                    .formatted(index, opName, endLine, lineCount);
+        }
+        return null;
+    }
+
+    /** Detect the file's predominant newline sequence. Defaults to LF for empty or single-line files. */
+    private static String detectLineEnding(String text) {
+        int crlf = 0, lf = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\n') {
+                if (i > 0 && text.charAt(i - 1) == '\r') crlf++;
+                else lf++;
+            }
+        }
+        return crlf > lf ? "\r\n" : "\n";
+    }
+
+    /** Split caller-supplied content into lines, stripping a single trailing newline
+     *  so it doesn't produce an empty line once re-joined by the file's native EOL. */
+    private static List<String> splitContentLines(String content) {
+        if (content.isEmpty()) return List.of();
+        var trimmed = content;
+        if (trimmed.endsWith("\r\n")) trimmed = trimmed.substring(0, trimmed.length() - 2);
+        else if (trimmed.endsWith("\n") || trimmed.endsWith("\r")) trimmed = trimmed.substring(0, trimmed.length() - 1);
+        return new ArrayList<>(List.of(trimmed.split("\r\n|\n|\r", -1)));
     }
 
     // === applyPatch ===

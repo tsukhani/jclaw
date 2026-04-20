@@ -189,7 +189,21 @@ public class ToolSystemTest extends UnitTest {
                 ]}
                 """, agent);
         assertTrue(result.contains("Error"));
-        assertTrue(result.contains("Exactly one"));
+        assertTrue(result.contains("At most one"));
+    }
+
+    @Test
+    public void checklistAllowsZeroInProgress() {
+        // Parity with OpenClaw update_plan: at-most-one semantics, not exactly-one.
+        // Needed so agents can submit initial "all pending" and final "all completed" states.
+        var result = ToolRegistry.execute("checklist",
+                """
+                {"items": [
+                    {"content": "Step 1", "status": "completed", "activeForm": "Did 1"},
+                    {"content": "Step 2", "status": "completed", "activeForm": "Did 2"}
+                ]}
+                """, agent);
+        assertTrue(result.contains("successfully"), "got: " + result);
     }
 
     // --- FileSystemTools ---
@@ -865,6 +879,181 @@ public class ToolSystemTest extends UnitTest {
                 """
                 {"action": "editFile", "path": "nonexistent.txt",
                  "edits": [{"oldText": "x", "newText": "y"}]}
+                """, agent);
+        assertTrue(result.startsWith("Error"));
+        assertTrue(result.contains("not found"));
+    }
+
+    // --- editLines ---
+
+    @Test
+    public void editLinesReplaceRange() throws Exception {
+        var workspace = AgentService.workspacePath(agent.name);
+        Files.writeString(workspace.resolve("lr-replace.txt"), "one\ntwo\nthree\nfour\n");
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editLines", "path": "lr-replace.txt",
+                 "operations": [
+                   {"op": "replace", "startLine": 2, "endLine": 3, "content": "TWO\\nTHREE"}
+                 ]}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+        assertEquals("one\nTWO\nTHREE\nfour\n", Files.readString(workspace.resolve("lr-replace.txt")));
+    }
+
+    @Test
+    public void editLinesInsertBeforeLine() throws Exception {
+        var workspace = AgentService.workspacePath(agent.name);
+        Files.writeString(workspace.resolve("lr-insert.txt"), "one\ntwo\nthree\n");
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editLines", "path": "lr-insert.txt",
+                 "operations": [
+                   {"op": "insert", "startLine": 2, "content": "BETWEEN\\nANOTHER"}
+                 ]}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+        assertEquals("one\nBETWEEN\nANOTHER\ntwo\nthree\n",
+                Files.readString(workspace.resolve("lr-insert.txt")));
+    }
+
+    @Test
+    public void editLinesInsertAppendsAtEnd() throws Exception {
+        var workspace = AgentService.workspacePath(agent.name);
+        Files.writeString(workspace.resolve("lr-append.txt"), "one\ntwo\n");
+        // startLine = lineCount + 1 means append after the last line
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editLines", "path": "lr-append.txt",
+                 "operations": [
+                   {"op": "insert", "startLine": 3, "content": "three"}
+                 ]}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+        assertEquals("one\ntwo\nthree\n", Files.readString(workspace.resolve("lr-append.txt")));
+    }
+
+    @Test
+    public void editLinesDeleteRange() throws Exception {
+        var workspace = AgentService.workspacePath(agent.name);
+        Files.writeString(workspace.resolve("lr-del.txt"), "alpha\nbeta\ngamma\ndelta\n");
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editLines", "path": "lr-del.txt",
+                 "operations": [
+                   {"op": "delete", "startLine": 2, "endLine": 3}
+                 ]}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+        assertEquals("alpha\ndelta\n", Files.readString(workspace.resolve("lr-del.txt")));
+    }
+
+    @Test
+    public void editLinesBottomUpOrdering() throws Exception {
+        // Two operations referenced against ORIGINAL line numbers should both apply
+        // cleanly — even though applying them top-to-bottom would shift later indices.
+        var workspace = AgentService.workspacePath(agent.name);
+        Files.writeString(workspace.resolve("lr-multi.txt"), "a\nb\nc\nd\ne\n");
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editLines", "path": "lr-multi.txt",
+                 "operations": [
+                   {"op": "replace", "startLine": 2, "endLine": 2, "content": "B"},
+                   {"op": "delete",  "startLine": 4, "endLine": 5}
+                 ]}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+        assertEquals("a\nB\nc\n", Files.readString(workspace.resolve("lr-multi.txt")));
+    }
+
+    @Test
+    public void editLinesPreservesCrlfLineEndings() throws Exception {
+        var workspace = AgentService.workspacePath(agent.name);
+        // Windows-authored file: CRLF everywhere.
+        Files.writeString(workspace.resolve("lr-crlf.txt"), "one\r\ntwo\r\nthree\r\n");
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editLines", "path": "lr-crlf.txt",
+                 "operations": [
+                   {"op": "replace", "startLine": 2, "endLine": 2, "content": "TWO"}
+                 ]}
+                """, agent);
+        assertTrue(result.startsWith("File written"), "got: " + result);
+        assertEquals("one\r\nTWO\r\nthree\r\n",
+                Files.readString(workspace.resolve("lr-crlf.txt")),
+                "native CRLF line endings must be preserved on write");
+    }
+
+    @Test
+    public void editLinesValidatesOutOfBounds() throws Exception {
+        var workspace = AgentService.workspacePath(agent.name);
+        Files.writeString(workspace.resolve("lr-bounds.txt"), "only line\n");
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editLines", "path": "lr-bounds.txt",
+                 "operations": [
+                   {"op": "replace", "startLine": 5, "endLine": 10, "content": "nope"}
+                 ]}
+                """, agent);
+        assertTrue(result.startsWith("Error"), "got: " + result);
+        assertTrue(result.contains("exceeds file length"), "got: " + result);
+        assertEquals("only line\n", Files.readString(workspace.resolve("lr-bounds.txt")),
+                "file must be unchanged when validation fails");
+    }
+
+    @Test
+    public void editLinesAtomicAllOrNothing() throws Exception {
+        var workspace = AgentService.workspacePath(agent.name);
+        Files.writeString(workspace.resolve("lr-atomic.txt"), "alpha\nbeta\ngamma\n");
+        // Second operation has endLine < startLine → entire batch rejects, no mutation.
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editLines", "path": "lr-atomic.txt",
+                 "operations": [
+                   {"op": "replace", "startLine": 1, "endLine": 1, "content": "ALPHA"},
+                   {"op": "delete",  "startLine": 3, "endLine": 2}
+                 ]}
+                """, agent);
+        assertTrue(result.startsWith("Error"), "got: " + result);
+        assertEquals("alpha\nbeta\ngamma\n",
+                Files.readString(workspace.resolve("lr-atomic.txt")),
+                "first op must not leak through when a later op fails validation");
+    }
+
+    @Test
+    public void editLinesRejectsUnknownOp() {
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "lr-unknown.txt", "content": "x"}
+                """, agent);
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editLines", "path": "lr-unknown.txt",
+                 "operations": [{"op": "rewrite", "startLine": 1, "endLine": 1, "content": "y"}]}
+                """, agent);
+        assertTrue(result.contains("unknown op"), "got: " + result);
+    }
+
+    @Test
+    public void editLinesEmptyOperationsRejected() {
+        ToolRegistry.execute("filesystem",
+                """
+                {"action": "writeFile", "path": "lr-empty.txt", "content": "x"}
+                """, agent);
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editLines", "path": "lr-empty.txt", "operations": []}
+                """, agent);
+        assertTrue(result.startsWith("Error"));
+        assertTrue(result.contains("non-empty"));
+    }
+
+    @Test
+    public void editLinesMissingFileErrors() {
+        var result = ToolRegistry.execute("filesystem",
+                """
+                {"action": "editLines", "path": "missing-file.txt",
+                 "operations": [{"op": "delete", "startLine": 1, "endLine": 1}]}
                 """, agent);
         assertTrue(result.startsWith("Error"));
         assertTrue(result.contains("not found"));
