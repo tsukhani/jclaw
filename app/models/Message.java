@@ -54,7 +54,26 @@ public class Message extends Model {
     }
 
     public static List<Message> findRecent(Conversation conversation, int limit) {
-        return Message.find("conversation = ?1 ORDER BY createdAt DESC", conversation)
-                .fetch(limit);
+        return findRecent(conversation, limit, null);
+    }
+
+    /**
+     * Fetch up to {@code limit} most-recent messages for {@code conversation},
+     * optionally bounded below by {@code since} — messages with
+     * {@code createdAt < since} are excluded. Used by {@code /reset}
+     * (JCLAW-26) where a watermark on the Conversation row hides pre-reset
+     * messages from LLM context without deleting them.
+     */
+    public static List<Message> findRecent(Conversation conversation, int limit, Instant since) {
+        if (since == null) {
+            return Message.find("conversation = ?1 ORDER BY createdAt DESC", conversation)
+                    .fetch(limit);
+        }
+        // Strict ">" so the /reset acknowledgement (whose createdAt equals
+        // the watermark it was used to set) is itself excluded from the
+        // next LLM context window. See {@code Commands.executeReset}.
+        return Message.find(
+                "conversation = ?1 AND createdAt > ?2 ORDER BY createdAt DESC",
+                conversation, since).fetch(limit);
     }
 }

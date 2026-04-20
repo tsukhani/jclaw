@@ -69,6 +69,20 @@ public class Conversation extends Model {
     @Column(name = "active_stream_chat_id")
     public String activeStreamChatId;
 
+    /**
+     * Context watermark for {@code /reset} (JCLAW-26). When non-null,
+     * {@link services.ConversationService#loadRecentMessages} excludes any
+     * message whose {@code createdAt} predates this value — so the LLM sees
+     * only post-reset history. Older messages remain in the DB (and remain
+     * visible in the web sidebar) but stop being shipped to the model.
+     *
+     * <p>Cleared by no command: {@code /reset} overwrites with a fresh
+     * {@code Instant.now()}, {@code /new} creates a new row where this is
+     * null by default, and history never un-resets.
+     */
+    @Column(name = "context_since")
+    public Instant contextSince;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 
@@ -91,12 +105,23 @@ public class Conversation extends Model {
         updatedAt = Instant.now();
     }
 
+    /**
+     * Resolve the current conversation for a (agent, channelType, peerId) tuple.
+     * Returns the MOST RECENTLY CREATED row — critical for JCLAW-26's
+     * {@code /new} where a freshly-created row for the same tuple must win
+     * subsequent lookups over the prior row. Before JCLAW-26 there was at
+     * most one row per tuple for non-web channels so ordering was moot; now
+     * {@code /new} can produce multiple rows and we always want the newest.
+     *
+     * <p>Web bypasses this path (see {@code AgentRunner.resolveConversationAndAcquireQueue}),
+     * so the ordering change only affects Telegram / other inbound-driven channels.
+     */
     public static Conversation findByAgentChannelPeer(Agent agent, String channelType, String peerId) {
         if (peerId == null) {
-            return Conversation.find("agent = ?1 AND channelType = ?2 AND peerId IS NULL",
+            return Conversation.find("agent = ?1 AND channelType = ?2 AND peerId IS NULL ORDER BY id DESC",
                     agent, channelType).first();
         }
-        return Conversation.find("agent = ?1 AND channelType = ?2 AND peerId = ?3",
+        return Conversation.find("agent = ?1 AND channelType = ?2 AND peerId = ?3 ORDER BY id DESC",
                 agent, channelType, peerId).first();
     }
 

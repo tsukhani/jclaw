@@ -92,12 +92,18 @@ public class ConversationService {
 
     /**
      * Load recent messages for context window assembly, returned in chronological order.
+     *
+     * <p>Honors {@link Conversation#contextSince} (JCLAW-26): if the user
+     * invoked {@code /reset}, messages older than the reset watermark are
+     * excluded — the LLM sees an empty slate on the next turn while the
+     * original messages remain in the DB (and remain visible in the web
+     * sidebar / Telegram scrollback).
      */
     public static List<Message> loadRecentMessages(Conversation conversation) {
         var maxMessages = ConfigService.getInt("chat.maxContextMessages", 50);
         // findRecent returns DESC order; reversed() returns a read-only ASC view
         // without copying — uses JDK 21 SequencedCollection.
-        return Message.findRecent(conversation, maxMessages).reversed();
+        return Message.findRecent(conversation, maxMessages, conversation.contextSince).reversed();
     }
 
     public static Conversation findById(Long id) {

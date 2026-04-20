@@ -51,6 +51,10 @@ public class DefaultConfigJob extends Job<Void> {
             // recovery job edits them on startup.
             stmt.execute("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS active_stream_message_id INT");
             stmt.execute("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS active_stream_chat_id VARCHAR(255)");
+            // JCLAW-26: /reset watermark. Messages older than this timestamp
+            // are excluded from the LLM context window. Null = no reset has
+            // occurred, full history is eligible.
+            stmt.execute("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS context_since TIMESTAMP");
         } catch (Exception e) {
             play.Logger.warn("Schema migration: %s", e.getMessage());
         }

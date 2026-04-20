@@ -1044,6 +1044,18 @@ public class AgentRunner {
      */
     public static void processInboundForAgent(Agent agent, String channelType, String peerId,
                                                String text, BiConsumer<String, String> sendResponse) {
+        // JCLAW-26: intercept slash commands before the LLM round. /new creates
+        // a fresh conversation and short-circuits; /reset + /help mutate the
+        // current conversation and short-circuit. Unknown /foo falls through.
+        var slashCmd = slash.Commands.parse(text);
+        if (slashCmd.isPresent()) {
+            Conversation current = slashCmd.get() == slash.Commands.Command.NEW
+                    ? null
+                    : services.Tx.run(() -> ConversationService.findOrCreate(agent, channelType, peerId));
+            var result = slash.Commands.execute(slashCmd.get(), agent, channelType, peerId, current);
+            sendResponse.accept(peerId, result.responseText());
+            return;
+        }
         var conversation = services.Tx.run(() ->
                 ConversationService.findOrCreate(agent, channelType, peerId));
         var result = run(agent, conversation, text);
@@ -1067,6 +1079,21 @@ public class AgentRunner {
     public static void processInboundForAgentStreaming(
             Agent agent, String channelType, String peerId, String text,
             java.util.function.Function<Long, channels.TelegramStreamingSink> sinkFactory) {
+        // JCLAW-26: intercept slash commands before the LLM round. Reuse the
+        // existing sink machinery to deliver the canned response — an unused
+        // sink's seal() path falls through to TelegramChannel.sendMessage,
+        // which keeps the bot-token / chat-id routing owned by the caller.
+        var slashCmd = slash.Commands.parse(text);
+        if (slashCmd.isPresent()) {
+            Conversation current = slashCmd.get() == slash.Commands.Command.NEW
+                    ? null
+                    : services.Tx.run(() -> ConversationService.findOrCreate(agent, channelType, peerId));
+            var result = slash.Commands.execute(slashCmd.get(), agent, channelType, peerId, current);
+            var slashSink = sinkFactory.apply(
+                    result.conversation() != null ? result.conversation().id : null);
+            slashSink.seal(result.responseText());
+            return;
+        }
         var conversation = services.Tx.run(() ->
                 ConversationService.findOrCreate(agent, channelType, peerId));
         // The sink needs the conversation id so it can persist / clear the

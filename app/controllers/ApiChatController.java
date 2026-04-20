@@ -88,6 +88,31 @@ public class ApiChatController extends Controller {
     public static void send() {
         var ctx = resolveChatContext(JsonBodyReader.readJsonBody());
 
+        // JCLAW-26: intercept slash commands before the LLM round. The
+        // handler owns conversation creation (/new) or context-reset state
+        // (/reset). Unknown slash-prefixed input falls through as normal text.
+        var slashCmd = slash.Commands.parse(ctx.message());
+        if (slashCmd.isPresent()) {
+            Conversation current;
+            if (slashCmd.get() == slash.Commands.Command.NEW) {
+                current = null;
+            } else if (ctx.conversationId() != null) {
+                current = ConversationService.findById(ctx.conversationId());
+                if (current == null) notFound();
+            } else {
+                current = ConversationService.findOrCreate(ctx.agent(), "web", ctx.username());
+            }
+            var slashResult = slash.Commands.execute(
+                    slashCmd.get(), ctx.agent(), "web", ctx.username(), current);
+            var slashResp = new HashMap<String, Object>();
+            slashResp.put("conversationId",
+                    slashResult.conversation() != null ? slashResult.conversation().id : null);
+            slashResp.put("response", slashResult.responseText());
+            slashResp.put("agentId", ctx.agent().id);
+            slashResp.put("agentName", ctx.agent().name);
+            renderJSON(gson.toJson(slashResp));
+        }
+
         Conversation conversation;
         if (ctx.conversationId() != null) {
             conversation = ConversationService.findById(ctx.conversationId());
@@ -233,6 +258,39 @@ public class ApiChatController extends Controller {
                 streamDone.complete(null);
             }
         }, 30, 30, TimeUnit.SECONDS);
+
+        // JCLAW-26: slash-command intercept. /new creates a fresh conversation
+        // (init frame carries the new id so the frontend switches); /reset +
+        // /help mutate/query the current conversation. Unknown /foo falls
+        // through as normal text. Emits SSE frames directly; never calls
+        // runStreaming, so the model isn't invoked at all.
+        var slashCmd = slash.Commands.parse(messageText);
+        if (slashCmd.isPresent()) {
+            Conversation slashConv;
+            if (slashCmd.get() == slash.Commands.Command.NEW) {
+                slashConv = null;
+            } else if (conversationId != null) {
+                slashConv = ConversationService.findById(conversationId);
+                if (slashConv == null) notFound();
+            } else {
+                slashConv = ConversationService.findOrCreate(agent, "web", username);
+            }
+            var slashResult = slash.Commands.execute(
+                    slashCmd.get(), agent, "web", username, slashConv);
+            if (slashResult.conversation() != null) {
+                writeSse(res, cancelled, streamDone,
+                        Map.of("type", "init", "conversationId", slashResult.conversation().id), false);
+            }
+            writeSse(res, cancelled, streamDone,
+                    Map.of("type", "complete", "content", slashResult.responseText()), true);
+            trace.mark(LatencyTrace.TERMINAL_SENT);
+            streamDone.whenComplete((_, _) -> {
+                heartbeatFuture.cancel(false);
+                trace.end();
+            });
+            await(streamDone, _ -> { });
+            return;
+        }
 
         var firstToken = new AtomicBoolean(true);
         var callbacks = new AgentRunner.StreamingCallbacks(
