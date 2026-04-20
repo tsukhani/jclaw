@@ -1051,6 +1051,37 @@ public class AgentRunner {
     }
 
     /**
+     * Streaming-aware counterpart to {@link #processInboundForAgent}: wires
+     * LLM tokens into a {@link channels.TelegramStreamingSink} so the user
+     * sees progressive edits rather than waiting for the full response
+     * (JCLAW-94). {@link #runStreaming} starts its own virtual thread, so
+     * this call returns immediately after queue acquisition; the sink is
+     * sealed asynchronously when the LLM call completes.
+     *
+     * <p>The sink receives text-only tokens (reasoning and status callbacks
+     * are no-ops — Telegram has no separate surface for them yet). On
+     * completion the full response is handed to {@link channels.TelegramStreamingSink#seal},
+     * which either performs one final HTML edit or falls back to the
+     * chunked planner path for oversize / media-rich responses.
+     */
+    public static void processInboundForAgentStreaming(
+            Agent agent, String channelType, String peerId, String text,
+            channels.TelegramStreamingSink sink) {
+        var conversation = services.Tx.run(() ->
+                ConversationService.findOrCreate(agent, channelType, peerId));
+        var isCancelled = services.ConversationQueue.cancellationFlag(conversation.id);
+        var cb = new StreamingCallbacks(
+                _ -> {},                 // onInit — nothing to do for Telegram
+                sink::update,            // onToken — live preview edits
+                _ -> {},                 // onReasoning — not surfaced on Telegram
+                _ -> {},                 // onStatus — not surfaced on Telegram
+                sink::seal,              // onComplete — final edit / planner fallback
+                sink::errorFallback);    // onError — delete placeholder + send error
+        runStreaming(agent, conversation.id, channelType, peerId, text,
+                isCancelled, cb, null);
+    }
+
+    /**
      * Best-effort delivery of a response to an external channel. Web channel
      * responses are already persisted to the DB by {@link #run} — the user sees
      * them on next conversation load or refresh. External channels need explicit

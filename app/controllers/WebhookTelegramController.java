@@ -117,9 +117,13 @@ public class WebhookTelegramController extends Controller {
         final String sendChatId = message.chatId();
         final Agent sendAgent = ctx.agent();
         try {
-            AgentRunner.processInboundForAgent(sendAgent, "telegram", ctx.telegramUserId(),
-                    message.text(),
-                    (peerId, response) -> TelegramChannel.sendMessage(sendToken, sendChatId, response, sendAgent));
+            // JCLAW-94: stream the response as it's generated. The sink owns
+            // send/edit/delete of the preview message; on completion it
+            // delegates to TelegramChannel.sendMessage (via the planner path)
+            // for media-rich / oversize responses.
+            var sink = new channels.TelegramStreamingSink(sendToken, sendChatId, sendAgent);
+            AgentRunner.processInboundForAgentStreaming(
+                    sendAgent, "telegram", ctx.telegramUserId(), message.text(), sink);
         } catch (Exception e) {
             EventLogger.error("channel", ctx.agent() != null ? ctx.agent().name : null, "telegram",
                     "Error processing message for binding %d: %s".formatted(ctx.bindingId(), e.getMessage()));

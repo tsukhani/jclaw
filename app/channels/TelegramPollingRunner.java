@@ -258,8 +258,12 @@ public final class TelegramPollingRunner {
             final String sendToken = ctx.botToken();
             final String sendChatId = msg.chatId();
             final Agent sendAgent = ctx.agent();
-            AgentRunner.processInboundForAgent(sendAgent, "telegram", ctx.telegramUserId(), msg.text(),
-                    (peer, resp) -> TelegramChannel.sendMessage(sendToken, sendChatId, resp, sendAgent));
+            // JCLAW-94: stream via the same sink as the webhook path. Sink
+            // owns the placeholder/edit/delete lifecycle; the planner takes
+            // over on seal for media-rich or oversize responses.
+            var sink = new TelegramStreamingSink(sendToken, sendChatId, sendAgent);
+            AgentRunner.processInboundForAgentStreaming(
+                    sendAgent, "telegram", ctx.telegramUserId(), msg.text(), sink);
         } catch (Exception e) {
             EventLogger.error("channel", null, "telegram",
                     "Polling update processing error for binding %d: %s".formatted(
