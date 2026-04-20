@@ -26,19 +26,38 @@ import java.util.concurrent.TimeUnit;
  * malware scanners) continue to use {@link HttpClients#GENERAL} /
  * {@link HttpClients#LLM} without SSRF overhead.
  *
+ * <p><strong>Why OkHttp's {@code Dns} interface is the right pin point:</strong>
+ * {@code RouteSelector.resetNextInetSocketAddress} calls
+ * {@code dns.lookup(host)}, then wraps each returned {@link InetAddress}
+ * into an {@code InetSocketAddress(inetAddress, port)} — the IP is bound
+ * into the socket-address object. The subsequent {@code Socket.connect()}
+ * uses that bound IP; OkHttp does <em>not</em> re-resolve the hostname
+ * during connect. So the classic DNS-rebinding TOCTOU window (resolve →
+ * attacker flips DNS → re-resolve) does not exist on this code path.
+ * Every call hits our filter afresh; an attacker that flips DNS between
+ * requests is still blocked on the next lookup.
+ *
+ * <p>Contrast with the JDK's {@code java.net.http.HttpClient} (which this
+ * tool replaced for exactly this reason): that stack has no pluggable DNS
+ * and re-resolves the hostname internally during connect, so no
+ * application-level filter can gate it without reaching for Netty's
+ * {@code AddressResolverGroup} or connecting by literal IP and forging
+ * the {@code Host} header.
+ *
  * <p>Limits of this design:
  * <ul>
- *   <li>Does not pin a resolved IP for the actual connect — OkHttp resolves
- *       via this {@code Dns}, caches nothing, then connects. A DNS rebinding
- *       attacker that wins the race between our resolve and OkHttp's connect
- *       could still slip through. Closing that TOCTOU gap would require
- *       switching to Netty's {@code AddressResolverGroup} pattern. For
- *       LLM-emitted URLs (single per-call attacker-controlled DNS response,
- *       high reputational cost per attempt), this is "close enough".</li>
- *   <li>Callers must still set {@code followRedirects(false)} and walk
- *       redirect hops manually, re-checking each target against the scheme
- *       allowlist — otherwise a 302 to {@code file:///etc/passwd} would be
- *       followed automatically.</li>
+ *   <li>Callers must set {@code followRedirects(false)} and walk redirect
+ *       hops manually, re-checking each {@code Location} through
+ *       {@link #assertSafeScheme(URI)} — otherwise a 302 to
+ *       {@code file:///etc/passwd} would be followed automatically.</li>
+ *   <li>Literal-IP URLs ({@code http://10.0.0.1/}) bypass the {@code Dns}
+ *       callback because OkHttp treats them as already-resolved.
+ *       {@link #assertSafeScheme(URI)} covers this case by validating
+ *       literal-IP hosts directly before the request ever starts.</li>
+ *   <li>If a proxy is configured on the client, {@code dns.lookup} runs
+ *       per-proxy per-call, which is fine — every lookup re-enters our
+ *       filter. {@link #buildGuardedClient(int, int)} does not configure
+ *       a proxy, so this is moot unless a caller overrides it.</li>
  * </ul>
  */
 public final class SsrfGuard {
