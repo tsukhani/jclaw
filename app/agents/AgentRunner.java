@@ -49,6 +49,19 @@ public class AgentRunner {
     private static final Pattern HTML_IMG_EMBED =
             Pattern.compile("<img\\s[^>]*?src\\s*=\\s*[\"']?([^\"'\\s>]+)",
                     Pattern.CASE_INSENSITIVE);
+    // Matches any markdown link or image ({@code [text](url)} or
+    // {@code ![alt](url)}) — the optional {@code !} prefix isn't captured in
+    // the group but the pattern still matches both. Used by
+    // {@link #buildDownloadSuffix} to detect when the LLM has already linked
+    // to a file so we don't append a duplicate download link.
+    private static final Pattern MARKDOWN_LINK_OR_IMAGE =
+            Pattern.compile("!?\\[[^\\]]*\\]\\(([^)]+)\\)");
+    // Matches HTML anchor {@code <a href="...">} (single, double, or unquoted).
+    // Same intent as HTML_IMG_EMBED — catch LLM-emitted HTML instead of
+    // markdown so the link dedup stays symmetric across formats.
+    private static final Pattern HTML_ANCHOR =
+            Pattern.compile("<a\\s[^>]*?href\\s*=\\s*[\"']?([^\"'\\s>]+)",
+                    Pattern.CASE_INSENSITIVE);
 
     private static int maxToolRounds() {
         return services.ConfigService.getInt("chat.maxToolRounds", DEFAULT_MAX_TOOL_ROUNDS);
@@ -484,11 +497,17 @@ public class AgentRunner {
             return;
         }
 
-        // Handle tool calls if present
+        // Handle tool calls if present. JCLAW-104: the image collector lives
+        // at turn scope (not per recursion level) so a screenshot captured
+        // mid-chain — say in round 1 — still reaches buildImagePrefix when
+        // the final synthesis happens in round N. Pre-fix the list was
+        // reset at every recursion depth, which silently dropped images
+        // from intermediate rounds when the LLM chose not to re-embed.
+        var turnImages = new ArrayList<String>();
         if (!accumulator.toolCalls.isEmpty()) {
             content = handleToolCallsStreaming(agent, conversation.id, messages, tools,
                     accumulator.toolCalls, content, primary, cb, maxTokens, thinkingMode, 0,
-                    isCancelled, trace, turnUsage);
+                    isCancelled, trace, turnUsage, turnImages, channelType);
         }
 
         if (checkCancelled(isCancelled, agent, channelType)) return;
@@ -686,7 +705,9 @@ public class AgentRunner {
                                                     Integer maxTokens, String thinkingMode,
                                                     int round, AtomicBoolean isCancelled,
                                                     LatencyTrace trace,
-                                                    LlmProvider.TurnUsage turnUsage) {
+                                                    LlmProvider.TurnUsage turnUsage,
+                                                    List<String> collectedImages,
+                                                    String channelType) {
         if (round >= maxToolRounds()) {
             return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
         }
@@ -698,7 +719,6 @@ public class AgentRunner {
 
         var currentMessages = new ArrayList<>(messages);
         currentMessages.add(ChatMessage.assistant(priorContent, toolCalls));
-        var collectedImages = new ArrayList<String>();
 
         var toolRoundStartNs = System.nanoTime();
         executeToolsParallel(toolCalls, agent, conversationId, currentMessages,
@@ -746,11 +766,14 @@ public class AgentRunner {
             return truncMsg;
         }
 
-        // Recursively handle if more tool calls
+        // Recursively handle if more tool calls. JCLAW-104: pass the SAME
+        // collectedImages through so images from this round accumulate into
+        // the deeper round's final buildImagePrefix call. channelType threads
+        // through too so buildDownloadSuffix can stay channel-aware.
         if (!accumulator.toolCalls.isEmpty()) {
             return handleToolCallsStreaming(agent, conversationId, currentMessages, tools,
                     accumulator.toolCalls, accumulator.content, provider, cb, maxTokens, thinkingMode,
-                    round + 1, isCancelled, trace, turnUsage);
+                    round + 1, isCancelled, trace, turnUsage, collectedImages, channelType);
         }
 
         // Some models (especially smaller/distilled ones) occasionally return zero tokens
@@ -781,7 +804,9 @@ public class AgentRunner {
             turnUsage.addRound(retry);
 
             if (retry.content != null && !retry.content.isBlank()) {
-                return buildImagePrefix(collectedImages, retry.content) + retry.content;
+                return buildImagePrefix(collectedImages, retry.content)
+                        + retry.content
+                        + buildDownloadSuffix(collectedImages, retry.content, channelType);
             }
 
             // Retry also empty — emit a labeled diagnostic so the user knows why.
@@ -790,13 +815,17 @@ public class AgentRunner {
             // No LLM content to dedupe against — prepend every collected image unchanged.
             var fallbackPrefix = collectedImages.isEmpty() ? ""
                     : String.join("\n\n", collectedImages) + "\n\n";
+            var fallbackSuffix = buildDownloadSuffix(collectedImages, "", channelType);
             var fallback = fallbackPrefix
-                    + "*[The model returned no synthesis after tool calls. Tool results are in the conversation history above — try rephrasing your request or switching to a larger model.]*";
+                    + "*[The model returned no synthesis after tool calls. Tool results are in the conversation history above — try rephrasing your request or switching to a larger model.]*"
+                    + fallbackSuffix;
             cb.onToken().accept(fallback);
             return fallback;
         }
 
-        return buildImagePrefix(collectedImages, accumulator.content) + accumulator.content;
+        return buildImagePrefix(collectedImages, accumulator.content)
+                + accumulator.content
+                + buildDownloadSuffix(collectedImages, accumulator.content, channelType);
     }
 
     /**
@@ -1305,6 +1334,84 @@ public class AgentRunner {
             missing.add(img);
         }
         return missing.isEmpty() ? "" : String.join("\n\n", missing) + "\n\n";
+    }
+
+    /**
+     * Build a trailing download-link block for collected images that the LLM
+     * reply has not already linked to (JCLAW-104). Mirrors
+     * {@link #buildImagePrefix} but in the opposite direction: prefix renders
+     * the image inline at the top, suffix gives the user a clickable
+     * "download" at the bottom.
+     *
+     * <p>Channel-aware — the suffix only fires for channels whose renderers
+     * resolve relative URLs to clickable links. {@code web} does (its
+     * frontend is same-origin with the workspace-file API); Telegram does
+     * not (its HTML parser requires absolute URLs, silently dropping an
+     * {@code href} that's relative, which would render "download Screenshot"
+     * as plain text — strictly worse than no link because the real download
+     * affordance on Telegram is the native save option on the uploaded
+     * photo). We fall back to no-suffix for any non-web channel and let the
+     * channel's native file-delivery path handle the download surface.
+     *
+     * <p>A collected image is suppressed when its filename appears in any
+     * markdown link ({@code [text](url)} or {@code ![alt](url)}) or HTML
+     * anchor/image embed inside the LLM reply, so the suffix never doubles
+     * up on a link the LLM already wrote out itself. Filenames in JClaw are
+     * timestamp-suffixed so collisions are effectively impossible.
+     *
+     * <p>Link text is derived from the alt in the collected image markdown
+     * — {@code ![Screenshot](url)} becomes {@code [download Screenshot](url)}.
+     * Falls back to {@code [download](url)} when the collected entry has no
+     * recoverable alt text.
+     *
+     * <p>Exposed for unit tests; not part of the public runner API.
+     */
+    public static String buildDownloadSuffix(List<String> collectedImages,
+                                             String content,
+                                             String channelType) {
+        if (collectedImages == null || collectedImages.isEmpty()) return "";
+        // Only the web frontend renders relative markdown links as clickable.
+        // Telegram / Slack / WhatsApp / etc. need absolute URLs for <a href>,
+        // and our workspace-file URLs are relative by design — rendering a
+        // non-clickable "download" caption would be confusing noise.
+        if (!"web".equalsIgnoreCase(channelType)) return "";
+        var safeContent = content != null ? content : "";
+
+        // Filenames already linked in the reply (covers both markdown forms
+        // — image and plain link — plus HTML <img> and <a href>). If the
+        // LLM already wrote a link to a file, we leave that as the user's
+        // download affordance and skip our suffix entry for that file.
+        var linkedFilenames = new java.util.HashSet<String>();
+        for (var pattern : List.of(MARKDOWN_LINK_OR_IMAGE, HTML_IMG_EMBED, HTML_ANCHOR)) {
+            var m = pattern.matcher(safeContent);
+            while (m.find()) {
+                var url = m.group(1);
+                var slash = url.lastIndexOf('/');
+                var fn = slash >= 0 ? url.substring(slash + 1) : url;
+                if (!fn.isEmpty()) linkedFilenames.add(fn);
+            }
+        }
+
+        var downloads = new ArrayList<String>();
+        for (var img : collectedImages) {
+            // img is "![alt](url)" shape. Extract url + alt for the link.
+            var urlMatcher = PAREN_URL_PATTERN.matcher(img);
+            if (!urlMatcher.find()) continue;
+            var url = urlMatcher.group(1);
+            var slash = url.lastIndexOf('/');
+            var filename = slash >= 0 ? url.substring(slash + 1) : url;
+            if (!filename.isEmpty() && linkedFilenames.contains(filename)) continue;
+
+            // Pull alt text out of the leading "![alt]" portion; fall back
+            // to an empty alt (= just "download" as the link label) if the
+            // pattern doesn't match (shouldn't happen for well-formed
+            // collected entries but guarded for safety).
+            var altMatcher = Pattern.compile("!\\[([^\\]]*)\\]").matcher(img);
+            var alt = altMatcher.find() ? altMatcher.group(1).trim() : "";
+            var label = alt.isEmpty() ? "download" : "download " + alt;
+            downloads.add("[" + label + "](" + url + ")");
+        }
+        return downloads.isEmpty() ? "" : "\n\n" + String.join("\n\n", downloads);
     }
 
     /**

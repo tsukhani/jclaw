@@ -116,28 +116,25 @@ public final class TelegramStreamingSink {
             VirtualThreads.newSingleThreadScheduledExecutor();
 
     /**
-     * Streaming transport selected at sink construction (JCLAW-103).
+     * Streaming transport selected at sink construction (JCLAW-103, JCLAW-105).
      * <ul>
-     *   <li>{@link #DRAFT} — DM chats only. Streaming updates go to
-     *       {@code sendMessageDraft} so no intermediate message appears in
-     *       the chat; the typing indicator covers the streaming phase.
-     *       Seal sends one final {@code sendMessage}, then clears the
-     *       draft so the user's compose area doesn't show a stale draft tag.
-     *   <li>{@link #EDIT_IN_PLACE} — groups, supergroups, channels, and the
-     *       fallback when draft API rejects at runtime. Placeholder + edit
+     *   <li>{@link #DRAFT} — preferred whenever the caller supplied a
+     *       non-blank {@code chat.type}. Streaming updates go to
+     *       {@code sendMessageDraft}; the final seal dispatches one
+     *       {@code sendMessage} with the complete response. Bot API 9.5
+     *       (2026-03-01) lifted the previous private-chats-only restriction,
+     *       so this transport is now attempted for groups, supergroups,
+     *       forums, and channels as well.
+     *   <li>{@link #EDIT_IN_PLACE} — the fallback. Used when we don't know
+     *       the chat type (caller passed {@code null}/blank), or when
+     *       Telegram rejects {@code sendMessageDraft} at runtime via the
+     *       classifiers in {@link #isDraftUnsupported}. Placeholder + edit
      *       pattern (the pre-JCLAW-103 behavior).
      * </ul>
-     * Starts DRAFT for {@code chat.type == "private"} and can one-way
-     * transition to EDIT_IN_PLACE if Telegram rejects {@code sendMessageDraft}.
+     * DRAFT → EDIT_IN_PLACE is one-way per sink lifetime; the reverse never
+     * happens.
      */
     public enum Transport { DRAFT, EDIT_IN_PLACE }
-
-    /**
-     * Chat types for which DRAFT transport is attempted. Telegram's server-side
-     * check restricts sendMessageDraft to {@code "private"} chats; we enforce
-     * the same at construction so groups/channels never even try.
-     */
-    private static final String PRIVATE_CHAT_TYPE = "private";
 
     /**
      * Regex patterns that classify a Telegram 400 as "draft API unavailable
@@ -251,11 +248,19 @@ public final class TelegramStreamingSink {
     }
 
     /**
-     * Full constructor (JCLAW-103). {@code chatType} is Telegram's
-     * {@code chat.type} string — {@code "private"} selects DRAFT transport,
-     * anything else (or {@code null}) selects EDIT_IN_PLACE. Callers that
-     * parse inbound Telegram updates get this from
+     * Full constructor (JCLAW-103, JCLAW-105). {@code chatType} is
+     * Telegram's {@code chat.type} string — any non-blank value selects
+     * DRAFT transport (Bot API 9.5 allows drafts for all chat types);
+     * {@code null} or blank selects EDIT_IN_PLACE as a defensive fallback
+     * for callers that couldn't parse chat context. Callers that parse
+     * inbound Telegram updates get {@code chatType} from
      * {@link TelegramChannel.InboundMessage#chatType()}.
+     *
+     * <p>Runtime-level safety still comes from
+     * {@link #tryDraftFlushWithFallback}: if Telegram rejects
+     * {@code sendMessageDraft} for a specific chat, the sink one-way
+     * transitions to EDIT_IN_PLACE and resumes streaming via the
+     * placeholder-then-edit pattern.
      */
     public TelegramStreamingSink(String botToken, String chatId, Agent agent,
                                  Long conversationId, String chatType) {
@@ -263,12 +268,20 @@ public final class TelegramStreamingSink {
         this.chatId = chatId;
         this.agent = agent;
         this.conversationId = conversationId;
-        this.transport = PRIVATE_CHAT_TYPE.equalsIgnoreCase(chatType)
+        this.transport = (chatType != null && !chatType.isBlank())
                 ? Transport.DRAFT
                 : Transport.EDIT_IN_PLACE;
         // Non-negative 31-bit int so it fits Telegram's draftId param and
         // doesn't collide across same-chat back-to-back turns in practice.
         this.draftId = java.util.concurrent.ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE);
+        // JCLAW-105: one-time breadcrumb so operators can confirm which
+        // transport a given turn ran on. category=channel matches the
+        // existing convention in TelegramChannel. Logs chat.type (if known)
+        // so server-side drafts rejections for specific chat types are
+        // easy to correlate against the fallback warning.
+        EventLogger.info("channel", agentName(), "telegram",
+                "Streaming transport: %s (chat.type=%s)"
+                        .formatted(transport, chatType != null ? chatType : "unknown"));
     }
 
     // ── Public API ─────────────────────────────────────────────────────

@@ -236,4 +236,94 @@ public class TelegramOutboundPlannerTest extends UnitTest {
                 .count();
         assertEquals(2, fileCount, "both files should be detected");
     }
+
+    // ── JCLAW-104: dedupe same-file references ──
+
+    @Test
+    public void duplicateFileReferencesProduceExactlyOneFileSegment() {
+        // JCLAW-104 sub-bug #2: PlaywrightBrowserTool's screenshot result tells
+        // the LLM to include BOTH a markdown image and a text link at the same
+        // URL so the user has an inline render AND a clickable reference. The
+        // planner's LINK_PATTERN doesn't distinguish `![alt](url)` from
+        // `[text](url)`, so pre-fix it emitted two FileSegments for the same
+        // file and Telegram received two sendPhoto uploads. Assert one.
+        var agent = AgentService.create("planner-dedupe", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile(agent.name, "screenshot-1776748706808.png", "png-bytes");
+
+        var md = "![Screenshot](/api/agents/1/files/screenshot-1776748706808.png)\n\n"
+                + "Here is the page. You can also reference the "
+                + "[screenshot](/api/agents/1/files/screenshot-1776748706808.png) directly.";
+        var segments = TelegramOutboundPlanner.plan(md, agent.name);
+
+        int fileCount = (int) segments.stream()
+                .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment)
+                .count();
+        assertEquals(1, fileCount,
+                "the same file referenced twice (once as image, once as link) "
+                        + "must produce exactly one FileSegment; got: " + segments);
+
+        // The second reference should remain visible in text so the user
+        // still sees the \"clickable reference\" the tool asked the LLM to emit.
+        var lastText = segments.stream()
+                .filter(s -> s instanceof TelegramOutboundPlanner.TextSegment)
+                .map(s -> ((TelegramOutboundPlanner.TextSegment) s).markdown())
+                .reduce((a, b) -> b)
+                .orElse("");
+        assertTrue(lastText.contains("[screenshot](/api/agents/1/files/screenshot-1776748706808.png)"),
+                "duplicate reference should survive as text so the clickable link "
+                        + "still renders in the final message; got last text: " + lastText);
+    }
+
+    @Test
+    public void markdownImagePrefixBangIsNotEmittedAsStandaloneText() {
+        // JCLAW-104 three-fix patch: post-buildImagePrefix, every screenshot
+        // turn's final content leads with "![Screenshot](url)". Pre-patch
+        // the planner's LINK_PATTERN matched "[Screenshot](url)" starting
+        // at position 1, leaving the `!` at position 0 as "text before the
+        // match" — which Telegram then delivered as a standalone message
+        // containing literally "!". The LINK_PATTERN fix makes the `!`
+        // optional-capture so the match envelope includes it when present.
+        var agent = AgentService.create("planner-bang", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile(agent.name, "screenshot-999.png", "png");
+
+        var md = "![Screenshot](/api/agents/1/files/screenshot-999.png)\n\n"
+                + "The page shows a dark header.";
+        var segments = TelegramOutboundPlanner.plan(md, agent.name);
+
+        // No segment should be the bare "!" (possibly with whitespace).
+        for (var seg : segments) {
+            if (seg instanceof TelegramOutboundPlanner.TextSegment ts) {
+                assertFalse(ts.markdown().trim().equals("!"),
+                        "planner must not emit a standalone '!' bubble; "
+                                + "the markdown-image prefix bang belongs to the image match: "
+                                + segments);
+            }
+        }
+        // And the file segment must still be produced.
+        long fileCount = segments.stream()
+                .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment)
+                .count();
+        assertEquals(1, fileCount, "file segment must still be emitted: " + segments);
+    }
+
+    @Test
+    public void differentFilesProduceMultipleFileSegments() {
+        // Dedupe is per-canonical-file, not per-URL-string: different files
+        // with different names must still produce independent FileSegments.
+        // This protects against over-zealous deduplication if the fix is
+        // ever refactored to match on alt text / display / path prefix.
+        var agent = AgentService.create("planner-distinct", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile(agent.name, "first.png", "first-bytes");
+        AgentService.writeWorkspaceFile(agent.name, "second.png", "second-bytes");
+
+        var md = "![First](/api/agents/1/files/first.png) and "
+                + "![Second](/api/agents/1/files/second.png).";
+        var segments = TelegramOutboundPlanner.plan(md, agent.name);
+
+        int fileCount = (int) segments.stream()
+                .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment)
+                .count();
+        assertEquals(2, fileCount,
+                "two distinct files should produce two FileSegments; got: " + segments);
+    }
 }

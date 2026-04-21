@@ -142,36 +142,48 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void screenshotResultContainsImageEmbedAndGuidance() {
-        // The tool result MUST contain a markdown image tag (so AgentRunner picks
-        // it up and prepends the inline image) AND guidance that tells the LLM:
-        //   - the image is already displayed (don't re-embed as an image), and
-        //   - the URL should be included in the reply as a plain link so the user
-        //     has a referenceable pointer to the file alongside the inline image.
+    public void screenshotResultIsMinimalAndSuppressesPathEcho() {
+        // Post-JCLAW-104 three-fix patch plus Option B: the tool result is a
+        // bare acknowledgment plus one targeted directive telling the LLM
+        // not to quote the file path. Pre-patch, the instruction prescribed
+        // "describe what the page shows" which made every screenshot turn
+        // verbose even when the user just asked "take a screenshot." The
+        // runtime already guarantees image display (buildImagePrefix) and
+        // the download affordance (native save on Telegram photos, markdown
+        // link on web). Option B was added after smoke testing surfaced a
+        // chatty-model failure mode where the model echoes the URL as a
+        // parenthetical in its prose.
         var url = "/api/agents/1/files/screenshot-1000.png";
         var result = PlaywrightBrowserTool.formatScreenshotResult(url);
 
         assertTrue(result.contains("![Screenshot](" + url + ")"),
-                "Result must contain a well-formed markdown image tag for the screenshot URL");
-        assertTrue(result.contains("Do NOT re-embed"),
-                "Result must tell the LLM not to re-embed the image");
-        assertTrue(result.contains("already displayed"),
-                "Result must state that the image is already displayed to the user");
-        assertTrue(result.contains("<img>"),
-                "Result must also forbid HTML <img> re-embeds (the dedup catches both forms)");
-        // URL appears twice: once inside the ![](...) image embed and once
-        // inside a ready-to-copy markdown link template, so the LLM has an
-        // unambiguous clickable reference to cite.
+                "Result must contain a well-formed markdown image tag so "
+                        + "extractImageUrls picks it up for the prefix/suffix pipeline");
+        assertTrue(result.contains("Screenshot captured"),
+                "Result should name the event so the LLM has a hook for its reply");
+        assertTrue(result.contains("Don't quote the file path"),
+                "Option B: directive telling the LLM not to echo the URL in its reply — "
+                        + "targets the observed Kimi behavior on Telegram");
+
+        // All pre-patch directives are obsolete and must stay out — they
+        // each map to a runtime deficiency that's been closed, so putting
+        // them back is a regression signal.
+        assertFalse(result.contains("Do NOT re-embed"),
+                "re-embed dedup lives in buildImagePrefix now");
+        assertFalse(result.contains("SHOULD include"),
+                "download affordance lives in buildDownloadSuffix / native photo save now");
+        assertFalse(result.contains("already displayed"),
+                "stale phrasing from pre-fix era");
+        assertFalse(result.contains("describe what the page shows"),
+                "tool must not prescribe verbosity — lets the LLM infer from user intent");
+
+        // URL appears exactly once — only in the image embed. Option B's
+        // new directive references "the file path" generically, never
+        // quoting the URL itself.
         int first = result.indexOf(url);
         int second = result.indexOf(url, first + 1);
-        assertTrue(first >= 0 && second > first,
-                "Result must reference the URL both inside the image embed and as a link template");
-        assertTrue(result.contains("[screenshot](" + url + ")"),
-                "Result must provide a ready-to-copy markdown link template for the LLM to echo");
-        assertTrue(result.contains("include the link"),
-                "Result must explicitly invite the LLM to include the link in its reply");
-        assertFalse(result.contains("Display it with:"),
-                "Result must NOT invite the LLM to display the image (the buggy prior wording)");
+        assertTrue(first >= 0, "URL must appear in the image embed");
+        assertEquals(-1, second, "URL should appear exactly once");
     }
 
     private static void deleteDir(java.nio.file.Path dir) {

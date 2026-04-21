@@ -190,4 +190,133 @@ public class AgentRunnerDedupTest extends UnitTest {
         assertTrue(prefix.contains("terminal-image-B.png"),
                 "terminal-image-B was not referenced — should be prepended");
     }
+
+    // ==================== JCLAW-104: buildDownloadSuffix ====================
+
+    @Test
+    public void buildDownloadSuffixAppendsDownloadLinkOnWeb() {
+        // Web-channel turns get a markdown download link — the frontend
+        // renders [text](url) as clickable against the same-origin API.
+        List<String> collected = List.of(
+                "![Screenshot](/api/agents/1/files/screenshot-A.png)");
+        var content = "Here's the homepage — it shows course categories.";
+        var suffix = AgentRunner.buildDownloadSuffix(collected, content, "web");
+        assertTrue(suffix.contains("[download Screenshot](/api/agents/1/files/screenshot-A.png)"),
+                "suffix should contain a clickable download link on web: " + suffix);
+        assertTrue(suffix.startsWith("\n\n"),
+                "suffix should separate itself from the LLM content with a blank line");
+    }
+
+    @Test
+    public void buildDownloadSuffixSkipsOnTelegram() {
+        // Telegram's HTML parser drops relative hrefs — a "[download](url)"
+        // would render as plain text, confusing users whose real download
+        // affordance is Telegram's native Save-Image on the uploaded photo.
+        // Skip the suffix entirely on non-web channels.
+        List<String> collected = List.of(
+                "![Screenshot](/api/agents/1/files/screenshot-A.png)");
+        var content = "Here's the homepage — course catalog.";
+        assertEquals("", AgentRunner.buildDownloadSuffix(collected, content, "telegram"));
+        assertEquals("", AgentRunner.buildDownloadSuffix(collected, content, "slack"));
+        assertEquals("", AgentRunner.buildDownloadSuffix(collected, content, "whatsapp"));
+        assertEquals("", AgentRunner.buildDownloadSuffix(collected, content, null),
+                "null channel should also skip — we only render when we're sure it works");
+        assertEquals("", AgentRunner.buildDownloadSuffix(collected, content, ""),
+                "blank channel should also skip");
+    }
+
+    @Test
+    public void buildDownloadSuffixSkipsWhenLlmAlreadyIncludedLink() {
+        List<String> collected = List.of(
+                "![Screenshot](/api/agents/1/files/screenshot-A.png)");
+        var content = "Here's the page [screenshot](/api/agents/1/files/screenshot-A.png).";
+        var suffix = AgentRunner.buildDownloadSuffix(collected, content, "web");
+        assertEquals("", suffix,
+                "LLM already linked the file — suffix must be empty to avoid duplicate links");
+    }
+
+    @Test
+    public void buildDownloadSuffixSkipsWhenLlmReembeddedAsImage() {
+        List<String> collected = List.of(
+                "![Screenshot](/api/agents/1/files/screenshot-A.png)");
+        var content = "![Here you go](/api/agents/1/files/screenshot-A.png)";
+        var suffix = AgentRunner.buildDownloadSuffix(collected, content, "web");
+        assertEquals("", suffix,
+                "re-embed counts as a link for filename dedup — no suffix needed");
+    }
+
+    @Test
+    public void buildDownloadSuffixSkipsWhenLlmUsedHtmlAnchor() {
+        List<String> collected = List.of(
+                "![Screenshot](/api/agents/1/files/screenshot-A.png)");
+        var content = "<a href=\"/api/agents/1/files/screenshot-A.png\">here</a>";
+        var suffix = AgentRunner.buildDownloadSuffix(collected, content, "web");
+        assertEquals("", suffix,
+                "<a href=...> counts as a link for filename dedup");
+    }
+
+    @Test
+    public void buildDownloadSuffixFallsBackToPlainDownloadWhenAltMissing() {
+        List<String> collected = List.of("![](/api/agents/1/files/screenshot-A.png)");
+        var content = "No image here in text.";
+        var suffix = AgentRunner.buildDownloadSuffix(collected, content, "web");
+        assertTrue(suffix.contains("[download](/api/agents/1/files/screenshot-A.png)"),
+                "empty alt should produce bare \"download\" label: " + suffix);
+    }
+
+    @Test
+    public void buildDownloadSuffixReturnsEmptyWhenNoImagesCollected() {
+        assertEquals("", AgentRunner.buildDownloadSuffix(new ArrayList<>(), "some content", "web"));
+    }
+
+    @Test
+    public void buildDownloadSuffixHandlesNullInputsGracefully() {
+        // Null collected list → empty suffix.
+        assertEquals("", AgentRunner.buildDownloadSuffix(null, "content", "web"));
+        // Null content on web → treated as empty content, suffix fires.
+        var suffix = AgentRunner.buildDownloadSuffix(List.of(
+                "![Screenshot](/api/agents/1/files/screenshot-A.png)"), null, "web");
+        assertTrue(suffix.contains("[download Screenshot](/api/agents/1/files/screenshot-A.png)"),
+                "null content should behave like empty content on web — suffix appends the link");
+    }
+
+    // ==================== JCLAW-104: accumulating across rounds ====================
+
+    @Test
+    public void collectedImagesAccumulateAcrossSimulatedToolRounds() {
+        // JCLAW-104 sub-bug #1: pre-fix, handleToolCallsStreaming declared a
+        // fresh collectedImages at every recursion depth, so images captured
+        // in round 1 never reached the round-N buildImagePrefix call when
+        // the LLM chose not to re-embed them in the final synthesis.
+        //
+        // This test simulates the turn-scope accumulator the fix installs:
+        // one list, fed by extractImageUrls over multiple tool-result
+        // payloads, then consumed by buildImagePrefix against a final
+        // synthesis that makes no mention of the image. The image must
+        // still make it into the prefix.
+        var turnImages = new ArrayList<String>();
+        // Round 1: browser navigate — no image in the result
+        AgentRunner.extractImageUrls(
+                "Page: Abundent Academy — HRDC IT Training...",
+                turnImages);
+        // Round 2: browser screenshot — emits the image markdown
+        AgentRunner.extractImageUrls(
+                "![Screenshot](/api/agents/1/files/screenshot-1713100000000.png)\n"
+                        + "[Screenshot already displayed above. Do NOT re-embed...]",
+                turnImages);
+        // Round 3: browser close — no image
+        AgentRunner.extractImageUrls("Browser session closed.", turnImages);
+
+        // Final LLM synthesis: the model obeyed the \"do not re-embed\"
+        // instruction so the content has no image markup at all.
+        var finalContent = "Is there anything else you'd like me to do with this website?";
+        var prefix = AgentRunner.buildImagePrefix(turnImages, finalContent);
+
+        assertTrue(prefix.contains("screenshot-1713100000000.png"),
+                "screenshot from an intermediate round must survive to the final buildImagePrefix "
+                        + "call; prefix was: " + prefix);
+        assertTrue(prefix.startsWith("![Screenshot]"),
+                "prefix should lead with the markdown image so the frontend renders inline; "
+                        + "actual prefix: " + prefix);
+    }
 }

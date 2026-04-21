@@ -279,25 +279,40 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void transportIsEditInPlaceForGroupAndSupergroupAndChannel() {
+    public void transportIsDraftForGroupSupergroupAndChannel() {
+        // JCLAW-105: Bot API 9.5 (2026-03-01) lifted the private-chats-only
+        // restriction. DRAFT is now the default for any non-blank chat type;
+        // runtime fallback handles the edge cases Telegram still rejects.
         for (String type : new String[] { "group", "supergroup", "channel" }) {
             var sink = new TelegramStreamingSink("tok", "chat", null, null, type);
-            assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
+            assertEquals(TelegramStreamingSink.Transport.DRAFT,
                     sink.transportForTest(),
-                    "chat.type=" + type + " should select EDIT_IN_PLACE");
+                    "chat.type=" + type + " should select DRAFT post-Bot-API-9.5");
         }
     }
 
     @Test
-    public void transportIsEditInPlaceForNullOrUnknownChatType() {
-        // Defensive: callers that couldn't parse chat.type pass null; that
-        // must fall to EDIT_IN_PLACE so we don't attempt drafts in chats
-        // where Telegram would 400 us.
+    public void transportIsDraftForUnknownButNonBlankChatType() {
+        // Forward-compat: if Telegram adds a new chat.type string we don't
+        // recognize, we still attempt DRAFT. The runtime fallback classifier
+        // handles any server-side rejection cleanly.
+        var sink = new TelegramStreamingSink("tok", "chat", null, null, "business_chat");
+        assertEquals(TelegramStreamingSink.Transport.DRAFT, sink.transportForTest());
+    }
+
+    @Test
+    public void transportIsEditInPlaceForNullOrBlankChatType() {
+        // Defensive: callers that couldn't parse chat.type pass null, or the
+        // field is absent from the inbound update. Fall back to EDIT_IN_PLACE
+        // so we don't issue a DRAFT request we have no signal to support.
         assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
                 new TelegramStreamingSink("tok", "chat", null, null, null)
                         .transportForTest());
         assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
-                new TelegramStreamingSink("tok", "chat", null, null, "weird_new_type")
+                new TelegramStreamingSink("tok", "chat", null, null, "")
+                        .transportForTest());
+        assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
+                new TelegramStreamingSink("tok", "chat", null, null, "   ")
                         .transportForTest());
     }
 

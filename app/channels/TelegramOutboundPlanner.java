@@ -35,12 +35,17 @@ public final class TelegramOutboundPlanner {
     /**
      * Markdown link pattern. Accepts both the canonical angle-bracket form
      * {@code [text](<path>)} from the file delivery convention and the plain
-     * {@code [text](path)} form — agents produce both. Group 1 is the display
-     * text, group 2 is the path (angle brackets stripped if present).
+     * {@code [text](path)} form — agents produce both. The optional leading
+     * {@code !?} lets the match envelope include a markdown-image prefix so
+     * the {@code !} doesn't leak into a standalone text segment when the
+     * planner cuts around the match (a visible bug pre-JCLAW-104 once
+     * {@code buildImagePrefix} started prepending {@code ![Screenshot](url)}
+     * on every turn). Group 1 is the display text, group 2 is the path
+     * (angle brackets stripped if present).
      */
     private static final Pattern LINK_PATTERN = Pattern.compile(
-            "\\[([^\\]]+)\\]\\(<([^>]+)>\\)"
-                    + "|\\[([^\\]]+)\\]\\(([^)\\s]+)\\)");
+            "!?\\[([^\\]]+)\\]\\(<([^>]+)>\\)"
+                    + "|!?\\[([^\\]]+)\\]\\(([^)\\s]+)\\)");
 
     /**
      * Matches JClaw's workspace-file serve URL as produced by the Playwright tool
@@ -75,6 +80,15 @@ public final class TelegramOutboundPlanner {
         var segments = new ArrayList<Segment>();
         var matcher = LINK_PATTERN.matcher(markdown);
         int cursor = 0;
+        // JCLAW-104: tools like the Playwright screenshot instruct the LLM to
+        // include BOTH a markdown image ({@code ![alt](url)}) and a plain text
+        // link ({@code [text](url)}) pointing at the same file URL. Our regex
+        // treats both as file references, so without dedup the planner emits
+        // two FileSegments for the same file and Telegram receives two uploads.
+        // Track resolved canonical paths and let only the first occurrence
+        // become a FileSegment; subsequent references stay inside the
+        // surrounding text (they still render as clickable links).
+        var seenFiles = new java.util.HashSet<String>();
 
         while (matcher.find()) {
             // Either the angle-bracket branch or the plain-form branch fired;
@@ -102,6 +116,20 @@ public final class TelegramOutboundPlanner {
 
             File resolved = resolveWorkspaceFile(agentName, relative);
             if (resolved == null) continue;
+
+            // JCLAW-104: if we've already emitted this file as a segment,
+            // treat this match as ordinary text — don't cut the markdown or
+            // add a second FileSegment. The canonical path is the dedupe
+            // key so two references via different-looking URLs (e.g. one
+            // through /api/agents/N/files and one through a relative path)
+            // still converge to a single segment.
+            String canonical;
+            try {
+                canonical = resolved.getCanonicalPath();
+            } catch (java.io.IOException e) {
+                canonical = resolved.getAbsolutePath();
+            }
+            if (!seenFiles.add(canonical)) continue;
 
             // Everything between the previous cut and this match stays as text.
             String before = markdown.substring(cursor, matcher.start());

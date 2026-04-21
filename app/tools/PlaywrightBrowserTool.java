@@ -182,22 +182,46 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 
     /**
      * Build the tool-result string for a captured screenshot. The markdown image
-     * tag is included so {@code AgentRunner.extractImageUrls} picks it up and
-     * prepends the rendered screenshot to the assistant message. The instruction
-     * tells the LLM the image is already displayed (so it must not re-embed it
-     * as an image in either markdown or HTML form, to avoid a duplicate render)
-     * and provides a ready-to-copy markdown link template so the URL surfaces
-     * as a clickable reference in the assistant's reply alongside the inline
-     * rendering.
+     * tag is included so {@code AgentRunner.extractImageUrls} picks it up — the
+     * runtime then guarantees both the inline image (via
+     * {@code buildImagePrefix}) and a download link below (via
+     * {@code buildDownloadSuffix}) in the assistant message. The instruction
+     * describes what's already handled so the LLM can focus on the
+     * page-description portion of its reply rather than juggling embed / link
+     * directives.
+     *
+     * <p>Pre-JCLAW-104 this string carried two explicit directives ("Do NOT
+     * re-embed" and "SHOULD include the link") that papered over two gaps in
+     * the runtime — the first fixed by filename-aware dedup in buildImagePrefix
+     * + the Telegram planner canonical-path dedup, the second fixed by the
+     * deterministic download-link suffix. Both directives became redundant
+     * once the runtime guarantees those outcomes, and the "SHOULD include the
+     * link" directive became actively harmful (some models produced duplicate
+     * links). The replacement is descriptive rather than prescriptive.
      *
      * <p>Exposed for unit tests; not part of the public tool API.
      */
     public static String formatScreenshotResult(String url) {
+        // Keep the markdown image so AgentRunner.extractImageUrls picks up
+        // the URL for the buildImagePrefix pipeline. Everything else is the
+        // LLM's call — if the user asked only to take a screenshot, a short
+        // acknowledgment is fine; if they asked for a summary, it'll describe.
+        // Pre-JCLAW-104 this instruction was a three-directive block telling
+        // the LLM what to embed, what not to embed, and what link to include;
+        // every directive has been replaced by a runtime guarantee (see the
+        // class javadoc).
+        //
+        // The one remaining directive — "don't quote the file path" — targets
+        // a specific chatty-model failure mode (observed with Kimi-K2.5 on
+        // Telegram): models sometimes echo the URL from the tool return as
+        // a parenthetical like "(Screenshot file saved to: /api/agents/1/...)"
+        // which renders in Telegram as a plain-text monospace blob with no
+        // clickable affordance. The runtime handles the image display and
+        // download surface on both channels, so the path is internal
+        // bookkeeping the LLM shouldn't surface.
         return ("![Screenshot](%s)\n"
-                + "[Screenshot already displayed above. Do NOT re-embed it as an image "
-                + "(no `![...](...)` markdown or `<img>` HTML), but you SHOULD include "
-                + "the link `[screenshot](%s)` in your reply so the user has a clickable reference.]")
-                .formatted(url, url);
+                + "[Screenshot captured. Don't quote the file path in your reply — "
+                + "the user already sees the image.]").formatted(url);
     }
 
     private String evaluate(Page page, String expression) {
