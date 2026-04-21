@@ -219,8 +219,12 @@ public final class TelegramPollingRunner {
      */
     private static void dispatch(Long bindingId, Update update) {
         try {
-            var msg = TelegramChannel.parseUpdate(update);
-            if (msg == null) return;
+            // JCLAW-109: parse inline-keyboard callbacks first so text-message
+            // parsing stays uncluttered. parseCallback returns null for any
+            // non-callback update, so we fall through to the message path below.
+            var callback = TelegramChannel.parseCallback(update);
+            var msg = callback == null ? TelegramChannel.parseUpdate(update) : null;
+            if (callback == null && msg == null) return;
 
             // Pull everything we need inside the transaction so the outbound send
             // path doesn't touch JPA-managed state on a non-request thread.
@@ -239,6 +243,17 @@ public final class TelegramPollingRunner {
             if (ctx == null || !ctx.enabled() || ctx.agent() == null) {
                 EventLogger.warn("channel", null, "telegram",
                         "Dropping update for missing/disabled binding %d".formatted(bindingId));
+                return;
+            }
+
+            if (callback != null) {
+                if (!ctx.telegramUserId().equals(callback.fromId())) {
+                    EventLogger.warn("channel", ctx.agent().name, "telegram",
+                            "Rejected callback from user %s: binding %d is bound to user %s".formatted(
+                                    callback.fromId(), bindingId, ctx.telegramUserId()));
+                    return;
+                }
+                TelegramCallbackDispatcher.dispatch(ctx.botToken(), ctx.agent(), callback);
                 return;
             }
 

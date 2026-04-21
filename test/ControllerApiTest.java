@@ -531,6 +531,29 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
+    public void configSaveProviderEnabledFlagRoundTrips() {
+        // JCLAW-110: the Settings toggle writes provider.NAME.enabled via the
+        // standard config API. The reserved-key guard is namespaced to the
+        // loadtest-mock prefix, so this POST must succeed for normal providers
+        // and the value must come back on GET.
+        login();
+        try {
+            var body = """
+                    {"key":"provider.openrouter.enabled","value":"false"}
+                    """;
+            var response = POST("/api/config", "application/json", body);
+            assertIsOk(response);
+
+            var getResp = GET("/api/config");
+            assertIsOk(getResp);
+            assertTrue(getContent(getResp).contains("provider.openrouter.enabled"),
+                    "round-tripped enabled key should appear in /api/config");
+        } finally {
+            services.ConfigService.delete("provider.openrouter.enabled");
+        }
+    }
+
+    @Test
     public void agentsListHidesLoadtestAgent() {
         login();
         services.Tx.run(() -> {

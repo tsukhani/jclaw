@@ -141,11 +141,16 @@ public final class MockTelegramServer implements AutoCloseable {
                 || m.equals("deletemessage")
                 || m.equals("sendchataction")
                 || m.equals("setwebhook")
-                || m.equals("setmycommands")) {
+                || m.equals("setmycommands")
+                // JCLAW-109: answerCallbackQuery returns True per the Bot API.
+                // editMessageText can return True or the updated Message — the
+                // SDK accepts either, but True is the safer default since the
+                // test assertions only care about the request side.
+                || m.equals("answercallbackquery")
+                || m.equals("editmessagetext")) {
             return DEFAULT_BOOLEAN_RESPONSE;
         }
-        // Message-returning methods: sendMessage, editMessageText,
-        // sendPhoto, sendDocument, etc.
+        // Message-returning methods: sendMessage, sendPhoto, sendDocument.
         return DEFAULT_MESSAGE_RESPONSE;
     }
 

@@ -146,8 +146,12 @@ public final class Commands {
      * the first whitespace. Returns null when the command has no arguments.
      * {@code /model openrouter/gpt-5} yields {@code "openrouter/gpt-5"};
      * {@code /model} yields null.
+     *
+     * <p>Public so callers that already {@link #parse} can thread the raw
+     * user text through the args-carrying {@link #execute} overload
+     * without re-running the parser.
      */
-    private static String extractArgs(String text) {
+    public static String extractArgs(String text) {
         if (text == null) return null;
         var trimmed = text.strip();
         var firstSpace = indexOfWhitespace(trimmed);
@@ -256,6 +260,19 @@ public final class Commands {
      */
     private static Result executeModel(Agent agent, String channelType, Conversation current, String args) {
         if (args == null || args.isBlank()) {
+            // JCLAW-109: on Telegram, render the short summary with an
+            // inline-keyboard selector. The handler sends the keyboard
+            // message itself via TelegramChannel.sendMessageWithKeyboard,
+            // so we return an empty responseText — processInboundForAgentStreaming
+            // skips the default sink.seal when the text is empty.
+            if ("telegram".equals(channelType) && current != null && agent != null) {
+                var delivered = channels.TelegramModelSelector.sendSummary(agent, current);
+                EventLogger.info("SLASH_COMMAND", agent.name, channelType,
+                        "/model (summary+keyboard) for conversation " + current.id
+                                + (delivered ? "" : " — delivery failed"));
+                return new Result(current, delivered ? "" : buildModelResponse(agent, current), Command.MODEL);
+            }
+            // Web, tests, or no-conversation fallback: full detail text as before.
             var responseText = Tx.run(() -> {
                 var text = buildModelResponse(agent, current);
                 persistCannedResponseInTx(current, text);
@@ -263,6 +280,17 @@ public final class Commands {
             });
             EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
                     "/model" + (current != null ? " for conversation " + current.id : ""));
+            return new Result(current, responseText, Command.MODEL);
+        }
+        // /model status — the full detail view, callable explicitly on any channel.
+        if (args.equalsIgnoreCase("status")) {
+            var responseText = Tx.run(() -> {
+                var text = buildModelResponse(agent, current);
+                persistCannedResponseInTx(current, text);
+                return text;
+            });
+            EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+                    "/model status" + (current != null ? " for conversation " + current.id : ""));
             return new Result(current, responseText, Command.MODEL);
         }
         if (args.equalsIgnoreCase("reset")) {
@@ -369,7 +397,7 @@ public final class Commands {
         return agent != null ? agent.modelId : null;
     }
 
-    static String buildModelResponse(Agent agent, Conversation current) {
+    public static String buildModelResponse(Agent agent, Conversation current) {
         if (agent == null) return "No agent bound to this conversation.";
         var providerName = effectiveProviderName(agent, current);
         var modelId = effectiveModelIdFor(agent, current);
@@ -414,7 +442,7 @@ public final class Commands {
      * a shrinkage warning). Validation failures return an explanatory message
      * without mutating state. Caller is responsible for opening the transaction.
      */
-    static String performModelSwitch(Agent agent, Conversation current, String args) {
+    public static String performModelSwitch(Agent agent, Conversation current, String args) {
         if (current == null) {
             return "No active conversation — cannot switch models without a target.";
         }

@@ -6,13 +6,17 @@ import models.Agent;
 import models.TelegramBinding;
 import okhttp3.OkHttpClient;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
+import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendPhoto;
 import org.telegram.telegrambots.meta.api.methods.updates.SetWebhook;
+import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
+import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
 import org.telegram.telegrambots.meta.api.objects.InputFile;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
@@ -47,6 +51,17 @@ public class TelegramChannel implements Channel {
      */
     public record InboundMessage(String chatId, String chatType, String text,
                                  String fromId, String fromUsername) {}
+
+    /**
+     * Inbound callback_query payload (JCLAW-109). Emitted by
+     * {@link #parseUpdate(Update)} when the update is a tap on an inline
+     * keyboard button. Carries the callback id (for answerCallbackQuery),
+     * the chat + user identity (for binding authorization), the original
+     * message id (so the handler can edit-in-place), and the opaque data
+     * string (parsed by the kind-specific dispatcher).
+     */
+    public record InboundCallback(String callbackId, String chatId, String chatType,
+                                  String fromId, Integer messageId, String data) {}
 
     private static final ObjectMapper JACKSON = new ObjectMapper();
 
@@ -352,6 +367,49 @@ public class TelegramChannel implements Channel {
         return new InboundMessage(chatId, chatType, text, fromId, fromUsername);
     }
 
+    /**
+     * JCLAW-109: parse an SDK {@link Update} for an inline-keyboard
+     * callback query. Returns null when the update isn't a callback,
+     * when the callback has no data field (Telegram theoretically allows
+     * games without data — we don't use that), or when identity fields
+     * required for authorization are missing. Separate entry point from
+     * {@link #parseUpdate(Update)} so callers can cleanly distinguish
+     * "text message arrived" from "keyboard tap arrived."
+     */
+    public static InboundCallback parseCallback(Update update) {
+        if (update == null || update.getCallbackQuery() == null) return null;
+        CallbackQuery cq = update.getCallbackQuery();
+        if (cq.getData() == null || cq.getData().isBlank()) return null;
+        if (cq.getFrom() == null) return null;
+
+        String callbackId = cq.getId();
+        String fromId = String.valueOf(cq.getFrom().getId());
+        String chatId = null;
+        String chatType = null;
+        Integer messageId = null;
+        var origin = cq.getMessage();
+        if (origin != null) {
+            messageId = origin.getMessageId();
+            if (origin instanceof Message mm) {
+                chatId = mm.getChatId() != null ? String.valueOf(mm.getChatId()) : null;
+                chatType = mm.getChat() != null ? mm.getChat().getType() : null;
+            }
+        }
+        return new InboundCallback(callbackId, chatId, chatType, fromId, messageId, cq.getData());
+    }
+
+    /** Parse a Gson {@link JsonObject} update (webhook payload) into an {@link InboundCallback}. */
+    public static InboundCallback parseCallback(JsonObject update) {
+        try {
+            Update sdk = JACKSON.readValue(update.toString(), Update.class);
+            return parseCallback(sdk);
+        } catch (Exception e) {
+            EventLogger.warn("channel", null, "telegram",
+                    "Callback parse error: %s".formatted(e.getMessage()));
+            return null;
+        }
+    }
+
     // ── Per-instance send path ──
 
     /**
@@ -425,6 +483,83 @@ public class TelegramChannel implements Channel {
         } catch (TelegramApiException e) {
             EventLogger.warn("channel", null, "telegram",
                     "Send failed: %s".formatted(e.getMessage()));
+            return false;
+        }
+    }
+
+    // ── JCLAW-109: inline-keyboard send + callback plumbing ────────────
+
+    /**
+     * Send an HTML-formatted message with an inline keyboard attached
+     * (JCLAW-109). Returns the new message id on success (so the caller
+     * can later {@code editMessageText} it), or null on failure. Single
+     * Bot API call — no chunking or planner pass, because keyboard
+     * messages stay well under the 4096-char limit by construction.
+     */
+    public static Integer sendMessageWithKeyboard(String botToken, String chatId,
+                                                   String htmlText, InlineKeyboardMarkup keyboard) {
+        var channel = forToken(botToken);
+        var request = SendMessage.builder()
+                .chatId(chatId)
+                .text(htmlText)
+                .parseMode("HTML")
+                .replyMarkup(keyboard)
+                .build();
+        try {
+            var msg = channel.client.execute(request);
+            return msg.getMessageId();
+        } catch (TelegramApiException e) {
+            EventLogger.warn("channel", null, "telegram",
+                    "sendMessageWithKeyboard failed: %s".formatted(e.getMessage()));
+            return null;
+        }
+    }
+
+    /**
+     * Edit an existing message in-place, optionally attaching a new
+     * inline keyboard (or null to clear it). Used by the callback
+     * dispatcher to drill down / return without cluttering the chat
+     * with a new message per tap.
+     */
+    public static boolean editMessageText(String botToken, String chatId, Integer messageId,
+                                           String htmlText, InlineKeyboardMarkup keyboard) {
+        var channel = forToken(botToken);
+        var builder = EditMessageText.builder()
+                .chatId(chatId)
+                .messageId(messageId)
+                .text(htmlText)
+                .parseMode("HTML");
+        if (keyboard != null) builder.replyMarkup(keyboard);
+        try {
+            channel.client.execute(builder.build());
+            return true;
+        } catch (TelegramApiException e) {
+            EventLogger.warn("channel", null, "telegram",
+                    "editMessageText failed: %s".formatted(e.getMessage()));
+            return false;
+        }
+    }
+
+    /**
+     * Acknowledge a callback query. Telegram requires this within three
+     * seconds or the user sees a spinner. Use {@code showAlert=true} for
+     * validation failures that the user must read (unknown provider,
+     * stale conversation); use {@code showAlert=false} and a null/short
+     * text for routine taps.
+     */
+    public static boolean answerCallbackQuery(String botToken, String callbackId,
+                                               String text, boolean showAlert) {
+        var channel = forToken(botToken);
+        var builder = AnswerCallbackQuery.builder()
+                .callbackQueryId(callbackId)
+                .showAlert(showAlert);
+        if (text != null && !text.isEmpty()) builder.text(text);
+        try {
+            channel.client.execute(builder.build());
+            return true;
+        } catch (TelegramApiException e) {
+            EventLogger.warn("channel", null, "telegram",
+                    "answerCallbackQuery failed: %s".formatted(e.getMessage()));
             return false;
         }
     }

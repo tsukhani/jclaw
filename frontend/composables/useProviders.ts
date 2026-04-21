@@ -34,7 +34,16 @@ export interface ConfigData {
 
 /**
  * Extract configured providers and their models from config entries.
- * Filters out providers without a non-empty API key.
+ * Filters out:
+ * - providers without a non-empty API key (unconfigured)
+ * - providers explicitly marked {@code provider.NAME.enabled=false} (JCLAW-110)
+ *
+ * The enabled-flag filter matches the backend {@code TelegramModelSelector}'s
+ * rule, so the web chat dropdown and the Telegram {@code /model} keyboard
+ * show the same set of providers. Providers without the {@code .enabled}
+ * key remain visible — the key is opt-in, written only when the user
+ * toggles a provider off in Settings (or the load-test harness flips its
+ * own reserved key).
  */
 export function useProviders(configData: Ref<ConfigData | null>) {
   const providers = computed<Provider[]>(() => {
@@ -51,6 +60,15 @@ export function useProviders(configData: Ref<ConfigData | null>) {
       if (e.key.endsWith('.apiKey') && e.key.startsWith('provider.')) {
         const name = e.key.split('.')[1]!
         if (!e.value || e.value === '(empty)') providerMap.delete(name)
+      }
+    }
+
+    // JCLAW-110: drop providers the user has explicitly disabled. Case-
+    // insensitive "false" match matches the backend filter exactly.
+    for (const e of entries) {
+      if (e.key.endsWith('.enabled') && e.key.startsWith('provider.')) {
+        const name = e.key.split('.')[1]!
+        if (e.value && e.value.toLowerCase() === 'false') providerMap.delete(name)
       }
     }
 

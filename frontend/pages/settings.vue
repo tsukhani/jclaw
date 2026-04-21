@@ -153,6 +153,26 @@ async function saveSPField(configKey: string, value: string) {
   }
 }
 
+// JCLAW-110: per-provider enabled flag. A provider is considered enabled
+// unless `provider.NAME.enabled=false` is explicitly set (case-insensitive).
+// Missing key ⇒ enabled, matching the backend TelegramModelSelector filter
+// so the /model keyboard on Telegram and the web chat dropdown agree.
+function isProviderEnabled(name: string): boolean {
+  const entries = configData.value?.entries ?? []
+  const entry = entries.find(e => e.key === `provider.${name}.enabled`)
+  if (!entry) return true
+  return (entry.value ?? '').toLowerCase() !== 'false'
+}
+
+async function toggleProviderEnabled(name: string) {
+  const newVal = isProviderEnabled(name) ? 'false' : 'true'
+  await $fetch('/api/config', {
+    method: 'POST',
+    body: { key: `provider.${name}.enabled`, value: newVal },
+  })
+  refresh()
+}
+
 // Playwright config
 const playwrightEnabled = computed(() => {
   const entries = configData.value?.entries ?? []
@@ -830,14 +850,35 @@ const providerEntries = computed(() => {
       <div
         v-for="[name, entries] in providerEntries.providers"
         :key="name"
-        class="bg-surface-elevated border border-border"
+        :class="isProviderEnabled(name) ? '' : 'opacity-60'"
+        class="bg-surface-elevated border border-border transition-opacity"
       >
-        <div class="px-4 py-2.5 border-b border-border">
+        <div class="px-4 py-2.5 border-b border-border flex items-center gap-2">
           <span class="text-sm font-medium text-fg-strong">{{ name }}</span>
           <span
             v-if="entries.find((e: any) => e.key.endsWith('.apiKey') && e.value && !e.value.startsWith('****') && e.value !== '****')"
-            class="ml-2 text-[10px] text-green-400 border border-green-400/30 px-1"
+            class="text-[10px] text-green-400 border border-green-400/30 px-1"
           >configured</span>
+          <span
+            v-if="!isProviderEnabled(name)"
+            class="text-[10px] text-fg-muted border border-input px-1"
+          >disabled</span>
+          <!-- JCLAW-110: per-provider enable/disable toggle. Hidden from
+               the /model selector and chat dropdown when off. -->
+          <button
+            :aria-label="`${isProviderEnabled(name) ? 'Disable' : 'Enable'} ${name} provider`"
+            :title="isProviderEnabled(name)
+              ? 'Hide this provider from the model selector'
+              : 'Show this provider in the model selector'"
+            :class="isProviderEnabled(name) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+            class="ml-auto relative w-9 h-5 rounded-full transition-colors"
+            @click="toggleProviderEnabled(name)"
+          >
+            <span
+              :class="isProviderEnabled(name) ? 'translate-x-4' : 'translate-x-0.5'"
+              class="block w-4 h-4 bg-white rounded-full transition-transform"
+            />
+          </button>
         </div>
         <div class="divide-y divide-border">
           <!-- Non-models entries (baseUrl, apiKey) -->

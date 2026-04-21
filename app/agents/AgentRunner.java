@@ -1199,7 +1199,8 @@ public class AgentRunner {
             Conversation current = slashCmd.get() == slash.Commands.Command.NEW
                     ? null
                     : services.Tx.run(() -> ConversationService.findOrCreate(agent, channelType, peerId));
-            var result = slash.Commands.execute(slashCmd.get(), agent, channelType, peerId, current);
+            var result = slash.Commands.execute(slashCmd.get(), agent, channelType, peerId, current,
+                    slash.Commands.extractArgs(text));
             sendResponse.accept(peerId, result.responseText());
             return;
         }
@@ -1235,10 +1236,17 @@ public class AgentRunner {
             Conversation current = slashCmd.get() == slash.Commands.Command.NEW
                     ? null
                     : services.Tx.run(() -> ConversationService.findOrCreate(agent, channelType, peerId));
-            var result = slash.Commands.execute(slashCmd.get(), agent, channelType, peerId, current);
+            var result = slash.Commands.execute(slashCmd.get(), agent, channelType, peerId, current,
+                    slash.Commands.extractArgs(text));
             var slashSink = sinkFactory.apply(
                     result.conversation() != null ? result.conversation().id : null);
-            slashSink.seal(result.responseText());
+            // JCLAW-109: an empty responseText is the handler's signal that
+            // it already delivered the reply itself (e.g. /model on Telegram
+            // sent an inline-keyboard message via a dedicated Bot API path).
+            // Fall through to seal only when there's text to emit.
+            if (result.responseText() != null && !result.responseText().isEmpty()) {
+                slashSink.seal(result.responseText());
+            }
             return;
         }
         var conversation = services.Tx.run(() ->

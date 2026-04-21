@@ -79,9 +79,31 @@ public class WebhookTelegramController extends Controller {
 
         try {
             var update = JsonParser.parseString(WebhookUtil.readRawBody()).getAsJsonObject();
+
+            // JCLAW-109: route inline-keyboard callback queries before the
+            // message parse path. parseCallback returns null for non-callback
+            // updates, so this falls through cleanly to the message path
+            // when the update is a regular text message.
+            var callback = TelegramChannel.parseCallback(update);
+            if (callback != null) {
+                if (!ctx.telegramUserId().equals(callback.fromId())) {
+                    EventLogger.warn("channel",
+                            ctx.agent() != null ? ctx.agent().name : null, "telegram",
+                            "Rejected callback from user %s: binding %d is bound to user %s".formatted(
+                                    callback.fromId(), bindingId, ctx.telegramUserId()));
+                    ok();
+                    return;
+                }
+                Thread.ofVirtual().start(() ->
+                        channels.TelegramCallbackDispatcher.dispatch(
+                                ctx.botToken(), ctx.agent(), callback));
+                ok();
+                return;
+            }
+
             var message = TelegramChannel.parseUpdate(update);
             if (message == null) {
-                ok(); // non-message update (edited_message, callback_query, etc.)
+                ok(); // non-message update (edited_message, etc.)
                 return;
             }
 

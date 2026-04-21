@@ -290,4 +290,46 @@ describe('useProviders', () => {
     expect(providers.value).toHaveLength(1)
     expect(providers.value[0]!.name).toBe('openai')
   })
+
+  // JCLAW-110: enabled-flag filter mirrors the backend TelegramModelSelector
+  // so the web chat dropdown and /model keyboard agree on which providers
+  // are visible. Missing key ⇒ enabled; "false" ⇒ filtered out.
+
+  it('filters out providers explicitly disabled via .enabled=false', () => {
+    const configData = makeConfigRef([
+      { key: 'provider.openai.apiKey', value: 'sk-xxxx' },
+      { key: 'provider.openai.models', value: '[{"id":"gpt-4"}]' },
+      { key: 'provider.ollama.apiKey', value: 'xxxx' },
+      { key: 'provider.ollama.models', value: '[{"id":"llama"}]' },
+      { key: 'provider.ollama.enabled', value: 'false' },
+    ])
+
+    const { providers } = useProviders(configData)
+    expect(providers.value).toHaveLength(1)
+    expect(providers.value[0]!.name).toBe('openai')
+  })
+
+  it('keeps providers with .enabled=true or missing key', () => {
+    const configData = makeConfigRef([
+      { key: 'provider.openai.apiKey', value: 'sk-xxxx' },
+      { key: 'provider.openai.models', value: '[{"id":"gpt-4"}]' },
+      { key: 'provider.openai.enabled', value: 'true' },
+      { key: 'provider.ollama.apiKey', value: 'xxxx' },
+      { key: 'provider.ollama.models', value: '[{"id":"llama"}]' },
+      // no .enabled key for ollama → visible by default
+    ])
+
+    const { providers } = useProviders(configData)
+    expect(providers.value).toHaveLength(2)
+  })
+
+  it('enabled-flag match is case-insensitive', () => {
+    const configData = makeConfigRef([
+      { key: 'provider.openai.apiKey', value: 'sk-xxxx' },
+      { key: 'provider.openai.enabled', value: 'FALSE' },
+    ])
+
+    const { providers } = useProviders(configData)
+    expect(providers.value).toHaveLength(0)
+  })
 })
