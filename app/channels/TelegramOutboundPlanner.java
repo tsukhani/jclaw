@@ -80,14 +80,10 @@ public final class TelegramOutboundPlanner {
         var segments = new ArrayList<Segment>();
         var matcher = LINK_PATTERN.matcher(markdown);
         int cursor = 0;
-        // JCLAW-104: tools like the Playwright screenshot instruct the LLM to
-        // include BOTH a markdown image ({@code ![alt](url)}) and a plain text
-        // link ({@code [text](url)}) pointing at the same file URL. Our regex
-        // treats both as file references, so without dedup the planner emits
-        // two FileSegments for the same file and Telegram receives two uploads.
-        // Track resolved canonical paths and let only the first occurrence
-        // become a FileSegment; subsequent references stay inside the
-        // surrounding text (they still render as clickable links).
+        // JCLAW-104 + JCLAW-123: tools like the Playwright screenshot produce
+        // both a markdown image ({@code ![alt](url)}) and a plain text link
+        // ({@code [text](url)}) pointing at the same file URL. Our regex
+        // matches both. Dedupe by canonical resolved path.
         var seenFiles = new java.util.HashSet<String>();
 
         while (matcher.find()) {
@@ -117,27 +113,38 @@ public final class TelegramOutboundPlanner {
             File resolved = resolveWorkspaceFile(agentName, relative);
             if (resolved == null) continue;
 
-            // JCLAW-104: if we've already emitted this file as a segment,
-            // treat this match as ordinary text — don't cut the markdown or
-            // add a second FileSegment. The canonical path is the dedupe
-            // key so two references via different-looking URLs (e.g. one
-            // through /api/agents/N/files and one through a relative path)
-            // still converge to a single segment.
             String canonical;
             try {
                 canonical = resolved.getCanonicalPath();
             } catch (java.io.IOException e) {
                 canonical = resolved.getAbsolutePath();
             }
-            if (!seenFiles.add(canonical)) continue;
 
-            // Everything between the previous cut and this match stays as text.
+            // JCLAW-123: advance cursor past every file-ref match (whether
+            // we're emitting a new segment or deduping a repeat). Pre-JCLAW-123
+            // dedup left the duplicate markdown in the text segment, which the
+            // HTML formatter converted to an anchor pointing at the localhost
+            // /api/agents/... URL — a visible-but-broken link in Telegram.
+            // Cutting the match out uniformly means the surrounding text stays
+            // clean regardless of how many times the LLM mentions the file.
             String before = markdown.substring(cursor, matcher.start());
             if (!before.isEmpty()) {
                 appendOrMergeText(segments, before);
             }
-            segments.add(new FileSegment(display, resolved, isImageFilename(resolved.getName())));
             cursor = matcher.end();
+
+            if (!seenFiles.add(canonical)) continue;
+
+            boolean isImage = isImageFilename(resolved.getName());
+            segments.add(new FileSegment(display, resolved, isImage));
+            // JCLAW-123: Telegram compresses photos aggressively (JPEG re-encode,
+            // downscaled). For image files we also emit a sendDocument pass so
+            // the user gets the original-quality downloadable file alongside
+            // the inline preview. Non-image files already deliver as documents
+            // on the first pass — no duplicate needed.
+            if (isImage) {
+                segments.add(new FileSegment(display, resolved, false));
+            }
         }
 
         if (cursor < markdown.length()) {

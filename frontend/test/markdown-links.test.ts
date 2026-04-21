@@ -122,4 +122,81 @@ describe('rewriteWorkspaceLinks', () => {
       expect(relative.hasAttribute('download')).toBe(true)
     })
   })
+
+  // JCLAW-124: img src handling. The LLM sometimes emits `![alt](filename.png)`
+  // with a bare filename, which marked renders as <img src="filename.png"> —
+  // broken in the browser because it resolves against /chat → /filename.png →
+  // 404. Rewrite to the absolute workspace URL so these render.
+  describe('img src rewriting', () => {
+    function firstImg(html: string): Element | null {
+      return parse(html).querySelector('img')
+    }
+
+    it('rewrites a bare-filename img src to the workspace URL', () => {
+      const input = '<img src="screenshot-1776781604684.png" alt="Screenshot">'
+      const img = firstImg(rewriteWorkspaceLinks(input, AGENT_ID))!
+      expect(img.getAttribute('src')).toBe('/api/agents/1/files/screenshot-1776781604684.png')
+    })
+
+    it('rewrites a nested relative img src to the workspace URL', () => {
+      const input = '<img src="subdir/chart.png" alt="Chart">'
+      const img = firstImg(rewriteWorkspaceLinks(input, AGENT_ID))!
+      expect(img.getAttribute('src')).toBe('/api/agents/1/files/subdir/chart.png')
+    })
+
+    it('leaves an already-absolute workspace img src alone', () => {
+      const input = '<img src="/api/agents/1/files/screenshot.png" alt="s">'
+      const img = firstImg(rewriteWorkspaceLinks(input, AGENT_ID))!
+      expect(img.getAttribute('src')).toBe('/api/agents/1/files/screenshot.png')
+    })
+
+    it('leaves http(s) external img src alone', () => {
+      const input = '<img src="https://example.com/foo.png" alt="ex">'
+      const img = firstImg(rewriteWorkspaceLinks(input, AGENT_ID))!
+      expect(img.getAttribute('src')).toBe('https://example.com/foo.png')
+    })
+
+    it('leaves an img src pointing at a different agent workspace alone', () => {
+      // Same cross-agent safety guard anchors honor.
+      const input = '<img src="/api/agents/99/files/other.png" alt="other">'
+      const img = firstImg(rewriteWorkspaceLinks(input, AGENT_ID))!
+      expect(img.getAttribute('src')).toBe('/api/agents/99/files/other.png')
+    })
+
+    it('preserves spaces-in-filenames by round-tripping encodeURIComponent', () => {
+      const input = '<img src="my%20shot.png" alt="spaces">'
+      const img = firstImg(rewriteWorkspaceLinks(input, AGENT_ID))!
+      expect(img.getAttribute('src')).toBe('/api/agents/1/files/my%20shot.png')
+    })
+
+    it('leaves data: and javascript: img src alone', () => {
+      for (const scheme of ['data:image/png;base64,AAA', 'javascript:void(0)']) {
+        const input = `<img src="${scheme}" alt="x">`
+        const img = firstImg(rewriteWorkspaceLinks(input, AGENT_ID))!
+        expect(img.getAttribute('src')).toBe(scheme)
+      }
+    })
+
+    it('handles mixed images and links in one pass — the reproduction shape', () => {
+      // Exactly what the 2026-04-22 screenshot showed: one absolute-URL img
+      // (works), one bare-filename img (pre-fix: broken), one absolute-URL
+      // anchor (works). All three must come out correct.
+      const input = [
+        '<p><img src="/api/agents/1/files/screenshot-1776781604684.png" alt="Screenshot"></p>',
+        '<p>I\'ve captured the screenshot.</p>',
+        '<p><img src="screenshot-1776781604684.png" alt="Screenshot"></p>',
+        '<p><a href="/api/agents/1/files/screenshot-1776781604684.png">download Screenshot</a></p>',
+      ].join('')
+      const doc = parse(rewriteWorkspaceLinks(input, AGENT_ID))
+      const imgs = Array.from(doc.querySelectorAll('img'))
+      expect(imgs).toHaveLength(2)
+      expect(imgs[0]!.getAttribute('src'))
+        .toBe('/api/agents/1/files/screenshot-1776781604684.png')
+      expect(imgs[1]!.getAttribute('src'))
+        .toBe('/api/agents/1/files/screenshot-1776781604684.png')
+      const a = doc.querySelector('a')!
+      expect(a.getAttribute('href')).toBe('/api/agents/1/files/screenshot-1776781604684.png')
+      expect(a.hasAttribute('download')).toBe(true)
+    })
+  })
 })

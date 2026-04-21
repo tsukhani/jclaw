@@ -88,6 +88,28 @@ public class TelegramChannel implements Channel {
     private static final int BOT_API_READ_TIMEOUT_SEC = 3;
     private static final int BOT_API_WRITE_TIMEOUT_SEC = 2;
 
+    /**
+     * Timeouts for {@code sendPhoto} / {@code sendDocument} (JCLAW-122). The
+     * 2 s write timeout the text paths use is far too tight for a multi-MB
+     * upload — a 1–2 MB screenshot on a typical home connection needs
+     * several seconds of write bandwidth, plus Telegram server processing.
+     * Before this split, every photo upload silently timed out into a
+     * {@code TelegramApiException("Unable to execute sendphoto method")}
+     * and the planner dropped the file segment. Generous read and write
+     * accommodate the largest files the planner will deliver (10 MB photo
+     * limit, 50 MB document limit in practice).
+     */
+    private static final int BOT_API_UPLOAD_CONNECT_TIMEOUT_SEC = 5;
+    private static final int BOT_API_UPLOAD_READ_TIMEOUT_SEC = 60;
+    private static final int BOT_API_UPLOAD_WRITE_TIMEOUT_SEC = 60;
+
+    /**
+     * Dedicated upload client for {@link #trySendPhoto} / {@link #trySendDocument}.
+     * Distinct from {@link #client} so file uploads don't share the aggressive
+     * text-message timeouts. Configured in the constructor alongside {@code client}.
+     */
+    private final TelegramClient uploadClient;
+
     private TelegramChannel(String botToken) {
         this(botToken, null);
     }
@@ -103,14 +125,40 @@ public class TelegramChannel implements Channel {
      */
     TelegramChannel(String botToken, org.telegram.telegrambots.meta.TelegramUrl urlOverride) {
         this.botToken = botToken;
-        var okHttp = new OkHttpClient.Builder()
+        // Fast client for text paths: sendMessage, editMessageText, typing,
+        // callback answers, etc. Tight timeouts fail fast into the
+        // streaming-sink retry tick (JCLAW-98).
+        var textOkHttp = new OkHttpClient.Builder()
                 .connectTimeout(BOT_API_CONNECT_TIMEOUT_SEC, TimeUnit.SECONDS)
                 .readTimeout(BOT_API_READ_TIMEOUT_SEC, TimeUnit.SECONDS)
                 .writeTimeout(BOT_API_WRITE_TIMEOUT_SEC, TimeUnit.SECONDS)
                 .build();
         this.client = urlOverride != null
-                ? new OkHttpTelegramClient(okHttp, botToken, urlOverride)
-                : new OkHttpTelegramClient(okHttp, botToken);
+                ? new OkHttpTelegramClient(textOkHttp, botToken, urlOverride)
+                : new OkHttpTelegramClient(textOkHttp, botToken);
+        // Upload client for sendPhoto / sendDocument (JCLAW-122). Must be
+        // tolerant of multi-second upload bodies and Telegram's slower
+        // file-processing path.
+        //
+        // JCLAW-126: retryOnConnectionFailure set to false. OkHttp's default
+        // of true silently retries on any transient connection issue —
+        // including a server-side RST mid-upload — with no upper bound on
+        // total attempts until the write timeout expires. Combined with our
+        // 60 s write timeout, one transient reset can compound into 60-120 s
+        // of invisible wait. Disabling auto-retry makes a failure visible
+        // (the SDK throws, we log a warn, the planner surfaces it) instead
+        // of hiding in socket-level replay. The streaming-sink and
+        // outbound-planner retry at a higher level where we control the
+        // policy.
+        var uploadOkHttp = new OkHttpClient.Builder()
+                .connectTimeout(BOT_API_UPLOAD_CONNECT_TIMEOUT_SEC, TimeUnit.SECONDS)
+                .readTimeout(BOT_API_UPLOAD_READ_TIMEOUT_SEC, TimeUnit.SECONDS)
+                .writeTimeout(BOT_API_UPLOAD_WRITE_TIMEOUT_SEC, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(false)
+                .build();
+        this.uploadClient = urlOverride != null
+                ? new OkHttpTelegramClient(uploadOkHttp, botToken, urlOverride)
+                : new OkHttpTelegramClient(uploadOkHttp, botToken);
     }
 
     /** Resolve (or lazily create) the singleton for {@code botToken}. */
@@ -472,14 +520,26 @@ public class TelegramChannel implements Channel {
                 .chatId(peerId)
                 .photo(new InputFile(file, displayName != null ? displayName : file.getName()))
                 .build();
+        // JCLAW-126: explicit upload timing so we can pinpoint slowdowns.
+        // Format: elapsedMs, file size in bytes. Together with the matching
+        // warn on failure, this bounds the upload wall-clock in the log.
+        long startNs = System.nanoTime();
+        long fileSize = file.length();
         try {
-            client.execute(request);
+            // JCLAW-122: upload via uploadClient (60 s r/w) rather than client
+            // (2 s w) — a 1–2 MB screenshot reliably times out on the text-path
+            // timeouts.
+            uploadClient.execute(request);
+            long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
             EventLogger.info("channel", null, "telegram",
-                    "Photo sent to chat %s: %s".formatted(peerId, displayName));
+                    "Photo sent to chat %s: %s (elapsedMs=%d, bytes=%d)"
+                            .formatted(peerId, displayName, elapsedMs, fileSize));
             return true;
         } catch (TelegramApiException e) {
+            long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
             EventLogger.warn("channel", null, "telegram",
-                    "Photo send failed for %s: %s".formatted(displayName, e.getMessage()));
+                    "Photo send failed for %s after %dms: %s"
+                            .formatted(displayName, elapsedMs, e.getMessage()));
             return false;
         }
     }
@@ -493,14 +553,23 @@ public class TelegramChannel implements Channel {
                 .chatId(peerId)
                 .document(new InputFile(file, displayName != null ? displayName : file.getName()))
                 .build();
+        long startNs = System.nanoTime();
+        long fileSize = file.length();
         try {
-            client.execute(request);
+            // JCLAW-122: upload via uploadClient (60 s r/w) rather than client
+            // (2 s w). Same rationale as trySendPhoto above — document bodies
+            // are often larger than photos (PDFs, reports, zips).
+            uploadClient.execute(request);
+            long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
             EventLogger.info("channel", null, "telegram",
-                    "Document sent to chat %s: %s".formatted(peerId, displayName));
+                    "Document sent to chat %s: %s (elapsedMs=%d, bytes=%d)"
+                            .formatted(peerId, displayName, elapsedMs, fileSize));
             return true;
         } catch (TelegramApiException e) {
+            long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
             EventLogger.warn("channel", null, "telegram",
-                    "Document send failed for %s: %s".formatted(displayName, e.getMessage()));
+                    "Document send failed for %s after %dms: %s"
+                            .formatted(displayName, elapsedMs, e.getMessage()));
             return false;
         }
     }

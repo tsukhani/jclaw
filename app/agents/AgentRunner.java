@@ -1521,9 +1521,7 @@ public class AgentRunner {
         for (var pattern : List.of(ANY_IMAGE_EMBED, HTML_IMG_EMBED)) {
             var m = pattern.matcher(safeContent);
             while (m.find()) {
-                var url = m.group(1);
-                var slash = url.lastIndexOf('/');
-                var fn = slash >= 0 ? url.substring(slash + 1) : url;
+                var fn = extractFilename(m.group(1));
                 if (!fn.isEmpty()) embeddedFilenames.add(fn);
             }
         }
@@ -1532,14 +1530,32 @@ public class AgentRunner {
         for (var img : collectedImages) {
             var m = PAREN_URL_PATTERN.matcher(img);
             if (m.find()) {
-                var fullUrl = m.group(1);
-                var slash = fullUrl.lastIndexOf('/');
-                var filename = slash >= 0 ? fullUrl.substring(slash + 1) : fullUrl;
+                var filename = extractFilename(m.group(1));
                 if (!filename.isEmpty() && embeddedFilenames.contains(filename)) continue;
             }
             missing.add(img);
         }
         return missing.isEmpty() ? "" : String.join("\n\n", missing) + "\n\n";
+    }
+
+    /**
+     * Extract the trailing filename from a URL or path captured from a
+     * markdown link (JCLAW-125). Strips leading {@code <} / trailing
+     * {@code >} first to handle CommonMark's angle-bracket form
+     * ({@code [text](<url>)}) — without this normalization the dedup
+     * logic in {@link #buildImagePrefix} and {@link #buildDownloadSuffix}
+     * compared {@code "<screenshot-1776813474015.png>"} against the
+     * collected {@code "screenshot-1776813474015.png"}, always missing,
+     * so buildDownloadSuffix appended a duplicate download pill.
+     */
+    public static String extractFilename(String capturedUrl) {
+        if (capturedUrl == null) return "";
+        var url = capturedUrl;
+        if (url.startsWith("<") && url.endsWith(">")) {
+            url = url.substring(1, url.length() - 1);
+        }
+        var slash = url.lastIndexOf('/');
+        return slash >= 0 ? url.substring(slash + 1) : url;
     }
 
     /**
@@ -1591,9 +1607,7 @@ public class AgentRunner {
         for (var pattern : List.of(MARKDOWN_LINK_OR_IMAGE, HTML_IMG_EMBED, HTML_ANCHOR)) {
             var m = pattern.matcher(safeContent);
             while (m.find()) {
-                var url = m.group(1);
-                var slash = url.lastIndexOf('/');
-                var fn = slash >= 0 ? url.substring(slash + 1) : url;
+                var fn = extractFilename(m.group(1));
                 if (!fn.isEmpty()) linkedFilenames.add(fn);
             }
         }
@@ -1604,8 +1618,7 @@ public class AgentRunner {
             var urlMatcher = PAREN_URL_PATTERN.matcher(img);
             if (!urlMatcher.find()) continue;
             var url = urlMatcher.group(1);
-            var slash = url.lastIndexOf('/');
-            var filename = slash >= 0 ? url.substring(slash + 1) : url;
+            var filename = extractFilename(url);
             if (!filename.isEmpty() && linkedFilenames.contains(filename)) continue;
 
             // Pull alt text out of the leading "![alt]" portion; fall back

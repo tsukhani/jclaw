@@ -104,15 +104,22 @@ public class TelegramOutboundPlannerTest extends UnitTest {
 
         var md = "Here is the shot: [capture.png](<capture.png>) as requested.";
         var segments = TelegramOutboundPlanner.plan(md, agent.name);
-        assertEquals(3, segments.size(), () -> "text + file + text: " + segments);
+        // JCLAW-123: an image reference now produces two FileSegments — a
+        // photo (inline preview) and a document (downloadable original).
+        assertEquals(4, segments.size(),
+                () -> "text + photo + document + text: " + segments);
         assertTrue(segments.get(0) instanceof TelegramOutboundPlanner.TextSegment);
         assertTrue(segments.get(1) instanceof TelegramOutboundPlanner.FileSegment);
-        assertTrue(segments.get(2) instanceof TelegramOutboundPlanner.TextSegment);
+        assertTrue(segments.get(2) instanceof TelegramOutboundPlanner.FileSegment);
+        assertTrue(segments.get(3) instanceof TelegramOutboundPlanner.TextSegment);
 
-        var fs = (TelegramOutboundPlanner.FileSegment) segments.get(1);
-        assertEquals("capture.png", fs.displayName());
-        assertTrue(fs.file().exists(), () -> "resolved file should exist: " + fs.file());
-        assertTrue(fs.isImage(), "png must be classified as image");
+        var photoSeg = (TelegramOutboundPlanner.FileSegment) segments.get(1);
+        var docSeg = (TelegramOutboundPlanner.FileSegment) segments.get(2);
+        assertEquals("capture.png", photoSeg.displayName());
+        assertTrue(photoSeg.isImage(), "first image segment must be photo");
+        assertFalse(docSeg.isImage(), "second image segment must be document");
+        assertEquals(photoSeg.file().getAbsolutePath(), docSeg.file().getAbsolutePath(),
+                "photo and document segments must target the same file");
     }
 
     @Test
@@ -180,7 +187,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     // ── Multi-file ordering + text merging ──
 
     @Test
-    public void multipleFilesProduceOneSegmentEach() {
+    public void multipleFilesProduceOneSegmentEachWithDocumentDuplicatesForImages() {
         var agent = AgentService.create("planner-multi", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile(agent.name, "a.png", "a");
         AgentService.writeWorkspaceFile(agent.name, "b.pdf", "b");
@@ -189,23 +196,23 @@ public class TelegramOutboundPlannerTest extends UnitTest {
         var md = "intro [a.png](<a.png>) middle [b.pdf](<b.pdf>) more [c.png](<c.png>) outro";
         var segments = TelegramOutboundPlanner.plan(md, agent.name);
 
-        assertEquals(7, segments.size(),
-                () -> "intro, a, middle, b, more, c, outro: " + segments);
-        assertTrue(segments.get(0) instanceof TelegramOutboundPlanner.TextSegment);
-        assertTrue(segments.get(1) instanceof TelegramOutboundPlanner.FileSegment);
-        assertTrue(segments.get(2) instanceof TelegramOutboundPlanner.TextSegment);
-        assertTrue(segments.get(3) instanceof TelegramOutboundPlanner.FileSegment);
-        assertTrue(segments.get(4) instanceof TelegramOutboundPlanner.TextSegment);
-        assertTrue(segments.get(5) instanceof TelegramOutboundPlanner.FileSegment);
-        assertTrue(segments.get(6) instanceof TelegramOutboundPlanner.TextSegment);
+        // JCLAW-123: images (a.png, c.png) each emit photo+document pairs;
+        // PDFs emit a single document. Result: text + photo(a) + doc(a) + text
+        // + doc(b) + text + photo(c) + doc(c) + text = 9 segments.
+        assertEquals(9, segments.size(),
+                () -> "intro, a-photo, a-doc, middle, b-doc, more, c-photo, c-doc, outro: " + segments);
 
-        // Verify image/doc classification is per-file, not uniform.
-        var fsA = (TelegramOutboundPlanner.FileSegment) segments.get(1);
-        var fsB = (TelegramOutboundPlanner.FileSegment) segments.get(3);
-        var fsC = (TelegramOutboundPlanner.FileSegment) segments.get(5);
-        assertTrue(fsA.isImage());
-        assertFalse(fsB.isImage());
-        assertTrue(fsC.isImage());
+        var fsAPhoto = (TelegramOutboundPlanner.FileSegment) segments.get(1);
+        var fsADoc = (TelegramOutboundPlanner.FileSegment) segments.get(2);
+        var fsBDoc = (TelegramOutboundPlanner.FileSegment) segments.get(4);
+        var fsCPhoto = (TelegramOutboundPlanner.FileSegment) segments.get(6);
+        var fsCDoc = (TelegramOutboundPlanner.FileSegment) segments.get(7);
+
+        assertTrue(fsAPhoto.isImage(), "a.png first pass must be photo");
+        assertFalse(fsADoc.isImage(), "a.png second pass must be document");
+        assertFalse(fsBDoc.isImage(), "b.pdf must be document only");
+        assertTrue(fsCPhoto.isImage(), "c.png first pass must be photo");
+        assertFalse(fsCDoc.isImage(), "c.png second pass must be document");
     }
 
     @Test
@@ -213,10 +220,13 @@ public class TelegramOutboundPlannerTest extends UnitTest {
         var agent = AgentService.create("planner-leading", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile(agent.name, "first.png", "x");
         var segments = TelegramOutboundPlanner.plan("[first.png](<first.png>) prose", agent.name);
-        assertEquals(2, segments.size(),
-                () -> "no empty leading text expected: " + segments);
+        // JCLAW-123: image produces photo + document, then text tail. No
+        // empty leading text segment.
+        assertEquals(3, segments.size(),
+                () -> "no empty leading text; photo + document + tail: " + segments);
         assertTrue(segments.get(0) instanceof TelegramOutboundPlanner.FileSegment);
-        assertTrue(segments.get(1) instanceof TelegramOutboundPlanner.TextSegment);
+        assertTrue(segments.get(1) instanceof TelegramOutboundPlanner.FileSegment);
+        assertTrue(segments.get(2) instanceof TelegramOutboundPlanner.TextSegment);
     }
 
     @Test
@@ -229,24 +239,29 @@ public class TelegramOutboundPlannerTest extends UnitTest {
         // shouldn't cause a zero-length send.
         var md = "[a.png](<a.png>) [b.png](<b.png>)";
         var segments = TelegramOutboundPlanner.plan(md, agent.name);
-        // text+file+text+file pattern — the middle text is just " ".
         assertTrue(segments.size() >= 2);
         int fileCount = (int) segments.stream()
                 .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment)
                 .count();
-        assertEquals(2, fileCount, "both files should be detected");
+        // JCLAW-123: each image produces photo+document, so two images → 4 segments.
+        assertEquals(4, fileCount, "both images should produce photo + document pairs");
     }
 
     // ── JCLAW-104: dedupe same-file references ──
 
     @Test
-    public void duplicateFileReferencesProduceExactlyOneFileSegment() {
-        // JCLAW-104 sub-bug #2: PlaywrightBrowserTool's screenshot result tells
-        // the LLM to include BOTH a markdown image and a text link at the same
-        // URL so the user has an inline render AND a clickable reference. The
-        // planner's LINK_PATTERN doesn't distinguish `![alt](url)` from
-        // `[text](url)`, so pre-fix it emitted two FileSegments for the same
-        // file and Telegram received two sendPhoto uploads. Assert one.
+    public void duplicateFileReferenceEmitsPhotoPlusDocumentAndStripsRedundantLink() {
+        // JCLAW-104 originally asked that the planner dedupe duplicate file
+        // references so Telegram didn't receive two sendPhoto uploads for the
+        // same file. JCLAW-123 revisits this: for images, we WANT two
+        // deliveries — a photo (inline preview) and a document (downloadable
+        // original) — so the user gets both affordances even when the server
+        // is behind localhost with no public URL.
+        //
+        // What we also need: the raw markdown link for the duplicate
+        // reference must NOT leak into the text segment. Pre-JCLAW-123 it
+        // rendered as a visible-but-broken href against the localhost-only
+        // /api/agents/N/files/... URL.
         var agent = AgentService.create("planner-dedupe", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile(agent.name, "screenshot-1776748706808.png", "png-bytes");
 
@@ -258,20 +273,30 @@ public class TelegramOutboundPlannerTest extends UnitTest {
         int fileCount = (int) segments.stream()
                 .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment)
                 .count();
-        assertEquals(1, fileCount,
-                "the same file referenced twice (once as image, once as link) "
-                        + "must produce exactly one FileSegment; got: " + segments);
+        assertEquals(2, fileCount,
+                "image must emit one photo + one document; duplicate link must NOT "
+                        + "produce a third FileSegment; got: " + segments);
 
-        // The second reference should remain visible in text so the user
-        // still sees the \"clickable reference\" the tool asked the LLM to emit.
-        var lastText = segments.stream()
+        var photoSegs = segments.stream()
+                .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment fs && fs.isImage())
+                .count();
+        var docSegs = segments.stream()
+                .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment fs && !fs.isImage())
+                .count();
+        assertEquals(1, photoSegs, "exactly one photo segment");
+        assertEquals(1, docSegs, "exactly one document segment");
+
+        // The duplicate [screenshot](url) markdown must be stripped from the
+        // final text — leaving it in would render as a broken anchor pointing
+        // at a localhost-only URL.
+        var joinedText = segments.stream()
                 .filter(s -> s instanceof TelegramOutboundPlanner.TextSegment)
                 .map(s -> ((TelegramOutboundPlanner.TextSegment) s).markdown())
-                .reduce((a, b) -> b)
-                .orElse("");
-        assertTrue(lastText.contains("[screenshot](/api/agents/1/files/screenshot-1776748706808.png)"),
-                "duplicate reference should survive as text so the clickable link "
-                        + "still renders in the final message; got last text: " + lastText);
+                .reduce("", String::concat);
+        assertFalse(joinedText.contains("/api/agents/1/files/screenshot-1776748706808.png"),
+                "duplicate file URL must not leak into text: " + joinedText);
+        assertFalse(joinedText.contains("[screenshot]"),
+                "duplicate markdown link must be stripped: " + joinedText);
     }
 
     @Test
@@ -299,11 +324,12 @@ public class TelegramOutboundPlannerTest extends UnitTest {
                                 + segments);
             }
         }
-        // And the file segment must still be produced.
+        // And the file segment must still be produced (JCLAW-123: image
+        // produces photo + document = 2 FileSegments).
         long fileCount = segments.stream()
                 .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment)
                 .count();
-        assertEquals(1, fileCount, "file segment must still be emitted: " + segments);
+        assertEquals(2, fileCount, "image must emit photo + document: " + segments);
     }
 
     @Test
@@ -323,7 +349,10 @@ public class TelegramOutboundPlannerTest extends UnitTest {
         int fileCount = (int) segments.stream()
                 .filter(s -> s instanceof TelegramOutboundPlanner.FileSegment)
                 .count();
-        assertEquals(2, fileCount,
-                "two distinct files should produce two FileSegments; got: " + segments);
+        // JCLAW-123: each image produces photo + document, so two distinct
+        // images now produce four FileSegments (2 photo + 2 document).
+        assertEquals(4, fileCount,
+                "two distinct images should produce two photo + two document segments: "
+                        + segments);
     }
 }

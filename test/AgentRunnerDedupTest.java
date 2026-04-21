@@ -319,4 +319,81 @@ public class AgentRunnerDedupTest extends UnitTest {
                 "prefix should lead with the markdown image so the frontend renders inline; "
                         + "actual prefix: " + prefix);
     }
+
+    // ==================== JCLAW-125: angle-bracket markdown URL form ====================
+
+    @Test
+    public void buildImagePrefixDedupsAgainstAngleBracketImageForm() {
+        // CommonMark accepts [text](<url>) as a valid link form; marked parses
+        // it identically to [text](url). The LLM sometimes emits the angle-
+        // bracket form (observed with gemini-3-flash-preview). Pre-JCLAW-125
+        // the captured URL kept the angle brackets, so filename extraction
+        // produced "<foo.png>" which never matched the collected "foo.png".
+        var collected = new ArrayList<String>();
+        collected.add("![Screenshot](/api/agents/1/files/screenshot-xyz.png)");
+
+        // LLM content re-embeds the image in angle-bracket form. Dedup must
+        // still fire so the prefix returns empty.
+        var content = "![Screenshot](<screenshot-xyz.png>)\n\nCaptured the page.";
+        var prefix = AgentRunner.buildImagePrefix(collected, content);
+        assertEquals("", prefix,
+                "angle-bracket form embedded in LLM content must dedup the collected image");
+    }
+
+    @Test
+    public void buildDownloadSuffixDedupsAgainstAngleBracketLinkForm() {
+        // The production reproduction: LLM emits a plain markdown link with
+        // angle-bracket URL around a bare filename. The collected image has
+        // the canonical /api/agents/... URL. Both filename roots are
+        // "screenshot-xyz.png", so dedup should fire and no suffix should
+        // be emitted.
+        var collected = new ArrayList<String>();
+        collected.add("![Screenshot](/api/agents/1/files/screenshot-xyz.png)");
+
+        var content = "Here is the captured image:\n"
+                + "[screenshot-xyz.png](<screenshot-xyz.png>)";
+        var suffix = AgentRunner.buildDownloadSuffix(collected, content, "web");
+        assertEquals("", suffix,
+                "angle-bracket link in LLM content must dedup the download suffix");
+    }
+
+    @Test
+    public void buildDownloadSuffixDedupsAgainstAngleBracketAbsoluteUrl() {
+        // Same test but with the full /api/agents/... URL inside the angle
+        // brackets. Tests the extraction path for both relative and
+        // absolute URLs wrapped in <>.
+        var collected = new ArrayList<String>();
+        collected.add("![Screenshot](/api/agents/1/files/screenshot-xyz.png)");
+
+        var content = "Link: [screenshot-xyz.png](</api/agents/1/files/screenshot-xyz.png>)";
+        var suffix = AgentRunner.buildDownloadSuffix(collected, content, "web");
+        assertEquals("", suffix,
+                "angle-bracket absolute URL must dedup the download suffix");
+    }
+
+    @Test
+    public void buildDownloadSuffixStillFiresWhenLlmDidNotLinkTheFile() {
+        // Regression guard: dedup should NOT fire on plain prose with no
+        // file links. The suffix is the only affordance the user has in
+        // that case, so the runtime must still emit it.
+        var collected = new ArrayList<String>();
+        collected.add("![Screenshot](/api/agents/1/files/screenshot-xyz.png)");
+
+        var content = "I captured the page. Let me know if you need anything else.";
+        var suffix = AgentRunner.buildDownloadSuffix(collected, content, "web");
+        assertFalse(suffix.isEmpty(), "suffix must still fire when LLM didn't link the file");
+        assertTrue(suffix.contains("download Screenshot"),
+                "suffix should contain the download label: " + suffix);
+    }
+
+    @Test
+    public void extractFilenameStripsAngleBrackets() {
+        // Direct test of the extraction helper so the contract is pinned.
+        assertEquals("foo.png", AgentRunner.extractFilename("<foo.png>"));
+        assertEquals("foo.png", AgentRunner.extractFilename("</path/to/foo.png>"));
+        assertEquals("foo.png", AgentRunner.extractFilename("foo.png"));
+        assertEquals("foo.png", AgentRunner.extractFilename("/path/to/foo.png"));
+        assertEquals("", AgentRunner.extractFilename(""));
+        assertEquals("", AgentRunner.extractFilename(null));
+    }
 }
