@@ -188,6 +188,55 @@ public class TelegramChannel implements Channel {
     }
 
     /**
+     * Clear a pending {@code sendMessageDraft} by posting empty text via
+     * raw HTTP (JCLAW-121). The telegrambots-meta 9.5.0 SDK rejects
+     * empty-text {@code SendMessageDraft} with a pre-submit validator, so
+     * we can't use {@link OkHttpTelegramClient#execute}. Telegram itself
+     * accepts the request — OpenClaw's grammY-backed streamer clears
+     * drafts this way in {@code extensions/telegram/src/draft-stream.ts:445}.
+     *
+     * <p>Best-effort: returns {@code false} on any failure and logs a
+     * warning. Caller (the streaming sink's {@code clearDraftBestEffort})
+     * swallows the result — a failed clear leaves a stale draft but
+     * doesn't prevent the final HTML message from being delivered.
+     */
+    public static boolean clearMessageDraft(String botToken, String chatId, int draftId) {
+        if (botToken == null || botToken.isBlank() || chatId == null) return false;
+        try {
+            var url = TELEGRAM_API_BASE + "/bot" + botToken + "/sendMessageDraft";
+            var body = "{\"chat_id\":%s,\"draft_id\":%d,\"text\":\"\"}".formatted(chatId, draftId);
+            var req = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .header("Content-Type", "application/json")
+                    .timeout(java.time.Duration.ofSeconds(BOT_API_READ_TIMEOUT_SEC))
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            var resp = utils.HttpClients.GENERAL.send(
+                    req, java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                EventLogger.warn("channel", null, "telegram",
+                        "clearMessageDraft returned HTTP %d for chat %s"
+                                .formatted(resp.statusCode(), chatId));
+                return false;
+            }
+            return true;
+        } catch (Exception e) {
+            EventLogger.warn("channel", null, "telegram",
+                    "clearMessageDraft failed for chat %s: %s"
+                            .formatted(chatId, e.getMessage()));
+            return false;
+        }
+    }
+
+    /**
+     * Telegram Bot API base URL used by the raw-HTTP helpers. Package-visible
+     * so tests targeting {@code MockTelegramServer} can redirect traffic
+     * without touching the SDK's {@code TelegramUrl} override (which only
+     * affects {@link OkHttpTelegramClient} calls).
+     */
+    public static String TELEGRAM_API_BASE = "https://api.telegram.org";
+
+    /**
      * Fire a "typing" chat-action so the user's Telegram client shows the
      * "• • • typing" indicator (JCLAW-98). The indicator lasts ~5 seconds
      * or until the bot sends a real message — callers that want a

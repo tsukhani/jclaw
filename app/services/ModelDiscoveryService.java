@@ -7,6 +7,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 /**
@@ -37,8 +39,22 @@ public class ModelDiscoveryService {
     /**
      * Fetch the model catalog from a provider's /models endpoint, apply leaderboard
      * rankings if configured, and return normalized model info sorted by rank.
+     *
+     * <p>Dispatches on provider name: any provider containing {@code "ollama"}
+     * uses the native {@code /api/tags} + {@code /api/show} pair (JCLAW-118),
+     * which returns real {@code context_length} and the {@code capabilities}
+     * array. Everything else uses the OpenAI-compatible {@code /models}
+     * endpoint as before — OpenRouter returns rich metadata there, and
+     * plain OpenAI-compat providers at least supply ids.
      */
     public static DiscoveryResult discover(String providerName, String baseUrl, String apiKey) {
+        if (providerName != null && providerName.toLowerCase().contains("ollama")) {
+            return discoverOllamaNative(providerName, baseUrl, apiKey);
+        }
+        return discoverOpenAiCompat(providerName, baseUrl, apiKey);
+    }
+
+    private static DiscoveryResult discoverOpenAiCompat(String providerName, String baseUrl, String apiKey) {
         try {
             var url = baseUrl.endsWith("/") ? baseUrl + "models" : baseUrl + "/models";
             var httpReq = HttpRequest.newBuilder()
@@ -178,6 +194,19 @@ public class ModelDiscoveryService {
                     if ("reasoning".equals(val) || "reasoning_effort".equals(val)) {
                         return new ThinkingDetection(true, true);
                     }
+                }
+            }
+            return new ThinkingDetection(false, true);
+        }
+
+        // Ollama /api/show exposes capabilities as a bare array (JCLAW-118).
+        // Mirrors the same precedence in detectVisionSupport /
+        // detectAudioSupport — if the provider reports the array at all, we
+        // trust it and mark fromProvider=true.
+        if (obj.has("capabilities") && obj.get("capabilities").isJsonArray()) {
+            for (var c : obj.getAsJsonArray("capabilities")) {
+                if (c.isJsonPrimitive() && "thinking".equalsIgnoreCase(c.getAsString())) {
+                    return new ThinkingDetection(true, true);
                 }
             }
             return new ThinkingDetection(false, true);
@@ -421,6 +450,201 @@ public class ModelDiscoveryService {
 
     public static String stripVersionSuffix(String id) {
         return id.replaceAll("-\\d{6,}$", "").replaceAll("-\\d{3,4}$", "");
+    }
+
+    // ─── Ollama native discovery (JCLAW-118) ─────────────────────────
+
+    /**
+     * Native-Ollama discovery path. Uses the richer {@code /api/tags} +
+     * {@code /api/show} pair to extract {@code context_length},
+     * {@code capabilities}, and architecture metadata that the
+     * OpenAI-compatible {@code /v1/models} stub omits entirely for
+     * Ollama Cloud. Fans out {@code /api/show} calls concurrently on
+     * virtual threads so a provider with dozens of models discovers in
+     * one round-trip's worth of wall time rather than N.
+     */
+    static DiscoveryResult discoverOllamaNative(String providerName, String baseUrl, String apiKey) {
+        try {
+            var nativeBase = stripV1Suffix(baseUrl);
+            var tagsReq = HttpRequest.newBuilder()
+                    .uri(URI.create(nativeBase + "/api/tags"))
+                    .header("Authorization", "Bearer " + (apiKey != null ? apiKey : ""))
+                    .header("Accept", "application/json")
+                    .timeout(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS))
+                    .GET()
+                    .build();
+            var tagsResp = utils.HttpClients.GENERAL.send(tagsReq, HttpResponse.BodyHandlers.ofString());
+            if (tagsResp.statusCode() != 200) {
+                return new DiscoveryResult.Error(502,
+                        "Provider returned HTTP %d from /api/tags: %s".formatted(
+                                tagsResp.statusCode(), truncate(tagsResp.body(), 200)));
+            }
+            var tagsBody = JsonParser.parseString(tagsResp.body()).getAsJsonObject();
+            var modelIds = extractTagIds(tagsBody);
+            if (modelIds.isEmpty()) return new DiscoveryResult.Ok(List.of());
+
+            var showUrl = nativeBase + "/api/show";
+            var results = new ArrayList<Map<String, Object>>(modelIds.size());
+            try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                var futures = modelIds.stream()
+                        .map(id -> executor.submit(() -> fetchOllamaShow(showUrl, apiKey, id)))
+                        .toList();
+                for (int i = 0; i < futures.size(); i++) {
+                    try {
+                        var model = futures.get(i).get(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                        if (model != null) results.add(model);
+                    } catch (Exception e) {
+                        play.Logger.warn("Ollama /api/show failed for %s: %s",
+                                modelIds.get(i), e.getMessage());
+                    }
+                }
+            }
+            if (results.isEmpty()) {
+                return new DiscoveryResult.Error(502,
+                        "All /api/show calls failed for provider " + providerName);
+            }
+
+            var leaderboardUrl = ConfigService.get("provider." + providerName + ".leaderboardUrl");
+            var rankings = fetchLeaderboard(leaderboardUrl);
+            if (!rankings.isEmpty()) applyRankings(results, rankings);
+
+            results.sort((a, b) -> {
+                var rankA = a.get("leaderboardRank");
+                var rankB = b.get("leaderboardRank");
+                if (rankA != null && rankB != null) return Integer.compare((int) rankA, (int) rankB);
+                if (rankA != null) return -1;
+                if (rankB != null) return 1;
+                var nameA = a.get("name") != null ? a.get("name").toString() : a.get("id").toString();
+                var nameB = b.get("name") != null ? b.get("name").toString() : b.get("id").toString();
+                return nameA.compareToIgnoreCase(nameB);
+            });
+
+            return new DiscoveryResult.Ok(results);
+
+        } catch (JsonSyntaxException e) {
+            return new DiscoveryResult.Error(502, "Invalid JSON response from provider");
+        } catch (Exception e) {
+            return new DiscoveryResult.Error(502,
+                    "Failed to connect to provider: %s".formatted(e.getMessage()));
+        }
+    }
+
+    /**
+     * Strip a trailing {@code /v1} (with or without trailing slash) from
+     * a provider base URL. Ollama providers store
+     * {@code https://ollama.com/v1} for the OpenAI-compat inference
+     * path; the native discovery endpoints live at the bare host.
+     */
+    public static String stripV1Suffix(String baseUrl) {
+        if (baseUrl == null) return "";
+        var s = baseUrl;
+        if (s.endsWith("/")) s = s.substring(0, s.length() - 1);
+        if (s.endsWith("/v1")) s = s.substring(0, s.length() - 3);
+        return s;
+    }
+
+    /**
+     * Extract the list of model ids from a {@code /api/tags} response.
+     * The list lives under {@code models[].name} (the full tagged id
+     * like {@code "gpt-oss:20b"}); falls back to {@code models[].model}
+     * when {@code name} is missing.
+     */
+    public static List<String> extractTagIds(JsonObject body) {
+        var out = new ArrayList<String>();
+        if (!body.has("models") || !body.get("models").isJsonArray()) return out;
+        for (var el : body.getAsJsonArray("models")) {
+            if (!el.isJsonObject()) continue;
+            var o = el.getAsJsonObject();
+            var id = getString(o, "name", getString(o, "model", ""));
+            if (!id.isBlank()) out.add(id);
+        }
+        return out;
+    }
+
+    private static Map<String, Object> fetchOllamaShow(String url, String apiKey, String id) {
+        try {
+            var body = "{\"name\":\"" + id.replace("\"", "\\\"") + "\"}";
+            var req = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("Authorization", "Bearer " + (apiKey != null ? apiKey : ""))
+                    .header("Content-Type", "application/json")
+                    .header("Accept", "application/json")
+                    .timeout(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS))
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            var resp = utils.HttpClients.GENERAL.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) return null;
+            return parseOllamaShow(id, JsonParser.parseString(resp.body()).getAsJsonObject());
+        } catch (Exception _) {
+            return null;
+        }
+    }
+
+    /**
+     * Parse a single {@code /api/show} response into the same Map shape
+     * {@link #parseModels} produces. The context length is namespaced by
+     * model family ({@code "kimi-k2.context_length"},
+     * {@code "glm.context_length"}, {@code "qwen3.context_length"}, …),
+     * so we scan for any key ending in {@code .context_length} rather
+     * than hardcoding the family list. Capability flags are fed through
+     * the standard detectors with the {@code capabilities} array
+     * surfaced in a minimal synthetic object, so the Ollama path shares
+     * the OpenRouter/Anthropic logic.
+     */
+    public static Map<String, Object> parseOllamaShow(String id, JsonObject show) {
+        var model = new LinkedHashMap<String, Object>();
+        model.put("id", id);
+        model.put("name", id);
+        model.put("contextWindow", extractOllamaContextLength(show));
+        model.put("maxTokens", 0);
+
+        var forDetect = new JsonObject();
+        forDetect.addProperty("id", id);
+        if (show.has("capabilities") && show.get("capabilities").isJsonArray()) {
+            forDetect.add("capabilities", show.getAsJsonArray("capabilities"));
+        }
+        var thinking = detectThinkingSupport(forDetect);
+        model.put("supportsThinking", thinking.confirmed());
+        model.put("thinkingDetectedFromProvider", thinking.fromProvider());
+        var vision = detectVisionSupport(forDetect);
+        model.put("supportsVision", vision.confirmed());
+        model.put("visionDetectedFromProvider", vision.fromProvider());
+        var audio = detectAudioSupport(forDetect);
+        model.put("supportsAudio", audio.confirmed());
+        model.put("audioDetectedFromProvider", audio.fromProvider());
+
+        // Ollama doesn't publish pricing via the API. -1 means "unset" —
+        // the frontend skips these fields when saving.
+        model.put("promptPrice", -1.0);
+        model.put("completionPrice", -1.0);
+        model.put("cachedReadPrice", -1.0);
+        model.put("cacheWritePrice", -1.0);
+        model.put("isFree", false);
+
+        return model;
+    }
+
+    /**
+     * Pick the first {@code *.context_length} entry under
+     * {@code model_info} and return its integer value. Returns {@code 0}
+     * when the response lacks a context-length entry — the frontend then
+     * surfaces "unknown" and asks the user to fill it in. Malformed
+     * numeric values are skipped; extraction continues so one
+     * misbehaving family key doesn't mask a correct one.
+     */
+    public static int extractOllamaContextLength(JsonObject show) {
+        if (show == null || !show.has("model_info") || !show.get("model_info").isJsonObject()) return 0;
+        var mi = show.getAsJsonObject("model_info");
+        for (var entry : mi.entrySet()) {
+            if (entry.getKey().endsWith(".context_length") && entry.getValue().isJsonPrimitive()) {
+                try {
+                    return entry.getValue().getAsInt();
+                } catch (NumberFormatException _) {
+                    // keep scanning in case a later family key is well-formed
+                }
+            }
+        }
+        return 0;
     }
 
     static String getString(JsonObject obj, String key, String defaultValue) {

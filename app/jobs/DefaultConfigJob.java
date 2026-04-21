@@ -55,6 +55,35 @@ public class DefaultConfigJob extends Job<Void> {
             // are excluded from the LLM context window. Null = no reset has
             // occurred, full history is eligible.
             stmt.execute("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS context_since TIMESTAMP");
+            // JCLAW-38: session-compaction watermark. Messages older than
+            // this timestamp have been summarized into a session_compaction
+            // row; loadRecentMessages skips them on subsequent turns. Null
+            // = conversation has never been compacted. Independent of
+            // context_since so /reset and compaction compose cleanly.
+            stmt.execute("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS compaction_since TIMESTAMP");
+            // JCLAW-38: session_compaction history table. The current
+            // summary for a conversation is the most recent row by
+            // compacted_at. Older rows are retained as an audit trail of
+            // how the conversation was progressively summarized.
+            stmt.execute("""
+                    CREATE TABLE IF NOT EXISTS session_compaction (
+                        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                        conversation_id BIGINT NOT NULL,
+                        turn_count INT NOT NULL,
+                        summary_tokens INT NOT NULL,
+                        model VARCHAR(255) NOT NULL,
+                        summary CLOB NOT NULL,
+                        compacted_at TIMESTAMP NOT NULL,
+                        created_at TIMESTAMP NOT NULL,
+                        CONSTRAINT fk_session_compaction_conversation
+                            FOREIGN KEY (conversation_id) REFERENCES conversation(id) ON DELETE CASCADE
+                    )""");
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_session_compaction_conversation
+                        ON session_compaction(conversation_id)""");
+            stmt.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_session_compaction_conv_compacted_at
+                        ON session_compaction(conversation_id, compacted_at)""");
         } catch (Exception e) {
             play.Logger.warn("Schema migration: %s", e.getMessage());
         }

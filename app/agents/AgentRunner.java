@@ -97,7 +97,8 @@ public class AgentRunner {
     private record PreparedPrologue(
         SystemPromptAssembler.AssembledPrompt assembled,
         List<ChatMessage> messages,
-        List<ToolDef> tools
+        List<ToolDef> tools,
+        java.util.Set<String> disabledTools
     ) {}
 
     private static final String STREAM_CANCELLED_MSG = "Stream cancelled by client disconnect";
@@ -231,7 +232,11 @@ public class AgentRunner {
                 trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
 
                 var assembled = SystemPromptAssembler.assemble(agent, userMessage, null, conv.channelType);
-                var messages = buildMessages(assembled.systemPrompt(), conv);
+                // JCLAW-38: re-inject the latest compaction summary (if any)
+                // into the system prompt so the LLM keeps continuity with
+                // turns that have since been dropped from the raw history.
+                var sysPrompt = services.SessionCompactor.appendSummaryToPrompt(assembled.systemPrompt(), conv);
+                var messages = buildMessages(sysPrompt, conv);
 
                 // JCLAW-108: resolve the provider from the effective provider name
                 // (conversation override when set, agent default otherwise), not
@@ -247,14 +252,12 @@ public class AgentRunner {
                 }
                 var secondary = ProviderRegistry.getSecondary();
 
-                var trimmed = trimToContextWindow(messages, agent, conv, primary);
-                trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
                 var tools = ToolRegistry.getToolDefsForAgent(agent);
 
                 EventLogger.info("llm", agent.name, conv.channelType,
                         "Calling %s / %s".formatted(primary.config().name(), effectiveModelId(agent, conv)));
 
-                return new PreparedData(trimmed, primary, secondary, tools);
+                return new PreparedData(messages, primary, secondary, tools);
             });
 
             if (prepared == null) {
@@ -262,6 +265,18 @@ public class AgentRunner {
                 return new RunResult(error,
                         services.Tx.run(() -> ConversationService.findById(conversationId)));
             }
+
+            // JCLAW-38: if the just-built context exceeds the compaction
+            // budget, summarize older turns (LLM call, outside Tx) and
+            // rebuild. trimToContextWindow below stays as a drop-oldest
+            // fallback for when compaction is skipped (too few turns) or
+            // fails.
+            var compactedMessages = maybeCompactAndRebuild(
+                    agent, conversationId, userMessage, null,
+                    prepared.primary(), prepared.messages());
+            var finalMessages = trimToContextWindow(compactedMessages, agent, conversation, prepared.primary());
+            prepared = new PreparedData(finalMessages, prepared.primary(), prepared.secondary(), prepared.tools());
+            trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
 
             trace.mark(LatencyTrace.PROLOGUE_DONE);
             // LLM call loop — no transaction open, JDBC connection back in pool
@@ -452,14 +467,24 @@ public class AgentRunner {
             var disabledTools = ToolRegistry.loadDisabledTools(agent);
             var convo = ConversationService.findById(conversation.id);
             var assembled0 = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, convo.channelType);
-            var msgs = buildMessages(assembled0.systemPrompt(), convo);
-            msgs = trimToContextWindow(msgs, agent, convo, primaryRef);
+            // JCLAW-38: re-inject latest compaction summary (if any)
+            var sysPrompt = services.SessionCompactor.appendSummaryToPrompt(assembled0.systemPrompt(), convo);
+            var msgs = buildMessages(sysPrompt, convo);
             var toolDefs = ToolRegistry.getToolDefsForAgent(disabledTools);
-            return new PreparedPrologue(assembled0, msgs, toolDefs);
+            return new PreparedPrologue(assembled0, msgs, toolDefs, disabledTools);
         });
 
+        // JCLAW-38: if the just-built context exceeds the compaction budget,
+        // summarize older turns (LLM call, outside Tx) and rebuild.
+        // trimToContextWindow below stays as a drop-oldest fallback for
+        // when compaction is skipped or fails.
+        var compactedMessages = maybeCompactAndRebuild(
+                agent, conversation.id, userMessage, prepared.disabledTools(),
+                primaryRef, prepared.messages());
+        var trimmedMessages = trimToContextWindow(compactedMessages, agent, conversation, primaryRef);
+
         var assembled = prepared.assembled();
-        var messages = prepared.messages();
+        var messages = trimmedMessages;
 
         if (checkCancelled(isCancelled, agent, channelType)) return;
 
@@ -1071,13 +1096,98 @@ public class AgentRunner {
                     }
                     yield ChatMessage.assistant(msg.content != null ? msg.content : "");
                 }
-                case TOOL -> ChatMessage.toolResult(msg.toolResults, msg.content);
+                // JCLAW-119: sanitize the tool_call_id on the TOOL-role row so
+                // it matches the normalized id on the assistant-row tool_calls.
+                // Paired normalization is deterministic — same input string
+                // produces the same output on both sides of the pair — so this
+                // does not break pairing.
+                case TOOL -> ChatMessage.toolResult(sanitizeToolCallId(msg.toolResults), msg.content);
                 case SYSTEM -> ChatMessage.system(msg.content);
             });
         }
 
         return messages;
     }
+
+    /**
+     * Replace every character outside {@code [a-zA-Z0-9_-]} with {@code '_'}
+     * (JCLAW-119). Historical tool_call IDs sometimes carry provider-specific
+     * shapes — Gemini and some open-weight model servers emit forms like
+     * {@code "functions.web_search:7"} — that stricter providers (Ollama
+     * Cloud on kimi-k2.6, for example) reject with HTTP 400 {@code
+     * "invalid tool call arguments"}. Normalizing at read time lets a
+     * /model switch across provider families keep working without
+     * mutating the DB or losing context. Returns {@code null} unchanged
+     * so callers can detect missing IDs.
+     */
+    public static String sanitizeToolCallId(String id) {
+        if (id == null) return null;
+        return id.replaceAll("[^a-zA-Z0-9_-]", "_");
+    }
+
+    /**
+     * If {@code current} exceeds the compaction budget for the effective
+     * model, run {@link services.SessionCompactor#compact} and return a
+     * freshly rebuilt message list (with the new summary injected into
+     * the system prompt and the older turns dropped). Otherwise returns
+     * {@code current} unchanged (JCLAW-38).
+     *
+     * <p>Called from both {@link #run} and {@link #streamLlmLoop} after
+     * the initial prep Tx closes, because the summarization call itself
+     * is LLM-bound and must not hold a JDBC connection. On success the
+     * caller should still pass the result through
+     * {@link #trimToContextWindow} as a final safety net — if the
+     * summary plus retained tail somehow still doesn't fit, drop-oldest
+     * guarantees we never ship an over-budget context.
+     */
+    private static List<ChatMessage> maybeCompactAndRebuild(
+            Agent agent, Long conversationId, String userMessage,
+            java.util.Set<String> disabledTools, LlmProvider primary,
+            List<ChatMessage> current) {
+        // Cheap snapshot: model info + effective model id + channel type.
+        // resolveModelInfo reads only in-memory provider config, so this
+        // Tx is bounded by one findById.
+        var snapshot = services.Tx.run(() -> {
+            var conv = ConversationService.findById(conversationId);
+            if (conv == null) return null;
+            var mi = resolveModelInfo(agent, conv, primary).orElse(null);
+            var modelId = effectiveModelId(agent, conv);
+            return new CompactionDecision(mi, modelId, conv.channelType);
+        });
+        if (snapshot == null || snapshot.modelInfo() == null || snapshot.modelId() == null) return current;
+        if (!services.SessionCompactor.shouldCompact(estimateTokens(current), snapshot.modelInfo())) return current;
+
+        final var modelId = snapshot.modelId();
+        final var maxOutput = services.ConfigService.getInt("chat.compactionMaxTokens", 8192);
+        final var modelLabel = primary.config().name() + "/" + modelId;
+
+        services.SessionCompactor.Summarizer summarizer = sumMsgs -> {
+            var resp = primary.chat(modelId, sumMsgs, List.of(), maxOutput, null);
+            return services.SessionCompactor.firstChoiceText(resp);
+        };
+
+        var result = services.SessionCompactor.compact(conversationId, modelLabel, summarizer);
+        if (!result.compacted()) {
+            EventLogger.info("compaction", agent.name, snapshot.channelType(),
+                    "Compaction skipped (%s); falling back to drop-oldest".formatted(result.skipReason()));
+            return current;
+        }
+        EventLogger.info("compaction", agent.name, snapshot.channelType(),
+                "Compacted %d turns (%d chars) via %s".formatted(
+                        result.turnsCompacted(), result.summaryChars(), modelLabel));
+
+        // Rebuild messages: fresh read picks up the bumped compactionSince,
+        // appendSummaryToPrompt re-injects the (now stored) summary.
+        return services.Tx.run(() -> {
+            var conv = ConversationService.findById(conversationId);
+            if (conv == null) return current;
+            var assembled = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, conv.channelType);
+            var sysPrompt = services.SessionCompactor.appendSummaryToPrompt(assembled.systemPrompt(), conv);
+            return buildMessages(sysPrompt, conv);
+        });
+    }
+
+    private record CompactionDecision(ModelInfo modelInfo, String modelId, String channelType) {}
 
     private static List<ChatMessage> trimToContextWindow(List<ChatMessage> messages, Agent agent, Conversation conv, LlmProvider provider) {
         var modelInfo = resolveModelInfo(agent, conv, provider).orElse(null);
@@ -1534,7 +1644,16 @@ public class AgentRunner {
     private static List<ToolCall> parseToolCalls(String json) {
         try {
             var tc = gson.fromJson(json, ToolCall.class);
-            return tc != null ? List.of(tc) : List.of();
+            if (tc == null) return List.of();
+            // JCLAW-119: normalize historical IDs so cross-provider /model
+            // switches don't re-ship IDs the new provider rejects. Same
+            // transformation as the TOOL-role sanitizer in buildMessages so
+            // assistant-tool_calls and tool-row tool_call_id still pair.
+            var safeId = sanitizeToolCallId(tc.id());
+            if (!java.util.Objects.equals(safeId, tc.id())) {
+                tc = new ToolCall(safeId, tc.type(), tc.function());
+            }
+            return List.of(tc);
         } catch (Exception _) {
             return List.of();
         }

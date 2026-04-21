@@ -242,52 +242,12 @@ public class JobLifecycleTest extends UnitTest {
         }
     }
 
-    @Test
-    public void draftTransportSinkProducesNoCheckpointRowForRecoveryToTarget() throws Exception {
-        // JCLAW-96 Gap 2 inverse: DRAFT transport never sets messageId, so
-        // persistStreamCheckpoint is a no-op and recovery has nothing to
-        // target. This documents / enforces the JCLAW-103 architectural
-        // assumption that DRAFT sinks are recovery-immune.
-        final String botToken = "draft-checkpoint-bot";
-        MockTelegramServer mockServer = new MockTelegramServer();
-        try {
-            mockServer.start();
-            channels.TelegramChannel.installForTest(botToken, mockServer.telegramUrl());
-
-            var agent = services.AgentService.create(
-                    "draft-checkpoint-agent", "openrouter", "gpt-4.1");
-            var convId = services.Tx.run(() -> {
-                var conv = services.ConversationService.create(agent, "telegram", "555");
-                return conv.id;
-            });
-
-            var sink = new channels.TelegramStreamingSink(
-                    botToken, "555", agent, convId, "private");
-            sink.update("some streamed text");
-            // Drive the scheduled flush so the DRAFT path runs end-to-end.
-            // The private flush() is invoked directly rather than waiting
-            // on the scheduler so the test stays under 100 ms.
-            var flushMethod = channels.TelegramStreamingSink.class.getDeclaredMethod("flush");
-            flushMethod.setAccessible(true);
-            flushMethod.invoke(sink);
-            sink.seal("final text");
-
-            // The mock must have seen DRAFT traffic (proving the flush ran),
-            // and the DB must have no checkpoint written.
-            assertTrue(mockServer.countRequests("sendMessageDraft") >= 1,
-                    "DRAFT path should have fired sendMessageDraft at least once");
-            var after = services.Tx.run(() ->
-                    (models.Conversation) models.Conversation.findById(convId));
-            assertNull(after.activeStreamMessageId,
-                    "DRAFT-transport turn must not write activeStreamMessageId — "
-                            + "recovery has nothing to target (JCLAW-103 assumption)");
-            assertNull(after.activeStreamChatId,
-                    "DRAFT-transport turn must not write activeStreamChatId");
-        } finally {
-            channels.TelegramChannel.clearForTest(botToken);
-            mockServer.close();
-        }
-    }
+    // The "DRAFT sinks produce no checkpoint" test was removed alongside
+    // DRAFT disablement (JCLAW-121). DRAFT is never selected now, so the
+    // recovery-immunity invariant the test enforced is vacuously true and
+    // there is no path to exercise it. EDIT_IN_PLACE checkpoint behavior
+    // is covered by streamingRecoveryFindsOrphanCheckpointAndEditsPlaceholder
+    // elsewhere in this file.
 
     @Test
     public void streamingRecoverySkipsConversationsWithoutCheckpoint() {

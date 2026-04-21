@@ -329,4 +329,152 @@ public class ModelDiscoveryServiceTest extends UnitTest {
         assertEquals(1, models.size());
         assertEquals("model-name", models.get(0).get("name"));
     }
+
+    // ─── Ollama native discovery (JCLAW-118) ─────────────────────────
+
+    @Test
+    public void stripV1SuffixRemovesTrailingV1() {
+        assertEquals("https://ollama.com", ModelDiscoveryService.stripV1Suffix("https://ollama.com/v1"));
+        assertEquals("https://ollama.com", ModelDiscoveryService.stripV1Suffix("https://ollama.com/v1/"));
+        assertEquals("http://localhost:11434", ModelDiscoveryService.stripV1Suffix("http://localhost:11434/v1"));
+    }
+
+    @Test
+    public void stripV1SuffixLeavesUrlsWithoutV1Untouched() {
+        assertEquals("https://ollama.com", ModelDiscoveryService.stripV1Suffix("https://ollama.com"));
+        assertEquals("https://example.com/api", ModelDiscoveryService.stripV1Suffix("https://example.com/api"));
+        assertEquals("", ModelDiscoveryService.stripV1Suffix(null));
+    }
+
+    @Test
+    public void extractTagIdsPullsNamesFromModelsArray() {
+        var json = JsonParser.parseString("""
+                {"models":[
+                  {"name":"kimi-k2.5","model":"kimi-k2.5"},
+                  {"name":"gpt-oss:20b","model":"gpt-oss:20b"},
+                  {"name":"glm-5"}
+                ]}
+                """).getAsJsonObject();
+        var ids = ModelDiscoveryService.extractTagIds(json);
+        assertEquals(3, ids.size());
+        assertEquals("kimi-k2.5", ids.get(0));
+        assertEquals("gpt-oss:20b", ids.get(1));
+        assertEquals("glm-5", ids.get(2));
+    }
+
+    @Test
+    public void extractTagIdsFallsBackToModelKey() {
+        // Malformed entry with only "model" and not "name" — still usable.
+        var json = JsonParser.parseString("""
+                {"models":[{"model":"qwen3-next:80b"}]}
+                """).getAsJsonObject();
+        var ids = ModelDiscoveryService.extractTagIds(json);
+        assertEquals(1, ids.size());
+        assertEquals("qwen3-next:80b", ids.get(0));
+    }
+
+    @Test
+    public void extractTagIdsReturnsEmptyWhenModelsKeyMissing() {
+        var json = JsonParser.parseString("{}").getAsJsonObject();
+        assertTrue(ModelDiscoveryService.extractTagIds(json).isEmpty());
+    }
+
+    @Test
+    public void extractOllamaContextLengthScansForFamilyPrefixedKey() {
+        // Real /api/show shape: family is "kimi-k2", context_length lives under "kimi-k2.context_length".
+        var json = JsonParser.parseString("""
+                {
+                  "model_info": {
+                    "general.architecture": "kimi-k2",
+                    "general.parameter_count": 1042000000000,
+                    "kimi-k2.context_length": 262144,
+                    "kimi-k2.embedding_length": 2048
+                  }
+                }
+                """).getAsJsonObject();
+        assertEquals(262144, ModelDiscoveryService.extractOllamaContextLength(json));
+    }
+
+    @Test
+    public void extractOllamaContextLengthHandlesDifferentFamilies() {
+        // Make sure the scan isn't hardcoded to kimi — any family prefix works.
+        var json = JsonParser.parseString("""
+                {"model_info": {"glm.context_length": 202752}}
+                """).getAsJsonObject();
+        assertEquals(202752, ModelDiscoveryService.extractOllamaContextLength(json));
+    }
+
+    @Test
+    public void extractOllamaContextLengthReturnsZeroWhenMissing() {
+        var json = JsonParser.parseString("""
+                {"model_info": {"general.architecture": "mystery"}}
+                """).getAsJsonObject();
+        assertEquals(0, ModelDiscoveryService.extractOllamaContextLength(json));
+    }
+
+    @Test
+    public void extractOllamaContextLengthReturnsZeroWhenNoModelInfo() {
+        assertEquals(0, ModelDiscoveryService.extractOllamaContextLength(JsonParser.parseString("{}").getAsJsonObject()));
+    }
+
+    @Test
+    public void parseOllamaShowPopulatesContextAndCapabilities() {
+        // Mirrors the live /api/show response for kimi-k2.5 as of 2026-04-22.
+        var json = JsonParser.parseString("""
+                {
+                  "details": {"family": "kimi-k2", "parameter_size": "1042000000000"},
+                  "model_info": {
+                    "general.architecture": "kimi-k2",
+                    "kimi-k2.context_length": 262144
+                  },
+                  "capabilities": ["vision", "thinking", "completion", "tools"]
+                }
+                """).getAsJsonObject();
+        var model = ModelDiscoveryService.parseOllamaShow("kimi-k2.5", json);
+
+        assertEquals("kimi-k2.5", model.get("id"));
+        assertEquals("kimi-k2.5", model.get("name"));
+        assertEquals(262144, model.get("contextWindow"));
+        assertEquals(true, model.get("supportsThinking"));
+        assertEquals(true, model.get("thinkingDetectedFromProvider"));
+        assertEquals(true, model.get("supportsVision"));
+        assertEquals(true, model.get("visionDetectedFromProvider"));
+        assertEquals(false, model.get("supportsAudio"));
+        assertEquals(true, model.get("audioDetectedFromProvider"));
+    }
+
+    @Test
+    public void parseOllamaShowHandlesAbsentCapabilities() {
+        // A model with no capabilities array — all flags fall back to
+        // detector defaults (id-based heuristic, or absent).
+        var json = JsonParser.parseString("""
+                {"model_info": {"mystery.context_length": 32768}}
+                """).getAsJsonObject();
+        var model = ModelDiscoveryService.parseOllamaShow("mystery-model", json);
+        assertEquals(32768, model.get("contextWindow"));
+        assertEquals(false, model.get("supportsThinking"));
+        assertEquals(false, model.get("thinkingDetectedFromProvider"));
+    }
+
+    @Test
+    public void parseOllamaShowReportsUnknownContextAsZero() {
+        var json = JsonParser.parseString("""
+                {"capabilities": ["completion"]}
+                """).getAsJsonObject();
+        var model = ModelDiscoveryService.parseOllamaShow("unknown-model", json);
+        assertEquals(0, model.get("contextWindow"));
+    }
+
+    @Test
+    public void detectThinkingSupportPicksUpOllamaCapabilities() {
+        // Regression guard: the Ollama capabilities path has to live
+        // alongside the OpenRouter supported_parameters path without
+        // stealing precedence.
+        var json = JsonParser.parseString("""
+                {"id": "glm-5", "capabilities": ["thinking", "completion"]}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectThinkingSupport(json);
+        assertTrue(result.confirmed(), "thinking should be detected from capabilities array");
+        assertTrue(result.fromProvider(), "detection should be marked as provider-confirmed");
+    }
 }

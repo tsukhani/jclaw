@@ -54,9 +54,57 @@ public class SlashCommandsTest extends UnitTest {
     public void parseRecognizesAllCommands() {
         assertEquals(Commands.Command.NEW, Commands.parse("/new").orElseThrow());
         assertEquals(Commands.Command.RESET, Commands.parse("/reset").orElseThrow());
+        assertEquals(Commands.Command.COMPACT, Commands.parse("/compact").orElseThrow());
         assertEquals(Commands.Command.HELP, Commands.parse("/help").orElseThrow());
         assertEquals(Commands.Command.MODEL, Commands.parse("/model").orElseThrow());
         assertEquals(Commands.Command.USAGE, Commands.parse("/usage").orElseThrow());
+    }
+
+    // ── /compact ──────────────────────────────────────────────────────
+
+    @Test
+    public void compactWithNoConversationReturnsFallback() {
+        var result = Commands.execute(Commands.Command.COMPACT, agent, "web", "user1", null);
+        assertEquals(Commands.Command.COMPACT, result.command());
+        assertNull(result.conversation());
+        assertTrue(result.responseText().contains("No active conversation"),
+                "got: " + result.responseText());
+    }
+
+    @Test
+    public void compactWithNoProviderReturnsError() {
+        // No provider seeded — registry is empty after refresh().
+        var convo = ConversationService.create(agent, "web", "user1");
+        var result = Commands.execute(Commands.Command.COMPACT, agent, "web", "user1", convo);
+        assertEquals(Commands.Command.COMPACT, result.command());
+        assertTrue(result.responseText().contains("No LLM provider"),
+                "got: " + result.responseText());
+    }
+
+    @Test
+    public void compactOnShortConversationAcksNothingToCompact() {
+        // Seed a real provider so we pass the provider gate, then invoke
+        // on a conversation with only 2 messages — below even the forced
+        // minimums (keepMin=4, minCompactable=2 → requires total >= 6).
+        seedProvider("openrouter", "gpt-4.1",
+                "{\"id\":\"gpt-4.1\",\"name\":\"GPT-4.1\",\"contextWindow\":1000000,\"maxTokens\":32768}");
+        var convo = ConversationService.create(agent, "web", "user1");
+        ConversationService.appendUserMessage(convo, "Hi");
+        ConversationService.appendAssistantMessage(convo, "Hello!", null);
+
+        var result = Commands.execute(Commands.Command.COMPACT, agent, "web", "user1", convo);
+        assertEquals(Commands.Command.COMPACT, result.command());
+        assertTrue(result.responseText().contains("Nothing to compact"),
+                "expected 'Nothing to compact' response, got: " + result.responseText());
+        // No SessionCompaction row should be written.
+        assertEquals(0L, models.SessionCompaction.count());
+    }
+
+    @Test
+    public void compactParsesTrailingHintAsArgs() {
+        assertEquals("focus on the sql migration work",
+                Commands.extractArgs("/compact focus on the sql migration work"));
+        assertNull(Commands.extractArgs("/compact"));
     }
 
     @Test

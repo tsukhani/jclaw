@@ -248,4 +248,116 @@ public class LlmClientTest extends UnitTest {
         assertNotNull(ProviderRegistry.getPrimary());
         assertNotNull(ProviderRegistry.getSecondary());
     }
+
+    // ─── mergeToolCallChunks (JCLAW-120) ─────────────────────────────
+
+    @Test
+    public void mergeToolCallChunks_wellBehavedStreamingKeepsOneSlot() {
+        // Streaming lifecycle of a single call: first chunk carries id+name+"",
+        // subsequent chunks carry just the arguments fragments. All share
+        // index=0. Must collapse into exactly one ToolCall.
+        var acc = new java.util.HashMap<Integer, LlmProvider.ToolCallBuilder>();
+        LlmProvider.mergeToolCallChunks(List.of(
+                new ToolCallChunk(0, "call_a", "function", new FunctionCall("web_search", ""))
+        ), acc);
+        LlmProvider.mergeToolCallChunks(List.of(
+                new ToolCallChunk(0, null, null, new FunctionCall(null, "{\"query\":"))
+        ), acc);
+        LlmProvider.mergeToolCallChunks(List.of(
+                new ToolCallChunk(0, null, null, new FunctionCall(null, "\"x\"}"))
+        ), acc);
+
+        assertEquals(1, acc.size());
+        var built = acc.get(0).build();
+        assertEquals("call_a", built.id());
+        assertEquals("web_search", built.function().name());
+        assertEquals("{\"query\":\"x\"}", built.function().arguments());
+    }
+
+    @Test
+    public void mergeToolCallChunks_parallelCallsWithDistinctIndicesStayDistinct() {
+        // OpenAI-compliant: parallel calls get distinct index values.
+        var acc = new java.util.HashMap<Integer, LlmProvider.ToolCallBuilder>();
+        LlmProvider.mergeToolCallChunks(List.of(
+                new ToolCallChunk(0, "call_a", "function", new FunctionCall("web_search", "{\"q\":\"a\"}")),
+                new ToolCallChunk(1, "call_b", "function", new FunctionCall("web_search", "{\"q\":\"b\"}"))
+        ), acc);
+
+        assertEquals(2, acc.size());
+        assertEquals("call_a", acc.get(0).build().id());
+        assertEquals("call_b", acc.get(1).build().id());
+        assertEquals("{\"q\":\"a\"}", acc.get(0).build().function().arguments());
+        assertEquals("{\"q\":\"b\"}", acc.get(1).build().function().arguments());
+    }
+
+    @Test
+    public void mergeToolCallChunks_reusedIndexWithDistinctIdsSplitsSlots() {
+        // JCLAW-120 production offender: Gemini-via-Ollama sends every parallel
+        // call at index=0 but with distinct ids. Must split into separate slots.
+        var acc = new java.util.HashMap<Integer, LlmProvider.ToolCallBuilder>();
+        // Separate deltas simulate per-chunk streaming.
+        LlmProvider.mergeToolCallChunks(List.of(
+                new ToolCallChunk(0, "functions.web_search:1", "function",
+                        new FunctionCall("web_search", "{\"query\":\"tech\"}"))
+        ), acc);
+        LlmProvider.mergeToolCallChunks(List.of(
+                new ToolCallChunk(0, "functions.web_search:2", "function",
+                        new FunctionCall("web_search", "{\"query\":\"biz\"}"))
+        ), acc);
+        LlmProvider.mergeToolCallChunks(List.of(
+                new ToolCallChunk(0, "functions.datetime:3", "function",
+                        new FunctionCall("datetime", "{\"action\":\"now\"}"))
+        ), acc);
+
+        assertEquals(3, acc.size());
+        // Each call's arguments and name must stay intact — the production bug
+        // was concatenating args and overwriting name to "datetime".
+        assertEquals("{\"query\":\"tech\"}", acc.get(0).build().function().arguments());
+        assertEquals("web_search", acc.get(0).build().function().name());
+        assertEquals("{\"query\":\"biz\"}", acc.get(1).build().function().arguments());
+        assertEquals("web_search", acc.get(1).build().function().name());
+        assertEquals("{\"action\":\"now\"}", acc.get(2).build().function().arguments());
+        assertEquals("datetime", acc.get(2).build().function().name());
+    }
+
+    @Test
+    public void mergeToolCallChunks_reusedIndexWithDifferentNamesSplitsSlots() {
+        // Provider sends two calls at index=0, same (null) id, different names.
+        // Name mismatch alone must force a new slot.
+        var acc = new java.util.HashMap<Integer, LlmProvider.ToolCallBuilder>();
+        LlmProvider.mergeToolCallChunks(List.of(
+                new ToolCallChunk(0, null, "function", new FunctionCall("web_search", "{\"q\":\"a\"}"))
+        ), acc);
+        LlmProvider.mergeToolCallChunks(List.of(
+                new ToolCallChunk(0, null, "function", new FunctionCall("datetime", "{\"action\":\"now\"}"))
+        ), acc);
+
+        assertEquals(2, acc.size());
+        assertEquals("web_search", acc.get(0).build().function().name());
+        assertEquals("datetime", acc.get(1).build().function().name());
+    }
+
+    @Test
+    public void mergeToolCallChunks_sameDeltaIndexCollisionSplitsSlots() {
+        // Defensive: provider bundles two parallel calls in one delta's
+        // tool_calls list, both at index=0. Must split even if id/name
+        // checks happen to pass (e.g., incomplete metadata).
+        var acc = new java.util.HashMap<Integer, LlmProvider.ToolCallBuilder>();
+        LlmProvider.mergeToolCallChunks(List.of(
+                new ToolCallChunk(0, "a", "function", new FunctionCall("web_search", "{\"q\":\"x\"}")),
+                new ToolCallChunk(0, "b", "function", new FunctionCall("web_search", "{\"q\":\"y\"}"))
+        ), acc);
+
+        assertEquals(2, acc.size());
+        assertEquals("a", acc.get(0).build().id());
+        assertEquals("b", acc.get(1).build().id());
+    }
+
+    @Test
+    public void mergeToolCallChunks_nullInputIsNoOp() {
+        var acc = new java.util.HashMap<Integer, LlmProvider.ToolCallBuilder>();
+        LlmProvider.mergeToolCallChunks(null, acc);
+        LlmProvider.mergeToolCallChunks(List.of(), acc);
+        assertEquals(0, acc.size());
+    }
 }

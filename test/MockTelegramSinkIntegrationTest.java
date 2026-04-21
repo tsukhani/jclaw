@@ -64,34 +64,9 @@ public class MockTelegramSinkIntegrationTest extends UnitTest {
     // Wire-level tests prove the guard actually prevents the network call
     // rather than the exception path producing the same observable state.
 
-    @Test
-    public void draftReentranceGuardPreventsSecondSendMessageDraft() throws Exception {
-        // Setup: DRAFT transport sink with a slow mock so the first flush
-        // is mid-HTTP when the second flush is invoked. Without the guard,
-        // both concurrent flush() calls would hit the mock → 2 requests.
-        // With the guard, the second flush sees flushInFlight != null and
-        // returns early → 1 request.
-        server.delay(150);  // every response delayed 150ms
-        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 1L, "private");
-        pokePending(sink, "some accumulated text");
-
-        var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
-        flushMethod.setAccessible(true);
-
-        var t1 = Thread.ofVirtual().start(() -> invokeQuietly(flushMethod, sink));
-        // Tiny stagger so t1 is very likely to enter the synchronized block first.
-        Thread.sleep(10);
-        var t2 = Thread.ofVirtual().start(() -> invokeQuietly(flushMethod, sink));
-
-        t1.join(2000);
-        t2.join(2000);
-        assertFalse(t1.isAlive(), "t1 should have completed");
-        assertFalse(t2.isAlive(), "t2 should have completed");
-
-        assertEquals(1, server.countRequests("sendMessageDraft"),
-                "re-entrance guard must prevent the second flush from sending; "
-                        + "requests=" + server.requests());
-    }
+    // Note: the DRAFT-path re-entrance test was removed alongside DRAFT
+    // disablement (JCLAW-121). The EDIT_IN_PLACE variant below covers the
+    // same guard — DRAFT and EDIT_IN_PLACE share flushInFlight state.
 
     @Test
     public void editInPlaceReentranceGuardPreventsSecondSendMessage() throws Exception {
@@ -124,17 +99,21 @@ public class MockTelegramSinkIntegrationTest extends UnitTest {
     @Test
     public void tenConcurrentSinksDoNotSerialize() throws Exception {
         // JCLAW-95 AC3: 10 sinks each with one update(), mock delays each
-        // sendMessageDraft by 200ms. Parallel → ~200ms total. Serialized →
+        // sendMessage by 200ms. Parallel → ~200ms total. Serialized →
         // ~2000ms. Assert under 500ms (generous epsilon for CI jitter).
-        server.respondWithDelay("sendMessageDraft", 200, "{\"ok\":true,\"result\":true}", 200);
+        // Post-JCLAW-121: the first flush on an EDIT_IN_PLACE sink sends a
+        // sendMessage placeholder, so we throttle that method instead of
+        // sendMessageDraft (which is no longer used).
+        // Global delay — mock's default Message-shape response suffices for sendMessage.
+        server.delay(200);
 
         int n = 10;
         var sinks = new TelegramStreamingSink[n];
         for (int i = 0; i < n; i++) {
             // Each sink gets its own conversationId so they don't share
-            // ConversationQueue locks.
+            // ConversationQueue locks. chatType=null selects EDIT_IN_PLACE.
             sinks[i] = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent,
-                    (long) (100 + i), "private");
+                    (long) (100 + i), null);
         }
 
         var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
@@ -150,8 +129,8 @@ public class MockTelegramSinkIntegrationTest extends UnitTest {
         for (var t : threads) t.join(3000);
         long elapsedMs = System.currentTimeMillis() - start;
 
-        assertEquals(n, server.countRequests("sendMessageDraft"),
-                "each sink should fire exactly one sendMessageDraft");
+        assertEquals(n, server.countRequests("sendMessage"),
+                "each sink should fire exactly one sendMessage placeholder");
         assertTrue(elapsedMs < 500,
                 "10 sinks @ 200ms/flush should complete in ~200ms total (parallel), "
                         + "not ~2000ms (serialized). actual=" + elapsedMs + "ms");
@@ -161,16 +140,20 @@ public class MockTelegramSinkIntegrationTest extends UnitTest {
 
     @Test
     public void throttleRatchetsUpOnMockTelegram429() throws Exception {
-        // Mock returns 429 with retry_after=1 on every sendMessageDraft.
-        // The real flush path catches TelegramApiRequestException and
-        // invokes recordFlushFailure which ratchets currentThrottleMs.
-        // Previously only unit-tested with a hand-built exception; this
-        // proves the SDK's exception shape is what the classifier expects.
-        server.respondWith("sendMessageDraft", 429,
+        // Mock returns 429 with retry_after=1 on every sendMessage. The
+        // real flush path catches TelegramApiRequestException and invokes
+        // recordFlushFailure which ratchets currentThrottleMs. Previously
+        // only unit-tested with a hand-built exception; this proves the
+        // SDK's exception shape is what the classifier expects.
+        //
+        // Post-JCLAW-121: EDIT_IN_PLACE is the only transport, so we
+        // throttle sendMessage (the placeholder call) instead of
+        // sendMessageDraft.
+        server.respondWith("sendMessage", 429,
                 "{\"ok\":false,\"error_code\":429,\"description\":\"Too Many Requests\","
                         + "\"parameters\":{\"retry_after\":1}}");
 
-        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 2L, "private");
+        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 2L, null);
         assertEquals(250L, sink.currentThrottleMsForTest(), "fresh sink at floor");
 
         var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
@@ -189,34 +172,12 @@ public class MockTelegramSinkIntegrationTest extends UnitTest {
     }
 
     // ==================== Gap 5: draft-unsupported runtime fallback ====================
-
-    @Test
-    public void draftUnsupportedMockTriggersFallbackToEditInPlace() throws Exception {
-        // Mock returns Telegram's documented chat-type restriction error.
-        // isDraftUnsupported classifier matches the "can be used only"
-        // pattern, so the sink should transition DRAFT → EDIT_IN_PLACE
-        // and the retry inside tryDraftFlushWithFallback lands a
-        // sendMessage placeholder on the mock.
-        server.respondWith("sendMessageDraft", 400,
-                "{\"ok\":false,\"error_code\":400,\"description\":"
-                        + "\"Bad Request: method sendMessageDraft can be used only in private chats\"}");
-
-        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 3L, "group");
-        assertEquals(TelegramStreamingSink.Transport.DRAFT, sink.transportForTest(),
-                "group chat starts on DRAFT post-JCLAW-105");
-
-        pokePending(sink, "something to flush");
-        var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
-        flushMethod.setAccessible(true);
-        flushMethod.invoke(sink);
-
-        assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE, sink.transportForTest(),
-                "sink must transition to EDIT_IN_PLACE after the mock's draft-unsupported 400");
-        assertEquals(1, server.countRequests("sendMessageDraft"),
-                "exactly one sendMessageDraft attempted before the transition");
-        assertEquals(1, server.countRequests("sendMessage"),
-                "fallback must reissue as a sendMessage placeholder");
-    }
+    //
+    // The draft-unsupported fallback test was removed alongside DRAFT
+    // disablement (JCLAW-121). The classifier itself remains covered by
+    // the unit-level draftUnsupportedClassifierRecognizesExpectedPatterns
+    // test in TelegramStreamingSinkTest, retained as documented dead code
+    // in case Bot API 10.x gains a working draft-clear.
 
     // ==================== Gap 6: planner-dedupe sendPhoto count ====================
 

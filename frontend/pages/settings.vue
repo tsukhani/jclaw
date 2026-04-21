@@ -532,7 +532,13 @@ async function toggleScannerEnabled(scannerId: string) {
 // --- Model management ---
 const expandedModelsProvider = ref<string | null>(null)
 const editingModelIdx = ref<number | null>(null)
-const modelForm = ref({ id: '', name: '', contextWindow: 131072, maxTokens: 8192, supportsThinking: false, supportsVision: false, supportsAudio: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 })
+// contextWindow/maxTokens default to 0 ("unknown — please set"). Seeding a
+// plausible-but-wrong number here used to mask provider-discovery gaps —
+// e.g. Ollama Cloud's /v1/models returns no context field, so the frontend
+// previously silently wrote 131072 (kimi-k2.5 is actually 256K), which
+// then broke /usage and compaction-budget math. Show 0 honestly instead
+// and let the user enter the real value from the provider's docs.
+const modelForm = ref({ id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, supportsVision: false, supportsAudio: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 })
 const addingModel = ref(false)
 
 function getProviderModels(providerName: string): ProviderModelDef[] {
@@ -614,8 +620,10 @@ function startEditModel(providerName: string, idx: number) {
   modelForm.value = {
     id: m.id || '',
     name: m.name || '',
-    contextWindow: m.contextWindow || 131072,
-    maxTokens: m.maxTokens || 8192,
+    // Preserve 0 ("unknown") honestly — don't fabricate a fallback. See
+    // modelForm initializer above for context.
+    contextWindow: m.contextWindow ?? 0,
+    maxTokens: m.maxTokens ?? 0,
     supportsThinking: m.supportsThinking || false,
     supportsVision: m.supportsVision || false,
     supportsAudio: m.supportsAudio || false,
@@ -629,7 +637,7 @@ function startEditModel(providerName: string, idx: number) {
 }
 
 function startAddModel() {
-  modelForm.value = { id: '', name: '', contextWindow: 131072, maxTokens: 8192, supportsThinking: false, supportsVision: false, supportsAudio: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 }
+  modelForm.value = { id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, supportsVision: false, supportsAudio: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 }
   addingModel.value = true
   editingModelIdx.value = null
 }
@@ -1178,6 +1186,10 @@ const providerEntries = computed(() => {
                       type="number"
                       class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                     >
+                    <span
+                      v-if="!modelForm.contextWindow || modelForm.contextWindow <= 0"
+                      class="block text-[10px] text-warning mt-0.5"
+                    >Unknown — set from provider docs. Compaction and /usage depend on this.</span>
                   </label>
                   <label
                     :for="`model-maxtok-${name}`"
@@ -1441,6 +1453,10 @@ const providerEntries = computed(() => {
                     type="number"
                     class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                   >
+                  <span
+                    v-if="!modelForm.contextWindow || modelForm.contextWindow <= 0"
+                    class="block text-[10px] text-warning mt-0.5"
+                  >Unknown — set from provider docs. Compaction and /usage depend on this.</span>
                 </label>
                 <label
                   :for="`addmodel-maxtok-${name}`"

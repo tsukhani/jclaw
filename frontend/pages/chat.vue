@@ -836,7 +836,14 @@ async function sendMessage() {
             if (event.content?.startsWith('{') && event.content.includes('"usage"')) {
               try {
                 const parsed = JSON.parse(event.content)
-                if (parsed.usage) messages.value[assistantIdx]!.usage = parsed.usage
+                if (parsed.usage) {
+                  messages.value[assistantIdx]!.usage = parsed.usage
+                  // The metrics pill renders below the bubble the moment
+                  // usage lands. Without this scroll the per-token scroller
+                  // leaves the viewport pinned to the pre-metrics bottom
+                  // and the user sees a half-cropped stats row.
+                  scrollToBottom()
+                }
               }
               catch { /* not JSON, treat as status text */ }
             }
@@ -904,6 +911,11 @@ async function sendMessage() {
             }
             streamStatus.value = ''
             m.content = event.content || streamContent.value
+            // Collapsing thinking + swapping in final content shifts layout
+            // height. Re-pin to the bottom so the next thing the user sees
+            // (the metrics pill landing on the subsequent status event) is
+            // fully in view.
+            scrollToBottom()
           }
           else if (event.type === 'error') {
             messages.value[assistantIdx]!.content = event.content
@@ -936,6 +948,10 @@ async function sendMessage() {
   finally {
     streaming.value = false
     triggerRef(messages) // re-render with final content + markdown
+    // triggerRef can add height (markdown codeblocks expand, metrics pill
+    // appears if usage arrived after complete). Wait a tick so the DOM
+    // reflects the final layout, then pin to the bottom.
+    nextTick().then(scrollToBottom)
     // Check if agent is still processing queued messages
     if (selectedConvoId.value) {
       try {

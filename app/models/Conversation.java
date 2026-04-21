@@ -84,6 +84,22 @@ public class Conversation extends Model {
     public Instant contextSince;
 
     /**
+     * Context watermark for session compaction (JCLAW-38). When a turn
+     * approaches the model's context window, {@code SessionCompactor}
+     * summarizes the older Message rows into a {@link SessionCompaction}
+     * row and bumps this timestamp to the {@code createdAt} of the first
+     * kept (post-summary) message. {@link services.ConversationService#loadRecentMessages}
+     * honors the max of {@link #contextSince} and this field, so
+     * {@code /reset} (JCLAW-26) and compaction stack without overwriting
+     * each other — the tighter of the two always wins.
+     *
+     * <p>Older Message rows remain in the DB and in the UI sidebar /
+     * scrollback; only the LLM-facing view of history is truncated.
+     */
+    @Column(name = "compaction_since")
+    public Instant compactionSince;
+
+    /**
      * Conversation-scoped model override (JCLAW-108). When both
      * {@link #modelProviderOverride} and {@link #modelIdOverride} are
      * non-null, {@code AgentRunner.resolveModelInfo} uses them in place of

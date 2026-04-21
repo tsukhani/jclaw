@@ -55,6 +55,7 @@ public final class Commands {
     public enum Command {
         NEW("/new", "Start a fresh conversation"),
         RESET("/reset", "Clear the LLM's memory for this conversation"),
+        COMPACT("/compact", "Summarize older turns to free context"),
         HELP("/help", "Show available commands"),
         MODEL("/model", "Show current model and its capabilities"),
         USAGE("/usage", "Show context usage for this conversation");
@@ -75,6 +76,7 @@ public final class Commands {
             Available commands:
             • /new — start a fresh conversation (creates a new thread)
             • /reset — clear the LLM's memory for this conversation (keeps the thread)
+            • /compact — summarize older turns to free context (optional: /compact focus-hint)
             • /help — show this message
             • /model — show current model and its capabilities
             • /usage — show context usage for this conversation""";
@@ -178,6 +180,7 @@ public final class Commands {
         return switch (cmd) {
             case NEW -> executeNew(agent, channelType, peerId);
             case RESET -> executeReset(agent, channelType, current);
+            case COMPACT -> executeCompact(agent, channelType, current, args);
             case HELP -> executeHelp(agent, channelType, current);
             case MODEL -> executeModel(agent, channelType, current, args);
             case USAGE -> executeUsage(agent, channelType, current);
@@ -223,6 +226,109 @@ public final class Commands {
         EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
                 "/reset for conversation %d".formatted(convId));
         return new Result(updated != null ? updated : current, RESET_TEXT, Command.RESET);
+    }
+
+    /**
+     * {@code /compact [hint]} — manually trigger session compaction
+     * (JCLAW-38). Bypasses the auto-trigger's too-few-turns guard so
+     * users can summarize on demand even on smaller conversations, and
+     * accepts an optional guidance hint that's appended to the
+     * summarization prompt (e.g. {@code /compact focus on the SQL
+     * migration work}).
+     *
+     * <p>Cycle-safety is preserved — boundaries still anchor at user
+     * messages, so tool_call/tool_result pairs are never split. The
+     * response is a canned acknowledgement with turn-count and rough
+     * token size of the summary; the summary itself is in the DB
+     * ({@link models.SessionCompaction}) and re-injected into the next
+     * turn's system prompt by {@link services.SessionCompactor#appendSummaryToPrompt}.
+     *
+     * <p>Runs the summarization LLM call synchronously on the caller's
+     * thread — the channel's response shows up only after the
+     * summarizer returns. This matches {@code /model NAME}'s validation
+     * latency and is acceptable for an explicit user-requested action.
+     */
+    private static Result executeCompact(Agent agent, String channelType, Conversation current, String args) {
+        if (current == null) {
+            var fallback = "No active conversation to compact.";
+            EventLogger.warn("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+                    "/compact with no current conversation");
+            return new Result(null, fallback, Command.COMPACT);
+        }
+
+        // Resolve provider: prefer the conversation override, fall back to
+        // the agent default, then to the registry's primary. Mirrors
+        // AgentRunner.run's provider-selection flow.
+        var providerName = current.modelProviderOverride != null ? current.modelProviderOverride : agent.modelProvider;
+        var primary = ProviderRegistry.get(providerName);
+        if (primary == null) primary = ProviderRegistry.getPrimary();
+        if (primary == null) {
+            var msg = "> Compaction failed\n\nNo LLM provider is configured. Add one in Settings.";
+            persistCompactAckAndLog(agent, channelType, current, msg, "no-provider");
+            return new Result(current, msg, Command.COMPACT);
+        }
+
+        var modelId = current.modelIdOverride != null ? current.modelIdOverride : agent.modelId;
+        var modelLabel = primary.config().name() + "/" + modelId;
+        var maxOutput = services.ConfigService.getInt("chat.compactionMaxTokens", 8192);
+
+        final var capturedPrimary = primary;
+        final var capturedModelId = modelId;
+        services.SessionCompactor.Summarizer summarizer = sumMsgs -> {
+            var resp = capturedPrimary.chat(capturedModelId, sumMsgs, java.util.List.of(), maxOutput, null);
+            return services.SessionCompactor.firstChoiceText(resp);
+        };
+
+        var result = services.SessionCompactor.compact(current.id, modelLabel, summarizer,
+                /*force*/ true, args);
+        var responseText = buildCompactResponseText(result, args);
+        persistCompactAckAndLog(agent, channelType, current, responseText,
+                result.compacted() ? "compacted %d turns".formatted(result.turnsCompacted())
+                        : "skipped: " + result.skipReason());
+
+        return new Result(current, responseText, Command.COMPACT);
+    }
+
+    /**
+     * Format the canned ack for {@link #executeCompact} — Telegram and
+     * web both render the leading {@code >} as a blockquote for a clear
+     * visual boundary.
+     */
+    private static String buildCompactResponseText(services.SessionCompactor.CompactionResult result, String args) {
+        if (!result.compacted()) {
+            var reason = result.skipReason();
+            if ("no safe boundary or below min-turns".equals(reason)) {
+                return "> Nothing to compact\n\nThis conversation doesn't have enough earlier turns to summarize yet.";
+            }
+            if ("llm error".equals(reason)) {
+                return "> Compaction failed\n\nThe summarization LLM call errored out. Older turns remain in the active context.";
+            }
+            if ("empty summary".equals(reason)) {
+                return "> Compaction failed\n\nThe summarization model returned an empty response. Older turns remain in the active context.";
+            }
+            return "> Compaction skipped\n\n" + (reason != null ? reason : "unknown reason");
+        }
+        var approxTokens = Math.max(1, result.summaryChars() / 4);
+        var hintNote = (args != null && !args.isBlank()) ? " (guidance: " + args.strip() + ")" : "";
+        return """
+                > Conversation Compacted%s
+
+                Summarized %d earlier turns into ~%d tokens. Older messages remain in history and will stop being shipped to the model starting next turn."""
+                .formatted(hintNote, result.turnsCompacted(), approxTokens);
+    }
+
+    private static void persistCompactAckAndLog(Agent agent, String channelType,
+                                                 Conversation current, String text, String outcome) {
+        final Long convId = current.id;
+        final String responseFinal = text;
+        Tx.run(() -> {
+            var conv = (Conversation) Conversation.findById(convId);
+            if (conv != null) {
+                ConversationService.appendAssistantMessage(conv, responseFinal, null);
+            }
+        });
+        EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+                "/compact for conversation %d: %s".formatted(convId, outcome));
     }
 
     private static Result executeHelp(Agent agent, String channelType, Conversation current) {

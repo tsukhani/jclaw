@@ -114,17 +114,32 @@ public class ConversationService {
     /**
      * Load recent messages for context window assembly, returned in chronological order.
      *
-     * <p>Honors {@link Conversation#contextSince} (JCLAW-26): if the user
-     * invoked {@code /reset}, messages older than the reset watermark are
-     * excluded — the LLM sees an empty slate on the next turn while the
-     * original messages remain in the DB (and remain visible in the web
-     * sidebar / Telegram scrollback).
+     * <p>Honors two independent watermarks, whichever is tighter wins:
+     * <ul>
+     *   <li>{@link Conversation#contextSince} — {@code /reset} (JCLAW-26).
+     *       User-driven: when invoked, the LLM sees an empty slate on the
+     *       next turn while history stays in the DB.</li>
+     *   <li>{@link Conversation#compactionSince} — session compaction
+     *       (JCLAW-38). Automatic: older turns have been summarized into a
+     *       {@link models.SessionCompaction} row and the summary is
+     *       injected into the system prompt in place of the raw messages.</li>
+     * </ul>
+     * The two are orthogonal — a user can {@code /reset} a compacted
+     * conversation, or compaction can fire on a conversation that's
+     * already had a reset — so the effective floor is {@code max(..)}.
      */
     public static List<Message> loadRecentMessages(Conversation conversation) {
         var maxMessages = ConfigService.getInt("chat.maxContextMessages", 50);
+        var floor = latestOf(conversation.contextSince, conversation.compactionSince);
         // findRecent returns DESC order; reversed() returns a read-only ASC view
         // without copying — uses JDK 21 SequencedCollection.
-        return Message.findRecent(conversation, maxMessages, conversation.contextSince).reversed();
+        return Message.findRecent(conversation, maxMessages, floor).reversed();
+    }
+
+    private static java.time.Instant latestOf(java.time.Instant a, java.time.Instant b) {
+        if (a == null) return b;
+        if (b == null) return a;
+        return a.isAfter(b) ? a : b;
     }
 
     public static Conversation findById(Long id) {

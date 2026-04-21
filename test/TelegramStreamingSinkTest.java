@@ -287,51 +287,42 @@ public class TelegramStreamingSinkTest extends UnitTest {
                 "should fire again once the rate window has elapsed");
     }
 
-    // === JCLAW-103: transport selection + DRAFT transport ===
+    // === JCLAW-121: transport is always EDIT_IN_PLACE ===
+    //
+    // DRAFT transport was disabled after we discovered Bot API 9.5 has no
+    // working draft-clear — sendMessageDraft with empty text is rejected HTTP
+    // 400 by both the SDK validator and the server, leaving stale draft
+    // bubbles visible for several seconds until Telegram's client cache
+    // auto-expires. These tests now pin the "always EDIT_IN_PLACE" contract.
 
     @Test
-    public void transportDefaultsToEditInPlaceWhenChatTypeOmitted() {
-        // Pre-JCLAW-103 constructor (no chatType) must behave exactly as
-        // before — EDIT_IN_PLACE — so existing callers and tests keep working.
+    public void transportIsEditInPlaceWhenChatTypeOmitted() {
         var sink = new TelegramStreamingSink("tok", "chat", null);
         assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
                 sink.transportForTest());
     }
 
     @Test
-    public void transportIsDraftForPrivateChats() {
+    public void transportIsEditInPlaceForPrivateChats() {
         var sink = new TelegramStreamingSink("tok", "12345", null, null, "private");
-        assertEquals(TelegramStreamingSink.Transport.DRAFT,
+        assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
                 sink.transportForTest());
     }
 
     @Test
-    public void transportIsDraftForGroupSupergroupAndChannel() {
-        // JCLAW-105: Bot API 9.5 (2026-03-01) lifted the private-chats-only
-        // restriction. DRAFT is now the default for any non-blank chat type;
-        // runtime fallback handles the edge cases Telegram still rejects.
+    public void transportIsEditInPlaceForGroupSupergroupAndChannel() {
         for (String type : new String[] { "group", "supergroup", "channel" }) {
             var sink = new TelegramStreamingSink("tok", "chat", null, null, type);
-            assertEquals(TelegramStreamingSink.Transport.DRAFT,
+            assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
                     sink.transportForTest(),
-                    "chat.type=" + type + " should select DRAFT post-Bot-API-9.5");
+                    "chat.type=" + type + " must select EDIT_IN_PLACE (DRAFT disabled)");
         }
     }
 
     @Test
-    public void transportIsDraftForUnknownButNonBlankChatType() {
-        // Forward-compat: if Telegram adds a new chat.type string we don't
-        // recognize, we still attempt DRAFT. The runtime fallback classifier
-        // handles any server-side rejection cleanly.
-        var sink = new TelegramStreamingSink("tok", "chat", null, null, "business_chat");
-        assertEquals(TelegramStreamingSink.Transport.DRAFT, sink.transportForTest());
-    }
-
-    @Test
     public void transportIsEditInPlaceForNullOrBlankChatType() {
-        // Defensive: callers that couldn't parse chat.type pass null, or the
-        // field is absent from the inbound update. Fall back to EDIT_IN_PLACE
-        // so we don't issue a DRAFT request we have no signal to support.
+        // Null / blank chatType still produces EDIT_IN_PLACE — same contract
+        // as when DRAFT was active, just now universal.
         assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
                 new TelegramStreamingSink("tok", "chat", null, null, null)
                         .transportForTest());

@@ -268,9 +268,19 @@ public final class TelegramStreamingSink {
         this.chatId = chatId;
         this.agent = agent;
         this.conversationId = conversationId;
-        this.transport = (chatType != null && !chatType.isBlank())
-                ? Transport.DRAFT
-                : Transport.EDIT_IN_PLACE;
+        // JCLAW-121: always EDIT_IN_PLACE. The DRAFT path (JCLAW-103) looked
+        // cheaper on paper — sendMessageDraft avoids the "bot message appears
+        // then edits" flicker during streaming — but in practice modern
+        // Telegram clients render bot-sent drafts as real chat bubbles, so a
+        // long response (daily-briefing, restaurant-recommender, …) shows as
+        // two duplicate bubbles for several seconds. Telegram's Bot API has
+        // no working draft-clear method — {@code sendMessageDraft} with empty
+        // text is rejected both by the telegrambots-meta validator and by
+        // the server itself (HTTP 400 "Text can't be empty"), so the user is
+        // stuck waiting for the client's own draft cache to auto-expire.
+        // EDIT_IN_PLACE has none of this: a single placeholder bubble gets
+        // edited throughout the stream and swapped to final HTML at seal.
+        this.transport = Transport.EDIT_IN_PLACE;
         // Non-negative 31-bit int so it fits Telegram's draftId param and
         // doesn't collide across same-chat back-to-back turns in practice.
         this.draftId = java.util.concurrent.ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE);
@@ -682,27 +692,21 @@ public final class TelegramStreamingSink {
     }
 
     /**
-     * Post-seal draft cleanup seam (JCLAW-103). Currently a no-op because
-     * {@code SendMessageDraft.validate()} in {@code telegrambots-meta 9.5.0}
-     * rejects empty text ({@code "Text can't be empty"}) before the network
-     * call, and no dedicated {@code DeleteMessageDraft} / {@code ClearDraft}
-     * method exists in the SDK. OpenClaw's grammY-based equivalent calls
-     * {@code sendMessageDraft(chatId, draftId, "")} to clear — that API path
-     * is unavailable to us. Smoke testing (2026-04-21) showed no stale-draft
-     * artifacts in the chat after seal, suggesting Telegram auto-resolves
-     * the draft when a regular {@code sendMessage} lands, so the missing
-     * explicit clear is not a user-visible issue.
-     *
-     * <p>Left as a method rather than inlined so a future SDK update with a
-     * working clear primitive can wire it up without touching the four
-     * seal / errorFallback call sites.
+     * Post-seal draft cleanup seam. No-op today: DRAFT transport is
+     * disabled (JCLAW-121) because Telegram's Bot API has no working
+     * draft-clear — {@code sendMessageDraft(chatId, draftId, "")} is
+     * rejected HTTP 400 by both the SDK validator and the server.
+     * {@code draftWasSent} therefore stays {@code false} for every sink
+     * and this method does nothing. Kept as a seam so a future Bot API
+     * version with a real {@code deleteMessageDraft} can wire it up
+     * without touching the four seal / errorFallback call sites.
+     * Companion helper {@link TelegramChannel#clearMessageDraft} stays
+     * in the codebase as documented dead code for the same reason.
      */
     private void clearDraftBestEffort() {
-        // Intentionally no-op. See method javadoc — SDK validation blocks the
-        // only clear path OpenClaw uses. The {@code draftWasSent} flag is
-        // still kept on the sink: it's read by {@link #draftWasSentForTest}
-        // for diagnostics and will be the guard when a working clear
-        // primitive eventually lands.
+        if (!draftWasSent) return;
+        TelegramChannel.clearMessageDraft(botToken, chatId, draftId);
+        draftWasSent = false;
     }
 
     /**
