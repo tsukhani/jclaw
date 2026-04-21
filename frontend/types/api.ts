@@ -99,8 +99,12 @@ export interface LatencyHistogram {
   buckets?: Array<{ le_ms: number, count: number }>
 }
 
-/** Map of segment name → histogram from GET /api/metrics/latency. */
-export type LatencyMetrics = Record<string, LatencyHistogram>
+/**
+ * Response shape from GET /api/metrics/latency.
+ * Nested by channel (web, telegram, task, ...) so each transport's
+ * distribution stays separable — see JCLAW-102.
+ */
+export type LatencyMetrics = Record<string, Record<string, LatencyHistogram>>
 
 /** A skill definition (returned by /api/skills). */
 export interface Skill {

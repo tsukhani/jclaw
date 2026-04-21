@@ -156,7 +156,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
         long simulatedAcceptNs = System.nanoTime() - 4_000_000L; // 4ms ago
         play.mvc.Http.Request.current().args.put("acceptedAtNanos", simulatedAcceptNs);
 
-        var trace = LatencyTrace.fromCurrentRequest();
+        var trace = LatencyTrace.forTurn("web", LatencyTrace.acceptedAtNsFromCurrentRequest());
         trace.mark(LatencyTrace.PROLOGUE_DONE);
         trace.mark(LatencyTrace.FIRST_TOKEN);
         trace.mark(LatencyTrace.STREAM_BODY_END);
@@ -174,7 +174,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
         login();
         play.mvc.Http.Request.current().args.remove("acceptedAtNanos");
 
-        var trace = LatencyTrace.fromCurrentRequest();
+        var trace = LatencyTrace.forTurn("web", LatencyTrace.acceptedAtNsFromCurrentRequest());
         trace.mark(LatencyTrace.PROLOGUE_DONE);
         trace.end();
 
@@ -182,6 +182,63 @@ public class ApiMetricsControllerTest extends FunctionalTest {
         assertIsOk(response);
         var body = getContent(response);
         assertFalse(body.contains("\"queue_wait\""), body);
+    }
+
+    @Test
+    public void forTurnWithNullProducesPopulatedTrace() throws Exception {
+        // Channels without a pre-runner timestamp (Telegram polling, TaskPoller)
+        // pass null acceptedAtNs to forTurn. All segments except queue_wait
+        // should still be recorded — that's the fix that makes non-web channels
+        // show up in the Chat Performance dashboard.
+        login();
+
+        var trace = LatencyTrace.forTurn("telegram", null);
+        trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
+        Thread.sleep(2);
+        trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
+        Thread.sleep(2);
+        trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
+        Thread.sleep(2);
+        trace.mark(LatencyTrace.PROLOGUE_DONE);
+        Thread.sleep(2);
+        trace.mark(LatencyTrace.FIRST_TOKEN);
+        Thread.sleep(2);
+        trace.mark(LatencyTrace.STREAM_BODY_END);
+        trace.mark(LatencyTrace.TERMINAL_SENT);
+        trace.end();
+
+        var response = GET("/api/metrics/latency");
+        assertIsOk(response);
+        var body = getContent(response);
+        // The telegram channel section should carry the segments, and queue_wait
+        // should be absent for a null-accept-stamp caller.
+        assertTrue(body.contains("\"telegram\""), body);
+        assertTrue(body.contains("\"total\""), body);
+        assertTrue(body.contains("\"prologue\""), body);
+        assertTrue(body.contains("\"ttft\""), body);
+        assertTrue(body.contains("\"stream_body\""), body);
+        assertFalse(body.contains("\"queue_wait\""), "no queue_wait without an accept stamp: " + body);
+    }
+
+    @Test
+    public void channelsStaySeparateInSnapshot() throws Exception {
+        // JCLAW-102: a web turn and a telegram turn should land in distinct
+        // channel sections rather than averaging their distributions.
+        login();
+
+        var webTrace = LatencyTrace.forTurn("web", null);
+        webTrace.mark(LatencyTrace.PROLOGUE_DONE);
+        webTrace.end();
+
+        var telegramTrace = LatencyTrace.forTurn("telegram", null);
+        telegramTrace.mark(LatencyTrace.PROLOGUE_DONE);
+        telegramTrace.end();
+
+        var response = GET("/api/metrics/latency");
+        assertIsOk(response);
+        var body = getContent(response);
+        assertTrue(body.contains("\"web\""), body);
+        assertTrue(body.contains("\"telegram\""), body);
     }
 
     @Test

@@ -6,13 +6,17 @@ import org.telegram.telegrambots.meta.api.methods.ParseMode;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import services.EventLogger;
 import services.Tx;
 import utils.VirtualThreads;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
@@ -27,9 +31,11 @@ import java.util.regex.Pattern;
  *   <li>Constructed by the caller with (botToken, chatId, agent).
  *   <li>{@link #update(String)} is called on every LLM token batch. The first
  *       call sends a placeholder {@code sendMessage}; subsequent calls batch
- *       into {@code pending} and schedule an {@code editMessageText} flush
- *       that is throttled to the Telegram rate limit ({@value #THROTTLE_MS}
- *       ms per message).
+ *       into {@code pending} and schedule an {@code editMessageText} flush.
+ *       The cadence adapts to Telegram's per-chat rate limit: starts at
+ *       {@value #THROTTLE_MIN_MS} ms and ratchets up by
+ *       {@value #THROTTLE_STEP_MS} ms on each observed 429, capped at
+ *       {@value #THROTTLE_MAX_MS} ms.
  *   <li>{@link #seal(String)} is called on normal completion with the full
  *       assembled response. The sink delivers the final formatted HTML —
  *       either via one last edit (if the response still fits into the live
@@ -63,8 +69,25 @@ import java.util.regex.Pattern;
  */
 public final class TelegramStreamingSink {
 
-    /** Telegram's {@code editMessageText} per-message rate limit is ~1/sec. */
-    private static final long THROTTLE_MS = 1000;
+    /**
+     * Adaptive edit cadence for streaming previews (JCLAW-100).
+     *
+     * <p>Telegram's per-chat editMessageText rate limit is soft — aggressive
+     * cadences get 429s whose retry-after header tells you how long to wait.
+     * OpenClaw's draft-stream treats 250 ms as the empirical floor; 1000 ms
+     * is the historical "always-safe" value. Rather than guess, we start at
+     * {@link #THROTTLE_MIN_MS} and ratchet up by {@link #THROTTLE_STEP_MS}
+     * every time Telegram responds with a 429 retry-after, capped at
+     * {@link #THROTTLE_MAX_MS}. No decay — each new sink starts fresh at
+     * the minimum, so a chat that 429'd on the previous turn gets another
+     * chance to go fast this turn.
+     */
+    private static final long THROTTLE_MIN_MS = 250;
+    private static final long THROTTLE_STEP_MS = 250;
+    private static final long THROTTLE_MAX_MS = 1000;
+
+    /** Current cadence for this sink. Monotonically non-decreasing until seal. */
+    private volatile long currentThrottleMs = THROTTLE_MIN_MS;
 
     /**
      * Telegram's single-message hard cap. Beyond this the live stream stops
@@ -120,10 +143,18 @@ public final class TelegramStreamingSink {
      * submission order, so an HTML seal that wins the race on submission
      * can still be overwritten by a slower plain-text flush.
      */
-    private volatile boolean flushInFlight = false;
+    /**
+     * Non-null while a flush is in flight; {@code null} when idle. The future
+     * is created under the {@code synchronized (this)} block at the top of
+     * {@link #flush()} and completed (to {@code null}) in its {@code finally}
+     * after the network call returns, so a concurrent {@link #seal(String)}
+     * can wait on it directly instead of polling. Keeps re-entrance guarding
+     * simple — {@code flushInFlight != null} means "someone else is busy".
+     */
+    private volatile CompletableFuture<Void> flushInFlight = null;
 
     /**
-     * Bounded spin-wait deadline for {@link #seal(String)} observing
+     * Bounded await cap for {@link #seal(String)} observing
      * {@link #flushInFlight}. 2s is long enough to cover p99 Telegram edit
      * latency but short enough that a stuck flush doesn't hold up seal
      * indefinitely.
@@ -279,6 +310,7 @@ public final class TelegramStreamingSink {
     public boolean sealedForTest() { return sealed.get(); }
     public String lastSentTextForTest() { return lastSentText; }
     public long lastSentAtForTest() { return lastSentAt; }
+    public long currentThrottleMsForTest() { return currentThrottleMs; }
     /** True while the typing-indicator heartbeat (JCLAW-98) is scheduled. */
     public boolean typingHeartbeatActiveForTest() {
         synchronized (this) {
@@ -329,7 +361,7 @@ public final class TelegramStreamingSink {
 
     private void scheduleFlushLocked() {
         if (scheduledFlush != null && !scheduledFlush.isDone()) return;
-        long wait = Math.max(0, THROTTLE_MS - (System.currentTimeMillis() - lastSentAt));
+        long wait = Math.max(0, currentThrottleMs - (System.currentTimeMillis() - lastSentAt));
         // Scheduler thread only spawns the flush; the flush itself runs on a
         // fresh virtual thread so cross-sink flushes don't serialize (JCLAW-95).
         scheduledFlush = SCHEDULER.schedule(
@@ -353,12 +385,12 @@ public final class TelegramStreamingSink {
             // newly-scheduled flush could fire while a previous one is still
             // mid-HTTP for this same sink. Skip and rely on the in-flight
             // flush's post-network reschedule to pick up the pending.
-            if (flushInFlight) return;
+            if (flushInFlight != null) return;
             toShow = stripImageRefs(pending.toString());
             if (toShow.length() < MIN_FLUSH_CHARS) return;
             if (toShow.equals(lastSentText)) return;
             wasFirstSend = (messageId == null);
-            flushInFlight = true;
+            flushInFlight = new CompletableFuture<>();
         }
         try {
             if (wasFirstSend) {
@@ -377,37 +409,81 @@ public final class TelegramStreamingSink {
                 if (pending.length() > lastSentText.length() && !sealed.get() && !streamCapReached) {
                     scheduledFlush = SCHEDULER.schedule(
                             () -> Thread.ofVirtual().start(this::flush),
-                            THROTTLE_MS, TimeUnit.MILLISECONDS);
+                            currentThrottleMs, TimeUnit.MILLISECONDS);
                 }
             }
         } catch (Exception e) {
-            // Non-fatal: retry on next flush window. A 429 (rate limit) is
-            // most likely — the throttle should prevent it, but if the LLM
-            // pushes through multiple retries or the server clock drifts,
-            // we'd rather drop one frame than surface an error.
-            EventLogger.warn("channel", agentName(), "telegram",
-                    "Streaming flush failed (will retry): " + e.getMessage());
+            // Non-fatal: retry on next flush window. See recordFlushFailure
+            // for the 429 adaptive-throttle ratchet (JCLAW-100).
+            recordFlushFailure(e);
         } finally {
-            flushInFlight = false;
+            // Clear the guard under the same lock order the setter used, then
+            // signal waiters outside the synchronized block — completeNow()
+            // on a future is lock-free and joiners are on foreign threads.
+            CompletableFuture<Void> done;
+            synchronized (this) {
+                done = flushInFlight;
+                flushInFlight = null;
+            }
+            if (done != null) done.complete(null);
         }
     }
 
     /**
-     * Spin-wait (bounded) for any in-flight flush to complete. Called from
+     * Extract rate-limit signal from a flush failure and ratchet
+     * {@link #currentThrottleMs} up by {@link #THROTTLE_STEP_MS} (capped at
+     * {@link #THROTTLE_MAX_MS}) when Telegram returned a 429 with a
+     * retry-after. Non-429 failures are logged and leave the cadence
+     * untouched. Public so unit tests in the default package can exercise
+     * the ratchet without standing up the network path — matches the
+     * existing {@code *ForTest} convention elsewhere in this class.
+     */
+    public void recordFlushFailure(Exception e) {
+        if (e instanceof TelegramApiRequestException tare
+                && tare.getParameters() != null
+                && tare.getParameters().getRetryAfter() != null
+                && tare.getParameters().getRetryAfter() > 0) {
+            long previous = currentThrottleMs;
+            if (previous < THROTTLE_MAX_MS) {
+                currentThrottleMs = Math.min(previous + THROTTLE_STEP_MS, THROTTLE_MAX_MS);
+            }
+            EventLogger.warn("channel", agentName(), "telegram",
+                    "Telegram 429 (retry_after=%ds); cadence %d → %d ms"
+                            .formatted(tare.getParameters().getRetryAfter(),
+                                    previous, currentThrottleMs));
+            return;
+        }
+        EventLogger.warn("channel", agentName(), "telegram",
+                "Streaming flush failed (will retry): " + e.getMessage());
+    }
+
+    /**
+     * Wait (bounded) for any in-flight flush to complete. Called from
      * {@link #seal(String)} and {@link #errorFallback(Exception)} so their
      * final network call isn't racing against a slower flush whose edit
      * lands on Telegram after ours — Telegram applies edits in the order
      * they arrive at its servers, not the order we submit them.
+     *
+     * <p>Implemented via a {@link CompletableFuture} the flush completes
+     * on exit (JCLAW-100): seal wakes the instant the flush returns rather
+     * than polling every 20 ms. If the flush is genuinely stuck the 2 s
+     * cap still applies so a hung HTTP call can't hold seal indefinitely.
      */
     private void awaitInFlightFlush() {
-        long deadline = System.currentTimeMillis() + SEAL_INFLIGHT_WAIT_MS;
-        while (flushInFlight && System.currentTimeMillis() < deadline) {
-            try {
-                Thread.sleep(20);
-            } catch (InterruptedException _) {
-                Thread.currentThread().interrupt();
-                return;
-            }
+        var done = flushInFlight;
+        if (done == null) return;
+        try {
+            done.get(SEAL_INFLIGHT_WAIT_MS, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+        } catch (TimeoutException _) {
+            // Defensive cap — flush exceeded the p99 latency budget. Proceed
+            // anyway; the worst-case outcome is an out-of-order edit, which
+            // the retry path can recover. Logging would be noisy here.
+        } catch (ExecutionException _) {
+            // flush() itself swallows exceptions and always completes the
+            // future normally, so this branch is effectively unreachable —
+            // kept for API completeness in case future refactors propagate.
         }
     }
 

@@ -37,6 +37,9 @@ function colorFor(key: string): string {
 // ── Selected segment state ──────────────────────────────────────────────────
 // Default: 'total' if present (most useful single-glance metric), else the
 // first series the parent supplies. Overridden from localStorage on mount.
+// With JCLAW-102 the channel is picked by a dropdown in the panel header;
+// the series arriving here are already scoped to one channel, so keys are
+// flat segment names like "total" / "ttft".
 function defaultKey(): string {
   return props.series.find(s => s.key === 'total')?.key
     ?? props.series[0]?.key

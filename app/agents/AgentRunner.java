@@ -158,6 +158,12 @@ public class AgentRunner {
         }
 
         final Long conversationId = conversation.id;
+        // Non-streaming callers (TaskPollerJob, background) have no pre-runner
+        // queue-accept timestamp, so queue_wait is naturally skipped. Every other
+        // segment is captured, which is why scheduled turns now show up in the
+        // Chat Performance dashboard (channel-partitioned per JCLAW-102).
+        var trace = LatencyTrace.forTurn(conversation.channelType, null);
+        trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
 
         try {
             // Short setup transaction: persist user message, assemble prompt, resolve provider.
@@ -168,6 +174,7 @@ public class AgentRunner {
             var prepared = services.Tx.run(() -> {
                 var conv = ConversationService.findById(conversationId);
                 ConversationService.appendUserMessage(conv, userMessage);
+                trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
 
                 var assembled = SystemPromptAssembler.assemble(agent, userMessage, null, conv.channelType);
                 var messages = buildMessages(assembled.systemPrompt(), conv);
@@ -183,6 +190,7 @@ public class AgentRunner {
                 var secondary = ProviderRegistry.getSecondary();
 
                 var trimmed = trimToContextWindow(messages, agent, primary);
+                trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
                 var tools = ToolRegistry.getToolDefsForAgent(agent);
 
                 EventLogger.info("llm", agent.name, conv.channelType,
@@ -197,9 +205,11 @@ public class AgentRunner {
                         services.Tx.run(() -> ConversationService.findById(conversationId)));
             }
 
+            trace.mark(LatencyTrace.PROLOGUE_DONE);
             // LLM call loop — no transaction open, JDBC connection back in pool
             var response = callWithToolLoop(agent, conversationId,
                     prepared.messages(), prepared.tools(), prepared.primary(), prepared.secondary());
+            trace.mark(LatencyTrace.STREAM_BODY_END);
 
             // Short persistence transaction: final assistant message
             services.Tx.run(() -> {
@@ -213,6 +223,8 @@ public class AgentRunner {
             var updatedConversation = services.Tx.run(() -> ConversationService.findById(conversationId));
             return new RunResult(response, updatedConversation);
         } finally {
+            trace.mark(LatencyTrace.TERMINAL_SENT);
+            trace.end();
             EventLogger.flush();
             processQueueDrain(conversationId);
         }
@@ -221,32 +233,43 @@ public class AgentRunner {
     /**
      * Run the agent with streaming. Resolves the conversation inside the virtual thread
      * so it commits in its own transaction before inserting messages.
+     *
+     * <p>{@code acceptedAtNs} is the {@code System.nanoTime()} of when the inbound
+     * message entered the process. Web controllers forward the Netty-set stamp so
+     * {@code queue_wait} can be measured; Telegram polling, scheduled tasks, and
+     * other channels without a pre-runner timestamp pass {@code null}. A
+     * {@link LatencyTrace} is always constructed inside the virtual thread, so
+     * every channel contributes to the performance histograms (JCLAW performance
+     * dashboard).
      */
     public static void runStreaming(Agent agent, Long conversationId, String channelType, String peerId,
                                     String userMessage,
                                     AtomicBoolean isCancelled,
                                     StreamingCallbacks cb,
-                                    LatencyTrace trace) {
+                                    Long acceptedAtNs) {
         Thread.ofVirtual().start(() -> {
             final Long[] conversationIdRef = {null};
+            var trace = LatencyTrace.forTurn(channelType, acceptedAtNs);
+            trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
+            var tracedCb = wrapCallbacksWithTrace(cb, trace);
             try {
                 // Phase 1: Resolve conversation, acquire queue, persist user message
                 var conversation = resolveConversationAndAcquireQueue(
-                        agent, conversationId, channelType, peerId, userMessage, cb);
+                        agent, conversationId, channelType, peerId, userMessage, tracedCb);
                 if (conversation == null) return; // queued, not-found, or error — already handled
                 conversationIdRef[0] = conversation.id;
 
-                if (trace != null) trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
+                trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
 
                 if (checkCancelled(isCancelled, agent, channelType)) return;
 
                 // Phase 2: Assemble prompt, resolve provider, call LLM in streaming loop
-                streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace);
+                streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, tracedCb, trace);
 
             } catch (Exception e) {
                 EventLogger.error("llm", agent.name, channelType,
                         "Streaming error: %s".formatted(e.getMessage()));
-                cb.onError().accept(e);
+                tracedCb.onError().accept(e);
             } finally {
                 EventLogger.flush();
                 if (conversationIdRef[0] != null) {
@@ -254,6 +277,38 @@ public class AgentRunner {
                 }
             }
         });
+    }
+
+    /**
+     * Wrap a caller's {@link StreamingCallbacks} so the trace captures the three
+     * boundaries only the transport layer knows about:
+     * {@code FIRST_TOKEN} on the first token write, and {@code TERMINAL_SENT} +
+     * {@link LatencyTrace#end()} after the caller's onComplete/onError handler
+     * returns (i.e. after the final SSE frame, Telegram edit, etc. is delivered).
+     * Invoking the caller's handler first ensures the mark captures the
+     * post-delivery timestamp, matching the pre-refactor web behavior.
+     */
+    private static StreamingCallbacks wrapCallbacksWithTrace(StreamingCallbacks cb, LatencyTrace trace) {
+        var firstTokenSeen = new AtomicBoolean(false);
+        return new StreamingCallbacks(
+                cb.onInit(),
+                token -> {
+                    if (firstTokenSeen.compareAndSet(false, true)) {
+                        trace.mark(LatencyTrace.FIRST_TOKEN);
+                    }
+                    cb.onToken().accept(token);
+                },
+                cb.onReasoning(),
+                cb.onStatus(),
+                content -> {
+                    try { cb.onComplete().accept(content); }
+                    finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
+                },
+                error -> {
+                    try { cb.onError().accept(error); }
+                    finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
+                }
+        );
     }
 
     /**
@@ -347,7 +402,7 @@ public class AgentRunner {
 
         if (checkCancelled(isCancelled, agent, channelType)) return;
 
-        if (trace != null) trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
+        trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
 
         var tools = prepared.tools();
         var thinkingMode = resolveThinkingMode(agent, primary);
@@ -360,7 +415,7 @@ public class AgentRunner {
         var modelInfo = resolveModelInfo(agent, primary).orElse(null);
 
         // Stream with tool call handling (HTTP, no JPA)
-        if (trace != null) trace.mark(LatencyTrace.PROLOGUE_DONE);
+        trace.mark(LatencyTrace.PROLOGUE_DONE);
         var streamStartMs = System.currentTimeMillis();
         // Turn-level cumulative usage. Each LLM round (first round here, plus
         // any tool-result continuation rounds inside handleToolCallsStreaming)
@@ -404,22 +459,28 @@ public class AgentRunner {
                     ? "I tried to use a tool but my response was too long and got cut off. Let me try a more concise approach."
                     : content;
             cb.onToken().accept(truncMsg.equals(content) ? "" : "\n\n*[Response was truncated — retrying with a simpler approach]*");
-            if (trace != null) trace.mark(LatencyTrace.STREAM_BODY_END);
+            trace.mark(LatencyTrace.STREAM_BODY_END);
             var finalContent = truncMsg;
-            // Fire the terminal SSE frame FIRST — user sees "done" immediately, and
-            // trace.end() (registered on streamDone.whenComplete) records a tight
-            // `total` that excludes the DB persist. Persist runs below on this same
-            // virtual thread, which means the outer wrapper's finally → processQueueDrain
-            // still observes a fully committed conversation before any queued follow-up
-            // message runs. No race, no stale history for back-to-back turns.
-            cb.onComplete().accept(finalContent);
+            // JCLAW-100: run the DB persist concurrently with the terminal
+            // delivery. No data dependency between them, and the terminal
+            // emit blocks on a Telegram Bot API round-trip (~500 ms p99) for
+            // Telegram turns — so piggy-backing persist on that window hides
+            // its ~8 ms entirely from the user-visible path. We still join
+            // before returning, because the outer runStreaming finally →
+            // processQueueDrain needs the conversation committed so the next
+            // queued turn loads fresh history.
             long truncPersistStartNs = System.nanoTime();
-            services.Tx.run(() -> {
-                var conv = ConversationService.findById(conversation.id);
-                ConversationService.appendAssistantMessage(conv, finalContent, null);
+            var truncPersistFuture = Thread.ofVirtual().start(() -> {
+                services.Tx.run(() -> {
+                    var conv = ConversationService.findById(conversation.id);
+                    ConversationService.appendAssistantMessage(conv, finalContent, null);
+                });
+                utils.LatencyStats.record(channelType, "persist",
+                        (System.nanoTime() - truncPersistStartNs) / 1_000_000L);
             });
-            utils.LatencyStats.record("persist",
-                    (System.nanoTime() - truncPersistStartNs) / 1_000_000L);
+            cb.onComplete().accept(finalContent);
+            try { truncPersistFuture.join(); }
+            catch (InterruptedException _) { Thread.currentThread().interrupt(); }
             return;
         }
 
@@ -432,27 +493,33 @@ public class AgentRunner {
 
         if (checkCancelled(isCancelled, agent, channelType)) return;
 
-        if (trace != null) trace.mark(LatencyTrace.STREAM_BODY_END);
+        trace.mark(LatencyTrace.STREAM_BODY_END);
 
         // Build usage JSON before persisting so it can be stored alongside the message
         var usageJson = buildUsageJson(turnUsage, firstRoundAccumulator, modelInfo, streamStartMs);
 
-        // Fire the terminal SSE frame FIRST so the user-visible `total` ends at the
-        // outgoing write, not at the DB round-trip. Persist happens below on this
-        // same virtual thread — the outer wrapper's finally → processQueueDrain
-        // therefore still observes a committed conversation before any queued
-        // follow-up turn runs. See the truncation branch above for the full rationale.
-        emitUsageAndComplete(agent, channelType, content, turnUsage, streamStartMs, usageJson, cb);
-
+        // JCLAW-100: persist the assistant message concurrently with the
+        // terminal delivery. No data dependency between them, and the
+        // terminal emit blocks on a Telegram Bot API round-trip (~500 ms
+        // p99) for Telegram turns — so running persist in parallel hides
+        // its ~8 ms entirely from the user-visible path. The join below
+        // ensures the outer runStreaming finally → processQueueDrain still
+        // observes a committed conversation before any queued follow-up
+        // turn runs.
         var finalContent = content;
         var finalReasoning = turnUsage.reasoningText();
         long persistStartNs = System.nanoTime();
-        services.Tx.run(() -> {
-            var conv = ConversationService.findById(conversation.id);
-            ConversationService.appendAssistantMessage(conv, finalContent, null, usageJson, finalReasoning);
+        var persistFuture = Thread.ofVirtual().start(() -> {
+            services.Tx.run(() -> {
+                var conv = ConversationService.findById(conversation.id);
+                ConversationService.appendAssistantMessage(conv, finalContent, null, usageJson, finalReasoning);
+            });
+            utils.LatencyStats.record(channelType, "persist",
+                    (System.nanoTime() - persistStartNs) / 1_000_000L);
         });
-        utils.LatencyStats.record("persist",
-                (System.nanoTime() - persistStartNs) / 1_000_000L);
+        emitUsageAndComplete(agent, channelType, content, turnUsage, streamStartMs, usageJson, cb);
+        try { persistFuture.join(); }
+        catch (InterruptedException _) { Thread.currentThread().interrupt(); }
     }
 
     /**
@@ -636,9 +703,7 @@ public class AgentRunner {
         var toolRoundStartNs = System.nanoTime();
         executeToolsParallel(toolCalls, agent, conversationId, currentMessages,
                 cb.onStatus(), collectedImages, isCancelled);
-        if (trace != null) {
-            trace.addToolRound((System.nanoTime() - toolRoundStartNs) / 1_000_000L);
-        }
+        trace.addToolRound((System.nanoTime() - toolRoundStartNs) / 1_000_000L);
 
         if (isCancelled.get()) return priorContent;
 

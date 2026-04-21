@@ -9,47 +9,72 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * In-memory HdrHistogram-backed latency stats. Not persisted — resets on
- * JVM restart and via {@link #reset()}.
+ * In-memory HdrHistogram-backed latency stats, partitioned by channel.
+ * Not persisted — resets on JVM restart and via {@link #reset()}.
  *
  * <p>Uses {@link AtomicHistogram} for lock-free multi-writer recording;
  * values below 1ms are clamped to 1 since HdrHistogram requires positive
  * integers. The range covers 1ms..1h with 3 significant digits (≈0.1%
  * relative error), which replaces the hand-rolled log-linear buckets that
  * rounded tail percentiles up to the next power of two.
+ *
+ * <p>Per-channel partitioning (JCLAW-102): every sample is bound to a
+ * channel (web, telegram, task, …) so the dashboard can show distinct
+ * distributions per transport instead of one comingled average. A blank
+ * or null channel falls back to {@link #UNKNOWN_CHANNEL} so nothing silently
+ * disappears from the snapshot.
  */
 public final class LatencyStats {
+
+    public static final String UNKNOWN_CHANNEL = "unknown";
 
     // 1ms..1h, 3 sig digits — memory footprint is ~50 KB per histogram.
     private static final long HIGHEST_TRACKABLE_MS = 3_600_000L;
     private static final int NUMBER_OF_SIG_DIGITS = 3;
 
-    private static final ConcurrentHashMap<String, Histogram> HISTOGRAMS =
+    // channel → (segment → histogram). Outer and inner maps are both
+    // ConcurrentHashMap so record() is lock-free on the fast path.
+    private static final ConcurrentHashMap<String, ConcurrentHashMap<String, Histogram>> BY_CHANNEL =
             new ConcurrentHashMap<>();
 
     private LatencyStats() {}
 
-    public static void record(String segment, long valueMs) {
-        HISTOGRAMS.computeIfAbsent(segment, _ -> new Histogram()).record(valueMs);
+    public static void record(String channel, String segment, long valueMs) {
+        var resolved = (channel == null || channel.isBlank()) ? UNKNOWN_CHANNEL : channel;
+        BY_CHANNEL
+                .computeIfAbsent(resolved, _ -> new ConcurrentHashMap<>())
+                .computeIfAbsent(segment, _ -> new Histogram())
+                .record(valueMs);
     }
 
+    /**
+     * Snapshot every channel's histograms as a nested JSON object:
+     * {@code {channel: {segment: histogramJson, …}, …}}. Callers that want
+     * a single aggregate view across channels can merge client-side (or
+     * we can add a server-side merge later — JCLAW-102 defers that).
+     */
     public static JsonObject snapshot() {
         var root = new JsonObject();
-        for (Map.Entry<String, Histogram> e : HISTOGRAMS.entrySet()) {
-            root.add(e.getKey(), e.getValue().toJson());
+        for (Map.Entry<String, ConcurrentHashMap<String, Histogram>> channelEntry : BY_CHANNEL.entrySet()) {
+            var channelObj = new JsonObject();
+            for (Map.Entry<String, Histogram> e : channelEntry.getValue().entrySet()) {
+                channelObj.add(e.getKey(), e.getValue().toJson());
+            }
+            root.add(channelEntry.getKey(), channelObj);
         }
         return root;
     }
 
     public static void reset() {
-        HISTOGRAMS.clear();
+        BY_CHANNEL.clear();
     }
 
     /**
-     * Capture the current histogram state and return a {@link Runnable} that,
-     * when invoked, restores the exact state at capture time — dropping any
-     * samples recorded between capture and restore, and removing any segments
-     * that were created after capture.
+     * Capture the current histogram state (all channels, all segments) and
+     * return a {@link Runnable} that, when invoked, restores the exact state
+     * at capture time — dropping any samples recorded between capture and
+     * restore, and removing any (channel, segment) pairs that were created
+     * after capture.
      *
      * <p>Used by the load-test harness to discard warmup samples without
      * wiping data accumulated from previous runs. Safe to call while other
@@ -58,19 +83,26 @@ public final class LatencyStats {
      * narrow (snapshot → single warmup request → restore).
      */
     public static Runnable captureResetPoint() {
-        java.util.Map<String, HistogramCopy> snap = new java.util.HashMap<>();
-        for (Map.Entry<String, Histogram> e : HISTOGRAMS.entrySet()) {
-            snap.put(e.getKey(), e.getValue().copy());
+        Map<String, Map<String, HistogramCopy>> snap = new java.util.HashMap<>();
+        for (var channelEntry : BY_CHANNEL.entrySet()) {
+            var inner = new java.util.HashMap<String, HistogramCopy>();
+            for (var e : channelEntry.getValue().entrySet()) {
+                inner.put(e.getKey(), e.getValue().copy());
+            }
+            snap.put(channelEntry.getKey(), inner);
         }
         return () -> {
-            // Drop any segments created after capture (e.g. first-ever warmup
-            // against a fresh JVM populates segments that didn't exist at
-            // snapshot time).
-            HISTOGRAMS.keySet().retainAll(snap.keySet());
-            // Restore each surviving segment to its captured state.
-            for (var e : snap.entrySet()) {
-                var hist = HISTOGRAMS.get(e.getKey());
-                if (hist != null) hist.restoreFrom(e.getValue());
+            // Drop channels entirely absent from the snapshot.
+            BY_CHANNEL.keySet().retainAll(snap.keySet());
+            for (var channelEntry : snap.entrySet()) {
+                var segmentMap = BY_CHANNEL.get(channelEntry.getKey());
+                if (segmentMap == null) continue;
+                // Drop segments in this channel that didn't exist at snapshot time.
+                segmentMap.keySet().retainAll(channelEntry.getValue().keySet());
+                for (var e : channelEntry.getValue().entrySet()) {
+                    var hist = segmentMap.get(e.getKey());
+                    if (hist != null) hist.restoreFrom(e.getValue());
+                }
             }
         };
     }

@@ -228,9 +228,12 @@ public class ApiChatController extends Controller {
      * POST /api/chat/stream — Send a message and stream the response as SSE.
      */
     public static void streamChat() {
-        var trace = LatencyTrace.fromCurrentRequest();
+        // Grab the Netty-set queue-accept stamp on the invocation thread so we can
+        // forward it across the virtual-thread hop inside AgentRunner. The trace
+        // itself is now constructed inside runStreaming — that's what lets every
+        // channel (not just web) populate the performance histograms.
+        var acceptedAtNs = LatencyTrace.acceptedAtNsFromCurrentRequest();
         var ctx = resolveChatContext(JsonBodyReader.readJsonBody());
-        trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
         var agent = ctx.agent();
         var messageText = ctx.message();
         var conversationId = ctx.conversationId();
@@ -283,15 +286,17 @@ public class ApiChatController extends Controller {
             }
             writeSse(res, cancelled, streamDone,
                     Map.of("type", "complete", "content", slashResult.responseText()), true);
-            trace.mark(LatencyTrace.TERMINAL_SENT);
-            streamDone.whenComplete((_, _) -> {
-                heartbeatFuture.cancel(false);
-                trace.end();
-            });
+            // Slash commands are synthetic turns — no LLM, no prologue → intentionally
+            // not instrumented so they don't skew the Chat Performance histograms.
+            streamDone.whenComplete((_, _) -> heartbeatFuture.cancel(false));
             await(streamDone, _ -> { });
             return;
         }
 
+        // Switch SSE payload shape on the first token only (includes a timestamp
+        // field the frontend uses for TTFT visualization). Subsequent tokens take
+        // the hot path. This is purely a wire-format decision — trace-side
+        // FIRST_TOKEN marking is handled inside AgentRunner now.
         var firstToken = new AtomicBoolean(true);
         var callbacks = new AgentRunner.StreamingCallbacks(
                 conversation -> {
@@ -315,7 +320,6 @@ public class ApiChatController extends Controller {
                 },
                 token -> {
                     if (firstToken.compareAndSet(true, false)) {
-                        trace.mark(LatencyTrace.FIRST_TOKEN);
                         // First token includes timestamp — use Gson path
                         writeSse(res, cancelled, streamDone,
                                 Map.of("type", "token", "content", token,
@@ -329,21 +333,17 @@ public class ApiChatController extends Controller {
                         Map.of("type", "reasoning", "content", reasoning), false),
                 status -> writeSse(res, cancelled, streamDone,
                         Map.of("type", "status", "content", status), false),
-                content -> {
-                    writeSse(res, cancelled, streamDone,
-                            Map.of("type", "complete", "content", content), true);
-                    trace.mark(LatencyTrace.TERMINAL_SENT);
-                },
+                content -> writeSse(res, cancelled, streamDone,
+                        Map.of("type", "complete", "content", content), true),
                 error -> {
                     writeSse(res, cancelled, streamDone,
                             Map.of("type", "error", "content", "An error occurred: " + error.getMessage()), true);
-                    trace.mark(LatencyTrace.TERMINAL_SENT);
                     EventLogger.error("channel", agent.name, "web",
                             "SSE stream error: %s".formatted(error.getMessage()));
                 }
         );
         AgentRunner.runStreaming(agent, conversationId, "web", username, messageText,
-                cancelled, callbacks, trace);
+                cancelled, callbacks, acceptedAtNs);
 
         // Safety timeout: emit one error frame and complete normally if no
         // terminal frame arrives within 600s. Scheduled on the shared scheduler;
@@ -366,7 +366,6 @@ public class ApiChatController extends Controller {
         streamDone.whenComplete((_, _) -> {
             heartbeatFuture.cancel(false);
             timeoutFuture.cancel(false);
-            trace.end();
         });
 
         // Suspend this invocation until streamDone completes. The Play worker

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   buildLatencyRows,
   buildChartSeries,
+  listAvailableChannels,
   type LatencyHistogram,
 } from '~/utils/latency-rows'
 
@@ -29,7 +30,6 @@ describe('buildLatencyRows (JCLAW-74 prologue nesting)', () => {
     })
 
     const keys = rows.map(r => r.key)
-    // Prologue parent sits at index 1, followed immediately by its children.
     const prologueIdx = keys.indexOf('prologue')
     expect(prologueIdx).toBeGreaterThan(-1)
     expect(keys.slice(prologueIdx + 1, prologueIdx + 5)).toEqual([
@@ -38,7 +38,6 @@ describe('buildLatencyRows (JCLAW-74 prologue nesting)', () => {
       'prologue_tools',
       'prologue_prompt',
     ])
-    // No prologue_* row appears after ttft.
     const ttftIdx = keys.indexOf('ttft')
     expect(keys.slice(ttftIdx + 1).some(k => k.startsWith('prologue_'))).toBe(false)
   })
@@ -64,8 +63,7 @@ describe('buildLatencyRows (JCLAW-74 prologue nesting)', () => {
     const rows = buildLatencyRows({
       prologue: h(3, 20),
       prologue_parse: h(3, 1),
-      // prologue_tools missing entirely
-      prologue_conv: { count: 0 }, // zero count → skip
+      prologue_conv: { count: 0 },
       prologue_prompt: h(3, 13),
     })
     const childKeys = rows.filter(r => r.isChild).map(r => r.key)
@@ -76,13 +74,12 @@ describe('buildLatencyRows (JCLAW-74 prologue nesting)', () => {
     const rows = buildLatencyRows({
       prologue: h(3, 20),
       prologue_parse: h(3, 1),
-      prologue_future_thing: h(3, 7), // unknown key
+      prologue_future_thing: h(3, 7),
     })
     const childKeys = rows.filter(r => r.isChild).map(r => r.key)
     expect(childKeys).toEqual(['prologue_parse', 'prologue_future_thing'])
     const unknown = rows.find(r => r.key === 'prologue_future_thing')!
     expect(unknown.isChild).toBe(true)
-    // Falls back to the suffix after the prologue_ prefix as label.
     expect(unknown.label).toBe('future_thing')
   })
 
@@ -97,6 +94,22 @@ describe('buildLatencyRows (JCLAW-74 prologue nesting)', () => {
     expect(topLevelKeys).toEqual(['queue_wait', 'prologue', 'ttft', 'total'])
   })
 
+  it('renders Terminal delivery immediately above Total (JCLAW-102)', () => {
+    const rows = buildLatencyRows({
+      prologue: h(3, 20),
+      ttft: h(3, 50),
+      stream_body: h(3, 200),
+      persist: h(3, 8),
+      terminal_tail: h(3, 500),
+      total: h(3, 800),
+    })
+    const topLevelKeys = rows.filter(r => !r.isChild).map(r => r.key)
+    const tailIdx = topLevelKeys.indexOf('terminal_tail')
+    const totalIdx = topLevelKeys.indexOf('total')
+    expect(tailIdx).toBeGreaterThan(-1)
+    expect(totalIdx).toBe(tailIdx + 1)
+  })
+
   it('appends unknown non-prologue top-level keys at the bottom', () => {
     const rows = buildLatencyRows({
       prologue: h(3, 20),
@@ -108,19 +121,52 @@ describe('buildLatencyRows (JCLAW-74 prologue nesting)', () => {
     expect(rows.find(r => r.key === 'some_future_segment')!.isChild).toBe(false)
   })
 
-  it('skips prologue entirely if its histogram is absent but still nests any present children', () => {
-    // Edge case: prologue parent missing but children present. Children still
-    // nest in "prologue position" — in practice prologue should always be
-    // present when children are, but the helper should not crash.
+  it('skips prologue entirely if its histogram is absent but still surfaces children', () => {
     const rows = buildLatencyRows({
       queue_wait: h(3, 5),
       prologue_parse: h(3, 1),
     })
-    // When prologue parent is missing, the nesting slot never fires, so the
-    // unknown-key catch-all picks up prologue_parse. Label still clean.
     const parse = rows.find(r => r.key === 'prologue_parse')!
     expect(parse).toBeDefined()
-    expect(parse.label).toBe('prologue_parse') // treated as top-level fallback
+    expect(parse.label).toBe('prologue_parse')
+  })
+})
+
+describe('listAvailableChannels (JCLAW-102 dropdown options)', () => {
+  it('orders channels web → telegram → task → webhook, then unknown ones alphabetical', () => {
+    const channels = listAvailableChannels({
+      slack: { total: h(1, 25) },
+      unknown: { total: h(1, 50) },
+      telegram: { total: h(1, 100) },
+      web: { total: h(1, 10) },
+      task: { total: h(1, 75) },
+    })
+    expect(channels.map(c => c.key)).toEqual([
+      'web', 'telegram', 'task', 'slack', 'unknown',
+    ])
+  })
+
+  it('labels known channels with their friendly names and title-cases unknown ones', () => {
+    const channels = listAvailableChannels({
+      web: { total: h(1, 10) },
+      slack: { total: h(1, 25) },
+    })
+    expect(channels.find(c => c.key === 'web')!.label).toBe('Web')
+    expect(channels.find(c => c.key === 'slack')!.label).toBe('Slack')
+  })
+
+  it('suppresses channels with no sampled segments', () => {
+    const channels = listAvailableChannels({
+      web: { total: h(3, 100) },
+      telegram: {},
+      task: { total: { count: 0 } }, // zero-count still counts as no samples
+    })
+    expect(channels.map(c => c.key)).toEqual(['web'])
+  })
+
+  it('returns an empty list when the payload has no sampled data', () => {
+    expect(listAvailableChannels({})).toEqual([])
+    expect(listAvailableChannels({ web: {} })).toEqual([])
   })
 })
 
@@ -141,9 +187,7 @@ describe('buildChartSeries (JCLAW-74)', () => {
   })
 
   it('exposes {key, label, histogram} shape for the chart component', () => {
-    const series = buildChartSeries({
-      prologue: h(1, 20),
-    })
+    const series = buildChartSeries({ prologue: h(1, 20) })
     expect(series).toEqual([
       { key: 'prologue', label: 'Prologue', histogram: h(1, 20) },
     ])

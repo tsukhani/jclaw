@@ -24,6 +24,7 @@ public final class LatencyTrace {
     public static final String PERSIST_DONE = "persist_done";
     public static final String TERMINAL_SENT = "terminal_sent";
 
+    private final String channel;
     private final long startNs;
     private final long acceptedAtNs;
     private final ConcurrentHashMap<String, Long> marks = new ConcurrentHashMap<>();
@@ -32,30 +33,41 @@ public final class LatencyTrace {
     private volatile boolean ended;
 
     public LatencyTrace() {
-        this(0L);
+        this(null, 0L);
     }
 
-    private LatencyTrace(long acceptedAtNs) {
+    private LatencyTrace(String channel, long acceptedAtNs) {
+        this.channel = channel;
         this.startNs = System.nanoTime();
         this.acceptedAtNs = acceptedAtNs;
     }
 
     /**
-     * Build a trace from the current Play request, reading the
-     * {@code acceptedAtNanos} stamp set by the framework's Netty handler.
-     * When the stamp is present, a {@code queue_wait} segment is recorded
-     * measuring the gap between Netty acceptance and controller entry —
-     * the symptom of invocation-pool saturation.
+     * Build a trace for one agent turn on a named transport. {@code channel}
+     * partitions the resulting histograms so each transport's distribution
+     * is visible separately (JCLAW-102) — pass "web", "telegram", "task", etc.
+     * Callers that know when the request hit the process (e.g. web controllers
+     * reading the Netty-set {@code acceptedAtNanos} stamp) pass that nanoTime
+     * in so the {@code queue_wait} segment gets populated. Channels that
+     * don't have a pre-runner timestamp (Telegram polling, scheduled tasks)
+     * pass {@code null} — every other segment is still captured.
      */
-    public static LatencyTrace fromCurrentRequest() {
+    public static LatencyTrace forTurn(String channel, Long acceptedAtNs) {
+        return new LatencyTrace(channel, acceptedAtNs == null ? 0L : acceptedAtNs);
+    }
+
+    /**
+     * Pull the {@code acceptedAtNanos} stamp set by Play's Netty handler out
+     * of the current request, or {@code null} if no request is bound to this
+     * thread (e.g. background jobs, sub-agent spawns). Used by web entrypoints
+     * so they can forward the stamp to {@link #forTurn} across a thread hop.
+     */
+    public static Long acceptedAtNsFromCurrentRequest() {
         var req = play.mvc.Http.Request.current();
-        if (req != null && req.args != null) {
-            Object accepted = req.args.get("acceptedAtNanos");
-            if (accepted instanceof Long ns) {
-                return new LatencyTrace(ns);
-            }
+        if (req != null && req.args != null && req.args.get("acceptedAtNanos") instanceof Long ns) {
+            return ns;
         }
-        return new LatencyTrace();
+        return null;
     }
 
     /** Record a named mark. First writer wins; subsequent calls are no-ops. */
@@ -89,11 +101,11 @@ public final class LatencyTrace {
             // virtual/worker thread — any skew we see would be a bug worth
             // surfacing as 0 rather than a negative outlier.
             long queueNs = Math.max(0L, startNs - acceptedAtNs);
-            LatencyStats.record("queue_wait", nsToMs(queueNs));
+            LatencyStats.record(channel, "queue_wait", nsToMs(queueNs));
         }
 
-        LatencyStats.record("total", nsToMs(endNs - startNs));
-        LatencyStats.record("prologue", nsToMs(prologueDone - startNs));
+        LatencyStats.record(channel, "total", nsToMs(endNs - startNs));
+        LatencyStats.record(channel, "prologue", nsToMs(prologueDone - startNs));
 
         // Prologue sub-segments — missing marks are OK, we just skip that sub-bucket.
         // The sequence is: startNs → request_parsed → conv_resolved → prompt_assembled → prologue_done.
@@ -104,26 +116,26 @@ public final class LatencyTrace {
         Long promptAssembled = marks.get(PROLOGUE_PROMPT_ASSEMBLED);
 
         if (requestParsed != null) {
-            LatencyStats.record("prologue_parse", nsToMs(requestParsed - startNs));
+            LatencyStats.record(channel, "prologue_parse", nsToMs(requestParsed - startNs));
         }
         if (requestParsed != null && convResolved != null) {
-            LatencyStats.record("prologue_conv", nsToMs(convResolved - requestParsed));
+            LatencyStats.record(channel, "prologue_conv", nsToMs(convResolved - requestParsed));
         }
         if (convResolved != null && promptAssembled != null) {
-            LatencyStats.record("prologue_prompt", nsToMs(promptAssembled - convResolved));
+            LatencyStats.record(channel, "prologue_prompt", nsToMs(promptAssembled - convResolved));
         }
         if (promptAssembled != null) {
-            LatencyStats.record("prologue_tools", nsToMs(prologueDone - promptAssembled));
+            LatencyStats.record(channel, "prologue_tools", nsToMs(prologueDone - promptAssembled));
         }
 
         Long firstToken = marks.get(FIRST_TOKEN);
         if (firstToken != null) {
-            LatencyStats.record("ttft", nsToMs(firstToken - prologueDone));
+            LatencyStats.record(channel, "ttft", nsToMs(firstToken - prologueDone));
         }
 
         Long streamBodyEnd = marks.get(STREAM_BODY_END);
         if (firstToken != null && streamBodyEnd != null) {
-            LatencyStats.record("stream_body", nsToMs(streamBodyEnd - firstToken));
+            LatencyStats.record(channel, "stream_body", nsToMs(streamBodyEnd - firstToken));
         }
 
         // `persist` is no longer derived here — it's recorded directly by AgentRunner
@@ -133,7 +145,7 @@ public final class LatencyTrace {
         // can produce a persist sample via this path.
         Long persistDone = marks.get(PERSIST_DONE);
         if (streamBodyEnd != null && persistDone != null) {
-            LatencyStats.record("persist", nsToMs(persistDone - streamBodyEnd));
+            LatencyStats.record(channel, "persist", nsToMs(persistDone - streamBodyEnd));
         }
 
         // `terminal_tail` measures the gap between stream_body_end and the terminal
@@ -144,12 +156,12 @@ public final class LatencyTrace {
         // emit path stays cheap.
         Long terminalSent = marks.get(TERMINAL_SENT);
         if (streamBodyEnd != null && terminalSent != null) {
-            LatencyStats.record("terminal_tail", nsToMs(terminalSent - streamBodyEnd));
+            LatencyStats.record(channel, "terminal_tail", nsToMs(terminalSent - streamBodyEnd));
         }
 
         if (toolRoundCount.get() > 0) {
-            LatencyStats.record("tool_exec", toolExecMs.get());
-            LatencyStats.record("tool_round_count", toolRoundCount.get());
+            LatencyStats.record(channel, "tool_exec", toolExecMs.get());
+            LatencyStats.record(channel, "tool_round_count", toolRoundCount.get());
         }
     }
 

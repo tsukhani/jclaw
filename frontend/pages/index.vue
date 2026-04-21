@@ -5,7 +5,7 @@ import type { Agent, LatencyHistogram, LatencyMetrics, LogEvent } from '~/types/
 // Row assembly (top-level order, prologue_* child nesting, chart-vs-table
 // split) lives in ~/utils/latency-rows for unit-testability without
 // mounting the dashboard.
-import { buildLatencyRows, buildChartSeries } from '~/utils/latency-rows'
+import { buildLatencyRows, buildChartSeries, listAvailableChannels } from '~/utils/latency-rows'
 
 interface ChannelStatus {
   channelType: string
@@ -34,10 +34,61 @@ const { data: latency, refresh: refreshLatency } = useFetch<LatencyMetrics>(
   { default: () => ({}) },
 )
 
-const latencyRows = computed(() => buildLatencyRows<LatencyHistogram>((latency.value ?? {}) as LatencyMetrics))
-const latencyChartSeries = computed(() => buildChartSeries<LatencyHistogram>((latency.value ?? {}) as LatencyMetrics))
+// The payload is now {channel: {segment: hist}}. One channel renders at
+// a time, selected via the dropdown; switching channels rotates both the
+// table and the chart. Empty channels are suppressed from the dropdown
+// so the user never sees an option that would render nothing.
+const latencyChannels = computed(() =>
+  listAvailableChannels<LatencyHistogram>((latency.value ?? {}) as LatencyMetrics),
+)
 
-const hasLatencyData = computed(() => latencyRows.value.length > 0)
+const LATENCY_CHANNEL_STORAGE_KEY = 'jclaw:chat-perf:selected-channel'
+const selectedChannel = ref<string>('')
+
+// Keep selection valid as channels come and go. If the stored/prior
+// choice isn't in the current list, fall back to the first available
+// (listAvailableChannels puts web first when present).
+watchEffect(() => {
+  const available = latencyChannels.value
+  if (available.length === 0) {
+    selectedChannel.value = ''
+    return
+  }
+  if (available.some(c => c.key === selectedChannel.value)) return
+  selectedChannel.value = available[0]!.key
+})
+
+onMounted(() => {
+  try {
+    const stored = localStorage.getItem(LATENCY_CHANNEL_STORAGE_KEY)
+    if (stored && latencyChannels.value.some(c => c.key === stored)) {
+      selectedChannel.value = stored
+    }
+  }
+  catch { /* SSR / privacy mode — stick with default */ }
+})
+
+function onSelectChannel(key: string) {
+  selectedChannel.value = key
+  try {
+    localStorage.setItem(LATENCY_CHANNEL_STORAGE_KEY, key)
+  }
+  catch { /* ignore */ }
+}
+
+const selectedChannelMetrics = computed<Record<string, LatencyHistogram>>(() => {
+  const payload = (latency.value ?? {}) as LatencyMetrics
+  return payload[selectedChannel.value] ?? {}
+})
+
+const latencyRows = computed(() =>
+  buildLatencyRows<LatencyHistogram>(selectedChannelMetrics.value),
+)
+const latencyChartSeries = computed(() =>
+  buildChartSeries<LatencyHistogram>(selectedChannelMetrics.value),
+)
+
+const hasLatencyData = computed(() => latencyChannels.value.length > 0)
 
 type LatencyView = 'table' | 'chart'
 const latencyView = ref<LatencyView>('table')
@@ -138,7 +189,13 @@ onBeforeUnmount(() => {
 
     <!-- Chat Performance -->
     <div class="bg-surface-elevated border border-border mb-8">
-      <div class="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
+      <!--
+        Three-column header so the channel selector can center on the row
+        regardless of left/right content width. grid-cols-[auto_1fr_auto]
+        lets the middle column absorb flex slack while the side clusters
+        size to their content (JCLAW-102).
+      -->
+      <div class="px-4 py-3 border-b border-border grid grid-cols-[auto_1fr_auto] items-center gap-3">
         <div class="flex items-center gap-3 min-w-0">
           <h2 class="text-sm font-medium text-fg-primary shrink-0">
             Chat Performance
@@ -197,6 +254,41 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
+        <div class="flex items-center justify-center">
+          <!--
+            Channel selector. Hidden entirely when no channels have samples
+            (matches the "no samples yet" empty state below). Visible even
+            when only one channel has samples so the operator can see which
+            channel they're looking at; the select is just a static display
+            in that case but still communicates context.
+
+            Label both wraps the control and carries for/id to match the
+            repo's established pattern (see pages/channels/telegram.vue).
+            Satisfies both nesting and id-association strategies of
+            vuejs-accessibility/label-has-for.
+          -->
+          <label
+            v-if="latencyChannels.length > 0"
+            for="chat-performance-channel"
+            class="inline-flex items-center gap-2 text-xs"
+          >
+            <span class="text-fg-muted">Channel</span>
+            <select
+              id="chat-performance-channel"
+              :value="selectedChannel"
+              class="bg-surface border border-border text-fg-primary text-xs px-2 py-1 focus:outline-none focus:border-fg-muted"
+              @change="onSelectChannel(($event.target as HTMLSelectElement).value)"
+            >
+              <option
+                v-for="channel in latencyChannels"
+                :key="channel.key"
+                :value="channel.key"
+              >
+                {{ channel.label }}
+              </option>
+            </select>
+          </label>
+        </div>
         <div class="flex items-center gap-3 text-xs shrink-0">
           <span class="text-fg-muted hidden sm:inline">In-memory • resets on JVM restart</span>
           <button
@@ -231,6 +323,13 @@ onBeforeUnmount(() => {
         v-else-if="latencyView === 'table'"
         class="overflow-x-auto"
       >
+        <!--
+          Single table that rotates based on the channel dropdown in the
+          header (JCLAW-102). Each channel's distribution is meaningfully
+          different (Telegram's Terminal delivery includes outbound Bot-API
+          round-trip time, web's doesn't) — the dropdown lets operators pick
+          which distribution they're inspecting without comingling them.
+        -->
         <table class="w-full text-xs">
           <thead>
             <tr class="text-fg-muted border-b border-border">
@@ -271,9 +370,7 @@ onBeforeUnmount(() => {
                 the Grafana / Datadog / Linear data-table pattern. Indent
                 alone plus color contrast is enough to signal "these belong
                 to the parent above" without glyphs or border-rules that
-                fight against table cell geometry. Four rows read cleanly
-                as a group because their left edges all line up at a
-                consistent x-position visibly further in than top-level rows.
+                fight against table cell geometry.
               -->
               <td
                 class="py-2 px-4"

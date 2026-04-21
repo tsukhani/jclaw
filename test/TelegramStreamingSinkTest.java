@@ -198,19 +198,21 @@ public class TelegramStreamingSinkTest extends UnitTest {
         // the real flush to go over the network.
         var sink = new TelegramStreamingSink("tok", "chat", null);
 
-        // Grab the flushInFlight field and set it to true — simulates a
-        // flush currently in its network-call phase.
+        // Grab the flushInFlight field and plant a non-null future — simulates
+        // a flush currently in its network-call phase. Post-JCLAW-100 the
+        // guard checks `flushInFlight != null` instead of a boolean; semantics
+        // are identical, shape changed to support latch-based waits in seal().
         var flushInFlight = TelegramStreamingSink.class.getDeclaredField("flushInFlight");
         flushInFlight.setAccessible(true);
-        flushInFlight.set(sink, true);
+        flushInFlight.set(sink, new java.util.concurrent.CompletableFuture<Void>());
 
         // Load up pending content so a real flush would otherwise try to
         // send. No network call happens because the guard returns first.
         sink.update("content that would otherwise flush");
 
-        // Invoke flush() via reflection. With flushInFlight=true, the first
-        // sync block returns immediately without touching pending or making
-        // any network calls.
+        // Invoke flush() via reflection. With flushInFlight != null, the
+        // first sync block returns immediately without touching pending or
+        // making any network calls.
         var flush = TelegramStreamingSink.class.getDeclaredMethod("flush");
         flush.setAccessible(true);
         flush.invoke(sink);
@@ -221,6 +223,116 @@ public class TelegramStreamingSinkTest extends UnitTest {
                 "re-entrant flush must not send a placeholder when the guard trips");
         assertEquals("", sink.lastSentTextForTest(),
                 "re-entrant flush must not update lastSentText");
+    }
+
+    @Test
+    public void awaitInFlightFlushWakesImmediatelyOnFutureCompletion() throws Exception {
+        // JCLAW-100: the old awaitInFlightFlush polled flushInFlight in a
+        // 20 ms sleep loop. Replaced with a CompletableFuture the flush
+        // completes on exit, so seal() wakes the instant the flush returns.
+        // Simulate an in-flight flush, kick off an awaiter on another VT,
+        // complete the future, and assert the awaiter returned in well under
+        // the 2 s cap (not a multiple of the old 20 ms tick).
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+
+        var flushInFlight = TelegramStreamingSink.class.getDeclaredField("flushInFlight");
+        flushInFlight.setAccessible(true);
+        var future = new java.util.concurrent.CompletableFuture<Void>();
+        flushInFlight.set(sink, future);
+
+        var awaitMethod = TelegramStreamingSink.class.getDeclaredMethod("awaitInFlightFlush");
+        awaitMethod.setAccessible(true);
+
+        long startNs = System.nanoTime();
+        var awaitThread = Thread.ofVirtual().start(() -> {
+            try { awaitMethod.invoke(sink); }
+            catch (Exception e) { throw new RuntimeException(e); }
+        });
+
+        // Let the awaiter enter the future.get() call, then complete it.
+        Thread.sleep(10);
+        future.complete(null);
+        awaitThread.join(500);
+
+        long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
+        assertFalse(awaitThread.isAlive(), "awaitInFlightFlush should return after future completes");
+        assertTrue(elapsedMs < 250,
+                "awaitInFlightFlush should wake promptly on future completion (took " + elapsedMs + " ms)");
+    }
+
+    // === JCLAW-100: adaptive throttle ratchet ===
+
+    @Test
+    public void throttleStartsAtMinimum() {
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        assertEquals(250L, sink.currentThrottleMsForTest(),
+                "fresh sink should start at the 250 ms minimum");
+    }
+
+    @Test
+    public void throttleRatchetsUpOn429RetryAfter() {
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        // 250 → 500 → 750 → 1000 → 1000 (capped).
+        long[] expected = { 500, 750, 1000, 1000 };
+        for (int i = 0; i < 4; i++) {
+            sink.recordFlushFailure(buildTelegram429(1));
+            assertEquals(expected[i], sink.currentThrottleMsForTest(),
+                    "step " + (i + 1) + " after 429");
+        }
+    }
+
+    @Test
+    public void throttleStaysUnchangedOnNon429Failure() {
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        sink.recordFlushFailure(new RuntimeException("connection reset"));
+        assertEquals(250L, sink.currentThrottleMsForTest(),
+                "non-rate-limit failure must not touch the cadence");
+    }
+
+    @Test
+    public void throttleStaysUnchangedOn429WithoutRetryAfter() {
+        // A TelegramApiRequestException without parameters (or with a
+        // zero/missing retry_after) is not a trustworthy rate-limit signal —
+        // treat it as a generic failure and leave the cadence alone.
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        var ex = new org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException(
+                "rate-ish but no params");
+        sink.recordFlushFailure(ex);
+        assertEquals(250L, sink.currentThrottleMsForTest());
+    }
+
+    /**
+     * Build a {@code TelegramApiRequestException} with a populated
+     * {@code ResponseParameters} carrying the supplied retry-after — the
+     * shape the SDK produces when Telegram's Bot API returns a 429 with a
+     * {@code retry_after} field in its JSON body.
+     */
+    private static org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException
+            buildTelegram429(int retryAfterSec) {
+        var params = new org.telegram.telegrambots.meta.api.objects.ResponseParameters();
+        params.setRetryAfter(retryAfterSec);
+        var apiResponse = new org.telegram.telegrambots.meta.api.objects.ApiResponse<Object>(
+                false, 429, "Too Many Requests", params, null);
+        return new org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException(
+                "Too Many Requests", apiResponse);
+    }
+
+    @Test
+    public void awaitInFlightFlushReturnsImmediatelyWhenIdle() throws Exception {
+        // When no flush is in progress (flushInFlight == null), seal() must
+        // fall through without any wait at all.
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        // Field is null by default; no setup needed.
+
+        var awaitMethod = TelegramStreamingSink.class.getDeclaredMethod("awaitInFlightFlush");
+        awaitMethod.setAccessible(true);
+
+        long startNs = System.nanoTime();
+        awaitMethod.invoke(sink);
+        long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
+
+        assertTrue(elapsedMs < 50,
+                "awaitInFlightFlush on idle sink should be near-instant (took " + elapsedMs + " ms)");
     }
 
     // === JCLAW-98: typing heartbeat lifecycle ===

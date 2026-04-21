@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.gson.JsonObject;
 import models.Agent;
 import models.TelegramBinding;
+import okhttp3.OkHttpClient;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
 import org.telegram.telegrambots.meta.api.methods.send.SendDocument;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
@@ -18,6 +19,7 @@ import org.telegram.telegrambots.meta.generics.TelegramClient;
 import services.EventLogger;
 
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Telegram Bot API adapter backed by the {@code org.telegram:telegrambots-client} SDK.
@@ -50,9 +52,27 @@ public class TelegramChannel implements Channel {
     /** retry_after delay hint (ms), set by trySend on 429, consumed by Channel.sendWithRetry. */
     private final ThreadLocal<Long> retryHintMs = new ThreadLocal<>();
 
+    /**
+     * Bot-API HTTP timeouts (JCLAW-100). OkHttp defaults to 10 s on every
+     * timeout, which means a slow or hung Telegram edge can burn ~10 s of
+     * critical path (inside TelegramStreamingSink.seal → final edit) before
+     * the existing scheduled-retry logic engages. The values below fail
+     * fast — 2 s connect, 3 s read, 2 s write — so a transient stall is
+     * caught and absorbed by the sink's retry tick rather than stretching
+     * the user-visible turn.
+     */
+    private static final int BOT_API_CONNECT_TIMEOUT_SEC = 2;
+    private static final int BOT_API_READ_TIMEOUT_SEC = 3;
+    private static final int BOT_API_WRITE_TIMEOUT_SEC = 2;
+
     private TelegramChannel(String botToken) {
         this.botToken = botToken;
-        this.client = new OkHttpTelegramClient(botToken);
+        var okHttp = new OkHttpClient.Builder()
+                .connectTimeout(BOT_API_CONNECT_TIMEOUT_SEC, TimeUnit.SECONDS)
+                .readTimeout(BOT_API_READ_TIMEOUT_SEC, TimeUnit.SECONDS)
+                .writeTimeout(BOT_API_WRITE_TIMEOUT_SEC, TimeUnit.SECONDS)
+                .build();
+        this.client = new OkHttpTelegramClient(okHttp, botToken);
     }
 
     /** Resolve (or lazily create) the singleton for {@code botToken}. */
