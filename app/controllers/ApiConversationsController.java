@@ -107,6 +107,13 @@ public class ApiConversationsController extends Controller {
             map.put("updatedAt", c.updatedAt.toString());
             map.put("messageCount", c.messageCount);
             map.put("preview", c.preview != null ? c.preview : "");
+            // JCLAW-108: expose override fields so the chat UI's model
+            // dropdown can reflect the effective model for the open
+            // conversation, and so the cost aggregator's per-turn attribution
+            // knows whether subsequent turns inherit from the agent or from
+            // a persisted override.
+            map.put("modelProviderOverride", c.modelProviderOverride);
+            map.put("modelIdOverride", c.modelIdOverride);
             return map;
         }).toList();
 
@@ -230,6 +237,67 @@ public class ApiConversationsController extends Controller {
             return;
         }
         renderJSON(gson.toJson(Map.of("status", "generating")));
+    }
+
+    /**
+     * PUT /api/conversations/{id}/model-override (JCLAW-108)
+     *
+     * <p>Write a conversation-scoped model override. Body:
+     * {@code {"modelProvider": "openrouter", "modelId": "google-flash"}}.
+     * Both fields must be present and non-blank. The provider/model pair is
+     * validated against {@link llm.ProviderRegistry} before the write lands —
+     * invalid combinations return 400 with an explanatory message.
+     *
+     * <p>Counterpart to the chat-page model dropdown's onModelChange (which
+     * now writes a conversation override instead of mutating the Agent row)
+     * and to the {@code /model NAME} slash command (which shares validation
+     * logic via {@link slash.Commands#performModelSwitch}).
+     */
+    public static void setModelOverride(Long id) {
+        Conversation conversation = Conversation.findById(id);
+        if (conversation == null) notFound();
+
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null || !body.has("modelProvider") || !body.has("modelId")) badRequest();
+        var newProvider = body.get("modelProvider").getAsString();
+        var newModelId = body.get("modelId").getAsString();
+        if (newProvider == null || newProvider.isBlank()
+                || newModelId == null || newModelId.isBlank()) badRequest();
+
+        // Validate against ProviderRegistry — same checks as /model NAME.
+        var provider = llm.ProviderRegistry.get(newProvider);
+        if (provider == null) {
+            response.status = 400;
+            renderJSON(gson.toJson(Map.of("error",
+                    "Provider '" + newProvider + "' is not configured.")));
+            return;
+        }
+        var modelExists = provider.config().models().stream()
+                .anyMatch(m -> newModelId.equals(m.id()));
+        if (!modelExists) {
+            response.status = 400;
+            renderJSON(gson.toJson(Map.of("error",
+                    "Provider '" + newProvider + "' has no model with id '" + newModelId + "'.")));
+            return;
+        }
+
+        ConversationService.setModelOverride(conversation, newProvider, newModelId);
+        renderJSON(gson.toJson(Map.of(
+                "modelProvider", newProvider,
+                "modelId", newModelId)));
+    }
+
+    /**
+     * DELETE /api/conversations/{id}/model-override (JCLAW-108)
+     *
+     * <p>Clear the conversation-scoped override, reverting to the agent's
+     * default. Idempotent — returns 200 whether or not an override was set.
+     */
+    public static void clearModelOverride(Long id) {
+        Conversation conversation = Conversation.findById(id);
+        if (conversation == null) notFound();
+        ConversationService.clearModelOverride(conversation);
+        renderJSON(gson.toJson(Map.of("status", "cleared")));
     }
 
     // --- Helpers ---

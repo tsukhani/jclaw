@@ -73,7 +73,7 @@ public class AgentRunnerUsageTest extends UnitTest {
         turn.addRound(roundWithUsage(new Usage(100, 10, 110, 5, 0, 0)));
         turn.addRound(roundWithUsage(new Usage(200, 800, 1000, 15, 0, 0)));
 
-        var json = AgentRunner.buildUsageJson(turn, null, null, System.currentTimeMillis());
+        var json = AgentRunner.buildUsageJson(turn, null, null, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertEquals(300, obj.get("prompt").getAsInt());
@@ -90,7 +90,7 @@ public class AgentRunnerUsageTest extends UnitTest {
         var turn = new LlmProvider.TurnUsage();
         turn.addRound(roundWithUsage(new Usage(500, 300, 800, 50, 100, 0)));
 
-        var json = AgentRunner.buildUsageJson(turn, null, null, System.currentTimeMillis());
+        var json = AgentRunner.buildUsageJson(turn, null, null, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertEquals(500, obj.get("prompt").getAsInt());
@@ -109,7 +109,7 @@ public class AgentRunnerUsageTest extends UnitTest {
         var turn = new LlmProvider.TurnUsage();
         turn.addRound(roundWithUsage(null));
 
-        var json = AgentRunner.buildUsageJson(turn, null, null, System.currentTimeMillis());
+        var json = AgentRunner.buildUsageJson(turn, null, null, System.currentTimeMillis(), null, null);
         assertFalse(json.contains("\"prompt\""), "no prompt field when zero usage: " + json);
         assertFalse(json.contains("\"completion\""), "no completion field when zero usage: " + json);
         assertTrue(json.contains("\"durationMs\""), "durationMs always present: " + json);
@@ -136,7 +136,7 @@ public class AgentRunnerUsageTest extends UnitTest {
         round2.appendReasoningText("B".repeat(100));
         turn.addRound(round2);
 
-        var json = AgentRunner.buildUsageJson(turn, round1, null, System.currentTimeMillis());
+        var json = AgentRunner.buildUsageJson(turn, round1, null, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         // 300 chars / 4 chars-per-token, rounded up = 75
@@ -159,7 +159,7 @@ public class AgentRunnerUsageTest extends UnitTest {
         turn.addRound(firstRound);
         turn.addRound(roundWithUsage(new Usage(200, 500, 700, 0, 0, 0)));
 
-        var json = AgentRunner.buildUsageJson(turn, firstRound, null, System.currentTimeMillis());
+        var json = AgentRunner.buildUsageJson(turn, firstRound, null, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertTrue(obj.has("reasoningDurationMs"), "duration field present when first round had reasoning: " + json);
@@ -178,11 +178,104 @@ public class AgentRunnerUsageTest extends UnitTest {
         var model = new ModelInfo("test-model", "Test", 128000, 4096, false,
                 3.0, 15.0, 0.30, 3.75);
 
-        var json = AgentRunner.buildUsageJson(turn, null, model, System.currentTimeMillis());
+        var json = AgentRunner.buildUsageJson(turn, null, model, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertEquals(3.0, obj.get("promptPrice").getAsDouble(), 0.001);
         assertEquals(15.0, obj.get("completionPrice").getAsDouble(), 0.001);
+    }
+
+    @Test
+    public void buildUsageJsonPersistsModelIdentityAndContextWindow() {
+        // JCLAW-107: each emitted message carries the agent's modelProvider +
+        // modelId plus the model's contextWindow so JCLAW-108's per-conversation
+        // cost aggregator can attribute every turn's cost to the model that
+        // actually ran it — without re-resolving provider config at read time.
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(roundWithUsage(new Usage(1000, 500, 1500, 0, 0, 0)));
+        var model = new ModelInfo("flash-preview", "Google Flash Preview", 128000, 8192, false,
+                0.30, 2.50, 0.08, 0.38);
+
+        var agent = new models.Agent();
+        agent.modelProvider = "openrouter";
+        agent.modelId = "flash-preview";
+
+        var json = AgentRunner.buildUsageJson(turn, null, model, System.currentTimeMillis(), agent, null);
+        var obj = JsonParser.parseString(json).getAsJsonObject();
+
+        assertEquals("openrouter", obj.get("modelProvider").getAsString());
+        assertEquals("flash-preview", obj.get("modelId").getAsString());
+        assertEquals(128000, obj.get("contextWindow").getAsInt());
+        // Pricing fields remain alongside the new identity fields.
+        assertEquals(0.30, obj.get("promptPrice").getAsDouble(), 0.001);
+    }
+
+    @Test
+    public void buildUsageJsonWritesResolvedOverrideValuesWhenConversationOverridesSet() {
+        // JCLAW-108: when the conversation has a model override, the emitted
+        // usageJson must attribute the turn to the OVERRIDE's modelProvider +
+        // modelId, not the agent's underlying fields. This is what makes
+        // per-turn cost attribution correct across mid-conversation switches.
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(roundWithUsage(new Usage(1000, 500, 1500, 0, 0, 0)));
+        var model = new ModelInfo("override-model", "Override", 100000, 4096, false,
+                1.0, 2.0, 0.1, 0.2);
+
+        var agent = new models.Agent();
+        agent.modelProvider = "agent-provider";
+        agent.modelId = "agent-model";
+
+        var conversation = new models.Conversation();
+        conversation.modelProviderOverride = "override-provider";
+        conversation.modelIdOverride = "override-model";
+
+        var json = AgentRunner.buildUsageJson(turn, null, model, System.currentTimeMillis(), agent, conversation);
+        var obj = JsonParser.parseString(json).getAsJsonObject();
+
+        assertEquals("override-provider", obj.get("modelProvider").getAsString(),
+                "override provider wins over agent's: " + json);
+        assertEquals("override-model", obj.get("modelId").getAsString(),
+                "override model wins over agent's: " + json);
+    }
+
+    @Test
+    public void buildUsageJsonFallsBackToAgentWhenOverrideIsHalfSet() {
+        // Defensive: if only one of the two override columns is non-null,
+        // treat it as no-override (writing a half-override is undefined per
+        // ConversationService.setModelOverride). The resolved identity comes
+        // from the agent.
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(roundWithUsage(new Usage(100, 50, 150, 0, 0, 0)));
+
+        var agent = new models.Agent();
+        agent.modelProvider = "agent-provider";
+        agent.modelId = "agent-model";
+
+        var conversation = new models.Conversation();
+        conversation.modelProviderOverride = "only-provider-set";
+        // modelIdOverride intentionally null
+
+        var json = AgentRunner.buildUsageJson(turn, null, null, System.currentTimeMillis(), agent, conversation);
+        var obj = JsonParser.parseString(json).getAsJsonObject();
+
+        assertEquals("agent-provider", obj.get("modelProvider").getAsString());
+        assertEquals("agent-model", obj.get("modelId").getAsString());
+    }
+
+    @Test
+    public void buildUsageJsonOmitsIdentityFieldsWhenAgentIsNull() {
+        // Defensive: AgentRunner passes a non-null agent in practice, but the
+        // helper must tolerate a null agent (e.g. pure-logic tests) without
+        // NPE. Missing modelProvider/modelId in the output is a clearer
+        // signal than a synthesized default.
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(roundWithUsage(new Usage(100, 50, 150, 0, 0, 0)));
+
+        var json = AgentRunner.buildUsageJson(turn, null, null, System.currentTimeMillis(), null, null);
+        var obj = JsonParser.parseString(json).getAsJsonObject();
+
+        assertFalse(obj.has("modelProvider"), "no modelProvider field when agent is null: " + json);
+        assertFalse(obj.has("modelId"), "no modelId field when agent is null: " + json);
     }
 
     // --- Helpers ---

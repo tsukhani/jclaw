@@ -1,12 +1,18 @@
 package slash;
 
+import com.google.gson.JsonParser;
+import llm.LlmProvider;
+import llm.LlmTypes.ModelInfo;
+import llm.ProviderRegistry;
 import models.Agent;
 import models.Conversation;
+import models.Message;
 import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -49,7 +55,9 @@ public final class Commands {
     public enum Command {
         NEW("/new", "Start a fresh conversation"),
         RESET("/reset", "Clear the LLM's memory for this conversation"),
-        HELP("/help", "Show available commands");
+        HELP("/help", "Show available commands"),
+        MODEL("/model", "Show current model and its capabilities"),
+        USAGE("/usage", "Show context usage for this conversation");
 
         public final String literal;
         public final String shortDescription;
@@ -67,7 +75,9 @@ public final class Commands {
             Available commands:
             • /new — start a fresh conversation (creates a new thread)
             • /reset — clear the LLM's memory for this conversation (keeps the thread)
-            • /help — show this message""";
+            • /help — show this message
+            • /model — show current model and its capabilities
+            • /usage — show context usage for this conversation""";
 
     /**
      * Canned response for {@link Command#NEW}. The leading {@code >} line
@@ -128,16 +138,45 @@ public final class Commands {
      */
     public static Optional<Result> handle(String text, Agent agent, String channelType,
                                            String peerId, Conversation current) {
-        return parse(text).map(cmd -> execute(cmd, agent, channelType, peerId, current));
+        return parse(text).map(cmd -> execute(cmd, agent, channelType, peerId, current, extractArgs(text)));
+    }
+
+    /**
+     * Extract the argument portion of a slash-command text — everything after
+     * the first whitespace. Returns null when the command has no arguments.
+     * {@code /model openrouter/gpt-5} yields {@code "openrouter/gpt-5"};
+     * {@code /model} yields null.
+     */
+    private static String extractArgs(String text) {
+        if (text == null) return null;
+        var trimmed = text.strip();
+        var firstSpace = indexOfWhitespace(trimmed);
+        if (firstSpace < 0) return null;
+        var rest = trimmed.substring(firstSpace + 1).strip();
+        return rest.isEmpty() ? null : rest;
     }
 
     /** Execute a previously-parsed command. See class javadoc for side effects. */
     public static Result execute(Command cmd, Agent agent, String channelType,
                                   String peerId, Conversation current) {
+        return execute(cmd, agent, channelType, peerId, current, null);
+    }
+
+    /**
+     * Argument-aware execute overload (JCLAW-108). {@code args} is the text
+     * following the command literal with leading/trailing whitespace stripped;
+     * null or empty when none. Only {@code /model} currently consumes args:
+     * {@code /model NAME} writes the conversation-scoped override,
+     * {@code /model reset} clears it.
+     */
+    public static Result execute(Command cmd, Agent agent, String channelType,
+                                  String peerId, Conversation current, String args) {
         return switch (cmd) {
             case NEW -> executeNew(agent, channelType, peerId);
             case RESET -> executeReset(agent, channelType, current);
             case HELP -> executeHelp(agent, channelType, current);
+            case MODEL -> executeModel(agent, channelType, current, args);
+            case USAGE -> executeUsage(agent, channelType, current);
         };
     }
 
@@ -195,5 +234,402 @@ public final class Commands {
         EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
                 "/help" + (current != null ? " for conversation " + current.id : ""));
         return new Result(current, HELP_TEXT, Command.HELP);
+    }
+
+    /**
+     * {@code /model} — three argument forms (JCLAW-107 for the first, JCLAW-108
+     * for the other two):
+     * <ul>
+     *   <li>{@code /model} — show the current model's identity, capabilities,
+     *       context window, and pricing. Honors any conversation-scoped
+     *       override when displaying.</li>
+     *   <li>{@code /model NAME} — set the conversation-scoped override to
+     *       {@code NAME} (parsed as {@code provider/model-id}). Validates
+     *       the pair exists in the provider registry; writes both override
+     *       columns atomically; includes a shrinkage warning when the new
+     *       model's context window is smaller than the current input-token
+     *       estimate.</li>
+     *   <li>{@code /model reset} — clear the override, reverting to the
+     *       agent's default.</li>
+     * </ul>
+     * Validation failures render a helpful response; no state is mutated.
+     */
+    private static Result executeModel(Agent agent, String channelType, Conversation current, String args) {
+        if (args == null || args.isBlank()) {
+            var responseText = Tx.run(() -> {
+                var text = buildModelResponse(agent, current);
+                persistCannedResponseInTx(current, text);
+                return text;
+            });
+            EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+                    "/model" + (current != null ? " for conversation " + current.id : ""));
+            return new Result(current, responseText, Command.MODEL);
+        }
+        if (args.equalsIgnoreCase("reset")) {
+            var responseText = Tx.run(() -> {
+                var text = performModelReset(agent, current);
+                persistCannedResponseInTx(current, text);
+                return text;
+            });
+            EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+                    "/model reset" + (current != null ? " for conversation " + current.id : ""));
+            return new Result(current, responseText, Command.MODEL);
+        }
+        // Write path: /model provider/model-id
+        var responseText = Tx.run(() -> {
+            var text = performModelSwitch(agent, current, args);
+            persistCannedResponseInTx(current, text);
+            return text;
+        });
+        EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+                "/model " + args + (current != null ? " for conversation " + current.id : ""));
+        return new Result(current, responseText, Command.MODEL);
+    }
+
+    /**
+     * {@code /usage} — render the current conversation's context usage. Sums
+     * the latest assistant turn's {@code prompt} and {@code completion} tokens
+     * (current context size, not lifetime — lifetime cost is JCLAW-108's
+     * aggregator) and expresses the prompt as a percentage of the resolved
+     * model's {@code contextWindow}. Divide-by-zero is guarded: if the
+     * discovered model has no context window, the percentage is rendered as
+     * "unknown (model metadata incomplete)".
+     */
+    private static Result executeUsage(Agent agent, String channelType, Conversation current) {
+        // buildUsageResponse calls ConversationService.loadRecentMessages,
+        // which issues a JPQL query and needs an active EntityManager. Wrap
+        // the full handler in Tx.run so the polling-thread entry point
+        // (Telegram) gets a transaction — the web SSE path already runs
+        // inside a request-scoped tx, and Tx.run joins that instead of
+        // opening a new one.
+        var responseText = Tx.run(() -> {
+            var text = buildUsageResponse(agent, current);
+            persistCannedResponseInTx(current, text);
+            return text;
+        });
+        EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+                "/usage" + (current != null ? " for conversation " + current.id : ""));
+        return new Result(current, responseText, Command.USAGE);
+    }
+
+    private static void persistCannedResponse(Conversation current, String responseText) {
+        if (current == null) return;
+        final Long convId = current.id;
+        Tx.run(() -> {
+            var conv = (Conversation) Conversation.findById(convId);
+            if (conv != null) {
+                ConversationService.appendAssistantMessage(conv, responseText, null);
+            }
+        });
+    }
+
+    /**
+     * Same as {@link #persistCannedResponse} but assumes the caller has
+     * already opened a transaction. Avoids a redundant Tx.run() nesting
+     * when the handler body is itself wrapped in one (the {@code /usage}
+     * case, which reads message history).
+     */
+    private static void persistCannedResponseInTx(Conversation current, String responseText) {
+        if (current == null) return;
+        var conv = (Conversation) Conversation.findById(current.id);
+        if (conv != null) {
+            ConversationService.appendAssistantMessage(conv, responseText, null);
+        }
+    }
+
+    /**
+     * Lookup the effective model in its provider's configured model list.
+     * Honors the conversation-scoped override (JCLAW-108) when present;
+     * otherwise falls back to the agent's default model.
+     */
+    private static Optional<ModelInfo> resolveModel(Agent agent, Conversation current) {
+        var providerName = effectiveProviderName(agent, current);
+        var modelId = effectiveModelIdFor(agent, current);
+        if (providerName == null || modelId == null) return Optional.empty();
+        LlmProvider provider = ProviderRegistry.get(providerName);
+        if (provider == null) return Optional.empty();
+        return provider.config().models().stream()
+                .filter(m -> modelId.equals(m.id()))
+                .findFirst();
+    }
+
+    /** Resolve the effective provider name — override when present, else agent default. */
+    private static String effectiveProviderName(Agent agent, Conversation current) {
+        if (current != null && current.modelProviderOverride != null && current.modelIdOverride != null) {
+            return current.modelProviderOverride;
+        }
+        return agent != null ? agent.modelProvider : null;
+    }
+
+    /** Resolve the effective model id — override when present, else agent default. */
+    private static String effectiveModelIdFor(Agent agent, Conversation current) {
+        if (current != null && current.modelProviderOverride != null && current.modelIdOverride != null) {
+            return current.modelIdOverride;
+        }
+        return agent != null ? agent.modelId : null;
+    }
+
+    static String buildModelResponse(Agent agent, Conversation current) {
+        if (agent == null) return "No agent bound to this conversation.";
+        var providerName = effectiveProviderName(agent, current);
+        var modelId = effectiveModelIdFor(agent, current);
+        var overrideActive = current != null
+                && current.modelProviderOverride != null
+                && current.modelIdOverride != null;
+        var model = resolveModel(agent, current);
+        if (model.isEmpty()) {
+            return "Model not found in provider config (%s/%s). Re-assign the agent's model or restore the provider entry."
+                    .formatted(providerName, modelId);
+        }
+        var m = model.get();
+        var thinkingLine = m.supportsThinking()
+                ? "supported" + renderThinkingSelection(agent, m)
+                : "not supported";
+        var sb = new StringBuilder();
+        sb.append("Model: ").append(providerName).append('/').append(modelId).append('\n');
+        if (overrideActive) {
+            // Make the scope explicit — users coming from OpenClaw expect
+            // session-scoped switches; JClaw's override is conversation-scoped
+            // and a /model reset returns to the agent default.
+            sb.append("(Conversation override active — agent default is ")
+                    .append(agent.modelProvider).append('/').append(agent.modelId)
+                    .append(")\n");
+        }
+        if (m.name() != null && !m.name().isBlank() && !m.name().equals(modelId)) {
+            sb.append("Display name: ").append(m.name()).append('\n');
+        }
+        sb.append("Provider: ").append(providerName).append('\n');
+        sb.append("Context window: ").append(formatTokenCapacity(m.contextWindow())).append('\n');
+        sb.append("Max output: ").append(formatTokenCapacity(m.maxTokens())).append('\n');
+        sb.append("Thinking: ").append(thinkingLine).append('\n');
+        sb.append("Vision: ").append(m.supportsVision() ? "supported" : "not supported").append('\n');
+        sb.append("Audio: ").append(m.supportsAudio() ? "supported" : "not supported").append('\n');
+        sb.append("Pricing (per 1M tokens): ").append(formatPricing(m));
+        return sb.toString();
+    }
+
+    /**
+     * Execute {@code /model NAME} — parse NAME as {@code provider/model-id},
+     * validate, write the override, and return a confirmation (possibly with
+     * a shrinkage warning). Validation failures return an explanatory message
+     * without mutating state. Caller is responsible for opening the transaction.
+     */
+    static String performModelSwitch(Agent agent, Conversation current, String args) {
+        if (current == null) {
+            return "No active conversation — cannot switch models without a target.";
+        }
+        if (agent == null) {
+            return "No agent bound to this conversation — cannot switch models.";
+        }
+        int slash = args.indexOf('/');
+        if (slash <= 0 || slash == args.length() - 1) {
+            return "Unrecognized model format. Use `/model provider/model-id` "
+                    + "(for example `/model openrouter/google-flash-preview`) "
+                    + "or `/model reset` to revert to the agent default.";
+        }
+        var newProvider = args.substring(0, slash).strip();
+        var newModelId = args.substring(slash + 1).strip();
+        if (newProvider.isEmpty() || newModelId.isEmpty()) {
+            return "Unrecognized model format. Use `/model provider/model-id` "
+                    + "(for example `/model openrouter/google-flash-preview`).";
+        }
+        var provider = ProviderRegistry.get(newProvider);
+        if (provider == null) {
+            return "Provider `%s` is not configured. Available providers appear under Settings → Providers; "
+                    .formatted(newProvider)
+                    + "add one there before switching to it.";
+        }
+        var resolved = provider.config().models().stream()
+                .filter(m -> newModelId.equals(m.id()))
+                .findFirst();
+        if (resolved.isEmpty()) {
+            return "Provider `%s` has no model with id `%s`. Run `/model` to see the current model "
+                    .formatted(newProvider, newModelId)
+                    + "or check Settings → Providers for the available list.";
+        }
+
+        // Warn if the new model's context window is smaller than the estimated
+        // current context size — the next turn's trim will drop oldest messages.
+        var shrinkage = computeShrinkageWarning(resolved.get(), current);
+
+        // Reload the persistence-context entity so the save() below writes to
+        // the managed instance, not a detached copy.
+        var managed = (Conversation) Conversation.findById(current.id);
+        if (managed == null) {
+            return "Conversation disappeared mid-switch — try again.";
+        }
+        ConversationService.setModelOverride(managed, newProvider, newModelId);
+
+        var sb = new StringBuilder();
+        sb.append("Switched this conversation to `").append(newProvider).append('/').append(newModelId).append("`.\n");
+        sb.append("Agent default (").append(agent.modelProvider).append('/').append(agent.modelId)
+                .append(") is unchanged. Use `/model reset` to revert this conversation.");
+        if (shrinkage != null) sb.append('\n').append(shrinkage);
+        return sb.toString();
+    }
+
+    /**
+     * Execute {@code /model reset} — clear both override columns, revert to the
+     * agent default, and return a confirmation. Caller owns the transaction.
+     */
+    static String performModelReset(Agent agent, Conversation current) {
+        if (current == null) {
+            return "No active conversation — nothing to reset.";
+        }
+        if (agent == null) {
+            return "No agent bound to this conversation — cannot reset.";
+        }
+        var managed = (Conversation) Conversation.findById(current.id);
+        if (managed == null) {
+            return "Conversation disappeared mid-reset — try again.";
+        }
+        boolean hadOverride = managed.modelProviderOverride != null && managed.modelIdOverride != null;
+        ConversationService.clearModelOverride(managed);
+        if (!hadOverride) {
+            return "This conversation had no override. The agent default (" + agent.modelProvider
+                    + "/" + agent.modelId + ") remains in effect.";
+        }
+        return "Cleared the conversation's model override. Reverted to agent default "
+                + agent.modelProvider + "/" + agent.modelId + ".";
+    }
+
+    /**
+     * Compute a human-readable shrinkage warning when switching to a model
+     * whose context window is smaller than the estimated current context size.
+     * The size estimate is the latest assistant turn's {@code prompt} — i.e.
+     * what was actually in the model's view on the last turn, same signal
+     * JCLAW-107's {@code /usage} uses. Returns null when no warning applies.
+     */
+    private static String computeShrinkageWarning(ModelInfo newModel, Conversation current) {
+        int newWindow = newModel.contextWindow();
+        if (newWindow <= 0) return null;
+        var messages = ConversationService.loadRecentMessages(current);
+        var latest = findLatestAssistantUsage(messages);
+        if (latest == null) return null;
+        int currentInput = latest[0];
+        if (currentInput <= newWindow) return null;
+        return "Warning: %s's %s context window is smaller than the current context (%s estimated). "
+                .formatted(newModel.id(), formatTokenCapacity(newWindow), formatTokens(currentInput))
+                + "Older messages will be trimmed on the next turn.";
+    }
+
+    private static String renderThinkingSelection(Agent agent, ModelInfo m) {
+        if (agent.thinkingMode == null || agent.thinkingMode.isBlank()) return " (not currently enabled)";
+        var levels = m.thinkingLevels();
+        if (levels != null && !levels.isEmpty() && !levels.contains(agent.thinkingMode)) {
+            return " (current setting %s is not advertised by this model — effectively off)"
+                    .formatted(agent.thinkingMode);
+        }
+        return " (effort: %s)".formatted(agent.thinkingMode);
+    }
+
+    private static String formatPricing(ModelInfo m) {
+        if (m.promptPrice() < 0 && m.completionPrice() < 0
+                && m.cachedReadPrice() < 0 && m.cacheWritePrice() < 0) {
+            return "unknown";
+        }
+        var parts = new java.util.ArrayList<String>(4);
+        parts.add("input " + formatPrice(m.promptPrice()));
+        parts.add("output " + formatPrice(m.completionPrice()));
+        parts.add("cache read " + formatPrice(m.cachedReadPrice()));
+        parts.add("cache write " + formatPrice(m.cacheWritePrice()));
+        return String.join(", ", parts);
+    }
+
+    private static String formatPrice(double perMillion) {
+        if (perMillion < 0) return "n/a";
+        if (perMillion == 0) return "free";
+        // Keep two decimals up to $9.99, three for sub-dollar granularity.
+        return perMillion < 1.0
+                ? "$%.3f".formatted(perMillion)
+                : "$%.2f".formatted(perMillion);
+    }
+
+    static String buildUsageResponse(Agent agent, Conversation current) {
+        if (current == null) return "No active conversation — no usage to report.";
+        // JCLAW-108: resolveModel honors the conversation override; the Model
+        // line below also reflects the effective id so switching mid-chat
+        // shows the new model in subsequent /usage output.
+        var model = resolveModel(agent, current);
+        var effectiveProvider = effectiveProviderName(agent, current);
+        var effectiveModel = effectiveModelIdFor(agent, current);
+        var messages = ConversationService.loadRecentMessages(current);
+        var latest = findLatestAssistantUsage(messages);
+        int prompt = latest != null ? latest[0] : 0;
+        int completion = latest != null ? latest[1] : 0;
+        int total = prompt + completion;
+
+        var sb = new StringBuilder();
+        sb.append("Input: ").append(formatTokens(prompt)).append(" tokens\n");
+        sb.append("Output: ").append(formatTokens(completion)).append(" tokens\n");
+        sb.append("Total: ").append(formatTokens(total)).append(" tokens\n");
+        sb.append("Context: ").append(renderContextLine(prompt, model)).append('\n');
+        sb.append("Model: ")
+                .append(effectiveProvider != null ? effectiveProvider : "?")
+                .append('/')
+                .append(effectiveModel != null ? effectiveModel : "?");
+        return sb.toString();
+    }
+
+    /**
+     * Walk messages newest-first, returning {@code [prompt, completion]} from the
+     * most recent assistant turn that has usage data. Skips user, tool, and
+     * assistant-without-usage rows (fresh conversations, turns without provider
+     * usage, slash-command acks). Returns {@code null} when no such turn
+     * exists — callers render zeros in that case.
+     */
+    private static int[] findLatestAssistantUsage(List<Message> messages) {
+        if (messages == null || messages.isEmpty()) return null;
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            var m = messages.get(i);
+            if (!"assistant".equals(m.role)) continue;
+            if (m.usageJson == null || m.usageJson.isBlank()) continue;
+            try {
+                var obj = JsonParser.parseString(m.usageJson).getAsJsonObject();
+                // Skip durationMs-only rows (cancelled turns, turns where the
+                // provider didn't return usage). Those carry no "prompt" field
+                // and reporting them as "current context = 0" would mislead
+                // the user when the actual last successful turn had real
+                // context. Keep scanning back for a turn with real tokens.
+                if (!obj.has("prompt")) continue;
+                int prompt = obj.get("prompt").getAsInt();
+                int completion = obj.has("completion") ? obj.get("completion").getAsInt() : 0;
+                return new int[]{prompt, completion};
+            } catch (Exception _) {
+                // Malformed usageJson — skip and keep scanning.
+            }
+        }
+        return null;
+    }
+
+    private static String renderContextLine(int prompt, Optional<ModelInfo> model) {
+        if (model.isEmpty() || model.get().contextWindow() <= 0) {
+            return "unknown (model metadata incomplete)";
+        }
+        int cw = model.get().contextWindow();
+        int pct = (int) Math.round(prompt * 100.0 / cw);
+        return "%d%% of %s tokens used".formatted(pct, formatTokenCapacity(cw));
+    }
+
+    /**
+     * Render a token count as a human-friendly capacity string: {@code 200000} →
+     * {@code "200K"}, {@code 1000000} → {@code "1M"}, {@code 2048000} →
+     * {@code "2.0M"}. Uses decimal (1K = 1000) matching provider-published
+     * context-window values like Anthropic's "200K" and Google's "2M". Returns
+     * {@code "?"} when the value is non-positive.
+     */
+    private static String formatTokenCapacity(int tokens) {
+        if (tokens <= 0) return "?";
+        if (tokens >= 1_000_000) {
+            double m = tokens / 1_000_000.0;
+            return m == Math.floor(m) ? "%.0fM".formatted(m) : "%.1fM".formatted(m);
+        }
+        if (tokens >= 1_000) return "%dK".formatted(tokens / 1_000);
+        return Integer.toString(tokens);
+    }
+
+    private static String formatTokens(int tokens) {
+        // Thousands separator for readability at larger counts.
+        return String.format("%,d", tokens);
     }
 }

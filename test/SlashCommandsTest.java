@@ -28,15 +28,35 @@ public class SlashCommandsTest extends UnitTest {
     void setup() {
         Fixtures.deleteDatabase();
         agent = AgentService.create("slash-agent", "openrouter", "gpt-4.1");
+        // Clear any provider cache carried over from earlier tests in the
+        // suite. The /model and /usage handlers read ProviderRegistry, and
+        // a stale cache would leak provider metadata between tests.
+        llm.ProviderRegistry.refresh();
+    }
+
+    /**
+     * Seed a minimal provider config so {@link llm.ProviderRegistry} returns
+     * a provider with one model when queried. Used by the {@code /model} and
+     * {@code /usage} tests that need {@code resolveModel} to return non-empty.
+     */
+    private static void seedProvider(String provider, String modelId, String modelJson) {
+        services.ConfigService.set("provider." + provider + ".baseUrl",
+                "http://127.0.0.1:9999/v1");
+        services.ConfigService.set("provider." + provider + ".apiKey", "sk-test");
+        services.ConfigService.set("provider." + provider + ".models",
+                "[" + modelJson + "]");
+        llm.ProviderRegistry.refresh();
     }
 
     // ── parse ──────────────────────────────────────────────────────────
 
     @Test
-    public void parseRecognizesAllThreeCommands() {
+    public void parseRecognizesAllCommands() {
         assertEquals(Commands.Command.NEW, Commands.parse("/new").orElseThrow());
         assertEquals(Commands.Command.RESET, Commands.parse("/reset").orElseThrow());
         assertEquals(Commands.Command.HELP, Commands.parse("/help").orElseThrow());
+        assertEquals(Commands.Command.MODEL, Commands.parse("/model").orElseThrow());
+        assertEquals(Commands.Command.USAGE, Commands.parse("/usage").orElseThrow());
     }
 
     @Test
@@ -209,11 +229,331 @@ public class SlashCommandsTest extends UnitTest {
     @Test
     public void helpTextListsAllRecognizedCommands() {
         // If a new command is added, HELP_TEXT must be updated — this test
-        // fails loudly when /new, /reset, or /help are missing from the
-        // listing (a cheap guardrail against silent drift).
+        // fails loudly when any command is missing from the listing (a cheap
+        // guardrail against silent drift).
         assertTrue(Commands.HELP_TEXT.contains("/new"));
         assertTrue(Commands.HELP_TEXT.contains("/reset"));
         assertTrue(Commands.HELP_TEXT.contains("/help"));
+        assertTrue(Commands.HELP_TEXT.contains("/model"));
+        assertTrue(Commands.HELP_TEXT.contains("/usage"));
+    }
+
+    // ── /model ─────────────────────────────────────────────────────────
+
+    @Test
+    public void modelWithoutProviderConfigExplainsMismatch() {
+        // No provider seeded in ConfigService — resolveModel returns empty,
+        // handler degrades to a clear explanation instead of NPE. This is
+        // the "model removed from provider config after agent assignment"
+        // AC path from JCLAW-107.
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        var result = Commands.execute(Commands.Command.MODEL, agent, "web", "admin", convo);
+
+        assertEquals(Commands.Command.MODEL, result.command());
+        assertTrue(result.responseText().contains("Model not found in provider config"),
+                "degradation message should explain the mismatch: " + result.responseText());
+        assertTrue(result.responseText().contains("openrouter"));
+        assertTrue(result.responseText().contains("gpt-4.1"));
+    }
+
+    @Test
+    public void modelWithProviderConfigRendersCapabilities() {
+        // Seed a provider with a model whose metadata covers the full set
+        // JCLAW-107 renders. The response must name all seven fields plus
+        // pricing so users coming from OpenClaw's /model see parity content.
+        seedProvider("openrouter", "gpt-4.1",
+                "{\"id\":\"gpt-4.1\",\"name\":\"GPT 4.1\",\"contextWindow\":128000,"
+                        + "\"maxTokens\":8192,\"supportsThinking\":true,"
+                        + "\"supportsVision\":true,\"supportsAudio\":false,"
+                        + "\"promptPrice\":3.0,\"completionPrice\":15.0,"
+                        + "\"cachedReadPrice\":0.30,\"cacheWritePrice\":3.75}");
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+
+        var result = Commands.execute(Commands.Command.MODEL, agent, "web", "admin", convo);
+        var text = result.responseText();
+
+        assertTrue(text.contains("openrouter/gpt-4.1"), "model id shown: " + text);
+        assertTrue(text.contains("128K"), "context window formatted as K: " + text);
+        assertTrue(text.contains("8K"), "max output formatted as K: " + text);
+        assertTrue(text.contains("Thinking: supported"), "thinking flag shown: " + text);
+        assertTrue(text.contains("Vision: supported"), "vision flag shown: " + text);
+        assertTrue(text.contains("Audio: not supported"), "audio flag shown: " + text);
+        assertTrue(text.contains("$3.00"), "prompt price shown: " + text);
+        assertTrue(text.contains("$15.00"), "completion price shown: " + text);
+    }
+
+    @Test
+    public void modelPersistsResponseAsAssistantMessage() {
+        // Parity with /help: the canned response is appended to the
+        // conversation so scrollback / reload shows the answer.
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        var countBefore = Message.count("conversation = ?1", convo);
+
+        Commands.execute(Commands.Command.MODEL, agent, "web", "admin", convo);
+
+        var countAfter = Message.count("conversation = ?1", convo);
+        assertEquals(countBefore + 1, countAfter,
+                "/model must persist its response as a new assistant message");
+        var msgs = ConversationService.loadRecentMessages(convo);
+        assertEquals("assistant", msgs.getLast().role);
+    }
+
+    // ── /model NAME (write path) ───────────────────────────────────────
+
+    @Test
+    public void modelSwitchWritesOverrideAndConfirms() {
+        // JCLAW-108: /model provider/model-id populates both override columns
+        // atomically and returns a confirmation naming the new model.
+        seedProvider("openrouter", "gpt-4.1",
+                "{\"id\":\"gpt-4.1\",\"contextWindow\":128000}");
+        seedProvider("ollama-cloud", "kimi-k2",
+                "{\"id\":\"kimi-k2\",\"contextWindow\":200000}");
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+
+        var result = Commands.handle("/model ollama-cloud/kimi-k2",
+                agent, "web", "admin", convo).orElseThrow();
+
+        // Reload from DB to confirm the override landed.
+        var reloaded = ConversationService.findById(convo.id);
+        assertEquals("ollama-cloud", reloaded.modelProviderOverride);
+        assertEquals("kimi-k2", reloaded.modelIdOverride);
+        assertTrue(result.responseText().contains("Switched this conversation to"),
+                "response confirms the switch: " + result.responseText());
+        assertTrue(result.responseText().contains("ollama-cloud/kimi-k2"));
+    }
+
+    @Test
+    public void modelSwitchRejectsUnknownProvider() {
+        // Validation path: unknown provider → no write, clear explanation.
+        seedProvider("openrouter", "gpt-4.1",
+                "{\"id\":\"gpt-4.1\",\"contextWindow\":128000}");
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+
+        var result = Commands.handle("/model nobody/no-model",
+                agent, "web", "admin", convo).orElseThrow();
+
+        var reloaded = ConversationService.findById(convo.id);
+        assertNull(reloaded.modelProviderOverride, "no override on validation failure");
+        assertNull(reloaded.modelIdOverride);
+        assertTrue(result.responseText().contains("Provider `nobody` is not configured"),
+                "message names the missing provider: " + result.responseText());
+    }
+
+    @Test
+    public void modelSwitchRejectsUnknownModelWithinKnownProvider() {
+        seedProvider("openrouter", "gpt-4.1",
+                "{\"id\":\"gpt-4.1\",\"contextWindow\":128000}");
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+
+        var result = Commands.handle("/model openrouter/some-phantom",
+                agent, "web", "admin", convo).orElseThrow();
+
+        var reloaded = ConversationService.findById(convo.id);
+        assertNull(reloaded.modelIdOverride);
+        assertTrue(result.responseText().contains("no model with id `some-phantom`"),
+                "message names the missing model: " + result.responseText());
+    }
+
+    @Test
+    public void modelSwitchRejectsMalformedArgument() {
+        // No slash, or empty provider / model id → helpful format error, no write.
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+
+        var result = Commands.handle("/model just-one-word",
+                agent, "web", "admin", convo).orElseThrow();
+
+        assertTrue(result.responseText().contains("Unrecognized model format"),
+                "format error shown: " + result.responseText());
+    }
+
+    @Test
+    public void modelSwitchEmitsShrinkageWarningWhenWindowShrinks() {
+        // Seed two models: a 200K-window one that ran the last turn, and a
+        // 10K-window one the user is switching to. Previous turn's prompt
+        // was 50K → exceeds the new window → warning must appear.
+        seedProvider("openrouter", "gpt-4.1",
+                "{\"id\":\"gpt-4.1\",\"contextWindow\":200000}");
+        seedProvider("tiny", "tiny-model",
+                "{\"id\":\"tiny-model\",\"contextWindow\":10000}");
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        ConversationService.appendAssistantMessage(convo, "last answer", null,
+                "{\"prompt\":50000,\"completion\":1000,\"total\":51000}");
+
+        var result = Commands.handle("/model tiny/tiny-model",
+                agent, "web", "admin", convo).orElseThrow();
+
+        var text = result.responseText();
+        assertTrue(text.contains("Warning"), "shrinkage warning present: " + text);
+        assertTrue(text.contains("10K"), "new window named: " + text);
+        assertTrue(text.contains("50,000"), "current size named: " + text);
+        // Override STILL lands even with the warning.
+        var reloaded = ConversationService.findById(convo.id);
+        assertEquals("tiny", reloaded.modelProviderOverride);
+    }
+
+    @Test
+    public void modelSwitchDoesNotWarnWhenNewWindowIsLarger() {
+        seedProvider("openrouter", "gpt-4.1",
+                "{\"id\":\"gpt-4.1\",\"contextWindow\":100000}");
+        seedProvider("big", "big-model",
+                "{\"id\":\"big-model\",\"contextWindow\":1000000}");
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        ConversationService.appendAssistantMessage(convo, "last answer", null,
+                "{\"prompt\":5000,\"completion\":1000,\"total\":6000}");
+
+        var result = Commands.handle("/model big/big-model",
+                agent, "web", "admin", convo).orElseThrow();
+
+        assertFalse(result.responseText().contains("Warning"),
+                "no warning when switching up: " + result.responseText());
+    }
+
+    // ── /model reset ───────────────────────────────────────────────────
+
+    @Test
+    public void modelResetClearsOverrideAndConfirms() {
+        seedProvider("openrouter", "gpt-4.1",
+                "{\"id\":\"gpt-4.1\",\"contextWindow\":128000}");
+        seedProvider("ollama-cloud", "kimi-k2",
+                "{\"id\":\"kimi-k2\",\"contextWindow\":200000}");
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        // First set an override.
+        Commands.handle("/model ollama-cloud/kimi-k2", agent, "web", "admin", convo);
+
+        var result = Commands.handle("/model reset",
+                agent, "web", "admin", convo).orElseThrow();
+
+        var reloaded = ConversationService.findById(convo.id);
+        assertNull(reloaded.modelProviderOverride, "override cleared");
+        assertNull(reloaded.modelIdOverride);
+        assertTrue(result.responseText().contains("Reverted to agent default"),
+                "reset confirms: " + result.responseText());
+        assertTrue(result.responseText().contains("openrouter/gpt-4.1"),
+                "agent default named: " + result.responseText());
+    }
+
+    @Test
+    public void modelResetWithoutPriorOverrideIsNoOp() {
+        // Idempotent: calling /model reset without a prior override still
+        // succeeds and reports the current (unchanged) agent default.
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+
+        var result = Commands.handle("/model reset",
+                agent, "web", "admin", convo).orElseThrow();
+
+        assertTrue(result.responseText().contains("no override"),
+                "idempotent path reports no-op: " + result.responseText());
+    }
+
+    // ── /model (display) with override ─────────────────────────────────
+
+    @Test
+    public void modelDisplayReflectsActiveOverride() {
+        // Once an override is set, /model (no args) shows the override's
+        // identity along with a note naming the agent default.
+        seedProvider("openrouter", "gpt-4.1",
+                "{\"id\":\"gpt-4.1\",\"contextWindow\":128000}");
+        seedProvider("ollama-cloud", "kimi-k2",
+                "{\"id\":\"kimi-k2\",\"contextWindow\":200000,\"supportsVision\":true}");
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        Commands.handle("/model ollama-cloud/kimi-k2", agent, "web", "admin", convo);
+
+        var result = Commands.handle("/model", agent, "web", "admin", convo).orElseThrow();
+        var text = result.responseText();
+
+        assertTrue(text.contains("Model: ollama-cloud/kimi-k2"),
+                "override shown on top line: " + text);
+        assertTrue(text.contains("Conversation override active"),
+                "scope note present: " + text);
+        assertTrue(text.contains("agent default is openrouter/gpt-4.1"),
+                "agent default named in scope note: " + text);
+        assertTrue(text.contains("200K"), "override's context window shown: " + text);
+    }
+
+    // ── /usage ─────────────────────────────────────────────────────────
+
+    @Test
+    public void usageOnFreshConversationReportsZeros() {
+        // AC: a brand-new conversation with zero assistant turns shows
+        // Input: 0 / Output: 0 / Total: 0. The percentage line depends on
+        // whether contextWindow is known; with no provider seeded it falls
+        // back to "unknown (model metadata incomplete)".
+        seedProvider("openrouter", "gpt-4.1",
+                "{\"id\":\"gpt-4.1\",\"contextWindow\":128000}");
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+
+        var result = Commands.execute(Commands.Command.USAGE, agent, "web", "admin", convo);
+        var text = result.responseText();
+
+        assertTrue(text.contains("Input: 0 tokens"), "zero input: " + text);
+        assertTrue(text.contains("Output: 0 tokens"), "zero output: " + text);
+        assertTrue(text.contains("Total: 0 tokens"), "zero total: " + text);
+        assertTrue(text.contains("0% of 128K"), "percentage against known window: " + text);
+        assertTrue(text.contains("openrouter/gpt-4.1"), "model id shown: " + text);
+    }
+
+    @Test
+    public void usagePullsLatestAssistantTurnTokens() {
+        // After a real assistant turn with usage data, /usage surfaces THAT
+        // turn's prompt and completion — not a lifetime accumulation. This
+        // is the "current context size" interpretation that makes the
+        // percentage meaningful.
+        seedProvider("openrouter", "gpt-4.1",
+                "{\"id\":\"gpt-4.1\",\"contextWindow\":100000}");
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        ConversationService.appendUserMessage(convo, "q1");
+        ConversationService.appendAssistantMessage(convo, "a1", null,
+                "{\"prompt\":1000,\"completion\":200,\"total\":1200}");
+        ConversationService.appendUserMessage(convo, "q2");
+        ConversationService.appendAssistantMessage(convo, "a2", null,
+                "{\"prompt\":25000,\"completion\":500,\"total\":25500}");
+
+        var result = Commands.execute(Commands.Command.USAGE, agent, "web", "admin", convo);
+        var text = result.responseText();
+
+        assertTrue(text.contains("Input: 25,000 tokens"), "latest prompt shown with thousands separator: " + text);
+        assertTrue(text.contains("Output: 500 tokens"), "latest completion shown: " + text);
+        assertTrue(text.contains("Total: 25,500 tokens"), "total equals latest prompt + completion: " + text);
+        // 25000 / 100000 = 25%
+        assertTrue(text.contains("25% of 100K"), "percentage from latest prompt: " + text);
+    }
+
+    @Test
+    public void usageMarksContextUnknownWhenModelMetadataIsMissing() {
+        // Divide-by-zero guard: when contextWindow is absent or zero the
+        // percentage math is meaningless. Response must render the tokens
+        // but tag the context line as unknown rather than showing "NaN%"
+        // or throwing.
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        ConversationService.appendAssistantMessage(convo, "a", null,
+                "{\"prompt\":50,\"completion\":10,\"total\":60}");
+
+        var result = Commands.execute(Commands.Command.USAGE, agent, "web", "admin", convo);
+        var text = result.responseText();
+
+        assertTrue(text.contains("Context: unknown"),
+                "unknown sentinel when provider config missing: " + text);
+    }
+
+    @Test
+    public void usagePersistsResponseAsAssistantMessage() {
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        var countBefore = Message.count("conversation = ?1", convo);
+
+        Commands.execute(Commands.Command.USAGE, agent, "web", "admin", convo);
+
+        var countAfter = Message.count("conversation = ?1", convo);
+        assertEquals(countBefore + 1, countAfter,
+                "/usage must persist its response as a new assistant message");
+    }
+
+    @Test
+    public void usageWithoutCurrentConversationIsSafe() {
+        // Parity with /reset's null-current handling: no conversation to
+        // inspect, no token totals to compute. Must not throw.
+        var result = Commands.execute(Commands.Command.USAGE, agent, "web", "admin", null);
+        assertNull(result.conversation());
+        assertNotNull(result.responseText());
     }
 
     // ── handle() convenience ───────────────────────────────────────────

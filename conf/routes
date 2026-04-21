@@ -92,6 +92,8 @@ GET     /api/conversations/{id}/queue           ApiConversationsController.getQu
 POST    /api/conversations/{id}/generate-title  ApiConversationsController.generateTitle
 DELETE  /api/conversations/{id}                 ApiConversationsController.deleteConversation
 DELETE  /api/conversations                      ApiConversationsController.deleteConversations
+PUT     /api/conversations/{id}/model-override  ApiConversationsController.setModelOverride
+DELETE  /api/conversations/{id}/model-override  ApiConversationsController.clearModelOverride
 
 # Channels API
 GET     /api/channels                           ApiChannelsController.list

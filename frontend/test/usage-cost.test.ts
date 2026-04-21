@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   computeUsageCostBreakdown,
+  computeConversationCost,
+  formatConversationCost,
+  formatConversationCostTooltip,
   formatUsageCost,
   formatUsageCostTooltip,
   type MessageUsage,
@@ -209,5 +212,143 @@ describe('formatUsageCostTooltip', () => {
     expect(tooltip).toContain('Output:')
     expect(tooltip).not.toContain('Cache read')
     expect(tooltip).not.toContain('Cache write')
+  })
+})
+
+describe('computeConversationCost (JCLAW-108)', () => {
+  it('sums to zero across an all-Kimi conversation with zero pricing', () => {
+    // Ollama-Cloud/Kimi is GPU-subscription: prices are 0 per-token. Every
+    // turn contributes nothing, but turnCount and per-model breakdown still
+    // track the conversation's shape for the UI.
+    const kimi: MessageUsage = {
+      prompt: 5000, completion: 1000, total: 6000, reasoning: 0, cached: 0, durationMs: 1000,
+      promptPrice: 0, completionPrice: 0,
+      modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5',
+    }
+    const breakdown = computeConversationCost([kimi, kimi, kimi])
+
+    expect(breakdown.total).toBe(0)
+    expect(breakdown.turnCount).toBe(3)
+    expect(breakdown.perModel).toHaveLength(1)
+    expect(breakdown.perModel[0]!.modelId).toBe('kimi-k2.5')
+    expect(breakdown.perModel[0]!.turnCount).toBe(3)
+    expect(breakdown.perModel[0]!.total).toBe(0)
+  })
+
+  it('sums all-Flash turns using per-turn embedded prices', () => {
+    // 1000 prompt + 500 completion at 0.30 / 2.50 → (1000/1M * 0.30) + (500/1M * 2.50)
+    //  = 0.0003 + 0.00125 = 0.00155 per turn; 3 turns = 0.00465
+    const flash: MessageUsage = {
+      prompt: 1000, completion: 500, total: 1500, reasoning: 0, cached: 0, durationMs: 1000,
+      promptPrice: 0.30, completionPrice: 2.50,
+      modelProvider: 'openrouter', modelId: 'google-flash',
+    }
+    const breakdown = computeConversationCost([flash, flash, flash])
+
+    expect(breakdown.total).toBeCloseTo(0.00465, 6)
+    expect(breakdown.turnCount).toBe(3)
+    expect(breakdown.perModel).toHaveLength(1)
+    expect(breakdown.perModel[0]!.turnCount).toBe(3)
+  })
+
+  it('honors each turn\'s own prices across a mid-conversation model switch', () => {
+    // Exactly the motivating scenario: 3 Kimi turns (free) then 3 Flash turns
+    // (paid). Grand total must equal ONLY the Flash contribution.
+    const kimi: MessageUsage = {
+      prompt: 5000, completion: 1000, total: 6000, reasoning: 0, cached: 0, durationMs: 1000,
+      promptPrice: 0, completionPrice: 0,
+      modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5',
+    }
+    const flash: MessageUsage = {
+      prompt: 1000, completion: 500, total: 1500, reasoning: 0, cached: 0, durationMs: 1000,
+      promptPrice: 0.30, completionPrice: 2.50,
+      modelProvider: 'openrouter', modelId: 'google-flash',
+    }
+    const breakdown = computeConversationCost([kimi, kimi, kimi, flash, flash, flash])
+
+    expect(breakdown.turnCount).toBe(6)
+    expect(breakdown.total).toBeCloseTo(0.00465, 6)
+    expect(breakdown.perModel).toHaveLength(2)
+    const kimiEntry = breakdown.perModel.find(p => p.modelId === 'kimi-k2.5')!
+    const flashEntry = breakdown.perModel.find(p => p.modelId === 'google-flash')!
+    expect(kimiEntry.turnCount).toBe(3)
+    expect(kimiEntry.total).toBe(0)
+    expect(flashEntry.turnCount).toBe(3)
+    expect(flashEntry.total).toBeCloseTo(0.00465, 6)
+  })
+
+  it('splits three distinct pricing regimes correctly', () => {
+    // 3 regimes: Kimi (free), Flash (cheap), Sonnet (pricier). Each entry
+    // must self-attribute its contribution even when interleaved.
+    const kimi: MessageUsage = {
+      prompt: 5000, completion: 1000, total: 6000, reasoning: 0, cached: 0, durationMs: 1000,
+      promptPrice: 0, completionPrice: 0,
+      modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5',
+    }
+    const flash: MessageUsage = {
+      prompt: 1000, completion: 500, total: 1500, reasoning: 0, cached: 0, durationMs: 1000,
+      promptPrice: 0.30, completionPrice: 2.50,
+      modelProvider: 'openrouter', modelId: 'google-flash',
+    }
+    const sonnet: MessageUsage = {
+      prompt: 1000, completion: 500, total: 1500, reasoning: 0, cached: 0, durationMs: 1000,
+      promptPrice: 3.0, completionPrice: 15.0,
+      modelProvider: 'anthropic', modelId: 'claude-sonnet-4-6',
+    }
+    const breakdown = computeConversationCost([kimi, flash, sonnet])
+
+    expect(breakdown.perModel).toHaveLength(3)
+    const sonnetEntry = breakdown.perModel.find(p => p.modelId === 'claude-sonnet-4-6')!
+    //   (1000/1M * 3.0) + (500/1M * 15.0) = 0.003 + 0.0075 = 0.0105
+    expect(sonnetEntry.total).toBeCloseTo(0.0105, 6)
+  })
+
+  it('counts turns but contributes zero when pricing is absent', () => {
+    // Fresh agent with no pricing configured — the turn still happened, so
+    // turnCount increments, but cost stays zero.
+    const noPriceTurn: MessageUsage = {
+      prompt: 1000, completion: 500, total: 1500, reasoning: 0, cached: 0, durationMs: 1000,
+      modelProvider: 'mystery', modelId: 'priceless',
+    }
+    const breakdown = computeConversationCost([noPriceTurn])
+
+    expect(breakdown.turnCount).toBe(1)
+    expect(breakdown.total).toBe(0)
+    expect(breakdown.perModel[0]!.turnCount).toBe(1)
+  })
+
+  it('groups turns with missing modelId under an unknown bucket', () => {
+    // Legacy rows predating JCLAW-107's usageJson extension may lack the
+    // modelId field. Aggregator must not crash and must not inflate a real
+    // model's turn count.
+    const legacy: MessageUsage = {
+      prompt: 1000, completion: 500, total: 1500, reasoning: 0, cached: 0, durationMs: 1000,
+      promptPrice: 3.0, completionPrice: 15.0,
+    }
+    const breakdown = computeConversationCost([legacy])
+
+    expect(breakdown.perModel).toHaveLength(1)
+    expect(breakdown.perModel[0]!.modelId).toBe('(unknown)')
+  })
+
+  it('formats compact conversation cost with the right thresholds', () => {
+    expect(formatConversationCost({ total: 0, turnCount: 0, perModel: [] })).toBeNull()
+    expect(formatConversationCost({ total: 0, turnCount: 3, perModel: [] })).toBe('$0.00')
+    expect(formatConversationCost({ total: 0.00005, turnCount: 1, perModel: [] })).toBe('< $0.0001')
+    expect(formatConversationCost({ total: 0.0149, turnCount: 1, perModel: [] })).toBe('$0.0149')
+  })
+
+  it('renders per-model tooltip one line per model', () => {
+    const tooltip = formatConversationCostTooltip({
+      total: 0.0149,
+      turnCount: 6,
+      perModel: [
+        { modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud', turnCount: 3, total: 0 },
+        { modelId: 'google-flash', modelProvider: 'openrouter', turnCount: 3, total: 0.0149 },
+      ],
+    })
+
+    expect(tooltip).toContain('ollama-cloud/kimi-k2.5: $0.00 / 3 turns')
+    expect(tooltip).toContain('openrouter/google-flash: $0.0149 / 3 turns')
   })
 })

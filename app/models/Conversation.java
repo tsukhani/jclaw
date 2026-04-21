@@ -83,6 +83,28 @@ public class Conversation extends Model {
     @Column(name = "context_since")
     public Instant contextSince;
 
+    /**
+     * Conversation-scoped model override (JCLAW-108). When both
+     * {@link #modelProviderOverride} and {@link #modelIdOverride} are
+     * non-null, {@code AgentRunner.resolveModelInfo} uses them in place of
+     * the agent's default {@code modelProvider}/{@code modelId}. Either
+     * both are set or both are null — a half-set override is undefined
+     * behavior (see {@code ConversationService.setModelOverride} for the
+     * atomic setter).
+     *
+     * <p>Null means "inherit from agent," which is also the default for
+     * every conversation created before JCLAW-108 (no backfill). The
+     * override is written by {@code /model NAME} and cleared by
+     * {@code /model reset}; JCLAW-107's {@code /model} (no args) reads it
+     * when displaying the current model.
+     */
+    @Column(name = "model_provider_override")
+    public String modelProviderOverride;
+
+    /** See {@link #modelProviderOverride}. */
+    @Column(name = "model_id_override")
+    public String modelIdOverride;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 

@@ -58,8 +58,12 @@ public class StreamingToolRoundTest extends UnitTest {
 
     @Test
     public void trimToContextWindowPreservesSystemPrompt() throws Exception {
+        // JCLAW-108: trimToContextWindow gained a Conversation parameter to
+        // honor conversation-scoped model overrides. Pass null here — tests
+        // that care about override behavior use the AgentRunnerUsageTest
+        // suite instead.
         var method = AgentRunner.class.getDeclaredMethod("trimToContextWindow",
-                List.class, models.Agent.class, LlmProvider.class);
+                List.class, models.Agent.class, models.Conversation.class, LlmProvider.class);
         method.setAccessible(true);
 
         // Create a provider with a very small context window
@@ -78,7 +82,7 @@ public class StreamingToolRoundTest extends UnitTest {
         messages.add(ChatMessage.user("This is a long user message number two.")); // 39 chars = ~10 tokens
 
         @SuppressWarnings("unchecked")
-        var trimmed = (List<ChatMessage>) method.invoke(null, messages, agent, provider);
+        var trimmed = (List<ChatMessage>) method.invoke(null, messages, agent, null, provider);
 
         // Should have trimmed some messages but kept the system prompt
         assertTrue(trimmed.size() < messages.size(), "Should have trimmed messages");
@@ -88,7 +92,7 @@ public class StreamingToolRoundTest extends UnitTest {
     @Test
     public void trimToContextWindowNoOpWhenFits() throws Exception {
         var method = AgentRunner.class.getDeclaredMethod("trimToContextWindow",
-                List.class, models.Agent.class, LlmProvider.class);
+                List.class, models.Agent.class, models.Conversation.class, LlmProvider.class);
         method.setAccessible(true);
 
         // Large context window — nothing should be trimmed
@@ -105,7 +109,7 @@ public class StreamingToolRoundTest extends UnitTest {
         );
 
         @SuppressWarnings("unchecked")
-        var result = (List<ChatMessage>) method.invoke(null, messages, agent, provider);
+        var result = (List<ChatMessage>) method.invoke(null, messages, agent, null, provider);
 
         assertEquals(messages.size(), result.size(), "No messages should be trimmed");
     }

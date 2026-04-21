@@ -23,6 +23,27 @@ public class ConversationService {
         return create(agent, channelType, peerId);
     }
 
+    /**
+     * Set both conversation-scoped override columns atomically (JCLAW-108).
+     * Both non-null means "use these for this conversation's turns"; both
+     * null clears the override and falls back to the agent's defaults.
+     * Caller owns the transaction — this method assumes an active Tx so it
+     * can piggy-back on {@code /model NAME}'s handler transaction without
+     * a redundant Tx.run nesting.
+     */
+    public static void setModelOverride(Conversation conversation, String provider, String modelId) {
+        conversation.modelProviderOverride = provider;
+        conversation.modelIdOverride = modelId;
+        conversation.save();
+    }
+
+    /** Clear the conversation-scoped override. See {@link #setModelOverride}. */
+    public static void clearModelOverride(Conversation conversation) {
+        conversation.modelProviderOverride = null;
+        conversation.modelIdOverride = null;
+        conversation.save();
+    }
+
     public static Conversation create(Agent agent, String channelType, String peerId) {
         var convo = new Conversation();
         convo.agent = agent;

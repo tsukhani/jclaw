@@ -54,6 +54,10 @@ export interface Conversation {
   messageCount: number
   createdAt: string
   updatedAt: string
+  /** Conversation-scoped model override (JCLAW-108). Null when the conversation inherits the agent default. */
+  modelProviderOverride?: string | null
+  /** Companion to modelProviderOverride — see type docs above. */
+  modelIdOverride?: string | null
 }
 
 /** A single message within a conversation. */

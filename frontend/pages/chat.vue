@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import { formatUsageCost, formatUsageCostTooltip, type MessageUsage } from '~/utils/usage-cost'
+import { computeConversationCost, formatConversationCost, formatConversationCostTooltip, formatUsageCost, formatUsageCostTooltip, type MessageUsage } from '~/utils/usage-cost'
 import { formatSize } from '~/utils/format'
 import { thinkingHeaderLabel, initCollapsedState } from '~/utils/thinking'
 import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
@@ -138,7 +138,32 @@ const selectedModelInfo = computed<ProviderModel | null>(() => {
 // both provider and model from a single DOM value. Must use a separator that
 // can't appear in either side; "::" is safe against every provider name and
 // model id we currently ship.
+/**
+ * The currently open conversation row, if any. Exposes the modelProvider /
+ * modelId override fields (JCLAW-108) so the model dropdown can reflect
+ * per-conversation state.
+ *
+ * Defensive: useFetch's `data` can briefly hold non-array values during
+ * pending / error states (null, SSR hydration mismatch, or a route that
+ * returned an error object). Check Array.isArray before .find rather than
+ * relying on optional chaining alone.
+ */
+const currentConversation = computed(() => {
+  const list = conversations.value
+  if (!Array.isArray(list)) return null
+  return list.find(c => c.id === selectedConvoId.value) ?? null
+})
+
+/**
+ * Effective model key for the dropdown selection — honors the conversation
+ * override when one is set, falls back to the agent default otherwise. This
+ * makes a mid-chat /model or dropdown-driven switch visible immediately.
+ */
 const selectedModelKey = computed(() => {
+  const conv = currentConversation.value
+  if (conv?.modelProviderOverride && conv?.modelIdOverride) {
+    return `${conv.modelProviderOverride}::${conv.modelIdOverride}`
+  }
   const p = selectedAgent.value?.modelProvider
   const m = selectedAgent.value?.modelId
   return p && m ? `${p}::${m}` : ''
@@ -217,17 +242,51 @@ async function updateAgentSetting(updates: Partial<Agent>) {
   catch { /* ignore */ }
 }
 
-function onModelChange(event: Event) {
+/**
+ * Model-dropdown change handler.
+ *
+ * JCLAW-108: when a conversation is open, writes a conversation-scoped
+ * override (PUT /api/conversations/{id}/model-override) instead of mutating
+ * the Agent row. This keeps mid-chat model switches bounded to the current
+ * conversation — matching the `/model NAME` slash command's semantics.
+ *
+ * When no conversation is open (the user is about to start a fresh one),
+ * falls back to the pre-JCLAW-108 behavior of mutating the agent's default
+ * model. This preserves the settings-page flow where editing the agent from
+ * here is the intent.
+ */
+async function onModelChange(event: Event) {
   const value = (event.target as HTMLSelectElement).value
   const sepIdx = value.indexOf('::')
   if (sepIdx < 0) return
   const modelProvider = value.slice(0, sepIdx)
   const modelId = value.slice(sepIdx + 2)
+
+  const convoId = selectedConvoId.value
+  if (convoId != null) {
+    // Write the conversation override. Match the refresh-on-success pattern
+    // used by updateAgentSetting so the local conversations list realigns
+    // with persisted state (including the fields listConversations now
+    // returns — modelProviderOverride / modelIdOverride).
+    try {
+      await $fetch(`/api/conversations/${convoId}/model-override`, {
+        method: 'PUT',
+        body: { modelProvider, modelId },
+      })
+      refreshConversations()
+    }
+    catch (err) {
+      // Server rejected (unknown provider/model) or network error. Refetch
+      // to realign the dropdown with persisted state.
+      refreshConversations()
+      throw err
+    }
+    return
+  }
+
+  // No conversation open — fall back to mutating the agent default.
   const provider = providers.value.find(p => p.name === modelProvider)
   const model = provider?.models.find(m => m.id === modelId) ?? null
-  // Send both fields so a cross-provider pick (e.g. ollama-cloud → openrouter)
-  // lands atomically; sending only modelId would leave the agent pointing a
-  // stale modelProvider at a model that doesn't exist there.
   const updates: Partial<Agent> = { modelProvider, modelId }
   // If the new model doesn't advertise the current thinking level, clear it in
   // the same PUT so the backend doesn't have to normalize the mismatch. The
@@ -240,6 +299,66 @@ function onModelChange(event: Event) {
   }
   updateAgentSetting(updates)
 }
+
+/**
+ * JCLAW-108 helpers for model-switch indicators and the conversation-total
+ * display in the chat UI.
+ */
+
+/**
+ * Walk {@code displayMessages} backwards from {@code idx - 1} to find the
+ * most recent PRIOR assistant message with usage — i.e. the model that ran
+ * the preceding turn. Returns null when no prior assistant turn exists
+ * (the conversation is on its first assistant message, or earlier rows
+ * predate JCLAW-107 and lack usage data).
+ */
+function previousAssistantUsage(idx: number): MessageUsage | null {
+  for (let i = idx - 1; i >= 0; i--) {
+    const prev = displayMessages.value[i]
+    if (prev && prev.role === 'assistant' && prev.usage) return prev.usage
+  }
+  return null
+}
+
+/**
+ * True when message at {@code idx} is an assistant turn whose
+ * {@code modelProvider/modelId} differs from the previous assistant turn.
+ * Drives the "Switched to X" divider between mid-conversation model changes.
+ */
+function shouldShowModelSwitchIndicator(idx: number): boolean {
+  const msg = displayMessages.value[idx]
+  if (!msg || msg.role !== 'assistant' || !msg.usage?.modelId) return false
+  const prior = previousAssistantUsage(idx)
+  if (!prior || !prior.modelId) return false
+  return prior.modelId !== msg.usage.modelId || prior.modelProvider !== msg.usage.modelProvider
+}
+
+/** Compact "provider/model-id" label for the switch indicator. */
+function formatModelLabel(msg: Message): string {
+  const u = msg.usage
+  if (!u) return '?'
+  return u.modelProvider ? `${u.modelProvider}/${u.modelId ?? '?'}` : (u.modelId ?? '?')
+}
+
+/**
+ * Running cost summary for the currently open conversation. Honors each turn's
+ * own embedded pricing so mixed-model conversations (e.g. Kimi → Flash) total
+ * correctly. Returns null when the conversation has no assistant turns.
+ */
+const conversationCostSummary = computed(() => {
+  const usages = (displayMessages.value ?? [])
+    .filter(m => m.role === 'assistant' && m.usage)
+    .map(m => m.usage as MessageUsage)
+  if (usages.length === 0) return null
+  const breakdown = computeConversationCost(usages)
+  const label = formatConversationCost(breakdown)
+  if (label === null) return null
+  return {
+    label,
+    tooltip: formatConversationCostTooltip(breakdown),
+    turnCount: breakdown.turnCount,
+  }
+})
 
 function onThinkingModeChange(event: Event) {
   const value = (event.target as HTMLSelectElement).value
@@ -1044,6 +1163,14 @@ function exportConversation() {
           v-else-if="agentBusy"
           class="text-xs text-fg-muted animate-pulse"
         >processing queue...</span>
+
+        <!-- JCLAW-108: running conversation-cost summary. Hover reveals the
+             per-model breakdown for mixed-model conversations. -->
+        <span
+          v-if="conversationCostSummary"
+          class="ml-auto text-xs text-fg-muted tabular-nums"
+          :title="conversationCostSummary.tooltip"
+        >{{ conversationCostSummary.label }} · {{ conversationCostSummary.turnCount }} turn{{ conversationCostSummary.turnCount === 1 ? '' : 's' }}</span>
       </div>
 
       <!-- Messages -->
@@ -1051,306 +1178,54 @@ function exportConversation() {
         ref="messagesEl"
         class="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-5"
       >
-        <div
-          v-for="msg in displayMessages"
+        <template
+          v-for="(msg, msgIdx) in displayMessages"
           :key="msg.id ?? msg._key"
-          :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'"
         >
+          <!-- JCLAW-108: divider when two adjacent assistant messages ran on
+               different models. Helps make mid-conversation /model switches
+               visible in the scrollback. -->
           <div
-            :class="msg.role === 'user' ? 'max-w-[80%]' : 'max-w-[85%]'"
-            class="min-w-0"
+            v-if="shouldShowModelSwitchIndicator(msgIdx)"
+            class="flex items-center gap-3 text-xs text-fg-muted select-none"
+          >
+            <span class="flex-1 border-t border-border-subtle" />
+            <span class="whitespace-nowrap">Switched to {{ formatModelLabel(msg) }}</span>
+            <span class="flex-1 border-t border-border-subtle" />
+          </div>
+          <div
+            :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'"
           >
             <div
-              class="flex items-baseline gap-2 mb-1"
-              :class="msg.role === 'user' ? 'justify-end' : ''"
-            >
-              <span
-                class="text-xs font-medium"
-                :class="msg.role === 'user' ? 'text-blue-700 dark:text-blue-400' : 'text-emerald-700 dark:text-emerald-400'"
-              >
-                {{ msg.role === 'user' ? 'you' : 'assistant' }}
-              </span>
-              <span
-                v-if="msg.createdAt"
-                class="text-xs text-fg-muted"
-              >{{ formatTimestamp(msg.createdAt) }}</span>
-            </div>
-            <!-- User messages: plain text + hover actions (copy, edit) -->
-            <div
-              v-if="msg.role === 'user'"
-              class="group"
+              :class="msg.role === 'user' ? 'max-w-[80%]' : 'max-w-[85%]'"
+              class="min-w-0"
             >
               <div
-                class="bg-blue-100 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800/40 rounded-2xl rounded-tr-sm text-fg-primary px-4 py-2.5 text-sm whitespace-pre-wrap break-words"
+                class="flex items-baseline gap-2 mb-1"
+                :class="msg.role === 'user' ? 'justify-end' : ''"
               >
-                {{ msg.content }}
-              </div>
-              <div class="flex items-center justify-end gap-1 mt-1 h-5 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  type="button"
-                  class="p-1 text-fg-muted hover:text-fg-primary transition-colors"
-                  :title="copiedMessageId === (msg.id ?? msg._key) ? 'Copied' : 'Copy to clipboard'"
-                  @click="copyMessage(msg)"
+                <span
+                  class="text-xs font-medium"
+                  :class="msg.role === 'user' ? 'text-blue-700 dark:text-blue-400' : 'text-emerald-700 dark:text-emerald-400'"
                 >
-                  <svg
-                    v-if="copiedMessageId !== (msg.id ?? msg._key)"
-                    class="w-3.5 h-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  ><path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                  /></svg>
-                  <svg
-                    v-else
-                    class="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  ><path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2.5"
-                    d="M5 13l4 4L19 7"
-                  /></svg>
-                </button>
-                <button
-                  type="button"
-                  :disabled="streaming"
-                  class="p-1 text-fg-muted hover:text-fg-primary disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
-                  title="Edit & resubmit"
-                  @click="editUserMessage(msg)"
-                >
-                  <svg
-                    class="w-3.5 h-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  ><path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                  /></svg>
-                </button>
+                  {{ msg.role === 'user' ? 'you' : 'assistant' }}
+                </span>
+                <span
+                  v-if="msg.createdAt"
+                  class="text-xs text-fg-muted"
+                >{{ formatTimestamp(msg.createdAt) }}</span>
               </div>
-            </div>
-            <!-- Assistant messages: rendered markdown with optional thinking -->
-            <div
-              v-else
-              class="group"
-            >
-              <!--
-                Thinking/reasoning block. Header is always rendered when reasoning
-                exists; clicking it toggles just this bubble's collapse state.
-                Default: in-flight turns start expanded and auto-collapse at the
-                reasoning→content transition; historical turns load collapsed.
-                Body is suppressed when msg.thinkingCollapsed is true.
-              -->
+              <!-- User messages: plain text + hover actions (copy, edit) -->
               <div
-                v-if="msg.reasoning"
-                class="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/20 rounded-xl rounded-tl-sm text-blue-800/80 dark:text-blue-300/70 px-3 py-2 text-xs font-mono mb-1.5 whitespace-pre-wrap break-words"
-                :class="msg.thinkingCollapsed ? '' : 'max-h-48 overflow-y-auto'"
+                v-if="msg.role === 'user'"
+                class="group"
               >
-                <button
-                  type="button"
-                  class="flex items-center gap-1.5 w-full text-left text-blue-700 dark:text-blue-400/60 text-[10px] font-sans font-medium hover:text-blue-600 dark:hover:text-blue-400/90 focus:outline-none"
-                  :class="msg.thinkingCollapsed ? '' : 'mb-1'"
-                  :title="msg.thinkingCollapsed ? 'Expand reasoning' : 'Collapse reasoning'"
-                  @click="toggleThinking(msg)"
-                >
-                  <svg
-                    class="w-3 h-3 transition-transform"
-                    :class="msg.thinkingCollapsed ? '' : 'rotate-90'"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9 5l7 7-7 7"
-                    />
-                  </svg>
-                  <span>{{ thinkingHeaderLabel(msg) }}</span>
-                </button>
-                <div v-if="!msg.thinkingCollapsed">
-                  {{ msg.reasoning }}
-                </div>
-              </div>
-              <!-- Response content -->
-              <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify (see renderMarkdown above) before returning. -->
-              <div
-                v-if="msg.content"
-                class="prose-chat bg-muted border border-input rounded-2xl rounded-tl-sm text-fg-primary px-4 py-2.5 text-sm overflow-x-auto break-words"
-                v-html="renderMarkdown(msg.content, selectedAgentId)"
-              />
-              <!-- eslint-enable vue/no-v-html -->
-              <div
-                v-else-if="!msg.reasoning"
-                class="bg-muted border border-input rounded-2xl rounded-tl-sm text-fg-muted px-4 py-2.5 text-sm italic"
-              >
-                (empty response)
-              </div>
-              <!--
-                Usage metrics + hover actions share a single right-aligned
-                row so the copy/delete icons live on the same visual baseline
-                as the token pills. ml-auto on the action group pushes it to
-                the far right of the flex row regardless of how many stat
-                pills are visible; the min-width ensures the bubble widens
-                far enough that the full worst-case set (prompt + cached +
-                reasoning + completion + separator + tok/s + duration + cost
-                + copy + delete) fits with breathing room. flex-wrap is
-                dropped — wrapping the action icons to their own line was
-                the previous layout we're explicitly moving away from.
-              -->
-              <div
-                v-if="msg.usage || msg.id"
-                class="flex items-center gap-2 mt-1.5 px-1 min-w-[500px]"
-              >
-                <template v-if="msg.usage">
-                  <span
-                    class="inline-flex items-center gap-1 text-xs text-fg-muted"
-                    :title="`${msg.usage.prompt.toLocaleString()} input tokens`"
-                  >
-                    <svg
-                      class="w-3 h-3 text-fg-muted"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    ><path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M7 11l5-5m0 0l5 5m-5-5v12"
-                    /></svg>
-                    {{ msg.usage.prompt.toLocaleString() }}
-                  </span>
-                  <span
-                    v-if="msg.usage.cached"
-                    class="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400/70"
-                    :title="`${msg.usage.cached.toLocaleString()} of ${msg.usage.prompt.toLocaleString()} input tokens served from prompt cache`"
-                  >
-                    <svg
-                      class="w-3 h-3"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    ><path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M13 10V3L4 14h7v7l9-11h-7z"
-                    /></svg>
-                    {{ msg.usage.cached.toLocaleString() }}
-                  </span>
-                  <span
-                    v-if="msg.usage.reasoning"
-                    class="inline-flex items-center gap-1 text-xs text-blue-700/80 dark:text-blue-400/70"
-                    :title="`${msg.usage.reasoning.toLocaleString()} reasoning tokens`"
-                  >
-                    <svg
-                      class="w-3 h-3"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    ><path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-                    /></svg>
-                    {{ msg.usage.reasoning.toLocaleString() }}
-                  </span>
-                  <span
-                    class="inline-flex items-center gap-1 text-xs text-fg-muted"
-                    :title="`${msg.usage.completion.toLocaleString()} output tokens`"
-                  >
-                    <svg
-                      class="w-3 h-3 text-fg-muted"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    ><path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M17 13l-5 5m0 0l-5-5m5 5V6"
-                    /></svg>
-                    {{ msg.usage.completion.toLocaleString() }}
-                  </span>
-                  <span class="text-border text-xs">|</span>
-                  <span
-                    v-if="formatTokensPerSec(msg.usage)"
-                    class="inline-flex items-center gap-1 text-xs text-fg-muted"
-                    title="Output tokens per second"
-                  >
-                    <svg
-                      class="w-3 h-3"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    ><path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M13 10V3L4 14h7v7l9-11h-7z"
-                    /></svg>
-                    {{ formatTokensPerSec(msg.usage) }}
-                  </span>
-                  <span
-                    v-if="msg.usage.durationMs"
-                    class="inline-flex items-center gap-1 text-xs text-fg-muted"
-                    title="Total response time"
-                  >
-                    <svg
-                      class="w-3 h-3"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    ><path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                    /></svg>
-                    {{ (msg.usage.durationMs / 1000).toFixed(1) }}s
-                  </span>
-                  <span
-                    v-if="formatUsageCost(msg.usage)"
-                    class="inline-flex items-center gap-1 text-xs text-amber-500/80 font-medium"
-                    :title="formatUsageCostTooltip(msg.usage)"
-                  >
-                    <svg
-                      class="w-3 h-3"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    ><path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                    /></svg>
-                    {{ formatUsageCost(msg.usage) }}
-                  </span>
-                </template>
-                <!--
-                  Assistant hover actions: copy the raw markdown to clipboard,
-                  or delete the message server-side. Hidden until hover to
-                  keep the row calm; ml-auto anchors them to the right edge
-                  regardless of how much stat content sits on the left. Only
-                  rendered on persisted messages (msg.id) — mid-stream
-                  placeholders have no server row to delete yet.
-                -->
                 <div
-                  v-if="msg.id"
-                  class="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                  class="bg-blue-100 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800/40 rounded-2xl rounded-tr-sm text-fg-primary px-4 py-2.5 text-sm whitespace-pre-wrap break-words"
                 >
+                  {{ msg.content }}
+                </div>
+                <div class="flex items-center justify-end gap-1 mt-1 h-5 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     type="button"
                     class="p-1 text-fg-muted hover:text-fg-primary transition-colors"
@@ -1385,9 +1260,9 @@ function exportConversation() {
                   <button
                     type="button"
                     :disabled="streaming"
-                    class="p-1 text-fg-muted hover:text-red-600 dark:hover:text-red-400 disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
-                    title="Delete message"
-                    @click="deleteMessage(msg)"
+                    class="p-1 text-fg-muted hover:text-fg-primary disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
+                    title="Edit & resubmit"
+                    @click="editUserMessage(msg)"
                   >
                     <svg
                       class="w-3.5 h-3.5"
@@ -1398,14 +1273,280 @@ function exportConversation() {
                       stroke-linecap="round"
                       stroke-linejoin="round"
                       stroke-width="2"
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
                     /></svg>
                   </button>
                 </div>
               </div>
+              <!-- Assistant messages: rendered markdown with optional thinking -->
+              <div
+                v-else
+                class="group"
+              >
+                <!--
+                Thinking/reasoning block. Header is always rendered when reasoning
+                exists; clicking it toggles just this bubble's collapse state.
+                Default: in-flight turns start expanded and auto-collapse at the
+                reasoning→content transition; historical turns load collapsed.
+                Body is suppressed when msg.thinkingCollapsed is true.
+              -->
+                <div
+                  v-if="msg.reasoning"
+                  class="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/20 rounded-xl rounded-tl-sm text-blue-800/80 dark:text-blue-300/70 px-3 py-2 text-xs font-mono mb-1.5 whitespace-pre-wrap break-words"
+                  :class="msg.thinkingCollapsed ? '' : 'max-h-48 overflow-y-auto'"
+                >
+                  <button
+                    type="button"
+                    class="flex items-center gap-1.5 w-full text-left text-blue-700 dark:text-blue-400/60 text-[10px] font-sans font-medium hover:text-blue-600 dark:hover:text-blue-400/90 focus:outline-none"
+                    :class="msg.thinkingCollapsed ? '' : 'mb-1'"
+                    :title="msg.thinkingCollapsed ? 'Expand reasoning' : 'Collapse reasoning'"
+                    @click="toggleThinking(msg)"
+                  >
+                    <svg
+                      class="w-3 h-3 transition-transform"
+                      :class="msg.thinkingCollapsed ? '' : 'rotate-90'"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                    <span>{{ thinkingHeaderLabel(msg) }}</span>
+                  </button>
+                  <div v-if="!msg.thinkingCollapsed">
+                    {{ msg.reasoning }}
+                  </div>
+                </div>
+                <!-- Response content -->
+                <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify (see renderMarkdown above) before returning. -->
+                <div
+                  v-if="msg.content"
+                  class="prose-chat bg-muted border border-input rounded-2xl rounded-tl-sm text-fg-primary px-4 py-2.5 text-sm overflow-x-auto break-words"
+                  v-html="renderMarkdown(msg.content, selectedAgentId)"
+                />
+                <!-- eslint-enable vue/no-v-html -->
+                <div
+                  v-else-if="!msg.reasoning"
+                  class="bg-muted border border-input rounded-2xl rounded-tl-sm text-fg-muted px-4 py-2.5 text-sm italic"
+                >
+                  (empty response)
+                </div>
+                <!--
+                Usage metrics + hover actions share a single right-aligned
+                row so the copy/delete icons live on the same visual baseline
+                as the token pills. ml-auto on the action group pushes it to
+                the far right of the flex row regardless of how many stat
+                pills are visible; the min-width ensures the bubble widens
+                far enough that the full worst-case set (prompt + cached +
+                reasoning + completion + separator + tok/s + duration + cost
+                + copy + delete) fits with breathing room. flex-wrap is
+                dropped — wrapping the action icons to their own line was
+                the previous layout we're explicitly moving away from.
+              -->
+                <div
+                  v-if="msg.usage || msg.id"
+                  class="flex items-center gap-2 mt-1.5 px-1 min-w-[500px]"
+                >
+                  <template v-if="msg.usage">
+                    <span
+                      class="inline-flex items-center gap-1 text-xs text-fg-muted"
+                      :title="`${msg.usage.prompt.toLocaleString()} input tokens`"
+                    >
+                      <svg
+                        class="w-3 h-3 text-fg-muted"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M7 11l5-5m0 0l5 5m-5-5v12"
+                      /></svg>
+                      {{ msg.usage.prompt.toLocaleString() }}
+                    </span>
+                    <span
+                      v-if="msg.usage.cached"
+                      class="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400/70"
+                      :title="`${msg.usage.cached.toLocaleString()} of ${msg.usage.prompt.toLocaleString()} input tokens served from prompt cache`"
+                    >
+                      <svg
+                        class="w-3 h-3"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M13 10V3L4 14h7v7l9-11h-7z"
+                      /></svg>
+                      {{ msg.usage.cached.toLocaleString() }}
+                    </span>
+                    <span
+                      v-if="msg.usage.reasoning"
+                      class="inline-flex items-center gap-1 text-xs text-blue-700/80 dark:text-blue-400/70"
+                      :title="`${msg.usage.reasoning.toLocaleString()} reasoning tokens`"
+                    >
+                      <svg
+                        class="w-3 h-3"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+                      /></svg>
+                      {{ msg.usage.reasoning.toLocaleString() }}
+                    </span>
+                    <span
+                      class="inline-flex items-center gap-1 text-xs text-fg-muted"
+                      :title="`${msg.usage.completion.toLocaleString()} output tokens`"
+                    >
+                      <svg
+                        class="w-3 h-3 text-fg-muted"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M17 13l-5 5m0 0l-5-5m5 5V6"
+                      /></svg>
+                      {{ msg.usage.completion.toLocaleString() }}
+                    </span>
+                    <span class="text-border text-xs">|</span>
+                    <span
+                      v-if="formatTokensPerSec(msg.usage)"
+                      class="inline-flex items-center gap-1 text-xs text-fg-muted"
+                      title="Output tokens per second"
+                    >
+                      <svg
+                        class="w-3 h-3"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M13 10V3L4 14h7v7l9-11h-7z"
+                      /></svg>
+                      {{ formatTokensPerSec(msg.usage) }}
+                    </span>
+                    <span
+                      v-if="msg.usage.durationMs"
+                      class="inline-flex items-center gap-1 text-xs text-fg-muted"
+                      title="Total response time"
+                    >
+                      <svg
+                        class="w-3 h-3"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                      /></svg>
+                      {{ (msg.usage.durationMs / 1000).toFixed(1) }}s
+                    </span>
+                    <span
+                      v-if="formatUsageCost(msg.usage)"
+                      class="inline-flex items-center gap-1 text-xs text-amber-500/80 font-medium"
+                      :title="formatUsageCostTooltip(msg.usage)"
+                    >
+                      <svg
+                        class="w-3 h-3"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      /></svg>
+                      {{ formatUsageCost(msg.usage) }}
+                    </span>
+                  </template>
+                  <!--
+                  Assistant hover actions: copy the raw markdown to clipboard,
+                  or delete the message server-side. Hidden until hover to
+                  keep the row calm; ml-auto anchors them to the right edge
+                  regardless of how much stat content sits on the left. Only
+                  rendered on persisted messages (msg.id) — mid-stream
+                  placeholders have no server row to delete yet.
+                -->
+                  <div
+                    v-if="msg.id"
+                    class="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                  >
+                    <button
+                      type="button"
+                      class="p-1 text-fg-muted hover:text-fg-primary transition-colors"
+                      :title="copiedMessageId === (msg.id ?? msg._key) ? 'Copied' : 'Copy to clipboard'"
+                      @click="copyMessage(msg)"
+                    >
+                      <svg
+                        v-if="copiedMessageId !== (msg.id ?? msg._key)"
+                        class="w-3.5 h-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                      /></svg>
+                      <svg
+                        v-else
+                        class="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2.5"
+                        d="M5 13l4 4L19 7"
+                      /></svg>
+                    </button>
+                    <button
+                      type="button"
+                      :disabled="streaming"
+                      class="p-1 text-fg-muted hover:text-red-600 dark:hover:text-red-400 disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
+                      title="Delete message"
+                      @click="deleteMessage(msg)"
+                    >
+                      <svg
+                        class="w-3.5 h-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      /></svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        </template>
         <!--
           Pre-first-byte placeholder. Visible only during the gap between "user
           sent the request" and "the first stream event (reasoning OR content)
