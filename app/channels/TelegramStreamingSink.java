@@ -338,7 +338,9 @@ public final class TelegramStreamingSink {
         // we simply dispatch the final answer and tidy up the compose-area
         // indicator. This is the happy path for DMs post-JCLAW-103.
         if (transport == Transport.DRAFT) {
-            TelegramChannel.sendMessage(botToken, chatId, finalResponse, agent);
+            if (!TelegramChannel.sendMessage(botToken, chatId, finalResponse, agent)) {
+                notifyDeliveryFailure();
+            }
             clearDraftBestEffort();
             clearStreamCheckpoint();
             return;
@@ -356,7 +358,9 @@ public final class TelegramStreamingSink {
 
         if (needsPlanner) {
             if (messageId != null) deletePlaceholderSafely();
-            TelegramChannel.sendMessage(botToken, chatId, finalResponse, agent);
+            if (!TelegramChannel.sendMessage(botToken, chatId, finalResponse, agent)) {
+                notifyDeliveryFailure();
+            }
             // Belt-and-suspenders: a sink that started as DRAFT and fell back
             // to EDIT_IN_PLACE still has a stale draft in the user's compose
             // area. clearDraftBestEffort short-circuits when draftWasSent is
@@ -374,7 +378,9 @@ public final class TelegramStreamingSink {
             // HTML expansion (wrapping <b> / <a> / etc.) can push us past
             // the cap even when the raw markdown fit — fall back to planner.
             deletePlaceholderSafely();
-            TelegramChannel.sendMessage(botToken, chatId, finalResponse, agent);
+            if (!TelegramChannel.sendMessage(botToken, chatId, finalResponse, agent)) {
+                notifyDeliveryFailure();
+            }
             clearDraftBestEffort();
             clearStreamCheckpoint();
             return;
@@ -697,6 +703,83 @@ public final class TelegramStreamingSink {
         // still kept on the sink: it's read by {@link #draftWasSentForTest}
         // for diagnostics and will be the guard when a working clear
         // primitive eventually lands.
+    }
+
+    /**
+     * Per-conversation rate limiter for {@link #notifyDeliveryFailure}
+     * (JCLAW-106). Maps conversationId → last-notifier-fire-ms so a
+     * conversation hitting repeated delivery failures only sees one
+     * "please retry" message per {@link #NOTIFIER_RATE_LIMIT_MS}.
+     *
+     * <p>Static + JVM-scope rather than per-sink because each turn gets a
+     * fresh sink, and without shared state the rate limit would fire on
+     * every turn. Resets on JVM restart — acceptable because a restart-time
+     * failure storm is already bounded by Telegram's own outbound rate
+     * limits, and the user genuinely needs to know delivery broke.
+     *
+     * <p>Race-tolerant: two concurrent tryFireNotifier calls for the same
+     * conversation can both pass the check if their reads interleave with
+     * the put. Worst case is two adjacent notifications, which is still a
+     * better UX than missing one entirely. The {@code ConcurrentHashMap}
+     * itself is thread-safe; what's approximate here is the 60-second
+     * window, not the structure.
+     */
+    private static final java.util.concurrent.ConcurrentHashMap<Long, Long>
+            LAST_NOTIFIER_FIRE_MS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long NOTIFIER_RATE_LIMIT_MS = 60_000;
+
+    /**
+     * Tell the user their response couldn't be delivered (JCLAW-106). Called
+     * from seal()'s three send paths when {@link TelegramChannel#sendMessage}
+     * returns {@code false} after retries. Rate-limited per conversation so
+     * a Telegram outage doesn't spam the chat. The notifier itself uses
+     * {@link TelegramChannel#sendMessage} directly — bypassing this sink —
+     * because the sink is already sealed and would refuse further input.
+     * If the notifier's own send fails, we log a warning and give up:
+     * the user will notice their bot stopped replying anyway.
+     */
+    private void notifyDeliveryFailure() {
+        if (!tryFireNotifier(conversationId)) {
+            EventLogger.info("channel", agentName(), "telegram",
+                    "Delivery failure (rate-limited — notification suppressed for chat "
+                            + chatId + ")");
+            return;
+        }
+        boolean sent = false;
+        try {
+            sent = TelegramChannel.sendMessage(botToken, chatId,
+                    "I finished generating a response but couldn't deliver it to this chat. "
+                            + "Please try again.");
+        } catch (Exception e) {
+            EventLogger.warn("channel", agentName(), "telegram",
+                    "Delivery-failure notifier itself failed: " + e.getMessage());
+        }
+        if (sent) {
+            EventLogger.info("channel", agentName(), "telegram",
+                    "Delivery failure notification sent to chat " + chatId);
+        }
+    }
+
+    /**
+     * Returns true if the notifier should fire for {@code conversationId}
+     * right now. Updates the last-fired timestamp in that case. Null
+     * conversationIds are permitted (test sinks without a conversation
+     * context) and always return false — we never notify without a
+     * conversation anchor because the rate limiter has no key to apply
+     * against. Public for test seam; not part of the sink's public API.
+     */
+    public static boolean tryFireNotifier(Long conversationId) {
+        if (conversationId == null) return false;
+        long now = System.currentTimeMillis();
+        var prev = LAST_NOTIFIER_FIRE_MS.get(conversationId);
+        if (prev != null && (now - prev) < NOTIFIER_RATE_LIMIT_MS) return false;
+        LAST_NOTIFIER_FIRE_MS.put(conversationId, now);
+        return true;
+    }
+
+    /** Clear the notifier rate limiter. Visible for tests only. */
+    public static void clearNotifierRateLimiterForTest() {
+        LAST_NOTIFIER_FIRE_MS.clear();
     }
 
     /**

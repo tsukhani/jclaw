@@ -74,13 +74,28 @@ public class TelegramChannel implements Channel {
     private static final int BOT_API_WRITE_TIMEOUT_SEC = 2;
 
     private TelegramChannel(String botToken) {
+        this(botToken, null);
+    }
+
+    /**
+     * Test-only constructor (JCLAW-96). Accepts a {@link TelegramUrl} override
+     * so the client targets a {@code MockTelegramServer} on 127.0.0.1 instead
+     * of {@code api.telegram.org}. Never called from production code —
+     * {@link #forToken} uses the single-arg constructor which defaults to
+     * the SDK's {@code TelegramUrl.DEFAULT_URL}. Package-private so tests
+     * in the {@code channels} package can reach it; other test packages
+     * use {@link #installForTest}.
+     */
+    TelegramChannel(String botToken, org.telegram.telegrambots.meta.TelegramUrl urlOverride) {
         this.botToken = botToken;
         var okHttp = new OkHttpClient.Builder()
                 .connectTimeout(BOT_API_CONNECT_TIMEOUT_SEC, TimeUnit.SECONDS)
                 .readTimeout(BOT_API_READ_TIMEOUT_SEC, TimeUnit.SECONDS)
                 .writeTimeout(BOT_API_WRITE_TIMEOUT_SEC, TimeUnit.SECONDS)
                 .build();
-        this.client = new OkHttpTelegramClient(okHttp, botToken);
+        this.client = urlOverride != null
+                ? new OkHttpTelegramClient(okHttp, botToken, urlOverride)
+                : new OkHttpTelegramClient(okHttp, botToken);
     }
 
     /** Resolve (or lazily create) the singleton for {@code botToken}. */
@@ -89,6 +104,24 @@ public class TelegramChannel implements Channel {
             throw new IllegalArgumentException("botToken required");
         }
         return INSTANCES.computeIfAbsent(botToken, TelegramChannel::new);
+    }
+
+    /**
+     * Test-only: pre-install a TelegramChannel pointing at {@code urlOverride}
+     * for the given {@code botToken}, bypassing the default api.telegram.org
+     * target. Subsequent {@link #forToken} calls will return this instance
+     * until {@link #evictToken} / {@link #clearForTest} is called. See
+     * JCLAW-96 for the MockTelegramServer integration pattern.
+     */
+    public static void installForTest(String botToken,
+                                       org.telegram.telegrambots.meta.TelegramUrl urlOverride) {
+        INSTANCES.put(botToken, new TelegramChannel(botToken, urlOverride));
+    }
+
+    /** Test-only: reset the per-token cache so the next {@link #forToken} call
+     *  constructs a fresh (production-targeted) instance. */
+    public static void clearForTest(String botToken) {
+        if (botToken != null) INSTANCES.remove(botToken);
     }
 
     /** Drop the cached instance for a token. Call when a binding is deleted or its token rotated. */

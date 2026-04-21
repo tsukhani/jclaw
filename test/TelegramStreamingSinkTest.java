@@ -180,50 +180,17 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     // === JCLAW-95: flushInFlight re-entrance ===
-
-    @Test
-    public void flushInFlightGuardPreventsReentranceForSameSink() throws Exception {
-        // JCLAW-95 moves flush work to virtual threads for cross-sink
-        // parallelism. With per-flush VTs, nothing at the scheduler level
-        // prevents a SAME-sink flush from racing an in-flight flush on the
-        // same sink — and concurrent editMessageText against one message
-        // would violate Telegram's 1/sec per-message rate limit. The
-        // re-entrance guard in flush()'s first sync block must short-circuit
-        // any overlapping flush.
-        //
-        // We can't call flush() directly here (it's private), so we exercise
-        // the invariant by checking that the guard reads flushInFlight via
-        // reflection and that setting it to true makes a second flush()
-        // call a no-op. The test uses reflection so it doesn't require
-        // the real flush to go over the network.
-        var sink = new TelegramStreamingSink("tok", "chat", null);
-
-        // Grab the flushInFlight field and plant a non-null future — simulates
-        // a flush currently in its network-call phase. Post-JCLAW-100 the
-        // guard checks `flushInFlight != null` instead of a boolean; semantics
-        // are identical, shape changed to support latch-based waits in seal().
-        var flushInFlight = TelegramStreamingSink.class.getDeclaredField("flushInFlight");
-        flushInFlight.setAccessible(true);
-        flushInFlight.set(sink, new java.util.concurrent.CompletableFuture<Void>());
-
-        // Load up pending content so a real flush would otherwise try to
-        // send. No network call happens because the guard returns first.
-        sink.update("content that would otherwise flush");
-
-        // Invoke flush() via reflection. With flushInFlight != null, the
-        // first sync block returns immediately without touching pending or
-        // making any network calls.
-        var flush = TelegramStreamingSink.class.getDeclaredMethod("flush");
-        flush.setAccessible(true);
-        flush.invoke(sink);
-
-        // The invariant: no state changed. messageId still null (no
-        // placeholder was sent), lastSentText still empty.
-        assertNull(sink.messageIdForTest(),
-                "re-entrant flush must not send a placeholder when the guard trips");
-        assertEquals("", sink.lastSentTextForTest(),
-                "re-entrant flush must not update lastSentText");
-    }
+    //
+    // The reflection-based test that lived here was superseded by
+    // MockTelegramSinkIntegrationTest.draftReentranceGuardPreventsSecondSendMessageDraft
+    // and editInPlaceReentranceGuardPreventsSecondSendMessage (JCLAW-96).
+    // The old test asserted state-unchanged after a planted-guard flush,
+    // which passed whether or not the guard actually short-circuited —
+    // an exception from the HTTP execute path would have left state
+    // unchanged too. The wire-level versions count outbound requests on
+    // a mock server, which is necessary-and-sufficient: if the guard
+    // were removed, both concurrent flushes would land as real HTTP
+    // calls and the assertion would fail.
 
     @Test
     public void awaitInFlightFlushWakesImmediatelyOnFutureCompletion() throws Exception {
@@ -258,6 +225,66 @@ public class TelegramStreamingSinkTest extends UnitTest {
         assertFalse(awaitThread.isAlive(), "awaitInFlightFlush should return after future completes");
         assertTrue(elapsedMs < 250,
                 "awaitInFlightFlush should wake promptly on future completion (took " + elapsedMs + " ms)");
+    }
+
+    // === JCLAW-106: delivery-failure notifier rate limiter ===
+
+    @Test
+    public void tryFireNotifierReturnsFalseForNullConversationId() {
+        // Test sinks constructed without a conversation (the two
+        // non-full constructors) pass null. We have no key to rate-limit
+        // against, so the notifier must decline to fire rather than
+        // accidentally sending a "your delivery failed" message from a
+        // sink that has no user context.
+        TelegramStreamingSink.clearNotifierRateLimiterForTest();
+        assertFalse(TelegramStreamingSink.tryFireNotifier(null),
+                "null conversationId must decline to fire");
+    }
+
+    @Test
+    public void tryFireNotifierFiresOnceThenRateLimits() {
+        TelegramStreamingSink.clearNotifierRateLimiterForTest();
+        // First call within the window: fires.
+        assertTrue(TelegramStreamingSink.tryFireNotifier(12345L),
+                "first call for a fresh conversation must fire");
+        // Second call within the 60s window: suppressed.
+        assertFalse(TelegramStreamingSink.tryFireNotifier(12345L),
+                "second call within the 60s window must suppress");
+    }
+
+    @Test
+    public void tryFireNotifierIsolatedPerConversation() {
+        // One conversation's rate limit shouldn't block another's. This
+        // matters during a Telegram outage: every affected chat should
+        // still get its first notification, even if they fail
+        // simultaneously.
+        TelegramStreamingSink.clearNotifierRateLimiterForTest();
+        assertTrue(TelegramStreamingSink.tryFireNotifier(111L));
+        assertTrue(TelegramStreamingSink.tryFireNotifier(222L));
+        assertTrue(TelegramStreamingSink.tryFireNotifier(333L));
+    }
+
+    @Test
+    public void tryFireNotifierReFiresAfterRateWindow() throws Exception {
+        // Simulate time passing: we can't actually wait 61s in a unit
+        // test, so we backdate the last-fired timestamp via reflection.
+        // A genuine concern this guards against: a bug that sets the
+        // timestamp but never lets it age out would manifest as a
+        // conversation that can only ever fire once per JVM lifetime.
+        TelegramStreamingSink.clearNotifierRateLimiterForTest();
+        assertTrue(TelegramStreamingSink.tryFireNotifier(999L));
+
+        var mapField = TelegramStreamingSink.class
+                .getDeclaredField("LAST_NOTIFIER_FIRE_MS");
+        mapField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        var map = (java.util.concurrent.ConcurrentHashMap<Long, Long>)
+                mapField.get(null);
+        // Backdate to 61s ago so the window has elapsed.
+        map.put(999L, System.currentTimeMillis() - 61_000);
+
+        assertTrue(TelegramStreamingSink.tryFireNotifier(999L),
+                "should fire again once the rate window has elapsed");
     }
 
     // === JCLAW-103: transport selection + DRAFT transport ===
