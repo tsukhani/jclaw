@@ -149,6 +149,61 @@ public final class SsrfGuard {
     }
 
     /**
+     * Full URL validation for callers that can't route through OkHttp + SAFE_DNS
+     * (JCLAW-116: the Playwright browser tool). Combines
+     * {@link #assertSafeScheme} (scheme + literal-IP checks) with a
+     * hostname-resolution pass that walks every resolved {@link InetAddress}
+     * through {@link #isUnsafe}. Throws on the first unsafe signal.
+     *
+     * <p>Callers that drive Chromium (or any other outbound path that bypasses
+     * the OkHttp custom resolver) must use this method because {@link #SAFE_DNS}
+     * only fires inside the OkHttp code path.
+     *
+     * @throws SecurityException when the URL fails scheme, literal-IP, or any
+     *         resolved-address check.
+     */
+    public static void assertUrlSafe(String url) {
+        java.net.URI uri;
+        try {
+            uri = java.net.URI.create(url);
+        } catch (IllegalArgumentException e) {
+            throw new SecurityException("SSRF guard: unparseable URL: " + url, e);
+        }
+        assertSafeScheme(uri);
+        var host = uri.getHost();
+        if (host == null) return; // assertSafeScheme already threw for null host
+        if (isLikelyIpLiteral(host)) return; // literal IPs were checked in assertSafeScheme
+        try {
+            for (var addr : InetAddress.getAllByName(host)) {
+                if (isUnsafe(addr)) {
+                    throw new SecurityException(
+                            "SSRF guard: host %s resolves to blocked address %s"
+                                    .formatted(host, addr.getHostAddress()));
+                }
+            }
+        } catch (UnknownHostException e) {
+            throw new SecurityException(
+                    "SSRF guard: cannot resolve host: " + host, e);
+        }
+    }
+
+    /**
+     * Non-throwing variant of {@link #assertUrlSafe} — returns {@code false}
+     * when the URL is unsafe or unparseable. Used by hot-path predicates
+     * like route interceptors that need to abort-or-resume hundreds of
+     * subresource requests per page without try/catch overhead on every
+     * decision.
+     */
+    public static boolean isUrlSafe(String url) {
+        try {
+            assertUrlSafe(url);
+            return true;
+        } catch (SecurityException _) {
+            return false;
+        }
+    }
+
+    /**
      * Cheap heuristic: treat the host as a literal IP if it's pure
      * digits+dots (IPv4) or wrapped in brackets (IPv6 RFC 3986 form). False
      * positives still flow into {@link InetAddress#getByName} which handles

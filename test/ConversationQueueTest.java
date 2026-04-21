@@ -395,4 +395,124 @@ public class ConversationQueueTest extends UnitTest {
         while (!ConversationQueue.drain(convId).isEmpty()) {}
         services.ConfigService.delete("agent.queue-test-agent.queue.mode");
     }
+
+    // ── JCLAW-117: atomic ownership transfer on drain ──
+
+    @Test
+    public void drainKeepsProcessingTrueWhenReturningWork() {
+        // The core invariant the fix establishes: when drain returns a
+        // non-empty list, processing stays true. This prevents a new
+        // inbound tryAcquire from slipping in before the caller re-runs.
+        long convId = 7001L;
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("A", "web", "admin", agent));
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+
+        var drained = ConversationQueue.drain(convId);
+        assertEquals(1, drained.size(), "drain returns queued B");
+
+        // A new inbound message MUST see processing=true and get queued.
+        var acquired = ConversationQueue.tryAcquire(convId,
+                new QueuedMessage("C", "web", "admin", agent));
+        assertFalse(acquired,
+                "processing must still be true after drain returned work; C must queue behind B");
+
+        // Release so C is picked up on the next drain cycle.
+        ConversationQueue.releaseOwnership(convId);
+        var next = ConversationQueue.drain(convId);
+        assertEquals(1, next.size(), "C is next after B");
+        assertEquals("C", next.get(0).text());
+        ConversationQueue.releaseOwnership(convId);
+    }
+
+    @Test
+    public void drainReleasesOwnershipWhenPendingEmpty() {
+        // When there's nothing to drain, processing flips to false so the
+        // next message can be processed directly.
+        long convId = 7002L;
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("A", "web", "admin", agent));
+
+        var drained = ConversationQueue.drain(convId);
+        assertTrue(drained.isEmpty(), "no pending → empty drain");
+
+        // Next inbound must be able to acquire.
+        var acquired = ConversationQueue.tryAcquire(convId,
+                new QueuedMessage("B", "web", "admin", agent));
+        assertTrue(acquired, "empty drain released ownership so B can acquire");
+        ConversationQueue.releaseOwnership(convId);
+    }
+
+    @Test
+    public void releaseOwnershipFlipsProcessingToFalse() {
+        long convId = 7003L;
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("A", "web", "admin", agent));
+
+        // A new caller would fail tryAcquire because processing=true.
+        var blocked = ConversationQueue.tryAcquire(convId,
+                new QueuedMessage("B", "web", "admin", agent));
+        assertFalse(blocked);
+
+        // Release and drain picks up the queued B.
+        ConversationQueue.releaseOwnership(convId);
+        var drained = ConversationQueue.drain(convId);
+        assertEquals(1, drained.size());
+        assertEquals("B", drained.get(0).text());
+        ConversationQueue.releaseOwnership(convId);
+    }
+
+    @Test
+    public void drainOverCollectModeKeepsOwnership() {
+        long convId = 7004L;
+        services.ConfigService.set("agent.queue-test-agent.queue.mode", "collect");
+        try {
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("A", "web", "admin", agent));
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+            ConversationQueue.tryAcquire(convId, new QueuedMessage("C", "web", "admin", agent));
+
+            var drained = ConversationQueue.drain(convId);
+            assertEquals(2, drained.size(), "collect returns all pending");
+
+            // Ownership transferred — new inbound queues behind.
+            var acquired = ConversationQueue.tryAcquire(convId,
+                    new QueuedMessage("D", "web", "admin", agent));
+            assertFalse(acquired, "collect drain also keeps ownership");
+
+            ConversationQueue.releaseOwnership(convId);
+        } finally {
+            services.ConfigService.delete("agent.queue-test-agent.queue.mode");
+            while (!ConversationQueue.drain(convId).isEmpty()) {}
+            ConversationQueue.releaseOwnership(convId);
+        }
+    }
+
+    @Test
+    public void fifoOrderSurvivesRaceBetweenDrainAndInboundMessage() {
+        // Regression for JCLAW-117: without atomic ownership transfer, a
+        // message arriving between drain()'s pop and the caller's re-run
+        // could overtake the drained message. With the fix, this test
+        // observes strict FIFO: A finishes → drain pops B → C arrives
+        // mid-window → C queues BEHIND B, not in front.
+        long convId = 7005L;
+
+        // A is "in flight" — processing=true, B is pending.
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("A", "web", "admin", agent));
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+
+        // Drain pops B but keeps ownership.
+        var firstDrain = ConversationQueue.drain(convId);
+        assertEquals("B", firstDrain.get(0).text());
+
+        // C arrives right now — must queue, not overtake B.
+        var cAcquired = ConversationQueue.tryAcquire(convId,
+                new QueuedMessage("C", "web", "admin", agent));
+        assertFalse(cAcquired, "C must not overtake B — ownership held");
+
+        // Simulate B's run completing: release, then drain again picks up C.
+        ConversationQueue.releaseOwnership(convId);
+        var secondDrain = ConversationQueue.drain(convId);
+        assertEquals(1, secondDrain.size());
+        assertEquals("C", secondDrain.get(0).text(),
+                "C runs after B — FIFO order preserved across the race window");
+
+        ConversationQueue.releaseOwnership(convId);
+    }
 }

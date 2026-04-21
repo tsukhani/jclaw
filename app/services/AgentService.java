@@ -268,8 +268,26 @@ public class AgentService {
         return Path.of(root);
     }
 
+    /**
+     * Resolve an agent's workspace path with defense-in-depth against path
+     * traversal (JCLAW-115). The controller layer already validates names
+     * against a strict slug regex; this method adds a second layer that
+     * catches:
+     *   - direct service calls bypassing the controller,
+     *   - legacy agents whose names predate the regex,
+     *   - any future relaxation of the controller-level check.
+     *
+     * Throws {@link SecurityException} when the resolved path escapes the
+     * workspace root — callers should not attempt to recover, the only
+     * correct response is to refuse the operation.
+     */
     public static Path workspacePath(String agentName) {
-        return workspaceRoot().resolve(agentName);
+        var contained = resolveContained(workspaceRoot(), agentName);
+        if (contained == null) {
+            throw new SecurityException(
+                    "Agent name '" + agentName + "' resolves outside the workspace root");
+        }
+        return contained;
     }
 
     /**

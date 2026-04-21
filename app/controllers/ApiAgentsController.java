@@ -6,12 +6,41 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
 
+import java.util.regex.Pattern;
+
 import static utils.GsonHolder.INSTANCE;
 
 @With(AuthCheck.class)
 public class ApiAgentsController extends Controller {
 
     private static final Gson gson = INSTANCE;
+
+    /**
+     * Slug regex enforced on every {@code name} received from the public
+     * API (JCLAW-115). Must begin with an alphanumeric character or
+     * underscore (existing reserved-pattern rows like {@code __loadtest__}
+     * qualify) and use only alphanumerics, hyphens, or underscores
+     * thereafter. Max length 64 chars. Deliberately excludes path
+     * separators, dot segments, whitespace, and absolute-path leading
+     * slashes — names flow through {@code AgentService.workspacePath}
+     * which does a {@code Path.resolve} that would otherwise happily
+     * escape the workspace root.
+     */
+    private static final Pattern AGENT_NAME_RE =
+            Pattern.compile("^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,63}$");
+
+    /**
+     * Reject any name that fails the slug regex with 400. Called from
+     * {@code create} and {@code update} before we touch the service layer.
+     * Returning {@code badRequest()} halts the controller action — the
+     * {@code notFound}-style flow Play uses.
+     */
+    private static void validateAgentName(String name) {
+        if (name == null || !AGENT_NAME_RE.matcher(name).matches()) {
+            error(400, "Agent name must match " + AGENT_NAME_RE.pattern()
+                    + " (letters, digits, hyphen, underscore; 1-64 chars; starts with alphanumeric)");
+        }
+    }
 
     /**
      * Reserved agent names that no user-facing API surface can create, read,
@@ -133,6 +162,7 @@ public class ApiAgentsController extends Controller {
         if (body == null) badRequest();
 
         var name = body.get("name").getAsString();
+        validateAgentName(name);
         if (Agent.MAIN_AGENT_NAME.equalsIgnoreCase(name)) {
             error(409, "The agent name 'main' is reserved for the built-in agent");
         }
@@ -180,6 +210,10 @@ public class ApiAgentsController extends Controller {
         if (body == null) badRequest();
 
         var name = body.has("name") ? body.get("name").getAsString() : agent.name;
+        // JCLAW-115: only validate when the name actually changes. Existing
+        // agents grandfathered in — rejecting their current name on an
+        // unrelated PUT (thinking-mode toggle, etc.) would break workflows.
+        if (!name.equals(agent.name)) validateAgentName(name);
         // The reserved name "main" is a singleton: no other agent may take the name,
         // and the main agent may not be renamed away from it.
         if (!agent.isMain() && Agent.MAIN_AGENT_NAME.equalsIgnoreCase(name)) {

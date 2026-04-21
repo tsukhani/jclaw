@@ -195,7 +195,22 @@ public class AgentRunner {
         if (!services.ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
             return new RunResult("Your message has been queued and will be processed shortly.", conversation);
         }
+        return runAfterAcquire(agent, conversation, userMessage);
+    }
 
+    /**
+     * Variant of {@link #run} for callers that have already acquired the
+     * conversation queue via {@link services.ConversationQueue#drain}
+     * (JCLAW-117). Skips {@code tryAcquire} because the caller holds
+     * ownership; the shared body's {@code finally} calls
+     * {@link #processQueueDrain} which releases ownership when the pending
+     * deque is empty (or transfers it to the next drained message).
+     */
+    public static RunResult runWithOwnedQueue(Agent agent, Conversation conversation, String userMessage) {
+        return runAfterAcquire(agent, conversation, userMessage);
+    }
+
+    private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage) {
         final Long conversationId = conversation.id;
         // Non-streaming callers (TaskPollerJob, background) have no pre-runner
         // queue-accept timestamp, so queue_wait is naturally skipped. Every other
@@ -1138,20 +1153,40 @@ public class AgentRunner {
      * fails.
      */
     private static void processQueueDrain(Long conversationId) {
+        // JCLAW-117: drain() now keeps processing=true when it returns a
+        // non-empty list — ownership transfers to this call. The virtual
+        // thread below must either re-drain on success (runAfterAcquire's
+        // finally will re-invoke processQueueDrain, and a later empty drain
+        // releases) or explicitly releaseOwnership on early-exit paths
+        // (findById returned null, or run threw before finally could fire).
         var drained = services.ConversationQueue.drain(conversationId);
         if (drained.isEmpty()) return;
 
         Thread.ofVirtual().start(() -> {
             var combined = services.ConversationQueue.formatCollectedMessages(drained);
             var msg = drained.getFirst(); // channel info is the same for all queued messages
+            boolean runStarted = false;
             try {
                 var conversation = services.Tx.run(() -> ConversationService.findById(conversationId));
-                if (conversation == null) return;
-                var result = run(msg.agent(), conversation, combined);
+                if (conversation == null) {
+                    services.ConversationQueue.releaseOwnership(conversationId);
+                    return;
+                }
+                runStarted = true;
+                // JCLAW-117: queue ownership was transferred to us by drain()
+                // above — use the owned-queue variant to avoid re-acquire.
+                var result = runWithOwnedQueue(msg.agent(), conversation, combined);
                 dispatchToChannel(msg.agent(), msg.channelType(), msg.peerId(), result.response());
             } catch (Exception e) {
                 EventLogger.error("queue", msg.agent().name, msg.channelType(),
                         "Failed to process queued message: %s".formatted(e.getMessage()));
+                if (!runStarted) {
+                    // Exception before run() — release so we don't wedge the queue.
+                    // If runWithOwnedQueue started and threw, its own finally ran
+                    // processQueueDrain which will observe pending and release
+                    // ownership correctly on the empty path.
+                    services.ConversationQueue.releaseOwnership(conversationId);
+                }
             }
         });
     }

@@ -173,6 +173,16 @@ async function toggleProviderEnabled(name: string) {
   refresh()
 }
 
+// JCLAW-113: count how many agents have this provider as their default.
+// Surfaced on disabled cards so operators see at a glance that the toggle
+// hides from selector but doesn't detach bound agents — they continue to
+// route LLM calls to the disabled provider until re-assigned. Conversation
+// overrides aren't counted here (settings.vue doesn't fetch conversations);
+// the inline hint covers that broader case in prose.
+function agentsRoutingToProvider(name: string): number {
+  return (agentsList.value ?? []).filter(a => a.modelProvider === name).length
+}
+
 // Playwright config
 const playwrightEnabled = computed(() => {
   const entries = configData.value?.entries ?? []
@@ -853,32 +863,53 @@ const providerEntries = computed(() => {
         :class="isProviderEnabled(name) ? '' : 'opacity-60'"
         class="bg-surface-elevated border border-border transition-opacity"
       >
-        <div class="px-4 py-2.5 border-b border-border flex items-center gap-2">
-          <span class="text-sm font-medium text-fg-strong">{{ name }}</span>
-          <span
-            v-if="entries.find((e: any) => e.key.endsWith('.apiKey') && e.value && !e.value.startsWith('****') && e.value !== '****')"
-            class="text-[10px] text-green-400 border border-green-400/30 px-1"
-          >configured</span>
-          <span
-            v-if="!isProviderEnabled(name)"
-            class="text-[10px] text-fg-muted border border-input px-1"
-          >disabled</span>
-          <!-- JCLAW-110: per-provider enable/disable toggle. Hidden from
-               the /model selector and chat dropdown when off. -->
-          <button
-            :aria-label="`${isProviderEnabled(name) ? 'Disable' : 'Enable'} ${name} provider`"
-            :title="isProviderEnabled(name)
-              ? 'Hide this provider from the model selector'
-              : 'Show this provider in the model selector'"
-            :class="isProviderEnabled(name) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
-            class="ml-auto relative w-9 h-5 rounded-full transition-colors"
-            @click="toggleProviderEnabled(name)"
-          >
+        <div class="px-4 py-2.5 border-b border-border">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium text-fg-strong">{{ name }}</span>
             <span
-              :class="isProviderEnabled(name) ? 'translate-x-4' : 'translate-x-0.5'"
-              class="block w-4 h-4 bg-white rounded-full transition-transform"
-            />
-          </button>
+              v-if="entries.find((e: any) => e.key.endsWith('.apiKey') && e.value && !e.value.startsWith('****') && e.value !== '****')"
+              class="text-[10px] text-green-400 border border-green-400/30 px-1"
+            >configured</span>
+            <span
+              v-if="!isProviderEnabled(name)"
+              class="text-[10px] text-fg-muted border border-input px-1"
+            >disabled</span>
+            <!-- JCLAW-113: audit pill when any agent still has this disabled
+                 provider as their default. Makes the "hide from selector, not
+                 a kill switch" semantics visible without requiring the user
+                 to read the hint text below. -->
+            <span
+              v-if="!isProviderEnabled(name) && agentsRoutingToProvider(name) > 0"
+              class="text-[10px] text-amber-400 border border-amber-400/40 px-1"
+              :title="`${agentsRoutingToProvider(name)} agent(s) still route LLM calls to this provider`"
+            >{{ agentsRoutingToProvider(name) }} agent{{ agentsRoutingToProvider(name) === 1 ? '' : 's' }} still routing</span>
+            <!-- JCLAW-110: per-provider enable/disable toggle. Hidden from
+                 the /model selector and chat dropdown when off. -->
+            <button
+              :aria-label="`${isProviderEnabled(name) ? 'Disable' : 'Enable'} ${name} provider`"
+              :title="isProviderEnabled(name)
+                ? 'Hide this provider from the model selector'
+                : 'Show this provider in the model selector'"
+              :class="isProviderEnabled(name) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+              class="ml-auto relative w-9 h-5 rounded-full transition-colors"
+              @click="toggleProviderEnabled(name)"
+            >
+              <span
+                :class="isProviderEnabled(name) ? 'translate-x-4' : 'translate-x-0.5'"
+                class="block w-4 h-4 bg-white rounded-full transition-transform"
+              />
+            </button>
+          </div>
+          <!-- JCLAW-113: explain "disabled" means hide-from-selector, not
+               kill-switch. Hidden when the toggle is on — the default state
+               is unambiguous and needs no explanation. -->
+          <p
+            v-if="!isProviderEnabled(name)"
+            class="mt-1.5 text-[10px] text-fg-muted leading-snug"
+          >
+            Hidden from the model selector. Agents and conversations already using this provider will
+            continue to route here — delete the provider row below to fully disconnect it.
+          </p>
         </div>
         <div class="divide-y divide-border">
           <!-- Non-models entries (baseUrl, apiKey) -->

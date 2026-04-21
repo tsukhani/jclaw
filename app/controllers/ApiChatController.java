@@ -102,8 +102,15 @@ public class ApiChatController extends Controller {
             } else {
                 current = ConversationService.findOrCreate(ctx.agent(), "web", ctx.username());
             }
+            // JCLAW-111: thread the user's typed arguments through the
+            // args-aware execute overload so /model status, /model reset,
+            // and /model NAME don't silently fall through to the no-args
+            // summary branch on web. Telegram got this fix in JCLAW-109 via
+            // AgentRunner.processInboundForAgentStreaming; the web path
+            // needs the same treatment.
             var slashResult = slash.Commands.execute(
-                    slashCmd.get(), ctx.agent(), "web", ctx.username(), current);
+                    slashCmd.get(), ctx.agent(), "web", ctx.username(), current,
+                    slash.Commands.extractArgs(ctx.message()));
             var slashResp = new HashMap<String, Object>();
             slashResp.put("conversationId",
                     slashResult.conversation() != null ? slashResult.conversation().id : null);
@@ -278,8 +285,10 @@ public class ApiChatController extends Controller {
             } else {
                 slashConv = ConversationService.findOrCreate(agent, "web", username);
             }
+            // JCLAW-111: args-aware execute so /model status etc. work via SSE.
             var slashResult = slash.Commands.execute(
-                    slashCmd.get(), agent, "web", username, slashConv);
+                    slashCmd.get(), agent, "web", username, slashConv,
+                    slash.Commands.extractArgs(messageText));
             if (slashResult.conversation() != null) {
                 writeSse(res, cancelled, streamDone,
                         Map.of("type", "init", "conversationId", slashResult.conversation().id), false);

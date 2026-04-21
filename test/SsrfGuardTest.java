@@ -133,4 +133,61 @@ public class SsrfGuardTest extends UnitTest {
         assertSame(SsrfGuard.SAFE_DNS, client.dns(),
                 "guarded client must wire SAFE_DNS — this is the whole point");
     }
+
+    // ── JCLAW-116: full-URL helpers for callers outside the OkHttp path ──
+
+    @Test
+    public void assertUrlSafeRejectsLoopbackLiteral() {
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://127.0.0.1:9000/admin"));
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://[::1]/"));
+    }
+
+    @Test
+    public void assertUrlSafeRejectsCloudMetadataLiteral() {
+        // The classic EC2/GCP metadata IP — MUST stay blocked via the
+        // literal-IP path in assertSafeScheme.
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe(
+                        "http://169.254.169.254/latest/meta-data/iam/security-credentials/"));
+    }
+
+    @Test
+    public void assertUrlSafeRejectsPrivateNetworkLiteral() {
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://10.0.0.5/"));
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://192.168.1.1/"));
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://172.16.0.1/"));
+    }
+
+    @Test
+    public void assertUrlSafeRejectsFileScheme() {
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("file:///etc/passwd"));
+    }
+
+    @Test
+    public void assertUrlSafeAcceptsPublicUrl() {
+        // localhost name and loopback IPs have been ruled out; a well-known
+        // public hostname should pass. Use example.com which resolves to
+        // public IPs across test environments.
+        SsrfGuard.assertUrlSafe("https://example.com/");
+    }
+
+    @Test
+    public void isUrlSafeNonThrowingReturnsFalseForUnsafe() {
+        // Hot-path variant used by route interceptors — never throws.
+        assertFalse(SsrfGuard.isUrlSafe("http://127.0.0.1/"));
+        assertFalse(SsrfGuard.isUrlSafe("http://169.254.169.254/"));
+        assertFalse(SsrfGuard.isUrlSafe("file:///etc/passwd"));
+        assertFalse(SsrfGuard.isUrlSafe("not-a-valid-url"));
+    }
+
+    @Test
+    public void isUrlSafeNonThrowingReturnsTrueForPublic() {
+        assertTrue(SsrfGuard.isUrlSafe("https://example.com/"));
+    }
 }

@@ -152,6 +152,120 @@ public class ControllerApiTest extends FunctionalTest {
         assertEquals(409, response.status.intValue());
     }
 
+    // JCLAW-115: agent-name slug validation rejects traversal-shaped input.
+
+    @Test
+    public void agentsCreateRejectsPathTraversalName() {
+        login();
+        var body = """
+                {"name": "../etc", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
+                """;
+        var response = POST("/api/agents", "application/json", body);
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    public void agentsCreateRejectsAbsolutePathName() {
+        login();
+        var body = """
+                {"name": "/etc/passwd", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
+                """;
+        var response = POST("/api/agents", "application/json", body);
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    public void agentsCreateRejectsSlashedName() {
+        login();
+        var body = """
+                {"name": "foo/bar", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
+                """;
+        var response = POST("/api/agents", "application/json", body);
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    public void agentsCreateRejectsEmptyName() {
+        login();
+        var body = """
+                {"name": "", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
+                """;
+        var response = POST("/api/agents", "application/json", body);
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    public void agentsCreateRejectsDotNames() {
+        login();
+        var dotBody = """
+                {"name": ".", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
+                """;
+        assertEquals(400, POST("/api/agents", "application/json", dotBody).status.intValue());
+        var dotDotBody = """
+                {"name": "..", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
+                """;
+        assertEquals(400, POST("/api/agents", "application/json", dotDotBody).status.intValue());
+    }
+
+    @Test
+    public void agentsCreateRejectsWhitespaceInName() {
+        login();
+        var body = """
+                {"name": "has space", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
+                """;
+        var response = POST("/api/agents", "application/json", body);
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    public void agentsCreateRejectsOverlongName() {
+        login();
+        // 65 chars — one over the limit.
+        var longName = "a".repeat(65);
+        var body = """
+                {"name": "%s", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
+                """.formatted(longName);
+        var response = POST("/api/agents", "application/json", body);
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    public void agentsCreateAcceptsValidSlugNames() {
+        login();
+        // Happy-path sanity: the regex allows typical names operators use.
+        var body = """
+                {"name": "my-agent_01", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
+                """;
+        var response = POST("/api/agents", "application/json", body);
+        assertIsOk(response);
+    }
+
+    @Test
+    public void agentsUpdateRejectsRenameToTraversalName() {
+        login();
+        var id = createAgent("rename-src-115");
+        var body = """
+                {"name": "../etc"}
+                """;
+        var response = PUT("/api/agents/" + id, "application/json", body);
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    public void agentsUpdateAllowsUnchangedName() {
+        // JCLAW-115 grandfather clause: update requests that don't modify
+        // the name must pass regardless of whether the existing name meets
+        // the new regex (e.g. legacy agents). Here we flip thinkingMode
+        // without touching name.
+        login();
+        var id = createAgent("legacy-ok-115");
+        var body = """
+                {"thinkingMode": null}
+                """;
+        var response = PUT("/api/agents/" + id, "application/json", body);
+        assertIsOk(response);
+    }
+
     @Test
     public void agentsCreateRejectsReservedLoadtestName() {
         login();
@@ -550,6 +664,74 @@ public class ControllerApiTest extends FunctionalTest {
                     "round-tripped enabled key should appear in /api/config");
         } finally {
             services.ConfigService.delete("provider.openrouter.enabled");
+        }
+    }
+
+    // =====================
+    // ApiChatController slash-argument wiring (JCLAW-111)
+    // =====================
+
+    @Test
+    public void chatSendRoutesModelStatusThroughFullDetailPath() {
+        // JCLAW-111: the sync REST chat handler used to call the no-args
+        // Commands.execute overload, which dropped the "status" argument
+        // and fell into the no-args summary branch. This test proves the
+        // args-carrying overload now fires and /model status returns the
+        // full model metadata.
+        login();
+        services.ConfigService.set("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
+        services.ConfigService.set("provider.openrouter.apiKey", "sk-test");
+        services.ConfigService.set("provider.openrouter.models",
+                "[{\"id\":\"gpt-4.1\",\"name\":\"GPT 4.1\",\"contextWindow\":128000,\"maxTokens\":8192}]");
+        llm.ProviderRegistry.refresh();
+        var agentId = createAgent("slash-status-agent");
+        try {
+            var chatBody = """
+                    {"agentId": %s, "message": "/model status"}
+                    """.formatted(agentId);
+            var response = POST("/api/chat/send", "application/json", chatBody);
+            assertIsOk(response);
+            var content = getContent(response);
+            // Full-detail markers — absent from the no-args summary.
+            assertTrue(content.contains("Context window"),
+                    "/model status should render full detail including context window: " + content);
+            assertTrue(content.contains("128K"),
+                    "/model status should include formatted context window: " + content);
+        } finally {
+            services.ConfigService.delete("provider.openrouter.baseUrl");
+            services.ConfigService.delete("provider.openrouter.apiKey");
+            services.ConfigService.delete("provider.openrouter.models");
+            llm.ProviderRegistry.refresh();
+        }
+    }
+
+    @Test
+    public void chatSendRoutesModelNameWriteThroughOverride() {
+        // JCLAW-111: /model openrouter/gpt-4.1 must reach the write-path
+        // branch (performModelSwitch) rather than being ignored as a no-args
+        // summary. We verify by inspecting the confirmation text — the
+        // summary and the switch confirmation are visibly distinct.
+        login();
+        services.ConfigService.set("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
+        services.ConfigService.set("provider.openrouter.apiKey", "sk-test");
+        services.ConfigService.set("provider.openrouter.models",
+                "[{\"id\":\"gpt-4.1\",\"contextWindow\":128000}]");
+        llm.ProviderRegistry.refresh();
+        var agentId = createAgent("slash-switch-agent");
+        try {
+            var chatBody = """
+                    {"agentId": %s, "message": "/model openrouter/gpt-4.1"}
+                    """.formatted(agentId);
+            var response = POST("/api/chat/send", "application/json", chatBody);
+            assertIsOk(response);
+            var content = getContent(response);
+            assertTrue(content.contains("Switched this conversation"),
+                    "/model NAME should render the switch-confirmation text: " + content);
+        } finally {
+            services.ConfigService.delete("provider.openrouter.baseUrl");
+            services.ConfigService.delete("provider.openrouter.apiKey");
+            services.ConfigService.delete("provider.openrouter.models");
+            llm.ProviderRegistry.refresh();
         }
     }
 

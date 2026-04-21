@@ -56,3 +56,24 @@ Backend exposes JSON endpoints under `/api/` (e.g., `ApiController.status` at `G
 - `play` command in PATH (custom fork: github.com/tsukhani/play1)
 - Node.js 20+
 - pnpm
+
+
+<claude-mem-context>
+# Memory Context
+
+# [jclaw] recent context, 2026-04-21 9:33pm GMT+8
+
+Legend: 🎯session 🔴bugfix 🟣feature 🔄refactor ✅change 🔵discovery ⚖️decision
+Format: ID TIME TYPE TITLE
+Fetch details: get_observations([IDs]) | Search: mem-search skill
+
+Stats: 1 obs (372t read) | 1,676t work | 78% savings
+
+### Apr 18, 2026
+**17550** 6:01p 🔵 **Backend Test Suite Port Conflict Prevents Execution**
+The unified test orchestration command ./jclaw.sh test attempted to run the full test suite but encountered an environment conflict. The Play Framework backend test runner failed during startup when it tried to bind the HTTP server to port 9100, which was already in use by another process (likely a lingering development server or abandoned test process). This prevented any backend unit or functional tests from executing, resulting in a FAILED status with 0 tests run. The frontend Vitest suite executed successfully afterward, completing all 199 tests. The port conflict is an environmental issue rather than a code defect - the test suite itself is functional but requires the port to be available. This discovery confirms that test environment cleanup (killing stale processes) is a prerequisite for running the backend test suite.
+~372t 🔍 1,676
+
+
+Access 2k tokens of past work via get_observations([IDs]) or mem-search skill.
+</claude-mem-context>

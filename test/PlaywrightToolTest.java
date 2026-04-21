@@ -88,6 +88,49 @@ public class PlaywrightToolTest extends UnitTest {
         deleteDir(AgentService.workspacePath("non-main-agent"));
     }
 
+    // JCLAW-116: entry-URL SSRF guard. These tests don't need a running
+    // Chromium — the guard runs before any session is created or any
+    // Playwright API is called. The tool returns the error string directly.
+
+    @Test
+    public void navigateRejectsCloudMetadataEndpoint() {
+        var tool = new PlaywrightBrowserTool();
+        var result = tool.execute(
+                "{\"action\":\"navigate\",\"url\":\"http://169.254.169.254/latest/meta-data/\"}",
+                agent);
+        assertTrue(result.startsWith("Error"),
+                "metadata endpoint must be rejected before Playwright is invoked: " + result);
+        assertTrue(result.contains("SSRF"),
+                "error message names the SSRF guard: " + result);
+    }
+
+    @Test
+    public void navigateRejectsLoopbackAddress() {
+        var tool = new PlaywrightBrowserTool();
+        var result = tool.execute(
+                "{\"action\":\"navigate\",\"url\":\"http://127.0.0.1:9000/admin\"}",
+                agent);
+        assertTrue(result.startsWith("Error"));
+    }
+
+    @Test
+    public void navigateRejectsPrivateNetworkAddress() {
+        var tool = new PlaywrightBrowserTool();
+        var result = tool.execute(
+                "{\"action\":\"navigate\",\"url\":\"http://10.0.0.5/\"}",
+                agent);
+        assertTrue(result.startsWith("Error"));
+    }
+
+    @Test
+    public void navigateRejectsFileScheme() {
+        var tool = new PlaywrightBrowserTool();
+        var result = tool.execute(
+                "{\"action\":\"navigate\",\"url\":\"file:///etc/passwd\"}",
+                agent);
+        assertTrue(result.startsWith("Error"));
+    }
+
     @Test
     public void idleSessionCleanupDoesNotThrow() {
         // Just verify the cleanup method runs without error even with no sessions

@@ -8,6 +8,7 @@ import com.microsoft.playwright.options.WaitForSelectorState;
 import models.Agent;
 import services.AgentService;
 import services.EventLogger;
+import utils.SsrfGuard;
 
 import java.nio.file.Files;
 import java.util.List;
@@ -140,6 +141,15 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     }
 
     private String navigate(Page page, String url) {
+        // JCLAW-116: validate the entry URL before handing it to Chromium.
+        // The route interceptor installed in createSession catches subresources
+        // and redirects, but the top-level URL is still checked here so we
+        // can surface a clean error to the agent without spinning up the nav.
+        try {
+            SsrfGuard.assertUrlSafe(url);
+        } catch (SecurityException e) {
+            return "Error: " + e.getMessage();
+        }
         page.navigate(url);
         page.waitForLoadState(LoadState.NETWORKIDLE);
         var title = page.title();
@@ -250,6 +260,23 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                     new BrowserType.LaunchOptions().setHeadless(
                             !"false".equals(services.ConfigService.get("playwright.headless", "true"))));
             var page = browser.newPage();
+            // JCLAW-116: abort any request (main frame, subresource, or
+            // redirect target) whose URL fails the SSRF guard. Catches
+            // three cases the entry-URL check in navigate() can't:
+            //   (a) subresources embedded in the loaded page that target
+            //       private networks (tracking pixels pointing at
+            //       169.254.169.254, script-loaders reaching loopback, etc.),
+            //   (b) HTTP redirects to unsafe hosts (Chromium follows them
+            //       automatically without re-invoking our one-shot check),
+            //   (c) any future navigation that bypasses navigate() (e.g.
+            //       a click handler that triggers page.navigate internally).
+            page.route("**/*", route -> {
+                if (SsrfGuard.isUrlSafe(route.request().url())) {
+                    route.resume();
+                } else {
+                    route.abort();
+                }
+            });
             return new BrowserSession(playwright, browser, page,
                     new ReentrantLock(), System.currentTimeMillis());
         });

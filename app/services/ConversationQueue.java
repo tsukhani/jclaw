@@ -108,37 +108,76 @@ public class ConversationQueue {
 
     /**
      * Called after processing completes. Returns the next message(s) to process,
-     * or empty list if queue is empty.
+     * or empty list if the queue is empty.
      *
-     * In "collect" mode, returns all pending messages combined.
-     * In "queue" mode, returns just the next message.
+     * <h2>Ownership semantics (JCLAW-117)</h2>
+     * When this method returns non-empty, the {@code processing} flag STAYS
+     * {@code true} — the caller inherits ownership of the conversation queue
+     * and is responsible for releasing it (via {@link #releaseOwnership},
+     * or by re-entering {@code drain} after their run completes; the re-entry
+     * will see an empty pending deque and clear the flag itself).
      *
-     * Does NOT remove the QueueState from the map — avoids a race between
+     * <p>Keeping ownership atomic across the pop closes a prior race where a
+     * new inbound message could {@code tryAcquire} in the gap between drain
+     * popping B and the caller actually starting to run B — letting C
+     * overtake an older queued message.
+     *
+     * <p>Does NOT remove the QueueState from the map — avoids a race between
      * {@code remove()} and a concurrent {@code computeIfAbsent()} that would
      * permanently orphan the conversation. Idle entries are harmless (empty
      * deque + processing=false) and will be reused on the next message.
+     *
+     * <p>In "collect" mode, returns all pending messages combined. In "queue"
+     * mode, returns just the next message.
      */
     public static List<QueuedMessage> drain(Long conversationId) {
         var state = queues.get(conversationId);
         if (state == null) return List.of();
 
         synchronized (state) {
-            state.finishProcessing();
             state.cancelled.set(false);
 
             if (state.pending.isEmpty()) {
+                // Nothing to do — release ownership and return. The next
+                // inbound message will re-acquire via tryAcquire.
+                state.finishProcessing();
                 return List.of();
             }
 
             if ("collect".equals(state.mode)) {
                 var all = new ArrayList<>(state.pending);
                 state.pending.clear();
+                // Ownership transfers to the caller — processing stays true.
                 return all;
             }
 
-            // Queue mode -- return next message
+            // Queue mode
             var next = state.pending.pollFirst();
-            return next != null ? List.of(next) : List.of();
+            if (next == null) {
+                // Shouldn't happen given the isEmpty check, but be defensive.
+                state.finishProcessing();
+                return List.of();
+            }
+            return List.of(next);
+        }
+    }
+
+    /**
+     * Release queue ownership explicitly. Callers that received a non-empty
+     * result from {@link #drain} must either call this on completion or
+     * re-invoke {@code drain} (which releases ownership automatically when
+     * the pending deque is empty).
+     *
+     * <p>This is the fail-safe exit path for drained-message processors —
+     * their {@code finally} block calls this to guarantee {@code processing}
+     * flips back to false even when the run throws an exception that
+     * short-circuits the normal re-drain.
+     */
+    public static void releaseOwnership(Long conversationId) {
+        var state = queues.get(conversationId);
+        if (state == null) return;
+        synchronized (state) {
+            state.finishProcessing();
         }
     }
 

@@ -13,6 +13,7 @@ import { shouldDisplayMessage } from '~/utils/display-message-filter'
 
 import type { Agent, Conversation, Message, ConfigResponse } from '~/types/api'
 import { effectiveThinkingLevels, type ProviderModel } from '~/composables/useProviders'
+import { useModelAutocomplete } from '~/composables/useModelAutocomplete'
 
 // Local helpers for fields that streaming/optimistic bubbles carry in addition
 // to the persisted Message shape. Kept co-located rather than in types/api.ts
@@ -126,18 +127,6 @@ const selectedAgent = computed(() => agents.value?.find(a => a.id === selectedAg
 // lets the user pick any model from any enabled provider without going back
 // to the Agents page. Encoded provider + id avoids ambiguity when two
 // providers happen to expose the same model id (e.g. "kimi-k2.5").
-const selectedModelInfo = computed<ProviderModel | null>(() => {
-  const providerName = selectedAgent.value?.modelProvider
-  const modelId = selectedAgent.value?.modelId
-  if (!providerName || !modelId) return null
-  const provider = providers.value.find(p => p.name === providerName)
-  return provider?.models.find(m => m.id === modelId) ?? null
-})
-
-// Compound key used as the <option> value so the change handler can read
-// both provider and model from a single DOM value. Must use a separator that
-// can't appear in either side; "::" is safe against every provider name and
-// model id we currently ship.
 /**
  * The currently open conversation row, if any. Exposes the modelProvider /
  * modelId override fields (JCLAW-108) so the model dropdown can reflect
@@ -155,18 +144,47 @@ const currentConversation = computed(() => {
 })
 
 /**
- * Effective model key for the dropdown selection — honors the conversation
- * override when one is set, falls back to the agent default otherwise. This
- * makes a mid-chat /model or dropdown-driven switch visible immediately.
+ * Effective (provider, modelId) for the currently open conversation.
+ * Honors the JCLAW-108 conversation override when both override columns are
+ * set; falls back to the agent's default otherwise. This is the single
+ * resolver both the dropdown key (selectedModelKey) and the capability
+ * pills (selectedModelInfo) route through — preventing the JCLAW-112
+ * drift where one side honored the override and the other didn't.
  */
-const selectedModelKey = computed(() => {
+const effectiveModel = computed<{ providerName: string | null, modelId: string | null }>(() => {
   const conv = currentConversation.value
   if (conv?.modelProviderOverride && conv?.modelIdOverride) {
-    return `${conv.modelProviderOverride}::${conv.modelIdOverride}`
+    return { providerName: conv.modelProviderOverride, modelId: conv.modelIdOverride }
   }
-  const p = selectedAgent.value?.modelProvider
-  const m = selectedAgent.value?.modelId
-  return p && m ? `${p}::${m}` : ''
+  return {
+    providerName: selectedAgent.value?.modelProvider ?? null,
+    modelId: selectedAgent.value?.modelId ?? null,
+  }
+})
+
+/**
+ * ModelInfo for the effective (override-or-agent) model. The Think / Vision /
+ * Audio pills and the thinking-level dropdown all derive from this, so they
+ * reflect the capabilities of the model that will actually run the next
+ * turn — not the agent's default when an override is active.
+ */
+const selectedModelInfo = computed<ProviderModel | null>(() => {
+  const { providerName, modelId } = effectiveModel.value
+  if (!providerName || !modelId) return null
+  const provider = providers.value.find(p => p.name === providerName)
+  return provider?.models.find(m => m.id === modelId) ?? null
+})
+
+/**
+ * Compound key used as the `<option>` value for the model dropdown so the
+ * change handler can read both provider and model from a single DOM value.
+ * Routes through {@link effectiveModel} so the dropdown and the capability
+ * pills stay in sync. "::" separator is safe against every provider name
+ * and model id we currently ship.
+ */
+const selectedModelKey = computed(() => {
+  const { providerName, modelId } = effectiveModel.value
+  return providerName && modelId ? `${providerName}::${modelId}` : ''
 })
 
 // Whether the selected model supports thinking
@@ -409,6 +427,70 @@ const input = ref('')
 const streaming = ref(false)
 const streamStatus = ref('')
 const chatInput = ref<HTMLTextAreaElement | null>(null)
+
+/**
+ * JCLAW-114: /model NAME autocomplete state. Driven by the input watcher
+ * below — watches for the /model <query> prefix and surfaces a floating
+ * popup above the textarea with matching provider/model pairs from the
+ * (already-filtered) providers list. Keyboard nav via ArrowUp/Down/Enter/
+ * Tab/Escape, mouse via click.
+ */
+const modelAutocomplete = useModelAutocomplete(providers)
+
+watch(input, (text) => {
+  modelAutocomplete.update(text)
+})
+
+function onInputKeydown(event: KeyboardEvent) {
+  // Only steal keys while the popup is open — when it's closed, the textarea
+  // behaves exactly as before (Enter sends, everything else is text input).
+  if (!modelAutocomplete.open.value) return
+  if (event.key === 'ArrowDown') {
+    event.preventDefault()
+    modelAutocomplete.moveHighlight('down')
+  }
+  else if (event.key === 'ArrowUp') {
+    event.preventDefault()
+    modelAutocomplete.moveHighlight('up')
+  }
+  else if (event.key === 'Tab' || event.key === 'Enter') {
+    const replacement = modelAutocomplete.accept(input.value)
+    if (replacement !== null) {
+      event.preventDefault()
+      input.value = replacement
+      nextTick(() => autoResize())
+    }
+  }
+  else if (event.key === 'Escape') {
+    event.preventDefault()
+    modelAutocomplete.close()
+  }
+}
+
+function onInputEnter(event: KeyboardEvent) {
+  // When the autocomplete popup is open, Enter accepts the selection
+  // (handled by onInputKeydown). Otherwise it sends the message.
+  if (modelAutocomplete.open.value) {
+    onInputKeydown(event)
+    return
+  }
+  event.preventDefault()
+  sendMessage()
+}
+
+function pickAutocomplete(choice: string) {
+  modelAutocomplete.moveHighlight('down') // no-op if already highlighted
+  const idx = modelAutocomplete.options.value.indexOf(choice)
+  if (idx >= 0) modelAutocomplete.highlightedIndex.value = idx
+  const replacement = modelAutocomplete.accept(input.value)
+  if (replacement !== null) {
+    input.value = replacement
+    nextTick(() => {
+      autoResize()
+      chatInput.value?.focus()
+    })
+  }
+}
 
 function autoResize() {
   const el = chatInput.value
@@ -1572,7 +1654,33 @@ function exportConversation() {
       </div>
 
       <!-- Input -->
-      <div class="px-4 py-3">
+      <div class="px-4 py-3 relative">
+        <!-- JCLAW-114: /model NAME autocomplete popup, anchored above the
+             form. Rendered outside the form so the form's overflow-hidden
+             (needed for rounded borders) doesn't clip the popup. -->
+        <div
+          v-if="modelAutocomplete.open.value"
+          class="absolute left-4 right-4 bottom-full mb-1 z-10
+                 bg-surface-elevated border border-border rounded-md shadow-lg
+                 max-h-60 overflow-y-auto"
+          role="listbox"
+          aria-label="Model completion options"
+        >
+          <button
+            v-for="(opt, idx) in modelAutocomplete.options.value"
+            :key="opt"
+            type="button"
+            :class="idx === modelAutocomplete.highlightedIndex.value
+              ? 'bg-muted text-fg-strong'
+              : 'text-fg-default hover:bg-muted/50'"
+            class="block w-full text-left px-3 py-1.5 text-xs font-mono transition-colors"
+            :aria-selected="idx === modelAutocomplete.highlightedIndex.value"
+            role="option"
+            @mousedown.prevent="pickAutocomplete(opt)"
+          >
+            {{ opt }}
+          </button>
+        </div>
         <form
           class="bg-surface-elevated border border-ring rounded-xl overflow-hidden"
           @submit.prevent="sendMessage"
@@ -1661,7 +1769,11 @@ function exportConversation() {
             aria-label="Message input"
             class="w-full px-4 pt-3 pb-2 bg-transparent text-sm text-fg-strong
                    placeholder-fg-muted focus:outline-hidden resize-none overflow-hidden"
-            @keydown.enter.exact.prevent="sendMessage()"
+            @keydown.enter.exact="onInputEnter"
+            @keydown.down="onInputKeydown"
+            @keydown.up="onInputKeydown"
+            @keydown.tab="onInputKeydown"
+            @keydown.esc="onInputKeydown"
             @input="autoResize"
           />
           <input
