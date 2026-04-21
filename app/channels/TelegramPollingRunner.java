@@ -262,10 +262,11 @@ public final class TelegramPollingRunner {
             // owns the placeholder/edit/delete lifecycle; the planner takes
             // over on seal for media-rich or oversize responses. JCLAW-95:
             // factory defers construction until the conversation id is known.
+            final String sendChatType = msg.chatType();
             AgentRunner.processInboundForAgentStreaming(
                     sendAgent, "telegram", ctx.telegramUserId(), msg.text(),
                     convId -> new TelegramStreamingSink(
-                            sendToken, sendChatId, sendAgent, convId));
+                            sendToken, sendChatId, sendAgent, convId, sendChatType));
         } catch (Exception e) {
             EventLogger.error("channel", null, "telegram",
                     "Polling update processing error for binding %d: %s".formatted(

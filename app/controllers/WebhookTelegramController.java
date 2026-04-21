@@ -123,10 +123,11 @@ public class WebhookTelegramController extends Controller {
             // for media-rich / oversize responses. JCLAW-95: the factory
             // defers sink construction until AgentRunner has resolved the
             // conversation id so the sink can persist its checkpoint.
+            final String sendChatType = message.chatType();
             AgentRunner.processInboundForAgentStreaming(
                     sendAgent, "telegram", ctx.telegramUserId(), message.text(),
                     convId -> new channels.TelegramStreamingSink(
-                            sendToken, sendChatId, sendAgent, convId));
+                            sendToken, sendChatId, sendAgent, convId, sendChatType));
         } catch (Exception e) {
             EventLogger.error("channel", ctx.agent() != null ? ctx.agent().name : null, "telegram",
                     "Error processing message for binding %d: %s".formatted(ctx.bindingId(), e.getMessage()));

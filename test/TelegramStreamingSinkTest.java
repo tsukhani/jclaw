@@ -260,6 +260,94 @@ public class TelegramStreamingSinkTest extends UnitTest {
                 "awaitInFlightFlush should wake promptly on future completion (took " + elapsedMs + " ms)");
     }
 
+    // === JCLAW-103: transport selection + DRAFT transport ===
+
+    @Test
+    public void transportDefaultsToEditInPlaceWhenChatTypeOmitted() {
+        // Pre-JCLAW-103 constructor (no chatType) must behave exactly as
+        // before — EDIT_IN_PLACE — so existing callers and tests keep working.
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
+                sink.transportForTest());
+    }
+
+    @Test
+    public void transportIsDraftForPrivateChats() {
+        var sink = new TelegramStreamingSink("tok", "12345", null, null, "private");
+        assertEquals(TelegramStreamingSink.Transport.DRAFT,
+                sink.transportForTest());
+    }
+
+    @Test
+    public void transportIsEditInPlaceForGroupAndSupergroupAndChannel() {
+        for (String type : new String[] { "group", "supergroup", "channel" }) {
+            var sink = new TelegramStreamingSink("tok", "chat", null, null, type);
+            assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
+                    sink.transportForTest(),
+                    "chat.type=" + type + " should select EDIT_IN_PLACE");
+        }
+    }
+
+    @Test
+    public void transportIsEditInPlaceForNullOrUnknownChatType() {
+        // Defensive: callers that couldn't parse chat.type pass null; that
+        // must fall to EDIT_IN_PLACE so we don't attempt drafts in chats
+        // where Telegram would 400 us.
+        assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
+                new TelegramStreamingSink("tok", "chat", null, null, null)
+                        .transportForTest());
+        assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
+                new TelegramStreamingSink("tok", "chat", null, null, "weird_new_type")
+                        .transportForTest());
+    }
+
+    @Test
+    public void draftWasSentIsFalseOnFreshSink() {
+        var sink = new TelegramStreamingSink("tok", "chat", null, null, "private");
+        assertFalse(sink.draftWasSentForTest(),
+                "a fresh DRAFT sink has not yet saved a draft");
+    }
+
+    @Test
+    public void draftUnsupportedClassifierRecognizesExpectedPatterns() throws Exception {
+        // JCLAW-103: when sendMessageDraft returns a 400 matching either
+        // DRAFT_METHOD_UNAVAILABLE_RE or DRAFT_CHAT_UNSUPPORTED_RE, the sink
+        // must transition to EDIT_IN_PLACE. Verify the classifier directly
+        // via reflection — the sink's runtime fallback path is driven off it.
+        var classifier = TelegramStreamingSink.class
+                .getDeclaredMethod("isDraftUnsupported",
+                        org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException.class);
+        classifier.setAccessible(true);
+
+        String[] unsupportedMessages = {
+                "method sendMessageDraft can be used only in private chats",
+                "400: Bad Request: method not found",
+                "unknown method",
+                "unsupported",
+                "can't be used in this chat",
+        };
+        for (String msg : unsupportedMessages) {
+            var ex = new org.telegram.telegrambots.meta.exceptions
+                    .TelegramApiRequestException(msg);
+            assertEquals(true, classifier.invoke(null, ex),
+                    "should classify '" + msg + "' as draft-unsupported");
+        }
+
+        // Unrelated errors must NOT be classified as draft-unsupported
+        // (they should propagate via the normal 429/other-error path).
+        String[] unrelatedMessages = {
+                "Too Many Requests",
+                "Bad Request: chat not found",
+                "Forbidden: bot was blocked by the user",
+        };
+        for (String msg : unrelatedMessages) {
+            var ex = new org.telegram.telegrambots.meta.exceptions
+                    .TelegramApiRequestException(msg);
+            assertEquals(false, classifier.invoke(null, ex),
+                    "must not classify '" + msg + "' as draft-unsupported");
+        }
+    }
+
     // === JCLAW-100: adaptive throttle ratchet ===
 
     @Test

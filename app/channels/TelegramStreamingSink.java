@@ -4,6 +4,7 @@ import models.Agent;
 import models.Conversation;
 import org.telegram.telegrambots.meta.api.methods.ParseMode;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.methods.send.SendMessageDraft;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
@@ -114,6 +115,46 @@ public final class TelegramStreamingSink {
     private static final ScheduledExecutorService SCHEDULER =
             VirtualThreads.newSingleThreadScheduledExecutor();
 
+    /**
+     * Streaming transport selected at sink construction (JCLAW-103).
+     * <ul>
+     *   <li>{@link #DRAFT} — DM chats only. Streaming updates go to
+     *       {@code sendMessageDraft} so no intermediate message appears in
+     *       the chat; the typing indicator covers the streaming phase.
+     *       Seal sends one final {@code sendMessage}, then clears the
+     *       draft so the user's compose area doesn't show a stale draft tag.
+     *   <li>{@link #EDIT_IN_PLACE} — groups, supergroups, channels, and the
+     *       fallback when draft API rejects at runtime. Placeholder + edit
+     *       pattern (the pre-JCLAW-103 behavior).
+     * </ul>
+     * Starts DRAFT for {@code chat.type == "private"} and can one-way
+     * transition to EDIT_IN_PLACE if Telegram rejects {@code sendMessageDraft}.
+     */
+    public enum Transport { DRAFT, EDIT_IN_PLACE }
+
+    /**
+     * Chat types for which DRAFT transport is attempted. Telegram's server-side
+     * check restricts sendMessageDraft to {@code "private"} chats; we enforce
+     * the same at construction so groups/channels never even try.
+     */
+    private static final String PRIVATE_CHAT_TYPE = "private";
+
+    /**
+     * Regex patterns that classify a Telegram 400 as "draft API unavailable
+     * for this chat or bot", triggering the one-way fallback to
+     * EDIT_IN_PLACE. Mirrors OpenClaw's {@code DRAFT_METHOD_UNAVAILABLE_RE}
+     * and {@code DRAFT_CHAT_UNSUPPORTED_RE} in
+     * {@code extensions/telegram/src/draft-stream.ts:12-14}. Two patterns so
+     * the log message carries the more-specific "chat unsupported" signal
+     * when it applies, without conflating it with "method unknown".
+     */
+    private static final Pattern DRAFT_METHOD_UNAVAILABLE_RE =
+            Pattern.compile("(unknown method|method .*not (found|available|supported)|unsupported)",
+                    Pattern.CASE_INSENSITIVE);
+    private static final Pattern DRAFT_CHAT_UNSUPPORTED_RE =
+            Pattern.compile("(can't be used|can be used only)",
+                    Pattern.CASE_INSENSITIVE);
+
     private final String botToken;
     private final String chatId;
     private final Agent agent;
@@ -124,6 +165,31 @@ public final class TelegramStreamingSink {
      * is a no-op when null.
      */
     private final Long conversationId;
+
+    /**
+     * Active streaming transport. Volatile because the flush thread reads it
+     * and a concurrent call from the same virtual thread can transition it
+     * after a draft rejection. Monotonic within a sink: DRAFT may become
+     * EDIT_IN_PLACE once, never the reverse.
+     */
+    private volatile Transport transport;
+
+    /**
+     * Per-sink draft identifier (JCLAW-103). Telegram's sendMessageDraft
+     * accepts an arbitrary int id so a single chat can hold multiple
+     * per-bot drafts without collision; we pick a random non-negative int
+     * at construction so back-to-back turns don't reuse ids.
+     */
+    private final int draftId;
+
+    /**
+     * True once at least one sendMessageDraft call has landed. Drives the
+     * "clear the stale draft indicator on seal" best-effort call — without
+     * this guard, sinks that transitioned to EDIT_IN_PLACE immediately
+     * (first-flush fallback) would still try to clear a draft that was
+     * never created.
+     */
+    private volatile boolean draftWasSent = false;
 
     private final StringBuilder pending = new StringBuilder();
     private Integer messageId = null;
@@ -177,14 +243,32 @@ public final class TelegramStreamingSink {
      * {@link #TelegramStreamingSink(String, String, Agent, Long)}.
      */
     public TelegramStreamingSink(String botToken, String chatId, Agent agent) {
-        this(botToken, chatId, agent, null);
+        this(botToken, chatId, agent, null, null);
     }
 
     public TelegramStreamingSink(String botToken, String chatId, Agent agent, Long conversationId) {
+        this(botToken, chatId, agent, conversationId, null);
+    }
+
+    /**
+     * Full constructor (JCLAW-103). {@code chatType} is Telegram's
+     * {@code chat.type} string — {@code "private"} selects DRAFT transport,
+     * anything else (or {@code null}) selects EDIT_IN_PLACE. Callers that
+     * parse inbound Telegram updates get this from
+     * {@link TelegramChannel.InboundMessage#chatType()}.
+     */
+    public TelegramStreamingSink(String botToken, String chatId, Agent agent,
+                                 Long conversationId, String chatType) {
         this.botToken = botToken;
         this.chatId = chatId;
         this.agent = agent;
         this.conversationId = conversationId;
+        this.transport = PRIVATE_CHAT_TYPE.equalsIgnoreCase(chatType)
+                ? Transport.DRAFT
+                : Transport.EDIT_IN_PLACE;
+        // Non-negative 31-bit int so it fits Telegram's draftId param and
+        // doesn't collide across same-chat back-to-back turns in practice.
+        this.draftId = java.util.concurrent.ThreadLocalRandom.current().nextInt(Integer.MAX_VALUE);
     }
 
     // ── Public API ─────────────────────────────────────────────────────
@@ -234,6 +318,19 @@ public final class TelegramStreamingSink {
         awaitInFlightFlush();
         if (finalResponse == null) finalResponse = "";
 
+        // JCLAW-103: DRAFT transport always short-circuits to "send as fresh
+        // message + clear draft". No placeholder ever existed (the draft is
+        // invisible to other chat members; it only shows in the sender's own
+        // compose area), so there's nothing to delete and nothing to edit —
+        // we simply dispatch the final answer and tidy up the compose-area
+        // indicator. This is the happy path for DMs post-JCLAW-103.
+        if (transport == Transport.DRAFT) {
+            TelegramChannel.sendMessage(botToken, chatId, finalResponse, agent);
+            clearDraftBestEffort();
+            clearStreamCheckpoint();
+            return;
+        }
+
         // If we never got to send a placeholder (no tokens, or instant cap
         // overflow) OR the final response requires the planner (images,
         // workspace files, oversize), fall through to the planner's
@@ -247,6 +344,11 @@ public final class TelegramStreamingSink {
         if (needsPlanner) {
             if (messageId != null) deletePlaceholderSafely();
             TelegramChannel.sendMessage(botToken, chatId, finalResponse, agent);
+            // Belt-and-suspenders: a sink that started as DRAFT and fell back
+            // to EDIT_IN_PLACE still has a stale draft in the user's compose
+            // area. clearDraftBestEffort short-circuits when draftWasSent is
+            // false, so this is a no-op for sinks that never ran DRAFT.
+            clearDraftBestEffort();
             clearStreamCheckpoint();
             return;
         }
@@ -260,6 +362,7 @@ public final class TelegramStreamingSink {
             // the cap even when the raw markdown fit — fall back to planner.
             deletePlaceholderSafely();
             TelegramChannel.sendMessage(botToken, chatId, finalResponse, agent);
+            clearDraftBestEffort();
             clearStreamCheckpoint();
             return;
         }
@@ -270,6 +373,7 @@ public final class TelegramStreamingSink {
                     "Streaming seal edit failed (plain text remains visible): "
                             + e.getMessage());
         }
+        clearDraftBestEffort();
         clearStreamCheckpoint();
     }
 
@@ -289,6 +393,7 @@ public final class TelegramStreamingSink {
         if (messageId != null) deletePlaceholderSafely();
         TelegramChannel.sendMessage(botToken, chatId,
                 "Sorry, an error occurred processing your message.", agent);
+        clearDraftBestEffort();
         clearStreamCheckpoint();
         EventLogger.error("channel", agentName(), "telegram",
                 "Streaming error: " + (e != null ? e.getMessage() : "(null)"));
@@ -311,6 +416,8 @@ public final class TelegramStreamingSink {
     public String lastSentTextForTest() { return lastSentText; }
     public long lastSentAtForTest() { return lastSentAt; }
     public long currentThrottleMsForTest() { return currentThrottleMs; }
+    public Transport transportForTest() { return transport; }
+    public boolean draftWasSentForTest() { return draftWasSent; }
     /** True while the typing-indicator heartbeat (JCLAW-98) is scheduled. */
     public boolean typingHeartbeatActiveForTest() {
         synchronized (this) {
@@ -393,7 +500,18 @@ public final class TelegramStreamingSink {
             flushInFlight = new CompletableFuture<>();
         }
         try {
-            if (wasFirstSend) {
+            if (transport == Transport.DRAFT) {
+                // JCLAW-103: DRAFT path — no placeholder, no messageId; each
+                // flush overwrites the draft in the user's compose area. On
+                // first draft rejection (method unsupported / chat-type
+                // restricted) fall back to EDIT_IN_PLACE for the rest of the
+                // sink's lifetime and reissue this flush as a placeholder.
+                if (!tryDraftFlushWithFallback(toShow)) {
+                    // Fallback took us into EDIT_IN_PLACE; the fallback path
+                    // already sent the placeholder, so skip the else-branch
+                    // handling below.
+                }
+            } else if (wasFirstSend) {
                 messageId = sendPlaceholder(toShow);
                 // JCLAW-95: persist the checkpoint so a crash between here and
                 // seal() leaves a recoverable breadcrumb.
@@ -496,6 +614,91 @@ public final class TelegramStreamingSink {
                 .build();
         var message = client.execute(send);
         return message.getMessageId();
+    }
+
+    /**
+     * Attempt a DRAFT-transport flush (JCLAW-103). On draft-unsupported 400,
+     * transition the sink to EDIT_IN_PLACE for the rest of its lifetime and
+     * reissue this flush as a placeholder so the user doesn't lose the
+     * tokens we already accumulated. Any other exception propagates to
+     * flush()'s catch, which runs the 429 ratchet and logs.
+     *
+     * @return {@code true} on successful draft save; {@code false} on
+     *         fallback (a placeholder was sent instead — caller should
+     *         continue normally, but {@code messageId} is now set).
+     */
+    private boolean tryDraftFlushWithFallback(String plainText) throws Exception {
+        try {
+            saveDraft(plainText);
+            draftWasSent = true;
+            return true;
+        } catch (TelegramApiRequestException tare) {
+            if (!isDraftUnsupported(tare)) throw tare;
+            // One-way transition. The fallback warn log fires exactly once
+            // per sink because the DRAFT branch is guarded by the transport
+            // field — subsequent flushes take EDIT_IN_PLACE directly.
+            transport = Transport.EDIT_IN_PLACE;
+            EventLogger.warn("channel", agentName(), "telegram",
+                    "sendMessageDraft rejected; falling back to EDIT_IN_PLACE: "
+                            + tare.getMessage());
+            messageId = sendPlaceholder(plainText);
+            persistStreamCheckpoint();
+            return false;
+        }
+    }
+
+    /**
+     * One {@code sendMessageDraft} call. Telegram overwrites any prior draft
+     * for {@code (botToken, chatId, draftId)} with {@code text} — no
+     * separate "edit draft" method is needed. Pass an empty string to
+     * clear the draft.
+     */
+    private void saveDraft(String text) throws Exception {
+        var client = TelegramChannel.forToken(botToken).client();
+        client.execute(SendMessageDraft.builder()
+                .chatId(Long.parseLong(chatId))
+                .draftId(draftId)
+                .text(text)
+                .build());
+    }
+
+    /**
+     * Post-seal draft cleanup seam (JCLAW-103). Currently a no-op because
+     * {@code SendMessageDraft.validate()} in {@code telegrambots-meta 9.5.0}
+     * rejects empty text ({@code "Text can't be empty"}) before the network
+     * call, and no dedicated {@code DeleteMessageDraft} / {@code ClearDraft}
+     * method exists in the SDK. OpenClaw's grammY-based equivalent calls
+     * {@code sendMessageDraft(chatId, draftId, "")} to clear — that API path
+     * is unavailable to us. Smoke testing (2026-04-21) showed no stale-draft
+     * artifacts in the chat after seal, suggesting Telegram auto-resolves
+     * the draft when a regular {@code sendMessage} lands, so the missing
+     * explicit clear is not a user-visible issue.
+     *
+     * <p>Left as a method rather than inlined so a future SDK update with a
+     * working clear primitive can wire it up without touching the four
+     * seal / errorFallback call sites.
+     */
+    private void clearDraftBestEffort() {
+        // Intentionally no-op. See method javadoc — SDK validation blocks the
+        // only clear path OpenClaw uses. The {@code draftWasSent} flag is
+        // still kept on the sink: it's read by {@link #draftWasSentForTest}
+        // for diagnostics and will be the guard when a working clear
+        // primitive eventually lands.
+    }
+
+    /**
+     * Classify a 400 from {@code sendMessageDraft} as "this chat/bot doesn't
+     * support drafts." Two concrete Telegram strings we see:
+     * {@code "method sendMessageDraft can be used only in private chats"}
+     * when the chat isn't a DM, and variants with {@code "method not found"}
+     * / {@code "unsupported"} when the bot account itself can't use drafts.
+     * Anything else (e.g. 429) falls through to the generic error handling.
+     */
+    private static boolean isDraftUnsupported(TelegramApiRequestException tare) {
+        var msg = tare.getMessage();
+        if (msg == null) return false;
+        return DRAFT_METHOD_UNAVAILABLE_RE.matcher(msg).find()
+                || DRAFT_CHAT_UNSUPPORTED_RE.matcher(msg).find();
     }
 
     private void editMessage(String text, boolean html) throws Exception {

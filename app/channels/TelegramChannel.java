@@ -37,8 +37,16 @@ import java.util.concurrent.TimeUnit;
  */
 public class TelegramChannel implements Channel {
 
-    /** Generic inbound shape consumed by {@link controllers.WebhookTelegramController}. */
-    public record InboundMessage(String chatId, String text, String fromId, String fromUsername) {}
+    /**
+     * Generic inbound shape consumed by {@link controllers.WebhookTelegramController}
+     * and {@link TelegramPollingRunner}. {@code chatType} is the Telegram Bot API
+     * chat.type string ({@code "private"} / {@code "group"} / {@code "supergroup"} /
+     * {@code "channel"}), used by the streaming sink to pick DRAFT vs EDIT_IN_PLACE
+     * transport — JCLAW-103. Nullable for defensive parsing: if an update somehow
+     * arrives without chat context, callers fall back to EDIT_IN_PLACE.
+     */
+    public record InboundMessage(String chatId, String chatType, String text,
+                                 String fromId, String fromUsername) {}
 
     private static final ObjectMapper JACKSON = new ObjectMapper();
 
@@ -300,6 +308,7 @@ public class TelegramChannel implements Channel {
         Message msg = update.getMessage();
         if (!msg.hasText()) return null;
         String chatId = String.valueOf(msg.getChatId());
+        String chatType = msg.getChat() != null ? msg.getChat().getType() : null;
         String text = msg.getText();
         String fromId = null;
         String fromUsername = null;
@@ -307,7 +316,7 @@ public class TelegramChannel implements Channel {
             fromId = String.valueOf(msg.getFrom().getId());
             fromUsername = msg.getFrom().getUserName();
         }
-        return new InboundMessage(chatId, text, fromId, fromUsername);
+        return new InboundMessage(chatId, chatType, text, fromId, fromUsername);
     }
 
     // ── Per-instance send path ──
