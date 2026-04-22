@@ -156,6 +156,8 @@ public class ConversationService {
         var em = JPA.em();
         em.createQuery("DELETE FROM Message m WHERE m.conversation.id IN :ids")
                 .setParameter("ids", ids).executeUpdate();
+        em.createQuery("DELETE FROM SessionCompaction sc WHERE sc.conversation.id IN :ids")
+                .setParameter("ids", ids).executeUpdate();
         return em.createQuery("DELETE FROM Conversation c WHERE c.id IN :ids")
                 .setParameter("ids", ids).executeUpdate();
     }

@@ -3,7 +3,10 @@ import play.test.*;
 import play.db.jpa.JPA;
 import models.Agent;
 import models.Conversation;
+import models.SessionCompaction;
 import services.ConversationService;
+
+import java.time.Instant;
 
 /**
  * Functional HTTP tests for ApiConversationsController CRUD and query endpoints.
@@ -89,6 +92,56 @@ public class ApiConversationsControllerTest extends FunctionalTest {
             assertIsOk(deleteResp);
             assertTrue(getContent(deleteResp).contains("\"status\":\"deleted\""));
         }
+    }
+
+    @Test
+    public void deleteByIdsPurgesSessionCompactionRows() {
+        // Regression for a FK violation seen in prod: session_compaction.conversation_id
+        // references conversation(id) without ON DELETE CASCADE, so deleteByIds must
+        // hand-delete compaction rows before the parent Conversation delete.
+        Long convoId = services.Tx.run(() -> {
+            var agent = new Agent();
+            agent.name = "compaction-delete-agent";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.enabled = true;
+            agent.save();
+
+            var convo = new Conversation();
+            convo.agent = agent;
+            convo.channelType = "web";
+            convo.peerId = "unit-test";
+            convo.save();
+
+            var sc = new SessionCompaction();
+            sc.conversation = convo;
+            sc.turnCount = 3;
+            sc.summaryTokens = 100;
+            sc.model = "openrouter/gpt-4.1";
+            sc.summary = "test summary";
+            sc.compactedAt = Instant.now();
+            sc.save();
+
+            return convo.id;
+        });
+
+        int deleted = services.Tx.run(() ->
+                ConversationService.deleteByIds(java.util.List.of(convoId)));
+        assertEquals(1, deleted,
+                "deleteByIds must return 1 when the conversation is purged");
+
+        // Confirm both parent and child are gone — no FK violation, no orphans.
+        // Count queries bypass the persistence context L1 cache, which JPQL bulk
+        // DELETEs don't sync; findById would otherwise return the stale managed
+        // entity left over from the pre-delete insert.
+        services.Tx.run(() -> {
+            long convoCount = Conversation.count("id = ?1", convoId);
+            assertEquals(0L, convoCount, "conversation row must be deleted");
+            long compactionCount = SessionCompaction.count(
+                    "conversation.id = ?1", convoId);
+            assertEquals(0L, compactionCount,
+                    "session_compaction rows must be purged alongside the conversation");
+        });
     }
 
     @Test
