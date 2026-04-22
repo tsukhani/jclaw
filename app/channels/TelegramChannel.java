@@ -355,7 +355,31 @@ public class TelegramChannel implements Channel {
                 if (!sendTextSegment(channel, chatId, ts.markdown())) allOk = false;
             }
             else if (segment instanceof TelegramOutboundPlanner.FileSegment fs) {
-                if (!sendFileSegment(channel, chatId, fs)) allOk = false;
+                // JCLAW-126: the quality-duplicate document emit (same file as
+                // a just-sent photo) fires on a virtual thread so slow Telegram
+                // document uploads — which we've observed stalling 2+ minutes
+                // for a 1.5 MB screenshot right after the photo sent in 65 s —
+                // don't block text or subsequent segments from reaching the user.
+                // Failures there log at warn and never regress allOk; the reply
+                // has already been delivered by the time the background upload
+                // might fail, so a late error can't retroactively fail the turn.
+                if (fs.isBackground()) {
+                    Thread.ofVirtual().start(() -> {
+                        try {
+                            if (!sendFileSegment(channel, chatId, fs)) {
+                                EventLogger.warn("channel", null, "telegram",
+                                        "Background file send failed (non-blocking): %s"
+                                                .formatted(fs.displayName()));
+                            }
+                        } catch (Throwable t) {
+                            EventLogger.warn("channel", null, "telegram",
+                                    "Background file send threw (non-blocking) for %s: %s"
+                                            .formatted(fs.displayName(), t.getMessage()));
+                        }
+                    });
+                } else {
+                    if (!sendFileSegment(channel, chatId, fs)) allOk = false;
+                }
             }
         }
         return allOk;

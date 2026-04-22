@@ -120,6 +120,10 @@ public class TelegramOutboundPlannerTest extends UnitTest {
         assertFalse(docSeg.isImage(), "second image segment must be document");
         assertEquals(photoSeg.file().getAbsolutePath(), docSeg.file().getAbsolutePath(),
                 "photo and document segments must target the same file");
+        // JCLAW-126: the quality-duplicate document must be marked background
+        // so the channel fires it async and doesn't block subsequent text.
+        assertFalse(photoSeg.isBackground(), "photo segment must dispatch synchronously");
+        assertTrue(docSeg.isBackground(), "quality-duplicate document must dispatch in background");
     }
 
     @Test

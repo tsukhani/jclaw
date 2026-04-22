@@ -65,7 +65,17 @@ public final class TelegramOutboundPlanner {
 
     public record TextSegment(String markdown) implements Segment {}
 
-    public record FileSegment(String displayName, File file, boolean isImage) implements Segment {}
+    /**
+     * File segment dispatched via sendPhoto / sendDocument.
+     *
+     * <p>{@code isBackground} marks the JCLAW-123 quality-duplicate document
+     * emit (second segment in the photo+document pair for an image). The
+     * channel fires background segments on a virtual thread and does not
+     * block subsequent dispatch on them — critical because these uploads of
+     * the already-rendered photo can take multiple minutes server-side, and
+     * we don't want text messages to wait behind them.
+     */
+    public record FileSegment(String displayName, File file, boolean isImage, boolean isBackground) implements Segment {}
 
     /**
      * Split {@code markdown} into an ordered list of text and file segments.
@@ -136,14 +146,17 @@ public final class TelegramOutboundPlanner {
             if (!seenFiles.add(canonical)) continue;
 
             boolean isImage = isImageFilename(resolved.getName());
-            segments.add(new FileSegment(display, resolved, isImage));
+            segments.add(new FileSegment(display, resolved, isImage, false));
             // JCLAW-123: Telegram compresses photos aggressively (JPEG re-encode,
             // downscaled). For image files we also emit a sendDocument pass so
             // the user gets the original-quality downloadable file alongside
             // the inline preview. Non-image files already deliver as documents
-            // on the first pass — no duplicate needed.
+            // on the first pass — no duplicate needed. Marked isBackground=true
+            // (JCLAW-126) so the channel fires it async — Telegram document
+            // uploads of a just-sent photo can stall for 2+ minutes, and we
+            // don't want text messages to wait behind that.
             if (isImage) {
-                segments.add(new FileSegment(display, resolved, false));
+                segments.add(new FileSegment(display, resolved, false, true));
             }
         }
 
