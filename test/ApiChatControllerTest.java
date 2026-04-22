@@ -235,7 +235,7 @@ public class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void uploadAcceptsValidFileAndReturnsBatchId() throws Exception {
+    public void uploadAcceptsValidFileAndReturnsMetadata() throws Exception {
         login();
         var id = createAgent("upload-ok");
         var f = makeTempFile("note.txt", 64);
@@ -248,14 +248,16 @@ public class ApiChatControllerTest extends FunctionalTest {
             assertIsOk(response);
             assertContentType("application/json", response);
             var content = getContent(response);
-            assertTrue(content.contains("\"batchId\""),
-                    "response missing batchId: " + content);
             assertTrue(content.contains("\"files\""),
                     "response missing files array: " + content);
-            assertTrue(content.contains("\"name\":\"note.txt\""),
-                    "uploaded file name should appear: " + content);
-            assertTrue(content.contains("\"size\":64"),
-                    "uploaded file size should be reported: " + content);
+            assertTrue(content.contains("\"attachmentId\""),
+                    "response must carry a per-file attachmentId (UUID): " + content);
+            assertTrue(content.contains("\"originalFilename\":\"note.txt\""),
+                    "uploaded filename must be echoed verbatim: " + content);
+            assertTrue(content.contains("\"sizeBytes\":64"),
+                    "uploaded file size must be reported as sizeBytes: " + content);
+            assertTrue(content.contains("\"kind\":\"FILE\""),
+                    "plain text upload should classify as FILE: " + content);
         } finally {
             //noinspection ResultOfMethodCallIgnored
             f.delete();
@@ -264,9 +266,9 @@ public class ApiChatControllerTest extends FunctionalTest {
 
     @Test
     public void uploadSanitizesUnsafeCharactersInFilename() throws Exception {
-        // sanitizeFilename strips characters outside [A-Za-z0-9._\- ]. A name
-        // with '$' and '!' must come back as a safe leaf — no '$', no '!', no
-        // path traversal segments.
+        // sanitizeFilename strips characters outside [A-Za-z0-9._\- ]. The
+        // echoed originalFilename carries the sanitized leaf; the on-disk
+        // filename is uuid.ext and never leaks back in the response.
         login();
         var id = createAgent("upload-sanitize");
         var f = makeTempFile("weird$name!.txt", 16);
@@ -278,11 +280,125 @@ public class ApiChatControllerTest extends FunctionalTest {
             var response = POST("/api/chat/upload", params, files);
             assertIsOk(response);
             var content = getContent(response);
-            // Sanitized name preserves '.' and '_' (underscore replaces '$' and '!').
             assertTrue(content.contains("weird_name_.txt"),
                     "expected sanitized leaf 'weird_name_.txt' in response: " + content);
             assertFalse(content.contains("../"),
                     "path-traversal segments must not appear in response: " + content);
+        } finally {
+            //noinspection ResultOfMethodCallIgnored
+            f.delete();
+        }
+    }
+
+    @Test
+    public void uploadRejectsOversizedFileAgainstConfigCap() throws Exception {
+        // JCLAW-131: per-kind caps come from ConfigService, default 100 MB for
+        // FILE kind. Pinning a tight cap via ConfigService.set and pushing a
+        // file just past it proves both branches fire: the sniff + kind path
+        // runs before the size check, and the size check itself respects the
+        // runtime-configured value (not a compile-time constant).
+        login();
+        services.ConfigService.set("upload.maxFileBytes", "100");
+        try {
+            var id = createAgent("upload-capped");
+            var f = makeTempFile("over.txt", 500);
+            try {
+                var params = new HashMap<String, String>();
+                params.put("agentId", id);
+                var files = new HashMap<String, File>();
+                files.put("files", f);
+                var response = POST("/api/chat/upload", params, files);
+                assertEquals(400, response.status.intValue());
+                var content = getContent(response);
+                assertTrue(content.contains("too large"),
+                        "oversized upload must surface size rejection: " + content);
+            } finally {
+                //noinspection ResultOfMethodCallIgnored
+                f.delete();
+            }
+        } finally {
+            services.ConfigService.set("upload.maxFileBytes",
+                    String.valueOf(services.UploadLimits.DEFAULT_MAX_FILE_BYTES));
+        }
+    }
+
+    @Test
+    public void uploadSniffesAudioMimeAndKind() throws Exception {
+        // A minimal valid WAV header — 46 bytes, enough for Tika to classify
+        // decisively as audio/vnd.wave (or audio/x-wav on some platforms).
+        // JCLAW-131 only requires that the sniffed MIME routes to KIND_AUDIO;
+        // the exact subtype is platform-dependent.
+        login();
+        var id = createAgent("upload-audio");
+        var dir = Files.createTempDirectory("chat-upload-wav");
+        var f = dir.resolve("tiny.wav").toFile();
+        var wav = new byte[]{
+                'R', 'I', 'F', 'F',
+                0x24, 0x00, 0x00, 0x00,
+                'W', 'A', 'V', 'E',
+                'f', 'm', 't', ' ',
+                0x10, 0x00, 0x00, 0x00,
+                0x01, 0x00, 0x01, 0x00,
+                0x44, (byte) 0xAC, 0x00, 0x00,
+                (byte) 0x88, 0x58, 0x01, 0x00,
+                0x02, 0x00, 0x10, 0x00,
+                'd', 'a', 't', 'a',
+                0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00
+        };
+        Files.write(f.toPath(), wav);
+        f.deleteOnExit();
+        try {
+            var params = new HashMap<String, String>();
+            params.put("agentId", id);
+            var files = new HashMap<String, File>();
+            files.put("files", f);
+            var response = POST("/api/chat/upload", params, files);
+            assertIsOk(response);
+            var content = getContent(response);
+            assertTrue(content.contains("\"kind\":\"AUDIO\""),
+                    "WAV upload must classify as AUDIO: " + content);
+        } finally {
+            //noinspection ResultOfMethodCallIgnored
+            f.delete();
+        }
+    }
+
+    @Test
+    public void uploadSniffesImageMimeAndKind() throws Exception {
+        // JCLAW-25: server-side MIME sniffing via Tika is authoritative for
+        // kind/mimeType (browser-declared MIME isn't trusted). A minimal 1×1
+        // PNG lets Tika classify decisively without a large fixture.
+        login();
+        var id = createAgent("upload-vision");
+        var dir = Files.createTempDirectory("chat-upload-png");
+        var f = dir.resolve("tiny.png").toFile();
+        // 1x1 transparent PNG — smallest valid encoding, classifies unambiguously.
+        var png = new byte[]{
+                (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+                0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+                0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+                0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, (byte) 0xC4,
+                (byte) 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41,
+                0x54, 0x78, (byte) 0x9C, 0x62, 0x00, 0x01, 0x00, 0x00,
+                0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, (byte) 0xB4, 0x00,
+                0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, (byte) 0xAE,
+                0x42, 0x60, (byte) 0x82
+        };
+        Files.write(f.toPath(), png);
+        f.deleteOnExit();
+        try {
+            var params = new HashMap<String, String>();
+            params.put("agentId", id);
+            var files = new HashMap<String, File>();
+            files.put("files", f);
+            var response = POST("/api/chat/upload", params, files);
+            assertIsOk(response);
+            var content = getContent(response);
+            assertTrue(content.contains("\"kind\":\"IMAGE\""),
+                    "PNG upload must classify as IMAGE: " + content);
+            assertTrue(content.contains("\"mimeType\":\"image/png\""),
+                    "PNG upload must report mimeType image/png: " + content);
         } finally {
             //noinspection ResultOfMethodCallIgnored
             f.delete();

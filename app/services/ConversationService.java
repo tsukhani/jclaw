@@ -92,6 +92,37 @@ public class ConversationService {
         return appendMessage(conversation, MessageRole.USER, content, null, null, null);
     }
 
+    /**
+     * Persist a user message together with its attached files (JCLAW-25).
+     * {@code attachments} is roundtripped verbatim from the upload response;
+     * each entry's staged file gets moved to the conversation-keyed final
+     * directory by {@link AttachmentService#finalizeAttachment} and a
+     * {@link models.MessageAttachment} row is written against the new
+     * message. A {@code VISION_ATTACHMENT_INGEST} event is emitted per image
+     * attachment.
+     */
+    public static Message appendUserMessage(Conversation conversation, String content,
+                                             List<AttachmentService.Input> attachments) {
+        var msg = appendMessage(conversation, MessageRole.USER, content, null, null, null);
+        if (attachments != null && !attachments.isEmpty()) {
+            for (var input : attachments) {
+                var att = AttachmentService.finalizeAttachment(conversation.agent, msg, input);
+                if (att.isImage()) {
+                    EventLogger.info("VISION_ATTACHMENT_INGEST",
+                            conversation.agent.name, conversation.channelType,
+                            "image=%s (%s, %d bytes)"
+                                    .formatted(att.originalFilename, att.mimeType, att.sizeBytes));
+                } else if (att.isAudio()) {
+                    EventLogger.info("AUDIO_ATTACHMENT_INGEST",
+                            conversation.agent.name, conversation.channelType,
+                            "audio=%s (%s, %d bytes)"
+                                    .formatted(att.originalFilename, att.mimeType, att.sizeBytes));
+                }
+            }
+        }
+        return msg;
+    }
+
     public static Message appendAssistantMessage(Conversation conversation, String content,
                                                    String toolCalls) {
         return appendAssistantMessage(conversation, content, toolCalls, null, null);

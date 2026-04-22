@@ -226,6 +226,22 @@ do_start_prod() {
     echo "==> Resolving backend dependencies..."
     play deps --sync
 
+    # Auto-precompile when the existing precompiled/ classes are stale or
+    # missing. Play 1.x's `play start --%prod` loads precompiled/ as-is
+    # and does NOT recompile when sources have changed — without this
+    # check, restarts silently boot the prior binary and code changes
+    # don't take effect. The -newer test uses the precompiled/java
+    # directory's mtime as the staleness threshold (Play refreshes it on
+    # each successful precompile), and -print -quit stops the walk at
+    # the first match so a clean tree costs milliseconds.
+    if [[ ! -d precompiled/java ]] \
+        || [[ -n "$(find app -name '*.java' -newer precompiled/java -print -quit 2>/dev/null)" ]]; then
+        echo "==> Precompiling backend (source newer than precompiled classes)..."
+        play precompile
+    else
+        echo "==> Skipping precompile (precompiled classes are up to date)"
+    fi
+
     echo "==> Installing frontend dependencies..."
     cd "$JCLAW_DIR/frontend"
     pnpm install --frozen-lockfile 2>/dev/null || pnpm install

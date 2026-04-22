@@ -145,3 +145,76 @@ describe('Chat page — empty conversation state', () => {
     expect(component.text()).toContain('Conversations')
   })
 })
+
+describe('Chat page — JCLAW-25 vision attachment gate', () => {
+  it('rejects image attachments when the selected model does not advertise supportsVision', async () => {
+    // Baseline harness pins kimi-k2.5, which has no supportsVision flag in
+    // its config JSON. visionSupported should therefore compute to false,
+    // and addAttachments is expected to short-circuit image files with the
+    // AC-mandated error string. defineExpose automatically unwraps refs,
+    // so vm.attachError yields the string directly (not a ref wrapper).
+    setupBaseChatApi()
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    const vm = component.vm as unknown as {
+      addAttachments: (files: File[]) => void
+      attachError: string | null
+      attachedFiles: File[]
+    }
+    const png = new File([new Uint8Array([0x89, 0x50, 0x4E, 0x47])], 'shot.png', { type: 'image/png' })
+    vm.addAttachments([png])
+    await flushPromises()
+
+    expect(vm.attachError).toBe('This model does not support images')
+    expect(vm.attachedFiles.length).toBe(0)
+  })
+
+  it('accepts non-image attachments on a non-vision model (file path is orthogonal to the vision gate)', async () => {
+    setupBaseChatApi()
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    const vm = component.vm as unknown as {
+      addAttachments: (files: File[]) => void
+      attachError: string | null
+      attachedFiles: File[]
+    }
+    const txt = new File(['hello'], 'note.txt', { type: 'text/plain' })
+    vm.addAttachments([txt])
+    await flushPromises()
+
+    expect(vm.attachError).toBeNull()
+    expect(vm.attachedFiles.length).toBe(1)
+  })
+})
+
+describe('Chat page — JCLAW-131 per-kind upload caps and audio gate', () => {
+  it('refuses audio attachments when the selected model does not advertise supportsAudio', async () => {
+    // Baseline config pins kimi-k2.5 without supportsAudio; the audio gate
+    // must mirror the vision gate, rejecting at attach time with the
+    // parallel phrasing.
+    setupBaseChatApi()
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    const vm = component.vm as unknown as {
+      addAttachments: (files: File[]) => void
+      attachError: string | null
+      attachedFiles: File[]
+    }
+    const wav = new File(['RIFF...'], 'memo.wav', { type: 'audio/wav' })
+    vm.addAttachments([wav])
+    await flushPromises()
+
+    expect(vm.attachError).toBe('This model does not support audio')
+    expect(vm.attachedFiles.length).toBe(0)
+  })
+
+  // The per-kind size cap is covered end-to-end in ApiChatControllerTest's
+  // uploadRejectsOversizedFileAgainstConfigCap — mocking /api/config at the
+  // Vitest layer races with the component's own useFetch, so we'd have to
+  // wait for hydration specifically before the computed cap updates. Backend
+  // coverage is the authoritative enforcement; frontend UX testing stays
+  // focused on the attach-time gates here.
+})

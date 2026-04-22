@@ -5,6 +5,7 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import models.Agent;
 import models.Conversation;
+import org.apache.tika.Tika;
 import play.mvc.Controller;
 import play.mvc.Http;
 import play.mvc.Util;
@@ -17,13 +18,10 @@ import utils.LatencyTrace;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
-import java.security.SecureRandom;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -91,12 +89,20 @@ public class ApiChatController extends Controller {
     }
 
     /** Validated prologue shared by send() and streamChat(). */
-    private record ChatContext(Agent agent, String message, Long conversationId, String username) {}
+    private record ChatContext(Agent agent, String message, Long conversationId, String username,
+                                java.util.List<services.AttachmentService.Input> attachments) {}
 
     /**
      * Parse and validate the common fields from a chat request body.
      * Calls {@code badRequest()} / {@code notFound()} (which throw) on invalid input,
      * so the return value is always non-null when control returns to the caller.
+     *
+     * <p>JCLAW-25: also parses the optional {@code attachments} array — each
+     * entry is the per-file metadata the frontend roundtripped from a prior
+     * {@code /api/chat/upload} response. Enforces the vision gate: if any
+     * attachment declares {@code kind=IMAGE} and the resolved model does not
+     * advertise {@code supportsVision}, responds 400 rather than quietly
+     * dropping the images.
      */
     private static ChatContext resolveChatContext(JsonObject body) {
         if (body == null || !body.has("message") || !body.has("agentId")) {
@@ -111,7 +117,65 @@ public class ApiChatController extends Controller {
         Long conversationId = (body.has("conversationId") && !body.get("conversationId").isJsonNull())
                 ? body.get("conversationId").getAsLong() : null;
 
-        return new ChatContext(agent, messageText, conversationId, session.get("username"));
+        var attachments = parseAttachments(body);
+        if (services.AttachmentService.anyImage(attachments) && !agentSupportsVision(agent)) {
+            error(400, "This model does not support images");
+        }
+        if (services.AttachmentService.anyAudio(attachments) && !agentSupportsAudio(agent)) {
+            error(400, "This model does not support audio");
+        }
+
+        return new ChatContext(agent, messageText, conversationId, session.get("username"), attachments);
+    }
+
+    private static java.util.List<services.AttachmentService.Input> parseAttachments(JsonObject body) {
+        if (body == null || !body.has("attachments") || body.get("attachments").isJsonNull()) {
+            return java.util.List.of();
+        }
+        var arr = body.getAsJsonArray("attachments");
+        var out = new java.util.ArrayList<services.AttachmentService.Input>(arr.size());
+        for (var el : arr) {
+            var o = el.getAsJsonObject();
+            var id = o.has("attachmentId") ? o.get("attachmentId").getAsString() : null;
+            if (id == null || id.isBlank()) {
+                error(400, "attachment missing attachmentId");
+            }
+            var originalFilename = o.has("originalFilename") ? o.get("originalFilename").getAsString() : null;
+            var mimeType = o.has("mimeType") ? o.get("mimeType").getAsString() : null;
+            var sizeBytes = o.has("sizeBytes") ? o.get("sizeBytes").getAsLong() : 0L;
+            var kind = o.has("kind") ? o.get("kind").getAsString() : models.MessageAttachment.KIND_FILE;
+            out.add(new services.AttachmentService.Input(id, originalFilename, mimeType, sizeBytes, kind));
+        }
+        return out;
+    }
+
+    /**
+     * Resolve whether the agent's active model advertises {@code supportsVision}.
+     * Mirrors the capability lookup {@link agents.AgentRunner} performs for
+     * thinking-mode validation: provider registry lookup, model-id match,
+     * boolean flag. Returns {@code false} when the provider or model can't
+     * be resolved — better to reject an image attachment than accept it
+     * against an unknown model.
+     */
+    private static boolean agentSupportsVision(Agent agent) {
+        var provider = llm.ProviderRegistry.get(agent.modelProvider);
+        if (provider == null) return false;
+        return provider.config().models().stream()
+                .filter(m -> m.id().equals(agent.modelId))
+                .findFirst()
+                .map(llm.LlmTypes.ModelInfo::supportsVision)
+                .orElse(false);
+    }
+
+    /** Mirror of {@link #agentSupportsVision} for the JCLAW-131 audio gate. */
+    private static boolean agentSupportsAudio(Agent agent) {
+        var provider = llm.ProviderRegistry.get(agent.modelProvider);
+        if (provider == null) return false;
+        return provider.config().models().stream()
+                .filter(m -> m.id().equals(agent.modelId))
+                .findFirst()
+                .map(llm.LlmTypes.ModelInfo::supportsAudio)
+                .orElse(false);
     }
 
     /**
@@ -160,7 +224,7 @@ public class ApiChatController extends Controller {
             conversation = ConversationService.findOrCreate(ctx.agent(), "web", ctx.username());
         }
 
-        var result = AgentRunner.run(ctx.agent(), conversation, ctx.message());
+        var result = AgentRunner.run(ctx.agent(), conversation, ctx.message(), ctx.attachments());
 
         var resp = new HashMap<String, Object>();
         resp.put("conversationId", conversation.id);
@@ -171,12 +235,22 @@ public class ApiChatController extends Controller {
     }
 
     private static final int MAX_UPLOAD_FILES = 5;
-    private static final long MAX_UPLOAD_FILE_BYTES = 10L * 1024 * 1024;
-    private static final SecureRandom RANDOM = new SecureRandom();
-    private static final char[] ID_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789".toCharArray();
 
     /**
-     * POST /api/chat/upload — Multipart upload for chat attachments.
+     * Shared Tika instance for server-side MIME sniffing. Tika is thread-safe
+     * once constructed and caches its detector config internally, so one
+     * process-wide instance avoids re-parsing the classpath mime-types tree
+     * per upload.
+     */
+    private static final Tika TIKA = new Tika();
+
+    /**
+     * POST /api/chat/upload — Multipart upload for chat attachments. JCLAW-25:
+     * files stage under {@code workspace/{agent.name}/attachments/staging/{uuid}.{ext}}
+     * and the response returns a per-file {@code attachmentId} the client
+     * roundtrips on the matching send. Finalization (move to the
+     * conversation-keyed directory and {@code chat_message_attachment} row
+     * insertion) happens in {@link AgentRunner} when the send lands.
      */
     public static void uploadChatFiles(Long agentId, java.io.File[] files) {
         if (agentId == null) badRequest();
@@ -191,16 +265,11 @@ public class ApiChatController extends Controller {
         }
         for (var f : files) {
             if (f == null || !f.exists()) error(400, "Invalid file upload");
-            if (f.length() > MAX_UPLOAD_FILE_BYTES) {
-                error(400, "File too large: " + f.getName()
-                        + " (max " + (MAX_UPLOAD_FILE_BYTES / (1024 * 1024)) + " MB)");
-            }
         }
 
-        var batchId = "uploads/" + buildBatchId();
-        java.nio.file.Path batchDir;
+        java.nio.file.Path stagingDir;
         try {
-            batchDir = AgentService.acquireWorkspacePath(agent.name, batchId);
+            stagingDir = AgentService.acquireWorkspacePath(agent.name, "attachments/staging");
         } catch (SecurityException e) {
             error(400, "Invalid upload target");
             return;
@@ -208,15 +277,33 @@ public class ApiChatController extends Controller {
 
         var results = new ArrayList<Map<String, Object>>();
         try {
-            Files.createDirectories(batchDir);
+            Files.createDirectories(stagingDir);
             for (var f : files) {
                 var safeName = sanitizeFilename(f.getName());
                 if (safeName.isEmpty()) {
                     error(400, "Invalid filename: " + f.getName());
                 }
+                var uuid = UUID.randomUUID().toString();
+                // Tika reads file magic bytes — authoritative over browser-declared
+                // Content-Type (which can be absent, wrong, or spoofed). Kind
+                // classification and per-kind size caps both derive from this
+                // sniffed MIME, never the declared one.
+                var sniffedMime = TIKA.detect(f);
+                var kind = models.MessageAttachment.kindForMime(sniffedMime);
+                var cap = services.UploadLimits.forKind(kind);
+                if (f.length() > cap) {
+                    error(400, "%s too large: %s (max %d MB for %s)"
+                            .formatted(services.UploadLimits.displayName(kind),
+                                    f.getName(), cap / (1024 * 1024),
+                                    services.UploadLimits.displayName(kind)));
+                }
+                var ext = extensionFromFilename(safeName);
+                if (ext.isEmpty()) ext = canonicalExtensionForMime(sniffedMime);
+                var onDiskName = uuid + (ext.isEmpty() ? "" : "." + ext);
+
                 java.nio.file.Path target;
                 try {
-                    target = AgentService.acquireContained(batchDir, safeName);
+                    target = AgentService.acquireContained(stagingDir, onDiskName);
                 } catch (SecurityException e) {
                     error(400, "Invalid filename: " + f.getName());
                     return;
@@ -224,9 +311,11 @@ public class ApiChatController extends Controller {
                 Files.copy(f.toPath(), target, StandardCopyOption.REPLACE_EXISTING);
 
                 var entry = new HashMap<String, Object>();
-                entry.put("path", batchId + "/" + safeName);
-                entry.put("name", safeName);
-                entry.put("size", Files.size(target));
+                entry.put("attachmentId", uuid);
+                entry.put("originalFilename", safeName);
+                entry.put("mimeType", sniffedMime);
+                entry.put("sizeBytes", Files.size(target));
+                entry.put("kind", kind);
                 results.add(entry);
             }
         } catch (java.io.IOException e) {
@@ -236,19 +325,43 @@ public class ApiChatController extends Controller {
         }
 
         var resp = new HashMap<String, Object>();
-        resp.put("batchId", batchId);
         resp.put("files", results);
         renderJSON(gson.toJson(resp));
     }
 
-    private static String buildBatchId() {
-        var ts = ZonedDateTime.now(ZoneId.systemDefault())
-                .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
-        var suffix = new StringBuilder(6);
-        for (int i = 0; i < 6; i++) {
-            suffix.append(ID_ALPHABET[RANDOM.nextInt(ID_ALPHABET.length)]);
-        }
-        return ts + "-" + suffix;
+    private static String extensionFromFilename(String safeName) {
+        var dot = safeName.lastIndexOf('.');
+        if (dot < 0 || dot == safeName.length() - 1) return "";
+        return safeName.substring(dot + 1).toLowerCase();
+    }
+
+    /**
+     * Candidate extensions probed against {@link play.libs.MimeTypes} to
+     * find one whose forward lookup matches a sniffed MIME. The data lives
+     * in Play's bundled {@code mime-types.properties} plus the
+     * {@code mimetype.*} overrides declared in {@code conf/application.conf}
+     * — adding a new format there makes it resolvable here without touching
+     * Java. Only hit when the uploader's original filename carried no
+     * extension at all, which is rare.
+     */
+    private static final String[] EXTENSION_CANDIDATES = {
+            "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg",
+            "avif", "heic", "heif",
+            "mp3", "m4a", "aac", "wav", "ogg", "oga", "flac", "opus", "weba",
+            "pdf", "txt", "md", "csv", "json", "html", "xml",
+            "zip", "tar", "gz",
+            "doc", "docx", "xls", "xlsx", "ppt", "pptx"
+    };
+
+    /**
+     * Reverse lookup delegated to {@link services.MimeExtensions} (which in
+     * turn calls {@link play.libs.MimeTypes}). Data lives in Play's bundled
+     * properties plus {@code mimetype.*} overrides in
+     * {@code conf/application.conf}; extending coverage for a new format is
+     * a one-line config change.
+     */
+    private static String canonicalExtensionForMime(String mime) {
+        return services.MimeExtensions.forMime(mime, EXTENSION_CANDIDATES);
     }
 
     private static String sanitizeFilename(String name) {
@@ -384,7 +497,7 @@ public class ApiChatController extends Controller {
                 }
         );
         AgentRunner.runStreaming(agent, conversationId, "web", username, messageText,
-                cancelled, callbacks, acceptedAtNs);
+                cancelled, callbacks, acceptedAtNs, ctx.attachments());
 
         // Safety timeout: emit one error frame and complete normally if no
         // terminal frame arrives within 600s. Scheduled on the shared scheduler;

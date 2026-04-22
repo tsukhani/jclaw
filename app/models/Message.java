@@ -48,6 +48,16 @@ public class Message extends Model {
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 
+    /**
+     * Files attached to this message (JCLAW-25). Populated on user turns that
+     * arrived with uploads; {@code null}/empty for assistant and tool rows and
+     * for user turns without attachments. Cascade deletes the rows and the
+     * on-disk storage-path references fall out with them.
+     */
+    @OneToMany(mappedBy = "message", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("id ASC")
+    public List<MessageAttachment> attachments;
+
     @PrePersist
     void onCreate() {
         createdAt = Instant.now();

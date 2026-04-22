@@ -750,10 +750,10 @@ async function sendMessage() {
 
   attachError.value = null
   const pending = attachedFiles.value.slice()
-  let uploadedPaths: string[] = []
+  let uploaded: UploadedAttachment[] = []
   if (pending.length) {
     try {
-      uploadedPaths = await uploadAttachments(selectedAgentId.value)
+      uploaded = await uploadAttachments(selectedAgentId.value)
     }
     catch (e: unknown) {
       const err = e as { data?: { error?: string }, message?: string } | undefined
@@ -762,15 +762,19 @@ async function sendMessage() {
     }
   }
 
-  let text = rawText
-  if (uploadedPaths.length) {
-    const block = '[Attached files in workspace:\n'
-      + uploadedPaths.map(p => `- ${p}`).join('\n')
-      + ']'
-    text = rawText ? `${block}\n\n${rawText}` : block
-  }
+  // JCLAW-25: message.content is the user's raw text. Attachment metadata
+  // rides in the `attachments` field; the backend persists chat_message_attachment
+  // rows and synthesizes the LLM content parts (image_url for images, bracketed
+  // file references for non-images) from those rows on every turn.
+  const text = rawText
 
   input.value = ''
+  // Revoke any blob preview URLs still held for the just-sent attachments.
+  for (const f of pending) {
+    const url = attachmentPreviews.value.get(f)
+    if (url) URL.revokeObjectURL(url)
+    attachmentPreviews.value.delete(f)
+  }
   attachedFiles.value = []
   if (chatInput.value) chatInput.value.style.height = 'auto'
   messages.value.push({ _key: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString() })
@@ -803,6 +807,7 @@ async function sendMessage() {
         agentId: selectedAgentId.value,
         conversationId: selectedConvoId.value,
         message: text,
+        attachments: uploaded,
       }),
     })
 
@@ -1010,7 +1015,60 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const attachedFiles = ref<File[]>([])
 const attachError = ref<string | null>(null)
 const MAX_ATTACHMENTS = 5
-const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+
+// JCLAW-131: per-kind upload caps sourced from /api/config, with defaults
+// matching services/UploadLimits.java. The server re-applies these caps on
+// upload (authoritative); the frontend copy is just UX — showing the user
+// the refusal before bytes leave the browser.
+const DEFAULT_MAX_IMAGE_BYTES = 20 * 1024 * 1024
+const DEFAULT_MAX_AUDIO_BYTES = 100 * 1024 * 1024
+const DEFAULT_MAX_FILE_BYTES = 100 * 1024 * 1024
+
+function configInt(key: string, fallback: number): number {
+  const raw = configData.value?.entries?.find(e => e.key === key)?.value
+  if (!raw) return fallback
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+const maxImageBytes = computed(() => configInt('upload.maxImageBytes', DEFAULT_MAX_IMAGE_BYTES))
+const maxAudioBytes = computed(() => configInt('upload.maxAudioBytes', DEFAULT_MAX_AUDIO_BYTES))
+const maxFileBytes = computed(() => configInt('upload.maxFileBytes', DEFAULT_MAX_FILE_BYTES))
+
+// Per-file thumbnail preview URL for image attachments (JCLAW-25). Keyed by
+// File identity via a WeakMap-like ref map; createObjectURL results are
+// revoked when the chip is removed so we don't leak blob handles across
+// long chat sessions.
+const attachmentPreviews = ref(new Map<File, string>())
+
+/** Upload response shape returned per file from POST /api/chat/upload. */
+interface UploadedAttachment {
+  attachmentId: string
+  originalFilename: string
+  mimeType: string
+  sizeBytes: number
+  kind: 'IMAGE' | 'FILE'
+}
+
+function isImageFile(f: File): boolean {
+  return typeof f.type === 'string' && f.type.startsWith('image/')
+}
+
+function isAudioFile(f: File): boolean {
+  return typeof f.type === 'string' && f.type.startsWith('audio/')
+}
+
+/** Effective byte cap for this File's kind, sourced from Settings config. */
+function capForFile(f: File): number {
+  if (isImageFile(f)) return maxImageBytes.value
+  if (isAudioFile(f)) return maxAudioBytes.value
+  return maxFileBytes.value
+}
+
+function kindLabelForFile(f: File): string {
+  if (isImageFile(f)) return 'image'
+  if (isAudioFile(f)) return 'audio'
+  return 'file'
+}
 
 function triggerFileUpload() {
   fileInput.value?.click()
@@ -1023,6 +1081,34 @@ function handleFileUpload(event: Event) {
   target.value = ''
 }
 
+// JCLAW-25 drop path. Mirrors the paperclip flow: read files off the
+// DataTransfer, route through addAttachments so the vision gate, size
+// cap, and thumbnail preview apply uniformly regardless of how the file
+// entered the composer.
+function handleDrop(event: DragEvent) {
+  const files = event.dataTransfer?.files
+  if (!files || files.length === 0) return
+  addAttachments(Array.from(files))
+}
+
+// JCLAW-25 paste path. Inspects the clipboard items for file entries —
+// typically a single image from a screenshot-copy (Cmd/Ctrl-Shift-4,
+// Windows Snipping Tool, etc.). Text pastes fall through untouched.
+function handlePaste(event: ClipboardEvent) {
+  const items = event.clipboardData?.items
+  if (!items || items.length === 0) return
+  const files: File[] = []
+  for (const item of items) {
+    if (item.kind === 'file') {
+      const f = item.getAsFile()
+      if (f) files.push(f)
+    }
+  }
+  if (files.length === 0) return
+  event.preventDefault()
+  addAttachments(files)
+}
+
 function addAttachments(files: File[]) {
   attachError.value = null
   for (const f of files) {
@@ -1030,33 +1116,75 @@ function addAttachments(files: File[]) {
       attachError.value = `Maximum ${MAX_ATTACHMENTS} files per message`
       break
     }
-    if (f.size > MAX_ATTACHMENT_BYTES) {
-      attachError.value = `${f.name} exceeds ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB`
+    // JCLAW-131: per-kind size cap, sourced from Settings config. The
+    // human-readable message names the kind so the operator knows which
+    // limit to raise.
+    const cap = capForFile(f)
+    if (f.size > cap) {
+      const label = kindLabelForFile(f)
+      attachError.value = `${f.name} exceeds ${Math.round(cap / (1024 * 1024))} MB limit for ${label} uploads`
+      continue
+    }
+    // JCLAW-25 capability gate: refuse image attachments when the selected
+    // model doesn't advertise vision.
+    if (isImageFile(f) && !visionSupported.value) {
+      attachError.value = 'This model does not support images'
+      continue
+    }
+    // JCLAW-131: mirror gate for audio. Backend returns 400 on send if the
+    // client bypasses this; showing the refusal at attach time avoids a
+    // pointless round-trip and gives the operator the exact string.
+    if (isAudioFile(f) && !audioSupported.value) {
+      attachError.value = 'This model does not support audio'
       continue
     }
     attachedFiles.value.push(f)
+    if (isImageFile(f)) {
+      attachmentPreviews.value.set(f, URL.createObjectURL(f))
+    }
   }
 }
 
 function removeAttachment(idx: number) {
+  const f = attachedFiles.value[idx]
+  if (f) {
+    const url = attachmentPreviews.value.get(f)
+    if (url) {
+      URL.revokeObjectURL(url)
+      attachmentPreviews.value.delete(f)
+    }
+  }
   attachedFiles.value.splice(idx, 1)
 }
 
 const formatAttachmentSize = formatSize
 
-async function uploadAttachments(agentId: number): Promise<string[]> {
+async function uploadAttachments(agentId: number): Promise<UploadedAttachment[]> {
   if (!attachedFiles.value.length) return []
   const form = new FormData()
   form.append('agentId', String(agentId))
   for (const f of attachedFiles.value) {
     form.append('files', f, f.name)
   }
-  const res = await $fetch<{ batchId: string, files: Array<{ path: string, name: string, size: number }> }>(
+  const res = await $fetch<{ files: UploadedAttachment[] }>(
     '/api/chat/upload',
     { method: 'POST', body: form },
   )
-  return res.files.map(f => f.path)
+  return res.files
 }
+
+// JCLAW-25: expose the attachment-gate surface so vitest can exercise the
+// visionSupported refusal without needing to synthesize a drag-drop or
+// file-input event. Kept minimal — only the three symbols the test asserts
+// against are surfaced. Hoisting defineExpose above the top-level awaits
+// would require moving attachedFiles + addAttachments + the vision/audio
+// computed refs ahead of the `await useFetch('/api/config')` call, which
+// breaks the config-driven capability gates. Accepting the lint rule's
+// runtime-timing concern as a known tradeoff: the test harness does its
+// mountSuspended wait before calling the exposed method, so the async
+// gap doesn't manifest in practice.
+// eslint-disable-next-line vue/no-expose-after-await
+defineExpose({ addAttachments, attachedFiles, attachError })
 
 function exportConversation() {
   if (!displayMessages.value.length) return
@@ -1709,9 +1837,20 @@ function exportConversation() {
             {{ opt }}
           </button>
         </div>
+        <!--
+          JCLAW-25: drop/paste handlers on the composer form are the
+          standard chat-composer pattern (Slack, Discord, ChatGPT all do
+          this). Keyboard users retain paste via Ctrl/Cmd+V, which is a
+          first-class native handler on the textarea inside, so the a11y
+          loss is minimal.
+        -->
+        <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -->
         <form
           class="bg-surface-elevated border border-ring rounded-xl overflow-hidden"
           @submit.prevent="sendMessage"
+          @drop.prevent="handleDrop"
+          @dragover.prevent
+          @paste="handlePaste"
         >
           <div
             v-if="attachedFiles.length || attachError"
@@ -1722,7 +1861,14 @@ function exportConversation() {
               :key="`${f.name}-${idx}`"
               class="inline-flex items-center gap-1.5 px-2 py-1 bg-muted border border-input rounded text-[11px] text-fg-primary"
             >
+              <img
+                v-if="attachmentPreviews.get(f)"
+                :src="attachmentPreviews.get(f)"
+                :alt="f.name"
+                class="w-6 h-6 object-cover rounded-sm shrink-0"
+              >
               <svg
+                v-else
                 class="w-3 h-3 text-fg-muted shrink-0"
                 fill="none"
                 stroke="currentColor"

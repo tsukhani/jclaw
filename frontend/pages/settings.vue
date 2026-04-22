@@ -55,6 +55,7 @@ const MANAGED_PREFIXES = [
   'skillsPromotion.', // Skills promotion sanitization — Settings
   'agent.', // Per-agent config (shell privileges, queue mode, etc.) — Agents page
   'ollama.', // Ollama provider-specific settings — Settings
+  'upload.', // Per-kind attachment size caps (JCLAW-131) — Settings
 ]
 
 function isManagedKey(key: string): boolean {
@@ -80,6 +81,52 @@ async function saveChatField(configKey: string, value: string) {
   try {
     await $fetch('/api/config', { method: 'POST', body: { key: configKey, value } })
     editingChatField.value = null
+    refresh()
+  }
+  finally {
+    saving.value = false
+  }
+}
+
+// JCLAW-131: Uploads settings — per-kind attachment size caps. Values are
+// stored in bytes in the DB (matches services/UploadLimits.java) but
+// surfaced as MB in the UI, where operators actually think. Defaults match
+// the server-side constants so a fresh install with no rows shows the real
+// effective limits.
+const DEFAULT_MAX_IMAGE_MB = 20
+const DEFAULT_MAX_AUDIO_MB = 100
+const DEFAULT_MAX_FILE_MB = 100
+
+function bytesToMb(raw: string | undefined, fallback: number): string {
+  if (!raw) return String(fallback)
+  const bytes = Number.parseInt(raw, 10)
+  if (!Number.isFinite(bytes) || bytes <= 0) return String(fallback)
+  return String(Math.round(bytes / (1024 * 1024)))
+}
+
+const uploadMaxImageMb = computed(() => {
+  const raw = configData.value?.entries?.find(e => e.key === 'upload.maxImageBytes')?.value
+  return bytesToMb(raw, DEFAULT_MAX_IMAGE_MB)
+})
+const uploadMaxAudioMb = computed(() => {
+  const raw = configData.value?.entries?.find(e => e.key === 'upload.maxAudioBytes')?.value
+  return bytesToMb(raw, DEFAULT_MAX_AUDIO_MB)
+})
+const uploadMaxFileMb = computed(() => {
+  const raw = configData.value?.entries?.find(e => e.key === 'upload.maxFileBytes')?.value
+  return bytesToMb(raw, DEFAULT_MAX_FILE_MB)
+})
+
+const editingUploadField = ref<string | null>(null)
+const uploadFieldEdit = ref('')
+
+async function saveUploadMb(configKey: string, mbValue: string) {
+  saving.value = true
+  try {
+    const mb = Math.max(1, Number.parseInt(mbValue, 10) || 0)
+    const bytes = mb * 1024 * 1024
+    await $fetch('/api/config', { method: 'POST', body: { key: configKey, value: String(bytes) } })
+    editingUploadField.value = null
     refresh()
   }
   finally {
@@ -2281,6 +2328,289 @@ const providerEntries = computed(() => {
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Edit"
                 @click="editingChatField = 'maxContextMessages'; chatFieldEdit = chatMaxContextMessages"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                /></svg>
+              </button>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Uploads (JCLAW-131) -->
+    <div class="mb-6 space-y-4">
+      <h2 class="text-sm font-medium text-fg-muted">
+        Uploads
+      </h2>
+      <p class="text-xs text-fg-muted">
+        Per-kind attachment size caps. The sniffed MIME decides which limit applies —
+        images, audio, or everything else. Takes effect without a restart; raise the
+        transport-layer ceiling in application.conf if you need over 512 MB.
+      </p>
+      <div class="bg-surface-elevated border border-border">
+        <div class="divide-y divide-border">
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+              maxImageBytes
+              <span class="relative group/tip">
+                <svg
+                  class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke-width="2"
+                /><path
+                  stroke-linecap="round"
+                  stroke-width="2"
+                  d="M12 16v-4m0-4h.01"
+                /></svg>
+                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+                  Max upload size for image attachments, in megabytes. Stored as bytes; most vision models accept up to 20 MB per image.
+                </span>
+              </span>
+            </span>
+            <template v-if="editingUploadField === 'maxImageMb'">
+              <input
+                v-model="uploadFieldEdit"
+                type="number"
+                min="1"
+                max="512"
+                aria-label="Max image upload MB"
+                class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              >
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="saveUploadMb('upload.maxImageBytes', uploadFieldEdit)"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M5 13l4 4L19 7"
+                /></svg>
+              </button>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingUploadField = null"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                /></svg>
+              </button>
+            </template>
+            <template v-else>
+              <span class="flex-1 text-sm text-fg-primary font-mono">{{ uploadMaxImageMb }} MB</span>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Edit"
+                @click="editingUploadField = 'maxImageMb'; uploadFieldEdit = uploadMaxImageMb"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                /></svg>
+              </button>
+            </template>
+          </div>
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+              maxAudioBytes
+              <span class="relative group/tip">
+                <svg
+                  class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke-width="2"
+                /><path
+                  stroke-linecap="round"
+                  stroke-width="2"
+                  d="M12 16v-4m0-4h.01"
+                /></svg>
+                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+                  Max upload size for audio attachments, in megabytes. 100 MB holds roughly an hour of 128 kbps recording.
+                </span>
+              </span>
+            </span>
+            <template v-if="editingUploadField === 'maxAudioMb'">
+              <input
+                v-model="uploadFieldEdit"
+                type="number"
+                min="1"
+                max="512"
+                aria-label="Max audio upload MB"
+                class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              >
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="saveUploadMb('upload.maxAudioBytes', uploadFieldEdit)"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M5 13l4 4L19 7"
+                /></svg>
+              </button>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingUploadField = null"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                /></svg>
+              </button>
+            </template>
+            <template v-else>
+              <span class="flex-1 text-sm text-fg-primary font-mono">{{ uploadMaxAudioMb }} MB</span>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Edit"
+                @click="editingUploadField = 'maxAudioMb'; uploadFieldEdit = uploadMaxAudioMb"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
+                /></svg>
+              </button>
+            </template>
+          </div>
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+              maxFileBytes
+              <span class="relative group/tip">
+                <svg
+                  class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke-width="2"
+                /><path
+                  stroke-linecap="round"
+                  stroke-width="2"
+                  d="M12 16v-4m0-4h.01"
+                /></svg>
+                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+                  Max upload size for every other attachment type (PDFs, text, archives, etc.), in megabytes.
+                </span>
+              </span>
+            </span>
+            <template v-if="editingUploadField === 'maxFileMb'">
+              <input
+                v-model="uploadFieldEdit"
+                type="number"
+                min="1"
+                max="512"
+                aria-label="Max file upload MB"
+                class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              >
+              <button
+                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                title="Save"
+                @click="saveUploadMb('upload.maxFileBytes', uploadFieldEdit)"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M5 13l4 4L19 7"
+                /></svg>
+              </button>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Cancel"
+                @click="editingUploadField = null"
+              >
+                <svg
+                  class="w-3.5 h-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                ><path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M6 18L18 6M6 6l12 12"
+                /></svg>
+              </button>
+            </template>
+            <template v-else>
+              <span class="flex-1 text-sm text-fg-primary font-mono">{{ uploadMaxFileMb }} MB</span>
+              <button
+                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                title="Edit"
+                @click="editingUploadField = 'maxFileMb'; uploadFieldEdit = uploadMaxFileMb"
               >
                 <svg
                   class="w-3.5 h-3.5"

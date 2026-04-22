@@ -190,13 +190,26 @@ public class AgentRunner {
      * is held during LLM HTTP calls or tool execution.
      */
     public static RunResult run(Agent agent, Conversation conversation, String userMessage) {
-        // Acquire conversation queue — prevents concurrent message corruption
+        return run(agent, conversation, userMessage, null);
+    }
+
+    /**
+     * JCLAW-25 vision variant: {@code attachments} is the list of files the
+     * caller already pre-uploaded via {@code POST /api/chat/upload}; each
+     * staged file gets finalized into the conversation-keyed directory and
+     * gains a {@link models.MessageAttachment} row against the new user
+     * message. Image attachments ride into the LLM request as OpenAI
+     * {@code image_url} content parts; non-image attachments are referenced
+     * by filename inside the text part.
+     */
+    public static RunResult run(Agent agent, Conversation conversation, String userMessage,
+                                 java.util.List<services.AttachmentService.Input> attachments) {
         var queueMsg = new services.ConversationQueue.QueuedMessage(
                 userMessage, conversation.channelType, conversation.peerId, agent);
         if (!services.ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
             return new RunResult("Your message has been queued and will be processed shortly.", conversation);
         }
-        return runAfterAcquire(agent, conversation, userMessage);
+        return runAfterAcquire(agent, conversation, userMessage, attachments);
     }
 
     /**
@@ -208,10 +221,11 @@ public class AgentRunner {
      * deque is empty (or transfers it to the next drained message).
      */
     public static RunResult runWithOwnedQueue(Agent agent, Conversation conversation, String userMessage) {
-        return runAfterAcquire(agent, conversation, userMessage);
+        return runAfterAcquire(agent, conversation, userMessage, null);
     }
 
-    private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage) {
+    private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,
+                                              java.util.List<services.AttachmentService.Input> attachments) {
         final Long conversationId = conversation.id;
         // Non-streaming callers (TaskPollerJob, background) have no pre-runner
         // queue-accept timestamp, so queue_wait is naturally skipped. Every other
@@ -228,7 +242,7 @@ public class AgentRunner {
             // would throw PersistentObjectException on save().
             var prepared = services.Tx.run(() -> {
                 var conv = ConversationService.findById(conversationId);
-                ConversationService.appendUserMessage(conv, userMessage);
+                ConversationService.appendUserMessage(conv, userMessage, attachments);
                 trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
 
                 var assembled = SystemPromptAssembler.assemble(agent, userMessage, null, conv.channelType);
@@ -320,6 +334,23 @@ public class AgentRunner {
                                     AtomicBoolean isCancelled,
                                     StreamingCallbacks cb,
                                     Long acceptedAtNs) {
+        runStreaming(agent, conversationId, channelType, peerId, userMessage,
+                isCancelled, cb, acceptedAtNs, null);
+    }
+
+    /**
+     * JCLAW-25 vision variant. {@code attachments} is the per-file metadata
+     * the frontend roundtripped from the prior {@code /api/chat/upload}
+     * response; each entry's staged file is moved into the conversation's
+     * attachments directory and recorded as a {@link models.MessageAttachment}
+     * row on the user message.
+     */
+    public static void runStreaming(Agent agent, Long conversationId, String channelType, String peerId,
+                                    String userMessage,
+                                    AtomicBoolean isCancelled,
+                                    StreamingCallbacks cb,
+                                    Long acceptedAtNs,
+                                    java.util.List<services.AttachmentService.Input> attachments) {
         Thread.ofVirtual().start(() -> {
             final Long[] conversationIdRef = {null};
             var trace = LatencyTrace.forTurn(channelType, acceptedAtNs);
@@ -328,7 +359,7 @@ public class AgentRunner {
             try {
                 // Phase 1: Resolve conversation, acquire queue, persist user message
                 var conversation = resolveConversationAndAcquireQueue(
-                        agent, conversationId, channelType, peerId, userMessage, tracedCb);
+                        agent, conversationId, channelType, peerId, userMessage, tracedCb, attachments);
                 if (conversation == null) return; // queued, not-found, or error — already handled
                 conversationIdRef[0] = conversation.id;
 
@@ -392,7 +423,8 @@ public class AgentRunner {
      */
     private static Conversation resolveConversationAndAcquireQueue(
             Agent agent, Long conversationId, String channelType, String peerId,
-            String userMessage, StreamingCallbacks cb) {
+            String userMessage, StreamingCallbacks cb,
+            java.util.List<services.AttachmentService.Input> attachments) {
 
         Conversation conversation = services.Tx.run(() -> {
             if (conversationId != null) {
@@ -417,10 +449,11 @@ public class AgentRunner {
             return null;
         }
 
-        // Now that we hold the lock, persist the user message.
+        // Now that we hold the lock, persist the user message (and any
+        // attachments that rode with it — JCLAW-25).
         services.Tx.run(() -> {
             var convo = ConversationService.findById(conversation.id);
-            ConversationService.appendUserMessage(convo, userMessage);
+            ConversationService.appendUserMessage(convo, userMessage, attachments);
         });
 
         cb.onInit().accept(conversation);
@@ -1080,6 +1113,85 @@ public class AgentRunner {
         }
     }
 
+    /**
+     * OpenAI {@code input_audio.format} values we know the shared adapter
+     * can emit. JCLAW-132: {@link services.MimeExtensions} reverse-looks a
+     * MIME against this list to derive the format hint; the underlying data
+     * lives in Play's {@code mime-types.properties} + {@code mimetype.*}
+     * application config, so adding a new audio format is a config change,
+     * not a code edit.
+     */
+    private static final String[] AUDIO_FORMAT_CANDIDATES = {
+            "mp3", "wav", "m4a", "aac", "ogg", "oga", "flac", "opus", "weba"
+    };
+
+    /**
+     * Build the {@link ChatMessage} for a historical user turn, lifting it
+     * into OpenAI-style content parts when the row has attachments. Images
+     * ride as {@code image_url} parts (JCLAW-25); audio rides as
+     * {@code input_audio} parts (JCLAW-132); other files fall through as
+     * bracketed filename references inside the text part. Plain-text turns
+     * without attachments still emit the compact {@code {role,content:"..."}}
+     * shape; the provider registry's shared serializer routes either form
+     * correctly.
+     *
+     * <p>Exposed as {@code public} purely so the unit test
+     * {@code VisionAudioAssemblyTest} can exercise the content-part
+     * assembly directly — Play 1.x pins tests to the default package, so
+     * package-private access is unreachable from the test. Not part of
+     * the production contract; callers outside {@link AgentRunner} itself
+     * should route through {@link #buildMessages}.
+     */
+    public static ChatMessage userMessageFor(models.Message msg) {
+        // Defensive fallback: in most paths Play's enhancer installs a
+        // Hibernate lazy proxy on @OneToMany and the field is non-null;
+        // VisionAudioAssemblyTest saw null collections after direct entity
+        // manipulation, so the explicit query is cheap insurance against
+        // the field being null for any reason.
+        var atts = msg.attachments;
+        if (atts == null) {
+            atts = models.MessageAttachment.findByMessage(msg);
+        }
+        if (atts.isEmpty()) {
+            return ChatMessage.user(msg.content);
+        }
+
+        var text = msg.content == null ? "" : msg.content;
+        var fileNotes = new StringBuilder();
+        var parts = new ArrayList<Map<String, Object>>();
+        for (var a : atts) {
+            if (!a.isImage() && !a.isAudio()) {
+                // FILE-kind attachments are surfaced to the LLM as a
+                // filename + workspace path it can read via the filesystem
+                // tool. Images and audio ride as structured content parts
+                // below, so they skip this branch.
+                fileNotes.append("\n[Attached file: ")
+                        .append(a.originalFilename)
+                        .append(" — workspace:")
+                        .append(a.storagePath)
+                        .append("]");
+            }
+        }
+        var combinedText = text + fileNotes;
+        if (!combinedText.isBlank()) {
+            parts.add(Map.of("type", "text", "text", combinedText));
+        }
+        for (var a : atts) {
+            if (a.isImage()) {
+                parts.add(Map.of(
+                        "type", "image_url",
+                        "image_url", Map.of("url", services.AttachmentService.readAsDataUrl(a))));
+            } else if (a.isAudio()) {
+                var format = services.MimeExtensions.forMime(a.mimeType, AUDIO_FORMAT_CANDIDATES);
+                var inner = new LinkedHashMap<String, Object>();
+                inner.put("data", services.AttachmentService.readAsBase64(a));
+                if (!format.isEmpty()) inner.put("format", format);
+                parts.add(Map.of("type", "input_audio", "input_audio", inner));
+            }
+        }
+        return new ChatMessage(MessageRole.USER.value, parts, null, null);
+    }
+
     private static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation) {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(systemPrompt));
@@ -1088,7 +1200,7 @@ public class AgentRunner {
         for (var msg : history) {
             var role = MessageRole.fromValue(msg.role);
             messages.add(switch (role != null ? role : MessageRole.USER) {
-                case USER -> ChatMessage.user(msg.content);
+                case USER -> userMessageFor(msg);
                 case ASSISTANT -> {
                     if (msg.toolCalls != null && !msg.toolCalls.isBlank()) {
                         var toolCalls = parseToolCalls(msg.toolCalls);
