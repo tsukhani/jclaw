@@ -81,6 +81,42 @@ pipeline {
             }
         }
 
+        stage('Sonar Analysis') {
+            steps {
+                // withSonarQubeEnv('SonarQube') injects SONAR_HOST_URL and
+                // SONAR_AUTH_TOKEN from the server configured in Manage
+                // Jenkins → System → SonarQube servers (label: SonarQube,
+                // pointing at https://sonar.abundent.com). `tool 'Sonar'`
+                // resolves to the SonarQube Scanner installation under
+                // Manage Jenkins → Tools → SonarQube Scanner installations
+                // (label: Sonar, currently auto-installed v3.3.0.1492 from
+                // Maven Central).
+                //
+                // projectVersion is passed dynamically so each analysis run is
+                // tagged with the actual application.version being analyzed,
+                // keeping Sonar's history aligned with the release stream.
+                //
+                // Wrapped in catchError so a scanner failure, a missing Sonar
+                // server, or a future quality-gate check downstream marks the
+                // stage UNSTABLE (yellow) without aborting the build. Sonar
+                // is advisory here — code quality feedback, not a merge gate.
+                // Same pattern used by the 'Cleanup Old Releases' stage below.
+                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
+                    script {
+                        def appVersion = sh(
+                            script: "grep '^application.version=' conf/application.conf | cut -d= -f2",
+                            returnStdout: true
+                        ).trim()
+                        withSonarQubeEnv('SonarQube') {
+                            sh "${tool 'Sonar'}/bin/sonar-scanner " +
+                               "-Dproject.settings=conf/sonar.properties " +
+                               "-Dsonar.projectVersion=v${appVersion}"
+                        }
+                    }
+                }
+            }
+        }
+
         stage('Package') {
             steps {
                 sh 'play dist'
@@ -141,6 +177,22 @@ pipeline {
                         // supply-chain requirements emerge.
                         sh """
                             echo \$GH_TOKEN | docker login ghcr.io -u tsukhani --password-stdin
+
+                            # Register QEMU user-mode emulation via binfmt_misc
+                            # on the Jenkins host so BuildKit can run arm64
+                            # binaries (e.g. the arm64 runtime stage's apt-get)
+                            # during the cross-arch build. Docker Engine updates
+                            # periodically invalidate these registrations, which
+                            # surfaces as
+                            #   .buildkit_qemu_emulator: /bin/sh: Invalid ELF image for this architecture
+                            # during arm64 RUN steps. tonistiigi/binfmt --install
+                            # all is idempotent (~2s when registrations are fresh,
+                            # ~5-10s when they need rebuilding), so it's safe to
+                            # run every build. Scoping to 'all' covers amd64,
+                            # arm64, riscv64, and the less-common platforms; trim
+                            # if you want to lock down the allowed target set.
+                            docker run --privileged --rm tonistiigi/binfmt --install all
+
                             docker buildx create --use --name jclaw-builder --driver docker-container 2>/dev/null || docker buildx use jclaw-builder
                             docker buildx build \\
                                 --provenance=false \\
