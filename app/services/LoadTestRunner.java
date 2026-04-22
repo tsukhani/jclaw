@@ -262,6 +262,11 @@ public final class LoadTestRunner {
             JPA.withTransaction("default", false, (play.libs.F.Function0<Void>) () -> {
                 var agent = Agent.findByName(LOADTEST_AGENT_NAME);
                 if (agent != null) {
+                    // MessageAttachment first — FK has no ON DELETE CASCADE (see ConversationService.deleteByIds).
+                    JPA.em().createQuery("DELETE FROM MessageAttachment a WHERE a.message.conversation IN " +
+                            "(SELECT c FROM Conversation c WHERE c.agent = :agent)")
+                            .setParameter("agent", agent)
+                            .executeUpdate();
                     JPA.em().createQuery("DELETE FROM Message m WHERE m.conversation IN " +
                             "(SELECT c FROM Conversation c WHERE c.agent = :agent)")
                             .setParameter("agent", agent)

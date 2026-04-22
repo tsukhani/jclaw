@@ -3,6 +3,7 @@ import play.test.*;
 import models.Agent;
 import models.Conversation;
 import models.Message;
+import models.MessageAttachment;
 import models.MessageRole;
 import models.SessionCompaction;
 import services.AgentService;
@@ -293,6 +294,41 @@ public class ConversationServiceTest extends UnitTest {
                 "session_compaction rows must be swept");
         assertEquals(0L, Conversation.count("id = ?1", conv.id),
                 "conversation row itself must be deleted");
+    }
+
+    @Test
+    public void deleteByIdsSweepsAttachmentsBeforeMessages() {
+        // Regression: FK2HSKR8CN6X9CEMKJWMA86XIIE from chat_message_attachment.message_id
+        // to message.id was violating when a bulk DELETE FROM Message ran while
+        // any attachment still pointed at one of the messages being deleted.
+        // deleteByIds must sweep attachments first so the FK holds.
+        var agent = newAgent("conv-delete-with-attachment");
+        var conv = ConversationService.create(agent, "web", "p");
+        ConversationService.appendUserMessage(conv, "msg-with-file");
+
+        var msg = Message.find("conversation.id = ?1", conv.id).<Message>first();
+        var att = new MessageAttachment();
+        att.message = msg;
+        att.uuid = "test-uuid-" + conv.id;
+        att.originalFilename = "photo.png";
+        att.storagePath = "test-agent/attachments/" + conv.id + "/photo.png";
+        att.mimeType = "image/png";
+        att.sizeBytes = 1024;
+        att.kind = MessageAttachment.KIND_IMAGE;
+        att.save();
+
+        assertEquals(1L, MessageAttachment.count("message.conversation.id = ?1", conv.id),
+                "precondition: attachment must exist before delete");
+
+        var deleted = ConversationService.deleteByIds(List.of(conv.id));
+        assertEquals(1, deleted, "must report 1 conversation deleted");
+
+        assertEquals(0L, MessageAttachment.count("message.conversation.id = ?1", conv.id),
+                "attachment rows must be swept");
+        assertEquals(0L, Message.count("conversation.id = ?1", conv.id),
+                "message rows must be swept");
+        assertEquals(0L, Conversation.count("id = ?1", conv.id),
+                "conversation row must be deleted");
     }
 
     @Test

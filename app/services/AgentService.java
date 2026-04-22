@@ -197,6 +197,10 @@ public class AgentService {
         // the O(N) per-entity loop with 2 queries regardless of row count.
         // Session clear is necessary because JPQL DELETE bypasses Hibernate's cache.
         var em = JPA.em();
+        // MessageAttachment first — FK has no ON DELETE CASCADE (see ConversationService.deleteByIds).
+        em.createQuery("DELETE FROM MessageAttachment a WHERE a.message.conversation.id IN " +
+                        "(SELECT c.id FROM Conversation c WHERE c.agent.id = :agentId)")
+                .setParameter("agentId", agentId).executeUpdate();
         em.createQuery("DELETE FROM Message m WHERE m.conversation.id IN " +
                         "(SELECT c.id FROM Conversation c WHERE c.agent.id = :agentId)")
                 .setParameter("agentId", agentId).executeUpdate();

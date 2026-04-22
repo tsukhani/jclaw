@@ -185,6 +185,11 @@ public class ConversationService {
     public static int deleteByIds(List<Long> ids) {
         if (ids == null || ids.isEmpty()) return 0;
         var em = JPA.em();
+        // MessageAttachment first — FK from chat_message_attachment.message_id to
+        // message.id has no ON DELETE CASCADE, so the bulk Message delete below
+        // would otherwise fail with a referential-integrity violation.
+        em.createQuery("DELETE FROM MessageAttachment a WHERE a.message.conversation.id IN :ids")
+                .setParameter("ids", ids).executeUpdate();
         em.createQuery("DELETE FROM Message m WHERE m.conversation.id IN :ids")
                 .setParameter("ids", ids).executeUpdate();
         em.createQuery("DELETE FROM SessionCompaction sc WHERE sc.conversation.id IN :ids")
