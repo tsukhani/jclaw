@@ -19,6 +19,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 /**
@@ -112,8 +113,36 @@ public final class TelegramStreamingSink {
      * gives cross-sink parallelism so N concurrent streams don't serialize
      * behind a single carrier (JCLAW-95).
      */
-    private static final ScheduledExecutorService SCHEDULER =
-            VirtualThreads.newSingleThreadScheduledExecutor();
+    /**
+     * Lazily-initialized, re-initializable scheduler. Direct static init would
+     * mean that {@link #shutdown} leaves a dead scheduler reference for the
+     * rest of the JVM lifetime — a problem during testing where
+     * {@code JobLifecycleTest} invokes {@code ShutdownJob.doJob()} in the
+     * middle of the suite, and subsequent tests still need a live scheduler.
+     * The AtomicReference pattern lets the next {@link #scheduler()} call
+     * transparently recreate a fresh executor after shutdown.
+     */
+    private static final AtomicReference<ScheduledExecutorService> SCHEDULER_REF = new AtomicReference<>();
+
+    private static ScheduledExecutorService scheduler() {
+        var s = SCHEDULER_REF.get();
+        if (s != null && !s.isShutdown()) return s;
+        var fresh = VirtualThreads.newSingleThreadScheduledExecutor();
+        if (SCHEDULER_REF.compareAndSet(s, fresh)) return fresh;
+        fresh.shutdown();
+        return SCHEDULER_REF.get();
+    }
+
+    /**
+     * Time-bounded drain of the scheduler. Called from
+     * {@link jobs.ShutdownJob} at application stop. Without this the static
+     * scheduler accumulates a carrier thread per dev hot reload. Re-init on
+     * next access ensures later code paths still work.
+     */
+    public static void shutdown() {
+        var s = SCHEDULER_REF.getAndSet(null);
+        if (s != null) VirtualThreads.gracefulShutdown(s, "telegram-streaming-sink");
+    }
 
     /**
      * Streaming transport selected at sink construction (JCLAW-103, JCLAW-105).
@@ -478,7 +507,7 @@ public final class TelegramStreamingSink {
             // from seal() / update() can suppress the first pulse if it
             // hasn't landed yet. Each tick spawns a VT so the scheduler
             // thread stays free for other sinks' flushes.
-            typingHeartbeat = SCHEDULER.scheduleAtFixedRate(
+            typingHeartbeat = scheduler().scheduleAtFixedRate(
                     () -> Thread.ofVirtual().start(() ->
                             TelegramChannel.sendTypingAction(botToken, chatId)),
                     0L, TYPING_HEARTBEAT_MS, TimeUnit.MILLISECONDS);
@@ -500,7 +529,7 @@ public final class TelegramStreamingSink {
         long wait = Math.max(0, currentThrottleMs - (System.currentTimeMillis() - lastSentAt));
         // Scheduler thread only spawns the flush; the flush itself runs on a
         // fresh virtual thread so cross-sink flushes don't serialize (JCLAW-95).
-        scheduledFlush = SCHEDULER.schedule(
+        scheduledFlush = scheduler().schedule(
                 () -> Thread.ofVirtual().start(this::flush),
                 wait, TimeUnit.MILLISECONDS);
     }
@@ -554,7 +583,7 @@ public final class TelegramStreamingSink {
                 // If more tokens arrived during the call, schedule the next flush
                 // on a fresh virtual thread (same pattern as scheduleFlushLocked).
                 if (pending.length() > lastSentText.length() && !sealed.get() && !streamCapReached) {
-                    scheduledFlush = SCHEDULER.schedule(
+                    scheduledFlush = scheduler().schedule(
                             () -> Thread.ofVirtual().start(this::flush),
                             currentThrottleMs, TimeUnit.MILLISECONDS);
                 }

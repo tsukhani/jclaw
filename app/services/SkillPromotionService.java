@@ -3,6 +3,7 @@ package services;
 import agents.SkillLoader;
 import agents.ToolCatalog;
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParser;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
@@ -35,7 +36,7 @@ import static java.util.stream.Collectors.joining;
  */
 public class SkillPromotionService {
 
-    private static final Gson PRETTY_GSON = new Gson().newBuilder().setPrettyPrinting().create();
+    private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
 
     private SkillPromotionService() {}
 

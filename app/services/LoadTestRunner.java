@@ -218,14 +218,13 @@ public final class LoadTestRunner {
             throw new IllegalStateException("jclaw.admin.username/password not configured");
         }
         var body = "{\"username\":\"" + user + "\",\"password\":\"" + pass + "\"}";
-        var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
         var req = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/api/auth/login"))
                 .header("Content-Type", "application/json")
                 .timeout(Duration.ofSeconds(10))
                 .POST(HttpRequest.BodyPublishers.ofString(body))
                 .build();
-        var resp = client.send(req, HttpResponse.BodyHandlers.discarding());
+        var resp = utils.HttpClients.GENERAL.send(req, HttpResponse.BodyHandlers.discarding());
         if (resp.statusCode() != 200) {
             throw new RuntimeException("Internal login failed: HTTP " + resp.statusCode());
         }

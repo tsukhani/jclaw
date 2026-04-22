@@ -7,6 +7,7 @@ import models.Agent;
 import models.Conversation;
 import play.mvc.Controller;
 import play.mvc.Http;
+import play.mvc.Util;
 import play.mvc.With;
 import services.AgentService;
 import services.ConversationService;
@@ -29,6 +30,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static utils.GsonHolder.INSTANCE;
@@ -52,11 +54,41 @@ public class ApiChatController extends Controller {
      * heartbeat task is ~1 byte write every 30 s and the timeout task is a single
      * fire-once. Per-stream cancellation is tracked via {@link ScheduledFuture}
      * references held by the request and cancelled in the stream's whenComplete.
+     *
+     * <p>Pool sizing: {@code max(2, availableProcessors / 2)}. Floor of 2 covers
+     * single-core test containers. The {@code / 2} ratio leaves CPU headroom for
+     * the agent loop itself (LLM streaming, tool dispatch) — these scheduler
+     * threads are I/O-bound and infrequent, but having one per core would starve
+     * the request-path carriers under load. Virtual threads mean the "pool size"
+     * is really the number of carrier threads that service scheduled dispatches;
+     * the actual heartbeat/timeout tasks run on ephemeral virtual threads.
      */
-    private static final ScheduledExecutorService STREAM_SCHEDULER =
-            Executors.newScheduledThreadPool(
-                    Math.max(2, Runtime.getRuntime().availableProcessors() / 2),
-                    r -> Thread.ofVirtual().name("sse-scheduler-", 0).unstarted(r));
+    private static final AtomicReference<ScheduledExecutorService> STREAM_SCHEDULER_REF = new AtomicReference<>();
+
+    private static ScheduledExecutorService streamScheduler() {
+        var s = STREAM_SCHEDULER_REF.get();
+        if (s != null && !s.isShutdown()) return s;
+        var fresh = Executors.newScheduledThreadPool(
+                Math.max(2, Runtime.getRuntime().availableProcessors() / 2),
+                r -> Thread.ofVirtual().name("sse-scheduler-", 0).unstarted(r));
+        if (STREAM_SCHEDULER_REF.compareAndSet(s, fresh)) return fresh;
+        fresh.shutdown();
+        return STREAM_SCHEDULER_REF.get();
+    }
+
+    /**
+     * Time-bounded drain of the SSE scheduler. Called from
+     * {@link jobs.ShutdownJob} at application stop. In-flight streams are
+     * allowed 5 s to wind down (heartbeat cancels, timeout fires, final
+     * flush); anything still scheduled is dropped. Re-init on next access
+     * ensures later code paths still work (e.g. {@code JobLifecycleTest}
+     * calls {@code ShutdownJob.doJob()} in the middle of the suite).
+     */
+    @Util
+    public static void shutdown() {
+        var s = STREAM_SCHEDULER_REF.getAndSet(null);
+        if (s != null) utils.VirtualThreads.gracefulShutdown(s, "sse-scheduler");
+    }
 
     /** Validated prologue shared by send() and streamChat(). */
     private record ChatContext(Agent agent, String message, Long conversationId, String username) {}
@@ -259,7 +291,7 @@ public class ApiChatController extends Controller {
         var streamDone = new CompletableFuture<Void>();
         var cancelled = new AtomicBoolean(false);
 
-        ScheduledFuture<?> heartbeatFuture = STREAM_SCHEDULER.scheduleAtFixedRate(() -> {
+        ScheduledFuture<?> heartbeatFuture = streamScheduler().scheduleAtFixedRate(() -> {
             if (cancelled.get() || streamDone.isDone()) return;
             try {
                 res.writeChunk(": keep-alive\n\n".getBytes(StandardCharsets.UTF_8));
@@ -360,7 +392,7 @@ public class ApiChatController extends Controller {
         // when the stream finishes. Using a manual watcher instead of
         // CompletableFuture.orTimeout avoids a race where the future completes
         // exceptionally before we write the timeout SSE frame.
-        ScheduledFuture<?> timeoutFuture = STREAM_SCHEDULER.schedule(() -> {
+        ScheduledFuture<?> timeoutFuture = streamScheduler().schedule(() -> {
             if (!streamDone.isDone()) {
                 cancelled.set(true);
                 writeSse(res, cancelled, streamDone,

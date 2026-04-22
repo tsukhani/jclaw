@@ -50,11 +50,8 @@ public final class TelegramPollingRunner {
     /** Default Telegram long-poll timeout is 30 s; match it, plus a small margin. */
     public static final long COOLDOWN_MS = 30_000L;
 
-    private static final ScheduledExecutorService SCHEDULER = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "telegram-cooldown-reconcile");
-        t.setDaemon(true);
-        return t;
-    });
+    private static final ScheduledExecutorService SCHEDULER = Executors.newSingleThreadScheduledExecutor(
+            r -> Thread.ofVirtual().name("telegram-cooldown-reconcile").unstarted(r));
 
     private TelegramPollingRunner() {}
 
@@ -111,17 +108,21 @@ public final class TelegramPollingRunner {
     /** Stop all active sessions. Safe to call at app shutdown. */
     public static synchronized void stop() {
         var app = APP.getAndSet(null);
-        if (app == null) return;
-        for (var entry : new HashMap<>(ACTIVE).entrySet()) {
-            unregisterInternal(app, entry.getKey(), entry.getValue());
+        if (app != null) {
+            for (var entry : new HashMap<>(ACTIVE).entrySet()) {
+                unregisterInternal(app, entry.getKey(), entry.getValue());
+            }
+            try {
+                app.close();
+                EventLogger.info("channel", null, "telegram", "Long-polling app closed");
+            } catch (Exception e) {
+                EventLogger.warn("channel", null, "telegram",
+                        "Polling app shutdown error: %s".formatted(e.getMessage()));
+            }
         }
-        try {
-            app.close();
-            EventLogger.info("channel", null, "telegram", "Long-polling app closed");
-        } catch (Exception e) {
-            EventLogger.warn("channel", null, "telegram",
-                    "Polling app shutdown error: %s".formatted(e.getMessage()));
-        }
+        // Time-bounded drain of the cooldown-reconcile scheduler. Without this
+        // the static SCHEDULER accumulates a thread per dev hot reload.
+        utils.VirtualThreads.gracefulShutdown(SCHEDULER, "telegram-cooldown-reconcile");
     }
 
     /** Test/admin introspection: set of binding ids with live polling sessions. */

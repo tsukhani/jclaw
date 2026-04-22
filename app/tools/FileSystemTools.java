@@ -356,6 +356,10 @@ public class FileSystemTools implements ToolRegistry.Tool {
 
         var working = original;
         var notes = new ArrayList<String>();
+        // Per-batch regex cache: reuses the compiled Pattern across edits that
+        // share the same oldText. Scope is one editFile call; the map is
+        // discarded when this loop returns, so no cross-batch global state.
+        var regexCache = new java.util.HashMap<String, Pattern>();
 
         for (int i = 0; i < editsJson.size(); i++) {
             if (!editsJson.get(i).isJsonObject()) {
@@ -373,7 +377,7 @@ public class FileSystemTools implements ToolRegistry.Tool {
                 return "Error: edit #%d has an empty oldText".formatted(i + 1);
             }
 
-            var applied = applySingleEdit(working, oldText, newText, isRegex, i + 1);
+            var applied = applySingleEdit(working, oldText, newText, isRegex, i + 1, regexCache);
             if (applied.error != null) {
                 return applied.error;
             }
@@ -400,13 +404,17 @@ public class FileSystemTools implements ToolRegistry.Tool {
         static EditResult err(String error) { return new EditResult(null, error, null); }
     }
 
-    private EditResult applySingleEdit(String working, String oldText, String newText, boolean isRegex, int editIndex) {
+    private EditResult applySingleEdit(String working, String oldText, String newText, boolean isRegex,
+                                        int editIndex, java.util.Map<String, Pattern> regexCache) {
         if (isRegex) {
-            Pattern pattern;
-            try {
-                pattern = Pattern.compile(oldText);
-            } catch (PatternSyntaxException e) {
-                return EditResult.err("Error: edit #%d has an invalid regex: %s".formatted(editIndex, e.getMessage()));
+            Pattern pattern = regexCache.get(oldText);
+            if (pattern == null) {
+                try {
+                    pattern = Pattern.compile(oldText);
+                } catch (PatternSyntaxException e) {
+                    return EditResult.err("Error: edit #%d has an invalid regex: %s".formatted(editIndex, e.getMessage()));
+                }
+                regexCache.put(oldText, pattern);
             }
             var matcher = pattern.matcher(working);
             var matchStarts = new ArrayList<Integer>();
