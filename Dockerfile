@@ -1,7 +1,12 @@
 # ── Stage 1: Build frontend SPA ──────────────────────────────────────────────
-FROM node:22-slim AS frontend-build
+FROM node:24-slim AS frontend-build
 
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+# Corepack resolves the pnpm version from frontend/package.json's
+# `packageManager` field at `pnpm install` time — no hardcoded version
+# here, so a bump in package.json (the single source of truth) doesn't
+# need a parallel edit to this file. Download happens inside the install
+# layer; invalidation follows package.json + pnpm-lock.yaml as before.
+RUN corepack enable
 
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/pnpm-lock.yaml ./

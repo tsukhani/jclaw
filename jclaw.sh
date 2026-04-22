@@ -152,6 +152,23 @@ resolve_play_pool() {
     fi
 }
 
+# Route every `pnpm` invocation through corepack so the version pinned
+# in frontend/package.json's `packageManager` field is authoritative,
+# regardless of what's installed globally. Corepack ships with Node 16.13+
+# (JClaw requires Node 20+ per CLAUDE.md) and caches the first-run download
+# so subsequent calls are zero-cost. Falls back to the system pnpm via the
+# `command pnpm` escape hatch when corepack is genuinely unavailable —
+# important for operators on unusual environments where corepack was
+# explicitly removed, but the warning about version drift stays loud.
+pnpm() {
+    if command -v corepack >/dev/null 2>&1; then
+        corepack pnpm "$@"
+    else
+        echo "[jclaw.sh] Warning: corepack unavailable; using system pnpm ($(command pnpm --version 2>/dev/null || echo unknown)) which may diverge from the pin in frontend/package.json." >&2
+        command pnpm "$@"
+    fi
+}
+
 # Verify Java 25+ is available
 check_java() {
     local java_version

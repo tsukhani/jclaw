@@ -28,7 +28,13 @@ pipeline {
             steps {
                 sh 'java -version'
                 sh 'play version || echo "Play not found at ${PLAY_HOME}"'
-                sh 'corepack enable && corepack prepare pnpm@10.33.0 --activate'
+                // Corepack resolves pnpm from frontend/package.json's
+                // `packageManager` field on first invocation, so no hardcoded
+                // version pins here. Bumping the pin in package.json (the
+                // single source of truth) doesn't need a parallel edit to
+                // this file. Download happens inside the install step; the
+                // per-build cache in PNPM_HOME covers repeat invocations.
+                sh 'corepack enable'
                 dir('frontend') {
                     sh 'pnpm install --frozen-lockfile'
                 }
