@@ -229,6 +229,129 @@ public class PlaywrightToolTest extends UnitTest {
         assertEquals(-1, second, "URL should appear exactly once");
     }
 
+    // ─── Session lifecycle (JCLAW-130 Phase 3) ────────────────────────────
+    //
+    // The three tests below exercise the navigate-under-failure, tab-reuse,
+    // and crash-recovery paths. Each gates on the same playwright.enabled
+    // flag the existing parallelBrowserOpsOnSameAgentDoNotCorruptPage test
+    // uses, so headless-CI environments without a Chromium install simply
+    // skip them rather than hang on browser launch.
+
+    @Test
+    public void navigateUnderNetworkFailureReturnsBrowserError() {
+        // Pin: when the underlying chromium navigation can't reach the host
+        // (e.g. RFC 6761 .invalid TLD that DNS guarantees never resolves),
+        // execute() must surface a "Browser error: ..." string rather than
+        // throwing or hanging. This is the regression surface JCLAW-126's
+        // OkHttp retry cousin lived in — make sure the Playwright path has
+        // the same crisp failure mode.
+        if (!"true".equals(services.ConfigService.get("playwright.enabled", "false"))) {
+            return;
+        }
+        var tool = new PlaywrightBrowserTool();
+        try {
+            var result = tool.execute(
+                    "{\"action\":\"navigate\",\"url\":\"http://nonexistent-host-jclaw-130.invalid/\"}",
+                    agent);
+            // Either the chromium-level failure surfaces as "Browser error: ..."
+            // (PlaywrightException catch in execute) or the SSRF guard rejects
+            // the .invalid host before it reaches the browser. Both are valid
+            // failure modes — what matters is no exception escapes and the
+            // result clearly signals failure.
+            assertTrue(result.startsWith("Browser error") || result.startsWith("Error"),
+                    "expected error result for unresolvable host, got: " + result);
+        } finally {
+            PlaywrightBrowserTool.closeSession(agent.name);
+        }
+    }
+
+    @Test
+    public void sequentialNavigatesReuseTheSameSession() throws Exception {
+        // The session map keys on agent.name; subsequent calls for the same
+        // agent must hit the cached BrowserSession path rather than launching
+        // a fresh chromium per call. Verified by reflecting into the private
+        // static sessions map and asserting the entry count stays at 1.
+        if (!"true".equals(services.ConfigService.get("playwright.enabled", "false"))) {
+            return;
+        }
+        var tool = new PlaywrightBrowserTool();
+        try {
+            var first = tool.execute(
+                    "{\"action\":\"navigate\",\"url\":\"data:text/html,<title>first</title><h1>1</h1>\"}",
+                    agent);
+            assertFalse(first.startsWith("Browser error"), "first navigate failed: " + first);
+
+            int sessionsAfterFirst = sessionCount();
+            assertEquals(1, sessionsAfterFirst,
+                    "first navigate should leave one cached session for the agent");
+
+            var second = tool.execute(
+                    "{\"action\":\"navigate\",\"url\":\"data:text/html,<title>second</title><h1>2</h1>\"}",
+                    agent);
+            assertFalse(second.startsWith("Browser error"), "second navigate failed: " + second);
+
+            int sessionsAfterSecond = sessionCount();
+            assertEquals(sessionsAfterFirst, sessionsAfterSecond,
+                    "second navigate must reuse the same session — no extra entry");
+        } finally {
+            PlaywrightBrowserTool.closeSession(agent.name);
+        }
+    }
+
+    @Test
+    public void executeAfterExplicitCloseRecreatesSessionCleanly() {
+        // Crash recovery: getOrCreateSession's compute() branch re-launches
+        // when the cached page is closed. We can't reliably simulate a SIGSEGV
+        // in chromium from a test, but closing the session out-of-band is the
+        // same observable state from the tool's POV — the next execute() must
+        // see a fresh, working session rather than NPE on the closed Page.
+        if (!"true".equals(services.ConfigService.get("playwright.enabled", "false"))) {
+            return;
+        }
+        var tool = new PlaywrightBrowserTool();
+        try {
+            var seed = tool.execute(
+                    "{\"action\":\"navigate\",\"url\":\"data:text/html,<h1>seed</h1>\"}",
+                    agent);
+            assertFalse(seed.startsWith("Browser error"), "seed navigate failed: " + seed);
+
+            // Simulate the crash window: external close, then a normal call.
+            PlaywrightBrowserTool.closeSession(agent.name);
+
+            var afterClose = tool.execute(
+                    "{\"action\":\"navigate\",\"url\":\"data:text/html,<h1>after</h1>\"}",
+                    agent);
+            assertFalse(afterClose.startsWith("Browser error"),
+                    "navigate after close must succeed via session re-creation: " + afterClose);
+            assertTrue(afterClose.contains("after") || afterClose.contains("Page:"),
+                    "fresh session should serve the post-close navigate: " + afterClose);
+        } finally {
+            PlaywrightBrowserTool.closeSession(agent.name);
+        }
+    }
+
+    @Test
+    public void closeSessionOnNonExistentAgentIsIdempotent() {
+        // Pure unit-test path — no chromium needed. The static remove() on
+        // ConcurrentHashMap returns null for a missing key, and the close
+        // helper short-circuits in that branch. Calling it twice in a row
+        // for an agent that never had a session must not throw.
+        PlaywrightBrowserTool.closeSession("agent-that-never-existed");
+        PlaywrightBrowserTool.closeSession("agent-that-never-existed");
+    }
+
+    /**
+     * Reflective view into the private static {@code sessions} map. Used by
+     * the tab-reuse test to assert the map size doesn't grow across
+     * sequential navigates for the same agent.
+     */
+    private static int sessionCount() throws Exception {
+        var f = PlaywrightBrowserTool.class.getDeclaredField("sessions");
+        f.setAccessible(true);
+        var map = (java.util.Map<?, ?>) f.get(null);
+        return map.size();
+    }
+
     private static void deleteDir(java.nio.file.Path dir) {
         if (!Files.exists(dir)) return;
         try (var walk = Files.walk(dir)) {

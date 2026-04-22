@@ -50,7 +50,18 @@ public class ParallelToolExecutionTest extends UnitTest {
 
     @AfterEach
     void restore() {
+        // Restore the global tool registry FIRST so no other test sees the
+        // sleep stubs published in setup().
         ToolRegistry.publish(originalTools);
+        // Defensive: drop the per-test state holders so any straggling
+        // virtual-thread callback that captured the old reference can't
+        // mutate "stale" state into the next test method's view. The
+        // synchronizedList wrapper is the most likely culprit — clearing
+        // it makes accidental cross-test pollution loud rather than silent.
+        if (executionOrder != null) executionOrder.clear();
+        executionOrder = null;
+        concurrentExecutions = null;
+        peakConcurrency = null;
     }
 
     private ToolRegistry.Tool sleepTool(String toolName, boolean parallelSafe) {
