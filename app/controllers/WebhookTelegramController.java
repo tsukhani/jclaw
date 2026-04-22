@@ -122,10 +122,16 @@ public class WebhookTelegramController extends Controller {
                     ctx.agent() != null ? ctx.agent().name : null, "telegram",
                     "Webhook received from %s: %s".formatted(
                             message.fromUsername() != null ? message.fromUsername() : message.fromId(),
-                            truncate(message.text())));
+                            utils.Strings.truncate(message.text(), 50)));
 
             // Off-request virtual thread so the HTTP 200 returns immediately.
-            Thread.ofVirtual().start(() -> processMessage(ctx, message));
+            // JCLAW-136: multi-photo albums ride through a reassembly buffer
+            // so N photos sharing a media_group_id dispatch as ONE turn, not N.
+            // Plain-text and single-attachment messages skip the buffer (null
+            // media_group_id → immediate dispatch).
+            final BindingCtx captured = ctx;
+            channels.TelegramMediaGroupBuffer.add(message, merged ->
+                    Thread.ofVirtual().start(() -> processMessage(captured, merged)));
         } catch (Exception e) {
             EventLogger.error("channel", null, "telegram",
                     "Webhook parse error for binding %d: %s".formatted(bindingId, e.getMessage()));
@@ -139,6 +145,14 @@ public class WebhookTelegramController extends Controller {
         final String sendChatId = message.chatId();
         final Agent sendAgent = ctx.agent();
         try {
+            // JCLAW-136: if the message carries attachments, gate them against
+            // the agent's model capabilities, then download each into workspace
+            // staging. Rejections (modality mismatch, size exceeded, network
+            // failures) produce a user-visible reply rather than a silent drop.
+            var inputs = TelegramChannel.prepareInboundAttachments(
+                    sendToken, sendChatId, sendAgent, message);
+            if (inputs == null) return; // prepareInboundAttachments already replied + logged
+
             // JCLAW-94: stream the response as it's generated. The sink owns
             // send/edit/delete of the preview message; on completion it
             // delegates to TelegramChannel.sendMessage (via the planner path)
@@ -149,16 +163,13 @@ public class WebhookTelegramController extends Controller {
             AgentRunner.processInboundForAgentStreaming(
                     sendAgent, "telegram", ctx.telegramUserId(), message.text(),
                     convId -> new channels.TelegramStreamingSink(
-                            sendToken, sendChatId, sendAgent, convId, sendChatType));
+                            sendToken, sendChatId, sendAgent, convId, sendChatType),
+                    inputs);
         } catch (Exception e) {
             EventLogger.error("channel", ctx.agent() != null ? ctx.agent().name : null, "telegram",
                     "Error processing message for binding %d: %s".formatted(ctx.bindingId(), e.getMessage()));
             TelegramChannel.sendMessage(sendToken, sendChatId,
                     "Sorry, an error occurred processing your message.");
         }
-    }
-
-    private static String truncate(String s) {
-        return s.length() > 50 ? s.substring(0, 50) + "..." : s;
     }
 }

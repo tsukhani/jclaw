@@ -1539,6 +1539,23 @@ public class AgentRunner {
     public static void processInboundForAgentStreaming(
             Agent agent, String channelType, String peerId, String text,
             java.util.function.Function<Long, channels.TelegramStreamingSink> sinkFactory) {
+        processInboundForAgentStreaming(agent, channelType, peerId, text, sinkFactory,
+                java.util.List.of());
+    }
+
+    /**
+     * JCLAW-136 overload: accepts inbound file attachments (images, audio,
+     * documents, video) alongside the text. The caller (webhook or polling
+     * runner) has already resolved Telegram file_ids via Bot API getFile and
+     * streamed the bytes into the agent's {@code attachments/staging}
+     * directory, so each {@link services.AttachmentService.Input} points at
+     * a real staged file the runner can finalize. Empty list is the
+     * text-only path — same behavior as before.
+     */
+    public static void processInboundForAgentStreaming(
+            Agent agent, String channelType, String peerId, String text,
+            java.util.function.Function<Long, channels.TelegramStreamingSink> sinkFactory,
+            java.util.List<services.AttachmentService.Input> attachments) {
         // JCLAW-26: intercept slash commands before the LLM round. Reuse the
         // existing sink machinery to deliver the canned response — an unused
         // sink's seal() path falls through to TelegramChannel.sendMessage,
@@ -1582,7 +1599,7 @@ public class AgentRunner {
                 sink::seal,              // onComplete — final edit / planner fallback
                 sink::errorFallback);    // onError — delete placeholder + send error
         runStreaming(agent, conversation.id, channelType, peerId, text,
-                isCancelled, cb, null);
+                isCancelled, cb, null, attachments);
     }
 
     /**

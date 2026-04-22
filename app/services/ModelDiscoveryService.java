@@ -1,6 +1,7 @@
 package services;
 
 import com.google.gson.*;
+import utils.Strings;
 
 import java.net.URI;
 import java.net.http.HttpRequest;
@@ -69,7 +70,7 @@ public class ModelDiscoveryService {
 
             if (response.statusCode() != 200) {
                 return new DiscoveryResult.Error(502, "Provider returned HTTP %d: %s".formatted(
-                        response.statusCode(), truncate(response.body(), 200)));
+                        response.statusCode(), Strings.truncate(response.body(), 200)));
             }
 
             var body = JsonParser.parseString(response.body()).getAsJsonObject();
@@ -477,7 +478,7 @@ public class ModelDiscoveryService {
             if (tagsResp.statusCode() != 200) {
                 return new DiscoveryResult.Error(502,
                         "Provider returned HTTP %d from /api/tags: %s".formatted(
-                                tagsResp.statusCode(), truncate(tagsResp.body(), 200)));
+                                tagsResp.statusCode(), Strings.truncate(tagsResp.body(), 200)));
             }
             var tagsBody = JsonParser.parseString(tagsResp.body()).getAsJsonObject();
             var modelIds = extractTagIds(tagsBody);
@@ -652,9 +653,5 @@ public class ModelDiscoveryService {
             return obj.get(key).getAsString();
         }
         return defaultValue;
-    }
-
-    private static String truncate(String s, int maxLen) {
-        return s.length() <= maxLen ? s : s.substring(0, maxLen) + "...";
     }
 }

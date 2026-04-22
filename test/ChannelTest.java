@@ -47,13 +47,207 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void telegramParseUpdateWithoutText() {
+    public void telegramParseTrulyEmptyUpdateReturnsNull() {
+        // No text, no caption, no attachments — nothing to act on. JCLAW-136
+        // preserved the null-return for this case so webhook handlers still
+        // bail out cleanly on unhandled update shapes.
         var json = JsonParser.parseString("""
-                {"update_id": 12345, "message": {"message_id": 1, "chat": {"id": 999}, "photo": [{}]}}
+                {"update_id": 12345, "message": {"message_id": 1, "chat": {"id": 999}}}
                 """).getAsJsonObject();
 
         var msg = TelegramChannel.parseUpdate(json);
         assertNull(msg);
+    }
+
+    // === JCLAW-136: inbound attachment parsing ===
+
+    @Test
+    public void telegramParsePhotoWithCaption() {
+        var json = JsonParser.parseString("""
+                {
+                  "update_id": 1,
+                  "message": {
+                    "message_id": 1,
+                    "from": {"id": 42, "is_bot": false, "first_name": "X"},
+                    "chat": {"id": 42, "type": "private"},
+                    "date": 1712345678,
+                    "caption": "look at this",
+                    "photo": [
+                      {"file_id": "SMALL", "file_unique_id": "us", "file_size": 100, "width": 90, "height": 51},
+                      {"file_id": "LARGE", "file_unique_id": "ul", "file_size": 20000, "width": 1280, "height": 720}
+                    ]
+                  }
+                }
+                """).getAsJsonObject();
+
+        var msg = TelegramChannel.parseUpdate(json);
+        assertNotNull(msg);
+        assertEquals("look at this", msg.text());
+        assertEquals(1, msg.attachments().size());
+        var att = msg.attachments().get(0);
+        assertEquals("LARGE", att.telegramFileId(),
+                "highest-resolution PhotoSize (last in array) must win");
+        assertEquals(models.MessageAttachment.KIND_IMAGE, att.kind());
+    }
+
+    @Test
+    public void telegramParsePhotoWithoutCaptionYieldsEmptyText() {
+        var json = JsonParser.parseString("""
+                {
+                  "update_id": 1,
+                  "message": {
+                    "message_id": 1,
+                    "from": {"id": 42, "is_bot": false, "first_name": "X"},
+                    "chat": {"id": 42, "type": "private"},
+                    "date": 1,
+                    "photo": [{"file_id": "F", "file_unique_id": "u", "width": 1, "height": 1}]
+                  }
+                }
+                """).getAsJsonObject();
+
+        var msg = TelegramChannel.parseUpdate(json);
+        assertNotNull(msg, "photo-only message must still parse (JCLAW-136)");
+        assertEquals("", msg.text(), "no synthetic default prompt; empty string for no caption");
+        assertEquals(1, msg.attachments().size());
+    }
+
+    @Test
+    public void telegramParseVoiceNote() {
+        var json = JsonParser.parseString("""
+                {
+                  "update_id": 1,
+                  "message": {
+                    "message_id": 1,
+                    "from": {"id": 42, "is_bot": false, "first_name": "X"},
+                    "chat": {"id": 42, "type": "private"},
+                    "date": 1,
+                    "voice": {"file_id": "V", "file_unique_id": "uv", "duration": 3, "mime_type": "audio/ogg", "file_size": 3000}
+                  }
+                }
+                """).getAsJsonObject();
+
+        var msg = TelegramChannel.parseUpdate(json);
+        assertNotNull(msg);
+        assertEquals(1, msg.attachments().size());
+        assertEquals(models.MessageAttachment.KIND_AUDIO, msg.attachments().get(0).kind());
+    }
+
+    @Test
+    public void telegramParseAudioWithCaption() {
+        var json = JsonParser.parseString("""
+                {
+                  "update_id": 1,
+                  "message": {
+                    "message_id": 1,
+                    "from": {"id": 42, "is_bot": false, "first_name": "X"},
+                    "chat": {"id": 42, "type": "private"},
+                    "date": 1,
+                    "caption": "Transcribe verbatim",
+                    "audio": {"file_id": "A", "file_unique_id": "ua", "duration": 5, "mime_type": "audio/mpeg", "file_name": "harvard.wav", "file_size": 3000000}
+                  }
+                }
+                """).getAsJsonObject();
+
+        var msg = TelegramChannel.parseUpdate(json);
+        assertNotNull(msg);
+        assertEquals("Transcribe verbatim", msg.text());
+        assertEquals(1, msg.attachments().size());
+        var att = msg.attachments().get(0);
+        assertEquals(models.MessageAttachment.KIND_AUDIO, att.kind());
+        assertEquals("harvard.wav", att.suggestedFilename());
+    }
+
+    @Test
+    public void telegramParseDocumentWithCaption() {
+        var json = JsonParser.parseString("""
+                {
+                  "update_id": 1,
+                  "message": {
+                    "message_id": 1,
+                    "from": {"id": 42, "is_bot": false, "first_name": "X"},
+                    "chat": {"id": 42, "type": "private"},
+                    "date": 1,
+                    "caption": "Summarize this",
+                    "document": {"file_id": "D", "file_unique_id": "ud", "mime_type": "application/pdf", "file_name": "report.pdf", "file_size": 1200000}
+                  }
+                }
+                """).getAsJsonObject();
+
+        var msg = TelegramChannel.parseUpdate(json);
+        assertNotNull(msg);
+        assertEquals("Summarize this", msg.text());
+        assertEquals(models.MessageAttachment.KIND_FILE,
+                msg.attachments().get(0).kind());
+    }
+
+    @Test
+    public void telegramParseDocumentWithImageMimeClassifiesAsImage() {
+        // User attached a PNG via "File" upload (to skip Telegram's JPEG
+        // compression) instead of "Photo". We still want the multimodal
+        // gate to treat it as an image so vision-capable models see it.
+        var json = JsonParser.parseString("""
+                {
+                  "update_id": 1,
+                  "message": {
+                    "message_id": 1,
+                    "from": {"id": 42, "is_bot": false, "first_name": "X"},
+                    "chat": {"id": 42, "type": "private"},
+                    "date": 1,
+                    "document": {"file_id": "D", "file_unique_id": "ud", "mime_type": "image/png", "file_name": "screenshot.png", "file_size": 200000}
+                  }
+                }
+                """).getAsJsonObject();
+
+        var msg = TelegramChannel.parseUpdate(json);
+        assertNotNull(msg);
+        assertEquals(models.MessageAttachment.KIND_IMAGE,
+                msg.attachments().get(0).kind(),
+                "document with image/* MIME must classify as IMAGE");
+    }
+
+    @Test
+    public void telegramParseVideo() {
+        var json = JsonParser.parseString("""
+                {
+                  "update_id": 1,
+                  "message": {
+                    "message_id": 1,
+                    "from": {"id": 42, "is_bot": false, "first_name": "X"},
+                    "chat": {"id": 42, "type": "private"},
+                    "date": 1,
+                    "caption": "Describe this clip",
+                    "video": {"file_id": "V", "file_unique_id": "uv", "duration": 10, "width": 640, "height": 480, "mime_type": "video/mp4", "file_size": 5000000}
+                  }
+                }
+                """).getAsJsonObject();
+
+        var msg = TelegramChannel.parseUpdate(json);
+        assertNotNull(msg);
+        assertEquals(models.MessageAttachment.KIND_FILE,
+                msg.attachments().get(0).kind());
+    }
+
+    @Test
+    public void telegramParseMediaGroupIdPreserved() {
+        var json = JsonParser.parseString("""
+                {
+                  "update_id": 1,
+                  "message": {
+                    "message_id": 1,
+                    "from": {"id": 42, "is_bot": false, "first_name": "X"},
+                    "chat": {"id": 42, "type": "private"},
+                    "date": 1,
+                    "media_group_id": "98765",
+                    "caption": "album",
+                    "photo": [{"file_id": "F", "file_unique_id": "u", "width": 1, "height": 1}]
+                  }
+                }
+                """).getAsJsonObject();
+
+        var msg = TelegramChannel.parseUpdate(json);
+        assertNotNull(msg);
+        assertEquals("98765", msg.mediaGroupId(),
+                "media_group_id must round-trip so the handler can reassemble albums");
     }
 
     // === Telegram outbound chunker ===

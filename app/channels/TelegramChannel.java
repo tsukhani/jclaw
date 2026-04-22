@@ -50,7 +50,32 @@ public class TelegramChannel implements Channel {
      * arrives without chat context, callers fall back to EDIT_IN_PLACE.
      */
     public record InboundMessage(String chatId, String chatType, String text,
-                                 String fromId, String fromUsername) {}
+                                 String fromId, String fromUsername,
+                                 java.util.List<PendingAttachment> attachments,
+                                 String mediaGroupId) {
+        public InboundMessage(String chatId, String chatType, String text,
+                              String fromId, String fromUsername) {
+            this(chatId, chatType, text, fromId, fromUsername, java.util.List.of(), null);
+        }
+    }
+
+    /**
+     * Inbound file attachment extracted from a Telegram Update before the actual
+     * bytes are downloaded (JCLAW-136). The webhook handler returns the 200 fast;
+     * a virtual thread then resolves each {@code telegramFileId} via the Bot API
+     * {@code getFile} call, streams the payload into workspace staging, and
+     * produces an {@link services.AttachmentService.Input} the runner can feed
+     * into the existing JCLAW-25 multimodal assembly path. {@code kind} is
+     * derived at parse time from which Telegram field the attachment came from
+     * (photo → IMAGE, voice/audio → AUDIO, document/video → FILE) and is
+     * authoritative for the inbound modality gate; the stored MessageAttachment
+     * row's kind is re-sniffed from disk by {@code finalizeAttachment}.
+     */
+    public record PendingAttachment(String telegramFileId,
+                                    String suggestedFilename,
+                                    String mimeType,
+                                    long sizeBytes,
+                                    String kind) {}
 
     /**
      * Inbound callback_query payload (JCLAW-109). Emitted by
@@ -459,6 +484,68 @@ public class TelegramChannel implements Channel {
         }
     }
 
+    /**
+     * JCLAW-136: apply the modality + size gates to {@code message.attachments()},
+     * then download each pending attachment into the agent's workspace
+     * staging directory. Shared by the webhook controller and polling
+     * runner — both route user uploads through the same rejection + stage
+     * pipeline so behavior stays identical regardless of delivery mode.
+     *
+     * <p>On any rejection (modality mismatch, size exceeded, network/API
+     * failure) sends a user-visible reply, logs at warn, and returns
+     * {@code null} so the caller can bail out. On success returns a
+     * (possibly empty) list of {@link services.AttachmentService.Input}
+     * whose shape is identical to what the web upload path produces — the
+     * runner handles both origins uniformly.
+     */
+    public static java.util.List<services.AttachmentService.Input> prepareInboundAttachments(
+            String sendToken, String sendChatId, Agent sendAgent, InboundMessage message) {
+        if (message.attachments().isEmpty()) return java.util.List.of();
+
+        boolean hasImage = message.attachments().stream().anyMatch(
+                a -> models.MessageAttachment.KIND_IMAGE.equalsIgnoreCase(a.kind()));
+        boolean hasAudio = message.attachments().stream().anyMatch(
+                a -> models.MessageAttachment.KIND_AUDIO.equalsIgnoreCase(a.kind()));
+        if (hasImage && !services.AgentService.supportsVision(sendAgent)) {
+            sendMessage(sendToken, sendChatId,
+                    "I can't handle images with the current model. Try a vision-capable model.");
+            EventLogger.warn("channel", sendAgent.name, "telegram",
+                    "Rejected image upload: model does not support vision");
+            return null;
+        }
+        if (hasAudio && !services.AgentService.supportsAudio(sendAgent)) {
+            sendMessage(sendToken, sendChatId,
+                    "I can't handle audio files with the current model. Try an audio-capable model.");
+            EventLogger.warn("channel", sendAgent.name, "telegram",
+                    "Rejected audio upload: model does not support audio");
+            return null;
+        }
+
+        var inputs = new java.util.ArrayList<services.AttachmentService.Input>(
+                message.attachments().size());
+        for (var pending : message.attachments()) {
+            var result = TelegramFileDownloader.download(sendToken, pending, sendAgent.name);
+            if (result instanceof TelegramFileDownloader.Ok ok) {
+                inputs.add(ok.input());
+            } else if (result instanceof TelegramFileDownloader.SizeExceeded se) {
+                sendMessage(sendToken, sendChatId,
+                        "That file is too large — Telegram bots can only accept up to %d MB.".formatted(
+                                TelegramFileDownloader.MAX_FILE_BYTES / (1024 * 1024)));
+                EventLogger.warn("channel", sendAgent.name, "telegram",
+                        "Rejected upload: %d bytes exceeds %d limit".formatted(
+                                se.actualBytes(), se.limit()));
+                return null;
+            } else if (result instanceof TelegramFileDownloader.DownloadFailed df) {
+                sendMessage(sendToken, sendChatId,
+                        "Sorry, I couldn't download your file from Telegram.");
+                EventLogger.warn("channel", sendAgent.name, "telegram",
+                        "Download failed: %s".formatted(df.reason()));
+                return null;
+            }
+        }
+        return inputs;
+    }
+
     /** Parse a Gson {@link JsonObject} update (webhook payload) into {@link InboundMessage}. */
     public static InboundMessage parseUpdate(JsonObject update) {
         try {
@@ -471,21 +558,108 @@ public class TelegramChannel implements Channel {
         }
     }
 
-    /** Parse an SDK {@link Update} (polling runner source) into {@link InboundMessage}. */
+    /**
+     * Parse an SDK {@link Update} (polling runner source) into {@link InboundMessage}.
+     *
+     * <p>JCLAW-136: accepts messages with attachments (photo, voice, audio,
+     * document, video, video_note) in addition to plain text. When the user
+     * uploads a file, {@code msg.hasText()} is false — the typed prose lives
+     * in {@code msg.getCaption()} instead. The returned InboundMessage
+     * populates {@code text} from caption-then-text (empty when neither) and
+     * populates {@code attachments} with one {@link PendingAttachment} per
+     * media field present. Returns {@code null} only when the update has
+     * neither text nor caption nor any recognizable attachment.
+     */
     public static InboundMessage parseUpdate(Update update) {
         if (update == null || update.getMessage() == null) return null;
         Message msg = update.getMessage();
-        if (!msg.hasText()) return null;
+
         String chatId = String.valueOf(msg.getChatId());
         String chatType = msg.getChat() != null ? msg.getChat().getType() : null;
-        String text = msg.getText();
         String fromId = null;
         String fromUsername = null;
         if (msg.getFrom() != null) {
             fromId = String.valueOf(msg.getFrom().getId());
             fromUsername = msg.getFrom().getUserName();
         }
-        return new InboundMessage(chatId, chatType, text, fromId, fromUsername);
+
+        var attachments = new java.util.ArrayList<PendingAttachment>();
+        // Highest-resolution PhotoSize wins — the array is sorted ascending by
+        // Telegram, so the last element is the full-quality original.
+        if (msg.hasPhoto() && msg.getPhoto() != null && !msg.getPhoto().isEmpty()) {
+            var sizes = msg.getPhoto();
+            var best = sizes.get(sizes.size() - 1);
+            long bytes = best.getFileSize() != null ? best.getFileSize() : 0L;
+            attachments.add(new PendingAttachment(
+                    best.getFileId(), null, "image/jpeg", bytes,
+                    models.MessageAttachment.KIND_IMAGE));
+        }
+        // Voice notes (OGG Opus) and audio files (mp3/m4a/etc.) both map to
+        // KIND_AUDIO. getMimeType is nullable — finalizeAttachment re-sniffs
+        // with Tika so we're not relying on Telegram's self-report anyway.
+        if (msg.getVoice() != null) {
+            var v = msg.getVoice();
+            long bytes = v.getFileSize() != null ? v.getFileSize() : 0L;
+            attachments.add(new PendingAttachment(
+                    v.getFileId(), null, v.getMimeType(), bytes,
+                    models.MessageAttachment.KIND_AUDIO));
+        }
+        if (msg.hasAudio() && msg.getAudio() != null) {
+            var a = msg.getAudio();
+            long bytes = a.getFileSize() != null ? a.getFileSize() : 0L;
+            attachments.add(new PendingAttachment(
+                    a.getFileId(), a.getFileName(), a.getMimeType(), bytes,
+                    models.MessageAttachment.KIND_AUDIO));
+        }
+        if (msg.hasDocument() && msg.getDocument() != null) {
+            var d = msg.getDocument();
+            long bytes = d.getFileSize() != null ? d.getFileSize() : 0L;
+            // A document whose MIME starts with image/ is still an inline
+            // image (user uploaded via "File" rather than "Photo" to avoid
+            // Telegram's compression). Classify as IMAGE so the multimodal
+            // gate applies correctly and the model receives an image part.
+            String kind = d.getMimeType() != null && d.getMimeType().startsWith("image/")
+                    ? models.MessageAttachment.KIND_IMAGE
+                    : models.MessageAttachment.KIND_FILE;
+            attachments.add(new PendingAttachment(
+                    d.getFileId(), d.getFileName(), d.getMimeType(), bytes, kind));
+        }
+        if (msg.hasVideo() && msg.getVideo() != null) {
+            var v = msg.getVideo();
+            long bytes = v.getFileSize() != null ? v.getFileSize() : 0L;
+            attachments.add(new PendingAttachment(
+                    v.getFileId(), v.getFileName(), v.getMimeType(), bytes,
+                    models.MessageAttachment.KIND_FILE));
+        }
+        if (msg.hasVideoNote() && msg.getVideoNote() != null) {
+            var vn = msg.getVideoNote();
+            long bytes = vn.getFileSize() != null ? vn.getFileSize() : 0L;
+            attachments.add(new PendingAttachment(
+                    vn.getFileId(), null, null, bytes,
+                    models.MessageAttachment.KIND_FILE));
+        }
+
+        // Caption wins over plain-text when both exist is impossible per
+        // Telegram's shape — a given Message carries either text or caption,
+        // never both. Pick whichever is populated; empty string is fine
+        // (means "user attached a file with no prose context").
+        String text;
+        if (msg.hasText()) {
+            text = msg.getText();
+        } else if (msg.getCaption() != null) {
+            text = msg.getCaption();
+        } else {
+            text = "";
+        }
+
+        String mediaGroupId = msg.getMediaGroupId();
+
+        // Fully empty updates (no text, no caption, no attachments) are
+        // nothing we can act on — drop as before.
+        if (text.isEmpty() && attachments.isEmpty()) return null;
+
+        return new InboundMessage(chatId, chatType, text, fromId, fromUsername,
+                attachments, mediaGroupId);
     }
 
     /**

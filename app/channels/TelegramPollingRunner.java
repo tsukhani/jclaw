@@ -269,20 +269,17 @@ public final class TelegramPollingRunner {
             EventLogger.info("channel", ctx.agent().name, "telegram",
                     "Polling received from %s: %s".formatted(
                             msg.fromUsername() != null ? msg.fromUsername() : msg.fromId(),
-                            truncate(msg.text())));
+                            utils.Strings.truncate(msg.text(), 50)));
 
             final String sendToken = ctx.botToken();
-            final String sendChatId = msg.chatId();
             final Agent sendAgent = ctx.agent();
-            // JCLAW-94: stream via the same sink as the webhook path. Sink
-            // owns the placeholder/edit/delete lifecycle; the planner takes
-            // over on seal for media-rich or oversize responses. JCLAW-95:
-            // factory defers construction until the conversation id is known.
-            final String sendChatType = msg.chatType();
-            AgentRunner.processInboundForAgentStreaming(
-                    sendAgent, "telegram", ctx.telegramUserId(), msg.text(),
-                    convId -> new TelegramStreamingSink(
-                            sendToken, sendChatId, sendAgent, convId, sendChatType));
+            final String userId = ctx.telegramUserId();
+            // JCLAW-136: media_group_id reassembly runs BEFORE attachment
+            // download + dispatch so multi-photo albums collapse into one
+            // turn. Plain-text and single-attachment messages skip the
+            // buffer (null media_group_id → immediate dispatch).
+            TelegramMediaGroupBuffer.add(msg, merged -> dispatchMerged(
+                    sendToken, sendAgent, userId, merged));
         } catch (Exception e) {
             EventLogger.error("channel", null, "telegram",
                     "Polling update processing error for binding %d: %s".formatted(
@@ -290,7 +287,38 @@ public final class TelegramPollingRunner {
         }
     }
 
-    private static String truncate(String s) {
-        return s.length() > 50 ? s.substring(0, 50) + "..." : s;
+    /**
+     * Invoked by {@link TelegramMediaGroupBuffer} either immediately (for
+     * non-group messages) or after the idle window (for reassembled
+     * albums). Applies attachment gates, downloads pending files, then
+     * hands off to {@link AgentRunner#processInboundForAgentStreaming}.
+     * Runs on a virtual thread so a long download doesn't block the
+     * single-threaded scheduler used by the reassembly buffer.
+     */
+    private static void dispatchMerged(String sendToken, Agent sendAgent, String userId,
+                                        TelegramChannel.InboundMessage merged) {
+        Thread.ofVirtual().start(() -> {
+            try {
+                final String sendChatId = merged.chatId();
+                var inputs = TelegramChannel.prepareInboundAttachments(
+                        sendToken, sendChatId, sendAgent, merged);
+                if (inputs == null) return; // helper already replied + logged
+
+                // JCLAW-94: stream via the same sink as the webhook path. Sink
+                // owns the placeholder/edit/delete lifecycle; the planner takes
+                // over on seal for media-rich or oversize responses. JCLAW-95:
+                // factory defers construction until the conversation id is known.
+                final String sendChatType = merged.chatType();
+                AgentRunner.processInboundForAgentStreaming(
+                        sendAgent, "telegram", userId, merged.text(),
+                        convId -> new TelegramStreamingSink(
+                                sendToken, sendChatId, sendAgent, convId, sendChatType),
+                        inputs);
+            } catch (Exception e) {
+                EventLogger.error("channel", sendAgent != null ? sendAgent.name : null,
+                        "telegram", "Polling dispatch error: %s".formatted(e.getMessage()));
+            }
+        });
     }
+
 }

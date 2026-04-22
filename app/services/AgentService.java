@@ -24,6 +24,35 @@ import java.util.stream.Stream;
 
 public class AgentService {
 
+    /**
+     * Does the agent's registered model (default, not conversation override)
+     * declare {@code supportsVision}? Callers use this before accepting image
+     * attachments on inbound paths (web controller, Telegram webhook) so the
+     * user gets a clear reject rather than a silent drop. Returns {@code false}
+     * when the provider or model can't be resolved — better to reject an
+     * attachment than accept it against an unknown model.
+     */
+    public static boolean supportsVision(Agent agent) {
+        return hasModelCapability(agent, llm.LlmTypes.ModelInfo::supportsVision);
+    }
+
+    /** Mirror of {@link #supportsVision} for the JCLAW-131 audio modality gate. */
+    public static boolean supportsAudio(Agent agent) {
+        return hasModelCapability(agent, llm.LlmTypes.ModelInfo::supportsAudio);
+    }
+
+    private static boolean hasModelCapability(Agent agent,
+                                              java.util.function.Predicate<llm.LlmTypes.ModelInfo> test) {
+        if (agent == null || agent.modelProvider == null || agent.modelId == null) return false;
+        var provider = ProviderRegistry.get(agent.modelProvider);
+        if (provider == null) return false;
+        return provider.config().models().stream()
+                .filter(m -> m.id().equals(agent.modelId))
+                .findFirst()
+                .map(test::test)
+                .orElse(false);
+    }
+
     private static final int FILE_CACHE_MAX_SIZE = 500;
     private static final java.util.concurrent.ConcurrentHashMap<String, CachedFile> fileCache =
             new java.util.concurrent.ConcurrentHashMap<>();
