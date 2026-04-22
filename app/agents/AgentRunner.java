@@ -67,6 +67,16 @@ public class AgentRunner {
         return services.ConfigService.getInt("chat.maxToolRounds", DEFAULT_MAX_TOOL_ROUNDS);
     }
 
+    // Absorbs slack between our chars/4 token heuristic and the provider's
+    // real tokenizer, plus the overhead of role tags, JSON punctuation, and
+    // streaming framing that promptTokens accounting doesn't cover.
+    private static final int OUTPUT_SAFETY_MARGIN_TOKENS = 512;
+
+    // Floor on the clamped max_tokens. If the prompt nearly fills the window,
+    // we'd rather the provider truncate a too-long prompt than ship a
+    // max_tokens so small the reply is useless.
+    private static final int MIN_OUTPUT_TOKENS = 256;
+
     public record RunResult(String response, Conversation conversation) {}
 
     /**
@@ -152,14 +162,54 @@ public class AgentRunner {
     }
 
     /**
-     * Derive the effective max-tokens limit from the resolved model info.
-     * Returns {@code null} when the model has no configured limit.
+     * Derive the effective {@code max_tokens} for a specific LLM call,
+     * clamped so that {@code promptTokens + returnedValue + safetyMargin}
+     * fits inside the model's context window.
+     *
+     * <p>Two bounds at play:
+     * <ul>
+     *   <li><b>Upper</b>: the operator-configured {@code ModelInfo.maxTokens}
+     *       (policy cap on reply size).</li>
+     *   <li><b>Context-fit</b>: {@code contextWindow - promptTokens - OUTPUT_SAFETY_MARGIN_TOKENS}
+     *       (so providers don't reject with HTTP 400 "requested N tokens but
+     *       context is M"). Returned value is {@code min(upper, contextFit)}
+     *       and never below {@link #MIN_OUTPUT_TOKENS}.</li>
+     * </ul>
+     *
+     * <p>Returns {@code null} when the model has no configured cap, in which
+     * case we omit {@code max_tokens} from the request and let the provider
+     * apply its own default.
      */
-    private static Integer effectiveMaxTokens(Agent agent, Conversation conv, LlmProvider provider) {
-        return resolveModelInfo(agent, conv, provider)
-                .filter(m -> m.maxTokens() > 0)
-                .map(ModelInfo::maxTokens)
-                .orElse(null);
+    private static Integer effectiveMaxTokens(Agent agent, Conversation conv, LlmProvider provider,
+                                              List<ChatMessage> messages, List<ToolDef> tools) {
+        var modelInfo = resolveModelInfo(agent, conv, provider).orElse(null);
+        if (modelInfo == null || modelInfo.maxTokens() <= 0) return null;
+
+        int configured = modelInfo.maxTokens();
+        if (modelInfo.contextWindow() <= 0) return configured;
+
+        int promptTokens = estimateTokens(messages) + estimateToolTokens(tools);
+        int headroom = modelInfo.contextWindow() - promptTokens - OUTPUT_SAFETY_MARGIN_TOKENS;
+        return Math.max(MIN_OUTPUT_TOKENS, Math.min(configured, headroom));
+    }
+
+    /**
+     * Rough token estimate for the tool-schema payload (names, descriptions,
+     * parameter JSON). Mirrors {@link #estimateTokens}'s {@code chars/4}
+     * approximation; {@code Map.toString()} differs from the JSON wire format
+     * but is within that heuristic's margin.
+     */
+    private static int estimateToolTokens(List<ToolDef> tools) {
+        if (tools == null || tools.isEmpty()) return 0;
+        int chars = 0;
+        for (var tool : tools) {
+            var fn = tool.function();
+            if (fn == null) continue;
+            if (fn.name() != null) chars += fn.name().length();
+            if (fn.description() != null) chars += fn.description().length();
+            if (fn.parameters() != null) chars += fn.parameters().toString().length();
+        }
+        return chars / 4;
     }
 
     /**
@@ -530,7 +580,7 @@ public class AgentRunner {
                         .formatted(primary.config().name(), effectiveModelId(agent, conversation),
                                 messages.size(), tools.size(), assembled.skills().size(),
                                 thinkingMode != null ? ", thinking=" + thinkingMode : ""));
-        var maxTokens = effectiveMaxTokens(agent, conversation, primary);
+        var maxTokens = effectiveMaxTokens(agent, conversation, primary, messages, tools);
         var modelInfo = resolveModelInfo(agent, conversation, primary).orElse(null);
 
         // Stream with tool call handling (HTTP, no JPA)
@@ -616,7 +666,7 @@ public class AgentRunner {
         var turnImages = new ArrayList<String>();
         if (!accumulator.toolCalls.isEmpty()) {
             content = handleToolCallsStreaming(agent, conversation, conversation.id, messages, tools,
-                    accumulator.toolCalls, content, primary, cb, maxTokens, thinkingMode, 0,
+                    accumulator.toolCalls, content, primary, cb, thinkingMode, 0,
                     isCancelled, trace, turnUsage, turnImages, channelType);
         }
 
@@ -774,11 +824,12 @@ public class AgentRunner {
                                             List<ChatMessage> messages, List<ToolDef> tools,
                                             LlmProvider primary, LlmProvider secondary) {
         var currentMessages = new ArrayList<>(messages);
-        var maxTokens = effectiveMaxTokens(agent, conversation, primary);
         var thinkingMode = resolveThinkingMode(agent, conversation, primary);
         var effectiveModelId = effectiveModelId(agent, conversation);
 
         for (int round = 0; round < maxToolRounds(); round++) {
+            // Recompute per-round so the clamp tracks the growing history.
+            var maxTokens = effectiveMaxTokens(agent, conversation, primary, currentMessages, tools);
             ChatResponse response;
             try {
                 response = (secondary != null)
@@ -826,7 +877,7 @@ public class AgentRunner {
                                                     List<ToolCall> toolCalls, String priorContent,
                                                     LlmProvider provider,
                                                     StreamingCallbacks cb,
-                                                    Integer maxTokens, String thinkingMode,
+                                                    String thinkingMode,
                                                     int round, AtomicBoolean isCancelled,
                                                     LatencyTrace trace,
                                                     LlmProvider.TurnUsage turnUsage,
@@ -858,6 +909,9 @@ public class AgentRunner {
         // Continue with streaming after tool results. JCLAW-108: effective
         // model id honors conversation override, same as the round-1 call.
         var effectiveModelIdForCall = effectiveModelId(agent, conversation);
+        // Recompute max_tokens against the grown message list so the clamp
+        // tightens as the tool loop accumulates history.
+        var maxTokens = effectiveMaxTokens(agent, conversation, provider, currentMessages, tools);
         var accumulator = provider.chatStreamAccumulate(
                 effectiveModelIdForCall, currentMessages, tools, cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode);
 
@@ -898,7 +952,7 @@ public class AgentRunner {
         // through too so buildDownloadSuffix can stay channel-aware.
         if (!accumulator.toolCalls.isEmpty()) {
             return handleToolCallsStreaming(agent, conversation, conversationId, currentMessages, tools,
-                    accumulator.toolCalls, accumulator.content, provider, cb, maxTokens, thinkingMode,
+                    accumulator.toolCalls, accumulator.content, provider, cb, thinkingMode,
                     round + 1, isCancelled, trace, turnUsage, collectedImages, channelType);
         }
 
@@ -917,8 +971,9 @@ public class AgentRunner {
                     "Synthesize the final response for me now using the tool results above. "
                             + "Do not call any more tools. Write the full answer as markdown."));
 
+            var retryMaxTokens = effectiveMaxTokens(agent, conversation, provider, retryMessages, tools);
             var retry = provider.chatStreamAccumulate(
-                    effectiveModelIdForCall, retryMessages, tools, cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode);
+                    effectiveModelIdForCall, retryMessages, tools, cb.onToken(), cb.onReasoning(), retryMaxTokens, thinkingMode);
             try {
                 if (!awaitAccumulatorOrCancel(retry, isCancelled, agent, null)) return priorContent;
             } catch (InterruptedException e) {

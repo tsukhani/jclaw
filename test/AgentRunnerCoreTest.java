@@ -316,7 +316,109 @@ public class AgentRunnerCoreTest extends UnitTest {
                 "Should return error message, got: " + result.response());
     }
 
+    // --- max_tokens clamp (context-window headroom) ---
+
+    @Test
+    public void passesConfiguredMaxTokensThroughWhenPromptFits() throws Exception {
+        var captured = new AtomicReference<Integer>();
+        startLlmServer(capturingHandler(captured, simpleResponse("ok")));
+        configureProvider(); // contextWindow=100000, maxTokens=4096 — tiny prompt fits easily
+
+        var agent = createAgent("fit-agent", "test-provider", "test-model");
+        var convo = ConversationService.create(agent, "web", "user1");
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        runOnVirtualThread(agent, convo, "Hi");
+
+        assertEquals(Integer.valueOf(4096), captured.get(),
+                "Small prompt should pass configured max_tokens through unchanged");
+    }
+
+    @Test
+    public void clampsMaxTokensWhenConfiguredValueExceedsHeadroom() throws Exception {
+        var captured = new AtomicReference<Integer>();
+        startLlmServer(capturingHandler(captured, simpleResponse("ok")));
+
+        // Pathological config: maxTokens equal to contextWindow — the bug
+        // pattern that produced the OpenRouter 400. Any prompt at all pushes
+        // promptTokens + maxTokens > contextWindow.
+        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:" + port);
+        ConfigService.set("provider.test-provider.apiKey", "sk-test");
+        ConfigService.set("provider.test-provider.models",
+                "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":2000,\"maxTokens\":2000}]");
+        llm.ProviderRegistry.refresh();
+
+        var agent = createAgent("clamp-agent", "test-provider", "test-model");
+        var convo = ConversationService.create(agent, "web", "user1");
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        runOnVirtualThread(agent, convo, "Hello world");
+
+        var sent = captured.get();
+        assertNotNull(sent, "max_tokens should still be set on the outgoing request");
+        assertTrue(sent < 2000,
+                "Clamped max_tokens should be below the configured cap when prompt eats headroom, got: " + sent);
+        assertTrue(sent >= 256,
+                "Clamped max_tokens should honor MIN_OUTPUT_TOKENS floor, got: " + sent);
+    }
+
+    @Test
+    public void omitsMaxTokensWhenModelHasNoConfiguredCap() throws Exception {
+        var captured = new AtomicReference<Integer>();
+        var seen = new java.util.concurrent.atomic.AtomicBoolean(false);
+        startLlmServer(exchange -> {
+            var bodyBytes = exchange.getRequestBody().readAllBytes();
+            var body = new String(bodyBytes);
+            var json = com.google.gson.JsonParser.parseString(body).getAsJsonObject();
+            seen.set(true);
+            if (json.has("max_tokens")) {
+                captured.set(json.get("max_tokens").getAsInt());
+            }
+            var resp = simpleResponse("ok");
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.getBytes().length);
+            exchange.getResponseBody().write(resp.getBytes());
+            exchange.close();
+        });
+        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:" + port);
+        ConfigService.set("provider.test-provider.apiKey", "sk-test");
+        ConfigService.set("provider.test-provider.models",
+                "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":0}]");
+        llm.ProviderRegistry.refresh();
+
+        var agent = createAgent("nocap-agent", "test-provider", "test-model");
+        var convo = ConversationService.create(agent, "web", "user1");
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        runOnVirtualThread(agent, convo, "Hi");
+
+        assertTrue(seen.get(), "LLM server should have received a request");
+        assertNull(captured.get(),
+                "max_tokens must be omitted when model has no configured cap; got: " + captured.get());
+    }
+
     // --- Helpers ---
+
+    private com.sun.net.httpserver.HttpHandler capturingHandler(
+            AtomicReference<Integer> captured, String responseBody) {
+        return exchange -> {
+            var body = new String(exchange.getRequestBody().readAllBytes());
+            var json = com.google.gson.JsonParser.parseString(body).getAsJsonObject();
+            if (json.has("max_tokens")) {
+                captured.set(json.get("max_tokens").getAsInt());
+            }
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, responseBody.getBytes().length);
+            exchange.getResponseBody().write(responseBody.getBytes());
+            exchange.close();
+        };
+    }
 
     private Agent createAgent(String name, String provider, String model) {
         var agent = new Agent();
