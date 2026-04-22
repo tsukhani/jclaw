@@ -125,9 +125,11 @@ skills/whatsapp-wacli-mac/tools/wacli
 workspace/*
 !workspace/main/
 workspace/main/*
-!workspace/main/AGENT.md
+!workspace/main/SOUL.md
 !workspace/main/IDENTITY.md
 !workspace/main/USER.md
+!workspace/main/BOOTSTRAP.md
+!workspace/main/AGENT.md
 
 # Test workspaces (ephemeral, created by integration tests)
 workspace-test/

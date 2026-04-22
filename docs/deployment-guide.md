@@ -100,7 +100,7 @@ The healthcheck uses bash's `/dev/tcp` to probe `:9000` — avoids pulling `curl
 ## Dockerfile stages
 
 1. **`frontend-build`** (`node:22-slim`) — corepack + pnpm + `nuxi generate`.
-2. **`backend-build`** (`azul/zulu-openjdk:25`) — downloads the latest `tsukhani/play1` release, `play deps --sync`, installs Playwright Chromium into `/opt/pw-browsers`, copies the SPA into `public/spa/`, bakes in `workspace/main/` (AGENT.md, IDENTITY.md, USER.md) as the main-agent seed, `play precompile`, and creates `data/` + `logs/`. The `./workspace` bind-mount in `docker-compose.yml` shadows the baked seed at runtime.
+2. **`backend-build`** (`azul/zulu-openjdk:25`) — downloads the latest `tsukhani/play1` release, `play deps --sync`, installs Playwright Chromium into `/opt/pw-browsers`, copies the SPA into `public/spa/`, bakes in `workspace/main/` (SOUL.md, IDENTITY.md, USER.md, BOOTSTRAP.md, AGENT.md) as the main-agent seed, `play precompile`, and creates `data/` + `logs/`. The `./workspace` bind-mount in `docker-compose.yml` shadows the baked seed at runtime.
 3. **`runtime`** (`azul/zulu-openjdk:25-jre-headless-latest`) — installs the Playwright-Chromium shared libs plus `python3` (for Play's Python CLI wrapper). Copies `/opt` and `/app` wholesale from the backend-build stage so the `/opt/play → /opt/play-<version>` symlink is preserved. `EXPOSE 9000`. `CMD ["play", "run", "--%prod"]`.
 
 ## Production configuration

@@ -19,7 +19,8 @@ public class AgentSystemTest extends UnitTest {
     private static final String[] TEST_AGENTS = {
             "test-agent", "ws-agent", "missing-agent", "enabled-1", "disabled-1",
             "skill-agent", "xml-agent", "convo-agent", "msg-agent", "prompt-agent",
-            "minimal-agent", "no-skills", "main", "window-agent", "delete-agent"
+            "minimal-agent", "no-skills", "main", "window-agent", "delete-agent",
+            "soul-boot-agent", "breakdown-agent"
     };
 
     @BeforeEach
@@ -76,9 +77,11 @@ public class AgentSystemTest extends UnitTest {
 
         var workspace = AgentService.workspacePath("test-agent");
         assertTrue(Files.exists(workspace));
-        assertTrue(Files.exists(workspace.resolve("AGENT.md")));
+        assertTrue(Files.exists(workspace.resolve("SOUL.md")));
         assertTrue(Files.exists(workspace.resolve("IDENTITY.md")));
         assertTrue(Files.exists(workspace.resolve("USER.md")));
+        assertTrue(Files.exists(workspace.resolve("BOOTSTRAP.md")));
+        assertTrue(Files.exists(workspace.resolve("AGENT.md")));
         assertTrue(Files.isDirectory(workspace.resolve("skills")));
     }
 
@@ -415,16 +418,56 @@ public class AgentSystemTest extends UnitTest {
     @Test
     public void assembleSkipsOptionalFiles() {
         var agent = AgentService.create("minimal-agent", "openrouter", "gpt-4.1");
-        // Delete optional files
+        // Delete optional files — SOUL, IDENTITY, USER, and BOOTSTRAP are all
+        // optional; only AGENT.md is the load-bearing instruction file.
+        var dir = AgentService.workspacePath("minimal-agent");
         try {
-            Files.deleteIfExists(AgentService.workspacePath("minimal-agent").resolve("IDENTITY.md"));
-            Files.deleteIfExists(AgentService.workspacePath("minimal-agent").resolve("USER.md"));
+            Files.deleteIfExists(dir.resolve("SOUL.md"));
+            Files.deleteIfExists(dir.resolve("IDENTITY.md"));
+            Files.deleteIfExists(dir.resolve("USER.md"));
+            Files.deleteIfExists(dir.resolve("BOOTSTRAP.md"));
         } catch (IOException _) {}
 
         var assembled = SystemPromptAssembler.assemble(agent, "test");
         assertNotNull(assembled.systemPrompt());
         // Should still have AGENT.md content and environment info
         assertTrue(assembled.systemPrompt().contains("Environment"));
+    }
+
+    @Test
+    public void assembleIncludesSoulAndBootstrapWhenPopulated() {
+        var agent = AgentService.create("soul-boot-agent", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile("soul-boot-agent", "SOUL.md", "# Soul\nPragmatic realism.");
+        AgentService.writeWorkspaceFile("soul-boot-agent", "BOOTSTRAP.md", "# Bootstrap\nPrime with caffeine.");
+        AgentService.writeWorkspaceFile("soul-boot-agent", "IDENTITY.md", "# Identity\nName: Soul Boot");
+        AgentService.writeWorkspaceFile("soul-boot-agent", "AGENT.md", "# Agent\nDo the thing.");
+
+        var prompt = SystemPromptAssembler.assemble(agent, "hello").systemPrompt();
+        assertTrue(prompt.contains("Pragmatic realism."), "SOUL.md content must appear in the prompt");
+        assertTrue(prompt.contains("Prime with caffeine."), "BOOTSTRAP.md content must appear in the prompt");
+
+        // Narrative ordering invariant: SOUL → IDENTITY → USER → BOOTSTRAP → AGENT.
+        // Assert on the two new files relative to each other and to AGENT.md so the
+        // intended sequence can't silently regress.
+        int soulIdx = prompt.indexOf("Pragmatic realism.");
+        int identIdx = prompt.indexOf("Name: Soul Boot");
+        int bootIdx = prompt.indexOf("Prime with caffeine.");
+        int agentIdx = prompt.indexOf("Do the thing.");
+        assertTrue(soulIdx >= 0 && identIdx >= 0 && bootIdx >= 0 && agentIdx >= 0,
+                "all four section bodies must be present");
+        assertTrue(soulIdx < identIdx, "SOUL must appear before IDENTITY");
+        assertTrue(identIdx < bootIdx, "IDENTITY must appear before BOOTSTRAP");
+        assertTrue(bootIdx < agentIdx, "BOOTSTRAP must appear before AGENT");
+    }
+
+    @Test
+    public void breakdownExposesSoulAndBootstrapSections() {
+        var agent = AgentService.create("breakdown-agent", "openrouter", "gpt-4.1");
+        var breakdown = SystemPromptAssembler.breakdown(agent, null, "web");
+        var names = breakdown.sections().stream()
+                .map(SystemPromptAssembler.PromptBreakdown.Entry::name).toList();
+        assertTrue(names.contains("SOUL.md"), "SOUL.md section must be present in breakdown");
+        assertTrue(names.contains("BOOTSTRAP.md"), "BOOTSTRAP.md section must be present in breakdown");
     }
 
     @Test

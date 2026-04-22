@@ -504,7 +504,7 @@ function cancel() {
   queueMode.value = 'queue'
 }
 
-const workspaceFiles = ['AGENT.md', 'IDENTITY.md', 'USER.md']
+const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AGENT.md']
 </script>
 
 <template>

@@ -445,14 +445,17 @@ public class AgentService {
             Files.createDirectories(dir);
             Files.createDirectories(dir.resolve("skills"));
 
-            writeFile(dir.resolve("AGENT.md"), """
-                    # Agent Instructions
+            // Workspace markdown files are injected into the system prompt in the order:
+            // SOUL → IDENTITY → USER → BOOTSTRAP → AGENT. Each file is optional: a missing
+            // or blank file is silently dropped from the prompt, so operators only need
+            // to edit the ones they want to populate.
 
-                    You are a helpful AI assistant. Follow these guidelines:
+            writeFile(dir.resolve("SOUL.md"), """
+                    # Soul
 
-                    - Be concise and accurate
-                    - Ask for clarification when the request is ambiguous
-                    - Use tools when they would help accomplish the task
+                    <!-- Define the psyche and character of the entity described in IDENTITY.md.
+                         This is the philosophical lens through which AGENT.md instructions are
+                         executed. Leave blank to skip. -->
                     """, overwrite);
 
             writeFile(dir.resolve("IDENTITY.md"), """
@@ -465,6 +468,24 @@ public class AgentService {
                     # User Information
 
                     <!-- Add information about the user here. The agent will use this context. -->
+                    """, overwrite);
+
+            writeFile(dir.resolve("BOOTSTRAP.md"), """
+                    # Bootstrap
+
+                    <!-- Priming / initialization context the agent should see before task
+                         instructions in AGENT.md. Examples: preconditions, environment
+                         assumptions, warm-up context. Leave blank to skip. -->
+                    """, overwrite);
+
+            writeFile(dir.resolve("AGENT.md"), """
+                    # Agent Instructions
+
+                    You are a helpful AI assistant. Follow these guidelines:
+
+                    - Be concise and accurate
+                    - Ask for clarification when the request is ambiguous
+                    - Use tools when they would help accomplish the task
                     """, overwrite);
 
         } catch (IOException e) {

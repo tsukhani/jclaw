@@ -171,17 +171,25 @@ public class SystemPromptAssembler {
      */
     private static List<SkillLoader.SkillInfo> buildPrompt(Agent agent, String userMessage, SectionedBuilder b,
                                                            Set<String> disabledTools, String channelType) {
-        // 1. AGENT.md content
-        b.startSection("AGENT.md");
-        appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "AGENT.md"));
+        // Workspace files are emitted in a deliberate narrative order: SOUL (psyche) →
+        // IDENTITY (who) → USER (for whom) → BOOTSTRAP (init/priming) → AGENT (what to do).
+        // Each section is skipped silently when the file is missing or blank, so an
+        // agent that only populates AGENT.md produces the same prompt as before the
+        // two new files were added.
+        b.startSection("SOUL.md");
+        appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "SOUL.md"));
 
-        // 2. IDENTITY.md content
         b.startSection("IDENTITY.md");
         appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "IDENTITY.md"));
 
-        // 3. USER.md content
         b.startSection("USER.md");
         appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "USER.md"));
+
+        b.startSection("BOOTSTRAP.md");
+        appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "BOOTSTRAP.md"));
+
+        b.startSection("AGENT.md");
+        appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "AGENT.md"));
 
         // 4. Skills
         var skills = SkillLoader.loadSkills(agent.name);

@@ -11,16 +11,18 @@ frontend/.nuxt/
 frontend/.output/
 frontend/node_modules/
 
-# Agent workspaces: only bake in the three main-agent seed files
-# (AGENT.md, IDENTITY.md, USER.md). All other workspace content —
-# runtime-created agents, uploads, screenshots, test workspaces — is
-# excluded. Mirrors .gitignore:124-132.
+# Agent workspaces: only bake in the five main-agent seed files
+# (SOUL.md, IDENTITY.md, USER.md, BOOTSTRAP.md, AGENT.md). All other
+# workspace content — runtime-created agents, uploads, screenshots,
+# test workspaces — is excluded. Mirrors .gitignore:124-132.
 workspace/*
 !workspace/main/
 workspace/main/*
-!workspace/main/AGENT.md
+!workspace/main/SOUL.md
 !workspace/main/IDENTITY.md
 !workspace/main/USER.md
+!workspace/main/BOOTSTRAP.md
+!workspace/main/AGENT.md
 workspace-test/
 
 # IDE
