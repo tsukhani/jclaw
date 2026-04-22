@@ -192,8 +192,12 @@ public class DefaultConfigJob extends Job<Void> {
             AgentService.create("main", "ollama-cloud", "kimi-k2.5");
             EventLogger.info("agent", "main", null, "Default agent 'main' created");
         }
-        // Always reset the built-in agent's workspace to match tracked files
-        AgentService.resetWorkspace("main");
+        // Non-destructive workspace fill-in: creates any missing workspace files
+        // from the Java-literal defaults without touching existing content.
+        // The repo ships tracked seed files under workspace/main/, so a fresh
+        // checkout already has populated markdown; this call handles the case
+        // where a file has been deleted from disk post-boot.
+        AgentService.createWorkspace("main");
 
         // Bootstrap the skill-creator capability: the main agent must have
         // skill-creator installed in its workspace on first boot so it can

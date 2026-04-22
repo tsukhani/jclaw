@@ -166,6 +166,52 @@ public class AgentSystemTest extends UnitTest {
         assertTrue(refreshed.enabled, "sync must re-enable a rogue disabled main row");
     }
 
+    @Test
+    public void mainAgentWorkspaceEditsSurviveSeedPass() {
+        // Regression for the boot-time clobber of user-edited main workspace
+        // files. Before the fix, seedDefaultAgent called resetWorkspace("main"),
+        // rewriting every workspace .md with hardcoded Java defaults on each
+        // boot. The fix switched to createWorkspace (overwrite=false) so edits
+        // persist. Simulate the boot sequence directly: pre-seed the agent,
+        // write user content, run the workspace pass, and confirm the content
+        // is unchanged.
+        AgentService.create("main", "openrouter", "gpt-4.1");
+        AgentService.writeWorkspaceFile("main", "SOUL.md",
+                "# Soul\nPragmatic realism. Intellectual integrity.");
+        AgentService.writeWorkspaceFile("main", "USER.md",
+                "# User Information\nName: Alice\nTitle: Founder");
+
+        // This is the same call seedDefaultAgent now makes on every boot.
+        AgentService.createWorkspace("main");
+
+        assertEquals("# Soul\nPragmatic realism. Intellectual integrity.",
+                AgentService.readWorkspaceFile("main", "SOUL.md"),
+                "SOUL.md edits must survive a seed-pass call");
+        assertEquals("# User Information\nName: Alice\nTitle: Founder",
+                AgentService.readWorkspaceFile("main", "USER.md"),
+                "USER.md edits must survive a seed-pass call");
+    }
+
+    @Test
+    public void mainAgentWorkspaceSeedFillsMissingFiles() {
+        // createWorkspace must still populate any file that's missing on disk,
+        // so a file accidentally deleted post-boot gets recreated with the
+        // Java-literal fallback on the next seed pass.
+        AgentService.create("main", "openrouter", "gpt-4.1");
+        var bootstrap = AgentService.workspacePath("main").resolve("BOOTSTRAP.md");
+        try { Files.deleteIfExists(bootstrap); } catch (IOException e) { fail(e); }
+        assertFalse(Files.exists(bootstrap), "precondition: BOOTSTRAP.md is absent");
+
+        AgentService.createWorkspace("main");
+
+        assertTrue(Files.exists(bootstrap),
+                "createWorkspace must recreate a missing workspace file");
+        var content = AgentService.readWorkspaceFile("main", "BOOTSTRAP.md");
+        assertNotNull(content);
+        assertTrue(content.contains("Bootstrap"),
+                "recreated BOOTSTRAP.md must carry the Java-literal default content");
+    }
+
     // --- SkillLoader tests ---
 
     @Test
