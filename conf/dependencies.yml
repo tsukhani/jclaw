@@ -3,7 +3,10 @@
 require:
     - play
     - play -> docviewer
-    - org.jsoup -> jsoup 1.18.3
+    # jsoup 1.21.2 matches the version Tika 3.2.3's parser modules (code,
+    # html) require; declaring the higher version explicitly keeps the
+    # resolved classpath version and the declared version in sync.
+    - org.jsoup -> jsoup 1.21.2
     - com.microsoft.playwright -> playwright 1.52.0
     - org.apache.tika -> tika-core 3.2.3:
         exclude:
@@ -12,6 +15,9 @@ require:
             - javax.activation -> *
             - com.sun.activation -> *
             - org.apache.logging.log4j -> *
+            - org.projectlombok -> *
+            - org.assertj -> *
+            - org.mockito -> *
     - org.apache.tika -> tika-parsers-standard-package 3.2.3:
         exclude:
             - org.apache.lucene -> *
@@ -29,12 +35,42 @@ require:
             - com.sun.activation -> *
             - org.apache.tika -> tika-parser-mail-commons
             - org.apache.tika -> tika-parser-mail-module
-    - com.vladsch.flexmark -> flexmark 0.64.8
+            - org.projectlombok -> *
+            - org.assertj -> *
+            - org.mockito -> *
+            - com.codeborne -> pdf-test
+            - com.vladsch.flexmark -> flexmark-test-util
+            - com.vladsch.flexmark -> flexmark-test-specs
+            - com.vladsch.flexmark -> flexmark-core-test
+    # flexmark pulls its own test utilities (flexmark-test-util,
+    # flexmark-test-specs, flexmark-core-test) plus codeborne/pdf-test for
+    # PDF rendering tests, which in turn drag AssertJ and hamcrest-core onto
+    # the runtime classpath. None are referenced by jclaw source (/app or
+    # /test) — tests use the JUnit 5 Jupiter API that Play's testrunner
+    # provides. Excluding shrinks the runtime bundle without affecting
+    # flexmark's Markdown → HTML rendering path.
+    - com.vladsch.flexmark -> flexmark 0.64.8:
+        exclude:
+            - com.vladsch.flexmark -> flexmark-test-util
+            - com.vladsch.flexmark -> flexmark-test-specs
+            - com.vladsch.flexmark -> flexmark-core-test
+            - com.codeborne -> pdf-test
+            - org.assertj -> *
+            - org.mockito -> *
+            - org.projectlombok -> *
     - com.vladsch.flexmark -> flexmark-ext-tables 0.64.8
     - com.vladsch.flexmark -> flexmark-ext-gfm-strikethrough 0.64.8
     - com.vladsch.flexmark -> flexmark-ext-gfm-tasklist 0.64.8
     - com.vladsch.flexmark -> flexmark-ext-autolink 0.64.8
-    - org.xhtmlrenderer -> flying-saucer-pdf-openpdf 9.4.0
+    # flying-saucer-pdf-openpdf is the other plausible transitive source of
+    # pdf-test / AssertJ / hamcrest; narrow those too.
+    - org.xhtmlrenderer -> flying-saucer-pdf-openpdf 9.4.0:
+        exclude:
+            - com.codeborne -> pdf-test
+            - org.assertj -> *
+            - org.hamcrest -> hamcrest-core
+            - org.mockito -> *
+            - org.projectlombok -> *
     - org.hdrhistogram -> HdrHistogram 2.2.2
     # Pin junit-vintage-engine to match the platform (1.13.4) that the rest of the
     # JUnit graph resolves to. A transitive dep (pdf-test via flexmark-test) pulls
@@ -55,12 +91,18 @@ require:
             # classes still live under okhttp3.*).
             - com.squareup.okhttp3 -> okhttp
             - com.squareup.okio -> *
+            - org.projectlombok -> *
+            - org.assertj -> *
+            - org.mockito -> *
     - org.telegram -> telegrambots-longpolling 9.5.0:
         exclude:
             - ch.qos.logback -> *
             - org.awaitility -> *
             - com.squareup.okhttp3 -> okhttp
             - com.squareup.okio -> *
+            - org.projectlombok -> *
+            - org.assertj -> *
+            - org.mockito -> *
     # OkHttp 5.x for WebFetchTool's SSRF-safe Dns plug-in. 5.x splits the
     # artifact by platform (okhttp-jvm / okhttp-android / okhttp-js) and
     # the root `okhttp` artifact is Gradle Metadata only — Play 1.x's Ivy
