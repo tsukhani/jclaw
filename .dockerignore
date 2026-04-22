@@ -5,6 +5,12 @@ logs/
 data/
 test-result/
 precompiled/
+# Coverage artifacts (test-time only; never shipped in the Docker image)
+jacoco.exec
+jacoco.xml
+bin/jacocoagent.jar
+bin/jacococli.jar
+frontend/coverage/
 
 # Frontend build (handled by multi-stage build)
 frontend/.nuxt/

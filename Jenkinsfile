@@ -64,6 +64,15 @@ pipeline {
                 stage('Backend') {
                     steps {
                         sh 'play autotest'
+                        // Convert the JaCoCo binary exec dump that the test
+                        // JVM wrote (via %test.javaagent.path=bin/jacocoagent.jar
+                        // in conf/application.conf) into the XML format Sonar
+                        // expects at sonar.coverage.jacoco.xmlReportPaths.
+                        // Runs after play autotest so the exec file is flushed
+                        // to disk; --classfiles points at the prod-mode
+                        // compile from the Build stage, not tmp/classes, so
+                        // the report matches what Sonar's binaries path sees.
+                        sh 'java -jar bin/jacococli.jar report jacoco.exec --classfiles precompiled/java --sourcefiles app --xml jacoco.xml'
                     }
                     post {
                         always {
@@ -74,7 +83,15 @@ pipeline {
                 stage('Frontend') {
                     steps {
                         dir('frontend') {
-                            sh 'pnpm test'
+                            // --coverage activates vitest.config.ts's
+                            // coverage.provider=v8 + reporter=[text, lcov, html]
+                            // so frontend/coverage/lcov.info exists by the
+                            // time the Sonar stage runs and can be picked up
+                            // via sonar.javascript.lcov.reportPaths. No `--`
+                            // separator — pnpm interprets that as end-of-flags
+                            // and vitest then sees `--coverage` as a test-file
+                            // pattern, not a coverage flag.
+                            sh 'pnpm test --coverage'
                         }
                     }
                 }

@@ -11,3 +11,12 @@ Jenkinsfile
 .distignore
 .dockerignore
 .gitignore
+# Build-time coverage artifacts (Jenkins only; not for the prod zip).
+# bin/ + conf/jacoco-agent.properties ship in the source repo so the
+# `%test.javaagent.path` line in conf/application.conf still resolves
+# when someone runs `play auto-test` from a fresh clone, but the
+# generated jacoco.exec / jacoco.xml should never ride into prod.
+jacoco.exec
+jacoco.xml
+bin/
+conf/jacoco-agent.properties

@@ -102,6 +102,8 @@ data/
 # Test coverage
 coverage/
 .nyc_output/
+jacoco.exec
+jacoco.xml
 
 # Play modules (auto-downloaded)
 modules/*
