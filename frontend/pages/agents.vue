@@ -43,7 +43,20 @@ onUnmounted(() => {
 })
 const workspaceTab = ref('AGENT.md')
 const workspaceContent = ref('')
+// Snapshot of the last-saved workspace-file content for the active tab.
+// Compared against workspaceContent to drive the save button's disabled state.
+// Updated on load (reset to server copy) and on successful save (reset to the
+// just-persisted value).
+const workspaceBaseline = ref('')
 const form = ref({ name: '', modelProvider: '', modelId: '', enabled: true, thinkingMode: '' })
+// Snapshot of the agent form at load time (or after a successful save). See
+// formDirty below — together they gate the Save button so it's only active
+// when the form has unsaved changes.
+const formBaseline = ref({ ...form.value })
+const formDirty = computed(() =>
+  JSON.stringify(form.value) !== JSON.stringify(formBaseline.value),
+)
+const workspaceDirty = computed(() => workspaceContent.value !== workspaceBaseline.value)
 const agentTools = ref<AgentTool[]>([])
 const agentSkills = ref<AgentSkill[]>([])
 // Effective shell allowlist for the current agent: global entries + per-skill
@@ -215,6 +228,7 @@ function newAgent() {
   const defaultProvider = providers.value[0]?.name ?? ''
   const defaultModel = providers.value[0]?.models?.[0]?.id ?? ''
   form.value = { name: '', modelProvider: defaultProvider, modelId: defaultModel, enabled: true, thinkingMode: '' }
+  formBaseline.value = { ...form.value }
   creating.value = true
   editing.value = null
 }
@@ -227,6 +241,7 @@ function editAgent(agent: Agent) {
     enabled: agent.enabled,
     thinkingMode: agent.thinkingMode ?? '',
   }
+  formBaseline.value = { ...form.value }
   editing.value = agent
   creating.value = false
   loadWorkspaceFile(agent.id, 'AGENT.md')
@@ -400,12 +415,16 @@ async function saveAgent() {
     }
     if (creating.value) {
       await $fetch('/api/agents', { method: 'POST', body: payload })
+      // Create mode navigates back to the list so the user sees the new row.
+      editing.value = null
+      creating.value = false
     }
     else if (editing.value) {
       await $fetch(`/api/agents/${editing.value.id}`, { method: 'PUT', body: payload })
+      // Edit mode stays on the detail page; reset the baseline so the Save
+      // button disables until the user makes another change.
+      formBaseline.value = { ...form.value }
     }
-    editing.value = null
-    creating.value = false
     refresh()
   }
   catch (e) {
@@ -486,14 +505,20 @@ async function loadWorkspaceFile(agentId: number, filename: string) {
   catch {
     workspaceContent.value = ''
   }
+  workspaceBaseline.value = workspaceContent.value
 }
 
 async function saveWorkspaceFile() {
-  if (!editing.value) return
+  if (!editing.value || !workspaceDirty.value) return
+  const saved = workspaceContent.value
   await $fetch(`/api/agents/${editing.value.id}/workspace/${workspaceTab.value}`, {
     method: 'PUT',
-    body: { content: workspaceContent.value },
+    body: { content: saved },
   })
+  // Snapshot the just-persisted value so the save button disables until the
+  // textarea diverges again. Capture before the await resolved so a late
+  // keystroke doesn't get clobbered into the baseline.
+  workspaceBaseline.value = saved
 }
 
 function cancel() {
@@ -819,9 +844,9 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         </div>
         <div class="flex mt-4">
           <button
-            :disabled="saving || !form.name || !form.modelProvider || !form.modelId"
+            :disabled="saving || !formDirty || !form.name || !form.modelProvider || !form.modelId"
             class="p-1.5 text-emerald-700 dark:text-emerald-400 hover:text-emerald-600 dark:hover:text-emerald-300 disabled:opacity-40 disabled:hover:text-emerald-700 dark:disabled:hover:text-emerald-400 transition-colors"
-            :title="saving ? 'Saving...' : 'Save'"
+            :title="saving ? 'Saving...' : formDirty ? 'Save' : 'No changes to save'"
             @click="saveAgent"
           >
             <svg
@@ -1323,8 +1348,9 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         </label>
         <div class="px-4 py-2 border-t border-border flex">
           <button
-            class="p-1.5 text-emerald-700 dark:text-emerald-400 hover:text-emerald-600 dark:hover:text-emerald-300 transition-colors"
-            title="Save file"
+            :disabled="!workspaceDirty"
+            class="p-1.5 text-emerald-700 dark:text-emerald-400 hover:text-emerald-600 dark:hover:text-emerald-300 disabled:opacity-40 disabled:hover:text-emerald-700 dark:disabled:hover:text-emerald-400 transition-colors"
+            :title="workspaceDirty ? 'Save file' : 'No changes to save'"
             @click="saveWorkspaceFile"
           >
             <svg
