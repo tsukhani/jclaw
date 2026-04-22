@@ -10,6 +10,13 @@ import llm.LlmTypes.*;
  * Reasoning: sends {@code reasoning_effort} (accepted values: "low", "medium", "high").
  * Streaming: reads the {@code reasoning} string field from deltas.
  *
+ * Known limitation (JCLAW-127): Gemini models hosted on Ollama Cloud cannot have
+ * reasoning disabled. Google's API clamps {@code thinking_budget} to a non-zero
+ * floor for Gemini 2.5 Pro / 3, and Ollama's OpenAI-compat shim does not document
+ * a passthrough for Google-native fields. The frontend locks the Thinking toggle
+ * off for the {@code ollama-cloud} + {@code gemini-*} combination to surface this
+ * to the user rather than silently ignoring their preference.
+ *
  * @see <a href="https://docs.ollama.com/capabilities/thinking">Ollama Thinking Docs</a>
  */
 public final class OllamaProvider extends LlmProvider {

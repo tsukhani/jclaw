@@ -4,6 +4,7 @@ import DOMPurify from 'dompurify'
 import { computeConversationCost, formatConversationCost, formatConversationCostTooltip, formatUsageCost, formatUsageCostTooltip, type MessageUsage } from '~/utils/usage-cost'
 import { formatSize } from '~/utils/format'
 import { thinkingHeaderLabel, initCollapsedState } from '~/utils/thinking'
+import { resolveThinkingLock } from '~/utils/thinking-lock'
 import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
 // Filter out tool messages and empty assistant messages (tool call records) from display.
 // The predicate lives in ~/utils/display-message-filter for unit-testability; see
@@ -190,6 +191,13 @@ const selectedModelKey = computed(() => {
 // Whether the selected model supports thinking
 const thinkingSupported = computed(() => selectedModelInfo.value?.supportsThinking === true)
 
+// JCLAW-127: Provider/model combos where reasoning cannot be disabled even with
+// the toggle off. Shown as a locked-blue pill with an explanatory tooltip so
+// the operator isn't misled into thinking their preference was honored.
+const thinkingLock = computed(() =>
+  resolveThinkingLock(effectiveModel.value.providerName, effectiveModel.value.modelId),
+)
+
 // Thinking levels advertised by the currently selected model. Empty for
 // non-thinking models — the toolbar hides the selector in that case.
 const thinkingLevels = computed<string[]>(() => effectiveThinkingLevels(selectedModelInfo.value))
@@ -227,6 +235,10 @@ const audioActive = computed(() => selectedAgent.value?.audioEnabled !== false)
 
 function toggleThinkingPill() {
   if (!thinkingSupported.value) return
+  // JCLAW-127: on a locked combo (ollama-cloud + Gemini 2.5 Pro / 3) the
+  // upstream Google API ignores our off signal, so clicking is a no-op. The
+  // tooltip communicates why.
+  if (thinkingLock.value.locked) return
   if (thinkingActive.value) {
     updateAgentSetting({ thinkingMode: null })
   }
@@ -1835,10 +1847,16 @@ function exportConversation() {
                 v-if="thinkingSupported"
                 type="button"
                 class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors"
-                :class="thinkingActive
-                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-500/25'
-                  : 'border border-input text-fg-muted hover:text-fg-primary hover:border-ring'"
-                :title="thinkingActive ? 'Thinking on — click to turn off' : 'Thinking off — click to turn on'"
+                :class="[
+                  (thinkingActive || thinkingLock.locked)
+                    ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-500/25'
+                    : 'border border-input text-fg-muted hover:text-fg-primary hover:border-ring',
+                  thinkingLock.locked ? 'cursor-not-allowed opacity-90' : '',
+                ]"
+                :aria-disabled="thinkingLock.locked"
+                :title="thinkingLock.locked
+                  ? thinkingLock.reason
+                  : (thinkingActive ? 'Thinking on — click to turn off' : 'Thinking off — click to turn on')"
                 @click="toggleThinkingPill"
               >
                 <svg

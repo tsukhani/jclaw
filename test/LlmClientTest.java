@@ -360,4 +360,175 @@ public class LlmClientTest extends UnitTest {
         LlmProvider.mergeToolCallChunks(List.of(), acc);
         assertEquals(0, acc.size());
     }
+
+    // ─── OpenRouter two-breakpoint prompt caching (JCLAW-128) ────────
+
+    @Test
+    public void openrouter_cache_splitsSystemAtBoundary() {
+        // Marker present: system message splits into two text blocks —
+        // prefix with cache_control, suffix without. Marker text itself is
+        // consumed by the split (never reaches the wire).
+        var marker = agents.SystemPromptAssembler.CACHE_BOUNDARY_MARKER;
+        var systemText = "stable skills + tools catalog\n" + marker + "\n<dynamic memories>";
+        var req = chatRequest("anthropic/claude-3-7-sonnet",
+                List.of(llm.LlmTypes.ChatMessage.system(systemText),
+                        llm.LlmTypes.ChatMessage.user("hello")));
+
+        var body = serialize(openRouterProvider(), req);
+        var systemMsg = firstSystem(body);
+        var blocks = systemMsg.getAsJsonArray("content");
+
+        assertEquals(2, blocks.size(), "expected prefix + suffix blocks");
+        var prefix = blocks.get(0).getAsJsonObject();
+        var suffix = blocks.get(1).getAsJsonObject();
+        assertTrue(prefix.has("cache_control"), "prefix must have cache_control");
+        assertFalse(suffix.has("cache_control"), "suffix must NOT have cache_control");
+        assertFalse(prefix.get("text").getAsString().contains(marker), "prefix must not contain marker");
+        assertFalse(suffix.get("text").getAsString().contains(marker), "suffix must not contain marker");
+        assertTrue(prefix.get("text").getAsString().contains("stable"));
+        assertTrue(suffix.get("text").getAsString().contains("dynamic"));
+    }
+
+    @Test
+    public void openrouter_cache_noBoundaryMarker_fallsBackToSingleBlock() {
+        // Regression guard for prompts that predate the marker convention —
+        // still get cache_control, just on a single block.
+        var req = chatRequest("anthropic/claude-3-7-sonnet",
+                List.of(llm.LlmTypes.ChatMessage.system("legacy system prompt, no marker"),
+                        llm.LlmTypes.ChatMessage.user("hello")));
+
+        var body = serialize(openRouterProvider(), req);
+        var blocks = firstSystem(body).getAsJsonArray("content");
+
+        assertEquals(1, blocks.size(), "no marker → single block fallback");
+        assertTrue(blocks.get(0).getAsJsonObject().has("cache_control"));
+    }
+
+    @Test
+    public void openrouter_cache_trailingUserMessageGetsBreakpoint() {
+        // Breakpoint B: when the last message is role=user, tag its final
+        // content block with cache_control. Extends cached prefix through
+        // all conversation history.
+        var req = chatRequest("anthropic/claude-3-7-sonnet",
+                List.of(llm.LlmTypes.ChatMessage.system("sys"),
+                        llm.LlmTypes.ChatMessage.user("first turn"),
+                        llm.LlmTypes.ChatMessage.assistant("response"),
+                        llm.LlmTypes.ChatMessage.user("follow-up")));
+
+        var body = serialize(openRouterProvider(), req);
+        var messages = body.getAsJsonArray("messages");
+        var last = messages.get(messages.size() - 1).getAsJsonObject();
+
+        assertEquals("user", last.get("role").getAsString());
+        var content = last.get("content");
+        assertTrue(content.isJsonArray(), "trailing user content must be blocks");
+        var blocks = content.getAsJsonArray();
+        assertTrue(blocks.get(blocks.size() - 1).getAsJsonObject().has("cache_control"),
+                "last block of trailing user message must have cache_control");
+    }
+
+    @Test
+    public void openrouter_cache_trailingToolMessageSkipsBreakpoint() {
+        // Mid-round tool loop case: last message is role=tool. No cache tag
+        // on that message (would be wasted — tool_result text varies every
+        // call). System breakpoint still fires.
+        var req = chatRequest("anthropic/claude-3-7-sonnet",
+                List.of(llm.LlmTypes.ChatMessage.system("sys"),
+                        llm.LlmTypes.ChatMessage.user("hello"),
+                        llm.LlmTypes.ChatMessage.toolResult("call_1", "tool output")));
+
+        var body = serialize(openRouterProvider(), req);
+        var messages = body.getAsJsonArray("messages");
+        var last = messages.get(messages.size() - 1).getAsJsonObject();
+
+        assertEquals("tool", last.get("role").getAsString());
+        // tool_result content stays as a plain string — breakpoint B did NOT
+        // touch it (it walks away early on non-user trailing messages).
+        assertTrue(last.get("content").isJsonPrimitive(),
+                "tool_result must stay as plain string, not block-array");
+        // System breakpoint still applied.
+        assertTrue(firstSystem(body).get("content").isJsonArray());
+    }
+
+    @Test
+    public void openrouter_cache_nonAnthropicModel_skipsBothBreakpoints() {
+        // Non-Anthropic route: no cache_control anywhere.
+        var req = chatRequest("openai/gpt-4",
+                List.of(llm.LlmTypes.ChatMessage.system("sys with no marker"),
+                        llm.LlmTypes.ChatMessage.user("hello")));
+
+        var body = serialize(openRouterProvider(), req);
+        var json = body.toString();
+
+        assertFalse(json.contains("cache_control"),
+                "non-Anthropic route must not emit cache_control: " + json);
+    }
+
+    @Test
+    public void openrouter_cache_nonAnthropicModel_stripsBoundaryMarker() {
+        // Non-caching route: the marker substring is scrubbed from the
+        // system content so it doesn't reach the model.
+        var marker = agents.SystemPromptAssembler.CACHE_BOUNDARY_MARKER;
+        var systemText = "stable\n" + marker + "\ndynamic";
+        var req = chatRequest("openai/gpt-4",
+                List.of(llm.LlmTypes.ChatMessage.system(systemText),
+                        llm.LlmTypes.ChatMessage.user("hello")));
+
+        var body = serialize(openRouterProvider(), req);
+        var systemContent = firstSystem(body).get("content");
+        assertTrue(systemContent.isJsonPrimitive(),
+                "non-caching route leaves system as plain string");
+        assertFalse(systemContent.getAsString().contains(marker),
+                "marker must be stripped from outbound system text");
+    }
+
+    @Test
+    public void openrouter_cache_breakpointCountAtMost4() {
+        // Anthropic allows ≤4 cache_control markers per request. Defensive
+        // assertion: no matter what we do upstream, we must not blow past 4.
+        var marker = agents.SystemPromptAssembler.CACHE_BOUNDARY_MARKER;
+        var req = chatRequest("anthropic/claude-3-7-sonnet",
+                List.of(llm.LlmTypes.ChatMessage.system("stable\n" + marker + "\ndynamic"),
+                        llm.LlmTypes.ChatMessage.user("first"),
+                        llm.LlmTypes.ChatMessage.assistant("reply"),
+                        llm.LlmTypes.ChatMessage.user("follow-up")));
+
+        var json = serialize(openRouterProvider(), req).toString();
+        // Count occurrences of "cache_control" in the serialized body.
+        int count = 0;
+        int idx = 0;
+        while ((idx = json.indexOf("cache_control", idx)) >= 0) { count++; idx++; }
+        assertTrue(count <= 4, "must not exceed Anthropic's 4-breakpoint budget, got " + count);
+        assertEquals(2, count, "JCLAW-128 emits exactly 2 breakpoints per request");
+    }
+
+    // ─── helpers ─────────────────────────────────────────────────────
+
+    private static llm.OpenRouterProvider openRouterProvider() {
+        return new llm.OpenRouterProvider(new llm.LlmTypes.ProviderConfig(
+                "openrouter", "https://openrouter.ai/api/v1", "sk-test", List.of()));
+    }
+
+    private static llm.LlmTypes.ChatRequest chatRequest(String model, List<llm.LlmTypes.ChatMessage> messages) {
+        return new llm.LlmTypes.ChatRequest(model, messages, null, false, null, null);
+    }
+
+    private static com.google.gson.JsonObject serialize(llm.LlmProvider provider, llm.LlmTypes.ChatRequest req) {
+        try {
+            var m = llm.LlmProvider.class.getDeclaredMethod("serializeRequest", llm.LlmTypes.ChatRequest.class);
+            m.setAccessible(true);
+            var json = (String) m.invoke(provider, req);
+            return JsonParser.parseString(json).getAsJsonObject();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static com.google.gson.JsonObject firstSystem(com.google.gson.JsonObject body) {
+        for (var el : body.getAsJsonArray("messages")) {
+            var msg = el.getAsJsonObject();
+            if ("system".equals(msg.get("role").getAsString())) return msg;
+        }
+        throw new AssertionError("no system message in body: " + body);
+    }
 }

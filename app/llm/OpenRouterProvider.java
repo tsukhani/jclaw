@@ -1,5 +1,6 @@
 package llm;
 
+import agents.SystemPromptAssembler;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import llm.LlmTypes.*;
@@ -78,62 +79,171 @@ public final class OpenRouterProvider extends LlmProvider {
         usage.addProperty("include", true);
         request.add("usage", usage);
 
-        // For providers that need explicit cache_control, walk the already-serialized
-        // messages array and attach a breakpoint to the system message. We used to
-        // send a top-level cache_control: {type: "ephemeral"} as a shortcut, but
-        // OpenRouter returns HTTP 404 ("No endpoints found that support Anthropic
-        // automatic caching (top-level cache_control)") when the routed endpoint does
-        // not support the shortcut — which turns out to be most Anthropic routes, not
-        // just Bedrock/Vertex as the docs suggest. Per-block injection works on every
-        // route.
+        // JCLAW-128: two-breakpoint strategy for Anthropic-routed models. Under
+        // Anthropic's canonical tools → system → messages ordering, a breakpoint
+        // on the stable system prefix caches (tools + stable system), and a
+        // second breakpoint on the trailing user message extends the cached
+        // prefix through the full conversation history. Each turn only re-
+        // prefills the one new user message; multi-round tool loops within a
+        // turn reuse the breakpoint from the previous round. Anthropic permits
+        // up to 4 cache breakpoints per request — we emit 2.
         //
         // OpenAI/DeepSeek/Grok/Gemini 2.5 cache implicitly and need no directive.
         if (requiresExplicitCacheControl(chatRequest.model())) {
-            injectSystemMessageCacheBreakpoint(request);
+            splitSystemMessageAtCacheBoundary(request);
+            injectTrailingUserMessageCacheBreakpoint(request);
+        } else {
+            // Non-caching providers still carry the boundary marker verbatim in
+            // the system text, which is meaningless to them. Strip it so it
+            // doesn't pollute the model's context (observed: some models echo
+            // HTML comments back if asked to quote their instructions).
+            stripCacheBoundaryMarker(request);
         }
     }
 
     /**
-     * Find the first system message in the already-serialized request and attach
-     * {@code cache_control: {type: "ephemeral"}} to its last content block, converting
-     * a string content field into block-array form if necessary. The cache breakpoint
-     * marks the end of the cacheable prefix; everything after the system message
-     * (the conversation history and current user turn) remains fresh input.
+     * Find the first system message and split its text at
+     * {@link SystemPromptAssembler#CACHE_BOUNDARY_MARKER} into two blocks:
+     * a stable-prefix block tagged with {@code cache_control: ephemeral} and a
+     * dynamic-suffix block without cache_control. The marker text itself is
+     * consumed by the split.
+     *
+     * When the marker is absent (older prompts, test fixtures, or the edge
+     * case where the assembler ran without the memories section), falls back
+     * to the pre-JCLAW-128 behavior: single block containing the full system
+     * text with cache_control attached. This preserves the cache-write
+     * behavior for callers that predate the marker convention.
      */
-    private static void injectSystemMessageCacheBreakpoint(JsonObject request) {
+    private static void splitSystemMessageAtCacheBoundary(JsonObject request) {
+        var systemMsg = findFirstSystemMessage(request);
+        if (systemMsg == null) return;
+        var content = systemMsg.get("content");
+        if (content == null || content.isJsonNull()) return;
+
+        // Only handle string content here — block-array content means an
+        // upstream caller already structured the system message and we
+        // shouldn't second-guess their layout.
+        if (!content.isJsonPrimitive()) {
+            // Fall back to the legacy single-cache-control behavior on the
+            // last existing block, matching pre-JCLAW-128 semantics.
+            if (content.isJsonArray()) {
+                var blocks = content.getAsJsonArray();
+                if (!blocks.isEmpty()) {
+                    attachCacheControl(blocks.get(blocks.size() - 1).getAsJsonObject());
+                }
+            }
+            return;
+        }
+
+        var text = content.getAsString();
+        var markerIdx = text.indexOf(SystemPromptAssembler.CACHE_BOUNDARY_MARKER);
+        var blocks = new JsonArray();
+        if (markerIdx < 0) {
+            // No marker: single cached block, preserving legacy behavior.
+            var block = textBlock(text);
+            attachCacheControl(block);
+            blocks.add(block);
+        } else {
+            var prefix = text.substring(0, markerIdx);
+            var suffix = text.substring(markerIdx + SystemPromptAssembler.CACHE_BOUNDARY_MARKER.length());
+            var prefixBlock = textBlock(prefix);
+            attachCacheControl(prefixBlock);
+            blocks.add(prefixBlock);
+            // Skip the suffix block entirely when empty — no reason to send an
+            // empty text block just to hold a missing cache_control.
+            if (!suffix.isEmpty()) {
+                blocks.add(textBlock(suffix));
+            }
+        }
+        systemMsg.add("content", blocks);
+    }
+
+    /**
+     * Attach {@code cache_control: ephemeral} to the last block of the final
+     * message when that message's role is {@code user}. No-op otherwise —
+     * during multi-round tool loops the final message is {@code tool}, and
+     * mid-stream the final message may be an empty {@code assistant} draft;
+     * neither should receive a cache tag.
+     *
+     * Effect: the cached prefix extends through the full conversation history
+     * up to and including the current user turn. On the next turn (or the
+     * next tool-loop round), everything up to this breakpoint is eligible for
+     * a cache read.
+     */
+    private static void injectTrailingUserMessageCacheBreakpoint(JsonObject request) {
         if (!request.has("messages") || !request.get("messages").isJsonArray()) return;
         var messages = request.getAsJsonArray("messages");
-        for (var el : messages) {
+        if (messages.isEmpty()) return;
+        var last = messages.get(messages.size() - 1);
+        if (!last.isJsonObject()) return;
+        var msg = last.getAsJsonObject();
+        if (!msg.has("role") || !MessageRole.USER.value.equals(msg.get("role").getAsString())) return;
+
+        var blocks = ensureBlockArrayContent(msg);
+        if (blocks == null || blocks.isEmpty()) return;
+        attachCacheControl(blocks.get(blocks.size() - 1).getAsJsonObject());
+    }
+
+    /**
+     * Remove the cache-boundary marker substring from the first system message
+     * for providers that don't participate in our cache protocol. The marker
+     * is an HTML comment inside the system text; cache-emitting routes
+     * consume it via {@link #splitSystemMessageAtCacheBoundary}, but other
+     * routes (OpenAI, DeepSeek, Grok, Gemini 2.5, Ollama) would otherwise
+     * ship it verbatim to the model.
+     */
+    private static void stripCacheBoundaryMarker(JsonObject request) {
+        var systemMsg = findFirstSystemMessage(request);
+        if (systemMsg == null) return;
+        var content = systemMsg.get("content");
+        if (content == null || !content.isJsonPrimitive()) return;
+        var text = content.getAsString();
+        if (!text.contains(SystemPromptAssembler.CACHE_BOUNDARY_MARKER)) return;
+        systemMsg.addProperty("content", text.replace(SystemPromptAssembler.CACHE_BOUNDARY_MARKER, ""));
+    }
+
+    /**
+     * Convert a message's string content into a single-element block array,
+     * or return the existing block array. Returns {@code null} when the
+     * content is null/JsonNull/non-convertible. Mutates the message to hold
+     * the new array form when conversion happens, so the caller can tag the
+     * last block and have the change persist.
+     */
+    private static JsonArray ensureBlockArrayContent(JsonObject msg) {
+        var content = msg.get("content");
+        if (content == null || content.isJsonNull()) return null;
+        if (content.isJsonArray()) return content.getAsJsonArray();
+        if (!content.isJsonPrimitive()) return null;
+
+        var blocks = new JsonArray();
+        blocks.add(textBlock(content.getAsString()));
+        msg.add("content", blocks);
+        return blocks;
+    }
+
+    private static JsonObject findFirstSystemMessage(JsonObject request) {
+        if (!request.has("messages") || !request.get("messages").isJsonArray()) return null;
+        for (var el : request.getAsJsonArray("messages")) {
             if (!el.isJsonObject()) continue;
             var msg = el.getAsJsonObject();
-            if (!msg.has("role") || !MessageRole.SYSTEM.value.equals(msg.get("role").getAsString())) continue;
-
-            var content = msg.get("content");
-            if (content == null || content.isJsonNull()) return;
-
-            JsonArray blocks;
-            if (content.isJsonPrimitive()) {
-                // String content: convert to block-array form so we have somewhere to
-                // attach the cache_control directive.
-                blocks = new JsonArray();
-                var block = new JsonObject();
-                block.addProperty("type", "text");
-                block.addProperty("text", content.getAsString());
-                blocks.add(block);
-                msg.add("content", blocks);
-            } else if (content.isJsonArray()) {
-                blocks = content.getAsJsonArray();
-            } else {
-                return;
+            if (msg.has("role") && MessageRole.SYSTEM.value.equals(msg.get("role").getAsString())) {
+                return msg;
             }
-
-            if (blocks.isEmpty()) return;
-            var lastBlock = blocks.get(blocks.size() - 1).getAsJsonObject();
-            var cacheControl = new JsonObject();
-            cacheControl.addProperty("type", "ephemeral");
-            lastBlock.add("cache_control", cacheControl);
-            return; // Only the first system message gets the breakpoint.
         }
+        return null;
+    }
+
+    private static JsonObject textBlock(String text) {
+        var block = new JsonObject();
+        block.addProperty("type", "text");
+        block.addProperty("text", text);
+        return block;
+    }
+
+    private static void attachCacheControl(JsonObject block) {
+        var cc = new JsonObject();
+        cc.addProperty("type", "ephemeral");
+        block.add("cache_control", cc);
     }
 
     /**
