@@ -16,6 +16,10 @@ import {
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
+// Solid lightbulb for the active-reasoning header — the outline bulb on the
+// composer's Think toggle means "thinking available", the solid+amber bulb
+// on an expanded reasoning block means "thoughts are here, shining."
+import { LightBulbIcon as LightBulbIconSolid } from '@heroicons/vue/24/solid'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { computeConversationCost, formatConversationCost, formatConversationCostTooltip, formatUsageCost, formatUsageCostTooltip, type MessageUsage } from '~/utils/usage-cost'
@@ -1514,8 +1518,8 @@ function exportConversation() {
                           :title="msg.thinkingCollapsed ? 'Expand reasoning' : 'Collapse reasoning'"
                           @click="toggleThinking(msg)"
                         >
-                          <LightBulbIcon
-                            class="w-3.5 h-3.5 shrink-0"
+                          <LightBulbIconSolid
+                            class="w-3.5 h-3.5 shrink-0 text-amber-400 drop-shadow-[0_0_4px_rgba(251,191,36,0.55)]"
                             aria-hidden="true"
                           />
                           <span class="font-medium">{{ thinkingHeaderLabel(msg) }}</span>
@@ -1544,13 +1548,14 @@ function exportConversation() {
                           <span>Copy</span>
                         </button>
                       </div>
+                      <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify (see renderMarkdown above) before returning. -->
                       <div
                         v-if="!msg.thinkingCollapsed"
                         data-reasoning-body
-                        class="px-4 pb-3 pt-1 text-base text-fg-primary whitespace-pre-wrap break-words h-80 overflow-y-auto border-t border-neutral-200 dark:border-neutral-700"
-                      >
-                        {{ msg.reasoning }}
-                      </div>
+                        class="prose-chat px-4 pb-3 pt-1 text-base text-fg-primary break-words h-80 overflow-y-auto border-t border-neutral-200 dark:border-neutral-700"
+                        v-html="renderMarkdown(msg.reasoning, selectedAgentId)"
+                      />
+                      <!-- eslint-enable vue/no-v-html -->
                     </div>
                     <!-- Response content — plain rendered markdown, no bubble. -->
                     <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify (see renderMarkdown above) before returning. -->
