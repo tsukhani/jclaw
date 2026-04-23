@@ -108,15 +108,19 @@ function handleMouseLeave() {
     </PopoverTrigger>
     <!--
       PopoverContent ships with w-72 rounded-md border p-4 shadow-md bg-popover
-      out of the box (see shadcn-vue Popover primitive) so we only override what
-      the default palette gets wrong: the project's --border token resolves to
-      the same hsl as the popover bg in dark mode, so the edge disappears. Pin
-      an explicit neutral pair to restore a visible 1px ring.
+      out of the box (see shadcn-vue Popover primitive). Two targeted overrides:
+      - border-neutral-200 / dark:border-neutral-700 — the project's --border
+        token resolves to the same hsl as the popover bg in dark mode, so the
+        default edge disappears; pin explicit neutrals to restore the ring.
+      - rounded-2xl — Unsloth Studio's popovers use a ~16px radius (their
+        --radius is 1.1rem vs shadcn's default 0.625rem). At jclaw's token
+        scale, rounded-2xl lands at the same ~16px and matches the reference
+        screenshot's corner softness.
     -->
     <PopoverContent
       align="end"
       :side-offset="4"
-      class="border-neutral-200 dark:border-neutral-700"
+      class="rounded-2xl border-neutral-200 dark:border-neutral-700"
       @mouseenter="open = true"
       @mouseleave="open = false"
       @focusin="open = true"
@@ -128,7 +132,7 @@ function handleMouseLeave() {
             Context usage
           </dt>
           <dd
-            class="tabular-nums font-medium"
+            class="tabular-nums"
             :class="percentColor"
           >
             {{ percentLabel }}
@@ -138,7 +142,7 @@ function handleMouseLeave() {
           <dt class="text-muted-foreground">
             Prompt tokens
           </dt>
-          <dd class="tabular-nums font-medium">
+          <dd class="tabular-nums">
             {{ prompt.toLocaleString() }}
           </dd>
         </div>
@@ -149,7 +153,7 @@ function handleMouseLeave() {
           <dt class="text-muted-foreground">
             Thinking tokens
           </dt>
-          <dd class="tabular-nums font-medium">
+          <dd class="tabular-nums">
             {{ reasoning.toLocaleString() }}
           </dd>
         </div>
@@ -160,7 +164,7 @@ function handleMouseLeave() {
           <dt class="text-muted-foreground">
             Cached tokens
           </dt>
-          <dd class="tabular-nums font-medium">
+          <dd class="tabular-nums">
             {{ cached.toLocaleString() }}
           </dd>
         </div>
@@ -168,7 +172,7 @@ function handleMouseLeave() {
           <dt class="text-muted-foreground">
             Completion
           </dt>
-          <dd class="tabular-nums font-medium">
+          <dd class="tabular-nums">
             {{ completion.toLocaleString() }}
           </dd>
         </div>
@@ -176,10 +180,10 @@ function handleMouseLeave() {
           <dt class="text-muted-foreground">
             Total
           </dt>
-          <dd class="tabular-nums font-medium">
+          <dd class="tabular-nums">
             {{ total.toLocaleString() }}<span
               v-if="capacity"
-              class="text-muted-foreground font-normal"
+              class="text-muted-foreground"
             > / {{ capacity.toLocaleString() }}</span>
           </dd>
         </div>
@@ -194,7 +198,7 @@ function handleMouseLeave() {
             <dt class="text-muted-foreground">
               Turns
             </dt>
-            <dd class="tabular-nums font-medium">
+            <dd class="tabular-nums">
               {{ turnCount }}
             </dd>
           </div>
@@ -206,7 +210,7 @@ function handleMouseLeave() {
             <dt class="text-muted-foreground">
               Cost
             </dt>
-            <dd class="tabular-nums font-medium">
+            <dd class="tabular-nums">
               {{ costLabel }}
             </dd>
           </div>

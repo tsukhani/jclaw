@@ -5,6 +5,13 @@
    ever generated and the whole site renders unstyled. */
 @import "tailwindcss";
 
+/* Self-hosted Inter Variable (weights 100–900). Matches the font stack
+   Unsloth Studio ships — its body sans is what gives their dark-mode chat
+   UI the crisp, tight feel; system-ui → SF Pro renders noticeably wider and
+   softer at the same Tailwind sizes. Package emits the @font-face rules
+   plus the woff2 files; Vite picks them up automatically. */
+@import "@fontsource-variable/inter";
+
 /* Class-based dark mode (preserves v3 darkMode: 'class' behavior).
    The <html> element carries the 'dark' class; useTheme() manages it. */
 @custom-variant dark (&:where(.dark, .dark *));
@@ -64,7 +71,7 @@
     --card: #222427;
     --card-foreground: hsl(0 0% 98%);
     --popover: #222427;
-    --popover-foreground: hsl(0 0% 98%);
+    --popover-foreground: hsl(0 0% 83%);
     --primary: hsl(0 0% 98%);
     --primary-foreground: hsl(0 0% 9%);
     --secondary: hsl(0 0% 14.9%);
@@ -103,6 +110,18 @@
   ::backdrop,
   ::file-selector-button {
     border-color: var(--border);
+  }
+
+  /* Inter Variable as the default sans — matches Unsloth Studio's body
+     font. The `--font-sans` @theme token below wires the class utility;
+     these rules apply the font globally so prose inherits it without
+     needing font-sans on every element. */
+  html,
+  body {
+    font-family: "Inter Variable", ui-sans-serif, sans-serif, system-ui;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizelegibility;
   }
 }
 
@@ -143,4 +162,7 @@
   --color-danger: var(--danger);
   --color-warning: var(--warning);
   --color-info: var(--info);
+
+  /* font-sans utility — uses Inter Variable same as the global body rule. */
+  --font-sans: "Inter Variable", ui-sans-serif, sans-serif, system-ui;
 }

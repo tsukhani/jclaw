@@ -21,6 +21,7 @@
     "test:e2e:headed": "PWSLOWMO=500 playwright test --headed --workers=1"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
     "@tanstack/vue-table": "^8.21.3",
     "@vueuse/core": "^14.2.1",
     "class-variance-authority": "^0.7.1",
