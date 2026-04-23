@@ -521,6 +521,51 @@ async function copyReasoning(msg: Message) {
     console.error('Failed to copy reasoning:', e)
   }
 }
+/**
+ * Regenerate the assistant's response to the last user prompt. Semantically
+ * equivalent to "rewind to the user message, re-send it". Deletes the user +
+ * assistant pair (and anything after) both server-side and locally, then
+ * calls sendMessage() with the user's original text so the backend runs a
+ * fresh turn against the pre-existing conversation history.
+ */
+async function regenerateMessage(msg: Message) {
+  if (streaming.value) return
+  const convoId = selectedConvoId.value
+  const idx = messages.value.findIndex(m => m === msg)
+  if (idx < 0) return
+  let userIdx = -1
+  for (let i = idx - 1; i >= 0; i--) {
+    if (messages.value[i]!.role === 'user') {
+      userIdx = i
+      break
+    }
+  }
+  if (userIdx < 0) return
+  const userContent = messages.value[userIdx]!.content ?? ''
+  if (convoId) {
+    for (let i = userIdx; i < messages.value.length; i++) {
+      const m = messages.value[i]!
+      if (m.id) {
+        try {
+          await $fetch(`/api/conversations/${convoId}/messages/${m.id}`, { method: 'DELETE' })
+        }
+        catch { /* best-effort — local truncate still happens */ }
+      }
+    }
+  }
+  messages.value = messages.value.slice(0, userIdx)
+  input.value = userContent
+  await nextTick()
+  sendMessage()
+}
+
+/**
+ * Per-message hover state for the tok/s statistics popover. Stores the
+ * currently-open message's id/_key so only one popover is visible at a
+ * time; v-for rows bind their individual open state off this ref.
+ */
+const tokStatsHoverKey = ref<string | number | null>(null)
+
 async function deleteMessage(msg: Message) {
   // Skip mid-stream placeholders that have no server-side row yet — the
   // outer stop-streaming path already handles those.
@@ -1540,211 +1585,197 @@ function exportConversation() {
                       (empty response)
                     </div>
                     <!--
-                Usage metrics + hover actions share a single right-aligned
-                row so the copy/delete icons live on the same visual baseline
-                as the token pills. ml-auto on the action group pushes it to
-                the far right of the flex row regardless of how many stat
-                pills are visible; the min-width ensures the bubble widens
-                far enough that the full worst-case set (prompt + cached +
-                reasoning + completion + separator + tok/s + duration + cost
-                + copy + delete) fits with breathing room. flex-wrap is
-                dropped — wrapping the action icons to their own line was
-                the previous layout we're explicitly moving away from.
-              -->
+                      Assistant footer — Unsloth-style compact row:
+                      [copy] [regenerate] [delete] [tok/s pill with hover
+                      popover for full stats]. Icons render as soon as
+                      streaming ends (no msg.id gate) so there's no
+                      perceptible delay during the persist race. Delete
+                      button is disabled until msg.id lands since the
+                      server needs an id to act on.
+                    -->
                     <div
-                      v-if="msg.usage || msg.id"
-                      class="flex items-center gap-2 mt-1.5 px-1 min-w-[500px]"
+                      v-if="!streaming && (msg.id || msg._key) && msg.content"
+                      class="flex items-center gap-1 mt-1.5 -ml-1"
                     >
-                      <template v-if="msg.usage">
-                        <span
-                          class="inline-flex items-center gap-1 text-xs text-fg-muted"
-                          :title="`${msg.usage.prompt.toLocaleString()} input tokens`"
-                        >
-                          <svg
-                            class="w-3 h-3 text-fg-muted"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M7 11l5-5m0 0l5 5m-5-5v12"
-                          /></svg>
-                          {{ msg.usage.prompt.toLocaleString() }}
-                        </span>
-                        <span
-                          v-if="msg.usage.cached"
-                          class="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400/70"
-                          :title="`${msg.usage.cached.toLocaleString()} of ${msg.usage.prompt.toLocaleString()} input tokens served from prompt cache`"
-                        >
-                          <svg
-                            class="w-3 h-3"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M13 10V3L4 14h7v7l9-11h-7z"
-                          /></svg>
-                          {{ msg.usage.cached.toLocaleString() }}
-                        </span>
-                        <span
-                          v-if="msg.usage.reasoning"
-                          class="inline-flex items-center gap-1 text-xs text-blue-700/80 dark:text-blue-400/70"
-                          :title="`${msg.usage.reasoning.toLocaleString()} reasoning tokens`"
-                        >
-                          <svg
-                            class="w-3 h-3"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-                          /></svg>
-                          {{ msg.usage.reasoning.toLocaleString() }}
-                        </span>
-                        <span
-                          class="inline-flex items-center gap-1 text-xs text-fg-muted"
-                          :title="`${msg.usage.completion.toLocaleString()} output tokens`"
-                        >
-                          <svg
-                            class="w-3 h-3 text-fg-muted"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M17 13l-5 5m0 0l-5-5m5 5V6"
-                          /></svg>
-                          {{ msg.usage.completion.toLocaleString() }}
-                        </span>
-                        <span class="text-border text-xs">|</span>
-                        <span
-                          v-if="formatTokensPerSec(msg.usage)"
-                          class="inline-flex items-center gap-1 text-xs text-fg-muted"
-                          title="Output tokens per second"
-                        >
-                          <svg
-                            class="w-3 h-3"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M13 10V3L4 14h7v7l9-11h-7z"
-                          /></svg>
-                          {{ formatTokensPerSec(msg.usage) }}
-                        </span>
-                        <span
-                          v-if="msg.usage.durationMs"
-                          class="inline-flex items-center gap-1 text-xs text-fg-muted"
-                          title="Total response time"
-                        >
-                          <svg
-                            class="w-3 h-3"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                          /></svg>
-                          {{ (msg.usage.durationMs / 1000).toFixed(1) }}s
-                        </span>
-                        <span
-                          v-if="formatUsageCost(msg.usage)"
-                          class="inline-flex items-center gap-1 text-xs text-amber-500/80 font-medium"
-                          :title="formatUsageCostTooltip(msg.usage)"
-                        >
-                          <svg
-                            class="w-3 h-3"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                          /></svg>
-                          {{ formatUsageCost(msg.usage) }}
-                        </span>
-                      </template>
-                      <!--
-                  Assistant hover actions: copy the raw markdown to clipboard,
-                  or delete the message server-side. Hidden until hover to
-                  keep the row calm; ml-auto anchors them to the right edge
-                  regardless of how much stat content sits on the left. Only
-                  rendered on persisted messages (msg.id) — mid-stream
-                  placeholders have no server row to delete yet.
-                -->
-                      <div
-                        v-if="msg.id"
-                        class="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                      <button
+                        type="button"
+                        class="p-1 text-fg-muted hover:text-fg-primary transition-colors"
+                        :title="copiedMessageId === (msg.id ?? msg._key) ? 'Copied' : 'Copy to clipboard'"
+                        @click="copyMessage(msg)"
                       >
-                        <button
-                          type="button"
-                          class="p-1 text-fg-muted hover:text-fg-primary transition-colors"
-                          :title="copiedMessageId === (msg.id ?? msg._key) ? 'Copied' : 'Copy to clipboard'"
-                          @click="copyMessage(msg)"
+                        <svg
+                          v-if="copiedMessageId !== (msg.id ?? msg._key)"
+                          class="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        ><path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                        /></svg>
+                        <svg
+                          v-else
+                          class="w-4 h-4 text-emerald-700 dark:text-emerald-400"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        ><path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2.5"
+                          d="M5 13l4 4L19 7"
+                        /></svg>
+                      </button>
+                      <button
+                        type="button"
+                        :disabled="streaming"
+                        class="p-1 text-fg-muted hover:text-fg-primary disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
+                        title="Regenerate response"
+                        @click="regenerateMessage(msg)"
+                      >
+                        <svg
+                          class="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        ><path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                        /></svg>
+                      </button>
+                      <button
+                        type="button"
+                        :disabled="streaming || !msg.id"
+                        class="p-1 text-fg-muted hover:text-red-600 dark:hover:text-red-400 disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
+                        title="Delete message"
+                        @click="deleteMessage(msg)"
+                      >
+                        <svg
+                          class="w-4 h-4"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        ><path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                        /></svg>
+                      </button>
+                      <!--
+                        tok/s trigger + hover popover for the full usage
+                        breakdown. Only rendered once msg.usage has landed
+                        (post-stream "complete" event) so we don't flash
+                        a dash during the commit race.
+                      -->
+                      <Popover
+                        v-if="msg.usage && formatTokensPerSec(msg.usage)"
+                        :open="tokStatsHoverKey === (msg.id ?? msg._key)"
+                        @update:open="(v) => { if (!v) tokStatsHoverKey = null }"
+                      >
+                        <PopoverTrigger as-child>
+                          <button
+                            type="button"
+                            class="ml-1 px-2 py-0.5 text-xs font-mono tabular-nums text-fg-muted hover:text-fg-primary rounded-md transition-colors cursor-help"
+                            :aria-label="`Response speed: ${formatTokensPerSec(msg.usage)}`"
+                            @mouseenter="tokStatsHoverKey = msg.id ?? msg._key ?? null"
+                            @mouseleave="tokStatsHoverKey = null"
+                            @focus="tokStatsHoverKey = msg.id ?? msg._key ?? null"
+                            @blur="tokStatsHoverKey = null"
+                          >
+                            {{ formatTokensPerSec(msg.usage) }}
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          align="start"
+                          :side-offset="8"
+                          class="min-w-52 px-3 py-2 rounded-[10px] border-neutral-200 dark:border-neutral-700/50"
+                          @mouseenter="tokStatsHoverKey = msg.id ?? msg._key ?? null"
+                          @mouseleave="tokStatsHoverKey = null"
+                          @focusin="tokStatsHoverKey = msg.id ?? msg._key ?? null"
+                          @focusout="tokStatsHoverKey = null"
                         >
-                          <svg
-                            v-if="copiedMessageId !== (msg.id ?? msg._key)"
-                            class="w-4 h-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                          /></svg>
-                          <svg
-                            v-else
-                            class="w-4 h-4 text-emerald-700 dark:text-emerald-400"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2.5"
-                            d="M5 13l4 4L19 7"
-                          /></svg>
-                        </button>
-                        <button
-                          type="button"
-                          :disabled="streaming"
-                          class="p-1 text-fg-muted hover:text-red-600 dark:hover:text-red-400 disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed transition-colors"
-                          title="Delete message"
-                          @click="deleteMessage(msg)"
-                        >
-                          <svg
-                            class="w-4 h-4"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2"
-                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                          /></svg>
-                        </button>
-                      </div>
+                          <dl class="grid gap-1.5 text-xs">
+                            <div class="flex items-center justify-between gap-4">
+                              <dt class="text-muted-foreground">
+                                Prompt tokens
+                              </dt>
+                              <dd class="font-mono tabular-nums">
+                                {{ msg.usage.prompt.toLocaleString() }}
+                              </dd>
+                            </div>
+                            <div
+                              v-if="msg.usage.reasoning"
+                              class="flex items-center justify-between gap-4"
+                            >
+                              <dt class="text-muted-foreground">
+                                Thinking tokens
+                              </dt>
+                              <dd class="font-mono tabular-nums">
+                                {{ msg.usage.reasoning.toLocaleString() }}
+                              </dd>
+                            </div>
+                            <div
+                              v-if="msg.usage.cached"
+                              class="flex items-center justify-between gap-4"
+                            >
+                              <dt class="text-muted-foreground">
+                                Cached tokens
+                              </dt>
+                              <dd class="font-mono tabular-nums">
+                                {{ msg.usage.cached.toLocaleString() }}
+                              </dd>
+                            </div>
+                            <div class="flex items-center justify-between gap-4">
+                              <dt class="text-muted-foreground">
+                                Completion
+                              </dt>
+                              <dd class="font-mono tabular-nums">
+                                {{ msg.usage.completion.toLocaleString() }}
+                              </dd>
+                            </div>
+                            <div
+                              aria-hidden="true"
+                              class="my-0.5 border-t border-neutral-200 dark:border-neutral-700/50"
+                            />
+                            <div class="flex items-center justify-between gap-4">
+                              <dt class="text-muted-foreground">
+                                Speed
+                              </dt>
+                              <dd class="font-mono tabular-nums">
+                                {{ formatTokensPerSec(msg.usage) }}
+                              </dd>
+                            </div>
+                            <div
+                              v-if="msg.usage.durationMs"
+                              class="flex items-center justify-between gap-4"
+                            >
+                              <dt class="text-muted-foreground">
+                                Total
+                              </dt>
+                              <dd class="font-mono tabular-nums">
+                                {{ (msg.usage.durationMs / 1000).toFixed(2) }}s
+                              </dd>
+                            </div>
+                            <div
+                              v-if="formatUsageCost(msg.usage)"
+                              class="flex items-center justify-between gap-4"
+                              :title="formatUsageCostTooltip(msg.usage) ?? undefined"
+                            >
+                              <dt class="text-muted-foreground">
+                                Cost
+                              </dt>
+                              <dd class="font-mono tabular-nums text-amber-500/80">
+                                {{ formatUsageCost(msg.usage) }}
+                              </dd>
+                            </div>
+                          </dl>
+                        </PopoverContent>
+                      </Popover>
                     </div>
                   </div>
                 </div>
