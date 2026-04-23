@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ChevronRightIcon } from '@heroicons/vue/24/outline'
+import { FolderIcon } from '@heroicons/vue/20/solid'
 import type { SkillFile } from '~/types/api'
 import { formatSize } from '~/utils/format'
 
@@ -56,27 +58,15 @@ function iconFor(file: SkillFile | undefined) {
         :style="{ paddingLeft: `${12 + (depth ?? 0) * 12}px` }"
         @click="toggle(node.path ?? (node.name + (depth ?? 0)))"
       >
-        <svg
+        <ChevronRightIcon
           class="w-3 h-3 shrink-0 transition-transform"
           :class="isOpen(node.path ?? (node.name + (depth ?? 0))) ? 'rotate-90' : ''"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M9 5l7 7-7 7"
-          />
-        </svg>
-        <svg
+          aria-hidden="true"
+        />
+        <FolderIcon
           class="w-3.5 h-3.5 text-fg-muted shrink-0"
-          fill="currentColor"
-          viewBox="0 0 20 20"
-        >
-          <path d="M2 6a2 2 0 012-2h3.172a2 2 0 011.414.586l1.828 1.828A2 2 0 0011.828 7H16a2 2 0 012 2v5a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
-        </svg>
+          aria-hidden="true"
+        />
         <span class="text-xs truncate">{{ node.name }}</span>
       </button>
 

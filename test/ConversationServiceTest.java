@@ -16,13 +16,8 @@ import java.util.List;
 /**
  * Service-layer tests for {@link ConversationService}: CRUD, message-append
  * mechanics, the recent-message loader (with {@code contextSince} +
- * {@code compactionSince} watermark interaction), bulk delete cascade, the
- * conversation-scoped model-override setters, and the title-generation
- * gating predicate.
- *
- * <p>{@code generateTitleAsync} itself is not tested here — it spins a
- * virtual thread and depends on a configured LLM provider, both of which
- * make assertions flaky in a unit-test setting.
+ * {@code compactionSince} watermark interaction), bulk delete cascade, and
+ * the conversation-scoped model-override setters.
  */
 public class ConversationServiceTest extends UnitTest {
 
@@ -346,28 +341,4 @@ public class ConversationServiceTest extends UnitTest {
         assertEquals(0L, Conversation.count("id IN (?1, ?2, ?3)", c1.id, c2.id, c3.id));
     }
 
-    // =====================
-    // requestTitleGeneration — gating predicate only
-    // =====================
-
-    @Test
-    public void requestTitleGenerationReturnsFalseWhenAtMaxGenerations() {
-        var agent = newAgent("conv-title-maxed");
-        var conv = ConversationService.create(agent, "web", "u");
-        ConversationService.appendUserMessage(conv, "would-trigger");
-        conv.titleGenerationCount = Conversation.MAX_TITLE_GENERATIONS;
-        conv.save();
-        assertFalse(ConversationService.requestTitleGeneration(conv),
-                "must short-circuit when titleGenerationCount has hit the cap");
-    }
-
-    @Test
-    public void requestTitleGenerationReturnsFalseWithNoUserMessages() {
-        var agent = newAgent("conv-title-no-user");
-        var conv = ConversationService.create(agent, "web", "u");
-        // Only an assistant message — no user content to summarize.
-        ConversationService.appendAssistantMessage(conv, "I have nothing to summarize", null);
-        assertFalse(ConversationService.requestTitleGeneration(conv),
-                "must return false when there are no user messages");
-    }
 }

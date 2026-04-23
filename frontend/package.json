@@ -22,11 +22,13 @@
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
+    "@heroicons/vue": "^2.2.0",
     "@tanstack/vue-table": "^8.21.3",
     "@vueuse/core": "^14.2.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dompurify": "^3.4.0",
+    "driver.js": "^1.4.0",
     "lucide-vue-next": "^1.0.0",
     "marked": "^17.0.6",
     "nuxt": "^4.0.0",

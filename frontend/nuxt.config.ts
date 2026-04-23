@@ -11,7 +11,31 @@ export default defineNuxtConfig({
 
   devtools: { enabled: true },
 
-  css: ['~/assets/css/tailwind.css'],
+  // Document-level a11y defaults + favicons. `lang` so screen readers
+  // pronounce content correctly, a non-empty `<title>` so tab/history
+  // labels aren't blank, and the full RealFaviconGenerator link set so
+  // iOS home-screen, Android PWA, and desktop browser tabs all resolve
+  // their native sizes. Favicon files live in `public/` (served as-is
+  // at the site root — see public/site.webmanifest).
+  app: {
+    head: {
+      htmlAttrs: { lang: 'en' },
+      title: 'JClaw',
+      link: [
+        { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico' },
+        { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/favicon-32x32.png' },
+        { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/favicon-16x16.png' },
+        { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png' },
+        { rel: 'manifest', href: '/site.webmanifest' },
+      ],
+    },
+  },
+
+  css: [
+    '~/assets/css/tailwind.css',
+    'driver.js/dist/driver.css',
+    '~/assets/css/driver-theme.css',
+  ],
 
   // Proxy API requests in production (SSR mode)
   routeRules: {
@@ -47,6 +71,7 @@ export default defineNuxtConfig({
         'class-variance-authority',
         'marked',
         'dompurify',
+        'driver.js',
       ],
     },
   },

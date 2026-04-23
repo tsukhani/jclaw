@@ -36,15 +36,17 @@ public class DefaultConfigJob extends Job<Void> {
      *
      * <p>Stale NOT NULL columns also break inserts when the model stops
      * setting them — that's the reason the pre-existing {@code is_default}
-     * drop stays here, and the reason we drop {@code title_generated} from
-     * the v0.9.6 iteration of the title-regeneration gate.
+     * drop stays here, the reason we drop {@code title_generated} from
+     * the v0.9.6 iteration of the title-regeneration gate, and the reason
+     * {@code title_generation_count} is dropped now that conversation-title
+     * regeneration has been removed entirely.
      */
     private void dropOrphanedColumns() {
         try (var conn = play.db.DB.getDataSource("default").getConnection();
              var stmt = conn.createStatement()) {
             stmt.execute("ALTER TABLE agent DROP COLUMN IF EXISTS is_default");
             stmt.execute("ALTER TABLE conversation DROP COLUMN IF EXISTS title_generated");
-            stmt.execute("ALTER TABLE conversation ADD COLUMN IF NOT EXISTS title_generation_count INT NOT NULL DEFAULT 0");
+            stmt.execute("ALTER TABLE conversation DROP COLUMN IF EXISTS title_generation_count");
             stmt.execute("ALTER TABLE message ADD COLUMN IF NOT EXISTS reasoning TEXT");
             // JCLAW-95: Telegram streaming checkpoint. Non-null rows indicate
             // a placeholder message left dangling by a prior JVM crash — the

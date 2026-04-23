@@ -1,0 +1,174 @@
+/*
+ * JClaw theme for driver.js. Loaded after driver.js/dist/driver.css (see
+ * nuxt.config.ts css array) so these rules override driver's defaults.
+ *
+ * Scoped via the `.jclaw-tour` popoverClass set in useGuidedTour.ts so we
+ * don't touch other driver.js instances (e.g. future product tours).
+ * Colors pull from our CSS custom properties so light/dark mode flip comes
+ * for free via the .dark parent class on <html>.
+ */
+
+.driver-popover.jclaw-tour {
+  background-color: var(--surface-elevated);
+  color: var(--fg-primary);
+  border: 1px solid hsl(0 0% 50% / 40%);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgb(0, 0, 0, 35%);
+
+  /* Top padding is larger than the others so the close button (absolute-
+     positioned at top:10, height:22) sits in its own header strip above the
+     title row — prevents long titles from colliding with the close button. */
+  padding: 42px 18px 14px;
+  max-width: 360px;
+}
+
+.driver-popover.jclaw-tour .driver-popover-title {
+  color: var(--fg-strong);
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  letter-spacing: 0.01em;
+}
+
+.driver-popover.jclaw-tour .driver-popover-description {
+  color: var(--fg-primary);
+  font-size: 13.5px;
+  line-height: 1.55;
+  margin-bottom: 14px;
+}
+
+.driver-popover.jclaw-tour .driver-popover-description strong {
+  color: hsl(160 64% 32%); /* emerald-700 */
+  font-weight: 600;
+}
+
+.dark .driver-popover.jclaw-tour .driver-popover-description strong {
+  color: hsl(152 69% 52%); /* emerald-400 */
+}
+
+.driver-popover.jclaw-tour .driver-popover-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.driver-popover.jclaw-tour .driver-popover-close-btn {
+  /* Reposition the X from top-right corner and restyle to match sidebar
+     collapse button pattern — subtle border pill, transparent bg. */
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 1px solid hsl(0 0% 50% / 40%);
+  border-radius: 999px;
+  width: 22px;
+  height: 22px;
+  line-height: 18px;
+  padding: 0;
+  font-size: 14px;
+  text-align: center;
+  transition: color 120ms, border-color 120ms;
+}
+
+.driver-popover.jclaw-tour .driver-popover-close-btn:hover {
+  color: var(--fg-strong);
+  border-color: var(--fg-muted);
+}
+
+/* Primary Next/Continue button — solid emerald fill. */
+.driver-popover.jclaw-tour .driver-popover-next-btn {
+  background-color: hsl(160 64% 32%); /* emerald-700 */
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  text-shadow: none;
+  cursor: pointer;
+  transition: background-color 120ms;
+}
+
+.driver-popover.jclaw-tour .driver-popover-next-btn:hover {
+  background-color: hsl(160 64% 28%);
+}
+
+.dark .driver-popover.jclaw-tour .driver-popover-next-btn {
+  background-color: hsl(152 69% 42%); /* emerald-500 */
+  color: hsl(160 84% 10%);
+}
+
+.dark .driver-popover.jclaw-tour .driver-popover-next-btn:hover {
+  background-color: hsl(152 69% 52%); /* emerald-400 */
+}
+
+/* Finish button — injected via onPopoverRender as a real <button>, not the
+   driver-managed Previous slot (which gets auto-disabled on single-step
+   popovers). Still uses .driver-popover-prev-btn class so these styles apply. */
+.driver-popover.jclaw-tour .driver-popover-prev-btn {
+  background-color: hsl(0 72% 51%); /* red-600 */
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  text-shadow: none;
+  cursor: pointer;
+  transition: background-color 120ms;
+}
+
+.driver-popover.jclaw-tour .driver-popover-prev-btn:hover {
+  background-color: hsl(0 74% 42%); /* red-700 */
+}
+
+.dark .driver-popover.jclaw-tour .driver-popover-prev-btn {
+  background-color: hsl(0 84% 60%); /* red-500 */
+}
+
+.dark .driver-popover.jclaw-tour .driver-popover-prev-btn:hover {
+  background-color: hsl(0 72% 51%); /* red-600 */
+}
+
+/* Paired-button popovers (steps 4 & 5): force Finish and Continue to render at
+   identical width so they read as a decision pair. Scoped to the paired
+   modifier so single-button steps (1, 3, 6) keep their natural narrow width. */
+.driver-popover.jclaw-tour-paired {
+  max-width: 560px;
+}
+
+.driver-popover.jclaw-tour-paired .driver-popover-next-btn,
+.driver-popover.jclaw-tour-paired .driver-popover-prev-btn {
+  width: 220px;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+/* Arrow color follows the popover bg */
+.driver-popover.jclaw-tour .driver-popover-arrow-side-right.driver-popover-arrow {
+  border-right-color: var(--surface-elevated);
+}
+
+.driver-popover.jclaw-tour .driver-popover-arrow-side-left.driver-popover-arrow {
+  border-left-color: var(--surface-elevated);
+}
+
+.driver-popover.jclaw-tour .driver-popover-arrow-side-top.driver-popover-arrow {
+  border-top-color: var(--surface-elevated);
+}
+
+.driver-popover.jclaw-tour .driver-popover-arrow-side-bottom.driver-popover-arrow {
+  border-bottom-color: var(--surface-elevated);
+}
+
+/* Highlighted element stage — subtle emerald glow instead of driver's default
+   white outline, which clashes with the sidebar accents. */
+.driver-active-element {
+  box-shadow: 0 0 0 3px hsl(160 64% 32% / 35%), 0 0 0 1px hsl(160 64% 32%);
+}
+
+.dark .driver-active-element {
+  box-shadow: 0 0 0 3px hsl(152 69% 42% / 40%), 0 0 0 1px hsl(152 69% 52%);
+}

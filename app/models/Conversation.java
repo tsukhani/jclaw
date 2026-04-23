@@ -29,23 +29,6 @@ public class Conversation extends Model {
     public String preview;
 
     /**
-     * Number of times an LLM-generated title has been successfully written to
-     * {@link #preview}. Gates {@code ConversationService.requestTitleGeneration}
-     * with a cap of {@link #MAX_TITLE_GENERATIONS}: the first generation
-     * produces the initial title (after the user's opening turn), the second
-     * refreshes it once more when the conversation has gained real content,
-     * and any subsequent requests short-circuit. Prevents the sidebar-click
-     * rewrite loop while still allowing one "the conversation has grown since
-     * the first turn" re-title. Defaults {@code 0} so pre-migration rows still
-     * get their full allotment of generations.
-     */
-    @Column(name = "title_generation_count", nullable = false)
-    public int titleGenerationCount = 0;
-
-    /** Upper bound on how many times a conversation's title will be LLM-regenerated. */
-    public static final int MAX_TITLE_GENERATIONS = 2;
-
-    /**
      * Streaming checkpoint (JCLAW-95). Set when the Telegram streaming sink
      * sends a placeholder message for this conversation; cleared when the
      * stream seals or errors. Non-null on startup means the prior JVM crashed

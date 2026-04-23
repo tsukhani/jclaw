@@ -108,7 +108,10 @@ onActivated(() => refreshBindings())
       Channels
     </h1>
 
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div
+      class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6"
+      data-tour="channel-list"
+    >
       <NuxtLink
         to="/channels/telegram"
         class="bg-surface-elevated border border-border p-4 block hover:border-ring transition-colors"

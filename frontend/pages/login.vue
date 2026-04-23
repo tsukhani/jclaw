@@ -14,24 +14,10 @@ function timeOfDay(hour: number): TimeOfDay {
   return 'evening'
 }
 const period = timeOfDay(new Date().getHours())
-const mascotSrc: Record<TimeOfDay, string> = {
-  morning: '/mascot-morning.gif',
-  afternoon: '/mascot.gif',
-  evening: '/mascot-evening.gif',
-}
 const greeting: Record<TimeOfDay, string> = {
   morning: 'Good morning',
   afternoon: 'Good day',
   evening: 'Good evening',
-}
-
-// Easter egg: click the mascot to cycle through the day's other avatars.
-// Greeting stays pinned to the actual time of day — only the image rotates.
-const periods: TimeOfDay[] = ['morning', 'afternoon', 'evening']
-const mascotPeriod = ref<TimeOfDay>(period)
-function cycleMascot() {
-  const next = (periods.indexOf(mascotPeriod.value) + 1) % periods.length
-  mascotPeriod.value = periods[next]!
 }
 
 // The login screen is always light, regardless of the OS color scheme or
@@ -64,18 +50,11 @@ const passwordId = useId()
   <div class="min-h-screen bg-surface flex items-center justify-center">
     <div class="w-full max-w-sm">
       <div class="mb-4 flex items-center justify-center gap-4">
-        <button
-          type="button"
-          class="bg-transparent p-0 border-0 cursor-pointer"
-          aria-label="Cycle mascot avatar"
-          @click="cycleMascot"
+        <img
+          src="/mascot.gif"
+          alt="JClaw"
+          class="w-32 h-32 rounded-full shrink-0 select-none"
         >
-          <img
-            :src="mascotSrc[mascotPeriod]"
-            alt="JClaw"
-            class="w-32 h-32 rounded-full shrink-0 select-none"
-          >
-        </button>
         <h1 class="text-4xl font-semibold tracking-wider">
           <span class="text-emerald-700 dark:text-emerald-400">J</span><span class="text-red-600 dark:text-red-500">Claw</span>
         </h1>

@@ -222,20 +222,6 @@ public class ApiConversationsController extends Controller {
     }
 
     /**
-     * POST /api/conversations/{id}/generate-title
-     */
-    public static void generateTitle(Long id) {
-        Conversation conversation = Conversation.findById(id);
-        if (conversation == null) notFound();
-
-        if (!ConversationService.requestTitleGeneration(conversation)) {
-            renderJSON(gson.toJson(Map.of("title", conversation.preview != null ? conversation.preview : "")));
-            return;
-        }
-        renderJSON(gson.toJson(Map.of("status", "generating")));
-    }
-
-    /**
      * PUT /api/conversations/{id}/model-override (JCLAW-108)
      *
      * <p>Write a conversation-scoped model override. Body:

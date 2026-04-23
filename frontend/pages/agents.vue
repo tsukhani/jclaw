@@ -1,4 +1,20 @@
 <script setup lang="ts">
+import {
+  CheckCircleIcon,
+  ChevronRightIcon,
+  ClipboardDocumentCheckIcon,
+  ClockIcon,
+  CommandLineIcon,
+  ComputerDesktopIcon,
+  DocumentTextIcon,
+  FolderIcon,
+  GlobeAltIcon,
+  MagnifyingGlassIcon,
+  PlusIcon,
+  TrashIcon,
+  XMarkIcon,
+} from '@heroicons/vue/24/outline'
+import { Save } from 'lucide-vue-next'
 import type {
   Agent,
   AgentSkill,
@@ -89,6 +105,24 @@ const allowlistExpanded = ref(false)
 // Group agentTools by category, in the canonical order from useToolMeta.
 // Each entry is { category, tools[] } — empty categories are omitted.
 const { TOOL_META, getToolMeta, getPillClass } = useToolMeta()
+
+// Map the backend-supplied tool icon key (see useToolMeta) to a Heroicons
+// component. Returns null for unknown keys so the caller can suppress rendering.
+const TOOL_ICON_COMPONENTS = {
+  terminal: CommandLineIcon,
+  folder: FolderIcon,
+  document: DocumentTextIcon,
+  globe: GlobeAltIcon,
+  search: MagnifyingGlassIcon,
+  browser: ComputerDesktopIcon,
+  clock: ClockIcon,
+  check: CheckCircleIcon,
+  tasks: ClipboardDocumentCheckIcon,
+} as const
+function toolIconComponent(name: string) {
+  const key = getToolMeta(name)?.icon as keyof typeof TOOL_ICON_COMPONENTS | undefined
+  return key ? TOOL_ICON_COMPONENTS[key] ?? null : null
+}
 const toolsByCategory = computed(() => {
   const categories = ['System', 'Files', 'Web', 'Utilities'] as const
   const orderedNames = [
@@ -642,17 +676,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             title="New Agent"
             @click="newAgent"
           >
-            <svg
+            <PlusIcon
               class="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            ><path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="1.75"
-              d="M12 4.5v15m7.5-7.5h-15"
-            /></svg>
+              aria-hidden="true"
+            />
           </button>
           <button
             :disabled="!customAgents.length"
@@ -660,17 +687,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             title="Delete an agent"
             @click="enterSelectMode"
           >
-            <svg
+            <TrashIcon
               class="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            ><path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="1.75"
-              d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0"
-            /></svg>
+              aria-hidden="true"
+            />
           </button>
         </template>
         <template v-else>
@@ -712,7 +732,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
       <p class="text-xs text-fg-muted">
         The built-in singleton agent. Always enabled, cannot be renamed or deleted. Handles admin chat and acts as the fallback route for channels without an explicit binding.
       </p>
-      <div class="bg-surface-elevated border border-border">
+      <div
+        class="bg-surface-elevated border border-border"
+        data-tour="main-agent"
+      >
         <div
           v-if="mainAgent"
           role="button"
@@ -844,7 +867,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
       >
         &larr; Back to agents
       </button>
-      <div class="bg-surface-elevated border border-border p-4">
+      <div
+        class="bg-surface-elevated border border-border p-4"
+        data-tour="agent-edit-form"
+      >
         <div class="flex items-center justify-between mb-4 gap-2">
           <h2 class="text-sm font-medium text-fg-strong">
             {{ creating ? 'New Agent' : 'Edit Agent' }}
@@ -948,22 +974,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             :title="saving ? 'Saving...' : formDirty ? 'Save' : 'No changes to save'"
             @click="saveAgent"
           >
-            <svg
+            <Save
               class="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            ><path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="1.5"
-              d="M3 5.25A2.25 2.25 0 015.25 3h10.379a2.25 2.25 0 011.59.659l2.122 2.121a2.25 2.25 0 01.659 1.591V18.75A2.25 2.25 0 0118.75 21H5.25A2.25 2.25 0 013 18.75V5.25z"
-            /><path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="1.5"
-              d="M7.5 3v4.5h7.5V3M7.5 21v-6.75h9V21"
-            /></svg>
+              aria-hidden="true"
+            />
           </button>
         </div>
       </div>
@@ -1061,77 +1075,13 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                   class="w-8 h-8 rounded flex items-center justify-center shrink-0"
                   :class="getToolMeta(tool.name)?.iconBg ?? 'bg-muted'"
                 >
-                  <svg
+                  <component
+                    :is="toolIconComponent(tool.name)"
+                    v-if="toolIconComponent(tool.name)"
                     class="w-4 h-4"
                     :class="getToolMeta(tool.name)?.iconColor ?? 'text-fg-muted'"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      v-if="getToolMeta(tool.name)?.icon === 'terminal'"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="1.75"
-                      d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                    />
-                    <path
-                      v-if="getToolMeta(tool.name)?.icon === 'folder'"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="1.75"
-                      d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-                    />
-                    <path
-                      v-if="getToolMeta(tool.name)?.icon === 'document'"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="1.75"
-                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                    />
-                    <path
-                      v-if="getToolMeta(tool.name)?.icon === 'globe'"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="1.75"
-                      d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
-                    />
-                    <path
-                      v-if="getToolMeta(tool.name)?.icon === 'search'"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="1.75"
-                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                    />
-                    <path
-                      v-if="getToolMeta(tool.name)?.icon === 'browser'"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="1.75"
-                      d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                    />
-                    <path
-                      v-if="getToolMeta(tool.name)?.icon === 'clock'"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="1.75"
-                      d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                    <path
-                      v-if="getToolMeta(tool.name)?.icon === 'check'"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="1.75"
-                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                    <path
-                      v-if="getToolMeta(tool.name)?.icon === 'tasks'"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="1.75"
-                      d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
-                    />
-                  </svg>
+                    aria-hidden="true"
+                  />
                 </div>
                 <!-- Name + function pills -->
                 <div class="flex-1 min-w-0">
@@ -1349,20 +1299,11 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               from {{ Object.keys(effectiveAllowlist.bySkill).length }} skill{{ Object.keys(effectiveAllowlist.bySkill).length === 1 ? '' : 's' }})
             </span>
           </span>
-          <svg
+          <ChevronRightIcon
             class="w-3 h-3 text-neutral-500 transition-transform"
             :class="allowlistExpanded ? 'rotate-90' : ''"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M9 5l7 7-7 7"
-            />
-          </svg>
+            aria-hidden="true"
+          />
         </button>
         <div
           v-if="allowlistExpanded"
@@ -1452,22 +1393,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             :title="workspaceDirty ? 'Save file' : 'No changes to save'"
             @click="saveWorkspaceFile"
           >
-            <svg
+            <Save
               class="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            ><path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="1.5"
-              d="M3 5.25A2.25 2.25 0 015.25 3h10.379a2.25 2.25 0 011.59.659l2.122 2.121a2.25 2.25 0 01.659 1.591V18.75A2.25 2.25 0 0118.75 21H5.25A2.25 2.25 0 013 18.75V5.25z"
-            /><path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="1.5"
-              d="M7.5 3v4.5h7.5V3M7.5 21v-6.75h9V21"
-            /></svg>
+              aria-hidden="true"
+            />
           </button>
         </div>
       </div>
@@ -1533,17 +1462,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               title="Close"
               @click="closePromptBreakdown()"
             >
-              <svg
+              <XMarkIcon
                 class="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              ><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M6 18L18 6M6 6l12 12"
-              /></svg>
+                aria-hidden="true"
+              />
             </button>
           </div>
         </div>

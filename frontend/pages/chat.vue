@@ -1,4 +1,21 @@
 <script setup lang="ts">
+import {
+  ArrowDownTrayIcon,
+  ArrowPathIcon,
+  ArrowUpIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ClipboardIcon,
+  EyeIcon,
+  LightBulbIcon,
+  PaperClipIcon,
+  PencilIcon,
+  PencilSquareIcon,
+  SpeakerWaveIcon,
+  StopIcon,
+  TrashIcon,
+  XMarkIcon,
+} from '@heroicons/vue/24/outline'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { computeConversationCost, formatConversationCost, formatConversationCostTooltip, formatUsageCost, formatUsageCostTooltip, type MessageUsage } from '~/utils/usage-cost'
@@ -636,7 +653,6 @@ const streamReasoning = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
 const abortController = ref<AbortController | null>(null)
 let scrollRaf: number | null = null
-let titleRefreshTimeout: ReturnType<typeof setTimeout> | null = null
 function scrollToBottom() {
   if (scrollRaf) return
   scrollRaf = requestAnimationFrame(() => {
@@ -664,7 +680,6 @@ watch(streamReasoning, async () => {
 onUnmounted(() => {
   abortController.value?.abort()
   if (scrollRaf) cancelAnimationFrame(scrollRaf)
-  if (titleRefreshTimeout) clearTimeout(titleRefreshTimeout)
 })
 
 function stopStreaming() {
@@ -752,10 +767,6 @@ else {
 }
 
 async function loadConversation(id: number) {
-  // Generate a title for the conversation we're leaving (if it still has a truncated preview)
-  if (selectedConvoId.value && selectedConvoId.value !== id) {
-    generateTitleForConversation(selectedConvoId.value)
-  }
   selectedConvoId.value = id
   messages.value = await $fetch<Message[]>(`/api/conversations/${id}/messages`) ?? []
   initCollapsedState(messages.value)
@@ -1040,28 +1051,10 @@ async function sendMessage() {
   }
 }
 
-async function generateTitleForConversation(convoId: number) {
-  try {
-    await $fetch(`/api/conversations/${convoId}/generate-title`, { method: 'POST' })
-    // Refresh after a delay to pick up the async-generated title
-    if (titleRefreshTimeout) clearTimeout(titleRefreshTimeout)
-    titleRefreshTimeout = setTimeout(() => {
-      refreshConversations()
-    }, 3000)
-  }
-  catch {
-    // Best-effort — ignore failures
-  }
-}
-
 function newChat() {
   // Abort any in-flight stream first so late SSE events don't land in the
   // freshly-cleared state as orphan deltas.
   if (streaming.value) stopStreaming()
-  // Generate a title for the conversation we're leaving
-  if (selectedConvoId.value) {
-    generateTitleForConversation(selectedConvoId.value)
-  }
   selectedConvoId.value = null
   messages.value = []
   // Clear composer + streaming buffers so the new-chat boundary is a hard
@@ -1358,32 +1351,36 @@ function exportConversation() {
       </div>
 
       <!--
-        Body wrapper: a flex-col with a pair of flex-grow-animated
-        spacers (top + bottom). When the chat is empty they grow to
-        1fr each, centering the hero + composer as a block. When a
-        conversation is active they collapse to 0, letting the
-        messages scroller (flex-1) fill and pinning the composer to
-        the bottom. flex-grow is animatable per the CSS spec and
-        Chromium/Firefox interpolate it cleanly — so the composer
-        glides between the two positions instead of snapping.
+        Body wrapper: a flex-col with a pair of spacers (top + bottom)
+        that instantly reflow between 0 and 1fr. When the chat is empty
+        the spacers grow so the hero + composer sit at vertical center;
+        when a conversation is active they collapse and the messages
+        scroller takes over. We deliberately do NOT transition flex-grow
+        — see Unsloth Studio, which swaps the composer between a
+        centered welcome slot and an absolute-bottom dock with zero
+        transition. The animated alternative competed with the hero fade
+        and the caption's v-if layout jump and looked jankier than a
+        snap reflow.
       -->
       <div class="flex-1 flex flex-col min-h-0">
         <!-- Top spacer: grows to push content toward vertical center on empty. -->
         <div
-          class="shrink-0 basis-0 [transition:flex-grow_400ms_ease-out]"
+          class="shrink-0 basis-0"
           :style="{ flexGrow: isEmptyChat ? 1 : 0 }"
           aria-hidden="true"
         />
 
         <!--
-          Empty-state hero with fade+lift transition. Crossfades with
-          the messages scroller via paired Vue <Transition> blocks.
+          Empty-state hero with a brief fade-in. Matches Unsloth's
+          Tailwind Animate `animate-in fade-in slide-in-from-bottom-1`
+          default (~150ms) — long enough to read as intentional, short
+          enough to not compete with the instant spacer reflow above.
         -->
         <Transition
-          enter-active-class="transition-opacity duration-300 ease-out delay-100"
+          enter-active-class="transition-opacity duration-150 ease-out"
           enter-from-class="opacity-0"
           enter-to-class="opacity-100"
-          leave-active-class="transition-opacity duration-150 ease-out"
+          leave-active-class="transition-opacity duration-100 ease-out"
           leave-from-class="opacity-100"
           leave-to-class="opacity-0"
         >
@@ -1457,30 +1454,16 @@ function exportConversation() {
                         :title="copiedMessageId === (msg.id ?? msg._key) ? 'Copied' : 'Copy to clipboard'"
                         @click="copyMessage(msg)"
                       >
-                        <svg
+                        <ClipboardIcon
                           v-if="copiedMessageId !== (msg.id ?? msg._key)"
                           class="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        ><path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                        /></svg>
-                        <svg
+                          aria-hidden="true"
+                        />
+                        <CheckIcon
                           v-else
                           class="w-4 h-4 text-emerald-700 dark:text-emerald-400"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        ><path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2.5"
-                          d="M5 13l4 4L19 7"
-                        /></svg>
+                          aria-hidden="true"
+                        />
                       </button>
                       <button
                         type="button"
@@ -1489,17 +1472,10 @@ function exportConversation() {
                         title="Edit & resubmit"
                         @click="editUserMessage(msg)"
                       >
-                        <svg
+                        <PencilIcon
                           class="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        ><path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                        /></svg>
+                          aria-hidden="true"
+                        />
                       </button>
                       <button
                         type="button"
@@ -1508,17 +1484,10 @@ function exportConversation() {
                         title="Delete message"
                         @click="deleteMessage(msg)"
                       >
-                        <svg
+                        <TrashIcon
                           class="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        ><path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                        /></svg>
+                          aria-hidden="true"
+                        />
                       </button>
                     </div>
                   </div>
@@ -1545,30 +1514,16 @@ function exportConversation() {
                           :title="msg.thinkingCollapsed ? 'Expand reasoning' : 'Collapse reasoning'"
                           @click="toggleThinking(msg)"
                         >
-                          <svg
+                          <LightBulbIcon
                             class="w-3.5 h-3.5 shrink-0"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="1.5"
-                            d="M9 18h6M10 22h4M12 2a7 7 0 00-4 12.74V17a1 1 0 001 1h6a1 1 0 001-1v-2.26A7 7 0 0012 2z"
-                          /></svg>
+                            aria-hidden="true"
+                          />
                           <span class="font-medium">{{ thinkingHeaderLabel(msg) }}</span>
-                          <svg
+                          <ChevronDownIcon
                             class="w-3.5 h-3.5 transition-transform ml-1"
                             :class="msg.thinkingCollapsed ? '' : 'rotate-180'"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="1.5"
-                            d="M19 9l-7 7-7-7"
-                          /></svg>
+                            aria-hidden="true"
+                          />
                         </button>
                         <button
                           type="button"
@@ -1576,30 +1531,16 @@ function exportConversation() {
                           :title="copiedMessageId === `reason:${msg.id ?? msg._key}` ? 'Copied' : 'Copy reasoning'"
                           @click.stop="copyReasoning(msg)"
                         >
-                          <svg
+                          <ClipboardIcon
                             v-if="copiedMessageId !== `reason:${msg.id ?? msg._key}`"
                             class="w-3.5 h-3.5"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="1.5"
-                            d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                          /></svg>
-                          <svg
+                            aria-hidden="true"
+                          />
+                          <CheckIcon
                             v-else
                             class="w-3.5 h-3.5 text-emerald-500"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            stroke-width="2.5"
-                            d="M5 13l4 4L19 7"
-                          /></svg>
+                            aria-hidden="true"
+                          />
                           <span>Copy</span>
                         </button>
                       </div>
@@ -1649,30 +1590,16 @@ function exportConversation() {
                         :title="copiedMessageId === (msg.id ?? msg._key) ? 'Copied' : 'Copy to clipboard'"
                         @click="copyMessage(msg)"
                       >
-                        <svg
+                        <ClipboardIcon
                           v-if="copiedMessageId !== (msg.id ?? msg._key)"
                           class="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        ><path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                        /></svg>
-                        <svg
+                          aria-hidden="true"
+                        />
+                        <CheckIcon
                           v-else
                           class="w-4 h-4 text-emerald-700 dark:text-emerald-400"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        ><path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2.5"
-                          d="M5 13l4 4L19 7"
-                        /></svg>
+                          aria-hidden="true"
+                        />
                       </button>
                       <button
                         type="button"
@@ -1681,17 +1608,10 @@ function exportConversation() {
                         title="Regenerate response"
                         @click="regenerateMessage(msg)"
                       >
-                        <svg
+                        <ArrowPathIcon
                           class="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        ><path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                        /></svg>
+                          aria-hidden="true"
+                        />
                       </button>
                       <button
                         type="button"
@@ -1700,17 +1620,10 @@ function exportConversation() {
                         title="Delete message"
                         @click="deleteMessage(msg)"
                       >
-                        <svg
+                        <TrashIcon
                           class="w-4 h-4"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        ><path
-                          stroke-linecap="round"
-                          stroke-linejoin="round"
-                          stroke-width="2"
-                          d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                        /></svg>
+                          aria-hidden="true"
+                        />
                       </button>
                       <!--
                         tok/s trigger + hover popover for the full usage
@@ -1894,6 +1807,7 @@ function exportConversation() {
         -->
           <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -->
           <form
+            data-tour="chat-composer"
             class="bg-surface-elevated border border-neutral-200 dark:border-neutral-700/50 rounded-[22px]
                  shadow-[0_2px_12px_rgba(0,0,0,0.2)] overflow-hidden"
             @submit.prevent="sendMessage"
@@ -1916,20 +1830,11 @@ function exportConversation() {
                   :alt="f.name"
                   class="w-6 h-6 object-cover rounded-sm shrink-0"
                 >
-                <svg
+                <PaperClipIcon
                   v-else
                   class="w-3 h-3 text-fg-muted shrink-0"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
-                  />
-                </svg>
+                  aria-hidden="true"
+                />
                 <span
                   class="truncate max-w-[140px]"
                   :title="f.name"
@@ -1941,19 +1846,10 @@ function exportConversation() {
                   title="Remove"
                   @click="removeAttachment(idx)"
                 >
-                  <svg
+                  <XMarkIcon
                     class="w-3 h-3"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2.5"
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
+                    aria-hidden="true"
+                  />
                 </button>
               </span>
               <span
@@ -1967,19 +1863,10 @@ function exportConversation() {
                   title="Dismiss"
                   @click="attachError = null"
                 >
-                  <svg
+                  <XMarkIcon
                     class="w-3 h-3"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2.5"
-                      d="M6 18L18 6M6 6l12 12"
-                    />
-                  </svg>
+                    aria-hidden="true"
+                  />
                 </button>
               </span>
             </div>
@@ -2020,17 +1907,10 @@ function exportConversation() {
                   affordance. The rounded border + bg-muted hover keep the
                   circle treatment used for the send button on the right.
                 -->
-                  <svg
+                  <PaperClipIcon
                     class="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  ><path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="1.8"
-                    d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"
-                  /></svg>
+                    aria-hidden="true"
+                  />
                 </button>
                 <!--
                 Model-capability toggles. Unsloth-style rounded-full pills:
@@ -2055,17 +1935,10 @@ function exportConversation() {
                     : (thinkingActive ? 'Thinking on — click to turn off' : 'Thinking off — click to turn on')"
                   @click="toggleThinkingPill"
                 >
-                  <svg
+                  <LightBulbIcon
                     class="w-3.5 h-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  ><path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="1.5"
-                    d="M9 18h6M10 22h4M12 2a7 7 0 00-4 12.74V17a1 1 0 001 1h6a1 1 0 001-1v-2.26A7 7 0 0012 2z"
-                  /></svg>
+                    aria-hidden="true"
+                  />
                   Think
                 </button>
                 <button
@@ -2078,22 +1951,10 @@ function exportConversation() {
                   :title="visionActive ? 'Vision on — click to turn off' : 'Vision off — click to turn on'"
                   @click="toggleVisionPill"
                 >
-                  <svg
+                  <EyeIcon
                     class="w-3.5 h-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  ><path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="1.5"
-                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                  /><path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="1.5"
-                    d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                  /></svg>
+                    aria-hidden="true"
+                  />
                   Vision
                 </button>
                 <button
@@ -2106,17 +1967,10 @@ function exportConversation() {
                   :title="audioActive ? 'Audio on — click to turn off' : 'Audio off — click to turn on'"
                   @click="toggleAudioPill"
                 >
-                  <svg
+                  <SpeakerWaveIcon
                     class="w-3.5 h-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  ><path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="1.5"
-                    d="M11 5L6 9H2v6h4l5 4V5zm8.536-.536a9 9 0 010 12.728M15.536 8.464a5 5 0 010 7.072"
-                  /></svg>
+                    aria-hidden="true"
+                  />
                   Audio
                 </button>
               </div>
@@ -2128,21 +1982,15 @@ function exportConversation() {
                   @click="newChat"
                 >
                   <!--
-                  Square-with-pencil "edit/compose" glyph (Lucide square-pen)
-                  — same semantic as Unsloth's "new chat" button. Reads as
-                  "start a new conversation" without needing the tooltip.
+                  Square-with-pencil "edit/compose" glyph (Heroicons
+                  PencilSquareIcon) — same semantic as Unsloth's "new chat"
+                  button. Reads as "start a new conversation" without
+                  needing the tooltip.
                 -->
-                  <svg
+                  <PencilSquareIcon
                     class="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  ><path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="1.5"
-                    d="M12 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"
-                  /></svg>
+                    aria-hidden="true"
+                  />
                 </button>
                 <button
                   type="button"
@@ -2151,17 +1999,10 @@ function exportConversation() {
                   title="Export as Markdown"
                   @click="exportConversation"
                 >
-                  <svg
+                  <ArrowDownTrayIcon
                     class="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  ><path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="1.5"
-                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                  /></svg>
+                    aria-hidden="true"
+                  />
                 </button>
                 <button
                   v-if="streaming"
@@ -2170,17 +2011,10 @@ function exportConversation() {
                   title="Stop generating"
                   @click="stopStreaming"
                 >
-                  <svg
+                  <StopIcon
                     class="w-3.5 h-3.5"
-                    fill="currentColor"
-                    viewBox="0 0 24 24"
-                  ><rect
-                    x="6"
-                    y="6"
-                    width="12"
-                    height="12"
-                    rx="1.5"
-                  /></svg>
+                    aria-hidden="true"
+                  />
                 </button>
                 <button
                   v-else
@@ -2189,17 +2023,10 @@ function exportConversation() {
                   class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-emerald-500 text-white hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   title="Send"
                 >
-                  <svg
+                  <ArrowUpIcon
                     class="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  ><path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2.5"
-                    d="M12 19V5m0 0l-7 7m7-7l7 7"
-                  /></svg>
+                    aria-hidden="true"
+                  />
                 </button>
               </div>
             </div>
@@ -2213,9 +2040,11 @@ function exportConversation() {
         </div>
         <!-- Bottom spacer: mirror of the top spacer, so the composer
              lands at vertical center of the body during the empty
-             state rather than just being pushed down from the top. -->
+             state rather than just being pushed down from the top.
+             No transition — the reflow is instant by design (see the
+             note on the top spacer). -->
         <div
-          class="shrink-0 basis-0 [transition:flex-grow_400ms_ease-out]"
+          class="shrink-0 basis-0"
           :style="{ flexGrow: isEmptyChat ? 1 : 0 }"
           aria-hidden="true"
         />

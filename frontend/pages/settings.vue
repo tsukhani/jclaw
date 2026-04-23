@@ -1,4 +1,16 @@
 <script setup lang="ts">
+import {
+  ArrowPathIcon,
+  CheckIcon,
+  ChevronUpIcon,
+  Cog6ToothIcon,
+  InformationCircleIcon,
+  MagnifyingGlassIcon,
+  PencilIcon,
+  PlusIcon,
+  TrashIcon,
+  XMarkIcon,
+} from '@heroicons/vue/24/outline'
 import type {
   Agent,
   ConfigEntry,
@@ -905,7 +917,10 @@ const providerEntries = computed(() => {
     </h1>
 
     <!-- Provider sections -->
-    <div class="mb-6 space-y-4">
+    <div
+      class="mb-6 space-y-4"
+      data-tour="llm-providers"
+    >
       <h2 class="text-sm font-medium text-fg-muted">
         LLM Providers
       </h2>
@@ -986,34 +1001,20 @@ const providerEntries = computed(() => {
                 title="Save"
                 @click="updateEntry(entry.key)"
               >
-                <svg
+                <CheckIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M5 13l4 4L19 7"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Cancel"
                 @click="editingKey = null"
               >
-                <svg
+                <XMarkIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
             <template v-else>
@@ -1023,17 +1024,10 @@ const providerEntries = computed(() => {
                 title="Edit"
                 @click="startEdit(entry)"
               >
-                <svg
+                <PencilIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
           </div>
@@ -1045,21 +1039,10 @@ const providerEntries = computed(() => {
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
               keepAlive
               <span class="relative group/tip">
-                <svg
+                <InformationCircleIcon
                   class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><circle
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke-width="2"
-                /><path
-                  stroke-linecap="round"
-                  stroke-width="2"
-                  d="M12 16v-4m0-4h.01"
-                /></svg>
+                  aria-hidden="true"
+                />
                 <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-56 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                   How long the model stays loaded between requests. Use <code class="font-mono text-fg-primary">30m</code> for 30 minutes, <code class="font-mono text-fg-primary">-1</code> to keep forever.
                 </span>
@@ -1075,34 +1058,20 @@ const providerEntries = computed(() => {
                 title="Save"
                 @click="updateEntry('ollama.keepAlive')"
               >
-                <svg
+                <CheckIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M5 13l4 4L19 7"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Cancel"
                 @click="editingKey = null"
               >
-                <svg
+                <XMarkIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
             <template v-else>
@@ -1112,17 +1081,10 @@ const providerEntries = computed(() => {
                 title="Edit"
                 @click="editingKey = 'ollama.keepAlive'; editValue = ollamaKeepAlive"
               >
-                <svg
+                <PencilIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
           </div>
@@ -1136,52 +1098,26 @@ const providerEntries = computed(() => {
               title="Discover models from provider"
               @click="startDiscovery(name)"
             >
-              <svg
+              <ArrowPathIcon
                 class="w-3.5 h-3.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              ><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-              /></svg>
+                aria-hidden="true"
+              />
             </button>
             <button
               class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
               :title="expandedModelsProvider === name ? 'Close models' : 'Manage models'"
               @click="toggleModelsPanel(name)"
             >
-              <svg
+              <ChevronUpIcon
                 v-if="expandedModelsProvider === name"
                 class="w-3.5 h-3.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              ><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M5 15l7-7 7 7"
-              /></svg>
-              <svg
+                aria-hidden="true"
+              />
+              <Cog6ToothIcon
                 v-else
                 class="w-3.5 h-3.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              ><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-              /><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-              /></svg>
+                aria-hidden="true"
+              />
             </button>
           </div>
         </div>
@@ -1347,51 +1283,30 @@ const providerEntries = computed(() => {
                       title="Save"
                       @click="saveEditedModel(name)"
                     >
-                      <svg
+                      <CheckIcon
                         class="w-3.5 h-3.5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      ><path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M5 13l4 4L19 7"
-                      /></svg>
+                        aria-hidden="true"
+                      />
                     </button>
                     <button
                       class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                       title="Cancel"
                       @click="editingModelIdx = null"
                     >
-                      <svg
+                      <XMarkIcon
                         class="w-3.5 h-3.5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      ><path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M6 18L18 6M6 6l12 12"
-                      /></svg>
+                        aria-hidden="true"
+                      />
                     </button>
                     <button
                       class="p-1 text-fg-muted hover:text-red-400 transition-colors"
                       title="Delete model"
                       @click="deleteModel(name, idx)"
                     >
-                      <svg
+                      <TrashIcon
                         class="w-3.5 h-3.5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      ><path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                      /></svg>
+                        aria-hidden="true"
+                      />
                     </button>
                   </div>
                 </div>
@@ -1443,17 +1358,10 @@ const providerEntries = computed(() => {
                       title="Edit model"
                       @click="startEditModel(name, idx)"
                     >
-                      <svg
+                      <PencilIcon
                         class="w-3.5 h-3.5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      ><path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                      /></svg>
+                        aria-hidden="true"
+                      />
                     </button>
                   </div>
                 </div>
@@ -1615,34 +1523,20 @@ const providerEntries = computed(() => {
                     title="Add model"
                     @click="saveNewModel(name)"
                   >
-                    <svg
+                    <CheckIcon
                       class="w-3.5 h-3.5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    ><path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M5 13l4 4L19 7"
-                    /></svg>
+                      aria-hidden="true"
+                    />
                   </button>
                   <button
                     class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                     title="Cancel"
                     @click="addingModel = false"
                   >
-                    <svg
+                    <XMarkIcon
                       class="w-3.5 h-3.5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    ><path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M6 18L18 6M6 6l12 12"
-                    /></svg>
+                      aria-hidden="true"
+                    />
                   </button>
                 </div>
               </div>
@@ -1653,17 +1547,10 @@ const providerEntries = computed(() => {
                 title="Add model"
                 @click="startAddModel"
               >
-                <svg
+                <PlusIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 4v16m8-8H4"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
           </div>
@@ -1697,17 +1584,10 @@ const providerEntries = computed(() => {
               title="Close"
               @click="closeDiscovery"
             >
-              <svg
+              <XMarkIcon
                 class="w-3.5 h-3.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              ><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M6 18L18 6M6 6l12 12"
-              /></svg>
+                aria-hidden="true"
+              />
             </button>
           </div>
 
@@ -1731,17 +1611,10 @@ const providerEntries = computed(() => {
           <template v-else-if="discoveredModels.length">
             <!-- Search + filters -->
             <div class="px-4 py-2 flex items-center gap-2 border-b border-border">
-              <svg
+              <MagnifyingGlassIcon
                 class="w-3.5 h-3.5 text-fg-muted shrink-0"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              ><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-              /></svg>
+                aria-hidden="true"
+              />
               <input
                 v-model="discoverySearch"
                 placeholder="Search models..."
@@ -1999,34 +1872,20 @@ const providerEntries = computed(() => {
                 title="Save"
                 @click="updateEntry(`search.${id}.apiKey`)"
               >
-                <svg
+                <CheckIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M5 13l4 4L19 7"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Cancel"
                 @click="editingKey = null"
               >
-                <svg
+                <XMarkIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
             <template v-else>
@@ -2036,17 +1895,10 @@ const providerEntries = computed(() => {
                 title="Edit"
                 @click="startEdit(searchApiKeyEntry(id))"
               >
-                <svg
+                <PencilIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
           </div>
@@ -2065,34 +1917,20 @@ const providerEntries = computed(() => {
                 title="Save"
                 @click="updateEntry(`search.${id}.baseUrl`)"
               >
-                <svg
+                <CheckIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M5 13l4 4L19 7"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Cancel"
                 @click="editingKey = null"
               >
-                <svg
+                <XMarkIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
             <template v-else>
@@ -2102,17 +1940,10 @@ const providerEntries = computed(() => {
                 title="Edit"
                 @click="startEdit(searchBaseUrlEntry(id))"
               >
-                <svg
+                <PencilIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
           </div>
@@ -2169,21 +2000,10 @@ const providerEntries = computed(() => {
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
               maxToolRounds
               <span class="relative group/tip">
-                <svg
+                <InformationCircleIcon
                   class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><circle
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke-width="2"
-                /><path
-                  stroke-linecap="round"
-                  stroke-width="2"
-                  d="M12 16v-4m0-4h.01"
-                /></svg>
+                  aria-hidden="true"
+                />
                 <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-56 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                   Max tool calls the agent can make per turn. Once reached, it must give a final answer without calling more tools.
                 </span>
@@ -2203,34 +2023,20 @@ const providerEntries = computed(() => {
                 title="Save"
                 @click="saveChatField('chat.maxToolRounds', chatFieldEdit)"
               >
-                <svg
+                <CheckIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M5 13l4 4L19 7"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Cancel"
                 @click="editingChatField = null"
               >
-                <svg
+                <XMarkIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
             <template v-else>
@@ -2240,17 +2046,10 @@ const providerEntries = computed(() => {
                 title="Edit"
                 @click="editingChatField = 'maxToolRounds'; chatFieldEdit = chatMaxToolRounds"
               >
-                <svg
+                <PencilIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
           </div>
@@ -2258,21 +2057,10 @@ const providerEntries = computed(() => {
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
               maxContextMessages
               <span class="relative group/tip">
-                <svg
+                <InformationCircleIcon
                   class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><circle
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke-width="2"
-                /><path
-                  stroke-linecap="round"
-                  stroke-width="2"
-                  d="M12 16v-4m0-4h.01"
-                /></svg>
+                  aria-hidden="true"
+                />
                 <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                   How many recent messages are sent with each LLM request. Older messages are dropped when the limit is reached to stay within the context window.
                 </span>
@@ -2292,34 +2080,20 @@ const providerEntries = computed(() => {
                 title="Save"
                 @click="saveChatField('chat.maxContextMessages', chatFieldEdit)"
               >
-                <svg
+                <CheckIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M5 13l4 4L19 7"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Cancel"
                 @click="editingChatField = null"
               >
-                <svg
+                <XMarkIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
             <template v-else>
@@ -2329,17 +2103,10 @@ const providerEntries = computed(() => {
                 title="Edit"
                 @click="editingChatField = 'maxContextMessages'; chatFieldEdit = chatMaxContextMessages"
               >
-                <svg
+                <PencilIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
           </div>
@@ -2363,21 +2130,10 @@ const providerEntries = computed(() => {
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
               maxImageBytes
               <span class="relative group/tip">
-                <svg
+                <InformationCircleIcon
                   class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><circle
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke-width="2"
-                /><path
-                  stroke-linecap="round"
-                  stroke-width="2"
-                  d="M12 16v-4m0-4h.01"
-                /></svg>
+                  aria-hidden="true"
+                />
                 <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                   Max upload size for image attachments, in megabytes. Stored as bytes; most vision models accept up to 20 MB per image.
                 </span>
@@ -2397,34 +2153,20 @@ const providerEntries = computed(() => {
                 title="Save"
                 @click="saveUploadMb('upload.maxImageBytes', uploadFieldEdit)"
               >
-                <svg
+                <CheckIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M5 13l4 4L19 7"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Cancel"
                 @click="editingUploadField = null"
               >
-                <svg
+                <XMarkIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
             <template v-else>
@@ -2434,17 +2176,10 @@ const providerEntries = computed(() => {
                 title="Edit"
                 @click="editingUploadField = 'maxImageMb'; uploadFieldEdit = uploadMaxImageMb"
               >
-                <svg
+                <PencilIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
           </div>
@@ -2452,21 +2187,10 @@ const providerEntries = computed(() => {
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
               maxAudioBytes
               <span class="relative group/tip">
-                <svg
+                <InformationCircleIcon
                   class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><circle
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke-width="2"
-                /><path
-                  stroke-linecap="round"
-                  stroke-width="2"
-                  d="M12 16v-4m0-4h.01"
-                /></svg>
+                  aria-hidden="true"
+                />
                 <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                   Max upload size for audio attachments, in megabytes. 100 MB holds roughly an hour of 128 kbps recording.
                 </span>
@@ -2486,34 +2210,20 @@ const providerEntries = computed(() => {
                 title="Save"
                 @click="saveUploadMb('upload.maxAudioBytes', uploadFieldEdit)"
               >
-                <svg
+                <CheckIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M5 13l4 4L19 7"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Cancel"
                 @click="editingUploadField = null"
               >
-                <svg
+                <XMarkIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
             <template v-else>
@@ -2523,17 +2233,10 @@ const providerEntries = computed(() => {
                 title="Edit"
                 @click="editingUploadField = 'maxAudioMb'; uploadFieldEdit = uploadMaxAudioMb"
               >
-                <svg
+                <PencilIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
           </div>
@@ -2541,21 +2244,10 @@ const providerEntries = computed(() => {
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
               maxFileBytes
               <span class="relative group/tip">
-                <svg
+                <InformationCircleIcon
                   class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><circle
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke-width="2"
-                /><path
-                  stroke-linecap="round"
-                  stroke-width="2"
-                  d="M12 16v-4m0-4h.01"
-                /></svg>
+                  aria-hidden="true"
+                />
                 <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
                   Max upload size for every other attachment type (PDFs, text, archives, etc.), in megabytes.
                 </span>
@@ -2575,34 +2267,20 @@ const providerEntries = computed(() => {
                 title="Save"
                 @click="saveUploadMb('upload.maxFileBytes', uploadFieldEdit)"
               >
-                <svg
+                <CheckIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M5 13l4 4L19 7"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Cancel"
                 @click="editingUploadField = null"
               >
-                <svg
+                <XMarkIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
             <template v-else>
@@ -2612,17 +2290,10 @@ const providerEntries = computed(() => {
                 title="Edit"
                 @click="editingUploadField = 'maxFileMb'; uploadFieldEdit = uploadMaxFileMb"
               >
-                <svg
+                <PencilIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
           </div>
@@ -2665,34 +2336,20 @@ const providerEntries = computed(() => {
                 title="Save"
                 @click="saveSPField('skillsPromotion.provider', spFieldEdit)"
               >
-                <svg
+                <CheckIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M5 13l4 4L19 7"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Cancel"
                 @click="editingSPField = null"
               >
-                <svg
+                <XMarkIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
             <template v-else>
@@ -2704,17 +2361,10 @@ const providerEntries = computed(() => {
                 title="Edit"
                 @click="editingSPField = 'provider'; spFieldEdit = spProviderRaw"
               >
-                <svg
+                <PencilIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
           </div>
@@ -2755,34 +2405,20 @@ const providerEntries = computed(() => {
                 title="Save"
                 @click="saveSPField('skillsPromotion.model', spFieldEdit)"
               >
-                <svg
+                <CheckIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M5 13l4 4L19 7"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Cancel"
                 @click="editingSPField = null"
               >
-                <svg
+                <XMarkIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
             <template v-else>
@@ -2797,17 +2433,10 @@ const providerEntries = computed(() => {
                 title="Edit"
                 @click="editingSPField = 'model'; spFieldEdit = spModelRaw || (spHasExplicitProvider && spAvailableModels.length ? (spAvailableModels[0]?.id ?? '') : '')"
               >
-                <svg
+                <PencilIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
           </div>
@@ -2828,34 +2457,20 @@ const providerEntries = computed(() => {
                 title="Save"
                 @click="saveSPField('skillsPromotion.timeoutSeconds', spFieldEdit)"
               >
-                <svg
+                <CheckIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M5 13l4 4L19 7"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Cancel"
                 @click="editingSPField = null"
               >
-                <svg
+                <XMarkIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
             <template v-else>
@@ -2865,17 +2480,10 @@ const providerEntries = computed(() => {
                 title="Edit"
                 @click="editingSPField = 'timeout'; spFieldEdit = spTimeout"
               >
-                <svg
+                <PencilIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
           </div>
@@ -2896,34 +2504,20 @@ const providerEntries = computed(() => {
                 title="Save"
                 @click="saveSPField('skillsPromotion.batchSizeKb', spFieldEdit)"
               >
-                <svg
+                <CheckIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M5 13l4 4L19 7"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Cancel"
                 @click="editingSPField = null"
               >
-                <svg
+                <XMarkIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
             <template v-else>
@@ -2933,17 +2527,10 @@ const providerEntries = computed(() => {
                 title="Edit"
                 @click="editingSPField = 'batchKb'; spFieldEdit = spBatchKb"
               >
-                <svg
+                <PencilIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
           </div>
@@ -3056,34 +2643,20 @@ const providerEntries = computed(() => {
                   title="Save"
                   @click="saveShellField('shell.allowlist', shellAllowlistEdit)"
                 >
-                  <svg
+                  <CheckIcon
                     class="w-3.5 h-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  ><path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M5 13l4 4L19 7"
-                  /></svg>
+                    aria-hidden="true"
+                  />
                 </button>
                 <button
                   class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                   title="Cancel"
                   @click="editingShellField = null"
                 >
-                  <svg
+                  <XMarkIcon
                     class="w-3.5 h-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  ><path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M6 18L18 6M6 6l12 12"
-                  /></svg>
+                    aria-hidden="true"
+                  />
                 </button>
               </div>
             </template>
@@ -3094,17 +2667,10 @@ const providerEntries = computed(() => {
                 title="Edit"
                 @click="startShellEdit('allowlist', shellConfig.allowlist)"
               >
-                <svg
+                <PencilIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
           </div>
@@ -3125,34 +2691,20 @@ const providerEntries = computed(() => {
                 title="Save"
                 @click="saveShellField('shell.defaultTimeoutSeconds', shellTimeoutEdit)"
               >
-                <svg
+                <CheckIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M5 13l4 4L19 7"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                 title="Cancel"
                 @click="editingShellField = null"
               >
-                <svg
+                <XMarkIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M6 18L18 6M6 6l12 12"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
             <template v-else>
@@ -3162,17 +2714,10 @@ const providerEntries = computed(() => {
                 title="Edit"
                 @click="startShellEdit('timeout', shellConfig.defaultTimeout)"
               >
-                <svg
+                <PencilIcon
                   class="w-3.5 h-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                ><path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                /></svg>
+                  aria-hidden="true"
+                />
               </button>
             </template>
           </div>
@@ -3250,34 +2795,20 @@ const providerEntries = computed(() => {
               title="Save"
               @click="updateEntry(def.apiKey.key)"
             >
-              <svg
+              <CheckIcon
                 class="w-3.5 h-3.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              ><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M5 13l4 4L19 7"
-              /></svg>
+                aria-hidden="true"
+              />
             </button>
             <button
               class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
               title="Cancel"
               @click="editingKey = null"
             >
-              <svg
+              <XMarkIcon
                 class="w-3.5 h-3.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              ><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M6 18L18 6M6 6l12 12"
-              /></svg>
+                aria-hidden="true"
+              />
             </button>
           </template>
           <template v-else>
@@ -3287,17 +2818,10 @@ const providerEntries = computed(() => {
               title="Edit"
               @click="startEdit(scannerApiKeyEntry(id))"
             >
-              <svg
+              <PencilIcon
                 class="w-3.5 h-3.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              ><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-              /></svg>
+                aria-hidden="true"
+              />
             </button>
           </template>
         </div>

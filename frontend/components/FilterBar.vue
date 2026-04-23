@@ -1,4 +1,9 @@
 <script setup lang="ts">
+import {
+  ArrowDownTrayIcon,
+  BookmarkIcon,
+} from '@heroicons/vue/24/outline'
+
 export interface Filter {
   key: string
   value: string
@@ -178,17 +183,10 @@ function handleInputKeydown(e: KeyboardEvent) {
         title="Saved views"
         @click="showSavedViews = !showSavedViews"
       >
-        <svg
+        <BookmarkIcon
           class="w-4 h-4"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        ><path
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          stroke-width="2"
-          d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
-        /></svg>
+          aria-hidden="true"
+        />
       </button>
       <div
         v-if="showSavedViews"
@@ -267,17 +265,10 @@ function handleInputKeydown(e: KeyboardEvent) {
       title="Export"
       @click="emit('export')"
     >
-      <svg
+      <ArrowDownTrayIcon
         class="w-4 h-4"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      ><path
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        stroke-width="1.5"
-        d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
-      /></svg>
+        aria-hidden="true"
+      />
     </button>
   </div>
 </template>

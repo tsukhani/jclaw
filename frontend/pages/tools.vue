@@ -1,5 +1,37 @@
 <script setup lang="ts">
+import {
+  CheckCircleIcon,
+  ChevronDownIcon,
+  ClipboardDocumentCheckIcon,
+  ClockIcon,
+  CommandLineIcon,
+  ComputerDesktopIcon,
+  DocumentTextIcon,
+  FolderIcon,
+  GlobeAltIcon,
+  MagnifyingGlassIcon,
+} from '@heroicons/vue/24/outline'
+import type { FunctionalComponent } from 'vue'
 import type { ToolMeta } from '~/composables/useToolMeta'
+
+// Maps the backend-supplied icon name (a stable string contract — see
+// composables/useToolMeta.ts) to the concrete Heroicons component. Unknown
+// keys fall back to DocumentTextIcon so a new backend icon never breaks
+// the grid while we catch up on the frontend side.
+const TOOL_ICONS: Record<string, FunctionalComponent> = {
+  terminal: CommandLineIcon,
+  folder: FolderIcon,
+  document: DocumentTextIcon,
+  globe: GlobeAltIcon,
+  search: MagnifyingGlassIcon,
+  browser: ComputerDesktopIcon,
+  clock: ClockIcon,
+  check: CheckCircleIcon,
+  tasks: ClipboardDocumentCheckIcon,
+}
+function iconFor(name: string): FunctionalComponent {
+  return TOOL_ICONS[name] ?? DocumentTextIcon
+}
 
 const { TOOL_META, ORDERED_TOOLS } = useToolMeta()
 
@@ -220,20 +252,11 @@ function toggleAllExpanded() {
           class="flex items-center gap-1.5 px-3 py-1 text-xs border border-border bg-surface-elevated text-fg-muted hover:text-fg-primary hover:border-input transition-colors"
           @click="toggleAllExpanded"
         >
-          <svg
+          <ChevronDownIcon
             class="w-3 h-3 transition-transform duration-200"
             :class="allExpanded ? 'rotate-180' : ''"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M19 9l-7 7-7-7"
-            />
-          </svg>
+            aria-hidden="true"
+          />
           {{ allExpanded ? 'Collapse all' : 'Expand all' }}
         </button>
       </div>
@@ -262,77 +285,12 @@ function toggleAllExpanded() {
             class="w-9 h-9 rounded flex items-center justify-center shrink-0"
             :class="tool.meta.iconBg"
           >
-            <svg
+            <component
+              :is="iconFor(tool.meta.icon)"
               class="w-5 h-5"
               :class="tool.meta.iconColor"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                v-if="tool.meta.icon === 'terminal'"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.75"
-                d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-              />
-              <path
-                v-if="tool.meta.icon === 'folder'"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.75"
-                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-              />
-              <path
-                v-if="tool.meta.icon === 'document'"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.75"
-                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-              />
-              <path
-                v-if="tool.meta.icon === 'globe'"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.75"
-                d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
-              />
-              <path
-                v-if="tool.meta.icon === 'search'"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.75"
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-              />
-              <path
-                v-if="tool.meta.icon === 'browser'"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.75"
-                d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-              />
-              <path
-                v-if="tool.meta.icon === 'clock'"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.75"
-                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-              <path
-                v-if="tool.meta.icon === 'check'"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.75"
-                d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-              <path
-                v-if="tool.meta.icon === 'tasks'"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.75"
-                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
-              />
-            </svg>
+              aria-hidden="true"
+            />
           </div>
 
           <!-- Name + badge + toggle -->
@@ -404,20 +362,11 @@ function toggleAllExpanded() {
               {{ tool.meta.functions.length }}
             </span>
           </div>
-          <svg
+          <ChevronDownIcon
             class="w-3.5 h-3.5 text-fg-muted group-hover:text-fg-muted transition-all duration-200 shrink-0"
             :class="expandedSet.has(tool.name) ? 'rotate-180' : ''"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M19 9l-7 7-7-7"
-            />
-          </svg>
+            aria-hidden="true"
+          />
         </button>
 
         <!-- Functions panel -->
