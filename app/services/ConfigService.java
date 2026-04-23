@@ -45,19 +45,11 @@ public class ConfigService {
         return value != null ? value : defaultValue;
     }
 
-    private static final ConcurrentHashMap<String, CachedInt> intCache = new ConcurrentHashMap<>();
-
-    private record CachedInt(int value, String rawValue) {}
-
     public static int getInt(String key, int defaultValue) {
         var raw = get(key);
         if (raw == null) return defaultValue;
-        var cached = intCache.get(key);
-        if (cached != null && cached.rawValue().equals(raw)) return cached.value();
         try {
-            int parsed = Integer.parseInt(raw);
-            intCache.put(key, new CachedInt(parsed, raw));
-            return parsed;
+            return Integer.parseInt(raw);
         } catch (NumberFormatException _) {
             return defaultValue;
         }

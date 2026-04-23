@@ -62,6 +62,8 @@ public class AgentRunner {
     private static final Pattern HTML_ANCHOR =
             Pattern.compile("<a\\s[^>]*?href\\s*=\\s*[\"']?([^\"'\\s>]+)",
                     Pattern.CASE_INSENSITIVE);
+    private static final Pattern ALT_TEXT_PATTERN =
+            Pattern.compile("!\\[([^\\]]*)\\]");
 
     private static int maxToolRounds() {
         return services.ConfigService.getInt("chat.maxToolRounds", DEFAULT_MAX_TOOL_ROUNDS);
@@ -1809,7 +1811,7 @@ public class AgentRunner {
             // to an empty alt (= just "download" as the link label) if the
             // pattern doesn't match (shouldn't happen for well-formed
             // collected entries but guarded for safety).
-            var altMatcher = Pattern.compile("!\\[([^\\]]*)\\]").matcher(img);
+            var altMatcher = ALT_TEXT_PATTERN.matcher(img);
             var alt = altMatcher.find() ? altMatcher.group(1).trim() : "";
             var label = alt.isEmpty() ? "download" : "download " + alt;
             downloads.add("[" + label + "](" + url + ")");
