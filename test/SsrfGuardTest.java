@@ -190,4 +190,76 @@ public class SsrfGuardTest extends UnitTest {
     public void isUrlSafeNonThrowingReturnsTrueForPublic() {
         assertTrue(SsrfGuard.isUrlSafe("https://example.com/"));
     }
+
+    // ── JCLAW-145: IPv6 link-local / ULA, IPv4 decimal integer form ──
+
+    @Test
+    public void isUnsafeRejectsIpv6LinkLocal() throws Exception {
+        // fe80::/10 — JDK's isLinkLocalAddress covers this range.
+        assertTrue(SsrfGuard.isUnsafe(InetAddress.getByName("fe80::1")));
+        assertTrue(SsrfGuard.isUnsafe(InetAddress.getByName("fe80::dead:beef")));
+    }
+
+    @Test
+    public void assertUrlSafeRejectsIpv6LinkLocalLiteral() {
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://[fe80::1]/"));
+    }
+
+    @Test
+    public void isUnsafeRejectsIpv6UniqueLocal() throws Exception {
+        // fc00::/7 — Unique Local Address (RFC 4193). JDK's predicate
+        // coverage misses this: isSiteLocalAddress only matches the
+        // deprecated fec0::/10. SsrfGuard must add an explicit prefix
+        // check. If this test regresses, a ULA-reachable service inside
+        // the host's network becomes SSRF-reachable.
+        assertTrue(SsrfGuard.isUnsafe(InetAddress.getByName("fc00::1")));
+        assertTrue(SsrfGuard.isUnsafe(InetAddress.getByName("fd00::1")));
+        assertTrue(SsrfGuard.isUnsafe(InetAddress.getByName("fcde:ad:be:ef::1")));
+    }
+
+    @Test
+    public void isUnsafeDoesNotRejectNonUlaIpv6() throws Exception {
+        // 2001:db8::/32 is documentation-reserved — non-ULA, non-link-local,
+        // non-loopback. Must NOT be blocked (false positives break real
+        // IPv6 endpoints).
+        assertFalse(SsrfGuard.isUnsafe(InetAddress.getByName("2001:db8::1")));
+        // fe00::1 is near the ULA range but above it (starts with 0xFE,
+        // not 0xFC or 0xFD). Must not be captured by the ULA check.
+        assertFalse(SsrfGuard.isUnsafe(InetAddress.getByName("fe00::1")));
+    }
+
+    @Test
+    public void assertUrlSafeRejectsIpv6UlaLiteral() {
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://[fc00::1]/"));
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://[fd12::1]/"));
+    }
+
+    @Test
+    public void assertUrlSafeRejectsIpv4DecimalLoopback() {
+        // 2130706433 == 0x7F000001 == 127.0.0.1. Java's InetAddress resolves
+        // bare decimal integers as packed IPv4. isLikelyIpLiteral misses
+        // this form (no dots), so the guard relies on the subsequent
+        // DNS-resolution pass in assertUrlSafe to catch the resolved
+        // loopback via isUnsafe.
+        assertThrows(SecurityException.class,
+                () -> SsrfGuard.assertUrlSafe("http://2130706433/"));
+    }
+
+    @Test
+    public void ipv4OctalPrefixDoesNotCollideWithLoopback() throws Exception {
+        // Pin: modern JDKs do NOT interpret leading-zero octets as octal per
+        // RFC 5735 hardening. InetAddress.getByName("0177.0.0.1") yields
+        // 177.0.0.1, NOT 127.0.0.1. If this assertion ever fails, the JDK
+        // has re-introduced octal parsing and SsrfGuard needs an explicit
+        // pre-DNS normaliser to catch `0177` → 127 before resolution.
+        var resolved = InetAddress.getByName("0177.0.0.1");
+        assertEquals("177.0.0.1", resolved.getHostAddress(),
+                "JDK must not interpret leading-zero octets as octal");
+        assertFalse(resolved.isLoopbackAddress(),
+                "0177.0.0.1 resolved to a loopback — JDK regression, SsrfGuard "
+                        + "needs explicit octal handling");
+    }
 }

@@ -102,7 +102,27 @@ public final class SsrfGuard {
                 || addr.isAnyLocalAddress()   // 0.0.0.0, ::
                 || addr.isLinkLocalAddress()  // 169.254.0.0/16, fe80::/10
                 || addr.isSiteLocalAddress()  // 10/8, 172.16/12, 192.168/16, fec0::/10
-                || addr.isMulticastAddress(); // 224/4
+                || addr.isMulticastAddress() // 224/4
+                || isUniqueLocalIpv6(addr);   // fc00::/7 (not caught by JDK predicates)
+    }
+
+    /**
+     * IPv6 Unique Local Address (RFC 4193): {@code fc00::/7}. The JDK exposes
+     * no predicate for this range — {@link InetAddress#isSiteLocalAddress()}
+     * only matches the deprecated {@code fec0::/10}. Without this check,
+     * {@code http://[fc00::1]/} would silently flow through {@link #isUnsafe},
+     * reaching internal ULA-assigned services on the host's network.
+     *
+     * <p>The /7 prefix means the upper 7 bits of the first byte are
+     * {@code 1111 110}, so the byte is {@code 0xFC} or {@code 0xFD}. The
+     * mask {@code 0xFE} leaves only that top 7-bit pattern.
+     */
+    private static boolean isUniqueLocalIpv6(InetAddress addr) {
+        byte[] bytes = addr.getAddress();
+        // Byte promotes to int via sign extension, so compare against the
+        // mask result as an int (0xFC, not (byte) 0xFC which sign-extends
+        // to 0xFFFFFFFC).
+        return bytes.length == 16 && (bytes[0] & 0xFE) == 0xFC;
     }
 
     /**
