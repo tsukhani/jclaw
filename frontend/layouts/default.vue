@@ -54,7 +54,7 @@ const breadcrumbExtra = useBreadcrumbExtra()
 
 // Sidebar "Recents" — last 10 conversations across all agents. Reactive;
 // pages mutate the list by calling refresh() on the same composable.
-const { data: recentConversations } = useRecentConversations()
+const { data: recentConversations, refresh: refreshRecentConversations } = useRecentConversations()
 
 /** Collapse/expand the Recents panel under the Conversations nav link. */
 const recentsOpen = ref(true)
@@ -65,6 +65,23 @@ function recentLabel(c: { preview?: string | null, agentName?: string | null, id
   if (p) return p
   if (c.agentName) return c.agentName
   return `Conversation ${c.id}`
+}
+
+/**
+ * Delete a recent conversation from the sidebar trash affordance. If the
+ * deleted row is the conversation currently open on /chat (via the
+ * ?conversation= query), strip the query so the page drops the stale
+ * messages instead of continuing to render them against a deleted id.
+ */
+async function deleteRecent(id: number) {
+  try {
+    await $fetch(`/api/conversations/${id}`, { method: 'DELETE' })
+    if (Number(route.query.conversation) === id) {
+      await navigateTo({ path: '/chat', query: {} })
+    }
+    await refreshRecentConversations()
+  }
+  catch { /* best-effort; surface via a toast later if it matters */ }
 }
 
 /**
@@ -367,20 +384,53 @@ const navGroups = [
               aria-label="Recent conversations"
               class="mb-1"
             >
-              <div class="px-4 pt-2 pb-1 text-[10px] text-fg-muted uppercase tracking-wider font-medium">
+              <div class="pl-12 pr-3 pt-2 pb-1 text-xs text-fg-muted font-medium">
                 Recent
               </div>
-              <NuxtLink
+              <!--
+                Each recent is a row with a hover-revealed trash affordance.
+                Absolute-positioned button stays a separate interactive
+                element (not nested inside the link) so keyboard focus order
+                and screen-reader semantics are clean. Parent div owns the
+                group-hover coordination and padding-right for the trash
+                slot; the link uses pr-10 so long previews truncate before
+                colliding with the trash button.
+              -->
+              <div
                 v-for="convo in recentConversations"
                 :key="convo.id"
-                :to="`/chat?conversation=${convo.id}`"
                 role="listitem"
-                class="block pl-12 pr-3 py-1 text-xs text-fg-muted truncate
-                       hover:text-fg-strong hover:bg-surface-elevated transition-colors"
-                :title="recentLabel(convo)"
+                class="group relative"
               >
-                {{ recentLabel(convo) }}
-              </NuxtLink>
+                <NuxtLink
+                  :to="`/chat?conversation=${convo.id}`"
+                  class="block pl-12 pr-10 py-1 text-xs text-fg-muted truncate
+                         hover:text-fg-strong hover:bg-surface-elevated transition-colors"
+                  :title="recentLabel(convo)"
+                >
+                  {{ recentLabel(convo) }}
+                </NuxtLink>
+                <button
+                  type="button"
+                  class="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-fg-muted hover:text-red-500
+                         opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                  title="Delete conversation"
+                  :aria-label="`Delete conversation: ${recentLabel(convo)}`"
+                  @click.prevent.stop="deleteRecent(convo.id)"
+                >
+                  <svg
+                    class="w-3.5 h-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  ><path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1.5"
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M10 3h4a1 1 0 011 1v3H9V4a1 1 0 011-1z"
+                  /></svg>
+                </button>
+              </div>
             </div>
           </template>
           <div
