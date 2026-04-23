@@ -41,7 +41,11 @@ const passwordId = useId()
 </script>
 
 <template>
-  <div class="min-h-screen bg-surface flex items-center justify-center p-6">
+  <div
+    class="min-h-screen flex items-center justify-center p-6
+           bg-gradient-to-br from-emerald-50 via-white to-emerald-50
+           dark:bg-surface dark:from-surface dark:via-surface dark:to-surface"
+  >
     <div
       class="w-full max-w-md bg-surface-elevated border border-fg-muted/20 rounded-2xl
              shadow-[0_12px_40px_rgba(0,0,0,0.08)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)]
@@ -51,7 +55,7 @@ const passwordId = useId()
         <img
           src="/mascot-waving.png"
           alt="JClaw"
-          class="h-24 w-auto select-none mb-4"
+          class="h-32 w-auto select-none mb-4"
         >
         <h1 class="text-2xl font-bold text-fg-strong">
           Welcome back
