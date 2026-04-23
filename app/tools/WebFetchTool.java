@@ -33,7 +33,13 @@ public class WebFetchTool implements ToolRegistry.Tool {
     private static final int TIMEOUT_SECONDS = 30;
     private static final int MAX_REDIRECTS = 5;
 
-    private static final OkHttpClient GUARDED = SsrfGuard.buildGuardedClient(
+    /**
+     * Package-private and non-final so {@code WebFetchToolTest} can substitute
+     * a loopback-friendly client (SsrfGuard's {@code SAFE_DNS} blocks 127.0.0.1
+     * where MockWebServer binds). Production code must not mutate this — the
+     * guarded client is the only supported runtime path.
+     */
+    static OkHttpClient CLIENT = SsrfGuard.buildGuardedClient(
             CONNECT_TIMEOUT_SECONDS, TIMEOUT_SECONDS);
 
     @Override
@@ -130,7 +136,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
                     .get()
                     .build();
 
-            try (var response = GUARDED.newCall(request).execute()) {
+            try (var response = CLIENT.newCall(request).execute()) {
                 int code = response.code();
 
                 // Follow 3xx manually so every hop re-enters SsrfGuard.
