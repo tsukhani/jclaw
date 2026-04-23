@@ -23,6 +23,17 @@ export function effectiveThinkingLevels(model: ProviderModel | null | undefined)
   return model.supportsThinking ? [...DEFAULT_THINKING_LEVELS] : []
 }
 
+/** Find a model's metadata by provider name + model id, or null if not found. */
+export function findProviderModel(
+  providers: Provider[],
+  providerName: string | null | undefined,
+  modelId: string | null | undefined,
+): ProviderModel | null {
+  if (!providerName || !modelId) return null
+  const provider = providers.find(p => p.name === providerName)
+  return provider?.models.find(m => m.id === modelId) ?? null
+}
+
 export interface Provider {
   name: string
   models: ProviderModel[]

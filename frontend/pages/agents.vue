@@ -9,7 +9,7 @@ import type {
   PromptBreakdown,
   WorkspaceFileContent,
 } from '~/types/api'
-import { effectiveThinkingLevels, type ProviderModel } from '~/composables/useProviders'
+import { effectiveThinkingLevels, findProviderModel, type ProviderModel } from '~/composables/useProviders'
 
 const { confirm } = useConfirm()
 
@@ -209,6 +209,12 @@ const availableModels = computed(() => {
 const selectedModel = computed<ProviderModel | null>(() =>
   availableModels.value.find(m => m.id === form.value.modelId) ?? null,
 )
+
+// Look up a listed agent's model metadata so the row can show capability pills.
+function modelForAgent(agent: Agent | null | undefined): ProviderModel | null {
+  if (!agent) return null
+  return findProviderModel(providers.value, agent.modelProvider, agent.modelId)
+}
 
 // Thinking levels the selected provider+model pair accepts. Empty when the
 // model doesn't support reasoning — the UI hides the selector in that case.
@@ -634,6 +640,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             <div class="text-xs text-neutral-500 mt-0.5">
               {{ mainAgent.modelProvider }} / {{ mainAgent.modelId }}
             </div>
+            <ModelCapabilityPills
+              :model="modelForAgent(mainAgent)"
+              class="mt-1.5"
+            />
           </div>
           <div class="flex items-center gap-3 shrink-0">
             <span
@@ -681,6 +691,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               <div class="text-xs text-neutral-500 mt-0.5">
                 {{ agent.modelProvider }} / {{ agent.modelId }}
               </div>
+              <ModelCapabilityPills
+                :model="modelForAgent(agent)"
+                class="mt-1.5"
+              />
             </div>
           </div>
           <div class="flex items-center gap-3 shrink-0">
@@ -796,6 +810,10 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 {{ m.name || m.id }}
               </option>
             </select>
+            <ModelCapabilityPills
+              :model="selectedModel"
+              class="mt-2"
+            />
           </label>
           <!--
             Thinking mode selector. The available options come from the selected
