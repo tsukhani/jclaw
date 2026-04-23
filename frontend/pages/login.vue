@@ -1,118 +1,117 @@
 <script setup lang="ts">
+import { EyeIcon, EyeSlashIcon } from '@heroicons/vue/24/outline'
+
 definePageMeta({ layout: false })
 
 const { login } = useAuth()
-const username = ref('')
 const password = ref('')
+const showPassword = ref(false)
 const error = ref('')
 const loading = ref(false)
 
-type TimeOfDay = 'morning' | 'afternoon' | 'evening'
-function timeOfDay(hour: number): TimeOfDay {
-  if (hour >= 5 && hour < 12) return 'morning'
-  if (hour >= 12 && hour < 22) return 'afternoon'
-  return 'evening'
-}
-const period = timeOfDay(new Date().getHours())
-const greeting: Record<TimeOfDay, string> = {
-  morning: 'Good morning',
-  afternoon: 'Good day',
-  evening: 'Good evening',
-}
-
-// The login screen is always light, regardless of the OS color scheme or
-// any stored preference. The stored theme belongs to the signed-in user and
-// the default layout's useTheme reapplies it after sign-in, so forcing light
-// here is purely a logged-out presentation choice.
+// Respect the stored theme preference (same logic as /setup-password).
+// Previously this page forced light mode — but once the user has set a
+// password and picked a theme, returning to /login after sign-out in dark
+// mode would flash them white. Stay consistent with whatever they chose.
 onMounted(() => {
-  document.documentElement.classList.remove('dark')
+  const saved = localStorage.getItem('jclaw-theme')
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+  const effective = saved === 'dark'
+    ? 'dark'
+    : saved === 'light'
+      ? 'light'
+      : prefersDark ? 'dark' : 'light'
+  document.documentElement.classList.toggle('dark', effective === 'dark')
 })
 
 async function handleLogin() {
   error.value = ''
   loading.value = true
-  const success = await login(username.value, password.value)
+  // Username is hardcoded to "admin" — JClaw is single-admin, the
+  // frontend doesn't surface the username-override path (conf still has
+  // jclaw.admin.username for operators who absolutely need it, but
+  // changing it breaks this login form; documented trade-off for UX).
+  const success = await login('admin', password.value)
   loading.value = false
-  if (success) {
-    navigateTo('/')
-  }
-  else {
-    error.value = 'Invalid username or password'
-  }
+  if (success) navigateTo('/')
+  else error.value = 'Invalid password'
 }
 
-// A11y: stable ids for label/control association
-const usernameId = useId()
 const passwordId = useId()
 </script>
 
 <template>
-  <div class="min-h-screen bg-surface flex items-center justify-center">
-    <div class="w-full max-w-sm">
-      <div class="mb-4 flex items-center justify-center gap-4">
+  <div class="min-h-screen bg-surface flex items-center justify-center p-6">
+    <div
+      class="w-full max-w-md bg-surface-elevated border border-fg-muted/20 rounded-2xl
+             shadow-[0_12px_40px_rgba(0,0,0,0.08)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)]
+             p-8"
+    >
+      <div class="flex flex-col items-center mb-6">
         <img
           src="/mascot-waving.png"
           alt="JClaw"
-          class="w-32 h-32 rounded-full shrink-0 select-none"
+          class="w-24 h-24 rounded-full select-none mb-4"
         >
-        <h1 class="text-4xl font-semibold tracking-wider">
-          <span class="text-emerald-700 dark:text-emerald-400">J</span><span class="text-red-600 dark:text-red-500">Claw</span>
+        <h1 class="text-2xl font-bold text-fg-strong">
+          Welcome back
         </h1>
+        <p class="mt-1 text-sm text-fg-muted">
+          Sign in with your password.
+        </p>
       </div>
-      <p class="mb-8 text-center text-base text-fg-muted">
-        {{ greeting[period] }}! Sign in to continue
-      </p>
 
       <form
         class="space-y-4"
         @submit.prevent="handleLogin"
       >
         <label
-          :for="usernameId"
-          class="block"
-        >
-          <span class="block text-xs font-medium text-fg-muted mb-1.5">Username</span>
-          <input
-            :id="usernameId"
-            v-model="username"
-            type="text"
-            autocomplete="username"
-            class="w-full px-3 py-2 bg-surface-elevated border border-border text-fg-strong text-sm
-                   focus:outline-hidden focus:border-input transition-colors"
-            placeholder="admin"
-          >
-        </label>
-
-        <label
           :for="passwordId"
           class="block"
         >
-          <span class="block text-xs font-medium text-fg-muted mb-1.5">Password</span>
-          <input
-            :id="passwordId"
-            v-model="password"
-            type="password"
-            autocomplete="current-password"
-            class="w-full px-3 py-2 bg-surface-elevated border border-border text-fg-strong text-sm
-                   focus:outline-hidden focus:border-input transition-colors"
-          >
+          <span class="block text-sm font-semibold text-fg-strong mb-2">Password</span>
+          <div class="relative">
+            <input
+              :id="passwordId"
+              v-model="password"
+              :type="showPassword ? 'text' : 'password'"
+              autocomplete="current-password"
+              class="w-full pl-4 pr-11 py-2.5 rounded-full text-sm text-fg-strong
+                     bg-muted border-0 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40
+                     transition-shadow"
+            >
+            <button
+              type="button"
+              class="absolute inset-y-0 right-3 flex items-center text-fg-muted hover:text-fg-strong
+                     transition-colors"
+              :title="showPassword ? 'Hide password' : 'Show password'"
+              @click="showPassword = !showPassword"
+            >
+              <component
+                :is="showPassword ? EyeSlashIcon : EyeIcon"
+                class="w-5 h-5"
+                aria-hidden="true"
+              />
+            </button>
+          </div>
         </label>
 
         <p
           v-if="error"
-          class="text-sm text-red-400"
+          class="text-sm text-red-500 dark:text-red-400"
         >
           {{ error }}
         </p>
 
         <button
           type="submit"
-          :disabled="loading || !username || !password"
-          class="w-full py-2 bg-emerald-600 text-white text-sm font-medium
-                 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed
+          :disabled="loading || !password"
+          class="w-full py-3 rounded-full text-sm font-semibold text-white
+                 bg-emerald-600 hover:bg-emerald-500
+                 disabled:bg-emerald-600/40 disabled:text-white/70 disabled:cursor-not-allowed
                  transition-colors"
         >
-          {{ loading ? 'Signing in...' : 'Sign in' }}
+          {{ loading ? 'Signing in…' : 'Login' }}
         </button>
       </form>
     </div>
