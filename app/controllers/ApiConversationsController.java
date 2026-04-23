@@ -7,13 +7,13 @@ import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ConversationService;
+import utils.BoundedPatternCache;
 import utils.JpqlFilter;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 import static utils.GsonHolder.INSTANCE;
@@ -28,16 +28,12 @@ public class ApiConversationsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
-    /** Small LRU cache of compiled word-boundary patterns keyed by the search string. */
-    private static final int PATTERN_CACHE_MAX = 64;
-    private static final ConcurrentHashMap<String, Pattern> patternCache = new ConcurrentHashMap<>();
+    private static final BoundedPatternCache patternCache = new BoundedPatternCache(64);
 
     private static Pattern wordBoundaryPattern(String name) {
         var key = name.strip().toLowerCase();
-        return patternCache.computeIfAbsent(key, k -> {
-            if (patternCache.size() > PATTERN_CACHE_MAX) patternCache.clear();
-            return Pattern.compile("\\b" + Pattern.quote(name.strip()) + "\\b", Pattern.CASE_INSENSITIVE);
-        });
+        return patternCache.computeIfAbsent(key, k ->
+                Pattern.compile("\\b" + Pattern.quote(name.strip()) + "\\b", Pattern.CASE_INSENSITIVE));
     }
 
     /**
