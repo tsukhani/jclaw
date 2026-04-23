@@ -7,12 +7,10 @@ import {
   SheetDescription,
 } from '~/components/ui/sheet'
 
-const props = withDefaults(defineProps<{
+withDefaults(defineProps<{
   open: boolean
   title?: string
   description?: string
-  /** Full-page route to navigate to on Cmd+Enter */
-  popOutRoute?: string
 }>(), {
   title: 'Details',
   description: '',
@@ -20,12 +18,8 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:open', value: boolean): void
-  (e: 'next' | 'prev'): void
 }>()
 
-const router = useRouter()
-
-// ── Resize state ────────────────────────────────────────────────────────────
 const MIN_WIDTH = 400
 const panelWidth = ref(Math.round(window.innerWidth * 0.45))
 const isResizing = ref(false)
@@ -55,32 +49,6 @@ function onResizeStart(e: MouseEvent) {
   document.addEventListener('mousemove', onMove)
   document.addEventListener('mouseup', onUp)
 }
-
-// ── Keyboard shortcuts ──────────────────────────────────────────────────────
-function handleKeydown(e: KeyboardEvent) {
-  if (!props.open) return
-
-  // Cmd+Enter → pop out to full page
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && props.popOutRoute) {
-    e.preventDefault()
-    emit('update:open', false)
-    router.push(props.popOutRoute)
-    return
-  }
-
-  // Arrow up/down → cycle items
-  if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    emit('next')
-  }
-  if (e.key === 'ArrowUp') {
-    e.preventDefault()
-    emit('prev')
-  }
-}
-
-onMounted(() => document.addEventListener('keydown', handleKeydown))
-onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
 </script>
 
 <template>
@@ -103,52 +71,15 @@ onUnmounted(() => document.removeEventListener('keydown', handleKeydown))
         @mousedown="onResizeStart"
       />
 
-      <!-- Header -->
+      <!--
+        The SheetContent primitive renders its own X close button in the
+        top-right corner, so pr-10 reserves room for it and the header
+        only carries the title + description.
+      -->
       <SheetHeader class="pr-10">
-        <div class="flex items-center gap-2">
-          <SheetTitle class="flex-1 truncate">
-            {{ title }}
-          </SheetTitle>
-          <button
-            v-if="popOutRoute"
-            class="p-1 text-fg-muted hover:text-fg-strong transition-colors shrink-0"
-            title="Open full page (Cmd+Enter)"
-            @click="emit('update:open', false); router.push(popOutRoute)"
-          >
-            <svg
-              class="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-              />
-            </svg>
-          </button>
-          <button
-            class="p-1 text-fg-muted hover:text-fg-strong transition-colors shrink-0"
-            title="Close panel (Esc)"
-            @click="emit('update:open', false)"
-          >
-            <svg
-              class="w-4 h-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M13 5l7 7-7 7M5 5l7 7-7 7"
-              />
-            </svg>
-          </button>
-        </div>
+        <SheetTitle class="truncate">
+          {{ title }}
+        </SheetTitle>
         <SheetDescription v-if="description">
           {{ description }}
         </SheetDescription>

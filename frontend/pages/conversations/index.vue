@@ -157,52 +157,6 @@ function closePeek() {
   // Keep selectedConvo so re-opening preserves last selection
 }
 
-function peekNext() {
-  if (!conversations.value.length || !selectedConvo.value) return
-  const idx = conversations.value.findIndex(c => c.id === selectedConvo.value!.id)
-  const next = conversations.value[Math.min(idx + 1, conversations.value.length - 1)]
-  if (next && next.id !== selectedConvo.value.id) selectConversation(next)
-}
-
-function peekPrev() {
-  if (!conversations.value.length || !selectedConvo.value) return
-  const idx = conversations.value.findIndex(c => c.id === selectedConvo.value!.id)
-  const prev = conversations.value[Math.max(idx - 1, 0)]
-  if (prev && prev.id !== selectedConvo.value.id) selectConversation(prev)
-}
-
-function exportConversation() {
-  if (!selectedConvo.value) return
-  const c = selectedConvo.value
-  const header = [
-    `# ${c.preview || 'Conversation'}`,
-    '',
-    `- **Channel:** ${c.channelType}`,
-    `- **Agent:** ${c.agentName}`,
-    `- **Peer:** ${c.peerId || '—'}`,
-    `- **Created:** ${new Date(c.createdAt).toLocaleString()}`,
-    `- **Updated:** ${new Date(c.updatedAt).toLocaleString()}`,
-    '',
-    '---',
-    '',
-  ].join('\n')
-
-  const body = messages.value.map((m) => {
-    const ts = new Date(m.createdAt).toLocaleString()
-    return `## ${m.role} — ${ts}\n\n${m.content || '(tool call)'}\n`
-  }).join('\n')
-
-  const blob = new Blob([header + body], { type: 'text/markdown' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `conversation-${c.id}.md`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-}
-
 // ── DataTable column definitions ────────────────────────────────────────────
 const columns: ColumnDef<Conversation, unknown>[] = [
   {
@@ -377,55 +331,14 @@ const columns: ColumnDef<Conversation, unknown>[] = [
       :open="peekOpen"
       :title="selectedConvo?.preview || 'Conversation'"
       :description="`${selectedConvo?.agentName || ''} · ${selectedConvo?.channelType || ''}`"
-      :pop-out-route="selectedConvo ? `/conversations/${selectedConvo.id}` : undefined"
       @update:open="closePeek"
-      @next="peekNext"
-      @prev="peekPrev"
     >
       <template v-if="selectedConvo">
-        <div class="flex items-center justify-between mb-4">
-          <div class="flex flex-wrap gap-x-6 gap-y-1 text-xs text-fg-muted">
-            <span>Channel: <strong class="text-fg-primary">{{ selectedConvo.channelType }}</strong></span>
-            <span>Agent: <strong class="text-fg-primary">{{ selectedConvo.agentName }}</strong></span>
-            <span>Peer: <strong class="text-fg-primary font-mono">{{ selectedConvo.peerId || '—' }}</strong></span>
-            <span>Messages: <strong class="text-fg-primary">{{ selectedConvo.messageCount }}</strong></span>
-          </div>
-          <div class="flex items-center gap-1 shrink-0">
-            <NuxtLink
-              :to="`/chat?conversation=${selectedConvo.id}`"
-              class="p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
-              title="Open in Chat"
-            >
-              <svg
-                class="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              ><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.5"
-                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-              /></svg>
-            </NuxtLink>
-            <button
-              class="p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
-              title="Export conversation as Markdown"
-              @click="exportConversation"
-            >
-              <svg
-                class="w-4 h-4"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              ><path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="1.5"
-                d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
-              /></svg>
-            </button>
-          </div>
+        <div class="flex flex-wrap gap-x-6 gap-y-1 text-xs text-fg-muted mb-4">
+          <span>Channel: <strong class="text-fg-primary">{{ selectedConvo.channelType }}</strong></span>
+          <span>Agent: <strong class="text-fg-primary">{{ selectedConvo.agentName }}</strong></span>
+          <span>Peer: <strong class="text-fg-primary font-mono">{{ selectedConvo.peerId || '—' }}</strong></span>
+          <span>Messages: <strong class="text-fg-primary">{{ selectedConvo.messageCount }}</strong></span>
         </div>
         <div class="space-y-3">
           <div

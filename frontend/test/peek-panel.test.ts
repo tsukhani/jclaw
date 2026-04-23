@@ -36,24 +36,6 @@ describe('PeekPanel', () => {
     expect(document.body.textContent).toContain('Some context')
   })
 
-  it('renders pop-out button when popOutRoute is provided', async () => {
-    await mountSuspended(PeekPanel, {
-      props: { open: true, title: 'Details', popOutRoute: '/chat?id=1' },
-    })
-    await nextTick()
-    const popOutBtn = document.body.querySelector('[title="Open full page (Cmd+Enter)"]')
-    expect(popOutBtn).not.toBeNull()
-  })
-
-  it('does not render pop-out button without popOutRoute', async () => {
-    await mountSuspended(PeekPanel, {
-      props: { open: true, title: 'Details' },
-    })
-    await nextTick()
-    const popOutBtn = document.body.querySelector('[title="Open full page (Cmd+Enter)"]')
-    expect(popOutBtn).toBeNull()
-  })
-
   it('has a resize handle', async () => {
     await mountSuspended(PeekPanel, {
       props: { open: true, title: 'Resize Test' },
