@@ -12,14 +12,17 @@ import {
   PencilIcon,
   PencilSquareIcon,
   SpeakerWaveIcon,
-  StopIcon,
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 // Solid lightbulb for the active-reasoning header — the outline bulb on the
 // composer's Think toggle means "thinking available", the solid+amber bulb
-// on an expanded reasoning block means "thoughts are here, shining."
-import { LightBulbIcon as LightBulbIconSolid } from '@heroicons/vue/24/solid'
+// on an expanded reasoning block means "thoughts are here, shining." Solid
+// stop icon is the filled red square used to interrupt an in-flight stream.
+import {
+  LightBulbIcon as LightBulbIconSolid,
+  StopIcon as StopIconSolid,
+} from '@heroicons/vue/24/solid'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { computeConversationCost, formatConversationCost, formatConversationCostTooltip, formatUsageCost, formatUsageCostTooltip, type MessageUsage } from '~/utils/usage-cost'
@@ -1909,8 +1912,8 @@ function exportConversation() {
                 >
                   <!--
                   Lucide-style paperclip — parity with Unsloth's attach
-                  affordance. The rounded border + bg-muted hover keep the
-                  circle treatment used for the send button on the right.
+                  affordance. The rounded border + bg-muted hover give a
+                  subtle, pressable surface.
                 -->
                   <PaperClipIcon
                     class="w-4 h-4"
@@ -2012,12 +2015,12 @@ function exportConversation() {
                 <button
                   v-if="streaming"
                   type="button"
-                  class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors"
+                  class="p-1.5 text-red-500 hover:text-red-400 transition-colors"
                   title="Stop generating"
                   @click="stopStreaming"
                 >
-                  <StopIcon
-                    class="w-3.5 h-3.5"
+                  <StopIconSolid
+                    class="w-5 h-5"
                     aria-hidden="true"
                   />
                 </button>
@@ -2025,11 +2028,11 @@ function exportConversation() {
                   v-else
                   type="submit"
                   :disabled="!input.trim() && !attachedFiles.length"
-                  class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-emerald-500 text-white hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  class="p-1.5 text-emerald-500 hover:text-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   title="Send"
                 >
                   <PaperAirplaneIcon
-                    class="w-4 h-4"
+                    class="w-5 h-5"
                     aria-hidden="true"
                   />
                 </button>
