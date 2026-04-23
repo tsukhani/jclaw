@@ -59,13 +59,14 @@ public class ApiAgentsController extends Controller {
         return agent;
     }
 
-    private record AgentView(Long id, String name, String modelProvider, String modelId,
+    private record AgentView(Long id, String name, String description,
+                             String modelProvider, String modelId,
                              boolean enabled, boolean isMain, String thinkingMode,
                              Boolean visionEnabled, Boolean audioEnabled,
                              String createdAt, String updatedAt, boolean providerConfigured) {
         static AgentView of(Agent a) {
             var configured = AgentService.isProviderConfigured(a.modelProvider, a.modelId);
-            return new AgentView(a.id, a.name, a.modelProvider, a.modelId,
+            return new AgentView(a.id, a.name, a.description, a.modelProvider, a.modelId,
                     a.enabled, a.isMain(), a.thinkingMode,
                     a.visionEnabled, a.audioEnabled,
                     a.createdAt.toString(), a.updatedAt.toString(), configured);
@@ -173,8 +174,9 @@ public class ApiAgentsController extends Controller {
         var modelProvider = body.get("modelProvider").getAsString();
         var modelId = body.get("modelId").getAsString();
         var thinkingMode = readOptionalString(body, "thinkingMode");
+        var description = readOptionalString(body, "description");
 
-        var agent = AgentService.create(name, modelProvider, modelId, thinkingMode);
+        var agent = AgentService.create(name, modelProvider, modelId, thinkingMode, description);
         renderJSON(gson.toJson(AgentView.of(agent)));
     }
 
@@ -255,9 +257,14 @@ public class ApiAgentsController extends Controller {
         var audioEnabled = body.has("audioEnabled")
                 ? readOptionalBoolean(body, "audioEnabled")
                 : agent.audioEnabled;
+        // description follows the same absent-leaves-untouched convention; an
+        // explicit null or blank clears the field.
+        var description = body.has("description")
+                ? readOptionalString(body, "description")
+                : agent.description;
 
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode,
-                visionEnabled, audioEnabled);
+                visionEnabled, audioEnabled, description);
         renderJSON(gson.toJson(AgentView.of(agent)));
     }
 

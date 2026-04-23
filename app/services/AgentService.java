@@ -74,14 +74,20 @@ public class AgentService {
     }
 
     public static Agent create(String name, String modelProvider, String modelId) {
-        return create(name, modelProvider, modelId, null);
+        return create(name, modelProvider, modelId, null, null);
     }
 
     public static Agent create(String name, String modelProvider, String modelId, String thinkingMode) {
+        return create(name, modelProvider, modelId, thinkingMode, null);
+    }
+
+    public static Agent create(String name, String modelProvider, String modelId,
+                                String thinkingMode, String description) {
         var agent = new Agent();
         agent.name = name;
         agent.modelProvider = modelProvider;
         agent.modelId = modelId;
+        agent.description = normalizeDescription(description);
         // The main agent is a structural singleton and MUST always be enabled — its
         // presence is load-bearing for tier-3 routing fallback, LLM sanitization, and
         // the web chat default selection. Provider misconfiguration will surface as
@@ -109,21 +115,29 @@ public class AgentService {
     public static Agent update(Agent agent, String name, String modelProvider, String modelId,
                                 boolean enabled) {
         return update(agent, name, modelProvider, modelId, enabled, agent.thinkingMode,
-                agent.visionEnabled, agent.audioEnabled);
+                agent.visionEnabled, agent.audioEnabled, agent.description);
     }
 
     public static Agent update(Agent agent, String name, String modelProvider, String modelId,
                                 boolean enabled, String thinkingMode) {
         return update(agent, name, modelProvider, modelId, enabled, thinkingMode,
-                agent.visionEnabled, agent.audioEnabled);
+                agent.visionEnabled, agent.audioEnabled, agent.description);
     }
 
     public static Agent update(Agent agent, String name, String modelProvider, String modelId,
                                 boolean enabled, String thinkingMode,
                                 Boolean visionEnabled, Boolean audioEnabled) {
+        return update(agent, name, modelProvider, modelId, enabled, thinkingMode,
+                visionEnabled, audioEnabled, agent.description);
+    }
+
+    public static Agent update(Agent agent, String name, String modelProvider, String modelId,
+                                boolean enabled, String thinkingMode,
+                                Boolean visionEnabled, Boolean audioEnabled, String description) {
         agent.name = name;
         agent.modelProvider = modelProvider;
         agent.modelId = modelId;
+        agent.description = normalizeDescription(description);
         // The main agent cannot be disabled — see the invariant note in create().
         // The caller's `enabled` argument is ignored for the main agent; a UI that
         // tries to toggle it off is either a bug or a pre-guard bypass, and the API
@@ -134,6 +148,18 @@ public class AgentService {
         agent.audioEnabled = audioEnabled;
         agent.save();
         return agent;
+    }
+
+    /**
+     * Normalise a user-supplied description: null or blank becomes null, anything
+     * longer than 255 chars is truncated. The server mirrors the client-side
+     * {@code maxlength="255"} so a direct API caller can't sneak past.
+     */
+    private static String normalizeDescription(String description) {
+        if (description == null) return null;
+        var trimmed = description.strip();
+        if (trimmed.isEmpty()) return null;
+        return trimmed.length() > 255 ? trimmed.substring(0, 255) : trimmed;
     }
 
     /**

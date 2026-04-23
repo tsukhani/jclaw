@@ -4,6 +4,8 @@ import type { MessageUsage } from '~/utils/usage-cost'
 export interface Agent {
   id: number
   name: string
+  /** Operator-supplied short description of the agent's purpose (max 255 chars), or null when unset. */
+  description?: string | null
   modelProvider: string
   modelId: string
   enabled: boolean

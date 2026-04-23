@@ -21,6 +21,16 @@ public class Agent extends Model {
     @Column(name = "model_id", nullable = false)
     public String modelId;
 
+    /**
+     * Operator-supplied short description of the agent's purpose, shown in the
+     * edit form next to the name. Optional; capped at 255 chars so the column
+     * stays within a varchar for any RDBMS and the UI never has to wrap a huge
+     * blob. Null and blank are equivalent — the service layer collapses both
+     * to null on save.
+     */
+    @Column(length = 255)
+    public String description;
+
     @Column(nullable = false)
     public boolean enabled = true;
 

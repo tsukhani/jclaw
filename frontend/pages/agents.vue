@@ -50,6 +50,7 @@ const workspaceContent = ref('')
 const workspaceBaseline = ref('')
 interface AgentForm {
   name: string
+  description: string
   modelProvider: string
   modelId: string
   enabled: boolean
@@ -60,6 +61,7 @@ interface AgentForm {
 }
 const form = ref<AgentForm>({
   name: '',
+  description: '',
   modelProvider: '',
   modelId: '',
   enabled: true,
@@ -125,6 +127,7 @@ const deletingBulk = ref(false)
 
 // A11y: stable ids for label/control association in the edit form
 const agentNameId = useId()
+const agentDescriptionId = useId()
 const agentProviderId = useId()
 const agentModelId = useId()
 const agentQueueModeId = useId()
@@ -257,6 +260,7 @@ function newAgent() {
   const defaultModel = providers.value[0]?.models?.[0]?.id ?? ''
   form.value = {
     name: '',
+    description: '',
     modelProvider: defaultProvider,
     modelId: defaultModel,
     enabled: true,
@@ -272,6 +276,7 @@ function newAgent() {
 function editAgent(agent: Agent) {
   form.value = {
     name: agent.name,
+    description: agent.description ?? '',
     modelProvider: agent.modelProvider,
     modelId: agent.modelId,
     enabled: agent.enabled,
@@ -498,6 +503,8 @@ async function saveAgent() {
       // preserved on untouched saves.
       visionEnabled: form.value.visionEnabled,
       audioEnabled: form.value.audioEnabled,
+      // Blank description clears the column; backend also strips/trims.
+      description: form.value.description.trim() || null,
     }
     if (creating.value) {
       await $fetch('/api/agents', { method: 'POST', body: payload })
@@ -862,6 +869,19 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             >
           </label>
           <label
+            :for="agentDescriptionId"
+            class="block"
+          >
+            <span class="block text-xs text-neutral-500 mb-1">Description</span>
+            <input
+              :id="agentDescriptionId"
+              v-model="form.description"
+              maxlength="255"
+              placeholder="What is this agent for?"
+              class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring"
+            >
+          </label>
+          <label
             :for="agentProviderId"
             class="block"
           >
@@ -898,17 +918,17 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 {{ m.name || m.id }}
               </option>
             </select>
-            <ModelCapabilityPills
-              :model="selectedModel"
-              :thinking-mode="form.thinkingMode"
-              :vision-enabled="form.visionEnabled"
-              :audio-enabled="form.audioEnabled"
-              size="md"
-              class="mt-4"
-              @toggle="toggleFormCapability"
-            />
           </label>
         </div>
+        <ModelCapabilityPills
+          :model="selectedModel"
+          :thinking-mode="form.thinkingMode"
+          :vision-enabled="form.visionEnabled"
+          :audio-enabled="form.audioEnabled"
+          size="md"
+          class="mt-5"
+          @toggle="toggleFormCapability"
+        />
         <div class="flex mt-4">
           <button
             :disabled="saving || !formDirty || !form.name || !form.modelProvider || !form.modelId"
