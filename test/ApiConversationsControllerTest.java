@@ -17,6 +17,7 @@ public class ApiConversationsControllerTest extends FunctionalTest {
     @BeforeEach
     void setup() {
         Fixtures.deleteDatabase();
+        AuthFixture.seedAdminPassword("changeme");
     }
 
     // --- Auth helper ---

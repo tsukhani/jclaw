@@ -24,6 +24,7 @@ public class ApiProvidersControllerTest extends FunctionalTest {
     void setup() {
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
+        AuthFixture.seedAdminPassword("changeme");
     }
 
     @AfterEach
