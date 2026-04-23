@@ -8,6 +8,10 @@ require:
     # resolved classpath version and the declared version in sync.
     - org.jsoup -> jsoup 1.21.2
     - com.microsoft.playwright -> playwright 1.52.0
+    # Tika's Ivy POM declares bndlib and OSGi with `conf="provided->..."`
+    # scope. Play 1.x's Ivy resolver treats `provided` as runtime, so
+    # without these excludes ~13 OSGi/bndlib JARs (~5 MB) land on the
+    # classpath unused. None are loaded by Tika's SPI parsers.
     - org.apache.tika -> tika-core 3.2.3:
         exclude:
             - javax.mail -> *
@@ -18,6 +22,8 @@ require:
             - org.projectlombok -> *
             - org.assertj -> *
             - org.mockito -> *
+            - biz.aQute.bnd -> *
+            - org.osgi -> *
     - org.apache.tika -> tika-parsers-standard-package 3.2.3:
         exclude:
             - org.apache.lucene -> *
@@ -42,6 +48,15 @@ require:
             - com.vladsch.flexmark -> flexmark-test-util
             - com.vladsch.flexmark -> flexmark-test-specs
             - com.vladsch.flexmark -> flexmark-core-test
+            # pdfbox-tools ships PDFBox CLI front-ends (PDFDebugger,
+            # ExtractText, etc.) which the app never invokes, and picocli
+            # exists solely to support that CLI. Both are unused at source.
+            - org.apache.pdfbox -> pdfbox-tools
+            - info.picocli -> *
+            # Some parsers transitively pull org.osgi.core as a
+            # service-registry dep we never consume — same story as the
+            # bndlib chain on tika-core.
+            - org.osgi -> *
     # flexmark pulls its own test utilities (flexmark-test-util,
     # flexmark-test-specs, flexmark-core-test) plus codeborne/pdf-test for
     # PDF rendering tests, which in turn drag AssertJ and hamcrest-core onto
@@ -58,10 +73,54 @@ require:
             - org.assertj -> *
             - org.mockito -> *
             - org.projectlombok -> *
-    - com.vladsch.flexmark -> flexmark-ext-tables 0.64.8
-    - com.vladsch.flexmark -> flexmark-ext-gfm-strikethrough 0.64.8
-    - com.vladsch.flexmark -> flexmark-ext-gfm-tasklist 0.64.8
-    - com.vladsch.flexmark -> flexmark-ext-autolink 0.64.8
+    # Each flexmark-ext-* pulls flexmark-core-test transitively, which
+    # in turn drags flexmark-test-util/specs, jmh-core, and hamcrest-core
+    # onto the runtime classpath — regressing the excludes on the parent
+    # `flexmark` artifact above. Replicate the exclude block on every
+    # extension to keep the test-only graph off the runtime classpath.
+    - com.vladsch.flexmark -> flexmark-ext-tables 0.64.8:
+        exclude:
+            - com.vladsch.flexmark -> flexmark-test-util
+            - com.vladsch.flexmark -> flexmark-test-specs
+            - com.vladsch.flexmark -> flexmark-core-test
+            - org.openjdk.jmh -> *
+            - org.hamcrest -> *
+            - com.codeborne -> pdf-test
+    - com.vladsch.flexmark -> flexmark-ext-gfm-strikethrough 0.64.8:
+        exclude:
+            - com.vladsch.flexmark -> flexmark-test-util
+            - com.vladsch.flexmark -> flexmark-test-specs
+            - com.vladsch.flexmark -> flexmark-core-test
+            - org.openjdk.jmh -> *
+            - org.hamcrest -> *
+            - com.codeborne -> pdf-test
+    - com.vladsch.flexmark -> flexmark-ext-gfm-tasklist 0.64.8:
+        exclude:
+            - com.vladsch.flexmark -> flexmark-test-util
+            - com.vladsch.flexmark -> flexmark-test-specs
+            - com.vladsch.flexmark -> flexmark-core-test
+            - org.openjdk.jmh -> *
+            - org.hamcrest -> *
+            - com.codeborne -> pdf-test
+    - com.vladsch.flexmark -> flexmark-ext-autolink 0.64.8:
+        exclude:
+            - com.vladsch.flexmark -> flexmark-test-util
+            - com.vladsch.flexmark -> flexmark-test-specs
+            - com.vladsch.flexmark -> flexmark-core-test
+            - org.openjdk.jmh -> *
+            - org.hamcrest -> *
+            - com.codeborne -> pdf-test
+    # Used directly by TelegramMarkdownFormatter. Arrives transitively
+    # via the other flexmark-ext-* pulls today but is fragile if upstream
+    # drops the dep — declare explicitly.
+    - com.vladsch.flexmark -> flexmark-ext-typographic 0.64.8:
+        exclude:
+            - com.vladsch.flexmark -> flexmark-test-util
+            - com.vladsch.flexmark -> flexmark-test-specs
+            - com.vladsch.flexmark -> flexmark-core-test
+            - org.openjdk.jmh -> *
+            - org.hamcrest -> *
+            - com.codeborne -> pdf-test
     # flying-saucer-pdf-openpdf is the other plausible transitive source of
     # pdf-test / AssertJ / hamcrest; narrow those too.
     - org.xhtmlrenderer -> flying-saucer-pdf-openpdf 9.4.0:
@@ -90,6 +149,9 @@ require:
             # OkHttp on the classpath (package names are compatible —
             # classes still live under okhttp3.*).
             - com.squareup.okhttp3 -> okhttp
+            # mockwebserver rides the same OkHttp 4.x graph and is a
+            # test-only artifact; keep it off the runtime classpath.
+            - com.squareup.okhttp3 -> mockwebserver
             - com.squareup.okio -> *
             - org.projectlombok -> *
             - org.assertj -> *
@@ -99,6 +161,7 @@ require:
             - ch.qos.logback -> *
             - org.awaitility -> *
             - com.squareup.okhttp3 -> okhttp
+            - com.squareup.okhttp3 -> mockwebserver
             - com.squareup.okio -> *
             - org.projectlombok -> *
             - org.assertj -> *
