@@ -261,6 +261,54 @@ const columns: ColumnDef<Conversation, unknown>[] = [
     header: 'Last Activity',
     cell: ({ getValue }) => h('span', { class: 'text-fg-muted text-xs' }, new Date(getValue() as string).toLocaleString()),
   },
+  {
+    id: 'actions',
+    header: '',
+    enableSorting: false,
+    size: 96,
+    cell: ({ row }) => h('div', { class: 'flex items-center justify-end gap-1' }, [
+      h('button', {
+        type: 'button',
+        class: 'p-1.5 text-fg-muted hover:text-fg-strong transition-colors',
+        title: 'Open in Chat',
+        onClick: (e: Event) => {
+          e.stopPropagation()
+          navigateTo(`/chat?conversation=${row.original.id}`)
+        },
+      }, [
+        h('svg', {
+          class: 'w-4 h-4', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24',
+        }, [
+          h('path', {
+            'stroke-linecap': 'round',
+            'stroke-linejoin': 'round',
+            'stroke-width': '1.5',
+            'd': 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z',
+          }),
+        ]),
+      ]),
+      h('button', {
+        type: 'button',
+        class: 'p-1.5 text-fg-muted hover:text-fg-strong transition-colors',
+        title: 'Quick preview',
+        onClick: (e: Event) => {
+          e.stopPropagation()
+          selectConversation(row.original)
+        },
+      }, [
+        h('svg', {
+          class: 'w-4 h-4', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24',
+        }, [
+          h('path', {
+            'stroke-linecap': 'round',
+            'stroke-linejoin': 'round',
+            'stroke-width': '1.5',
+            'd': 'M4 4h16v16H4z M14 4v16',
+          }),
+        ]),
+      ]),
+    ]),
+  },
 ]
 </script>
 
@@ -297,7 +345,7 @@ const columns: ColumnDef<Conversation, unknown>[] = [
         :data="conversations"
         :loading="loading"
         empty-message="No conversations yet"
-        @row-click="selectConversation"
+        @row-click="(c: Conversation) => navigateTo(`/conversations/${c.id}`)"
       />
       <div
         v-if="total > 0"
