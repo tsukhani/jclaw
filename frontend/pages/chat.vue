@@ -1272,38 +1272,52 @@ function exportConversation() {
       </div>
 
       <!--
-        Body wrapper: when the chat is empty (no convo, no messages, not
-        streaming) justify-center lifts the hero + composer into the
-        vertical middle of the column so the landing state matches
-        Unsloth Studio. When a conversation exists, messagesEl's flex-1
-        takes all remaining space and the composer stays pinned to the
-        bottom as before.
+        Body wrapper: a flex-col with a pair of flex-grow-animated
+        spacers (top + bottom). When the chat is empty they grow to
+        1fr each, centering the hero + composer as a block. When a
+        conversation is active they collapse to 0, letting the
+        messages scroller (flex-1) fill and pinning the composer to
+        the bottom. flex-grow is animatable per the CSS spec and
+        Chromium/Firefox interpolate it cleanly — so the composer
+        glides between the two positions instead of snapping.
       -->
-      <div
-        class="flex-1 flex flex-col min-h-0"
-        :class="isEmptyChat ? 'justify-center' : ''"
-      >
-        <!--
-        Empty-state hero. Mascot + tagline sit directly above the
-        composer so the composer is the anchor of the whole block once
-        justify-center takes effect on the wrapper.
-      -->
+      <div class="flex-1 flex flex-col min-h-0">
+        <!-- Top spacer: grows to push content toward vertical center on empty. -->
         <div
-          v-if="isEmptyChat"
-          class="mx-auto w-full max-w-3xl flex flex-col items-center gap-3 px-4 pb-4 text-center"
+          class="shrink-0 basis-0 [transition:flex-grow_400ms_ease-out]"
+          :style="{ flexGrow: isEmptyChat ? 1 : 0 }"
+          aria-hidden="true"
+        />
+
+        <!--
+          Empty-state hero with fade+lift transition. Crossfades with
+          the messages scroller via paired Vue <Transition> blocks.
+        -->
+        <Transition
+          enter-active-class="transition-opacity duration-300 ease-out delay-100"
+          enter-from-class="opacity-0"
+          enter-to-class="opacity-100"
+          leave-active-class="transition-opacity duration-150 ease-out"
+          leave-from-class="opacity-100"
+          leave-to-class="opacity-0"
         >
-          <img
-            src="/mascot_typing.png"
-            alt=""
-            class="w-24 h-24 select-none"
+          <div
+            v-if="isEmptyChat"
+            class="mx-auto w-full max-w-3xl flex flex-col items-center gap-3 px-4 pb-4 text-center"
           >
-          <h1 class="text-2xl font-semibold text-fg-strong">
-            Chat with your agent
-          </h1>
-          <p class="text-sm text-fg-muted">
-            Pick a model, pick an agent, and start a new conversation.
-          </p>
-        </div>
+            <img
+              src="/mascot_typing.png"
+              alt=""
+              class="w-24 h-24 select-none"
+            >
+            <h1 class="text-2xl font-semibold text-fg-strong">
+              Chat with your agent
+            </h1>
+            <p class="text-sm text-fg-muted">
+              Pick a model, pick an agent, and start a new conversation.
+            </p>
+          </div>
+        </Transition>
 
         <!-- Messages -->
         <div
@@ -2116,10 +2130,21 @@ function exportConversation() {
               </div>
             </div>
           </form>
-          <p class="mt-1.5 text-center text-[11px] text-fg-muted">
+          <p
+            v-if="!isEmptyChat"
+            class="mt-1.5 text-center text-[11px] text-fg-muted"
+          >
             LLMs can make mistakes. Double-check all responses.
           </p>
         </div>
+        <!-- Bottom spacer: mirror of the top spacer, so the composer
+             lands at vertical center of the body during the empty
+             state rather than just being pushed down from the top. -->
+        <div
+          class="shrink-0 basis-0 [transition:flex-grow_400ms_ease-out]"
+          :style="{ flexGrow: isEmptyChat ? 1 : 0 }"
+          aria-hidden="true"
+        />
       </div> <!-- end body wrapper -->
     </div>
   </div>
