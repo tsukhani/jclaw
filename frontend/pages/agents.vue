@@ -724,7 +724,13 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         >
           <div>
             <span class="text-sm text-fg-strong">{{ mainAgent.name }}</span>
-            <div class="text-xs text-neutral-500 mt-0.5">
+            <div
+              v-if="mainAgent.description"
+              class="text-xs text-fg-muted mt-0.5"
+            >
+              {{ mainAgent.description }}
+            </div>
+            <div class="text-xs text-neutral-500 mt-3">
               {{ mainAgent.modelProvider }} / {{ mainAgent.modelId }}
             </div>
             <ModelCapabilityPills
@@ -779,7 +785,13 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             >
             <div class="min-w-0">
               <span class="text-sm text-fg-strong">{{ agent.name }}</span>
-              <div class="text-xs text-neutral-500 mt-0.5">
+              <div
+                v-if="agent.description"
+                class="text-xs text-fg-muted mt-0.5"
+              >
+                {{ agent.description }}
+              </div>
+              <div class="text-xs text-neutral-500 mt-3">
                 {{ agent.modelProvider }} / {{ agent.modelId }}
               </div>
               <ModelCapabilityPills
