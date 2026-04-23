@@ -1838,7 +1838,7 @@ function exportConversation() {
             :disabled="streaming"
             rows="1"
             aria-label="Message input"
-            class="w-full px-4 pt-4 pb-2 bg-transparent text-sm text-fg-strong
+            class="w-full px-4 pt-4 pb-6 bg-transparent text-sm text-fg-strong
                    placeholder-fg-muted focus:outline-hidden resize-none overflow-hidden"
             @keydown.enter.exact="onInputEnter"
             @keydown.down="onInputKeydown"
@@ -1863,6 +1863,11 @@ function exportConversation() {
                 title="Attach file"
                 @click="triggerFileUpload"
               >
+                <!--
+                  Lucide-style paperclip — parity with Unsloth's attach
+                  affordance. The rounded border + bg-muted hover keep the
+                  circle treatment used for the send button on the right.
+                -->
                 <svg
                   class="w-4 h-4"
                   fill="none"
@@ -1871,8 +1876,8 @@ function exportConversation() {
                 ><path
                   stroke-linecap="round"
                   stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 4v16m8-8H4"
+                  stroke-width="1.8"
+                  d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"
                 /></svg>
               </button>
               <!--
