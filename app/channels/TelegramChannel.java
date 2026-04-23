@@ -97,9 +97,6 @@ public class TelegramChannel implements Channel {
     private final String botToken;
     private final TelegramClient client;
 
-    /** retry_after delay hint (ms), set by trySend on 429, consumed by Channel.sendWithRetry. */
-    private final ThreadLocal<Long> retryHintMs = new ThreadLocal<>();
-
     /**
      * Bot-API HTTP timeouts (JCLAW-100). OkHttp defaults to 10 s on every
      * timeout, which means a slow or hung Telegram edge can burn ~10 s of
@@ -336,13 +333,6 @@ public class TelegramChannel implements Channel {
 
     @Override
     public String channelName() { return "telegram"; }
-
-    @Override
-    public long consumeRetryDelayMs() {
-        Long v = retryHintMs.get();
-        retryHintMs.remove();
-        return v != null ? v : Channel.super.consumeRetryDelayMs();
-    }
 
     // ── Outbound sends ──
 
@@ -773,7 +763,7 @@ public class TelegramChannel implements Channel {
     }
 
     @Override
-    public boolean trySend(String peerId, String text) {
+    public SendResult trySend(String peerId, String text) {
         var request = SendMessage.builder()
                 .chatId(peerId)
                 .text(text)
@@ -783,23 +773,22 @@ public class TelegramChannel implements Channel {
             client.execute(request);
             EventLogger.info("channel", null, "telegram",
                     "Message sent to chat %s".formatted(peerId));
-            return true;
+            return SendResult.OK;
         } catch (TelegramApiRequestException e) {
             var params = e.getParameters();
             if (params != null && params.getRetryAfter() != null && params.getRetryAfter() > 0) {
                 int retryAfter = params.getRetryAfter();
-                retryHintMs.set(retryAfter * 1000L);
                 EventLogger.warn("channel", null, "telegram",
                         "Rate-limited; retry_after=%ds".formatted(retryAfter));
-            } else {
-                EventLogger.warn("channel", null, "telegram",
-                        "Telegram API error: %s".formatted(e.getMessage()));
+                return SendResult.rateLimited(retryAfter * 1000L);
             }
-            return false;
+            EventLogger.warn("channel", null, "telegram",
+                    "Telegram API error: %s".formatted(e.getMessage()));
+            return SendResult.FAILED;
         } catch (TelegramApiException e) {
             EventLogger.warn("channel", null, "telegram",
                     "Send failed: %s".formatted(e.getMessage()));
-            return false;
+            return SendResult.FAILED;
         }
     }
 

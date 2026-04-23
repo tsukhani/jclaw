@@ -50,13 +50,13 @@ public class SlackChannel implements Channel {
     }
 
     @Override
-    public boolean trySend(String peerId, String text) {
+    public SendResult trySend(String peerId, String text) {
         var config = SlackConfig.load();
-        if (config == null) return false;
+        if (config == null) return SendResult.FAILED;
         return trySend(config, peerId, text);
     }
 
-    private boolean trySend(SlackConfig config, String channelId, String text) {
+    private SendResult trySend(SlackConfig config, String channelId, String text) {
         var body = gson.toJson(Map.of("channel", channelId, "text", text));
         try {
             var request = HttpRequest.newBuilder()
@@ -68,21 +68,37 @@ public class SlackChannel implements Channel {
                     .build();
 
             var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 429) {
+                var retryAfterHeader = response.headers().firstValue("Retry-After").orElse(null);
+                long retryAfterMs = parseRetryAfterMs(retryAfterHeader);
+                EventLogger.warn("channel", null, "slack",
+                        "Rate-limited; Retry-After=%sms".formatted(retryAfterMs));
+                return SendResult.rateLimited(retryAfterMs);
+            }
             var result = JsonParser.parseString(response.body()).getAsJsonObject();
 
             if (result.get("ok").getAsBoolean()) {
                 EventLogger.info("channel", null, "slack",
                         "Message sent to channel %s".formatted(channelId));
-                return true;
+                return SendResult.OK;
             }
 
             EventLogger.warn("channel", null, "slack",
                     "Slack API error: %s".formatted(result.has("error") ? result.get("error").getAsString() : response.body()));
-            return false;
+            return SendResult.FAILED;
         } catch (Exception e) {
             EventLogger.warn("channel", null, "slack",
                     "Send failed: %s".formatted(e.getMessage()));
-            return false;
+            return SendResult.FAILED;
+        }
+    }
+
+    private static long parseRetryAfterMs(String header) {
+        if (header == null || header.isBlank()) return 0L;
+        try {
+            return Long.parseLong(header.trim()) * 1000L;
+        } catch (NumberFormatException _) {
+            return 0L;
         }
     }
 

@@ -51,9 +51,9 @@ public class WhatsAppChannel implements Channel {
     }
 
     @Override
-    public boolean trySend(String peerId, String text) {
+    public SendResult trySend(String peerId, String text) {
         var config = WhatsAppConfig.load();
-        if (config == null) return false;
+        if (config == null) return SendResult.FAILED;
         var url = API_BASE + config.phoneNumberId() + "/messages";
         var body = gson.toJson(Map.of(
                 "messaging_product", "whatsapp",
@@ -74,16 +74,16 @@ public class WhatsAppChannel implements Channel {
             if (response.statusCode() == 200) {
                 EventLogger.info("channel", null, "whatsapp",
                         "Message sent to %s".formatted(peerId));
-                return true;
+                return SendResult.OK;
             }
 
             EventLogger.warn("channel", null, "whatsapp",
                     "WhatsApp API error (HTTP %d): %s".formatted(response.statusCode(), response.body()));
-            return false;
+            return SendResult.FAILED;
         } catch (Exception e) {
             EventLogger.warn("channel", null, "whatsapp",
                     "Send failed: %s".formatted(e.getMessage()));
-            return false;
+            return SendResult.FAILED;
         }
     }
 

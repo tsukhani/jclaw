@@ -435,15 +435,13 @@ public class ChannelTest extends UnitTest {
     // === Channel.sendWithRetry ===
 
     @Test
-    public void channelSendWithRetryHonoursRetryDelayHint() {
+    public void channelSendWithRetryHonoursRetryAfterFromSendResult() {
         var channel = new Channel() {
             int attempts = 0;
             @Override public String channelName() { return "test"; }
-            @Override public boolean trySend(String peer, String text) {
-                return ++attempts >= 2; // fail first, succeed second
-            }
-            @Override public long consumeRetryDelayMs() {
-                return 2000L; // hint: platform says wait 2s
+            @Override public SendResult trySend(String peer, String text) {
+                if (++attempts == 1) return SendResult.rateLimited(2000L);
+                return SendResult.OK;
             }
         };
 
@@ -451,25 +449,35 @@ public class ChannelTest extends UnitTest {
         assertTrue(channel.sendWithRetry("peer", "hello"));
         long elapsed = System.currentTimeMillis() - start;
         assertTrue(elapsed >= 1800 && elapsed < 4000,
-                () -> "Expected ~2s sleep, got " + (System.currentTimeMillis() - start) + "ms");
+                () -> "Expected ~2s sleep from rate-limit hint, got " + elapsed + "ms");
     }
 
     @Test
-    public void channelSendWithRetryUsesDefaultWhenNoHintOverride() {
-        // Default Channel.consumeRetryDelayMs returns 1000ms; verify the
-        // generic retry sleeps roughly that long when the channel doesn't override.
+    public void channelSendWithRetryUsesDefaultWhenSendResultHasNoHint() {
         var channel = new Channel() {
             int attempts = 0;
             @Override public String channelName() { return "test"; }
-            @Override public boolean trySend(String peer, String text) {
-                return ++attempts >= 2;
+            @Override public SendResult trySend(String peer, String text) {
+                if (++attempts == 1) return SendResult.FAILED;
+                return SendResult.OK;
             }
         };
         long start = System.currentTimeMillis();
         assertTrue(channel.sendWithRetry("peer", "hello"));
         long elapsed = System.currentTimeMillis() - start;
         assertTrue(elapsed >= 800 && elapsed < 2500,
-                () -> "Expected ~1s sleep (default), got " + (System.currentTimeMillis() - start) + "ms");
+                () -> "Expected ~1s sleep (default), got " + elapsed + "ms");
+    }
+
+    @Test
+    public void channelSendWithRetryReturnsFalseWhenBothAttemptsFail() {
+        var channel = new Channel() {
+            @Override public String channelName() { return "test"; }
+            @Override public SendResult trySend(String peer, String text) {
+                return SendResult.FAILED;
+            }
+        };
+        assertFalse(channel.sendWithRetry("peer", "hello"));
     }
 
     // === Slack ===
