@@ -2,12 +2,12 @@
 import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
-  ArrowUpIcon,
   CheckIcon,
   ChevronDownIcon,
   ClipboardIcon,
   EyeIcon,
   LightBulbIcon,
+  PaperAirplaneIcon,
   PaperClipIcon,
   PencilIcon,
   PencilSquareIcon,
@@ -2028,7 +2028,7 @@ function exportConversation() {
                   class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-emerald-500 text-white hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   title="Send"
                 >
-                  <ArrowUpIcon
+                  <PaperAirplaneIcon
                     class="w-4 h-4"
                     aria-hidden="true"
                   />
