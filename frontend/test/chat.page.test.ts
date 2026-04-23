@@ -46,12 +46,13 @@ describe('Chat page — streaming state machine', () => {
     await flushPromises()
 
     // The streaming badge no longer lives in the header — it moved to the
-    // in-body pre-first-byte placeholder ('Thinking...') that only renders
-    // while streaming && !streamContent && !streamReasoning. Guard against
-    // either indicator leaking into the idle render.
+    // in-body pre-first-byte placeholder ('Generating...') that only
+    // renders while streaming && !streamContent && !streamReasoning.
+    // Guard against either indicator leaking into the idle render.
     const html = component.html()
     expect(html).not.toContain('streaming...')
     expect(html).not.toContain('Thinking...')
+    expect(html).not.toContain('Generating...')
   })
 
   it('keeps the send button enabled when an agent is selected and no stream is in flight', async () => {

@@ -1751,26 +1751,22 @@ function exportConversation() {
               </div>
             </template>
             <!--
-          Pre-first-byte placeholder. Visible only during the gap between "user
-          sent the request" and "the first stream event (reasoning OR content)
-          arrived." Once either signal lands, displayMessages starts rendering
-          the real bubble (with live reasoning and/or content) and this gray
-          placeholder yields. Without the streamReasoning guard, JCLAW-75
-          regression: reasoning-mode turns show this pill for the entire
-          thinking phase.
-        -->
+              Pre-first-byte placeholder. Visible only during the gap between
+              "user sent the request" and "the first stream event (reasoning
+              OR content) arrived." Once either signal lands, displayMessages
+              starts rendering the real bubble (reasoning card and/or
+              markdown body) and this placeholder yields. Without the
+              streamReasoning guard, JCLAW-75 regression: reasoning-mode
+              turns would show this pill for the entire thinking phase.
+
+              Rendered as plain "Generating..." text — no bubble, no
+              "assistant" label — matching Unsloth Studio's landing.
+            -->
             <div
               v-if="streaming && !streamContent && !streamReasoning"
-              class="flex justify-start"
+              class="text-base text-fg-muted animate-pulse"
             >
-              <div class="max-w-[85%]">
-                <div class="flex items-baseline gap-2 mb-1">
-                  <span class="text-xs font-medium text-emerald-700 dark:text-emerald-400">assistant</span>
-                </div>
-                <div class="bg-muted border border-input rounded-2xl rounded-tl-sm px-4 py-2.5 text-base text-fg-muted">
-                  <span class="animate-pulse">{{ streamStatus || 'Thinking...' }}</span>
-                </div>
-              </div>
+              Generating...
             </div>
           </div>
         </div>
