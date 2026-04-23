@@ -427,12 +427,30 @@ public final class TelegramStreamingSink {
         try {
             editMessage(html, true);
         } catch (Exception e) {
-            EventLogger.warn("channel", agentName(), "telegram",
-                    "Streaming seal edit failed (plain text remains visible): "
-                            + e.getMessage());
+            // Benign: Telegram rejects no-op edits with "message is not
+            // modified" when the new HTML is byte-identical to what's
+            // already displayed — which happens whenever the markdown→HTML
+            // conversion is a pass-through (plain-text responses like "4"
+            // or "Hello" have identical markdown and HTML forms). The
+            // message is already correct on screen; logging this as a
+            // warning confuses operators into thinking delivery failed.
+            if (!isMessageNotModified(e)) {
+                EventLogger.warn("channel", agentName(), "telegram",
+                        "Streaming seal edit failed (plain text remains visible): "
+                                + e.getMessage());
+            }
         }
         clearDraftBestEffort();
         clearStreamCheckpoint();
+    }
+
+    /** Telegram's "message is not modified" error — a benign no-op, not a
+     *  failure. Returned when the new {@code editMessageText} content plus
+     *  reply markup are byte-identical to the currently-displayed message. */
+    private static boolean isMessageNotModified(Exception e) {
+        if (!(e instanceof TelegramApiRequestException tare)) return false;
+        var msg = tare.getMessage();
+        return msg != null && msg.contains("message is not modified");
     }
 
     /**
@@ -629,6 +647,11 @@ public final class TelegramStreamingSink {
                                     previous, currentThrottleMs));
             return;
         }
+        // "message is not modified" is a benign no-op — the equality guard
+        // at the top of flush() catches most cases, but a race where pending
+        // grew then shrank between schedule and execute can still produce
+        // a byte-identical edit. Not worth warning on.
+        if (isMessageNotModified(e)) return;
         EventLogger.warn("channel", agentName(), "telegram",
                 "Streaming flush failed (will retry): " + e.getMessage());
     }
