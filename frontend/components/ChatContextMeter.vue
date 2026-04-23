@@ -109,19 +109,19 @@ function handleMouseLeave() {
     <PopoverContent
       align="end"
       :side-offset="4"
-      class="w-64 p-3 bg-surface-elevated border-border"
+      class="w-72 p-4 bg-surface-elevated rounded-xl border border-neutral-200 dark:border-neutral-700"
       @mouseenter="open = true"
       @mouseleave="open = false"
       @focusin="open = true"
       @focusout="open = false"
     >
-      <dl class="space-y-1.5 text-xs">
+      <dl class="space-y-2 text-sm">
         <div class="flex items-center justify-between">
           <dt class="text-fg-muted">
             Context usage
           </dt>
           <dd
-            class="font-mono tabular-nums"
+            class="tabular-nums"
             :class="percentColor"
           >
             {{ percentLabel }}
@@ -131,7 +131,7 @@ function handleMouseLeave() {
           <dt class="text-fg-muted">
             Prompt tokens
           </dt>
-          <dd class="font-mono tabular-nums text-fg-strong">
+          <dd class="tabular-nums text-fg-strong">
             {{ prompt.toLocaleString() }}
           </dd>
         </div>
@@ -142,7 +142,7 @@ function handleMouseLeave() {
           <dt class="text-fg-muted">
             Thinking tokens
           </dt>
-          <dd class="font-mono tabular-nums text-fg-strong">
+          <dd class="tabular-nums text-fg-strong">
             {{ reasoning.toLocaleString() }}
           </dd>
         </div>
@@ -153,7 +153,7 @@ function handleMouseLeave() {
           <dt class="text-fg-muted">
             Cached tokens
           </dt>
-          <dd class="font-mono tabular-nums text-fg-strong">
+          <dd class="tabular-nums text-fg-strong">
             {{ cached.toLocaleString() }}
           </dd>
         </div>
@@ -161,15 +161,15 @@ function handleMouseLeave() {
           <dt class="text-fg-muted">
             Completion
           </dt>
-          <dd class="font-mono tabular-nums text-fg-strong">
+          <dd class="tabular-nums text-fg-strong">
             {{ completion.toLocaleString() }}
           </dd>
         </div>
-        <div class="pt-1.5 mt-1 border-t border-border flex items-center justify-between">
+        <div class="pt-1.5 mt-1 border-t border-neutral-200 dark:border-neutral-700 flex items-center justify-between">
           <dt class="text-fg-muted">
             Total
           </dt>
-          <dd class="font-mono tabular-nums text-fg-strong">
+          <dd class="tabular-nums text-fg-strong">
             {{ total.toLocaleString() }}<span
               v-if="capacity"
               class="text-fg-muted"
@@ -178,7 +178,7 @@ function handleMouseLeave() {
         </div>
         <div
           v-if="costLabel != null || (turnCount ?? 0) > 0"
-          class="pt-1.5 mt-1 border-t border-border space-y-1.5"
+          class="pt-1.5 mt-1 border-t border-neutral-200 dark:border-neutral-700 space-y-1.5"
         >
           <div
             v-if="(turnCount ?? 0) > 0"
@@ -187,7 +187,7 @@ function handleMouseLeave() {
             <dt class="text-fg-muted">
               Turns
             </dt>
-            <dd class="font-mono tabular-nums text-fg-strong">
+            <dd class="tabular-nums text-fg-strong">
               {{ turnCount }}
             </dd>
           </div>
@@ -199,7 +199,7 @@ function handleMouseLeave() {
             <dt class="text-fg-muted">
               Cost
             </dt>
-            <dd class="font-mono tabular-nums text-fg-strong">
+            <dd class="tabular-nums text-fg-strong">
               {{ costLabel }}
             </dd>
           </div>
