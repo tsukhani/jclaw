@@ -95,17 +95,6 @@ function renderMarkdown(text: string, agentId: number | null = null): string {
   return result
 }
 
-function formatTimestamp(iso: string): string {
-  if (!iso) return ''
-  const date = new Date(iso)
-  if (isNaN(date.getTime())) return ''
-  return date.toLocaleString(undefined, {
-    month: 'long', day: 'numeric', year: 'numeric',
-    hour: 'numeric', minute: '2-digit', second: '2-digit',
-    timeZoneName: 'short',
-  })
-}
-
 const { data: agents, refresh: refreshAgents } = await useFetch<Agent[]>('/api/agents')
 const { data: configData } = await useFetch<ConfigResponse>('/api/config')
 
@@ -1284,7 +1273,6 @@ function exportConversation() {
               <div
                 :class="msg.role === 'user' ? 'max-w-[80%]' : 'max-w-[85%] w-full'"
                 class="min-w-0"
-                :title="msg.createdAt ? formatTimestamp(msg.createdAt) : undefined"
               >
                 <!-- User messages: subtle rounded pill + hover actions (copy, edit, delete) -->
                 <div
@@ -1305,7 +1293,7 @@ function exportConversation() {
                     >
                       <svg
                         v-if="copiedMessageId !== (msg.id ?? msg._key)"
-                        class="w-3.5 h-3.5"
+                        class="w-4 h-4"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -1317,7 +1305,7 @@ function exportConversation() {
                       /></svg>
                       <svg
                         v-else
-                        class="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400"
+                        class="w-4 h-4 text-emerald-700 dark:text-emerald-400"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -1336,7 +1324,7 @@ function exportConversation() {
                       @click="editUserMessage(msg)"
                     >
                       <svg
-                        class="w-3.5 h-3.5"
+                        class="w-4 h-4"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -1355,7 +1343,7 @@ function exportConversation() {
                       @click="deleteMessage(msg)"
                     >
                       <svg
-                        class="w-3.5 h-3.5"
+                        class="w-4 h-4"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -1633,7 +1621,7 @@ function exportConversation() {
                       >
                         <svg
                           v-if="copiedMessageId !== (msg.id ?? msg._key)"
-                          class="w-3.5 h-3.5"
+                          class="w-4 h-4"
                           fill="none"
                           stroke="currentColor"
                           viewBox="0 0 24 24"
@@ -1645,7 +1633,7 @@ function exportConversation() {
                         /></svg>
                         <svg
                           v-else
-                          class="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400"
+                          class="w-4 h-4 text-emerald-700 dark:text-emerald-400"
                           fill="none"
                           stroke="currentColor"
                           viewBox="0 0 24 24"
@@ -1664,7 +1652,7 @@ function exportConversation() {
                         @click="deleteMessage(msg)"
                       >
                         <svg
-                          class="w-3.5 h-3.5"
+                          class="w-4 h-4"
                           fill="none"
                           stroke="currentColor"
                           viewBox="0 0 24 24"
