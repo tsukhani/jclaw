@@ -912,26 +912,28 @@ const providerEntries = computed(() => {
 
 // ──────────────────── Password / account management ─────────────────────
 const { resetPassword } = useAuth()
+const { confirm } = useConfirm()
 const resettingPassword = ref(false)
 
 async function handleResetPassword() {
-  // Destructive — confirm before wiping the hash. On success the backend
-  // clears the session too, so the very next request is unauthenticated
-  // and the auth middleware routes to /setup-password.
-  const ok = window.confirm(
-    'Reset the admin password?\n\n'
-    + 'This wipes the stored password from the database and signs you out. '
-    + 'On next access you\'ll be taken to the setup screen to choose a new password.',
-  )
+  // Destructive — confirm via the shared in-app dialog (same pattern as
+  // the conversation-delete flow) rather than window.confirm, which
+  // looks like a browser alert and escapes theming. On success the
+  // backend clears the session too, so the very next request is
+  // unauthenticated and the auth middleware routes to /setup-password.
+  const ok = await confirm({
+    title: 'Reset admin password',
+    message: 'This wipes the stored password from the database and signs you out. '
+      + 'On next access you\'ll be taken to the setup screen to choose a new password.',
+    confirmText: 'Reset',
+    variant: 'danger',
+  })
   if (!ok) return
   resettingPassword.value = true
   const success = await resetPassword()
   resettingPassword.value = false
   if (success) {
     navigateTo('/setup-password')
-  }
-  else {
-    window.alert('Could not reset password. Please try again.')
   }
 }
 </script>
