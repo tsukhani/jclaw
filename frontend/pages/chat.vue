@@ -1225,14 +1225,6 @@ function exportConversation() {
             </option>
           </select>
         </label>
-        <span
-          v-if="streaming"
-          class="text-xs text-emerald-700 dark:text-emerald-400 animate-pulse"
-        >{{ streamStatus || 'streaming...' }}</span>
-        <span
-          v-else-if="agentBusy"
-          class="text-xs text-fg-muted animate-pulse"
-        >processing queue...</span>
         <span class="ml-auto flex items-center gap-2">
           <ChatContextMeter
             :prompt-tokens="latestAssistantUsage?.prompt ?? 0"

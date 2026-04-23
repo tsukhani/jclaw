@@ -45,10 +45,13 @@ describe('Chat page — streaming state machine', () => {
     const component = await mountSuspended(Chat)
     await flushPromises()
 
-    // The streaming badge text comes from streamStatus || 'streaming...'. With
-    // streaming flag false on initial mount, neither marker may appear.
+    // The streaming badge no longer lives in the header — it moved to the
+    // in-body pre-first-byte placeholder ('Thinking...') that only renders
+    // while streaming && !streamContent && !streamReasoning. Guard against
+    // either indicator leaking into the idle render.
     const html = component.html()
     expect(html).not.toContain('streaming...')
+    expect(html).not.toContain('Thinking...')
   })
 
   it('keeps the send button enabled when an agent is selected and no stream is in flight', async () => {
