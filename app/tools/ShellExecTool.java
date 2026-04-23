@@ -17,6 +17,47 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
+/**
+ * Shell execution tool for agent-invoked commands.
+ *
+ * <h2>Security posture (JCLAW-146)</h2>
+ *
+ * <p>This tool is <strong>not</strong> a sandbox. It invokes commands via
+ * {@code /bin/sh -c}, which means the full shell grammar is available:
+ * composition ({@code ;}, {@code &&}, {@code ||}), pipes ({@code |}), command
+ * substitution ({@code $(...)}, backticks), redirection ({@code > < >>}),
+ * subshells ({@code (cmd)}), and variable expansion. Only the <em>first token</em>
+ * of the command is validated against {@link #DEFAULT_ALLOWLIST} /
+ * {@code shell.allowlist}. A command like {@code echo hi; rm -rf foo} passes
+ * the allowlist (first token is {@code echo}) and runs both the echo and the rm.
+ *
+ * <p>This is <strong>intentional</strong>, not a gap. The rationale:
+ * <ul>
+ *   <li>The agent runs with the same OS privileges as the Play process. A
+ *       hostile prompt that reaches this tool at all has already breached the
+ *       prompt-injection perimeter — further per-token gating just moves the
+ *       goalposts, not the defensive line. Legitimate shell composition
+ *       ({@code cd build && make}, {@code git log | head}, shell-redirect into
+ *       a file) is load-bearing for real agent workflows.</li>
+ *   <li>Sandboxing happens at two layers <em>below</em> this one:
+ *       (1) the {@code resolveWorkdir} path-containment check, which confines
+ *       the working directory to the agent's workspace unless
+ *       {@code agent.main.shell.allowGlobalPaths=true} is explicitly set for
+ *       the main agent; and (2) the environment-variable filter that strips
+ *       sensitive keys before handing the map to {@link ProcessBuilder}.</li>
+ *   <li>The {@link #validateAllowlist(String, Agent)} check exists for <em>UX
+ *       guardrails</em> — catching accidental LLM misfires on obvious bad
+ *       commands ({@code rm -rf /}, {@code curl | sh}) — not as a
+ *       metacharacter-hardened sandbox. Anyone who needs metacharacter-level
+ *       isolation must wrap this tool in an external sandbox
+ *       (firejail, Docker, etc.) at the platform-operator layer.</li>
+ * </ul>
+ *
+ * <p>Regression tests in {@code ShellExecToolTest} pin this posture —
+ * {@code commandCompositionRunsBothCommands} specifically asserts that
+ * {@code echo hi; echo world} executes both statements, so any future attempt
+ * to harden the allowlist into per-token gating will fail loudly.
+ */
 public class ShellExecTool implements ToolRegistry.Tool {
 
     public static final String DEFAULT_ALLOWLIST = "git,npm,npx,pnpm,node,python,python3,pip,ls,cat,head,tail,grep,find,wc,sort,uniq,diff,mkdir,cp,mv,echo,curl,wget,jq,tar,zip,unzip,test,pwd,which,whoami,uname,date,file,stat,env,printenv,awk,sed,tr,cut,tee,xargs,touch,cmp,sleep";

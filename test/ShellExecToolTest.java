@@ -348,6 +348,141 @@ public class ShellExecToolTest extends UnitTest {
                 "Main agent must only bypass when the Config row is actually set to true");
     }
 
+    // ==================== Shell-composition posture (JCLAW-146) ====================
+    //
+    // These tests pin the documented posture: the allowlist validates only the
+    // first token, and the command is executed via /bin/sh -c so shell
+    // composition/metacharacters ARE allowed by design. See the class-level
+    // JavaDoc on ShellExecTool for the rationale. If any of these tests fail,
+    // somebody has attempted to harden the allowlist into per-token gating —
+    // that's a substantive security-posture change that needs a design review,
+    // not a silent upgrade.
+
+    @Test
+    public void commandCompositionRunsBothCommands() {
+        // `echo hi; echo world` — first-token is `echo` (allowed), shell
+        // composition runs both statements.
+        var result = tool.execute("""
+                {"command": "echo hi; echo world"}
+                """, agent);
+        assertTrue(result.contains("hi"), "first echo statement missing; got: " + result);
+        assertTrue(result.contains("world"), "second echo statement missing; got: " + result);
+        assertTrue(result.contains("\"exitCode\":0"));
+    }
+
+    @Test
+    public void commandSubstitutionIsExecuted() {
+        // `echo $(echo nested)` — first-token allowlist check passes,
+        // subshell evaluates and produces "nested".
+        var result = tool.execute("""
+                {"command": "echo $(echo nested)"}
+                """, agent);
+        assertTrue(result.contains("nested"),
+                "command substitution did not evaluate; got: " + result);
+    }
+
+    @Test
+    public void shellRedirectionIsAllowed() {
+        // Redirect to a file within the workspace. Allowlist sees `echo`
+        // only — the `>` is handled by /bin/sh.
+        var result = tool.execute("""
+                {"command": "echo captured > out.txt && cat out.txt"}
+                """, agent);
+        assertTrue(result.contains("captured"),
+                "redirect-then-cat did not work; got: " + result);
+    }
+
+    // ==================== UTF-8 + truncation ====================
+
+    @Test
+    public void utf8MultiByteCharsRoundTripCorrectly() {
+        // InputStreamReader with UTF-8 handles partial multi-byte sequences
+        // across read() boundaries internally. Output non-ASCII chars and
+        // verify they survive the read loop without corruption.
+        var result = tool.execute("""
+                {"command": "echo 'café — 中文 — 😀'"}
+                """, agent);
+        assertTrue(result.contains("café"), "é mangled; got: " + result);
+        assertTrue(result.contains("中文"), "Han chars mangled; got: " + result);
+        assertTrue(result.contains("😀"), "emoji mangled; got: " + result);
+    }
+
+    @Test
+    public void outputTruncationMarksTruncatedTrue() {
+        // Keep the default allowlist and shell.maxOutputBytes cap, but force
+        // a smaller cap for this test so the output overflows without
+        // burning test time on a large process.
+        ConfigService.set("shell.maxOutputBytes", "100");
+        try {
+            ConfigService.clearCache();
+            // printf is in the allowlist implicitly via the test setup? It's
+            // not — but `echo` is, and we can produce a large echo with a
+            // shell loop that the first-token check still accepts.
+            var result = tool.execute("""
+                    {"command": "echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+                    """, agent);
+            assertTrue(result.contains("\"truncated\":true"),
+                    "truncated flag not set; got: " + result);
+            assertTrue(result.contains("Output truncated"),
+                    "truncation marker not appended; got: " + result);
+        } finally {
+            ConfigService.delete("shell.maxOutputBytes");
+            ConfigService.clearCache();
+        }
+    }
+
+    // ==================== Watchdog race ====================
+
+    @Test
+    public void fastExitDoesNotMarkTimedOut() {
+        // Regression guard: process that exits well within the timeout must
+        // leave timedOut=false (watchdog sees waitFor(timeout) return true and
+        // never sets the flag). If this ever flips to true, the watchdog race
+        // described in JCLAW-146 has re-emerged.
+        var result = tool.execute("""
+                {"command": "echo fast", "timeout": 10}
+                """, agent);
+        assertTrue(result.contains("\"timedOut\":false"),
+                "fast exit must NOT be marked timed-out; got: " + result);
+        assertTrue(result.contains("\"exitCode\":0"),
+                "normal exit code must be preserved; got: " + result);
+    }
+
+    // ==================== Terminal-image early return ====================
+
+    @Test
+    public void terminalImageTriggersEarlyReturn() {
+        // 6 consecutive lines of U+2588 (full block, 12 chars each) — above
+        // the 5-line/70% threshold in hasTerminalImage — triggers the
+        // early-return branch that renders the block art as a PNG and marks
+        // exitCode=-1 with a background-process note.
+        var line = "████████████";
+        var cmd = "printf '%s\\n%s\\n%s\\n%s\\n%s\\n%s\\n' "
+                + "'" + line + "' '" + line + "' '" + line + "' "
+                + "'" + line + "' '" + line + "' '" + line + "'";
+        // printf is not in the default seeded allowlist for this test class;
+        // extend it so the allowlist check passes.
+        ConfigService.set("shell.allowlist",
+                "echo,ls,cat,git,head,sleep,pwd,printenv,exit,sh,wc,grep,printf");
+        ConfigService.clearCache();
+        try {
+            var result = tool.execute(
+                    "{\"command\":\"" + cmd.replace("\\", "\\\\") + "\"}", agent);
+            // Early-return branch marks exitCode=-1 + timedOut=false + the
+            // "Process still running in background" marker.
+            assertTrue(result.contains("\"exitCode\":-1"),
+                    "early-return should report exitCode=-1; got: " + result);
+            assertTrue(result.contains("still running in background"),
+                    "early-return marker missing; got: " + result);
+            assertTrue(result.contains("\"timedOut\":false"),
+                    "early-return must not mark timedOut; got: " + result);
+        } finally {
+            ConfigService.set("shell.allowlist",
+                    "echo,ls,cat,git,head,sleep,pwd,printenv,exit,sh,wc,grep");
+            ConfigService.clearCache();
+        }
+    }
+
     // ==================== Helpers ====================
 
     private static void deleteDir(Path dir) {

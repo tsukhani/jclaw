@@ -78,6 +78,8 @@ For channel webhooks, the prelude changes: `WebhookXController.webhook` → veri
 
 11 built-in tools: shell, filesystem, web fetch/search, Playwright browser, documents (Tika), tasks, checklists, datetime, skills, plus a load-test sleep tool. Per-agent enablement is controlled by `AgentToolConfig`. `ShellExecTool` consults `AgentSkillAllowedTool` at call time — not the skill's `SKILL.md` file — to prevent allowlist expansion via filesystem-write.
 
+**`ShellExecTool` security posture (JCLAW-146):** the allowlist validates only the first token of the command string; the rest is handed to `/bin/sh -c`, which means shell composition (`;`, `&&`, `||`, `|`, `$(...)`, redirects) is fully available. This is intentional — the agent runs with the same OS privileges as the Play process, so per-token metacharacter-level gating would only move the goalposts while breaking legitimate composition workflows (`cd build && make`, `git log | head`). Sandboxing lives at the `resolveWorkdir` containment check and the env-variable filter, not at the shell-syntax layer. Operators who need hard isolation wrap the Play process itself (firejail, Docker). See the class-level JavaDoc on `ShellExecTool` and the pin tests in `ShellExecToolTest` (section "Shell-composition posture").
+
 ### Background jobs (`app/jobs/`)
 
 Play's `@Every`/`@On` jobs:
