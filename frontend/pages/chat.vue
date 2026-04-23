@@ -1391,7 +1391,7 @@ function exportConversation() {
             <img
               src="/mascot-typing.png"
               alt=""
-              class="w-24 h-24 select-none"
+              class="h-32 w-auto select-none"
             >
             <h1 class="text-2xl font-semibold text-fg-strong">
               Chat with your agent
