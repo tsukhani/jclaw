@@ -115,22 +115,14 @@ describe('Chat page — tool call rendering', () => {
     const component = await mountSuspended(Chat)
     await flushPromises()
 
-    // Sidebar renders the conversation preview text — that proves the
-    // /api/conversations endpoint was consumed without erroring on the
-    // tool-call-bearing message shape.
-    expect(component.text()).toContain('Tool call demo')
-  })
-
-  it('exposes the conversation in the sidebar even with non-trivial message shapes', async () => {
-    setupToolCallConversation()
-    const component = await mountSuspended(Chat)
-    await flushPromises()
-
-    // Sidebar summarises the conversation by preview text. The agent name is
-    // no longer shown in the chat header when there is only one agent (the
-    // Agent: selector is hidden below the multi-agent threshold), so we
-    // assert on the conversation preview instead.
-    expect(component.text().toLowerCase()).toContain('tool call demo')
+    // Regression guard: the page used to iterate the conversation-sidebar
+    // list on mount; the tool-call-bearing message shape (no content, with
+    // toolCalls) must not break the feed fetch. The in-page sidebar is gone
+    // (recents moved to layouts/default.vue), so we assert the textarea
+    // rendered — proof the composition setup reached template render without
+    // throwing on the tool-call fixture.
+    const textarea = component.find('textarea')
+    expect(textarea.exists()).toBe(true)
   })
 })
 
@@ -142,9 +134,9 @@ describe('Chat page — empty conversation state', () => {
     const component = await mountSuspended(Chat)
     await flushPromises()
 
-    // Even with zero agents the page must not throw — the header surface
-    // (Conversations sidebar, agent dropdown frame) still renders.
-    expect(component.text()).toContain('Conversations')
+    // Even with zero agents the page must not throw — the composer surface
+    // still renders even without agents to select.
+    expect(component.find('textarea').exists()).toBe(true)
   })
 })
 

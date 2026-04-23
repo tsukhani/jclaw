@@ -63,22 +63,18 @@ describe('Chat page', () => {
     expect(component.text()).not.toContain('Thinking:')
   })
 
-  it('renders conversation sidebar', async () => {
+  it('no longer renders an in-page conversations sidebar', async () => {
+    // The Conversations list moved to the global left sidebar in
+    // layouts/default.vue (see useRecentConversations). The chat page now
+    // takes the full content width — no 'Conversations' section title and
+    // no resize handle inside the page itself.
     setupChatApi()
     const component = await mountSuspended(Chat)
     await flushPromises()
 
-    expect(component.text()).toContain('Conversations')
-    expect(component.text()).toContain('Hello world')
-  })
-
-  it('has a resize handle between sidebar and chat area', async () => {
-    setupChatApi()
-    const component = await mountSuspended(Chat)
-
-    // The resize handle is a div with cursor-col-resize class
-    const resizeHandle = component.find('.cursor-col-resize')
-    expect(resizeHandle.exists()).toBe(true)
+    const sidebarTitle = component.findAll('span').find(s => s.text().trim() === 'Conversations')
+    expect(sidebarTitle?.exists() ?? false).toBe(false)
+    expect(component.find('.cursor-col-resize').exists()).toBe(false)
   })
 
   it('has a chat input textarea', async () => {

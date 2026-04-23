@@ -420,22 +420,11 @@ const conversationsUrl = computed(() =>
 const { data: conversations, refresh: refreshConversations } = await useFetch<Conversation[]>(
   conversationsUrl as unknown as Ref<string>,
 )
-/**
- * Defensive client-side re-sort by updatedAt DESC. The backend's ORDER BY
- * already yields this shape, but a render-layer computed makes the invariant
- * ("most recently modified on top") robust against fetch-race windows — the
- * SSE `complete` frame fires before AgentRunner's persist Tx commits (see
- * AgentRunner.streamLlmLoop), so a refresh triggered by onComplete can land
- * before the DB write and read stale updatedAts. Cheap on a ≤50-row list.
- */
-const sortedConversations = computed(() => {
-  const list = conversations.value ?? []
-  return [...list].sort((a, b) => {
-    const at = a.updatedAt ? new Date(a.updatedAt).getTime() : 0
-    const bt = b.updatedAt ? new Date(b.updatedAt).getTime() : 0
-    return bt - at
-  })
-})
+// Sidebar Recents live in layouts/default.vue via useRecentConversations.
+// Refresh that list whenever this page mutates conversations so the sidebar
+// reflects the newly-created / renamed / deleted-from-stream row.
+const { refresh: refreshRecents } = useRecentConversations()
+
 const selectedConvoId = ref<number | null>(null)
 const messages = ref<Message[]>([])
 const input = ref('')
@@ -583,74 +572,6 @@ const streamContent = ref('')
 const streamReasoning = ref('')
 const messagesEl = ref<HTMLElement | null>(null)
 const abortController = ref<AbortController | null>(null)
-const sidebarWidth = ref(224) // 14rem = 224px (matches w-56)
-const isResizing = ref(false)
-let cleanupResize: (() => void) | null = null
-
-function startResize(e: MouseEvent) {
-  isResizing.value = true
-  const startX = e.clientX
-  const startWidth = sidebarWidth.value
-
-  function onMove(e: MouseEvent) {
-    const newWidth = startWidth + (e.clientX - startX)
-    sidebarWidth.value = Math.max(120, Math.min(newWidth, 600))
-  }
-  function onUp() {
-    isResizing.value = false
-    document.removeEventListener('mousemove', onMove)
-    document.removeEventListener('mouseup', onUp)
-    cleanupResize = null
-  }
-  document.addEventListener('mousemove', onMove)
-  document.addEventListener('mouseup', onUp)
-  cleanupResize = () => {
-    document.removeEventListener('mousemove', onMove)
-    document.removeEventListener('mouseup', onUp)
-  }
-}
-
-const selectMode = ref(false)
-const selectedIds = ref<Set<number>>(new Set())
-
-function toggleSelect(id: number) {
-  const s = new Set(selectedIds.value)
-  if (s.has(id)) s.delete(id)
-  else s.add(id)
-  selectedIds.value = s
-}
-
-function selectAll() {
-  if (!conversations.value) return
-  if (selectedIds.value.size === conversations.value.length) {
-    selectedIds.value = new Set()
-  }
-  else {
-    selectedIds.value = new Set(conversations.value.map(c => c.id))
-  }
-}
-
-async function deleteSelected() {
-  if (selectedIds.value.size === 0) return
-  const ids = [...selectedIds.value]
-  try {
-    await $fetch('/api/conversations', { method: 'DELETE', body: { ids } })
-    if (selectedConvoId.value && selectedIds.value.has(selectedConvoId.value)) {
-      selectedConvoId.value = null
-      messages.value = []
-    }
-    selectedIds.value = new Set()
-    selectMode.value = false
-    refreshConversations()
-  }
-  catch { /* ignore */ }
-}
-
-function exitSelectMode() {
-  selectMode.value = false
-  selectedIds.value = new Set()
-}
-
 let scrollRaf: number | null = null
 let titleRefreshTimeout: ReturnType<typeof setTimeout> | null = null
 function scrollToBottom() {
@@ -663,7 +584,6 @@ function scrollToBottom() {
 
 onUnmounted(() => {
   abortController.value?.abort()
-  cleanupResize?.()
   if (scrollRaf) cancelAnimationFrame(scrollRaf)
   if (titleRefreshTimeout) clearTimeout(titleRefreshTimeout)
 })
@@ -762,6 +682,33 @@ async function loadConversation(id: number) {
   initCollapsedState(messages.value)
   scrollToBottom()
 }
+
+// Sidebar Recents deep-link from within /chat: NuxtLink swaps the query
+// without remounting the page, so the one-shot deep-link watcher above
+// doesn't re-fire. This route-query watcher catches in-page navigations
+// and loads the target conversation — switching agents when the target
+// belongs to a different agent's list.
+watch(() => route.query.conversation, async (raw) => {
+  const id = raw ? Number(raw) : null
+  if (!id || id === selectedConvoId.value) return
+  const ownedByCurrent = conversations.value?.some(c => c.id === id) ?? false
+  if (ownedByCurrent) {
+    await loadConversation(id)
+    return
+  }
+  // Target lives under a different agent — find it and switch, then load.
+  try {
+    const allConvos = await $fetch<Conversation[]>('/api/conversations?channel=web&limit=100')
+    const convo = allConvos?.find(c => c.id === id)
+    if (!convo) return
+    const agent = agents.value?.find(a => a.name === convo.agentName)
+    if (agent && agent.id !== selectedAgentId.value) {
+      selectedAgentId.value = agent.id
+    }
+    await loadConversation(id)
+  }
+  catch { /* best-effort */ }
+})
 
 async function sendMessage() {
   if (streaming.value || !selectedAgentId.value) return
@@ -1002,11 +949,12 @@ async function sendMessage() {
     // catches the race where the SSE `complete` frame beat the persist Tx
     // commit (see AgentRunner.streamLlmLoop — emitUsageAndComplete is
     // intentionally called before the Tx.run persist block for latency).
-    // The sortedConversations computed handles display-layer ordering
-    // either way; this just ensures the updatedAt values we're sorting on
-    // reflect the turn that just finished.
     refreshConversations()
-    setTimeout(() => refreshConversations(), 600)
+    refreshRecents()
+    setTimeout(() => {
+      refreshConversations()
+      refreshRecents()
+    }, 600)
   }
 }
 
@@ -1015,7 +963,10 @@ async function generateTitleForConversation(convoId: number) {
     await $fetch(`/api/conversations/${convoId}/generate-title`, { method: 'POST' })
     // Refresh after a delay to pick up the async-generated title
     if (titleRefreshTimeout) clearTimeout(titleRefreshTimeout)
-    titleRefreshTimeout = setTimeout(() => refreshConversations(), 3000)
+    titleRefreshTimeout = setTimeout(() => {
+      refreshConversations()
+      refreshRecents()
+    }, 3000)
   }
   catch {
     // Best-effort — ignore failures
@@ -1235,94 +1186,13 @@ function exportConversation() {
   <div
     class="flex -m-6"
     style="height: calc(100vh - 3rem);"
-    :class="{ 'select-none': isResizing }"
   >
-    <!-- Conversation sidebar -->
-    <div
-      :style="{ width: sidebarWidth + 'px' }"
-      class="shrink-0 border-r border-border flex flex-col overflow-hidden"
-    >
-      <div class="p-3 border-b border-border flex items-center justify-between">
-        <template v-if="selectMode">
-          <button
-            class="text-xs text-fg-muted hover:text-fg-strong transition-colors"
-            @click="selectAll"
-          >
-            {{ selectedIds.size === (conversations?.length || 0) ? 'None' : 'All' }}
-          </button>
-          <div class="flex items-center gap-2">
-            <button
-              :disabled="selectedIds.size === 0"
-              class="text-xs text-red-400 hover:text-red-300 disabled:text-fg-muted transition-colors"
-              @click="deleteSelected"
-            >
-              Delete ({{ selectedIds.size }})
-            </button>
-            <button
-              class="text-xs text-fg-muted hover:text-fg-strong transition-colors"
-              @click="exitSelectMode"
-            >
-              Done
-            </button>
-          </div>
-        </template>
-        <template v-else>
-          <span class="text-xs font-medium text-fg-muted">Conversations</span>
-          <button
-            v-if="conversations?.length"
-            class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-            title="Edit conversations"
-            @click="selectMode = true"
-          >
-            <svg
-              class="w-3.5 h-3.5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            ><path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-            /></svg>
-          </button>
-        </template>
-      </div>
-      <div class="flex-1 overflow-y-auto">
-        <button
-          v-for="convo in sortedConversations"
-          :key="convo.id"
-          type="button"
-          :class="[
-            selectMode && selectedIds.has(convo.id) ? 'bg-muted text-fg-strong'
-            : selectedConvoId === convo.id ? 'bg-muted text-fg-strong' : 'text-fg-muted',
-          ]"
-          class="w-full text-left px-3 py-2 text-xs hover:bg-muted transition-colors truncate flex items-center gap-2 cursor-pointer bg-transparent border-0"
-          @click="selectMode ? toggleSelect(convo.id) : loadConversation(convo.id)"
-        >
-          <span
-            v-if="selectMode"
-            class="shrink-0 w-3.5 h-3.5 border border-input flex items-center justify-center text-[10px]"
-            :class="selectedIds.has(convo.id) ? 'bg-white text-fg-strong border-white' : ''"
-          >
-            <span v-if="selectedIds.has(convo.id)">&#10003;</span>
-          </span>
-          <span class="truncate">{{ convo.preview || convo.agentName }} &middot; {{ new Date(convo.updatedAt).toLocaleDateString() }}</span>
-        </button>
-      </div>
-    </div>
-
-    <!-- Resize handle -->
-    <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- pointer-only resize affordance with ARIA separator role -->
-    <div
-      class="w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-muted active:bg-neutral-500 transition-colors"
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize conversation sidebar"
-      @mousedown="startResize"
-    />
-
-    <!-- Chat area -->
+    <!--
+      Chat area takes the full main-content width now that the in-page
+      Conversations sidebar has moved to the global left sidebar (see
+      layouts/default.vue → useRecentConversations). Multi-select delete
+      + bulk management live on the dedicated /conversations page.
+    -->
     <div class="flex-1 flex flex-col">
       <!--
         Chat header — Unsloth-style: searchable model combobox on the left,
