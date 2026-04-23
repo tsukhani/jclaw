@@ -66,18 +66,31 @@ const percentColor = computed(() => {
   if (p >= 70) return 'text-amber-400'
   return 'text-emerald-400'
 })
+
+/**
+ * The Popover primitive can programmatically focus the trigger on open, so a
+ * mouse-only interaction leaves the button focused after mouseleave — which
+ * :focus would paint as still-active. focus-visible solves the visual side,
+ * and blurring here also clears any residual focus ring in assistive tech.
+ */
+const triggerButton = ref<HTMLButtonElement | null>(null)
+function handleMouseLeave() {
+  open.value = false
+  triggerButton.value?.blur()
+}
 </script>
 
 <template>
   <Popover v-model:open="open">
     <PopoverTrigger as-child>
       <button
+        ref="triggerButton"
         type="button"
         class="inline-flex items-center gap-2.5 px-2.5 py-1 rounded-md hover:bg-muted
-               focus:outline-hidden focus:bg-muted transition-colors"
+               focus:outline-hidden focus-visible:bg-muted transition-colors"
         :title="capacity ? `${total.toLocaleString()} / ${capacity.toLocaleString()} tokens` : 'No context window metadata'"
         @mouseenter="open = true"
-        @mouseleave="open = false"
+        @mouseleave="handleMouseLeave"
         @focus="open = true"
         @blur="open = false"
       >

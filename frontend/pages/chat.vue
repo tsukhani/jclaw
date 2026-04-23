@@ -1975,6 +1975,11 @@ function exportConversation() {
                 title="New conversation"
                 @click="newChat"
               >
+                <!--
+                  Square-with-pencil "edit/compose" glyph (Lucide square-pen)
+                  — same semantic as Unsloth's "new chat" button. Reads as
+                  "start a new conversation" without needing the tooltip.
+                -->
                 <svg
                   class="w-4 h-4"
                   fill="none"
@@ -1984,7 +1989,7 @@ function exportConversation() {
                   stroke-linecap="round"
                   stroke-linejoin="round"
                   stroke-width="1.5"
-                  d="M12 4v16m8-8H4"
+                  d="M12 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"
                 /></svg>
               </button>
               <button
