@@ -48,7 +48,25 @@ const workspaceContent = ref('')
 // Updated on load (reset to server copy) and on successful save (reset to the
 // just-persisted value).
 const workspaceBaseline = ref('')
-const form = ref({ name: '', modelProvider: '', modelId: '', enabled: true, thinkingMode: '' })
+interface AgentForm {
+  name: string
+  modelProvider: string
+  modelId: string
+  enabled: boolean
+  thinkingMode: string
+  /** null preserves the "inherit capability default" semantic on untouched saves. */
+  visionEnabled: boolean | null
+  audioEnabled: boolean | null
+}
+const form = ref<AgentForm>({
+  name: '',
+  modelProvider: '',
+  modelId: '',
+  enabled: true,
+  thinkingMode: '',
+  visionEnabled: null,
+  audioEnabled: null,
+})
 // Snapshot of the agent form at load time (or after a successful save). See
 // formDirty below — together they gate the Save button so it's only active
 // when the form has unsaved changes.
@@ -110,6 +128,8 @@ const agentNameId = useId()
 const agentProviderId = useId()
 const agentModelId = useId()
 const agentThinkingId = useId()
+const agentVisionId = useId()
+const agentAudioId = useId()
 const agentQueueModeId = useId()
 const agentWorkspaceTextareaId = useId()
 
@@ -220,6 +240,20 @@ function modelForAgent(agent: Agent | null | undefined): ProviderModel | null {
 // model doesn't support reasoning — the UI hides the selector in that case.
 const thinkingLevels = computed<string[]>(() => effectiveThinkingLevels(selectedModel.value))
 
+// Binary On/Off bindings for the Vision and Audio selects. A null stored
+// value means "inherit the model's capability default" — render as "on"
+// when the model supports the capability. Writing through the setter
+// collapses null to an explicit true/false, which is what we want once
+// the operator has actually interacted with the dropdown.
+const visionSelect = computed<'on' | 'off'>({
+  get: () => form.value.visionEnabled === false ? 'off' : 'on',
+  set: (v) => { form.value.visionEnabled = v === 'off' ? false : true },
+})
+const audioSelect = computed<'on' | 'off'>({
+  get: () => form.value.audioEnabled === false ? 'off' : 'on',
+  set: (v) => { form.value.audioEnabled = v === 'off' ? false : true },
+})
+
 // Whether the selected provider is configured and the selected model is available.
 // Kept with `_` prefix so the unused-vars rule is satisfied while the logic
 // remains available for when the UI re-surfaces provider-mismatch warnings.
@@ -233,7 +267,15 @@ const _providerValid = computed(() => {
 function newAgent() {
   const defaultProvider = providers.value[0]?.name ?? ''
   const defaultModel = providers.value[0]?.models?.[0]?.id ?? ''
-  form.value = { name: '', modelProvider: defaultProvider, modelId: defaultModel, enabled: true, thinkingMode: '' }
+  form.value = {
+    name: '',
+    modelProvider: defaultProvider,
+    modelId: defaultModel,
+    enabled: true,
+    thinkingMode: '',
+    visionEnabled: null,
+    audioEnabled: null,
+  }
   formBaseline.value = { ...form.value }
   creating.value = true
   editing.value = null
@@ -246,6 +288,8 @@ function editAgent(agent: Agent) {
     modelId: agent.modelId,
     enabled: agent.enabled,
     thinkingMode: agent.thinkingMode ?? '',
+    visionEnabled: agent.visionEnabled ?? null,
+    audioEnabled: agent.audioEnabled ?? null,
   }
   formBaseline.value = { ...form.value }
   editing.value = agent
@@ -418,6 +462,11 @@ async function saveAgent() {
     const payload = {
       ...form.value,
       thinkingMode: form.value.thinkingMode || null,
+      // visionEnabled / audioEnabled are already null|true|false in the form;
+      // pass through verbatim so the "null = inherit capability" semantic is
+      // preserved on untouched saves.
+      visionEnabled: form.value.visionEnabled,
+      audioEnabled: form.value.audioEnabled,
     }
     if (creating.value) {
       await $fetch('/api/agents', { method: 'POST', body: payload })
@@ -754,7 +803,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             Inspect prompt
           </button>
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-2 gap-x-4 gap-y-5">
           <label
             :for="agentNameId"
             class="block"
@@ -777,7 +826,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             :for="agentProviderId"
             class="block"
           >
-            <span class="block text-xs text-neutral-500 mb-1">Model Provider</span>
+            <span class="block text-xs text-neutral-500 mb-1">Default Provider</span>
             <select
               :id="agentProviderId"
               v-model="form.modelProvider"
@@ -796,7 +845,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             :for="agentModelId"
             class="block"
           >
-            <span class="block text-xs text-neutral-500 mb-1">Model</span>
+            <span class="block text-xs text-neutral-500 mb-1">Default Model</span>
             <select
               :id="agentModelId"
               v-model="form.modelId"
@@ -812,7 +861,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             </select>
             <ModelCapabilityPills
               :model="selectedModel"
-              class="mt-2"
+              class="mt-3"
             />
           </label>
           <!--
@@ -855,6 +904,78 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                   :value="level"
                 >
                   {{ level.charAt(0).toUpperCase() + level.slice(1) }}
+                </option>
+              </template>
+            </select>
+          </label>
+          <!--
+            Vision toggle — matches the Thinking selector shape so the form
+            layout stays stable across models. Models that don't advertise
+            vision input render the control disabled with "Not supported".
+          -->
+          <label
+            :for="agentVisionId"
+            class="block"
+          >
+            <span
+              class="block text-xs text-neutral-500 mb-1"
+              :class="{ 'opacity-40': !selectedModel?.supportsVision }"
+            >
+              Vision
+            </span>
+            <select
+              :id="agentVisionId"
+              v-model="visionSelect"
+              :disabled="!selectedModel?.supportsVision"
+              class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring
+                           disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <option
+                v-if="!selectedModel?.supportsVision"
+                value="on"
+              >
+                Not supported
+              </option>
+              <template v-else>
+                <option value="off">
+                  Off
+                </option>
+                <option value="on">
+                  On
+                </option>
+              </template>
+            </select>
+          </label>
+          <!-- Audio toggle — same shape as Vision. -->
+          <label
+            :for="agentAudioId"
+            class="block"
+          >
+            <span
+              class="block text-xs text-neutral-500 mb-1"
+              :class="{ 'opacity-40': !selectedModel?.supportsAudio }"
+            >
+              Audio
+            </span>
+            <select
+              :id="agentAudioId"
+              v-model="audioSelect"
+              :disabled="!selectedModel?.supportsAudio"
+              class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring
+                           disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <option
+                v-if="!selectedModel?.supportsAudio"
+                value="on"
+              >
+                Not supported
+              </option>
+              <template v-else>
+                <option value="off">
+                  Off
+                </option>
+                <option value="on">
+                  On
                 </option>
               </template>
             </select>
