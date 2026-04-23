@@ -101,53 +101,64 @@ function pick(row: Row) {
         <ChevronDown class="w-3.5 h-3.5 text-fg-muted shrink-0" />
       </button>
     </PopoverTrigger>
+    <!--
+      Styling traced from Unsloth Studio's model picker via Chrome devtools:
+      w-[440px] p-2 rounded-[10px] wrapper, space-y-2 between the pill-shaped
+      search and a max-h-64 list scroller. Section headers use the tight 10px
+      uppercase pattern; rows are flex with a rounded-[6px] hover/selected
+      bg in #ececec (light) / #2e3035 (dark). Border override needed because
+      jclaw's --border is invisible against --popover in dark mode (same
+      gotcha as ChatContextMeter).
+    -->
     <PopoverContent
       align="start"
-      class="w-[420px] p-0 bg-surface-elevated border-border"
+      class="w-[440px] p-2 rounded-[10px] border-neutral-200 dark:border-neutral-700/50"
     >
-      <div class="relative border-b border-border">
-        <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-fg-muted" />
-        <input
-          v-model="query"
-          type="text"
-          placeholder="Search models"
-          aria-label="Search models"
-          class="w-full pl-9 pr-3 py-2.5 bg-transparent text-sm text-fg-strong placeholder:text-fg-muted
-                 focus:outline-hidden"
-        >
-      </div>
-      <div class="max-h-80 overflow-y-auto py-1">
-        <div
-          v-if="!Object.keys(filtered).length"
-          class="px-3 py-6 text-center text-xs text-fg-muted"
-        >
-          No matching models.
-        </div>
-        <template
-          v-for="(groupRows, provider) in filtered"
-          :key="provider"
-        >
-          <div class="px-3 pt-2 pb-1 text-[10px] font-semibold tracking-wider text-fg-muted uppercase">
-            {{ provider }}
-          </div>
-          <button
-            v-for="row in groupRows"
-            :key="`${row.provider}::${row.model}`"
-            type="button"
-            class="w-full flex items-center justify-between gap-3 px-3 py-2 text-left text-sm
-                   hover:bg-muted transition-colors"
-            :class="[
-              row.provider === current?.provider && row.model === current?.model
-                ? 'bg-muted text-fg-strong' : 'text-fg-primary',
-            ]"
-            @click="pick(row)"
+      <div class="space-y-2">
+        <div class="relative">
+          <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          <input
+            v-model="query"
+            type="text"
+            placeholder="Search models"
+            aria-label="Search models"
+            class="w-full h-9 pl-8 pr-3 rounded-3xl bg-input/30 border border-neutral-200 dark:border-neutral-700/50
+                   text-sm text-fg-primary placeholder:text-muted-foreground
+                   focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]
+                   focus-visible:outline-none transition-colors"
           >
-            <span class="truncate">{{ row.label }}</span>
-            <span class="text-[10px] text-fg-muted shrink-0 font-mono truncate max-w-[160px]">
-              {{ row.model }}
-            </span>
-          </button>
-        </template>
+        </div>
+        <div class="max-h-64 overflow-y-auto p-1">
+          <div
+            v-if="!Object.keys(filtered).length"
+            class="px-3 py-6 text-center text-xs text-muted-foreground"
+          >
+            No matching models.
+          </div>
+          <template
+            v-for="(groupRows, provider) in filtered"
+            :key="provider"
+          >
+            <div class="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {{ provider }}
+            </div>
+            <button
+              v-for="row in groupRows"
+              :key="`${row.provider}::${row.model}`"
+              type="button"
+              class="flex w-full items-center gap-2 rounded-[6px] px-2.5 py-1.5 text-left text-sm transition-colors
+                     hover:bg-neutral-100 dark:hover:bg-[#2e3035]"
+              :class="row.provider === current?.provider && row.model === current?.model
+                ? 'bg-neutral-100 dark:bg-[#2e3035] text-fg-strong' : 'text-fg-primary'"
+              @click="pick(row)"
+            >
+              <span class="block min-w-0 flex-1 truncate">{{ row.label }}</span>
+              <span class="ml-auto flex items-center gap-1.5 shrink-0 text-muted-foreground truncate max-w-[160px]">
+                {{ row.model }}
+              </span>
+            </button>
+          </template>
+        </div>
       </div>
     </PopoverContent>
   </Popover>
