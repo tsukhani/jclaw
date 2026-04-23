@@ -106,100 +106,107 @@ function handleMouseLeave() {
         </span>
       </button>
     </PopoverTrigger>
+    <!--
+      PopoverContent ships with w-72 rounded-md border p-4 shadow-md bg-popover
+      out of the box (see shadcn-vue Popover primitive) so we only override what
+      the default palette gets wrong: the project's --border token resolves to
+      the same hsl as the popover bg in dark mode, so the edge disappears. Pin
+      an explicit neutral pair to restore a visible 1px ring.
+    -->
     <PopoverContent
       align="end"
       :side-offset="4"
-      class="w-72 p-4 bg-surface-elevated rounded-xl border border-neutral-200 dark:border-neutral-700"
+      class="border-neutral-200 dark:border-neutral-700"
       @mouseenter="open = true"
       @mouseleave="open = false"
       @focusin="open = true"
       @focusout="open = false"
     >
-      <dl class="space-y-2 text-sm">
-        <div class="flex items-center justify-between">
-          <dt class="text-fg-muted">
+      <dl class="grid gap-2.5 text-sm">
+        <div class="flex items-center justify-between gap-4">
+          <dt class="text-muted-foreground">
             Context usage
           </dt>
           <dd
-            class="tabular-nums"
+            class="tabular-nums font-medium"
             :class="percentColor"
           >
             {{ percentLabel }}
           </dd>
         </div>
-        <div class="flex items-center justify-between">
-          <dt class="text-fg-muted">
+        <div class="flex items-center justify-between gap-4">
+          <dt class="text-muted-foreground">
             Prompt tokens
           </dt>
-          <dd class="tabular-nums text-fg-strong">
+          <dd class="tabular-nums font-medium">
             {{ prompt.toLocaleString() }}
           </dd>
         </div>
         <div
           v-if="reasoning > 0"
-          class="flex items-center justify-between"
+          class="flex items-center justify-between gap-4"
         >
-          <dt class="text-fg-muted">
+          <dt class="text-muted-foreground">
             Thinking tokens
           </dt>
-          <dd class="tabular-nums text-fg-strong">
+          <dd class="tabular-nums font-medium">
             {{ reasoning.toLocaleString() }}
           </dd>
         </div>
         <div
           v-if="cached > 0"
-          class="flex items-center justify-between"
+          class="flex items-center justify-between gap-4"
         >
-          <dt class="text-fg-muted">
+          <dt class="text-muted-foreground">
             Cached tokens
           </dt>
-          <dd class="tabular-nums text-fg-strong">
+          <dd class="tabular-nums font-medium">
             {{ cached.toLocaleString() }}
           </dd>
         </div>
-        <div class="flex items-center justify-between">
-          <dt class="text-fg-muted">
+        <div class="flex items-center justify-between gap-4">
+          <dt class="text-muted-foreground">
             Completion
           </dt>
-          <dd class="tabular-nums text-fg-strong">
+          <dd class="tabular-nums font-medium">
             {{ completion.toLocaleString() }}
           </dd>
         </div>
-        <div class="pt-1.5 mt-1 border-t border-neutral-200 dark:border-neutral-700 flex items-center justify-between">
-          <dt class="text-fg-muted">
+        <div class="flex items-center justify-between gap-4 pt-2.5 border-t border-neutral-200 dark:border-neutral-700">
+          <dt class="text-muted-foreground">
             Total
           </dt>
-          <dd class="tabular-nums text-fg-strong">
+          <dd class="tabular-nums font-medium">
             {{ total.toLocaleString() }}<span
               v-if="capacity"
-              class="text-fg-muted"
+              class="text-muted-foreground font-normal"
             > / {{ capacity.toLocaleString() }}</span>
           </dd>
         </div>
         <div
           v-if="costLabel != null || (turnCount ?? 0) > 0"
-          class="pt-1.5 mt-1 border-t border-neutral-200 dark:border-neutral-700 space-y-1.5"
+          class="grid gap-2.5 pt-2.5 border-t border-neutral-200 dark:border-neutral-700"
         >
           <div
             v-if="(turnCount ?? 0) > 0"
-            class="flex items-center justify-between"
+            class="flex items-center justify-between gap-4"
           >
-            <dt class="text-fg-muted">
+            <dt class="text-muted-foreground">
               Turns
             </dt>
-            <dd class="tabular-nums text-fg-strong">
+            <dd class="tabular-nums font-medium">
               {{ turnCount }}
             </dd>
           </div>
           <div
             v-if="costLabel != null"
-            class="flex items-center justify-between"
+            class="flex items-center justify-between gap-4"
             :title="costTooltip ?? undefined"
           >
-            <dt class="text-fg-muted">
+            <dt class="text-muted-foreground">
               Cost
             </dt>
-            <dd class="tabular-nums text-fg-strong">
+            <dd class="tabular-nums font-medium">
               {{ costLabel }}
             </dd>
           </div>
