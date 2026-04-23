@@ -566,6 +566,22 @@ function scrollToBottom() {
   })
 }
 
+/**
+ * Reasoning bubble is a fixed-height scroll region (see the h-80 data-
+ * reasoning-body div in the template). As reasoning tokens stream in, pin
+ * the last one to its own bottom so the latest thought is visible without
+ * the user having to chase the scroll themselves. Only the in-flight
+ * message's bubble is updated — historical messages keep whatever scroll
+ * position the user set.
+ */
+watch(streamReasoning, async () => {
+  if (!streaming.value) return
+  await nextTick()
+  const bodies = messagesEl.value?.querySelectorAll<HTMLElement>('[data-reasoning-body]')
+  const last = bodies?.[bodies.length - 1]
+  if (last) last.scrollTop = last.scrollHeight
+})
+
 onUnmounted(() => {
   abortController.value?.abort()
   if (scrollRaf) cancelAnimationFrame(scrollRaf)
@@ -1430,7 +1446,8 @@ function exportConversation() {
                     </div>
                     <div
                       v-if="!msg.thinkingCollapsed"
-                      class="px-4 pb-3 pt-1 text-base text-fg-primary whitespace-pre-wrap break-words max-h-64 overflow-y-auto border-t border-neutral-200 dark:border-neutral-700"
+                      data-reasoning-body
+                      class="px-4 pb-3 pt-1 text-base text-fg-primary whitespace-pre-wrap break-words h-80 overflow-y-auto border-t border-neutral-200 dark:border-neutral-700"
                     >
                       {{ msg.reasoning }}
                     </div>
