@@ -19,6 +19,7 @@ GET     /api/auth/status                        ApiAuthController.status
 POST    /api/auth/setup                         ApiAuthController.setup
 POST    /api/auth/login                         ApiAuthController.login
 POST    /api/auth/logout                        ApiAuthController.logout
+POST    /api/auth/reset-password                ApiAuthController.resetPassword
 
 # Tasks API
 GET     /api/tasks                              ApiTasksController.list

@@ -127,6 +127,31 @@ public class ApiAuthController extends Controller {
         renderJSON(gson.toJson(result));
     }
 
+    /**
+     * POST /api/auth/reset-password — authenticated. Wipes the stored hash
+     * and clears the current session so the user is immediately signed out.
+     * Next access routes through the /setup-password flow via the frontend
+     * middleware's {@code checkPasswordSet()} gate.
+     *
+     * <p>This is deliberately not the same shape as {@link #setup} — setup
+     * is first-install (unauthenticated, 409s if already set); reset is
+     * "I'm the current admin, I want to start over" (authenticated, always
+     * succeeds). Separate endpoints keep the authentication-required gate
+     * on reset and the no-auth gate on setup from getting tangled.
+     */
+    public static void resetPassword() {
+        var authed = session.get("authenticated");
+        if (!"true".equals(authed)) {
+            response.status = 401;
+            renderJSON("{\"error\":\"Authentication required\"}");
+            return;
+        }
+        ConfigService.delete(PASSWORD_HASH_KEY);
+        session.clear();
+        EventLogger.info("auth", "Admin password reset — user signed out");
+        renderJSON(gson.toJson(Map.of("status", "ok")));
+    }
+
     private static boolean constantTimeEquals(String expected, String actual) {
         return MessageDigest.isEqual(
                 expected.getBytes(StandardCharsets.UTF_8),

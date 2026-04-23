@@ -68,6 +68,7 @@ const MANAGED_PREFIXES = [
   'agent.', // Per-agent config (shell privileges, queue mode, etc.) — Agents page
   'ollama.', // Ollama provider-specific settings — Settings
   'upload.', // Per-kind attachment size caps (JCLAW-131) — Settings
+  'auth.', // Admin password hash — Settings (Password section, not rendered as a row)
 ]
 
 function isManagedKey(key: string): boolean {
@@ -908,6 +909,31 @@ const providerEntries = computed(() => {
   }
   return { providers, other }
 })
+
+// ──────────────────── Password / account management ─────────────────────
+const { resetPassword } = useAuth()
+const resettingPassword = ref(false)
+
+async function handleResetPassword() {
+  // Destructive — confirm before wiping the hash. On success the backend
+  // clears the session too, so the very next request is unauthenticated
+  // and the auth middleware routes to /setup-password.
+  const ok = window.confirm(
+    'Reset the admin password?\n\n'
+    + 'This wipes the stored password from the database and signs you out. '
+    + 'On next access you\'ll be taken to the setup screen to choose a new password.',
+  )
+  if (!ok) return
+  resettingPassword.value = true
+  const success = await resetPassword()
+  resettingPassword.value = false
+  if (success) {
+    navigateTo('/setup-password')
+  }
+  else {
+    window.alert('Could not reset password. Please try again.')
+  }
+}
 </script>
 
 <template>
@@ -2824,6 +2850,37 @@ const providerEntries = computed(() => {
               />
             </button>
           </template>
+        </div>
+      </div>
+    </div>
+
+    <!-- Password / account management -->
+    <div class="mb-6 space-y-4">
+      <h2 class="text-sm font-medium text-fg-muted">
+        Password
+      </h2>
+      <p class="text-xs text-fg-muted">
+        The admin password is stored as a PBKDF2-SHA256 hash in the Config DB. Resetting wipes the
+        stored hash and signs you out — on the next access you'll be routed to the setup screen to
+        choose a new password.
+      </p>
+      <div class="bg-surface-elevated border border-border">
+        <div class="px-4 py-2.5 flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <span class="text-sm font-medium text-fg-strong">Reset password</span>
+            <div class="text-xs text-fg-muted mt-0.5">
+              Wipe the stored hash and return to the setup flow.
+            </div>
+          </div>
+          <button
+            :disabled="resettingPassword"
+            class="shrink-0 px-3 py-1.5 text-xs font-medium text-white
+                   bg-red-600 hover:bg-red-700 disabled:bg-red-600/40
+                   disabled:cursor-not-allowed rounded-full transition-colors"
+            @click="handleResetPassword"
+          >
+            {{ resettingPassword ? 'Resetting…' : 'Reset' }}
+          </button>
         </div>
       </div>
     </div>

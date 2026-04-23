@@ -117,6 +117,35 @@ public class AuthTest extends FunctionalTest {
     }
 
     @Test
+    public void resetPasswordRequiresAuth() {
+        var response = POST("/api/auth/reset-password", "application/json", "{}");
+        assertEquals(401, response.status.intValue());
+    }
+
+    @Test
+    public void resetPasswordWipesHashAndClearsSession() {
+        // Log in
+        var loginBody = """
+                {"username": "admin", "password": "%s"}
+                """.formatted(TEST_PASSWORD);
+        var loginResponse = POST("/api/auth/login", "application/json", loginBody);
+        assertIsOk(loginResponse);
+
+        // Reset
+        var resetResponse = POST("/api/auth/reset-password", "application/json", "{}");
+        assertIsOk(resetResponse);
+
+        // Status now reports passwordSet=false (hash wiped)
+        var statusResponse = GET("/api/auth/status");
+        assertTrue(getContent(statusResponse).contains("\"passwordSet\":false"),
+                "expected hash to be wiped; got: " + getContent(statusResponse));
+
+        // Session was cleared — protected endpoint must reject
+        var protectedResponse = GET("/api/config");
+        assertEquals(401, protectedResponse.status.intValue());
+    }
+
+    @Test
     public void logoutClearsSession() {
         var loginBody = """
                 {"username": "admin", "password": "%s"}
