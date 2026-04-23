@@ -153,7 +153,7 @@ const navGroups = [
       <div class="h-14 flex items-center justify-between px-3 border-b border-border shrink-0">
         <div class="flex items-center gap-2.5">
           <img
-            src="/avatar.png"
+            src="/mascot.png"
             alt="JClaw"
             class="w-9 h-9 rounded-full"
           >
