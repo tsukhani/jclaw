@@ -69,6 +69,18 @@ echo '#!/bin/sh' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 git config core.hooksPath .git/hooks
 ```
 
+## Commit and Push Workflow
+
+**Stop at the local commit. Do not push.** When you finish a unit of work:
+
+1. Stage the files that belong to the change.
+2. Create a local commit. The `pre-commit` hook runs here; fix every issue it surfaces and re-commit until the commit succeeds. Never use `--no-verify` to bypass the hook. If a rule is wrong, fix the rule; if a formatting auto-fix modifies files, re-stage and try again.
+3. Stop. Report the commit hash and wait.
+
+**Pushing is the user's job via `/deploy`.** The `/deploy` slash command is the only automation that bumps `application.version`, creates the release commit, and pushes to both remotes (`origin` + `github`). Do not `git push` as part of ordinary coding, and do not combine a final commit with a push in one step. A prior `/deploy` authorises only that release — the next one requires a new explicit invocation.
+
+Why this matters: every push to `main` triggers the `pre-push` hook's full backend + frontend suite, occupies the two-remote deploy flow, and mutates shared state. Keeping push behind `/deploy` makes releases a deliberate act rather than a side-effect of finishing a task.
+
 ## Architecture
 
 ### Backend
