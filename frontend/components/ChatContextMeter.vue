@@ -94,7 +94,7 @@ function handleMouseLeave() {
         @focus="open = true"
         @blur="open = false"
       >
-        <span class="text-xs font-mono text-fg-muted tabular-nums">
+        <span class="text-sm font-mono text-fg-muted tabular-nums">
           {{ total.toLocaleString() }} / {{ triggerRight }}
         </span>
         <span class="w-10 h-1 bg-muted rounded-full overflow-hidden">
@@ -117,7 +117,7 @@ function handleMouseLeave() {
     -->
     <PopoverContent
       align="end"
-      :side-offset="4"
+      :side-offset="12"
       class="min-w-44 px-3 py-2 rounded-[10px] border-neutral-200 dark:border-neutral-700/50"
       @mouseenter="open = true"
       @mouseleave="open = false"
