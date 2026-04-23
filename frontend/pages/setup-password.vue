@@ -75,7 +75,7 @@ const confirmPasswordId = useId()
     >
       <div class="flex flex-col items-center mb-6">
         <img
-          src="/mascot.gif"
+          src="/mascot-waving.png"
           alt="JClaw"
           class="w-24 h-24 rounded-full select-none mb-4"
         >

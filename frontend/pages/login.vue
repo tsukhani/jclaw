@@ -51,7 +51,7 @@ const passwordId = useId()
     <div class="w-full max-w-sm">
       <div class="mb-4 flex items-center justify-center gap-4">
         <img
-          src="/mascot.gif"
+          src="/mascot-waving.png"
           alt="JClaw"
           class="w-32 h-32 rounded-full shrink-0 select-none"
         >
