@@ -2,12 +2,14 @@
 /**
  * Unsloth-style running context-usage indicator: compact "N / Ck" readout
  * plus a thin progress bar, with a hover popover that breaks down prompt /
- * completion / percentage / total against the model's context window.
+ * thinking / cached / completion / percentage / total against the model's
+ * context window, and folds in the running cost/turns aggregate so the
+ * header stays minimal.
  *
- * Derives its numbers from the latest assistant turn's usage block. When no
- * usage is available yet (empty conversation, streaming first token) the
- * trigger renders as "0 / Ck" with a zeroed bar — the popover label reads
- * "No usage yet" so the operator isn't left guessing why it's flat.
+ * Derives its token numbers from the latest assistant turn's usage block.
+ * When no usage is available yet (empty conversation, streaming first token)
+ * the trigger renders as "0 / Ck" with a zeroed bar — the popover label
+ * reads "No usage yet" so the operator isn't left guessing why it's flat.
  */
 import {
   Popover, PopoverContent, PopoverTrigger,
@@ -16,13 +18,25 @@ import {
 const props = defineProps<{
   promptTokens?: number | null
   completionTokens?: number | null
+  /** Reasoning/thinking tokens from the latest assistant turn. */
+  reasoningTokens?: number | null
+  /** Prompt-cache reads on the latest assistant turn. */
+  cachedTokens?: number | null
   contextWindow?: number | null
+  /** Running conversation cost string (e.g. "$0.0041"); omitted when pricing is absent. */
+  costLabel?: string | null
+  /** Hover tooltip on the cost row — the per-component breakdown. */
+  costTooltip?: string | null
+  /** Count of assistant turns contributing to costLabel. */
+  turnCount?: number | null
 }>()
 
 const open = ref(false)
 
 const prompt = computed(() => props.promptTokens ?? 0)
 const completion = computed(() => props.completionTokens ?? 0)
+const reasoning = computed(() => props.reasoningTokens ?? 0)
+const cached = computed(() => props.cachedTokens ?? 0)
 const total = computed(() => prompt.value + completion.value)
 const capacity = computed(() => props.contextWindow ?? 0)
 
@@ -82,7 +96,7 @@ const percentColor = computed(() => {
     <PopoverContent
       align="end"
       :side-offset="4"
-      class="w-56 p-3 bg-surface-elevated border-border"
+      class="w-64 p-3 bg-surface-elevated border-border"
       @mouseenter="open = true"
       @mouseleave="open = false"
       @focusin="open = true"
@@ -108,6 +122,28 @@ const percentColor = computed(() => {
             {{ prompt.toLocaleString() }}
           </dd>
         </div>
+        <div
+          v-if="reasoning > 0"
+          class="flex items-center justify-between"
+        >
+          <dt class="text-fg-muted">
+            Thinking tokens
+          </dt>
+          <dd class="font-mono tabular-nums text-fg-strong">
+            {{ reasoning.toLocaleString() }}
+          </dd>
+        </div>
+        <div
+          v-if="cached > 0"
+          class="flex items-center justify-between"
+        >
+          <dt class="text-fg-muted">
+            Cached tokens
+          </dt>
+          <dd class="font-mono tabular-nums text-fg-strong">
+            {{ cached.toLocaleString() }}
+          </dd>
+        </div>
         <div class="flex items-center justify-between">
           <dt class="text-fg-muted">
             Completion
@@ -126,6 +162,34 @@ const percentColor = computed(() => {
               class="text-fg-muted"
             > / {{ capacity.toLocaleString() }}</span>
           </dd>
+        </div>
+        <div
+          v-if="costLabel != null || (turnCount ?? 0) > 0"
+          class="pt-1.5 mt-1 border-t border-border space-y-1.5"
+        >
+          <div
+            v-if="(turnCount ?? 0) > 0"
+            class="flex items-center justify-between"
+          >
+            <dt class="text-fg-muted">
+              Turns
+            </dt>
+            <dd class="font-mono tabular-nums text-fg-strong">
+              {{ turnCount }}
+            </dd>
+          </div>
+          <div
+            v-if="costLabel != null"
+            class="flex items-center justify-between"
+            :title="costTooltip ?? undefined"
+          >
+            <dt class="text-fg-muted">
+              Cost
+            </dt>
+            <dd class="font-mono tabular-nums text-fg-strong">
+              {{ costLabel }}
+            </dd>
+          </div>
         </div>
       </dl>
     </PopoverContent>
