@@ -1197,7 +1197,13 @@ function exportConversation() {
         header; the Think pill in the composer footer owns on/off, and the
         level is controlled from the agent detail page.
       -->
-      <div class="px-3 py-2 border-b border-border flex items-center gap-2">
+      <!--
+        Three-zone header: model combobox on the left, agent selector
+        absolute-centered on the row midpoint, context meter pushed to the
+        right edge. Absolute positioning on the agent label keeps it
+        optically centered regardless of the left/right content widths.
+      -->
+      <div class="relative px-3 py-2 border-b border-border flex items-center gap-2">
         <ChatModelCombobox
           :providers="providers"
           :model-key="selectedModelKey"
@@ -1207,13 +1213,13 @@ function exportConversation() {
         <label
           v-if="(agents?.length ?? 0) > 1"
           :for="agentSelectId"
-          class="text-xs text-fg-muted flex items-center gap-1.5"
+          class="absolute left-1/2 -translate-x-1/2 text-sm text-fg-muted flex items-center gap-1.5"
         >
           <span>Agent:</span>
           <select
             :id="agentSelectId"
             v-model="selectedAgentId"
-            class="bg-transparent border-0 text-sm text-fg-strong px-1 py-1
+            class="bg-transparent border-0 text-base text-fg-strong px-1 py-1
                    focus:outline-hidden cursor-pointer hover:bg-muted rounded"
           >
             <option

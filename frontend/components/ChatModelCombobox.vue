@@ -86,7 +86,7 @@ function pick(row: Row) {
     <PopoverTrigger as-child>
       <button
         type="button"
-        class="group inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm text-fg-strong
+        class="group inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-base text-fg-strong
                hover:bg-muted focus:outline-hidden focus:bg-muted transition-colors max-w-[420px]"
       >
         <span
@@ -96,9 +96,9 @@ function pick(row: Row) {
         <span class="font-medium truncate">{{ current?.label ?? 'Select a model' }}</span>
         <span
           v-if="current"
-          class="text-xs text-fg-muted truncate"
+          class="text-sm text-fg-muted truncate"
         >{{ current.sublabel }}</span>
-        <ChevronDown class="w-3.5 h-3.5 text-fg-muted shrink-0" />
+        <ChevronDown class="w-4 h-4 text-fg-muted shrink-0" />
       </button>
     </PopoverTrigger>
     <!--
