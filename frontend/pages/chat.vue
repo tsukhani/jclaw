@@ -1389,7 +1389,7 @@ function exportConversation() {
             class="mx-auto w-full max-w-3xl flex flex-col items-center gap-3 px-4 pb-4 text-center"
           >
             <img
-              src="/mascot_typing.png"
+              src="/mascot-typing.png"
               alt=""
               class="w-24 h-24 select-none"
             >
