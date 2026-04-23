@@ -10,6 +10,8 @@ export interface ProviderModel {
   supportsVision?: boolean
   /** True when the model accepts audio inputs. */
   supportsAudio?: boolean
+  /** Total context window size in tokens. 0/undefined when the provider did not advertise it. */
+  contextWindow?: number
   [key: string]: unknown
 }
 

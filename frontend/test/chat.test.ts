@@ -24,15 +24,14 @@ function setupChatApi() {
 }
 
 describe('Chat page', () => {
-  it('renders with agent selector', async () => {
+  it('renders with agent selector when multiple agents exist', async () => {
     setupChatApi()
     const component = await mountSuspended(Chat)
 
-    // Should have at least the agent select dropdown
+    // Agent label only renders when agents.length > 1 (the default fixture has
+    // main-agent + secondary). Two selects expected: agent + conversation scroll.
     const selects = component.findAll('select')
     expect(selects.length).toBeGreaterThanOrEqual(1)
-
-    // Agent label should be present
     expect(component.text()).toContain('Agent:')
   })
 
@@ -44,22 +43,23 @@ describe('Chat page', () => {
     expect(component.text()).toContain('secondary')
   })
 
-  it('renders model selector', async () => {
+  it('renders the model combobox trigger with the selected model', async () => {
     setupChatApi()
     const component = await mountSuspended(Chat)
 
-    expect(component.text()).toContain('Model:')
-    // Model names from config should appear as options
+    // The trigger shows the model display name + provider sublabel; no more
+    // "Model:" label row (replaced by the Unsloth-style combobox).
     expect(component.text()).toContain('Kimi K2.5')
+    expect(component.text()).toContain('ollama-cloud')
   })
 
-  it('hides thinking selector for non-thinking models', async () => {
+  it('hides the Think pill for non-thinking models', async () => {
     setupChatApi()
     const component = await mountSuspended(Chat)
 
-    // Both mock models have supportsThinking:false, so no Thinking: label should
-    // render in the toolbar — the per-model selector is only shown when the
-    // currently selected model advertises reasoning support.
+    // Both mock models have supportsThinking:false, so the Think pill in the
+    // composer footer is hidden. The standalone "Thinking:" level dropdown is
+    // gone entirely — level is controlled on the agent detail page now.
     expect(component.text()).not.toContain('Thinking:')
   })
 
@@ -111,7 +111,7 @@ describe('Chat page', () => {
   // file, and this case overrides /api/agents + /api/config + /api/conversations
   // with a thinking-capable fixture. Putting it at the end prevents leakage
   // into unrelated tests above that expect the default non-thinking fixture.
-  it('renders thinking level selector for thinking-capable models', async () => {
+  it('shows the Think pill for thinking-capable models', async () => {
     // Clear Nuxt's useFetch cache so re-registered endpoints take effect.
     // In Nuxt 4, useFetch shares data across calls with the same key (URL),
     // so stale data from prior tests would otherwise persist.
@@ -124,7 +124,8 @@ describe('Chat page', () => {
       entries: [
         { key: 'provider.ollama-cloud.baseUrl', value: 'https://ollama.com/v1' },
         { key: 'provider.ollama-cloud.apiKey', value: 'xxxx****' },
-        // Explicit thinkingLevels populate the dropdown; supportsThinking gates its visibility.
+        // supportsThinking gates Think-pill visibility; thinkingLevels is still
+        // carried so the agent detail page can render the level selector.
         { key: 'provider.ollama-cloud.models', value: '[{"id":"kimi-k2.5","name":"Kimi K2.5","supportsThinking":true,"thinkingLevels":["low","medium","high"]}]' },
       ],
     }))
@@ -133,14 +134,9 @@ describe('Chat page', () => {
     const component = await mountSuspended(Chat)
     await flushPromises()
 
-    expect(component.text()).toContain('Thinking:')
-    expect(component.text()).toContain('Low')
-    expect(component.text()).toContain('Medium')
-    expect(component.text()).toContain('High')
-    // On/off is owned by the Think pill in the input footer, not by a dropdown
-    // option — so the dropdown must NOT contain an "Off" entry any more.
-    expect(component.text()).not.toContain('>Off<')
-    // The pill itself is a button labelled "Think".
+    // The in-chat Thinking: level dropdown is gone — on/off is the composer's
+    // Think pill, and the level itself lives on the agent detail page.
+    expect(component.text()).not.toContain('Thinking:')
     expect(component.text()).toContain('Think')
   })
 })

@@ -113,8 +113,6 @@ const selectedAgentId = ref<number | null>(null)
 
 // A11y: generated ids for label/control association
 const agentSelectId = useId()
-const modelSelectId = useId()
-const thinkingSelectId = useId()
 
 // Extract configured providers and their models from config
 const configDataRef = computed(() => configData.value ?? null)
@@ -285,12 +283,11 @@ async function updateAgentSetting(updates: Partial<Agent>) {
  * model. This preserves the settings-page flow where editing the agent from
  * here is the intent.
  */
-async function onModelChange(event: Event) {
-  const value = (event.target as HTMLSelectElement).value
-  const sepIdx = value.indexOf('::')
+async function onModelKeyChange(key: string) {
+  const sepIdx = key.indexOf('::')
   if (sepIdx < 0) return
-  const modelProvider = value.slice(0, sepIdx)
-  const modelId = value.slice(sepIdx + 2)
+  const modelProvider = key.slice(0, sepIdx)
+  const modelId = key.slice(sepIdx + 2)
 
   const convoId = selectedConvoId.value
   if (convoId != null) {
@@ -371,6 +368,21 @@ function formatModelLabel(msg: Message): string {
 }
 
 /**
+ * Latest assistant turn's usage block, or null when the conversation has none
+ * yet. Drives the top-right context meter's numbers — we show the prompt/
+ * completion from the most recent turn because that represents the context
+ * about to be resent on the next request.
+ */
+const latestAssistantUsage = computed<MessageUsage | null>(() => {
+  const msgs = displayMessages.value ?? []
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]
+    if (m && m.role === 'assistant' && m.usage) return m.usage
+  }
+  return null
+})
+
+/**
  * Running cost summary for the currently open conversation. Honors each turn's
  * own embedded pricing so mixed-model conversations (e.g. Kimi → Flash) total
  * correctly. Returns null when the conversation has no assistant turns.
@@ -389,15 +401,6 @@ const conversationCostSummary = computed(() => {
     turnCount: breakdown.turnCount,
   }
 })
-
-function onThinkingModeChange(event: Event) {
-  const value = (event.target as HTMLSelectElement).value
-  // The dropdown no longer exposes an "Off" option — the Think pill owns
-  // on/off. So any value reaching this handler is a non-empty level. Remember
-  // it for subsequent toggle-on restores.
-  if (value) lastThinkingLevel.value = value
-  updateAgentSetting({ thinkingMode: value || null })
-}
 
 // Per-bubble collapse toggle handler. Header label + default-collapse rules
 // live in ~/utils/thinking.ts (thinkingHeaderLabel, initCollapsedState) so
@@ -526,6 +529,23 @@ async function copyMessage(msg: Message) {
   }
   catch (e) {
     console.error('Failed to copy message:', e)
+  }
+}
+
+// Copy the reasoning body only (not the final response). Namespaced key so the
+// per-message flash doesn't clash with copyMessage on the same row.
+async function copyReasoning(msg: Message) {
+  if (!msg.reasoning) return
+  try {
+    await navigator.clipboard.writeText(msg.reasoning)
+    const key = `reason:${msg.id ?? msg._key}`
+    copiedMessageId.value = key
+    setTimeout(() => {
+      if (copiedMessageId.value === key) copiedMessageId.value = null
+    }, 1200)
+  }
+  catch (e) {
+    console.error('Failed to copy reasoning:', e)
   }
 }
 async function deleteMessage(msg: Message) {
@@ -1304,18 +1324,31 @@ function exportConversation() {
 
     <!-- Chat area -->
     <div class="flex-1 flex flex-col">
-      <!-- Agent / Model / Thinking selector -->
-      <div class="px-4 py-2.5 border-b border-border flex items-center gap-3 flex-wrap">
+      <!--
+        Chat header — Unsloth-style: searchable model combobox on the left,
+        compact agent selector + streaming status mid-row, context meter on
+        the right. The per-turn Thinking level select moved out of the
+        header; the Think pill in the composer footer owns on/off, and the
+        level is controlled from the agent detail page.
+      -->
+      <div class="px-3 py-2 border-b border-border flex items-center gap-2">
+        <ChatModelCombobox
+          :providers="providers"
+          :model-key="selectedModelKey"
+          :status-tone="streaming ? 'busy' : (selectedAgent?.providerConfigured === false ? 'offline' : 'ok')"
+          @update:model-key="onModelKeyChange"
+        />
         <label
+          v-if="(agents?.length ?? 0) > 1"
           :for="agentSelectId"
-          class="text-xs text-fg-muted flex items-center gap-2"
+          class="text-xs text-fg-muted flex items-center gap-1.5"
         >
           <span>Agent:</span>
           <select
             :id="agentSelectId"
             v-model="selectedAgentId"
-            class="bg-muted border border-input text-sm text-fg-strong px-2 py-1
-                   focus:outline-hidden focus:border-ring"
+            class="bg-transparent border-0 text-sm text-fg-strong px-1 py-1
+                   focus:outline-hidden cursor-pointer hover:bg-muted rounded"
           >
             <option
               v-for="agent in agents"
@@ -1326,73 +1359,6 @@ function exportConversation() {
             </option>
           </select>
         </label>
-
-        <label
-          :for="modelSelectId"
-          class="text-xs text-fg-muted flex items-center gap-2"
-        >
-          <span>Model:</span>
-          <select
-            :id="modelSelectId"
-            :value="selectedModelKey"
-            class="bg-muted border border-input text-sm text-fg-strong px-2 py-1
-                   focus:outline-hidden focus:border-ring"
-            @change="onModelChange"
-          >
-            <optgroup
-              v-for="p in providers"
-              :key="p.name"
-              :label="p.name"
-            >
-              <option
-                v-for="m in p.models"
-                :key="`${p.name}::${m.id}`"
-                :value="`${p.name}::${m.id}`"
-              >
-                {{ m.name || m.id }}
-              </option>
-            </optgroup>
-          </select>
-        </label>
-
-        <!--
-          Thinking-level selector. Options come from the selected model's
-          `thinkingLevels` metadata, so switching from an Ollama model (3 levels)
-          to an OpenAI o-series on OpenRouter (up to 5 levels) re-populates in
-          place. Hidden entirely for non-thinking models — the agent detail
-          page renders a disabled placeholder, but the chat toolbar prioritizes
-          compactness since non-reasoning is the common case.
-
-          On/off is owned by the Think pill in the input footer; this select
-          only picks the effort LEVEL and is disabled when the pill is off.
-          The value falls back to the last remembered level in that state so
-          switching back on snaps to a meaningful choice rather than a blank.
-        -->
-        <template v-if="thinkingSupported && thinkingLevels.length">
-          <label
-            :for="thinkingSelectId"
-            class="text-xs text-fg-muted flex items-center gap-2"
-          >
-            <span>Thinking:</span>
-            <select
-              :id="thinkingSelectId"
-              :value="selectedAgent?.thinkingMode || lastThinkingLevel"
-              :disabled="!thinkingActive"
-              class="bg-muted border border-input text-sm text-fg-strong px-2 py-1
-                     focus:outline-hidden focus:border-ring disabled:opacity-50 disabled:cursor-not-allowed"
-              @change="onThinkingModeChange"
-            >
-              <option
-                v-for="level in thinkingLevels"
-                :key="level"
-                :value="level"
-              >
-                {{ level.charAt(0).toUpperCase() + level.slice(1) }}
-              </option>
-            </select>
-          </label>
-        </template>
-
         <span
           v-if="streaming"
           class="text-xs text-emerald-700 dark:text-emerald-400 animate-pulse"
@@ -1401,14 +1367,18 @@ function exportConversation() {
           v-else-if="agentBusy"
           class="text-xs text-fg-muted animate-pulse"
         >processing queue...</span>
-
-        <!-- JCLAW-108: running conversation-cost summary. Hover reveals the
-             per-model breakdown for mixed-model conversations. -->
-        <span
-          v-if="conversationCostSummary"
-          class="ml-auto text-xs text-fg-muted tabular-nums"
-          :title="conversationCostSummary.tooltip"
-        >{{ conversationCostSummary.label }} · {{ conversationCostSummary.turnCount }} turn{{ conversationCostSummary.turnCount === 1 ? '' : 's' }}</span>
+        <span class="ml-auto flex items-center gap-2">
+          <span
+            v-if="conversationCostSummary"
+            class="text-xs text-fg-muted tabular-nums"
+            :title="conversationCostSummary.tooltip"
+          >{{ conversationCostSummary.label }} · {{ conversationCostSummary.turnCount }} turn{{ conversationCostSummary.turnCount === 1 ? '' : 's' }}</span>
+          <ChatContextMeter
+            :prompt-tokens="latestAssistantUsage?.prompt ?? 0"
+            :completion-tokens="latestAssistantUsage?.completion ?? 0"
+            :context-window="(selectedModelInfo?.contextWindow as number | undefined) ?? null"
+          />
+        </span>
       </div>
 
       <!-- Messages -->
@@ -1435,31 +1405,17 @@ function exportConversation() {
             :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'"
           >
             <div
-              :class="msg.role === 'user' ? 'max-w-[80%]' : 'max-w-[85%]'"
+              :class="msg.role === 'user' ? 'max-w-[80%]' : 'max-w-[85%] w-full'"
               class="min-w-0"
+              :title="msg.createdAt ? formatTimestamp(msg.createdAt) : undefined"
             >
-              <div
-                class="flex items-baseline gap-2 mb-1"
-                :class="msg.role === 'user' ? 'justify-end' : ''"
-              >
-                <span
-                  class="text-xs font-medium"
-                  :class="msg.role === 'user' ? 'text-blue-700 dark:text-blue-400' : 'text-emerald-700 dark:text-emerald-400'"
-                >
-                  {{ msg.role === 'user' ? 'you' : 'assistant' }}
-                </span>
-                <span
-                  v-if="msg.createdAt"
-                  class="text-xs text-fg-muted"
-                >{{ formatTimestamp(msg.createdAt) }}</span>
-              </div>
-              <!-- User messages: plain text + hover actions (copy, edit) -->
+              <!-- User messages: subtle rounded pill + hover actions (copy, edit, delete) -->
               <div
                 v-if="msg.role === 'user'"
                 class="group"
               >
                 <div
-                  class="bg-blue-100 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800/40 rounded-2xl rounded-tr-sm text-fg-primary px-4 py-2.5 text-sm whitespace-pre-wrap break-words"
+                  class="inline-block bg-muted rounded-2xl text-fg-strong px-4 py-2 text-sm whitespace-pre-wrap break-words"
                 >
                   {{ msg.content }}
                 </div>
@@ -1535,61 +1491,105 @@ function exportConversation() {
                   </button>
                 </div>
               </div>
-              <!-- Assistant messages: rendered markdown with optional thinking -->
+              <!-- Assistant messages: optional thinking card + plain markdown body -->
               <div
                 v-else
                 class="group"
               >
                 <!--
-                Thinking/reasoning block. Header is always rendered when reasoning
-                exists; clicking it toggles just this bubble's collapse state.
-                Default: in-flight turns start expanded and auto-collapse at the
-                reasoning→content transition; historical turns load collapsed.
-                Body is suppressed when msg.thinkingCollapsed is true.
-              -->
+                  Thinking/reasoning block, Unsloth-style: bordered card with a
+                  "Thought for Xs" header (lightbulb + chevron) and an in-place
+                  Copy button. Collapsed by default on historical turns; in-flight
+                  turns open on first reasoning delta and auto-collapse at the
+                  reasoning→content transition.
+                -->
                 <div
                   v-if="msg.reasoning"
-                  class="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/20 rounded-xl rounded-tl-sm text-blue-800/80 dark:text-blue-300/70 px-3 py-2 text-xs font-mono mb-1.5 whitespace-pre-wrap break-words"
-                  :class="msg.thinkingCollapsed ? '' : 'max-h-48 overflow-y-auto'"
+                  class="mb-3 border border-neutral-200 dark:border-neutral-700 rounded-xl overflow-hidden bg-surface-elevated"
                 >
-                  <button
-                    type="button"
-                    class="flex items-center gap-1.5 w-full text-left text-blue-700 dark:text-blue-400/60 text-[10px] font-sans font-medium hover:text-blue-600 dark:hover:text-blue-400/90 focus:outline-none"
-                    :class="msg.thinkingCollapsed ? '' : 'mb-1'"
-                    :title="msg.thinkingCollapsed ? 'Expand reasoning' : 'Collapse reasoning'"
-                    @click="toggleThinking(msg)"
-                  >
-                    <svg
-                      class="w-3 h-3 transition-transform"
-                      :class="msg.thinkingCollapsed ? '' : 'rotate-90'"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
+                  <div class="flex items-center gap-2 px-3 py-2">
+                    <button
+                      type="button"
+                      class="flex-1 flex items-center gap-2 text-left text-xs text-fg-muted hover:text-fg-strong focus:outline-none"
+                      :title="msg.thinkingCollapsed ? 'Expand reasoning' : 'Collapse reasoning'"
+                      @click="toggleThinking(msg)"
                     >
-                      <path
+                      <svg
+                        class="w-3.5 h-3.5 shrink-0"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
                         stroke-linecap="round"
                         stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M9 5l7 7-7 7"
-                      />
-                    </svg>
-                    <span>{{ thinkingHeaderLabel(msg) }}</span>
-                  </button>
-                  <div v-if="!msg.thinkingCollapsed">
+                        stroke-width="1.5"
+                        d="M9 18h6M10 22h4M12 2a7 7 0 00-4 12.74V17a1 1 0 001 1h6a1 1 0 001-1v-2.26A7 7 0 0012 2z"
+                      /></svg>
+                      <span class="font-medium">{{ thinkingHeaderLabel(msg) }}</span>
+                      <svg
+                        class="w-3.5 h-3.5 transition-transform ml-1"
+                        :class="msg.thinkingCollapsed ? '' : 'rotate-180'"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="1.5"
+                        d="M19 9l-7 7-7-7"
+                      /></svg>
+                    </button>
+                    <button
+                      type="button"
+                      class="shrink-0 inline-flex items-center gap-1 px-2 py-1 text-[11px] text-fg-muted hover:text-fg-strong transition-colors"
+                      :title="copiedMessageId === `reason:${msg.id ?? msg._key}` ? 'Copied' : 'Copy reasoning'"
+                      @click.stop="copyReasoning(msg)"
+                    >
+                      <svg
+                        v-if="copiedMessageId !== `reason:${msg.id ?? msg._key}`"
+                        class="w-3.5 h-3.5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="1.5"
+                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                      /></svg>
+                      <svg
+                        v-else
+                        class="w-3.5 h-3.5 text-emerald-500"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      ><path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2.5"
+                        d="M5 13l4 4L19 7"
+                      /></svg>
+                      <span>Copy</span>
+                    </button>
+                  </div>
+                  <div
+                    v-if="!msg.thinkingCollapsed"
+                    class="px-4 pb-3 pt-1 text-sm text-fg-primary whitespace-pre-wrap break-words max-h-64 overflow-y-auto border-t border-neutral-200 dark:border-neutral-700"
+                  >
                     {{ msg.reasoning }}
                   </div>
                 </div>
-                <!-- Response content -->
+                <!-- Response content — plain rendered markdown, no bubble. -->
                 <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify (see renderMarkdown above) before returning. -->
                 <div
                   v-if="msg.content"
-                  class="prose-chat bg-muted border border-input rounded-2xl rounded-tl-sm text-fg-primary px-4 py-2.5 text-sm overflow-x-auto break-words"
+                  class="prose-chat text-fg-primary text-sm overflow-x-auto break-words"
                   v-html="renderMarkdown(msg.content, selectedAgentId)"
                 />
                 <!-- eslint-enable vue/no-v-html -->
                 <div
                   v-else-if="!msg.reasoning"
-                  class="bg-muted border border-input rounded-2xl rounded-tl-sm text-fg-muted px-4 py-2.5 text-sm italic"
+                  class="text-fg-muted text-sm italic"
                 >
                   (empty response)
                 </div>
@@ -1865,7 +1865,7 @@ function exportConversation() {
         -->
         <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -->
         <form
-          class="bg-surface-elevated border border-ring rounded-xl overflow-hidden"
+          class="bg-surface-elevated border border-border rounded-2xl overflow-hidden"
           @submit.prevent="sendMessage"
           @drop.prevent="handleDrop"
           @dragover.prevent
@@ -1956,11 +1956,11 @@ function exportConversation() {
           <textarea
             ref="chatInput"
             v-model="input"
-            placeholder="Type a message..."
+            placeholder="Send a message..."
             :disabled="streaming"
             rows="1"
             aria-label="Message input"
-            class="w-full px-4 pt-3 pb-2 bg-transparent text-sm text-fg-strong
+            class="w-full px-4 pt-4 pb-2 bg-transparent text-sm text-fg-strong
                    placeholder-fg-muted focus:outline-hidden resize-none overflow-hidden"
             @keydown.enter.exact="onInputEnter"
             @keydown.down="onInputKeydown"
@@ -1977,11 +1977,11 @@ function exportConversation() {
             class="hidden"
             @change="handleFileUpload"
           >
-          <div class="flex items-center justify-between px-3 pb-2.5">
+          <div class="flex items-center justify-between gap-2 px-2 pb-2">
             <div class="flex items-center gap-1.5 flex-wrap">
               <button
                 type="button"
-                class="p-1.5 text-fg-muted hover:text-fg-primary transition-colors"
+                class="inline-flex items-center justify-center w-8 h-8 rounded-full border border-border text-fg-muted hover:text-fg-strong hover:bg-muted transition-colors"
                 title="Attach file"
                 @click="triggerFileUpload"
               >
@@ -1993,29 +1993,25 @@ function exportConversation() {
                 ><path
                   stroke-linecap="round"
                   stroke-linejoin="round"
-                  stroke-width="1.5"
-                  d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"
+                  stroke-width="2"
+                  d="M12 4v16m8-8H4"
                 /></svg>
               </button>
               <!--
-                Model-capability toggles. LM Studio-style chips that both
-                reflect and control whether the corresponding capability is
-                currently active for the selected agent. Visible only when the
-                model advertises the capability (set via provider auto-detect
-                or manual override in Settings). Active state: solid coloured
-                chip; inactive state: outlined muted chip.
-                  - Think: flips agent.thinkingMode between null and the last
-                    remembered effort level (default "medium").
-                  - Vision / Audio: flip the matching agent.*Enabled override.
+                Model-capability toggles. Unsloth-style rounded-full pills:
+                when active the pill paints in the capability colour; inactive
+                pills stay outlined neutral. Visible only when the model
+                advertises the capability. Think flips thinkingMode null ↔
+                remembered level; Vision/Audio flip their *Enabled override.
               -->
               <button
                 v-if="thinkingSupported"
                 type="button"
-                class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors"
+                class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium transition-colors"
                 :class="[
                   (thinkingActive || thinkingLock.locked)
-                    ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400 hover:bg-blue-200 dark:hover:bg-blue-500/25'
-                    : 'border border-input text-fg-muted hover:text-fg-primary hover:border-ring',
+                    ? 'bg-emerald-500/15 text-emerald-500 hover:bg-emerald-500/25'
+                    : 'border border-border text-fg-muted hover:text-fg-strong hover:bg-muted',
                   thinkingLock.locked ? 'cursor-not-allowed opacity-90' : '',
                 ]"
                 :aria-disabled="thinkingLock.locked"
@@ -2032,18 +2028,18 @@ function exportConversation() {
                 ><path
                   stroke-linecap="round"
                   stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+                  stroke-width="1.5"
+                  d="M9 18h6M10 22h4M12 2a7 7 0 00-4 12.74V17a1 1 0 001 1h6a1 1 0 001-1v-2.26A7 7 0 0012 2z"
                 /></svg>
                 Think
               </button>
               <button
                 v-if="visionSupported"
                 type="button"
-                class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors"
+                class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium transition-colors"
                 :class="visionActive
-                  ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-500/25'
-                  : 'border border-input text-fg-muted hover:text-fg-primary hover:border-ring'"
+                  ? 'bg-sky-500/15 text-sky-400 hover:bg-sky-500/25'
+                  : 'border border-border text-fg-muted hover:text-fg-strong hover:bg-muted'"
                 :title="visionActive ? 'Vision on — click to turn off' : 'Vision off — click to turn on'"
                 @click="toggleVisionPill"
               >
@@ -2055,12 +2051,12 @@ function exportConversation() {
                 ><path
                   stroke-linecap="round"
                   stroke-linejoin="round"
-                  stroke-width="2"
+                  stroke-width="1.5"
                   d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
                 /><path
                   stroke-linecap="round"
                   stroke-linejoin="round"
-                  stroke-width="2"
+                  stroke-width="1.5"
                   d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
                 /></svg>
                 Vision
@@ -2068,10 +2064,10 @@ function exportConversation() {
               <button
                 v-if="audioSupported"
                 type="button"
-                class="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors"
+                class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium transition-colors"
                 :class="audioActive
-                  ? 'bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400 hover:bg-violet-200 dark:hover:bg-violet-500/25'
-                  : 'border border-input text-fg-muted hover:text-fg-primary hover:border-ring'"
+                  ? 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
+                  : 'border border-border text-fg-muted hover:text-fg-strong hover:bg-muted'"
                 :title="audioActive ? 'Audio on — click to turn off' : 'Audio off — click to turn on'"
                 @click="toggleAudioPill"
               >
@@ -2083,8 +2079,8 @@ function exportConversation() {
                 ><path
                   stroke-linecap="round"
                   stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M19 11a7 7 0 01-14 0m7 7v4m-4 0h8m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                  stroke-width="1.5"
+                  d="M11 5L6 9H2v6h4l5 4V5zm8.536-.536a9 9 0 010 12.728M15.536 8.464a5 5 0 010 7.072"
                 /></svg>
                 Audio
               </button>
@@ -2092,7 +2088,7 @@ function exportConversation() {
             <div class="flex items-center gap-1">
               <button
                 type="button"
-                class="p-1.5 text-fg-muted hover:text-fg-primary transition-colors"
+                class="p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
                 title="New conversation"
                 @click="newChat"
               >
@@ -2111,7 +2107,7 @@ function exportConversation() {
               <button
                 type="button"
                 :disabled="!displayMessages.length"
-                class="p-1.5 text-fg-muted hover:text-fg-primary disabled:text-neutral-300 dark:disabled:text-neutral-700 transition-colors"
+                class="p-1.5 text-fg-muted hover:text-fg-strong disabled:text-neutral-300 dark:disabled:text-neutral-700 transition-colors"
                 title="Export as Markdown"
                 @click="exportConversation"
               >
@@ -2130,12 +2126,12 @@ function exportConversation() {
               <button
                 v-if="streaming"
                 type="button"
-                class="p-1.5 text-red-600 dark:text-red-500 hover:text-red-700 dark:hover:text-red-400 transition-colors"
+                class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors"
                 title="Stop generating"
                 @click="stopStreaming"
               >
                 <svg
-                  class="w-4 h-4"
+                  class="w-3.5 h-3.5"
                   fill="currentColor"
                   viewBox="0 0 24 24"
                 ><rect
@@ -2150,7 +2146,7 @@ function exportConversation() {
                 v-else
                 type="submit"
                 :disabled="!input.trim() && !attachedFiles.length"
-                class="p-1.5 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 disabled:text-neutral-300 dark:disabled:text-neutral-700 transition-colors"
+                class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-emerald-500 text-white hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 title="Send"
               >
                 <svg
@@ -2161,13 +2157,16 @@ function exportConversation() {
                 ><path
                   stroke-linecap="round"
                   stroke-linejoin="round"
-                  stroke-width="1.5"
-                  d="M6 12L3 21l18-9L3 3l3 9zm0 0h8"
+                  stroke-width="2.5"
+                  d="M12 19V5m0 0l-7 7m7-7l7 7"
                 /></svg>
               </button>
             </div>
           </div>
         </form>
+        <p class="mt-1.5 text-center text-[11px] text-fg-muted">
+          LLMs can make mistakes. Double-check all responses.
+        </p>
       </div>
     </div>
   </div>

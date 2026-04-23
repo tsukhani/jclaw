@@ -126,9 +126,11 @@ describe('Chat page — tool call rendering', () => {
     const component = await mountSuspended(Chat)
     await flushPromises()
 
-    // The sidebar summarizes the conversation with the agent name; that's
-    // the stable marker (channel type renders via icon, not text).
-    expect(component.text().toLowerCase()).toContain('streaming-agent')
+    // Sidebar summarises the conversation by preview text. The agent name is
+    // no longer shown in the chat header when there is only one agent (the
+    // Agent: selector is hidden below the multi-agent threshold), so we
+    // assert on the conversation preview instead.
+    expect(component.text().toLowerCase()).toContain('tool call demo')
   })
 })
 
