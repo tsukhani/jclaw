@@ -566,6 +566,40 @@ async function regenerateMessage(msg: Message) {
  */
 const tokStatsHoverKey = ref<string | number | null>(null)
 
+/**
+ * Backfill server ids onto the local `messages` array after a stream turn.
+ *
+ * The stream protocol doesn't emit persisted message ids (see
+ * ApiChatController.writeSse — the complete event carries only content).
+ * That left the optimistic user + assistant bubbles without ids until the
+ * user left and re-entered the conversation, which disabled the Delete
+ * button (gated on `msg.id`) until then.
+ *
+ * Rather than renegotiate the SSE contract, we refetch the transcript once
+ * at end-of-stream and walk both lists backwards, pairing id-less local
+ * rows with the freshest server row of the same role. Bounded by the tail
+ * distance so unrelated mid-conversation edits can't re-key older rows.
+ */
+async function reconcileMessageIds() {
+  const convoId = selectedConvoId.value
+  if (!convoId) return
+  try {
+    const fresh = await $fetch<Message[]>(`/api/conversations/${convoId}/messages`)
+    if (!fresh?.length) return
+    const local = messages.value
+    for (let li = local.length - 1, ri = fresh.length - 1; li >= 0 && ri >= 0; li--, ri--) {
+      const L = local[li]
+      const R = fresh[ri]
+      if (!L || !R) continue
+      if (L.role !== R.role) break
+      if (!L.id && R.id) L.id = R.id
+    }
+  }
+  catch (e) {
+    console.error('Failed to reconcile message ids:', e)
+  }
+}
+
 async function deleteMessage(msg: Message) {
   // Skip mid-stream placeholders that have no server-side row yet — the
   // outer stop-streaming path already handles those.
@@ -995,8 +1029,13 @@ async function sendMessage() {
     // commit (see AgentRunner.streamLlmLoop — emitUsageAndComplete is
     // intentionally called before the Tx.run persist block for latency).
     refreshConversations()
+    // Delayed reconcile rides the same persist-race window so the in-flight
+    // user + assistant bubbles pick up their server ids (delete button gates
+    // on msg.id — without this the Delete action was a no-op until the user
+    // navigated away and back).
     setTimeout(() => {
       refreshConversations()
+      void reconcileMessageIds()
     }, 600)
   }
 }
@@ -1261,29 +1300,23 @@ function exportConversation() {
     -->
     <div class="flex-1 flex flex-col">
       <!--
-        Chat header — Unsloth-style: searchable model combobox on the left,
-        compact agent selector + streaming status mid-row, context meter on
-        the right. The per-turn Thinking level select moved out of the
-        header; the Think pill in the composer footer owns on/off, and the
-        level is controlled from the agent detail page.
+        Chat header — Unsloth-style: compact agent selector on the left,
+        searchable model combobox absolute-centered, context meter on the
+        right. The per-turn Thinking level select moved out of the header;
+        the Think pill in the composer footer owns on/off, and the level is
+        controlled from the agent detail page.
       -->
       <!--
-        Three-zone header: model combobox on the left, agent selector
+        Three-zone header: agent selector on the left, model combobox
         absolute-centered on the row midpoint, context meter pushed to the
-        right edge. Absolute positioning on the agent label keeps it
+        right edge. Absolute positioning on the model combobox keeps it
         optically centered regardless of the left/right content widths.
       -->
       <div class="relative px-3 py-2 border-b border-border flex items-center gap-2">
-        <ChatModelCombobox
-          :providers="providers"
-          :model-key="selectedModelKey"
-          :status-tone="streaming ? 'busy' : (selectedAgent?.providerConfigured === false ? 'offline' : 'ok')"
-          @update:model-key="onModelKeyChange"
-        />
         <label
           v-if="(agents?.length ?? 0) > 1"
           :for="agentSelectId"
-          class="absolute left-1/2 -translate-x-1/2 text-sm text-fg-muted flex items-center gap-1.5"
+          class="text-sm text-fg-muted flex items-center gap-1.5"
         >
           <span>Agent:</span>
           <select
@@ -1301,6 +1334,14 @@ function exportConversation() {
             </option>
           </select>
         </label>
+        <div class="absolute left-1/2 -translate-x-1/2">
+          <ChatModelCombobox
+            :providers="providers"
+            :model-key="selectedModelKey"
+            :status-tone="streaming ? 'busy' : (selectedAgent?.providerConfigured === false ? 'offline' : 'ok')"
+            @update:model-key="onModelKeyChange"
+          />
+        </div>
         <span class="ml-auto flex items-center gap-2">
           <ChatContextMeter
             v-if="!isEmptyChat"
@@ -1359,7 +1400,7 @@ function exportConversation() {
               Chat with your agent
             </h1>
             <p class="text-sm text-fg-muted">
-              Pick a model, pick an agent, and start a new conversation.
+              Pick an agent, pick a model, and start a new conversation.
             </p>
           </div>
         </Transition>
@@ -1595,7 +1636,12 @@ function exportConversation() {
                     -->
                     <div
                       v-if="!streaming && (msg.id || msg._key) && msg.content"
-                      class="flex items-center gap-1 mt-1.5 -ml-1"
+                      :class="[
+                        'flex items-center gap-1 mt-1.5 -ml-1 transition-opacity',
+                        tokStatsHoverKey === (msg.id ?? msg._key)
+                          ? 'opacity-100'
+                          : 'opacity-0 group-hover:opacity-100',
+                      ]"
                     >
                       <button
                         type="button"
@@ -1691,6 +1737,7 @@ function exportConversation() {
                           </button>
                         </PopoverTrigger>
                         <PopoverContent
+                          side="top"
                           align="start"
                           :side-offset="8"
                           class="min-w-52 px-3 py-2 rounded-[10px] border-neutral-200 dark:border-neutral-700/50"

@@ -119,13 +119,13 @@ const navGroups = [
     items: [
       { label: 'Chat', to: '/chat', icon: 'svg-chat' },
       { label: 'Conversations', to: '/conversations', icon: 'svg-conversations' },
+      { label: 'Channels', to: '/channels', icon: 'svg-channels' },
     ],
   },
   {
     label: 'Ops',
     items: [
       { label: 'Agents', to: '/agents', icon: 'svg-agents' },
-      { label: 'Channels', to: '/channels', icon: 'svg-channels' },
       { label: 'Tasks', to: '/tasks', icon: 'svg-tasks' },
       { label: 'Skills', to: '/skills', icon: 'svg-skills' },
       { label: 'Tools', to: '/tools', icon: 'svg-tools' },
@@ -145,7 +145,7 @@ const navGroups = [
   <div class="h-screen bg-surface text-fg-primary flex overflow-hidden">
     <!-- Sidebar -->
     <aside
-      :class="sidebarOpen ? 'w-52' : 'w-0 -ml-52'"
+      :class="sidebarOpen ? 'w-60' : 'w-0 -ml-60'"
       class="fixed inset-y-0 left-0 z-30 bg-surface-elevated border-r border-border
              flex flex-col transition-all duration-200 overflow-hidden lg:relative lg:ml-0"
     >
@@ -174,6 +174,16 @@ const navGroups = [
               >Claw</span>
             </div>
           </div>
+          <span
+            class="inline-flex items-center justify-center
+                   rounded-full border
+                   border-neutral-300 dark:border-neutral-700
+                   px-[5px] py-[2px]
+                   text-[8px] font-medium leading-none tracking-[0.04em]
+                   text-neutral-500 dark:text-neutral-400
+                   shadow-[0_1px_2px_rgba(0,0,0,0.06)]
+                   dark:shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+          >ALPHA</span>
         </div>
         <button
           class="p-1.5 rounded-full border border-border text-fg-muted hover:text-fg-strong hover:border-fg-muted transition-colors"
