@@ -1735,9 +1735,18 @@ function exportConversation() {
           first-class native handler on the textarea inside, so the a11y
           loss is minimal.
         -->
+        <!--
+          Composer card — traced from Unsloth Studio via devtools:
+          rounded-[22px] (their rounded-3xl), 1px border in #2e3035
+          (neutral-700 at 50% opacity against the card bg), and a soft
+          0 2px 12px rgba(0,0,0,0.2) drop shadow. The border override is
+          needed because the project's --border token is invisible
+          against --surface-elevated in dark mode.
+        -->
         <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -->
         <form
-          class="bg-surface-elevated border border-border rounded-2xl overflow-hidden"
+          class="bg-surface-elevated border border-neutral-200 dark:border-neutral-700/50 rounded-[22px]
+                 shadow-[0_2px_12px_rgba(0,0,0,0.2)] overflow-hidden"
           @submit.prevent="sendMessage"
           @drop.prevent="handleDrop"
           @dragover.prevent
