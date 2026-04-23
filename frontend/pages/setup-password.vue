@@ -178,16 +178,6 @@ const confirmPasswordId = useId()
         >
           {{ loading ? 'Saving…' : 'Change password' }}
         </button>
-
-        <p class="text-center text-sm text-fg-muted pt-2">
-          Password already setup?
-          <NuxtLink
-            to="/login"
-            class="text-emerald-700 dark:text-emerald-400 hover:underline font-medium"
-          >
-            Back to login
-          </NuxtLink>
-        </p>
       </form>
     </div>
   </div>
