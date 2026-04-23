@@ -64,10 +64,10 @@ describe('Chat page', () => {
   })
 
   it('no longer renders an in-page conversations sidebar', async () => {
-    // The Conversations list moved to the global left sidebar in
-    // layouts/default.vue (see useRecentConversations). The chat page now
-    // takes the full content width — no 'Conversations' section title and
-    // no resize handle inside the page itself.
+    // The in-page Conversations list was removed; the dedicated
+    // /conversations page owns the full list now. The chat page takes the
+    // full content width — no 'Conversations' section title and no resize
+    // handle inside the page itself.
     setupChatApi()
     const component = await mountSuspended(Chat)
     await flushPromises()

@@ -409,11 +409,6 @@ const conversationsUrl = computed(() =>
 const { data: conversations, refresh: refreshConversations } = await useFetch<Conversation[]>(
   conversationsUrl as unknown as Ref<string>,
 )
-// Sidebar Recents live in layouts/default.vue via useRecentConversations.
-// Refresh that list whenever this page mutates conversations so the sidebar
-// reflects the newly-created / renamed / deleted-from-stream row.
-const { refresh: refreshRecents } = useRecentConversations()
-
 const selectedConvoId = ref<number | null>(null)
 const messages = ref<Message[]>([])
 const input = ref('')
@@ -939,10 +934,8 @@ async function sendMessage() {
     // commit (see AgentRunner.streamLlmLoop — emitUsageAndComplete is
     // intentionally called before the Tx.run persist block for latency).
     refreshConversations()
-    refreshRecents()
     setTimeout(() => {
       refreshConversations()
-      refreshRecents()
     }, 600)
   }
 }
@@ -954,7 +947,6 @@ async function generateTitleForConversation(convoId: number) {
     if (titleRefreshTimeout) clearTimeout(titleRefreshTimeout)
     titleRefreshTimeout = setTimeout(() => {
       refreshConversations()
-      refreshRecents()
     }, 3000)
   }
   catch {
@@ -1178,9 +1170,8 @@ function exportConversation() {
   >
     <!--
       Chat area takes the full main-content width now that the in-page
-      Conversations sidebar has moved to the global left sidebar (see
-      layouts/default.vue → useRecentConversations). Multi-select delete
-      + bulk management live on the dedicated /conversations page.
+      Conversations sidebar has been removed. Multi-select delete + bulk
+      management live on the dedicated /conversations page.
     -->
     <div class="flex-1 flex flex-col">
       <!--
