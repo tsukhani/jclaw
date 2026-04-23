@@ -127,9 +127,6 @@ const deletingBulk = ref(false)
 const agentNameId = useId()
 const agentProviderId = useId()
 const agentModelId = useId()
-const agentThinkingId = useId()
-const agentVisionId = useId()
-const agentAudioId = useId()
 const agentQueueModeId = useId()
 const agentWorkspaceTextareaId = useId()
 
@@ -236,23 +233,14 @@ function modelForAgent(agent: Agent | null | undefined): ProviderModel | null {
   return findProviderModel(providers.value, agent.modelProvider, agent.modelId)
 }
 
-// Thinking levels the selected provider+model pair accepts. Empty when the
-// model doesn't support reasoning — the UI hides the selector in that case.
-const thinkingLevels = computed<string[]>(() => effectiveThinkingLevels(selectedModel.value))
-
-// Binary On/Off bindings for the Vision and Audio selects. A null stored
-// value means "inherit the model's capability default" — render as "on"
-// when the model supports the capability. Writing through the setter
-// collapses null to an explicit true/false, which is what we want once
-// the operator has actually interacted with the dropdown.
-const visionSelect = computed<'on' | 'off'>({
-  get: () => form.value.visionEnabled === false ? 'off' : 'on',
-  set: (v) => { form.value.visionEnabled = v === 'off' ? false : true },
-})
-const audioSelect = computed<'on' | 'off'>({
-  get: () => form.value.audioEnabled === false ? 'off' : 'on',
-  set: (v) => { form.value.audioEnabled = v === 'off' ? false : true },
-})
+// Pick a sensible default reasoning-effort level when the user toggles
+// the Thinking pill on. Middle of the model's declared levels matches the
+// spirit of backend DEFAULT_THINKING_LEVELS (low/medium/high → medium).
+function defaultThinkingLevel(model: ProviderModel | null): string {
+  const levels = effectiveThinkingLevels(model)
+  if (!levels.length) return 'medium'
+  return levels[Math.floor(levels.length / 2)] ?? 'medium'
+}
 
 // Whether the selected provider is configured and the selected model is available.
 // Kept with `_` prefix so the unused-vars rule is satisfied while the logic
@@ -303,13 +291,56 @@ function editAgent(agent: Agent) {
 }
 
 // When the selected model changes, drop a thinking mode the new model doesn't
-// advertise. Prevents submitting a stale level (e.g. "xhigh" after swapping
-// from GPT-5 to Kimi) that would be silently normalized to null server-side.
+// advertise. Prevents submitting a stale level (e.g. "high" after swapping
+// to a non-thinking model) that would be silently normalized server-side.
 watch(() => [form.value.modelProvider, form.value.modelId], () => {
-  if (form.value.thinkingMode && !thinkingLevels.value.includes(form.value.thinkingMode)) {
-    form.value.thinkingMode = ''
+  if (form.value.thinkingMode) {
+    const levels = effectiveThinkingLevels(selectedModel.value)
+    if (!levels.includes(form.value.thinkingMode)) form.value.thinkingMode = ''
   }
 })
+
+// Pill toggle from inside the Edit Agent form — purely local state. The
+// form save performs the API call once the operator clicks Save.
+function toggleFormCapability(capability: 'thinking' | 'vision' | 'audio') {
+  if (capability === 'thinking') {
+    form.value.thinkingMode = form.value.thinkingMode
+      ? ''
+      : defaultThinkingLevel(selectedModel.value)
+  }
+  else if (capability === 'vision') {
+    form.value.visionEnabled = form.value.visionEnabled === false
+  }
+  else {
+    form.value.audioEnabled = form.value.audioEnabled === false
+  }
+}
+
+// Pill toggle from a listing row — persists immediately via a partial PUT
+// so the row stays in sync with the backend. Only the touched field is
+// sent; the update endpoint honours absent-key-leaves-unchanged.
+async function toggleListingCapability(agent: Agent | undefined, capability: 'thinking' | 'vision' | 'audio') {
+  if (!agent) return
+  const body: Record<string, unknown> = {}
+  if (capability === 'thinking') {
+    body.thinkingMode = agent.thinkingMode
+      ? null
+      : defaultThinkingLevel(modelForAgent(agent))
+  }
+  else if (capability === 'vision') {
+    body.visionEnabled = agent.visionEnabled === false
+  }
+  else {
+    body.audioEnabled = agent.audioEnabled === false
+  }
+  try {
+    await $fetch(`/api/agents/${agent.id}`, { method: 'PUT', body })
+    refresh()
+  }
+  catch (e) {
+    console.error('Failed to toggle capability:', e)
+  }
+}
 
 async function loadAgentTools(agentId: number) {
   try {
@@ -691,7 +722,11 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             </div>
             <ModelCapabilityPills
               :model="modelForAgent(mainAgent)"
-              class="mt-1.5"
+              :thinking-mode="mainAgent.thinkingMode"
+              :vision-enabled="mainAgent.visionEnabled"
+              :audio-enabled="mainAgent.audioEnabled"
+              class="mt-2"
+              @toggle="(cap) => toggleListingCapability(mainAgent, cap)"
             />
           </div>
           <div class="flex items-center gap-3 shrink-0">
@@ -742,7 +777,11 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               </div>
               <ModelCapabilityPills
                 :model="modelForAgent(agent)"
-                class="mt-1.5"
+                :thinking-mode="agent.thinkingMode"
+                :vision-enabled="agent.visionEnabled"
+                :audio-enabled="agent.audioEnabled"
+                class="mt-2"
+                @toggle="(cap) => toggleListingCapability(agent, cap)"
               />
             </div>
           </div>
@@ -861,124 +900,13 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             </select>
             <ModelCapabilityPills
               :model="selectedModel"
-              class="mt-3"
+              :thinking-mode="form.thinkingMode"
+              :vision-enabled="form.visionEnabled"
+              :audio-enabled="form.audioEnabled"
+              size="md"
+              class="mt-4"
+              @toggle="toggleFormCapability"
             />
-          </label>
-          <!--
-            Thinking mode selector. The available options come from the selected
-            model's `thinkingLevels` metadata (falling back to low/medium/high for
-            any thinking-capable model that doesn't declare its own). Non-thinking
-            models render the selector disabled with "Not supported" so the agent
-            form shape stays consistent across rows.
-          -->
-          <label
-            :for="agentThinkingId"
-            class="block"
-          >
-            <span
-              class="block text-xs text-neutral-500 mb-1"
-              :class="{ 'opacity-40': !thinkingLevels.length }"
-            >
-              Thinking
-            </span>
-            <select
-              :id="agentThinkingId"
-              v-model="form.thinkingMode"
-              :disabled="!thinkingLevels.length"
-              class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring
-                           disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <option
-                v-if="!thinkingLevels.length"
-                value=""
-              >
-                Not supported
-              </option>
-              <template v-else>
-                <option value="">
-                  Off
-                </option>
-                <option
-                  v-for="level in thinkingLevels"
-                  :key="level"
-                  :value="level"
-                >
-                  {{ level.charAt(0).toUpperCase() + level.slice(1) }}
-                </option>
-              </template>
-            </select>
-          </label>
-          <!--
-            Vision toggle — matches the Thinking selector shape so the form
-            layout stays stable across models. Models that don't advertise
-            vision input render the control disabled with "Not supported".
-          -->
-          <label
-            :for="agentVisionId"
-            class="block"
-          >
-            <span
-              class="block text-xs text-neutral-500 mb-1"
-              :class="{ 'opacity-40': !selectedModel?.supportsVision }"
-            >
-              Vision
-            </span>
-            <select
-              :id="agentVisionId"
-              v-model="visionSelect"
-              :disabled="!selectedModel?.supportsVision"
-              class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring
-                           disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <option
-                v-if="!selectedModel?.supportsVision"
-                value="on"
-              >
-                Not supported
-              </option>
-              <template v-else>
-                <option value="off">
-                  Off
-                </option>
-                <option value="on">
-                  On
-                </option>
-              </template>
-            </select>
-          </label>
-          <!-- Audio toggle — same shape as Vision. -->
-          <label
-            :for="agentAudioId"
-            class="block"
-          >
-            <span
-              class="block text-xs text-neutral-500 mb-1"
-              :class="{ 'opacity-40': !selectedModel?.supportsAudio }"
-            >
-              Audio
-            </span>
-            <select
-              :id="agentAudioId"
-              v-model="audioSelect"
-              :disabled="!selectedModel?.supportsAudio"
-              class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring
-                           disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <option
-                v-if="!selectedModel?.supportsAudio"
-                value="on"
-              >
-                Not supported
-              </option>
-              <template v-else>
-                <option value="off">
-                  Off
-                </option>
-                <option value="on">
-                  On
-                </option>
-              </template>
-            </select>
           </label>
         </div>
         <div class="flex mt-4">
