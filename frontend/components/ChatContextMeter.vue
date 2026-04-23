@@ -107,32 +107,30 @@ function handleMouseLeave() {
       </button>
     </PopoverTrigger>
     <!--
-      PopoverContent ships with w-72 rounded-md border p-4 shadow-md bg-popover
-      out of the box (see shadcn-vue Popover primitive). Two targeted overrides:
-      - border-neutral-200 / dark:border-neutral-700 — the project's --border
-        token resolves to the same hsl as the popover bg in dark mode, so the
-        default edge disappears; pin explicit neutrals to restore the ring.
-      - rounded-2xl — Unsloth Studio's popovers use a ~16px radius (their
-        --radius is 1.1rem vs shadcn's default 0.625rem). At jclaw's token
-        scale, rounded-2xl lands at the same ~16px and matches the reference
-        screenshot's corner softness.
+      Styling traced from Unsloth Studio's tooltip via devtools (see JCLAW
+      notes): px-3 py-2, rounded-[10px], grid gap-1.5, text-xs body,
+      font-mono on numerical values, font-medium only on the emphasized
+      percent. min-w-44 stops narrow rows collapsing on the token-only
+      cases. We still need the explicit border-neutral override because
+      the project's --border token is invisible against --popover in
+      dark mode; /50 opacity thins it to the hairline Unsloth uses.
     -->
     <PopoverContent
       align="end"
       :side-offset="4"
-      class="rounded-2xl border-neutral-200 dark:border-neutral-700"
+      class="min-w-44 px-3 py-2 rounded-[10px] border-neutral-200 dark:border-neutral-700/50"
       @mouseenter="open = true"
       @mouseleave="open = false"
       @focusin="open = true"
       @focusout="open = false"
     >
-      <dl class="grid gap-2.5 text-sm">
+      <dl class="grid gap-1.5 text-xs">
         <div class="flex items-center justify-between gap-4">
           <dt class="text-muted-foreground">
             Context usage
           </dt>
           <dd
-            class="tabular-nums"
+            class="font-mono tabular-nums font-medium"
             :class="percentColor"
           >
             {{ percentLabel }}
@@ -142,7 +140,7 @@ function handleMouseLeave() {
           <dt class="text-muted-foreground">
             Prompt tokens
           </dt>
-          <dd class="tabular-nums">
+          <dd class="font-mono tabular-nums">
             {{ prompt.toLocaleString() }}
           </dd>
         </div>
@@ -153,7 +151,7 @@ function handleMouseLeave() {
           <dt class="text-muted-foreground">
             Thinking tokens
           </dt>
-          <dd class="tabular-nums">
+          <dd class="font-mono tabular-nums">
             {{ reasoning.toLocaleString() }}
           </dd>
         </div>
@@ -164,7 +162,7 @@ function handleMouseLeave() {
           <dt class="text-muted-foreground">
             Cached tokens
           </dt>
-          <dd class="tabular-nums">
+          <dd class="font-mono tabular-nums">
             {{ cached.toLocaleString() }}
           </dd>
         </div>
@@ -172,25 +170,30 @@ function handleMouseLeave() {
           <dt class="text-muted-foreground">
             Completion
           </dt>
-          <dd class="tabular-nums">
+          <dd class="font-mono tabular-nums">
             {{ completion.toLocaleString() }}
           </dd>
         </div>
-        <div class="flex items-center justify-between gap-4 pt-2.5 border-t border-neutral-200 dark:border-neutral-700">
+        <div
+          aria-hidden="true"
+          class="my-0.5 border-t border-neutral-200 dark:border-neutral-700/50"
+        />
+        <div class="flex items-center justify-between gap-4">
           <dt class="text-muted-foreground">
             Total
           </dt>
-          <dd class="tabular-nums">
+          <dd class="font-mono tabular-nums">
             {{ total.toLocaleString() }}<span
               v-if="capacity"
               class="text-muted-foreground"
             > / {{ capacity.toLocaleString() }}</span>
           </dd>
         </div>
-        <div
-          v-if="costLabel != null || (turnCount ?? 0) > 0"
-          class="grid gap-2.5 pt-2.5 border-t border-neutral-200 dark:border-neutral-700"
-        >
+        <template v-if="costLabel != null || (turnCount ?? 0) > 0">
+          <div
+            aria-hidden="true"
+            class="my-0.5 border-t border-neutral-200 dark:border-neutral-700/50"
+          />
           <div
             v-if="(turnCount ?? 0) > 0"
             class="flex items-center justify-between gap-4"
@@ -198,7 +201,7 @@ function handleMouseLeave() {
             <dt class="text-muted-foreground">
               Turns
             </dt>
-            <dd class="tabular-nums">
+            <dd class="font-mono tabular-nums">
               {{ turnCount }}
             </dd>
           </div>
@@ -210,11 +213,11 @@ function handleMouseLeave() {
             <dt class="text-muted-foreground">
               Cost
             </dt>
-            <dd class="tabular-nums">
+            <dd class="font-mono tabular-nums">
               {{ costLabel }}
             </dd>
           </div>
-        </div>
+        </template>
       </dl>
     </PopoverContent>
   </Popover>
