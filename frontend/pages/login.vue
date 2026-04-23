@@ -51,7 +51,7 @@ const passwordId = useId()
         <img
           src="/mascot-waving.png"
           alt="JClaw"
-          class="w-24 h-24 rounded-full select-none mb-4"
+          class="h-24 w-auto select-none mb-4"
         >
         <h1 class="text-2xl font-bold text-fg-strong">
           Welcome back
