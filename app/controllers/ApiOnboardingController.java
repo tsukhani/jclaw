@@ -66,4 +66,18 @@ public class ApiOnboardingController extends Controller {
         }
         renderJSON(gson.toJson(Map.of("maxStepReached", newMax)));
     }
+
+    /** POST /api/onboarding/tour-reset — wipes the threshold so the dashboard
+     *  intro dialog will appear again on next visit. Idempotent: clearing an
+     *  already-empty key still succeeds and returns 0. Logs even on no-op
+     *  resets — a Reset click is operator-initiated and worth recording in
+     *  the event log even when the threshold was already zero. */
+    public static void reset() {
+        var existing = ConfigService.getInt(CONFIG_KEY, 0);
+        ConfigService.delete(CONFIG_KEY);
+        EventLogger.info("onboarding",
+                "Tour state reset",
+                "previous=%d".formatted(existing));
+        renderJSON(gson.toJson(Map.of("maxStepReached", 0)));
+    }
 }

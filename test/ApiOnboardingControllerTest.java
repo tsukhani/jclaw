@@ -46,6 +46,10 @@ public class ApiOnboardingControllerTest extends FunctionalTest {
         runInFreshTx(() -> ConfigService.set(ApiOnboardingController.CONFIG_KEY, String.valueOf(step)));
     }
 
+    private void logout() {
+        POST("/api/auth/logout", "application/json", "{}");
+    }
+
     @Test
     public void statusReturnsZeroForFreshInstall() {
         var response = GET("/api/onboarding/tour-status");
@@ -81,7 +85,7 @@ public class ApiOnboardingControllerTest extends FunctionalTest {
     public void statusRequiresAuth() {
         // Use a fresh test that does NOT call seedAndLogin's login step.
         // Easiest: log out first.
-        POST("/api/auth/logout", "application/json", "{}");
+        logout();
         var response = GET("/api/onboarding/tour-status");
         assertEquals(401, response.status.intValue());
     }
@@ -130,9 +134,37 @@ public class ApiOnboardingControllerTest extends FunctionalTest {
 
     @Test
     public void recordProgressRequiresAuth() {
-        POST("/api/auth/logout", "application/json", "{}");
+        logout();
         var response = POST("/api/onboarding/tour-progress",
                 "application/json", "{\"step\":2}");
+        assertEquals(401, response.status.intValue());
+    }
+
+    @Test
+    public void resetClearsToZero() {
+        seedTourMaxStep(4);
+        var response = POST("/api/onboarding/tour-reset", "application/json", "{}");
+        assertIsOk(response);
+        var body = getContent(response);
+        assertTrue(body.contains("\"maxStepReached\":0"), "got: " + body);
+
+        var statusResponse = GET("/api/onboarding/tour-status");
+        assertTrue(getContent(statusResponse).contains("\"maxStepReached\":0"));
+        assertTrue(getContent(statusResponse).contains("\"shouldAutoShow\":true"));
+    }
+
+    @Test
+    public void resetIsIdempotent() {
+        // Reset on a fresh install should also succeed and report 0
+        var response = POST("/api/onboarding/tour-reset", "application/json", "{}");
+        assertIsOk(response);
+        assertTrue(getContent(response).contains("\"maxStepReached\":0"));
+    }
+
+    @Test
+    public void resetRequiresAuth() {
+        logout();
+        var response = POST("/api/onboarding/tour-reset", "application/json", "{}");
         assertEquals(401, response.status.intValue());
     }
 }
