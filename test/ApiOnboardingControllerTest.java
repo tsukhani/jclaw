@@ -1,3 +1,4 @@
+import controllers.ApiOnboardingController;
 import org.junit.jupiter.api.*;
 import play.test.*;
 import services.ConfigService;
@@ -6,7 +7,6 @@ import services.Tx;
 public class ApiOnboardingControllerTest extends FunctionalTest {
 
     private static final String TEST_PASSWORD = "testpass-123";
-    private static final String CONFIG_KEY = "onboarding.tourMaxStep";
 
     @BeforeEach
     void seedAndLogin() {
@@ -39,11 +39,11 @@ public class ApiOnboardingControllerTest extends FunctionalTest {
     }
 
     private static void clearTourState() {
-        runInFreshTx(() -> ConfigService.delete(CONFIG_KEY));
+        runInFreshTx(() -> ConfigService.delete(ApiOnboardingController.CONFIG_KEY));
     }
 
     private static void seedTourMaxStep(int step) {
-        runInFreshTx(() -> ConfigService.set(CONFIG_KEY, String.valueOf(step)));
+        runInFreshTx(() -> ConfigService.set(ApiOnboardingController.CONFIG_KEY, String.valueOf(step)));
     }
 
     @Test
