@@ -957,6 +957,13 @@ async function handleResetTour() {
     sessionStorage.removeItem(SESSION_SKIP_KEY)
     navigateTo('/')
   }
+  catch (err) {
+    // Surface the failure to the console for operator triage. Without this
+    // a "click does nothing" report is undebuggable from the dev panel
+    // because the throw is swallowed by the try/finally. If a toast helper
+    // ships later, swap this for a user-visible notification.
+    console.error('[settings] resetTourThreshold failed', err)
+  }
   finally {
     resettingTour.value = false
   }
