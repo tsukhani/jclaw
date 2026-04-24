@@ -193,9 +193,16 @@ const navGroups: NavGroup[] = [
              flex flex-col transition-all duration-200 overflow-hidden lg:relative"
     >
       <!-- Logo -->
+      <!--
+        border-b goes transparent in light mode: the shadcn --border token
+        is #e5e5e5 against our #fcfcfc surface-elevated and renders a
+        visible hairline, but in dark mode the same token is nearly
+        isoluminant with the surface so the line is already invisible.
+        Hide in light for parity with dark.
+      -->
       <div
         :class="sidebarOpen ? 'justify-between px-3' : 'justify-center px-0'"
-        class="h-14 flex items-center border-b border-border shrink-0"
+        class="h-14 flex items-center border-b border-transparent dark:border-border shrink-0"
       >
         <div
           :class="sidebarOpen ? 'gap-2.5' : 'gap-0'"
@@ -306,9 +313,16 @@ const navGroups: NavGroup[] = [
               <span v-if="sidebarOpen">{{ item.label }}</span>
             </NuxtLink>
           </template>
+          <!--
+            Group spacer: keep the 1px transparent border-t so the element
+            still occupies its box (prevents my-1.5 margin collapse with
+            neighboring blocks and preserves exact 12px vertical rhythm).
+            Dark mode keeps border-border; the token is near-isoluminant
+            with the surface so the line is already effectively invisible.
+          -->
           <div
             v-if="gi < navGroups.length - 1"
-            class="my-1.5 border-t border-border"
+            class="my-1.5 border-t border-transparent dark:border-border"
           />
         </div>
       </nav>

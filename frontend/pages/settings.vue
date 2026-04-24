@@ -955,7 +955,10 @@ async function handleResetTour() {
   try {
     await resetTourThreshold()
     sessionStorage.removeItem(SESSION_SKIP_KEY)
-    navigateTo('/')
+    // Stay on Settings — don't navigate. Auto-routing to / would fire the
+    // home page's onMounted, which on a just-reset threshold auto-shows the
+    // intro dialog. The confirm copy promises the dialog reappears on the
+    // user's *next* dashboard visit, so let that visit happen organically.
   }
   catch (err) {
     // TODO: when a toast helper ships, replace this console.error with a
@@ -2018,6 +2021,7 @@ async function handleResetTour() {
               title="Server-side recency filter on Perplexity /search. Narrows results to content indexed within the selected window; 'none' disables filtering. Narrower windows prevent the LLM from echoing stale snippets."
             >recencyFilter</span>
             <select
+              :id="`search-recency-filter-${id}`"
               :value="searchRecencyFilter(id)"
               aria-label="Recency filter"
               class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"

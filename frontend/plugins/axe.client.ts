@@ -22,4 +22,29 @@ export default defineNuxtPlugin(async (nuxtApp) => {
       },
     },
   })
+
+  // vue-axe ships its overlay UI with a bundled Tailwind v2 preflight that
+  // includes unlayered universal resets like `* { --tw-shadow: 0 0 #0000; }`.
+  // In the CSS Cascade Layers spec, unlayered rules trump any layered rule
+  // regardless of specificity — so those `*` resets stomp on every
+  // `.shadow-*` utility we emit from Tailwind v4's `@layer utilities`, which
+  // causes all Tailwind shadows (including custom arbitrary values) to be
+  // forced back to `0 0 #0000` for every element in the page.
+  // Strip them surgically. vue-axe's own overlay doesn't rely on these
+  // resets at runtime — it sets its own shadows via `.va-shadow-*` classes.
+  const sanitizeVueAxeStylesheet = (style: HTMLStyleElement) => {
+    if (style.dataset.jclawVaxePatched === '1') return
+    const txt = style.textContent
+    if (!txt || !txt.includes('.va-shadow-lg')) return
+    style.textContent = txt.replace(/\*\s*\{\s*--tw-[^}]*\}/g, '')
+    style.dataset.jclawVaxePatched = '1'
+  }
+  document.querySelectorAll('style').forEach(s => sanitizeVueAxeStylesheet(s as HTMLStyleElement))
+  new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      for (const node of Array.from(m.addedNodes)) {
+        if (node instanceof HTMLStyleElement) sanitizeVueAxeStylesheet(node)
+      }
+    }
+  }).observe(document.head, { childList: true, subtree: true })
 })

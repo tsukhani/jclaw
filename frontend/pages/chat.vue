@@ -1879,6 +1879,7 @@ function exportConversation() {
               </span>
             </div>
             <textarea
+              id="chat-message-input"
               ref="chatInput"
               v-model="input"
               placeholder="Send a message..."
@@ -1895,6 +1896,7 @@ function exportConversation() {
               @input="autoResize"
             />
             <input
+              id="chat-file-upload"
               ref="fileInput"
               type="file"
               multiple

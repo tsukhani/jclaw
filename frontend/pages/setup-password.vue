@@ -68,22 +68,47 @@ const confirmPasswordId = useId()
 
 <template>
   <div
-    class="min-h-screen flex items-center justify-center p-6
-           bg-gradient-to-br from-emerald-50 via-white to-emerald-50
-           dark:bg-surface dark:from-surface dark:via-surface dark:to-surface"
+    class="relative min-h-screen flex items-center justify-center p-6
+           bg-white dark:bg-surface"
   >
+    <!--
+      Ambient green wash — two layered radial gradients from the top
+      corners give the backdrop Unsloth's soft "alive" feel. Matches
+      Unsloth's green-500 (rgb 34 197 94) at the same alphas / overlay
+      opacity they use. Emerald-500 read too cool next to Unsloth's
+      purer green even at ~7% effective alpha.
+    -->
     <div
-      class="w-full max-w-md bg-surface-elevated border border-fg-muted/20 rounded-2xl
-             shadow-[0_12px_40px_rgba(0,0,0,0.08)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)]
-             p-8"
+      aria-hidden="true"
+      class="pointer-events-none absolute inset-0 opacity-60"
+      :style="{
+        backgroundImage:
+          'radial-gradient(circle at 20% 15%, rgb(34 197 94 / 0.113), transparent 70%), '
+          + 'radial-gradient(circle at 80% 10%, rgb(34 197 94 / 0.088), transparent 75%)',
+      }"
+    />
+    <!--
+      Card ring + shadow ported faithfully from Unsloth: 1px ring in the
+      mint-tinted pale grey #dfe7e3 (their oklch(0.9208 0.0101 164.854))
+      layered under a soft rgba(0,0,0,0.1) 0 4px 16px drop shadow. Dark
+      theme keeps our existing tokens — Unsloth's light-theme tint would
+      look wrong against our dark surfaces.
+    -->
+    <div
+      class="relative z-10 w-full max-w-sm bg-surface-elevated rounded-[26px]
+             ring-1 ring-[#dfe7e3] dark:ring-fg-muted/20
+             shadow-[0_4px_16px_#0000001a] dark:shadow-[0_4px_16px_#0000004d]
+             px-6 py-8"
     >
       <div class="flex flex-col items-center mb-6">
         <img
           src="/mascot-waving.png"
           alt="JClaw"
-          class="h-32 w-auto select-none mb-4"
+          width="119"
+          height="128"
+          class="select-none mb-2"
         >
-        <h1 class="text-2xl font-bold text-fg-strong">
+        <h1 class="text-2xl font-semibold text-fg-strong">
           Setup your account
         </h1>
         <p class="mt-1 text-sm text-fg-muted">
@@ -92,23 +117,25 @@ const confirmPasswordId = useId()
       </div>
 
       <form
-        class="space-y-4"
+        class="space-y-6"
         @submit.prevent="handleSubmit"
       >
         <label
           :for="newPasswordId"
           class="block"
         >
-          <span class="block text-sm font-semibold text-fg-strong mb-2">New password</span>
+          <span class="block text-sm font-medium text-fg-strong mb-2">New password</span>
           <div class="relative">
             <input
               :id="newPasswordId"
               v-model="newPassword"
               :type="showNew ? 'text' : 'password'"
               autocomplete="new-password"
-              class="w-full pl-4 pr-11 py-2.5 rounded-full text-sm text-fg-strong
-                     bg-muted border-0 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40
-                     transition-shadow"
+              class="w-full h-9 pl-4 pr-10 rounded-[26px] text-sm text-fg-strong
+                     bg-[#dfe7e3]/30 border border-[#dfe7e3]
+                     dark:bg-fg-muted/10 dark:border-border
+                     focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40
+                     transition-colors"
             >
             <button
               type="button"
@@ -130,16 +157,18 @@ const confirmPasswordId = useId()
           :for="confirmPasswordId"
           class="block"
         >
-          <span class="block text-sm font-semibold text-fg-strong mb-2">Confirm password</span>
+          <span class="block text-sm font-medium text-fg-strong mb-2">Confirm password</span>
           <div class="relative">
             <input
               :id="confirmPasswordId"
               v-model="confirmPassword"
               :type="showConfirm ? 'text' : 'password'"
               autocomplete="new-password"
-              class="w-full pl-4 pr-11 py-2.5 rounded-full text-sm text-fg-strong
-                     bg-muted border-0 focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40
-                     transition-shadow"
+              class="w-full h-9 pl-4 pr-10 rounded-[26px] text-sm text-fg-strong
+                     bg-[#dfe7e3]/30 border border-[#dfe7e3]
+                     dark:bg-fg-muted/10 dark:border-border
+                     focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40
+                     transition-colors"
             >
             <button
               type="button"
@@ -171,7 +200,7 @@ const confirmPasswordId = useId()
         <button
           type="submit"
           :disabled="!canSubmit"
-          class="w-full py-3 rounded-full text-sm font-semibold text-white
+          class="w-full h-9 rounded-[26px] text-sm font-medium text-white
                  bg-emerald-600 hover:bg-emerald-500
                  disabled:bg-emerald-600/40 disabled:text-white/70 disabled:cursor-not-allowed
                  transition-colors"
