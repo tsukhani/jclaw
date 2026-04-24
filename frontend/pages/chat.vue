@@ -1723,7 +1723,7 @@ function exportConversation() {
                       <div
                         v-if="!msg.thinkingCollapsed"
                         data-reasoning-body
-                        class="prose-chat px-4 pb-3 pt-1 text-base text-fg-primary break-words h-80 overflow-y-auto border-t border-neutral-200 dark:border-neutral-700"
+                        class="prose-chat px-4 pb-3 pt-1 text-base text-fg-primary break-words max-h-80 overflow-y-auto border-t border-neutral-200 dark:border-neutral-700"
                         v-html="renderMarkdown(msg.reasoning, selectedAgentId)"
                       />
                       <!-- eslint-enable vue/no-v-html -->
@@ -2240,11 +2240,13 @@ function exportConversation() {
                   v-else
                   type="submit"
                   :disabled="!input.trim() && !attachedFiles.length"
-                  class="p-1.5 text-emerald-500 hover:text-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  class="p-1.5 transition-colors
+                         enabled:text-emerald-400 enabled:hover:text-emerald-300
+                         disabled:text-neutral-300 dark:disabled:text-neutral-700 disabled:cursor-not-allowed"
                   title="Send"
                 >
                   <PaperAirplaneIcon
-                    class="w-5 h-5"
+                    class="w-5 h-5 -rotate-45"
                     aria-hidden="true"
                   />
                 </button>
