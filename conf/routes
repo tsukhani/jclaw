@@ -21,6 +21,9 @@ POST    /api/auth/login                         ApiAuthController.login
 POST    /api/auth/logout                        ApiAuthController.logout
 POST    /api/auth/reset-password                ApiAuthController.resetPassword
 
+# Onboarding API
+GET     /api/onboarding/tour-status             ApiOnboardingController.status
+
 # Tasks API
 GET     /api/tasks                              ApiTasksController.list
 POST    /api/tasks/{id}/cancel                  ApiTasksController.cancel
