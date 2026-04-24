@@ -249,6 +249,10 @@ export function useGuidedTour() {
     destroy()
     const next = state.value.step + 1
     const nextStep = steps[next]
+    // Record reaching the step we're about to land on (1-based for the API).
+    // Fire-and-forget: don't block UI on the network round-trip; the backend
+    // clamps to Math.max so duplicates / out-of-order writes are safe.
+    void recordStepReached(next + 1)
     if (!nextStep) {
       complete()
       return
@@ -267,6 +271,8 @@ export function useGuidedTour() {
 
   function complete() {
     destroy()
+    // Reaching the final step = recording total step count
+    void recordStepReached(steps.length)
     state.value = { step: 0, active: false }
     saveState(state.value)
   }
