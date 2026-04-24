@@ -77,10 +77,20 @@ const { start: startTour } = useGuidedTour()
 onMounted(async () => {
   if (sessionStorage.getItem(SESSION_SKIP_KEY)) return
   const status = await loadTourStatus()
+  // Re-check after the await — defensive against any future writer that
+  // sets the flag while the network round-trip is in flight. Today the
+  // only writer is onTourSkip in this same component (which can't fire
+  // before the dialog is visible), so this is belt-and-suspenders.
+  if (sessionStorage.getItem(SESSION_SKIP_KEY)) return
   if (status.shouldAutoShow) showTourIntro.value = true
 })
 
 function onTourStart() {
+  // Don't write the session-skip flag here — recordStepReached() in
+  // useGuidedTour writes the cross-session threshold as soon as the user
+  // advances one step, so suppression for "user is taking the tour" is
+  // already handled. Not writing here also means a Reset → revisit cycle
+  // correctly re-shows this dialog when the threshold has been cleared.
   showTourIntro.value = false
   startTour()
 }
