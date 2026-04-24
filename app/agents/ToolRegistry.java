@@ -24,11 +24,33 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class ToolRegistry {
 
+    /**
+     * JCLAW-170: rich tool output used by {@link #executeRich}. {@code text}
+     * is always the string the LLM sees (same shape as {@link Tool#execute}).
+     * {@code structuredJson} is an optional JSON payload the UI can render
+     * richly (e.g. search result chips with favicons) — persisted to
+     * {@code message.tool_result_structured} so re-opening a conversation
+     * keeps the richer render. {@code null} means "no structured view".
+     */
+    public record ToolResult(String text, String structuredJson) {
+        public static ToolResult text(String text) { return new ToolResult(text, null); }
+    }
+
     public interface Tool {
         String name();
         String description();
         Map<String, Object> parameters();
         String execute(String argsJson, Agent agent);
+
+        /**
+         * JCLAW-170: rich-output variant. Defaults to wrapping {@link #execute} in a
+         * text-only {@link ToolResult}; tools that want the UI to render a richer
+         * view (clickable result chips, favicons, previews) override this and
+         * supply a structured JSON payload alongside the LLM-visible text.
+         */
+        default ToolResult executeRich(String argsJson, Agent agent) {
+            return ToolResult.text(execute(argsJson, agent));
+        }
 
         /** Short one-line summary for the system prompt tool catalog. Defaults to
          *  the full description, but tools with multi-sentence descriptions should
@@ -123,6 +145,47 @@ public class ToolRegistry {
     public static boolean isParallelSafe(String toolName) {
         var tool = tools.get(toolName);
         return tool != null && tool.parallelSafe();
+    }
+
+    /** JCLAW-170: resolve a tool's semantic icon key by name. Returns the
+     *  registered tool's {@link Tool#icon} hint, or {@code "wrench"} for
+     *  unknown/unregistered names. Used by the agent loop to stamp every
+     *  {@code tool_call} SSE frame with the icon hint the UI renders. */
+    public static String iconFor(String toolName) {
+        var tool = tools.get(toolName);
+        return tool != null ? tool.icon() : "wrench";
+    }
+
+    /**
+     * JCLAW-170: rich-output sibling of {@link #execute}. Same validation
+     * semantics (unknown tool, empty args, malformed args); on success
+     * returns the tool's {@link ToolResult} so callers that want the
+     * structured JSON payload (UI surfaces) get it alongside the LLM-visible
+     * text. Tools that don't override {@link Tool#executeRich} fall back
+     * to a text-only result.
+     */
+    public static ToolResult executeRich(String toolName, String argsJson, Agent agent) {
+        var tool = tools.get(toolName);
+        if (tool == null) {
+            return ToolResult.text("Error: Unknown tool '%s'".formatted(toolName));
+        }
+        if (argsJson == null || argsJson.isEmpty()) {
+            return ToolResult.text(
+                    "Error: Tool '%s' received empty arguments. The model's response was likely truncated before the tool call completed. Try breaking the task into smaller steps — for example, write large files in multiple smaller operations instead of one big call."
+                            .formatted(toolName));
+        }
+        try {
+            JsonParser.parseString(argsJson);
+        } catch (JsonSyntaxException e) {
+            return ToolResult.text(
+                    "Error: Tool '%s' received malformed arguments (likely truncated by the model's output token limit). Try breaking the task into smaller steps — for example, write large files in multiple smaller operations instead of one big call. Parse error: %s"
+                            .formatted(toolName, e.getMessage()));
+        }
+        try {
+            return tool.executeRich(argsJson, agent);
+        } catch (Exception e) {
+            return ToolResult.text("Error executing tool '%s': %s".formatted(toolName, e.getMessage()));
+        }
     }
 
     public static String execute(String toolName, String argsJson, Agent agent) {

@@ -74,4 +74,18 @@ describe('shouldDisplayMessage (JCLAW-75 regression — reasoning must render li
     }
     expect(shouldDisplayMessage(msg, false)).toBe(true)
   })
+
+  it('keeps a streaming placeholder that has only tool calls, no content or reasoning yet (JCLAW-170)', () => {
+    // When the model emits tool_calls before any content token, the assistant
+    // placeholder has only the toolCalls array populated — the tool-calls UI
+    // block should still render so the user sees live tool activity.
+    const msg = {
+      role: 'assistant',
+      _key: 'abc',
+      id: null,
+      content: '',
+      toolCalls: [{ id: 'call_a' }],
+    }
+    expect(shouldDisplayMessage(msg, true)).toBe(true)
+  })
 })

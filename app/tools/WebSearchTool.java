@@ -13,6 +13,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -30,6 +31,20 @@ public class WebSearchTool implements ToolRegistry.Tool {
     private static final int TIMEOUT_SECONDS = 30;
     private static final int DEFAULT_NUM_RESULTS = 5;
     private static final int MAX_NUM_RESULTS = 10;
+
+    /**
+     * JCLAW-170: structured per-result shape the UI renders as clickable chips.
+     * {@code faviconUrl} resolves through the DuckDuckGo favicon service, which
+     * handles every host uniformly and does not require an API key. {@code null}
+     * when the host cannot be parsed.
+     */
+    public record SearchResult(String title, String url, String snippet, String faviconUrl) {}
+
+    /** Outcome of a provider call — carries both the LLM-visible markdown and
+     *  the structured list the UI uses for JCLAW-170 result chips. */
+    private record SearchOutcome(String text, List<SearchResult> results, String providerDisplayName, boolean ok) {
+        static SearchOutcome error(String msg) { return new SearchOutcome(msg, null, null, false); }
+    }
 
     private static final List<SearchProvider> PROVIDERS = List.of(
             new ExaProvider(),
@@ -88,6 +103,28 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
     @Override
     public String execute(String argsJson, Agent agent) {
+        return runFromArgs(argsJson, agent).text();
+    }
+
+    /**
+     * JCLAW-170: rich variant. Emits both the LLM-visible markdown and a
+     * structured JSON payload carrying the per-result title/url/snippet plus
+     * a pre-resolved favicon URL, so the chat UI can render clickable result
+     * chips instead of just rendering the markdown as plain text.
+     */
+    @Override
+    public ToolRegistry.ToolResult executeRich(String argsJson, Agent agent) {
+        var outcome = runFromArgs(argsJson, agent);
+        if (!outcome.ok() || outcome.results() == null || outcome.results().isEmpty()) {
+            return ToolRegistry.ToolResult.text(outcome.text());
+        }
+        var payload = new LinkedHashMap<String, Object>();
+        payload.put("provider", outcome.providerDisplayName());
+        payload.put("results", outcome.results());
+        return new ToolRegistry.ToolResult(outcome.text(), gson.toJson(payload));
+    }
+
+    private SearchOutcome runFromArgs(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
         var query = args.get("query").getAsString();
         var numResults = args.has("numResults")
@@ -102,24 +139,22 @@ public class WebSearchTool implements ToolRegistry.Tool {
      * Automatic provider selection: try each enabled provider in priority order,
      * falling back to the next on failure (HTTP error or exception).
      */
-    private String executeWithFallback(String query, int numResults, Agent agent) {
+    private SearchOutcome executeWithFallback(String query, int numResults, Agent agent) {
         var candidates = resolveProvidersByPriority();
         if (candidates.isEmpty()) {
-            return "Error: No search provider configured. Enable one of Exa, Brave, Tavily, Perplexity, or Ollama and add its API key in Settings.";
+            return SearchOutcome.error("Error: No search provider configured. Enable one of Exa, Brave, Tavily, Perplexity, or Ollama and add its API key in Settings.");
         }
 
-        String lastError = null;
+        SearchOutcome lastError = null;
         for (var entry : candidates) {
-            var result = doSearch(entry.provider(), entry.apiKey(), query, numResults, agent);
-            if (!result.startsWith("Error:")) {
-                return result;
-            }
-            lastError = result;
+            var outcome = doSearch(entry.provider(), entry.apiKey(), query, numResults, agent);
+            if (outcome.ok()) return outcome;
+            lastError = outcome;
             EventLogger.warn("search", agent != null ? agent.name : null, null,
                     "%s failed, trying next provider. Error: %s".formatted(
-                            entry.provider().displayName(), result));
+                            entry.provider().displayName(), outcome.text()));
         }
-        return lastError;
+        return lastError != null ? lastError : SearchOutcome.error("Error: No search provider available.");
     }
 
     private record ProviderEntry(SearchProvider provider, String apiKey) {}
@@ -144,7 +179,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
         return candidates;
     }
 
-    private String doSearch(SearchProvider provider, String apiKey, String query, int numResults, Agent agent) {
+    private SearchOutcome doSearch(SearchProvider provider, String apiKey, String query, int numResults, Agent agent) {
         try {
             EventLogger.info("search", agent != null ? agent.name : null, null,
                     "Searching via %s: \"%s\" (numResults=%d)".formatted(provider.displayName(), query, numResults));
@@ -156,25 +191,60 @@ public class WebSearchTool implements ToolRegistry.Tool {
                 EventLogger.error("search", agent != null ? agent.name : null, null,
                         "%s API returned HTTP %d: %s".formatted(provider.displayName(), response.statusCode(),
                                 response.body().substring(0, Math.min(response.body().length(), 200))));
-                return "Error: %s API returned HTTP %d: %s".formatted(
+                return SearchOutcome.error("Error: %s API returned HTTP %d: %s".formatted(
                         provider.displayName(), response.statusCode(),
-                        response.body().substring(0, Math.min(response.body().length(), 200)));
+                        response.body().substring(0, Math.min(response.body().length(), 200))));
             }
 
-            var formatted = provider.formatResults(response.body());
+            var results = provider.parseResults(response.body());
+            var markdown = provider.formatResults(response.body(), results);
             EventLogger.info("search", agent != null ? agent.name : null, null,
-                    "%s returned %d chars for \"%s\"".formatted(provider.displayName(), formatted.length(), query));
+                    "%s returned %d chars for \"%s\"".formatted(provider.displayName(), markdown.length(), query));
 
-            return formatted;
+            return new SearchOutcome(markdown, results, provider.displayName(), true);
         } catch (Exception e) {
             EventLogger.error("search", agent != null ? agent.name : null, null,
                     "%s search failed: %s".formatted(provider.displayName(), e.getMessage()));
-            return "Error: searching with %s: %s".formatted(provider.displayName(), e.getMessage());
+            return SearchOutcome.error("Error: searching with %s: %s".formatted(provider.displayName(), e.getMessage()));
         }
     }
 
     private static int parseInt(String s, int fallback) {
         try { return Integer.parseInt(s); } catch (NumberFormatException _) { return fallback; }
+    }
+
+    /**
+     * JCLAW-170: resolve a result URL to a favicon URL via DuckDuckGo's public
+     * icon service. Returns {@code null} when the URL can't be parsed or has
+     * no host — the UI falls back to a generic globe icon on null.
+     */
+    static String faviconUrlFor(String url) {
+        if (url == null || url.isBlank()) return null;
+        try {
+            var host = URI.create(url).getHost();
+            if (host == null || host.isBlank()) return null;
+            return "https://icons.duckduckgo.com/ip3/" + host + ".ico";
+        } catch (IllegalArgumentException _) {
+            return null;
+        }
+    }
+
+    /** Shared markdown renderer used by every provider so the LLM-visible
+     *  shape stays identical before and after JCLAW-170's structured-result
+     *  refactor. */
+    private static String renderMarkdown(List<SearchResult> results, String providerDisplayName) {
+        if (results.isEmpty()) return "No results found.";
+        var sb = new StringBuilder("Found %d results (via %s):\n\n".formatted(results.size(), providerDisplayName));
+        for (int i = 0; i < results.size(); i++) {
+            var r = results.get(i);
+            sb.append("### %d. %s\n".formatted(i + 1, r.title() == null ? "Untitled" : r.title()));
+            sb.append("URL: %s\n".formatted(r.url() == null ? "" : r.url()));
+            if (r.snippet() != null && !r.snippet().isBlank()) {
+                sb.append("> %s\n".formatted(r.snippet().strip()));
+            }
+            sb.append("\n");
+        }
+        return sb.toString().strip();
     }
 
     // --- Provider interface ---
@@ -184,7 +254,20 @@ public class WebSearchTool implements ToolRegistry.Tool {
         String displayName();
         String defaultBaseUrl();
         HttpRequest buildRequest(String apiKey, String query, int numResults);
-        String formatResults(String responseJson);
+
+        /** JCLAW-170: parse the provider's raw response into the structured
+         *  per-result shape used both by the UI (chips with favicons) and by
+         *  the shared markdown renderer above. Returns an empty list when
+         *  the response has no results. */
+        List<SearchResult> parseResults(String responseJson);
+
+        /** Render the markdown text handed to the LLM. Default delegates to
+         *  the shared renderer so every provider produces the same shape the
+         *  pre-refactor callers saw. Felo overrides to prepend its
+         *  answer-summary prefix. */
+        default String formatResults(String responseJson, List<SearchResult> parsed) {
+            return renderMarkdown(parsed, displayName());
+        }
 
         default String apiKeyKey() { return "search." + id() + ".apiKey"; }
         default String baseUrlKey() { return "search." + id() + ".baseUrl"; }
@@ -222,15 +305,40 @@ public class WebSearchTool implements ToolRegistry.Tool {
         }
 
         @Override
-        public String formatResults(String responseJson) {
+        public List<SearchResult> parseResults(String responseJson) {
             var json = JsonParser.parseString(responseJson).getAsJsonObject();
-            if (!json.has("results") || json.getAsJsonArray("results").isEmpty()) {
-                return "No results found.";
+            if (!json.has("results") || json.getAsJsonArray("results").isEmpty()) return List.of();
+            var arr = json.getAsJsonArray("results");
+            var out = new ArrayList<SearchResult>(arr.size());
+            for (var el : arr) {
+                var r = el.getAsJsonObject();
+                var title = r.has("title") ? r.get("title").getAsString() : "Untitled";
+                var url = r.has("url") ? r.get("url").getAsString() : "";
+                String snippet = null;
+                if (r.has("highlights") && r.getAsJsonArray("highlights").size() > 0) {
+                    var sb = new StringBuilder();
+                    for (var h : r.getAsJsonArray("highlights")) {
+                        if (!sb.isEmpty()) sb.append(' ');
+                        sb.append(h.getAsString().strip());
+                    }
+                    snippet = sb.toString();
+                }
+                out.add(new SearchResult(title, url, snippet, faviconUrlFor(url)));
             }
-            var results = json.getAsJsonArray("results");
-            var sb = new StringBuilder("Found %d results (via Exa):\n\n".formatted(results.size()));
-            for (int i = 0; i < results.size(); i++) {
-                var r = results.get(i).getAsJsonObject();
+            return out;
+        }
+
+        @Override
+        public String formatResults(String responseJson, List<SearchResult> parsed) {
+            // Exa's markdown shape historically emitted one line per highlight,
+            // not a joined snippet. Preserve that so existing LLM prompts see
+            // the same structure.
+            if (parsed.isEmpty()) return "No results found.";
+            var json = JsonParser.parseString(responseJson).getAsJsonObject();
+            var arr = json.getAsJsonArray("results");
+            var sb = new StringBuilder("Found %d results (via Exa):\n\n".formatted(parsed.size()));
+            for (int i = 0; i < arr.size(); i++) {
+                var r = arr.get(i).getAsJsonObject();
                 sb.append("### %d. %s\n".formatted(i + 1,
                         r.has("title") ? r.get("title").getAsString() : "Untitled"));
                 sb.append("URL: %s\n".formatted(r.has("url") ? r.get("url").getAsString() : ""));
@@ -266,25 +374,25 @@ public class WebSearchTool implements ToolRegistry.Tool {
         }
 
         @Override
-        public String formatResults(String responseJson) {
+        public List<SearchResult> parseResults(String responseJson) {
             var json = JsonParser.parseString(responseJson).getAsJsonObject();
             if (!json.has("web") || !json.getAsJsonObject("web").has("results")
                     || json.getAsJsonObject("web").getAsJsonArray("results").isEmpty()) {
-                return "No results found.";
+                return List.of();
             }
-            var results = json.getAsJsonObject("web").getAsJsonArray("results");
-            var sb = new StringBuilder("Found %d results (via Brave):\n\n".formatted(results.size()));
-            for (int i = 0; i < results.size(); i++) {
-                var r = results.get(i).getAsJsonObject();
-                sb.append("### %d. %s\n".formatted(i + 1,
-                        r.has("title") ? r.get("title").getAsString() : "Untitled"));
-                sb.append("URL: %s\n".formatted(r.has("url") ? r.get("url").getAsString() : ""));
+            var arr = json.getAsJsonObject("web").getAsJsonArray("results");
+            var out = new ArrayList<SearchResult>(arr.size());
+            for (var el : arr) {
+                var r = el.getAsJsonObject();
+                var title = r.has("title") ? r.get("title").getAsString() : "Untitled";
+                var url = r.has("url") ? r.get("url").getAsString() : "";
+                String snippet = null;
                 if (r.has("description") && !r.get("description").isJsonNull()) {
-                    sb.append("> %s\n".formatted(r.get("description").getAsString().strip()));
+                    snippet = r.get("description").getAsString();
                 }
-                sb.append("\n");
+                out.add(new SearchResult(title, url, snippet, faviconUrlFor(url)));
             }
-            return sb.toString().strip();
+            return out;
         }
     }
 
@@ -312,26 +420,24 @@ public class WebSearchTool implements ToolRegistry.Tool {
         }
 
         @Override
-        public String formatResults(String responseJson) {
+        public List<SearchResult> parseResults(String responseJson) {
             var json = JsonParser.parseString(responseJson).getAsJsonObject();
-            if (!json.has("results") || json.getAsJsonArray("results").isEmpty()) {
-                return "No results found.";
-            }
-            var results = json.getAsJsonArray("results");
-            var sb = new StringBuilder("Found %d results (via Tavily):\n\n".formatted(results.size()));
-            for (int i = 0; i < results.size(); i++) {
-                var r = results.get(i).getAsJsonObject();
-                sb.append("### %d. %s\n".formatted(i + 1,
-                        r.has("title") ? r.get("title").getAsString() : "Untitled"));
-                sb.append("URL: %s\n".formatted(r.has("url") ? r.get("url").getAsString() : ""));
+            if (!json.has("results") || json.getAsJsonArray("results").isEmpty()) return List.of();
+            var arr = json.getAsJsonArray("results");
+            var out = new ArrayList<SearchResult>(arr.size());
+            for (var el : arr) {
+                var r = el.getAsJsonObject();
+                var title = r.has("title") ? r.get("title").getAsString() : "Untitled";
+                var url = r.has("url") ? r.get("url").getAsString() : "";
+                String snippet = null;
                 if (r.has("content") && !r.get("content").isJsonNull()) {
                     var content = r.get("content").getAsString().strip();
                     if (content.length() > 500) content = content.substring(0, 500) + "...";
-                    sb.append("> %s\n".formatted(content));
+                    snippet = content;
                 }
-                sb.append("\n");
+                out.add(new SearchResult(title, url, snippet, faviconUrlFor(url)));
             }
-            return sb.toString().strip();
+            return out;
         }
     }
 
@@ -371,24 +477,22 @@ public class WebSearchTool implements ToolRegistry.Tool {
         }
 
         @Override
-        public String formatResults(String responseJson) {
+        public List<SearchResult> parseResults(String responseJson) {
             var json = JsonParser.parseString(responseJson).getAsJsonObject();
-            if (!json.has("results") || json.getAsJsonArray("results").isEmpty()) {
-                return "No results found.";
-            }
-            var results = json.getAsJsonArray("results");
-            var sb = new StringBuilder("Found %d results (via Perplexity):\n\n".formatted(results.size()));
-            for (int i = 0; i < results.size(); i++) {
-                var r = results.get(i).getAsJsonObject();
-                sb.append("### %d. %s\n".formatted(i + 1,
-                        r.has("title") ? r.get("title").getAsString() : "Untitled"));
-                sb.append("URL: %s\n".formatted(r.has("url") ? r.get("url").getAsString() : ""));
+            if (!json.has("results") || json.getAsJsonArray("results").isEmpty()) return List.of();
+            var arr = json.getAsJsonArray("results");
+            var out = new ArrayList<SearchResult>(arr.size());
+            for (var el : arr) {
+                var r = el.getAsJsonObject();
+                var title = r.has("title") ? r.get("title").getAsString() : "Untitled";
+                var url = r.has("url") ? r.get("url").getAsString() : "";
+                String snippet = null;
                 if (r.has("snippet") && !r.get("snippet").isJsonNull()) {
-                    sb.append("> %s\n".formatted(r.get("snippet").getAsString().strip()));
+                    snippet = r.get("snippet").getAsString();
                 }
-                sb.append("\n");
+                out.add(new SearchResult(title, url, snippet, faviconUrlFor(url)));
             }
-            return sb.toString().strip();
+            return out;
         }
     }
 
@@ -414,26 +518,24 @@ public class WebSearchTool implements ToolRegistry.Tool {
         }
 
         @Override
-        public String formatResults(String responseJson) {
+        public List<SearchResult> parseResults(String responseJson) {
             var json = JsonParser.parseString(responseJson).getAsJsonObject();
-            if (!json.has("results") || json.getAsJsonArray("results").isEmpty()) {
-                return "No results found.";
-            }
-            var results = json.getAsJsonArray("results");
-            var sb = new StringBuilder("Found %d results (via Ollama):\n\n".formatted(results.size()));
-            for (int i = 0; i < results.size(); i++) {
-                var r = results.get(i).getAsJsonObject();
-                sb.append("### %d. %s\n".formatted(i + 1,
-                        r.has("title") ? r.get("title").getAsString() : "Untitled"));
-                sb.append("URL: %s\n".formatted(r.has("url") ? r.get("url").getAsString() : ""));
+            if (!json.has("results") || json.getAsJsonArray("results").isEmpty()) return List.of();
+            var arr = json.getAsJsonArray("results");
+            var out = new ArrayList<SearchResult>(arr.size());
+            for (var el : arr) {
+                var r = el.getAsJsonObject();
+                var title = r.has("title") ? r.get("title").getAsString() : "Untitled";
+                var url = r.has("url") ? r.get("url").getAsString() : "";
+                String snippet = null;
                 if (r.has("content") && !r.get("content").isJsonNull()) {
                     var content = r.get("content").getAsString().strip();
                     if (content.length() > 500) content = content.substring(0, 500) + "...";
-                    sb.append("> %s\n".formatted(content));
+                    snippet = content;
                 }
-                sb.append("\n");
+                out.add(new SearchResult(title, url, snippet, faviconUrlFor(url)));
             }
-            return sb.toString().strip();
+            return out;
         }
     }
 
@@ -457,34 +559,40 @@ public class WebSearchTool implements ToolRegistry.Tool {
         }
 
         @Override
-        public String formatResults(String responseJson) {
+        public List<SearchResult> parseResults(String responseJson) {
             var json = JsonParser.parseString(responseJson).getAsJsonObject();
-            if (!json.has("data") || json.get("data").isJsonNull()) {
-                return "No results found.";
-            }
+            if (!json.has("data") || json.get("data").isJsonNull()) return List.of();
             var data = json.getAsJsonObject("data");
-            if (!data.has("resources") || data.getAsJsonArray("resources").isEmpty()) {
-                return "No results found.";
+            if (!data.has("resources") || data.getAsJsonArray("resources").isEmpty()) return List.of();
+            var arr = data.getAsJsonArray("resources");
+            var out = new ArrayList<SearchResult>(arr.size());
+            for (var el : arr) {
+                var r = el.getAsJsonObject();
+                var title = r.has("title") ? r.get("title").getAsString() : "Untitled";
+                var url = r.has("link") ? r.get("link").getAsString() : "";
+                String snippet = null;
+                if (r.has("snippet") && !r.get("snippet").isJsonNull()) {
+                    snippet = r.get("snippet").getAsString();
+                }
+                out.add(new SearchResult(title, url, snippet, faviconUrlFor(url)));
             }
-            var resources = data.getAsJsonArray("resources");
+            return out;
+        }
+
+        @Override
+        public String formatResults(String responseJson, List<SearchResult> parsed) {
+            // Felo emits an answer summary alongside its resources; prepend it
+            // so the LLM sees the same two-part shape as before JCLAW-170.
+            var json = JsonParser.parseString(responseJson).getAsJsonObject();
+            if (!json.has("data") || json.get("data").isJsonNull()) return "No results found.";
+            var data = json.getAsJsonObject("data");
             var sb = new StringBuilder();
             if (data.has("answer") && !data.get("answer").isJsonNull()) {
                 var answer = data.get("answer").getAsString().strip();
-                if (!answer.isEmpty()) {
-                    sb.append("**Felo summary:** ").append(answer).append("\n\n");
-                }
+                if (!answer.isEmpty()) sb.append("**Felo summary:** ").append(answer).append("\n\n");
             }
-            sb.append("Found %d results (via Felo):\n\n".formatted(resources.size()));
-            for (int i = 0; i < resources.size(); i++) {
-                var r = resources.get(i).getAsJsonObject();
-                sb.append("### %d. %s\n".formatted(i + 1,
-                        r.has("title") ? r.get("title").getAsString() : "Untitled"));
-                sb.append("URL: %s\n".formatted(r.has("link") ? r.get("link").getAsString() : ""));
-                if (r.has("snippet") && !r.get("snippet").isJsonNull()) {
-                    sb.append("> %s\n".formatted(r.get("snippet").getAsString().strip()));
-                }
-                sb.append("\n");
-            }
+            if (parsed.isEmpty()) return sb.isEmpty() ? "No results found." : sb.append("No results found.").toString().strip();
+            sb.append(renderMarkdown(parsed, "Felo"));
             return sb.toString().strip();
         }
     }

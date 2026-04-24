@@ -107,11 +107,16 @@ public class ParallelToolExecutionTest extends UnitTest {
     private static void invokeParallel(List<ToolCall> calls, Agent agent, long convId,
                                         List<ChatMessage> messages, AtomicBoolean cancelled)
             throws Exception {
+        // JCLAW-170: signature gained the onToolCall Consumer<ToolCallEvent>
+        // parameter ahead of the image collector. We pass null here since
+        // these tests exercise scheduling semantics, not the per-call event
+        // stream — the production code tolerates null onToolCall.
         var m = AgentRunner.class.getDeclaredMethod("executeToolsParallel",
                 List.class, Agent.class, Long.class, List.class,
-                java.util.function.Consumer.class, List.class, AtomicBoolean.class);
+                java.util.function.Consumer.class, java.util.function.Consumer.class,
+                List.class, AtomicBoolean.class);
         m.setAccessible(true);
-        m.invoke(null, calls, agent, convId, messages, null, null, cancelled);
+        m.invoke(null, calls, agent, convId, messages, null, null, null, cancelled);
     }
 
     @Test

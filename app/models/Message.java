@@ -30,6 +30,16 @@ public class Message extends Model {
     public String toolResults;
 
     /**
+     * JCLAW-170: optional structured JSON payload for tool-result rows, keyed
+     * off the {@code toolResults} tool_call_id. Rendered by the chat UI as
+     * rich widgets (e.g. clickable search-result chips with favicons);
+     * absent for tools that don't produce structured output. The LLM never
+     * sees this column — it only rehydrates the plain-text {@link #content}.
+     */
+    @Column(name = "tool_result_structured", columnDefinition = "TEXT")
+    public String toolResultStructured;
+
+    /**
      * Streamed reasoning / extended-thinking text for assistant turns that
      * ran with thinking enabled. Persisted so the collapsible thinking
      * bubble renders the same content after a conversation reload as it did

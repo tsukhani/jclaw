@@ -138,8 +138,16 @@ public class ApiConversationsController extends Controller {
             map.put("id", m.id);
             map.put("role", m.role);
             map.put("content", m.content);
-            map.put("toolCalls", m.toolCalls);
+            // JCLAW-170: enrich each persisted tool call with the registry's
+            // current {@code icon} hint so the chat UI can render historical
+            // tool-call rows without maintaining a client-side name→icon
+            // mapping. Parsed to a JsonArray so the enriched payload lands
+            // as a real array in the response (not a stringified nested JSON).
+            map.put("toolCalls", enrichToolCallsWithIcons(m.toolCalls, jsonParser));
             map.put("toolResults", m.toolResults);
+            if (m.toolResultStructured != null) {
+                map.put("toolResultStructured", jsonParser.parse(m.toolResultStructured));
+            }
             // Include reasoning text so the collapsible thinking bubble
             // re-renders identically after a conversation reload. Null for
             // assistant turns without thinking and for user/tool rows.
@@ -287,5 +295,39 @@ public class ApiConversationsController extends Controller {
     private static void setPaginationHeaders(long total) {
         response.setHeader("X-Total-Count", String.valueOf(total));
         response.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
+    }
+
+    /**
+     * JCLAW-170: stamp the current registry's {@link agents.ToolRegistry#iconFor}
+     * hint onto each persisted tool-call entry on the way out of /messages.
+     * The persisted JSON is the raw OpenAI-shape {@code [{id, type, function:
+     * {name, arguments}}]}; we leave those fields untouched and add an {@code
+     * icon} sibling so the chat UI can render historical rows with the same
+     * icon the live stream uses — no client-side tool→icon table needed.
+     * Returns {@code null} when the input is null so the UI's guard on missing
+     * tool-call columns still works.
+     */
+    private static com.google.gson.JsonArray enrichToolCallsWithIcons(String toolCallsJson,
+                                                                       com.google.gson.JsonParser parser) {
+        if (toolCallsJson == null || toolCallsJson.isBlank()) return null;
+        try {
+            var parsed = parser.parse(toolCallsJson);
+            if (!parsed.isJsonArray()) return null;
+            var arr = parsed.getAsJsonArray();
+            for (var el : arr) {
+                if (!el.isJsonObject()) continue;
+                var obj = el.getAsJsonObject();
+                String name = null;
+                if (obj.has("function") && obj.get("function").isJsonObject()) {
+                    var fn = obj.getAsJsonObject("function");
+                    if (fn.has("name")) name = fn.get("name").getAsString();
+                }
+                obj.addProperty("icon", agents.ToolRegistry.iconFor(name));
+            }
+            return arr;
+        } catch (Exception _) {
+            // Malformed persisted JSON — drop to null rather than crash the /messages endpoint.
+            return null;
+        }
     }
 }

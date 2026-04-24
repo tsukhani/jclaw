@@ -82,7 +82,24 @@ public class AgentRunner {
     public record RunResult(String response, Conversation conversation) {}
 
     /**
-     * Callbacks for streaming mode. Groups the 6 event handlers that
+     * JCLAW-170: granular tool-invocation event, fired from the agent loop
+     * once each tool call completes. Carries enough metadata for the UI to
+     * render a per-call row (icon, name, arguments) plus the optional
+     * structured result payload used by search-style tools to produce
+     * clickable chips with favicons. {@code resultStructuredJson} is null
+     * for tools that don't emit a structured view.
+     */
+    public record ToolCallEvent(
+        String id,
+        String name,
+        String icon,
+        String arguments,
+        String resultText,
+        String resultStructuredJson
+    ) {}
+
+    /**
+     * Callbacks for streaming mode. Groups the 7 event handlers that
      * {@link #runStreaming} pushes SSE data through.
      */
     public record StreamingCallbacks(
@@ -90,6 +107,7 @@ public class AgentRunner {
         Consumer<String> onToken,
         Consumer<String> onReasoning,
         Consumer<String> onStatus,
+        Consumer<ToolCallEvent> onToolCall,
         Consumer<String> onComplete,
         Consumer<Exception> onError
     ) {}
@@ -456,6 +474,7 @@ public class AgentRunner {
                 },
                 cb.onReasoning(),
                 cb.onStatus(),
+                cb.onToolCall(),
                 content -> {
                     try { cb.onComplete().accept(content); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
@@ -868,7 +887,7 @@ public class AgentRunner {
                     "Round %d: executing %d tool call(s)".formatted(round + 1, assistantMsg.toolCalls().size()));
 
             executeToolsParallel(assistantMsg.toolCalls(), agent, conversationId,
-                    currentMessages, null, null, null);
+                    currentMessages, null, null, null, null);
         }
 
         return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
@@ -899,7 +918,7 @@ public class AgentRunner {
 
         var toolRoundStartNs = System.nanoTime();
         executeToolsParallel(toolCalls, agent, conversationId, currentMessages,
-                cb.onStatus(), collectedImages, isCancelled);
+                cb.onStatus(), cb.onToolCall(), collectedImages, isCancelled);
         trace.addToolRound((System.nanoTime() - toolRoundStartNs) / 1_000_000L);
 
         if (isCancelled.get()) return priorContent;
@@ -1016,7 +1035,7 @@ public class AgentRunner {
      * effects on shared state (message lists, image collector, DB). Safe to
      * call from multiple virtual threads concurrently.
      */
-    private static String runToolCall(ToolCall toolCall, Agent agent, Consumer<String> onStatus) {
+    private static ToolRegistry.ToolResult runToolCall(ToolCall toolCall, Agent agent, Consumer<String> onStatus) {
         if (onStatus != null) {
             onStatus.accept("Using tool: " + toolCall.function().name());
         }
@@ -1026,10 +1045,14 @@ public class AgentRunner {
                                 toolCall.function().arguments().length() > 200
                                         ? toolCall.function().arguments().substring(0, 200) + "..."
                                         : toolCall.function().arguments()));
-        var result = ToolRegistry.execute(toolCall.function().name(),
+        // JCLAW-170: use the rich-output path so search-style tools can emit a
+        // structured JSON payload alongside the LLM-visible text. Non-rich
+        // tools fall through the default and return a text-only ToolResult.
+        var result = ToolRegistry.executeRich(toolCall.function().name(),
                 toolCall.function().arguments(), agent);
-        var resultPreview = result.length() > 200
-                ? result.substring(0, 200) + "... (%d chars)".formatted(result.length()) : result;
+        var text = result.text();
+        var resultPreview = text.length() > 200
+                ? text.substring(0, 200) + "... (%d chars)".formatted(text.length()) : text;
         EventLogger.info("tool", agent.name, null,
                 "Tool '%s' returned: %s".formatted(toolCall.function().name(), resultPreview));
         return result;
@@ -1068,12 +1091,13 @@ public class AgentRunner {
                                               Agent agent, Long conversationId,
                                               List<ChatMessage> currentMessages,
                                               Consumer<String> onStatus,
+                                              Consumer<ToolCallEvent> onToolCall,
                                               List<String> imageCollector,
                                               AtomicBoolean isCancelled) {
         int n = toolCalls.size();
         if (n == 0) return;
 
-        String[] results = new String[n];
+        ToolRegistry.ToolResult[] results = new ToolRegistry.ToolResult[n];
 
         if (n == 1) {
             if (isCancelled == null || !isCancelled.get()) {
@@ -1113,7 +1137,7 @@ public class AgentRunner {
                             EventLogger.error("tool", agent.name, null,
                                     "Tool '%s' threw: %s"
                                             .formatted(tc.function().name(), e.getMessage()));
-                            results[i] = "Error executing tool: " + e.getMessage();
+                            results[i] = ToolRegistry.ToolResult.text("Error executing tool: " + e.getMessage());
                         }
                     } finally {
                         latch.countDown();
@@ -1135,7 +1159,7 @@ public class AgentRunner {
                                 EventLogger.error("tool", agent.name, null,
                                         "Tool '%s' threw: %s"
                                                 .formatted(tc.function().name(), e.getMessage()));
-                                results[idx] = "Error executing tool: " + e.getMessage();
+                                results[idx] = ToolRegistry.ToolResult.text("Error executing tool: " + e.getMessage());
                             }
                         }
                     } finally {
@@ -1157,16 +1181,32 @@ public class AgentRunner {
             var result = results[i];
             if (result == null) continue; // skipped due to cancellation
             var tc = toolCalls.get(i);
-            currentMessages.add(ChatMessage.toolResult(tc.id(), result));
+            var text = result.text();
+            var structured = result.structuredJson();
+            currentMessages.add(ChatMessage.toolResult(tc.id(), text));
             if (imageCollector != null) {
-                extractImageUrls(result, imageCollector);
+                extractImageUrls(text, imageCollector);
             }
-            final String r = result;
+            final String r = text;
+            final String s = structured;
             services.Tx.run(() -> {
                 var conv = ConversationService.findById(conversationId);
                 ConversationService.appendAssistantMessage(conv, null, gson.toJson(tc));
-                ConversationService.appendToolResult(conv, tc.id(), r);
+                ConversationService.appendToolResult(conv, tc.id(), r, s);
             });
+            // JCLAW-170: surface the completed call to the SSE stream so the
+            // chat UI can render a per-call row with the structured result
+            // payload (search-result chips, favicons). Fired post-persist so
+            // a reload mid-turn would still see the same row.
+            if (onToolCall != null) {
+                onToolCall.accept(new ToolCallEvent(
+                        tc.id(),
+                        tc.function().name(),
+                        ToolRegistry.iconFor(tc.function().name()),
+                        tc.function().arguments(),
+                        text,
+                        structured));
+            }
         }
     }
 
@@ -1598,6 +1638,7 @@ public class AgentRunner {
                 sink::update,            // onToken — live preview edits
                 _ -> {},                 // onReasoning — not surfaced on Telegram
                 _ -> {},                 // onStatus — not surfaced on Telegram
+                _ -> {},                 // onToolCall — JCLAW-170, web-only for now
                 sink::seal,              // onComplete — final edit / planner fallback
                 sink::errorFallback);    // onError — delete placeholder + send error
         runStreaming(agent, conversation.id, channelType, peerId, text,

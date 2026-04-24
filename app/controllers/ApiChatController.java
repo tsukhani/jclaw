@@ -487,6 +487,25 @@ public class ApiChatController extends Controller {
                         Map.of("type", "reasoning", "content", reasoning), false),
                 status -> writeSse(res, cancelled, streamDone,
                         Map.of("type", "status", "content", status), false),
+                // JCLAW-170: tool-call frame. structuredJson rides as a raw
+                // JsonElement (not a nested string) so the frontend can parse
+                // it as an object tree — search-style tools embed a
+                // {provider, results:[...]} payload that the UI turns into
+                // clickable result chips.
+                ev -> {
+                    var payload = new java.util.LinkedHashMap<String, Object>();
+                    payload.put("type", "tool_call");
+                    payload.put("id", ev.id());
+                    payload.put("name", ev.name());
+                    payload.put("icon", ev.icon());
+                    payload.put("arguments", ev.arguments());
+                    payload.put("resultText", ev.resultText() == null ? "" : ev.resultText());
+                    if (ev.resultStructuredJson() != null) {
+                        payload.put("resultStructured",
+                                com.google.gson.JsonParser.parseString(ev.resultStructuredJson()));
+                    }
+                    writeSse(res, cancelled, streamDone, payload, false);
+                },
                 content -> writeSse(res, cancelled, streamDone,
                         Map.of("type", "complete", "content", content), true),
                 error -> {

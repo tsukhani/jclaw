@@ -5,7 +5,10 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ClipboardIcon,
+  CommandLineIcon,
   EyeIcon,
+  FolderIcon,
+  GlobeAltIcon,
   LightBulbIcon,
   MicrophoneIcon,
   PaperAirplaneIcon,
@@ -14,6 +17,8 @@ import {
   PencilSquareIcon,
   SpeakerWaveIcon,
   TrashIcon,
+  WrenchIcon,
+  WrenchScrewdriverIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 // Solid lightbulb for the active-reasoning header — the outline bulb on the
@@ -31,6 +36,7 @@ import DOMPurify from 'dompurify'
 import { computeConversationCost, formatConversationCost, formatConversationCostTooltip, formatUsageCost, formatUsageCostTooltip, type MessageUsage } from '~/utils/usage-cost'
 import { formatSize } from '~/utils/format'
 import { thinkingHeaderLabel, initCollapsedState } from '~/utils/thinking'
+import { hydrateToolCalls } from '~/utils/tool-calls'
 import { resolveThinkingLock } from '~/utils/thinking-lock'
 import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
 // Filter out tool messages and empty assistant messages (tool call records) from display.
@@ -39,7 +45,7 @@ import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
 // suppression rule closes.
 import { shouldDisplayMessage } from '~/utils/display-message-filter'
 
-import type { Agent, Conversation, Message, ConfigResponse } from '~/types/api'
+import type { Agent, Conversation, Message, ConfigResponse, ToolCall, ToolCallResultChip } from '~/types/api'
 import { effectiveThinkingLevels, type ProviderModel } from '~/composables/useProviders'
 import { useModelAutocomplete } from '~/composables/useModelAutocomplete'
 
@@ -425,6 +431,109 @@ function toggleThinking(msg: Message) {
   msg.thinkingCollapsed = !msg.thinkingCollapsed
 }
 
+// JCLAW-170: tool-calls block collapse toggle. Mirrors the thinking card's
+// single-boolean collapse UX.
+function toggleToolCalls(msg: Message) {
+  (msg as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed
+    = !(msg as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed
+}
+
+/**
+ * JCLAW-170: resolve the registry's semantic icon key to a Heroicon component.
+ * Keys beyond this switch default to the generic wrench so an unknown tool
+ * still renders visibly rather than as a blank cell.
+ */
+function toolCallIcon(key: string | null | undefined) {
+  switch (key) {
+    case 'search': return GlobeAltIcon
+    case 'folder': return FolderIcon
+    case 'terminal':
+    case 'shell': return CommandLineIcon
+    case 'wrench': return WrenchIcon
+    default: return WrenchScrewdriverIcon
+  }
+}
+
+/**
+ * JCLAW-170: compact one-line preview of a tool call's arguments. For
+ * web_search the query gets wrapped in quotes to match the "Searched <q>"
+ * label the reference UX uses; other tools show their first argument name
+ * and value, truncated. Falls back to the raw JSON slice on parse failure.
+ */
+function toolCallPreview(tc: ToolCall): string {
+  if (!tc.arguments) return ''
+  try {
+    const parsed = JSON.parse(tc.arguments) as Record<string, unknown>
+    if (tc.name === 'web_search' && typeof parsed.query === 'string') {
+      return `Searched "${parsed.query}"`
+    }
+    const keys = Object.keys(parsed)
+    if (keys.length === 0) return tc.name
+    const first = keys[0]!
+    const v = parsed[first]
+    const preview = typeof v === 'string' ? v : JSON.stringify(v)
+    return `${first}: ${String(preview).slice(0, 80)}`
+  }
+  catch {
+    return tc.arguments.slice(0, 80)
+  }
+}
+
+const MAX_VISIBLE_RESULT_CHIPS = 6
+
+/** JCLAW-170: merge every structured search-result row across all tool calls
+ *  on this assistant message into one de-duplicated chip list. Different
+ *  search calls on the same turn commonly return overlapping URLs; dropping
+ *  dupes keeps the strip dense. */
+function mergedResultChips(m: Message): ToolCallResultChip[] {
+  if (!m.toolCalls) return []
+  const seen = new Set<string>()
+  const chips: ToolCallResultChip[] = []
+  for (const tc of m.toolCalls) {
+    const list = tc.resultStructured?.results ?? []
+    for (const r of list) {
+      const key = r.url ?? ''
+      if (key) {
+        if (seen.has(key)) continue
+        seen.add(key)
+      }
+      chips.push(r)
+    }
+  }
+  return chips
+}
+
+function visibleResultChips(m: Message): ToolCallResultChip[] {
+  return mergedResultChips(m).slice(0, MAX_VISIBLE_RESULT_CHIPS)
+}
+
+function extraResultChipCount(m: Message): number {
+  return Math.max(0, mergedResultChips(m).length - MAX_VISIBLE_RESULT_CHIPS)
+}
+
+function chipTitle(chip: ToolCallResultChip): string {
+  if (chip.title && chip.title.trim()) return chip.title.trim()
+  if (chip.url) {
+    try {
+      return new URL(chip.url).hostname.replace(/^www\./, '')
+    }
+    catch {
+      return chip.url
+    }
+  }
+  return 'result'
+}
+
+/** Favicon load failures fall back to the generic globe. We swap the <img>
+ *  for a data: transparent pixel and let the adjacent GlobeAltIcon take
+ *  over via CSS (`:not([src])` would require inlining the fallback; the
+ *  simpler path is to hide the broken image so the sibling icon fills the
+ *  slot via flex alignment). */
+function onFaviconError(ev: Event) {
+  const img = ev.target as HTMLImageElement | null
+  if (img) img.style.display = 'none'
+}
+
 const conversationsUrl = computed(() =>
   selectedAgentId.value
     ? `/api/conversations?channel=web&agentId=${selectedAgentId.value}&limit=50`
@@ -778,7 +887,16 @@ else {
 
 async function loadConversation(id: number) {
   selectedConvoId.value = id
-  messages.value = await $fetch<Message[]>(`/api/conversations/${id}/messages`) ?? []
+  const loaded = await $fetch<Message[]>(`/api/conversations/${id}/messages`) ?? []
+  // JCLAW-170: fold persisted tool-role rows into the following assistant
+  // message's toolCalls array so the tool-calls block re-renders on reload.
+  // Mutates in place, then we also collapse the block by default for
+  // historical turns — same UX as the thinking card.
+  hydrateToolCalls(loaded as unknown as Array<Record<string, unknown>>)
+  for (const m of loaded) {
+    if (m.toolCalls?.length) (m as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed = true
+  }
+  messages.value = loaded
   initCollapsedState(messages.value)
   scrollToBottom()
 }
@@ -983,6 +1101,29 @@ async function sendMessage() {
             if (event.timestamp) m.createdAt = event.timestamp
             streamContent.value += event.content
             m.content = streamContent.value
+            scrollToBottom()
+          }
+          else if (event.type === 'tool_call') {
+            // JCLAW-170: a tool invocation completed on the backend. Append
+            // the structured payload to the streaming assistant message's
+            // toolCalls array so the collapsible block surfaces it live.
+            // The accordion starts expanded so users see in-progress activity
+            // the instant the first tool finishes; once content begins to
+            // stream they can collapse it themselves, and it auto-collapses
+            // on reload for historical turns.
+            const m = messages.value[assistantIdx] as StreamingMessage
+            if (!m.toolCalls) {
+              m.toolCalls = []
+              m.toolCallsCollapsed = false
+            }
+            m.toolCalls.push({
+              id: event.id,
+              name: event.name,
+              icon: event.icon || 'wrench',
+              arguments: event.arguments ?? '',
+              resultText: event.resultText ?? null,
+              resultStructured: event.resultStructured ?? null,
+            })
             scrollToBottom()
           }
           else if (event.type === 'complete') {
@@ -1666,11 +1807,99 @@ function exportConversation() {
                       </button>
                     </div>
                   </div>
-                  <!-- Assistant messages: optional thinking card + plain markdown body -->
+                  <!-- Assistant messages: optional tool-calls block + thinking card + plain markdown body -->
                   <div
                     v-else
                     class="group"
                   >
+                    <!--
+                      JCLAW-170: tool-calls accordion. Renders above the
+                      thinking card whenever the assistant message carries one
+                      or more tool invocations (live-streamed via the
+                      {@code tool_call} SSE frame, or hydrated from persisted
+                      {@code tool_results_*} columns on reload). Mirrors the
+                      thinking card's bordered-card + header-button pattern;
+                      auto-collapses on reload and on stream-completion,
+                      expands when a new call lands so in-flight tool activity
+                      is visible without a click.
+                    -->
+                    <div
+                      v-if="msg.toolCalls?.length"
+                      class="mb-3 border border-neutral-200 dark:border-neutral-700 rounded-xl overflow-hidden bg-surface-elevated"
+                    >
+                      <button
+                        type="button"
+                        class="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-fg-muted hover:text-fg-strong focus:outline-none"
+                        :title="(msg as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed ? 'Expand tool calls' : 'Collapse tool calls'"
+                        @click="toggleToolCalls(msg)"
+                      >
+                        <WrenchScrewdriverIcon
+                          class="w-3.5 h-3.5 shrink-0"
+                          aria-hidden="true"
+                        />
+                        <span class="font-medium">
+                          {{ msg.toolCalls.length }} tool {{ msg.toolCalls.length === 1 ? 'call' : 'calls' }}
+                        </span>
+                        <ChevronDownIcon
+                          class="w-3.5 h-3.5 transition-transform ml-auto"
+                          :class="(msg as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed ? '' : 'rotate-180'"
+                          aria-hidden="true"
+                        />
+                      </button>
+                      <div
+                        v-if="!(msg as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed"
+                        class="border-t border-neutral-200 dark:border-neutral-700"
+                      >
+                        <div
+                          v-for="tc in msg.toolCalls"
+                          :key="tc.id"
+                          class="flex items-center gap-2 px-3 py-2 text-xs text-fg-muted border-b border-neutral-100 dark:border-neutral-800 last:border-b-0"
+                        >
+                          <component
+                            :is="toolCallIcon(tc.icon)"
+                            class="w-3.5 h-3.5 shrink-0"
+                            aria-hidden="true"
+                          />
+                          <span class="truncate">
+                            <span class="text-fg-subtle">Used tool:</span>
+                            {{ toolCallPreview(tc) }}
+                          </span>
+                        </div>
+                        <div
+                          v-if="mergedResultChips(msg).length"
+                          class="flex flex-wrap gap-1.5 px-3 py-2 border-t border-neutral-200 dark:border-neutral-700"
+                        >
+                          <a
+                            v-for="(chip, cIdx) in visibleResultChips(msg)"
+                            :key="(chip.url ?? chip.title ?? '') + ':' + cIdx"
+                            :href="chip.url ?? '#'"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="inline-flex items-center gap-1.5 px-2 py-1 text-[11px] border border-neutral-200 dark:border-neutral-700 rounded-full text-fg-muted hover:text-fg-strong hover:bg-surface transition-colors max-w-[200px]"
+                            :title="chip.title ?? chip.url ?? ''"
+                          >
+                            <img
+                              v-if="chip.faviconUrl"
+                              :src="chip.faviconUrl"
+                              class="w-3.5 h-3.5 shrink-0 rounded-sm"
+                              alt=""
+                              referrerpolicy="no-referrer"
+                              @error="onFaviconError"
+                            >
+                            <GlobeAltIcon
+                              v-else
+                              class="w-3.5 h-3.5 shrink-0"
+                              aria-hidden="true"
+                            />
+                            <span class="truncate">{{ chipTitle(chip) }}</span>
+                          </a>
+                          <span
+                            v-if="extraResultChipCount(msg) > 0"
+                            class="inline-flex items-center px-2 py-1 text-[11px] border border-dashed border-neutral-200 dark:border-neutral-700 rounded-full text-fg-subtle"
+                          >+{{ extraResultChipCount(msg) }} more</span>
+                        </div>
+                      </div>
+                    </div>
                     <!--
                   Thinking/reasoning block, Unsloth-style: bordered card with a
                   "Thought for Xs" header (lightbulb + chevron) and an in-place

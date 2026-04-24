@@ -62,6 +62,45 @@ export interface Conversation {
   modelIdOverride?: string | null
 }
 
+/**
+ * JCLAW-170: one structured search-result row, shipped by the backend
+ * alongside the LLM-visible markdown so the chat UI can render clickable
+ * chips with favicons. Every field is nullable since older search providers
+ * may not always populate all of them and the UI has to be defensive.
+ */
+export interface ToolCallResultChip {
+  title: string | null
+  url: string | null
+  snippet: string | null
+  faviconUrl: string | null
+}
+
+/** JCLAW-170: structured result payload attached to a tool call. For
+ *  {@code web_search}, carries a list of {@link ToolCallResultChip}s the UI
+ *  renders as clickable result chips. Absent for tools that don't emit a
+ *  structured view. */
+export interface ToolCallResultStructured {
+  provider?: string | null
+  results?: ToolCallResultChip[]
+}
+
+/**
+ * JCLAW-170: one tool invocation the assistant made during the turn.
+ * Populated both live (via the {@code tool_call} SSE frame) and on
+ * conversation reload (from persisted {@code Message.toolCalls}
+ * plus the corresponding {@code tool_result_structured} row keyed by
+ * {@code id}). {@code icon} is the registry's semantic icon key ({@code
+ * "search"}, {@code "folder"}, etc.) that the chat UI maps to a Heroicon.
+ */
+export interface ToolCall {
+  id: string
+  name: string
+  icon: string
+  arguments: string
+  resultText?: string | null
+  resultStructured?: ToolCallResultStructured | null
+}
+
 /** A single message within a conversation. */
 export interface Message {
   /** Server-assigned id. Absent on optimistic/streaming placeholders until the backend persists the row. */
@@ -71,10 +110,15 @@ export interface Message {
   reasoning?: string | null
   createdAt: string
   usage?: MessageUsage | null
+  /** JCLAW-170: tool invocations on this assistant turn, hydrated from the
+   *  persisted message thread on load and appended via SSE during streaming. */
+  toolCalls?: ToolCall[]
   /** Frontend-only key assigned to optimistic/streaming placeholders. */
   _key?: string
   /** Client-only: whether the thinking/reasoning bubble is collapsed for this message. */
   thinkingCollapsed?: boolean
+  /** Client-only: whether the tool-calls block is collapsed for this message (JCLAW-170). */
+  toolCallsCollapsed?: boolean
   /** Client-only: elapsed stream thinking duration in ms, persisted only for the current render. */
   _thinkingDurationMs?: number | null
   /** Client-only: wall-clock ms when the current assistant stream began producing reasoning. */

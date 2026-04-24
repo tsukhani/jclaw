@@ -133,7 +133,23 @@ public class ConversationService {
     }
 
     public static Message appendToolResult(Conversation conversation, String toolCallId, String result) {
-        return appendMessage(conversation, MessageRole.TOOL, result, null, toolCallId, null);
+        return appendToolResult(conversation, toolCallId, result, null);
+    }
+
+    /**
+     * JCLAW-170 overload: persist a tool-result row with an optional
+     * structured JSON payload (e.g. web-search result list with favicons)
+     * the UI renders as rich widgets. {@code structuredJson} is null for
+     * tools that don't produce structured output.
+     */
+    public static Message appendToolResult(Conversation conversation, String toolCallId,
+                                            String result, String structuredJson) {
+        var msg = appendMessage(conversation, MessageRole.TOOL, result, null, toolCallId, null);
+        if (structuredJson != null) {
+            msg.toolResultStructured = structuredJson;
+            msg.save();
+        }
+        return msg;
     }
 
     /**

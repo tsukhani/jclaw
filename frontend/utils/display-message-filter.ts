@@ -23,6 +23,15 @@ export interface DisplayMessageCandidate {
   content?: string | null
   reasoning?: string | null
   usage?: object | null
+  /** JCLAW-170: tool invocations on this assistant turn. A streaming
+   *  placeholder that has at least one tool call landed — even before the
+   *  first content/reasoning token — should render so the user sees
+   *  live tool activity instead of a blank gap. */
+  toolCalls?: { length?: number } | null | undefined
+}
+
+function hasToolCalls(m: DisplayMessageCandidate): boolean {
+  return !!(m.toolCalls && (m.toolCalls.length ?? 0) > 0)
 }
 
 export function shouldDisplayMessage(
@@ -30,6 +39,6 @@ export function shouldDisplayMessage(
   streaming: boolean,
 ): boolean {
   if (m.role === 'tool') return false
-  if (m._key && !m.id && streaming && !m.content && !m.reasoning) return false
-  return !!(m.content || m.reasoning || m.usage)
+  if (m._key && !m.id && streaming && !m.content && !m.reasoning && !hasToolCalls(m)) return false
+  return !!(m.content || m.reasoning || m.usage || hasToolCalls(m))
 }
