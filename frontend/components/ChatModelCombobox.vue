@@ -112,19 +112,25 @@ function pick(row: Row) {
     -->
     <PopoverContent
       align="start"
-      class="w-[440px] p-2 rounded-[10px] border-neutral-200 dark:border-neutral-700/50"
+      class="w-[440px] p-2 rounded-[10px] border-[#dfe7e3] dark:border-[#2e3035]"
     >
       <div class="space-y-2">
         <div class="relative">
           <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          <!--
+            Focus ring is emerald (not the default shadcn --ring which is
+            near-black in light / light-grey in dark): matches Unsloth's
+            branded green focus indicator on this same input. 3px ring at
+            50% alpha mirrors their oklab(0.6929 -0.136 0.032 / 0.5) 0 0 0 3px.
+          -->
           <input
             v-model="query"
             type="text"
             placeholder="Search models"
             aria-label="Search models"
-            class="w-full h-9 pl-8 pr-3 rounded-3xl bg-input/30 border border-neutral-200 dark:border-neutral-700/50
+            class="w-full h-9 pl-8 pr-3 rounded-3xl bg-input/30 border border-[#dfe7e3] dark:border-[#2e3035]
                    text-sm text-fg-primary placeholder:text-muted-foreground
-                   focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]
+                   focus-visible:border-emerald-500 focus-visible:ring-emerald-500/50 focus-visible:ring-[3px]
                    focus-visible:outline-none transition-colors"
           >
         </div>

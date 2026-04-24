@@ -1289,9 +1289,17 @@ function exportConversation() {
 </script>
 
 <template>
+  <!--
+    Height subtracts the 3.5rem (56px) top nav bar (see layouts/default.vue
+    header.h-14) — NOT the parent main's p-6 padding, which is already
+    cancelled by the -m-6 on this element. Using 3rem here leaves main
+    with an 8px hidden scroll range: aggressive scroll in the messages
+    pane chains up to main and pushes the chat header off the top by
+    that amount, compressing its apparent top padding.
+  -->
   <div
     class="flex -m-6"
-    style="height: calc(100vh - 3rem);"
+    style="height: calc(100vh - 3.5rem);"
   >
     <!--
       Chat area takes the full main-content width now that the in-page
@@ -1312,7 +1320,14 @@ function exportConversation() {
         right edge. Absolute positioning on the model combobox keeps it
         optically centered regardless of the left/right content widths.
       -->
-      <div class="relative px-3 py-2 border-b border-border flex items-center gap-2">
+      <!--
+        border-b uses neutral-300/700 instead of --border (which is
+        neutral-200/800 — near-isoluminant with --surface-elevated in
+        dark mode and invisible). One palette step up on both modes
+        lifts the header above the chat canvas without jumping to a
+        hard division line.
+      -->
+      <div class="relative px-3 py-2 border-b border-neutral-300 dark:border-neutral-700 flex items-center gap-2">
         <label
           v-if="(agents?.length ?? 0) > 1"
           :for="agentSelectId"
@@ -1334,6 +1349,20 @@ function exportConversation() {
             </option>
           </select>
         </label>
+        <!--
+          Single-agent case: no dropdown — the user has nothing to pick
+          between. Render as static text to preserve the same horizontal
+          slot (keeps the absolute-centered model combobox optically
+          centered) while making it obvious no choice is expected. Uses
+          a div, not a label: there's no input to associate with.
+        -->
+        <div
+          v-else-if="(agents?.length ?? 0) === 1"
+          class="text-sm text-fg-muted flex items-center gap-1.5"
+        >
+          <span>Agent:</span>
+          <span class="text-base text-fg-strong px-1 py-1">{{ selectedAgent?.name }}</span>
+        </div>
         <div class="absolute left-1/2 -translate-x-1/2">
           <ChatModelCombobox
             :providers="providers"
@@ -1409,11 +1438,17 @@ function exportConversation() {
           </div>
         </Transition>
 
-        <!-- Messages -->
+        <!--
+          Messages — overscroll-contain stops trackpad/wheel momentum
+          from chaining into the ancestor <main> if a height mismatch
+          ever re-introduces a scroll range there (e.g. when the API
+          status banner is visible). Without it, aggressive scroll in
+          this list could push the chat header up out of view.
+        -->
         <div
           v-if="!isEmptyChat"
           ref="messagesEl"
-          class="flex-1 overflow-y-auto overflow-x-hidden px-4 py-6"
+          class="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-6"
         >
           <!--
           Unsloth-style centered content column: the scroll container
@@ -1806,18 +1841,29 @@ function exportConversation() {
           loss is minimal.
         -->
           <!--
-          Composer card — traced from Unsloth Studio via devtools:
+          Composer card — traced from Unsloth Studio via devtools.
           rounded-[22px] (their rounded-3xl), 1px border in #2e3035
-          (neutral-700 at 50% opacity against the card bg), and a soft
-          0 2px 12px rgba(0,0,0,0.2) drop shadow. The border override is
+          (neutral-700 at 50% opacity) in dark mode. Border override is
           needed because the project's --border token is invisible
           against --surface-elevated in dark mode.
+
+          Shadow differs by theme:
+          - light: three-layer stacked drop shadow at 4–5% alpha,
+            matching Unsloth's composer — tight edge line (0 1px 2px
+            .04), mid cushion (0 6px 14px .05), diffuse lift (0 18px
+            40px .05). Reads as a soft float, not a dark halo.
+          - dark: single 0 4px 16px at 30% alpha (#0000004d), the
+            same value used by the login/setup-password cards. Below
+            ~25% alpha, black shadows vanish against #222427 — this
+            is the "elevated card" token across the auth pages.
         -->
           <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -->
           <form
             data-tour="chat-composer"
             class="bg-surface-elevated border border-neutral-200 dark:border-neutral-700/50 rounded-[22px]
-                 shadow-[0_2px_12px_rgba(0,0,0,0.2)] overflow-hidden"
+                 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_6px_14px_rgba(0,0,0,0.05),0_18px_40px_rgba(0,0,0,0.05)]
+                 dark:shadow-[0_4px_16px_#0000004d]
+                 overflow-hidden"
             @submit.prevent="sendMessage"
             @drop.prevent="handleDrop"
             @dragover.prevent
