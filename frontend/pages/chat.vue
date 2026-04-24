@@ -1582,8 +1582,14 @@ function exportConversation() {
           stays full-width so the scrollbar tracks the window edge, but
           each turn sits inside a max-w-3xl rail that keeps long lines
           readable regardless of viewport width.
+
+          `px-4` mirrors the composer wrapper's internal padding so the
+          rail's usable content box aligns exactly with the composer
+          form's visible borders — message text won't overhang the
+          card's left edge, and the user bubble's right edge won't stick
+          past the card's right edge.
         -->
-          <div class="mx-auto w-full max-w-3xl space-y-5">
+          <div class="mx-auto w-full max-w-3xl px-4 space-y-5">
             <template
               v-for="(msg, msgIdx) in displayMessages"
               :key="msg.id ?? msg._key"
@@ -2077,7 +2083,7 @@ function exportConversation() {
               class="hidden"
               @change="handleFileUpload"
             >
-            <div class="flex items-center justify-between gap-2 px-2 pb-2">
+            <div class="grid grid-cols-[1fr_auto_1fr] items-center gap-2 px-2 pb-2">
               <div class="flex items-center gap-1.5 flex-wrap">
                 <button
                   type="button"
@@ -2121,13 +2127,18 @@ function exportConversation() {
                     aria-hidden="true"
                   />
                 </button>
-                <!--
+              </div>
+              <!--
                 Model-capability toggles. Unsloth-style rounded-full pills:
                 when active the pill paints in the capability colour; inactive
                 pills stay outlined neutral. Visible only when the model
                 advertises the capability. Think flips thinkingMode null ↔
                 remembered level; Vision/Audio flip their *Enabled override.
+                Grouped in the row's center track; the 1fr side tracks keep
+                this group anchored to the container midpoint regardless of
+                how many capability pills render.
               -->
+              <div class="flex items-center gap-1.5 flex-wrap justify-self-center">
                 <button
                   v-if="thinkingSupported"
                   type="button"
@@ -2183,7 +2194,7 @@ function exportConversation() {
                   Audio
                 </button>
               </div>
-              <div class="flex items-center gap-1">
+              <div class="flex items-center gap-1 justify-self-end">
                 <button
                   type="button"
                   class="p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
