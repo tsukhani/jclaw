@@ -64,7 +64,7 @@ public class ApiOnboardingController extends Controller {
                     "Tour progressed to step %d".formatted(newMax),
                     "previous=%d".formatted(existing));
         }
-        renderJSON(gson.toJson(Map.of("maxStepReached", newMax)));
+        renderMaxStep(newMax);
     }
 
     /** POST /api/onboarding/tour-reset — wipes the threshold so the dashboard
@@ -78,6 +78,14 @@ public class ApiOnboardingController extends Controller {
         EventLogger.info("onboarding",
                 "Tour state reset",
                 "previous=%d".formatted(existing));
-        renderJSON(gson.toJson(Map.of("maxStepReached", 0)));
+        renderMaxStep(0);
+    }
+
+    /** Single source of truth for the response envelope so all three actions
+     *  return identically-shaped JSON. The {@code status()} action additionally
+     *  emits {@code totalSteps} and {@code shouldAutoShow} — but they all
+     *  agree on {@code maxStepReached}. */
+    private static void renderMaxStep(int maxStep) {
+        renderJSON(gson.toJson(Map.of("maxStepReached", maxStep)));
     }
 }

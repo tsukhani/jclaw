@@ -83,8 +83,6 @@ public class ApiOnboardingControllerTest extends FunctionalTest {
 
     @Test
     public void statusRequiresAuth() {
-        // Use a fresh test that does NOT call seedAndLogin's login step.
-        // Easiest: log out first.
         logout();
         var response = GET("/api/onboarding/tour-status");
         assertEquals(401, response.status.intValue());
@@ -145,6 +143,7 @@ public class ApiOnboardingControllerTest extends FunctionalTest {
         seedTourMaxStep(4);
         var response = POST("/api/onboarding/tour-reset", "application/json", "{}");
         assertIsOk(response);
+        assertContentType("application/json", response);
         var body = getContent(response);
         assertTrue(body.contains("\"maxStepReached\":0"), "got: " + body);
 
