@@ -38,8 +38,6 @@ pnpm test                 # Vitest (unit)
 ### Running Both Together
 Start the Play backend (`play run`) and the Nuxt frontend (`cd frontend && pnpm dev`) in separate terminals. The frontend proxies `/api/**` requests to `localhost:9000`.
 
-**SLF4J provider:** when running `play run` directly (outside `jclaw.sh` / Docker), add `-Dslf4j.provider=org.apache.logging.slf4j.SLF4JServiceProvider` so log4j2 wins ServiceLoader order over Playwright's transitive `slf4j-simple`. `jclaw.sh --dev start` and the Dockerfile `CMD` pass this automatically; the bare `play run` invocation does not. Without it, third-party library logs (Hibernate, HikariCP, OkHttp) render with the stderr-only simple-provider format instead of `conf/log4j2.xml`. See JCLAW-88 for context.
-
 ## Git Hooks
 
 Checked-in hooks live in `.githooks/`. Enable them on a fresh clone with:

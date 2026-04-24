@@ -291,12 +291,6 @@ do_start_prod() {
     # Play 1.x passes unrecognized args straight to the JVM (see
     # framework/pym/play/application.py:java_cmd), so these become the
     # actual java command line — no -J prefix needed.
-    #
-    # slf4j.provider: Force log4j-slf4j2-impl as the SLF4J binding. Project lib/
-    # precedes framework lib/ in Play 1.x's resolved classpath, so Playwright's
-    # transitive slf4j-simple (via Java-WebSocket) wins ServiceLoader order
-    # without this override — producing unformatted third-party logs. Ivy
-    # excludes can't reach that 4-level transitive chain (see JCLAW-86/88).
     local heap="${JCLAW_JVM_HEAP:-2g}"
     local jvm_opts=(
         "-Xms${heap}"
@@ -308,7 +302,6 @@ do_start_prod() {
         "-XX:MaxDirectMemorySize=256m"
         "-Dnetworkaddress.cache.ttl=30"
         "-Dnetworkaddress.cache.negative.ttl=0"
-        "-Dslf4j.provider=org.apache.logging.slf4j.SLF4JServiceProvider"
         "-Xlog:gc*:file=$JCLAW_DIR/logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M"
     )
 
@@ -373,18 +366,13 @@ do_start_dev() {
     local pool_arg
     pool_arg=$(resolve_play_pool)
 
-    # Force log4j2 as the SLF4J binding (see JCLAW-88 and the prod-start
-    # comment for rationale). Play 1.x passes unrecognized args straight
-    # through to the JVM, so this lands as a real -D on the java command.
-    local slf4j_arg="-Dslf4j.provider=org.apache.logging.slf4j.SLF4JServiceProvider"
-
     echo "==> Starting Play backend on port $BACKEND_PORT (dev)..."
     if [[ -n "$pool_arg" ]]; then
         echo "    Play invocation pool: ${pool_arg#-Dplay.pool=} (explicit override)"
-        nohup play run --http.port="$BACKEND_PORT" "$pool_arg" "$slf4j_arg" > "$JCLAW_DIR/logs/backend-dev.out" 2>&1 &
+        nohup play run --http.port="$BACKEND_PORT" "$pool_arg" > "$JCLAW_DIR/logs/backend-dev.out" 2>&1 &
     else
         echo "    Play invocation pool: auto (sized by PlayPoolAutoSizer at startup)"
-        nohup play run --http.port="$BACKEND_PORT" "$slf4j_arg" > "$JCLAW_DIR/logs/backend-dev.out" 2>&1 &
+        nohup play run --http.port="$BACKEND_PORT" > "$JCLAW_DIR/logs/backend-dev.out" 2>&1 &
     fi
     local play_pid=$!
     # play run doesn't create server.pid — store the wrapper pid ourselves

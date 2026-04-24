@@ -90,8 +90,4 @@ WORKDIR /app
 
 EXPOSE 9000
 
-# -Dslf4j.provider forces log4j-slf4j2-impl as the SLF4J binding. Without it,
-# Playwright's transitive slf4j-simple (via Java-WebSocket) wins ServiceLoader
-# order because project lib/ precedes framework lib/ in Play 1.x's classpath
-# — see JCLAW-88 for full context. Keep this arg in sync with jclaw.sh.
-CMD ["play", "run", "--%prod", "-Dslf4j.provider=org.apache.logging.slf4j.SLF4JServiceProvider"]
+CMD ["play", "run", "--%prod"]

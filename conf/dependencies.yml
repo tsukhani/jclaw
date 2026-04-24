@@ -7,7 +7,13 @@ require:
     # html) require; declaring the higher version explicitly keeps the
     # resolved classpath version and the declared version in sync.
     - org.jsoup -> jsoup 1.21.2
-    - com.microsoft.playwright -> playwright 1.52.0
+    # Playwright's POM declares slf4j-simple as a runtime dep, which races
+    # log4j-slf4j2-impl for the SLF4JServiceProvider ServiceLoader slot
+    # (see JCLAW-88). Excluding it here eliminates the race; the
+    # -Dslf4j.provider=... flag in jclaw.sh / Dockerfile becomes a no-op.
+    - com.microsoft.playwright -> playwright 1.52.0:
+        exclude:
+            - org.slf4j -> slf4j-simple
     # Tika's Ivy POM declares bndlib and OSGi with `conf="provided->..."`
     # scope. Play 1.x's Ivy resolver treats `provided` as runtime, so
     # without these excludes ~13 OSGi/bndlib JARs (~5 MB) land on the
@@ -73,6 +79,10 @@ require:
             - org.assertj -> *
             - org.mockito -> *
             - org.projectlombok -> *
+            # flexmark's POM declares jmh-core + jmh-generator-annprocess in
+            # test scope for its benchmark harness. Play 1.x's Ivy resolver
+            # promotes test→runtime, so they land in lib/ as dead weight.
+            - org.openjdk.jmh -> *
     # Each flexmark-ext-* pulls flexmark-core-test transitively, which
     # in turn drags flexmark-test-util/specs, jmh-core, and hamcrest-core
     # onto the runtime classpath — regressing the excludes on the parent
@@ -130,12 +140,24 @@ require:
             - org.hamcrest -> hamcrest-core
             - org.mockito -> *
             - org.projectlombok -> *
+            # flying-saucer-pdf (pulled transitively through -openpdf)
+            # declares slf4j-simple — same ServiceLoader-race story as
+            # Playwright above.
+            - org.slf4j -> slf4j-simple
     - org.hdrhistogram -> HdrHistogram 2.2.2
     # Pin junit-vintage-engine to match the platform (1.13.4) that the rest of the
     # JUnit graph resolves to. A transitive dep (pdf-test via flexmark-test) pulls
     # in vintage 5.9.3, which uses junit-platform-commons 1.9.x — the resulting
     # ClassFilter NoClassDefFoundError kills the TestRunner before any test runs.
-    - org.junit.vintage -> junit-vintage-engine 5.13.4
+    #
+    # Vintage drags junit 4.13.2 → hamcrest-core 1.3 onto the runtime classpath.
+    # No jclaw source imports org.hamcrest (Jupiter + Play's UnitTest only), so
+    # hamcrest-core is dead weight. JUnit 4's Assert.assertThat(T, Matcher)
+    # references Matcher reflectively; if play autotest goes red with
+    # NoClassDefFoundError, drop this exclude.
+    - org.junit.vintage -> junit-vintage-engine 5.13.4:
+        exclude:
+            - org.hamcrest -> hamcrest-core
     # Telegram Bot API SDK. telegrambots-client ships the OkHttpTelegramClient +
     # typed API models (SendMessage, Update, etc); telegrambots-longpolling is
     # the framework-agnostic runner used when transport=POLLING (no Spring).
