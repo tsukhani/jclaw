@@ -96,6 +96,46 @@ describe('hydrateToolCalls', () => {
     expect(Array.isArray(intermediate.toolCalls) && (intermediate.toolCalls as unknown[]).length > 0).toBe(true)
   })
 
+  it('consolidates N intermediate assistant rows into one toolCalls list on the final content row', () => {
+    // Production persists ONE assistant row per tool call (not one row per
+    // LLM turn with an N-element array). A two-call turn therefore lands
+    // as: user → asst(call_1) → tool(call_1) → asst(call_2) → tool(call_2)
+    // → asst(content). Hydration must flatten all N calls onto the final
+    // content row — not leave each intermediate row with its own one-call
+    // rendering, which is what produced the "N × 1 tool call" regression.
+    const msgs = [
+      { role: 'user', content: 'do two searches', id: 1 },
+      {
+        role: 'assistant', id: 2, content: null,
+        toolCalls: [{ id: 'call_1', type: 'function',
+          function: { name: 'web_search', arguments: '{"query":"a"}' },
+          icon: 'search' }],
+      },
+      { role: 'tool', id: 3, content: 'first result body', toolResults: 'call_1' },
+      {
+        role: 'assistant', id: 4, content: null,
+        toolCalls: [{ id: 'call_2', type: 'function',
+          function: { name: 'web_search', arguments: '{"query":"b"}' },
+          icon: 'search' }],
+      },
+      { role: 'tool', id: 5, content: 'second result body', toolResults: 'call_2' },
+      { role: 'assistant', id: 6, content: 'Here are both results.' },
+    ]
+
+    hydrateToolCalls(msgs as unknown as Array<Record<string, unknown>>)
+
+    // Intermediate rows must be emptied so the renderer doesn't attach
+    // per-row "1 tool call" cards to each of them.
+    expect(msgs[1]!.toolCalls).toBeNull()
+    expect(msgs[3]!.toolCalls).toBeNull()
+
+    // Final row gets the combined 2-call array in declared order.
+    const final = msgs[5] as unknown as { toolCalls: Array<{ id: string }> }
+    expect(final.toolCalls).toHaveLength(2)
+    expect(final.toolCalls[0]!.id).toBe('call_1')
+    expect(final.toolCalls[1]!.id).toBe('call_2')
+  })
+
   it('falls back to wrench icon when the persisted entry has no icon hint', () => {
     // Older conversation rows predate JCLAW-170's icon enrichment at /messages
     // read-time (or the registry lost the tool). The hydrator must still

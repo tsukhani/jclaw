@@ -842,11 +842,10 @@ if (deepLinkConvoId) {
     // Check if the target conversation is in the current agent's list
     const found = convos.find(c => c.id === deepLinkConvoId)
     if (found) {
-      // It's in the current list — select it
-      selectedConvoId.value = deepLinkConvoId
-      messages.value = await $fetch<Message[]>(`/api/conversations/${deepLinkConvoId}/messages`) ?? []
-      initCollapsedState(messages.value)
-      scrollToBottom()
+      // It's in the current list — route through loadConversation so the
+      // JCLAW-170 tool-calls hydration runs; skipping it here was the cause
+      // of the "N × 1 tool call" split render on first page load.
+      await loadConversation(deepLinkConvoId)
       initializing.value = false
       stopDeepLink()
       return
