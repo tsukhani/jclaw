@@ -46,10 +46,7 @@ public class ApiOnboardingController extends Controller {
      *  never lower the recorded max. Validates step is in [1, TOTAL_STEPS]. */
     public static void recordProgress() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has("step")) {
-            badRequest();
-            return;
-        }
+        if (body == null || !body.has("step")) badRequest();
         int step;
         try {
             step = body.get("step").getAsInt();
@@ -58,15 +55,14 @@ public class ApiOnboardingController extends Controller {
             badRequest();
             return;
         }
-        if (step < 1 || step > TOTAL_STEPS) {
-            badRequest();
-            return;
-        }
+        if (step < 1 || step > TOTAL_STEPS) badRequest();
         var existing = ConfigService.getInt(CONFIG_KEY, 0);
         var newMax = Math.max(existing, step);
         if (newMax != existing) {
             ConfigService.set(CONFIG_KEY, String.valueOf(newMax));
-            EventLogger.info("onboarding", "Tour progressed to step %d (was %d)".formatted(newMax, existing));
+            EventLogger.info("onboarding",
+                    "Tour progressed to step %d".formatted(newMax),
+                    "previous=%d".formatted(existing));
         }
         renderJSON(gson.toJson(Map.of("maxStepReached", newMax)));
     }
