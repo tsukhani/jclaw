@@ -12,6 +12,8 @@ import type { Agent, LatencyHistogram, LatencyMetrics, LogEvent } from '~/types/
 // split) lives in ~/utils/latency-rows for unit-testability without
 // mounting the dashboard.
 import { buildLatencyRows, buildChartSeries, listAvailableChannels } from '~/utils/latency-rows'
+import { loadTourStatus, useGuidedTour } from '~/composables/useGuidedTour'
+import TourIntroDialog from '~/components/TourIntroDialog.vue'
 
 interface ChannelStatus {
   channelType: string
@@ -63,6 +65,35 @@ watchEffect(() => {
   if (available.some(c => c.key === selectedChannel.value)) return
   selectedChannel.value = available[0]!.key
 })
+
+// ──────────────────────── Guided tour intro dialog ───────────────────────
+// First-login auto-trigger. Threshold lives server-side; the session-skip
+// flag prevents re-popping after the user clicked Skip and is reloading or
+// navigating within the same session. Both gates must pass.
+const SESSION_SKIP_KEY = 'jclaw.tour.skippedThisSession'
+const showTourIntro = ref(false)
+const { start: startTour } = useGuidedTour()
+
+onMounted(async () => {
+  if (sessionStorage.getItem(SESSION_SKIP_KEY)) return
+  const status = await loadTourStatus()
+  if (status.shouldAutoShow) showTourIntro.value = true
+})
+
+function onTourStart() {
+  showTourIntro.value = false
+  startTour()
+}
+
+function onTourSkip() {
+  showTourIntro.value = false
+  try {
+    sessionStorage.setItem(SESSION_SKIP_KEY, '1')
+  }
+  catch {
+    // private mode
+  }
+}
 
 onMounted(() => {
   try {
@@ -153,6 +184,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
+    <TourIntroDialog
+      :open="showTourIntro"
+      @start="onTourStart"
+      @skip="onTourSkip"
+      @update:open="showTourIntro = $event"
+    />
     <h1 class="text-lg font-semibold text-fg-strong mb-6">
       Dashboard
     </h1>
