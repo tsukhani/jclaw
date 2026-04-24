@@ -350,14 +350,18 @@ export async function loadTourStatus(): Promise<TourStatus> {
 }
 
 export async function recordStepReached(step: number): Promise<void> {
-  // Serialize concurrent writes — if a POST is in flight, wait for it before
-  // issuing this caller's own POST. Click-spam on Next produces N sequential
-  // requests, not N parallel ones (or one coalesced one — see ADR below).
-  // Why not true single-flight? B/C piggybacking on A's promise would skip
-  // their own step values entirely, and only the backend's Math.max clamp
-  // would prevent regression. The user's max step would be undercounted in
-  // a rapid-click burst. Sequential is correct AND simple given the tour
-  // is at most 5 Next clicks; we accept the small extra round-trips.
+  // Best-effort serialization — if a POST is in flight, wait for it before
+  // issuing this caller's own POST. Three rapid calls produce one sequential
+  // POST followed by up to two parallel ones (after the first POST resolves,
+  // the .finally clears the slot and the queued awaiters race to assign
+  // their own $fetch). Correctness is guaranteed by the backend's Math.max
+  // clamp regardless of arrival order; this code only tries to avoid the
+  // worst case of N fully-parallel writes.
+  // Why not true single-flight (B/C piggyback on A's promise)? They would
+  // skip their own step values entirely, leaving the user's max step
+  // undercounted in a rapid-click burst (only the backend Math.max would
+  // catch it, and only if a later call ever lands). Best-effort here is
+  // correct AND simple given the tour is at most 5 Next clicks.
   if (inFlightRecord) {
     try {
       await inFlightRecord

@@ -958,10 +958,11 @@ async function handleResetTour() {
     navigateTo('/')
   }
   catch (err) {
-    // Surface the failure to the console for operator triage. Without this
-    // a "click does nothing" report is undebuggable from the dev panel
-    // because the throw is swallowed by the try/finally. If a toast helper
-    // ships later, swap this for a user-visible notification.
+    // TODO: when a toast helper ships, replace this console.error with a
+    // user-visible notification. For v1 the user-visible signal is "no
+    // navigation happened" (button flips back, page stays); the console
+    // entry is the operator's triage path because a silent throw inside
+    // try/finally is undebuggable from devtools alone.
     console.error('[settings] resetTourThreshold failed', err)
   }
   finally {

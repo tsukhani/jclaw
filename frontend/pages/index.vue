@@ -73,14 +73,27 @@ watchEffect(() => {
 const showTourIntro = ref(false)
 const { start: startTour } = useGuidedTour()
 
+function tourSessionSkipped(): boolean {
+  // Wrapped because some browsers (Safari Private historically) throw on
+  // sessionStorage access. Failing to "true" would suppress the tour
+  // forever in those environments, so failing to "false" (let the dialog
+  // through) is the correct fallback.
+  try {
+    return sessionStorage.getItem(SESSION_SKIP_KEY) !== null
+  }
+  catch {
+    return false
+  }
+}
+
 onMounted(async () => {
-  if (sessionStorage.getItem(SESSION_SKIP_KEY)) return
+  if (tourSessionSkipped()) return
   const status = await loadTourStatus()
   // Re-check after the await — defensive against any future writer that
   // sets the flag while the network round-trip is in flight. Today the
   // only writer is onTourSkip in this same component (which can't fire
   // before the dialog is visible), so this is belt-and-suspenders.
-  if (sessionStorage.getItem(SESSION_SKIP_KEY)) return
+  if (tourSessionSkipped()) return
   if (status.shouldAutoShow) showTourIntro.value = true
 })
 
