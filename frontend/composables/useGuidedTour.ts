@@ -302,3 +302,67 @@ export function installGuidedTourHooks() {
     if (tour.isActive.value) tour.showStepForCurrentPage()
   })
 }
+
+// ──────────────────────────── API helpers ────────────────────────────────
+//
+// The threshold state lives server-side in the Config DB — see
+// ApiOnboardingController. The in-progress cursor (jclaw.tour.state above)
+// stays in localStorage; only the "have they progressed past the auto-show
+// threshold?" rule needs cross-session persistence.
+
+export interface TourStatus {
+  maxStepReached: number
+  totalSteps: number
+  shouldAutoShow: boolean
+}
+
+let inFlightRecord: Promise<unknown> | null = null
+
+export async function loadTourStatus(): Promise<TourStatus> {
+  try {
+    return await $fetch<TourStatus>('/api/onboarding/tour-status')
+  }
+  catch {
+    // Fail closed — never pop a dialog over a broken state. Worst case,
+    // the user opens the tour from the sidebar manually.
+    return { maxStepReached: 0, totalSteps: steps.length, shouldAutoShow: false }
+  }
+}
+
+export async function recordStepReached(step: number): Promise<void> {
+  // Single-flight: if a write is already pending, wait for it before issuing
+  // the next one. Click-spam on Next won't stack up POSTs, and out-of-order
+  // writes are still safe because the backend clamps to Math.max.
+  if (inFlightRecord) {
+    try {
+      await inFlightRecord
+    }
+    catch {
+      // ignore — we're issuing our own
+    }
+  }
+  inFlightRecord = $fetch('/api/onboarding/tour-progress', {
+    method: 'POST',
+    body: { step },
+  }).finally(() => {
+    inFlightRecord = null
+  })
+  try {
+    await inFlightRecord
+  }
+  catch {
+    // Worst case: user retakes the tour next login. Don't block UI.
+  }
+}
+
+export async function resetTourThreshold(): Promise<void> {
+  await $fetch('/api/onboarding/tour-reset', { method: 'POST' })
+  if (!import.meta.server) {
+    try {
+      localStorage.removeItem(STORAGE_KEY)
+    }
+    catch {
+      // ignore
+    }
+  }
+}
