@@ -249,14 +249,18 @@ export function useGuidedTour() {
     destroy()
     const next = state.value.step + 1
     const nextStep = steps[next]
+    if (!nextStep) {
+      // No next step — complete() handles the final-step writeback. Skip the
+      // record here to avoid POSTing an out-of-range step value (which the
+      // backend would reject with 400) right before complete() POSTs the
+      // correct steps.length value.
+      complete()
+      return
+    }
     // Record reaching the step we're about to land on (1-based for the API).
     // Fire-and-forget: don't block UI on the network round-trip; the backend
     // clamps to Math.max so duplicates / out-of-order writes are safe.
     void recordStepReached(next + 1)
-    if (!nextStep) {
-      complete()
-      return
-    }
     state.value = { step: next, active: true }
     saveState(state.value)
     if (route.path === nextStep.path) showStepForCurrentPage()
