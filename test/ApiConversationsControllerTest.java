@@ -3,10 +3,14 @@ import play.test.*;
 import play.db.jpa.JPA;
 import models.Agent;
 import models.Conversation;
+import models.Message;
+import models.MessageRole;
 import models.SessionCompaction;
 import services.ConversationService;
+import services.Tx;
 
 import java.time.Instant;
+import java.util.function.Supplier;
 
 /**
  * Functional HTTP tests for ApiConversationsController CRUD and query endpoints.
@@ -185,6 +189,92 @@ public class ApiConversationsControllerTest extends FunctionalTest {
         assertIsOk(response);
         assertContentType("application/json", response);
         assertTrue(getContent(response).startsWith("["));
+    }
+
+    /**
+     * JCLAW-170: tool-call rows persist as one assistant row per call (the
+     * {@code toolCalls} column holds a single ToolCall JSON object, not an
+     * array) followed by a TOOL-role row keyed by the same id. The
+     * /messages endpoint must normalize the single-object shape to an array
+     * and stamp the current registry's {@link agents.ToolRegistry#iconFor}
+     * hint onto each entry — otherwise the chat UI's hydration fold treats
+     * the row as empty and the tool-calls block vanishes on reload.
+     */
+    @Test
+    public void getMessagesNormalizesPersistedToolCallsToArrayWithIcons() {
+        login();
+        var cid = commitInFreshTx(() -> {
+            var agent = new Agent();
+            agent.name = "tool-call-test";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+            var conv = ConversationService.create(agent, "web", "tester");
+            // User turn.
+            ConversationService.appendUserMessage(conv, "do a search please");
+            // Intermediate assistant row — the production code persists ONE
+            // ToolCall per row via gson.toJson(tc), not an array.
+            var asst = new Message();
+            asst.conversation = conv;
+            asst.role = MessageRole.ASSISTANT.value;
+            asst.content = null;
+            asst.toolCalls = "{\"id\":\"call_a\",\"type\":\"function\","
+                    + "\"function\":{\"name\":\"web_search\","
+                    + "\"arguments\":\"{\\\"query\\\":\\\"jclaw\\\"}\"}}";
+            asst.save();
+            // Matching tool-row result with a structured payload.
+            ConversationService.appendToolResult(conv, "call_a", "Found 1 result...",
+                    "{\"provider\":\"Exa\",\"results\":[{\"title\":\"JClaw\","
+                    + "\"url\":\"https://example.com\",\"snippet\":\"hi\","
+                    + "\"faviconUrl\":\"https://icons.duckduckgo.com/ip3/example.com.ico\"}]}");
+            // Final assistant-with-content row.
+            ConversationService.appendAssistantMessage(conv, "Here is what I found.", null);
+            return conv.id;
+        });
+
+        var response = GET("/api/conversations/" + cid + "/messages");
+        assertIsOk(response);
+        var body = getContent(response);
+
+        // The persisted single-object shape must be promoted to an array.
+        // Every entry carries an icon sibling — value depends on whether
+        // WebSearchTool is published to the registry in the test harness
+        // ("search" if yes, "wrench" fallback if no). The critical
+        // invariant for the UI hydrator is that the field exists on every
+        // call so historical rows never surface without an icon.
+        assertTrue(body.contains("\"toolCalls\":[{"),
+                "toolCalls must serialize as an array, got: " + body);
+        assertTrue(body.contains("\"name\":\"web_search\"") && body.contains("\"icon\":\""),
+                "every tool call must carry an icon field, got: " + body);
+        // Structured payload rides as a real JSON object (not a nested string).
+        assertTrue(body.contains("\"toolResultStructured\":{\"provider\":\"Exa\""),
+                "structured payload must land as object, got: " + body);
+        assertTrue(body.contains("\"faviconUrl\":\"https://icons.duckduckgo.com"),
+                "favicon URL must roundtrip, got: " + body);
+    }
+
+    private static <T> T commitInFreshTx(Supplier<T> block) {
+        // FunctionalTest's carrier thread runs inside an ambient JPA tx that
+        // doesn't commit until the test returns, so inline Tx.run writes are
+        // invisible to the in-process HTTP request handler. Spawn a virtual
+        // thread to open a fresh tx that commits before the GET fires.
+        var ref = new java.util.concurrent.atomic.AtomicReference<T>();
+        var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var t = Thread.ofVirtual().start(() -> {
+            try {
+                ref.set(Tx.run(block::get));
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+        if (err.get() != null) throw new RuntimeException(err.get());
+        return ref.get();
     }
 
     @Test

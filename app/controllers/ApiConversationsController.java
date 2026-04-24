@@ -299,21 +299,36 @@ public class ApiConversationsController extends Controller {
 
     /**
      * JCLAW-170: stamp the current registry's {@link agents.ToolRegistry#iconFor}
-     * hint onto each persisted tool-call entry on the way out of /messages.
-     * The persisted JSON is the raw OpenAI-shape {@code [{id, type, function:
-     * {name, arguments}}]}; we leave those fields untouched and add an {@code
-     * icon} sibling so the chat UI can render historical rows with the same
-     * icon the live stream uses — no client-side tool→icon table needed.
-     * Returns {@code null} when the input is null so the UI's guard on missing
-     * tool-call columns still works.
+     * hint onto each persisted tool-call entry on the way out of /messages, and
+     * normalize the shape to a JSON array.
+     *
+     * <p>The persisted column holds a single ToolCall object per assistant row
+     * ({@code gson.toJson(tc)} in {@code AgentRunner.executeToolsParallel})
+     * rather than a proper array — each tool invocation gets its own row so
+     * the persisted shape is {@code {id, type, function: {name, arguments}}}
+     * for one call or, in theory, an array for callers that batch. This
+     * helper accepts either shape, adds an {@code icon} sibling to each
+     * call object, and always returns an array so the frontend's hydrator
+     * can iterate uniformly. Returns {@code null} on null/blank input or
+     * malformed JSON so the UI's guard on missing tool-call columns still
+     * works.
      */
     private static com.google.gson.JsonArray enrichToolCallsWithIcons(String toolCallsJson,
                                                                        com.google.gson.JsonParser parser) {
         if (toolCallsJson == null || toolCallsJson.isBlank()) return null;
         try {
             var parsed = parser.parse(toolCallsJson);
-            if (!parsed.isJsonArray()) return null;
-            var arr = parsed.getAsJsonArray();
+            com.google.gson.JsonArray arr;
+            if (parsed.isJsonArray()) {
+                arr = parsed.getAsJsonArray();
+            }
+            else if (parsed.isJsonObject()) {
+                arr = new com.google.gson.JsonArray();
+                arr.add(parsed.getAsJsonObject());
+            }
+            else {
+                return null;
+            }
             for (var el : arr) {
                 if (!el.isJsonObject()) continue;
                 var obj = el.getAsJsonObject();
