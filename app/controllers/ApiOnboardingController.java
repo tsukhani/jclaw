@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
+import services.EventLogger;
 
 import java.util.Map;
 
@@ -38,5 +39,35 @@ public class ApiOnboardingController extends Controller {
                 "maxStepReached", maxStep,
                 "totalSteps", TOTAL_STEPS,
                 "shouldAutoShow", maxStep < AUTO_SHOW_THRESHOLD)));
+    }
+
+    /** POST /api/onboarding/tour-progress — body {@code {"step":N}}.
+     *  Upserts {@code Math.max(existing, step)} so out-of-order writes can
+     *  never lower the recorded max. Validates step is in [1, TOTAL_STEPS]. */
+    public static void recordProgress() {
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null || !body.has("step")) {
+            badRequest();
+            return;
+        }
+        int step;
+        try {
+            step = body.get("step").getAsInt();
+        }
+        catch (Exception _) {
+            badRequest();
+            return;
+        }
+        if (step < 1 || step > TOTAL_STEPS) {
+            badRequest();
+            return;
+        }
+        var existing = ConfigService.getInt(CONFIG_KEY, 0);
+        var newMax = Math.max(existing, step);
+        if (newMax != existing) {
+            ConfigService.set(CONFIG_KEY, String.valueOf(newMax));
+            EventLogger.info("onboarding", "Tour progressed to step %d (was %d)".formatted(newMax, existing));
+        }
+        renderJSON(gson.toJson(Map.of("maxStepReached", newMax)));
     }
 }

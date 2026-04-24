@@ -85,4 +85,54 @@ public class ApiOnboardingControllerTest extends FunctionalTest {
         var response = GET("/api/onboarding/tour-status");
         assertEquals(401, response.status.intValue());
     }
+
+    @Test
+    public void recordProgressUpsertsValue() {
+        var response = POST("/api/onboarding/tour-progress",
+                "application/json", "{\"step\":3}");
+        assertIsOk(response);
+        var body = getContent(response);
+        assertTrue(body.contains("\"maxStepReached\":3"), "got: " + body);
+
+        // Status now reflects the new max
+        var statusResponse = GET("/api/onboarding/tour-status");
+        assertTrue(getContent(statusResponse).contains("\"maxStepReached\":3"));
+    }
+
+    @Test
+    public void recordProgressClampsToMax() {
+        seedTourMaxStep(3);
+        var response = POST("/api/onboarding/tour-progress",
+                "application/json", "{\"step\":1}");
+        assertIsOk(response);
+        var body = getContent(response);
+        // max stays at 3 — earlier writes can't lower the recorded high-water mark
+        assertTrue(body.contains("\"maxStepReached\":3"), "got: " + body);
+    }
+
+    @Test
+    public void recordProgressRejectsOutOfRange() {
+        var low = POST("/api/onboarding/tour-progress",
+                "application/json", "{\"step\":0}");
+        assertEquals(400, low.status.intValue());
+
+        var high = POST("/api/onboarding/tour-progress",
+                "application/json", "{\"step\":99}");
+        assertEquals(400, high.status.intValue());
+    }
+
+    @Test
+    public void recordProgressRejectsMissingStep() {
+        var response = POST("/api/onboarding/tour-progress",
+                "application/json", "{}");
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    public void recordProgressRequiresAuth() {
+        POST("/api/auth/logout", "application/json", "{}");
+        var response = POST("/api/onboarding/tour-progress",
+                "application/json", "{\"step\":2}");
+        assertEquals(401, response.status.intValue());
+    }
 }
