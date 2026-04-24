@@ -163,6 +163,78 @@
   border-bottom-color: var(--surface-elevated);
 }
 
+/* Intro dialog — lives in the shadcn Dialog tree (reka-ui portal), not driver.js,
+   so it shares visual language with .jclaw-tour via these parallel rules rather
+   than the same class. Keep values in sync with .jclaw-tour above. */
+.jclaw-tour-intro {
+  background-color: var(--surface-elevated);
+  color: var(--fg-primary);
+  border: 1px solid hsl(0 0% 50% / 40%);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgb(0, 0, 0, 35%);
+  padding: 42px 18px 14px;
+}
+
+.jclaw-tour-intro [data-slot="dialog-title"] {
+  color: var(--fg-strong);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.jclaw-tour-intro [data-slot="dialog-description"] {
+  color: var(--fg-primary);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.jclaw-tour-intro-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 1px solid hsl(0 0% 50% / 40%);
+  border-radius: 999px;
+  width: 22px;
+  height: 22px;
+  line-height: 18px;
+  padding: 0;
+  font-size: 14px;
+  text-align: center;
+  cursor: pointer;
+  transition: color 120ms, border-color 120ms;
+}
+
+.jclaw-tour-intro-close:hover {
+  color: var(--fg-strong);
+  border-color: var(--fg-muted);
+}
+
+.jclaw-tour-intro .jclaw-tour-intro-primary {
+  background-color: hsl(160 64% 32%); /* emerald-700 */
+  color: #fff;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background-color 120ms;
+}
+
+.jclaw-tour-intro .jclaw-tour-intro-primary:hover {
+  background-color: hsl(160 64% 28%);
+}
+
+.dark .jclaw-tour-intro .jclaw-tour-intro-primary {
+  background-color: hsl(152 69% 42%); /* emerald-500 */
+  color: hsl(160 84% 10%);
+}
+
+.dark .jclaw-tour-intro .jclaw-tour-intro-primary:hover {
+  background-color: hsl(152 69% 52%); /* emerald-400 */
+}
+
 /* Highlighted element stage — subtle emerald glow instead of driver's default
    white outline, which clashes with the sidebar accents. */
 .driver-active-element {

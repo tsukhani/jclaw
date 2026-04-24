@@ -20,7 +20,7 @@ const emit = defineEmits<{
 
 function onOpenChange(value: boolean) {
   emit('update:open', value)
-  // Closing via X / Escape / overlay click counts as Skip — same outcome:
+  // Closing via Escape / overlay click counts as Skip — same outcome:
   // the dialog goes away for this session and the threshold isn't advanced.
   if (!value) emit('skip')
 }
@@ -39,7 +39,18 @@ function onSkip() {
     :open="open"
     @update:open="onOpenChange"
   >
-    <DialogContent class="max-w-md">
+    <DialogContent
+      class="jclaw-tour-intro max-w-md"
+      :show-close-button="false"
+    >
+      <button
+        type="button"
+        class="jclaw-tour-intro-close"
+        aria-label="Close"
+        @click="onSkip"
+      >
+        ×
+      </button>
       <DialogHeader>
         <DialogTitle>Welcome to JClaw</DialogTitle>
         <DialogDescription class="pt-2">
@@ -56,7 +67,10 @@ function onSkip() {
         >
           Skip for now
         </Button>
-        <Button @click="onStart">
+        <Button
+          class="jclaw-tour-intro-primary"
+          @click="onStart"
+        >
           Start tour
         </Button>
       </DialogFooter>
