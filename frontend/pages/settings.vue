@@ -19,6 +19,7 @@ import type {
   DiscoverModelsResponse,
   ProviderModelDef,
 } from '~/types/api'
+import { resetTourThreshold, SESSION_SKIP_KEY } from '~/composables/useGuidedTour'
 
 const { data: configData, refresh } = await useFetch<ConfigResponse>('/api/config')
 const saving = ref(false)
@@ -69,6 +70,7 @@ const MANAGED_PREFIXES = [
   'ollama.', // Ollama provider-specific settings — Settings
   'upload.', // Per-kind attachment size caps (JCLAW-131) — Settings
   'auth.', // Admin password hash — Settings (Password section, not rendered as a row)
+  'onboarding.', // First-login guided tour threshold — Settings (Guided Tour section)
 ]
 
 function isManagedKey(key: string): boolean {
@@ -934,6 +936,29 @@ async function handleResetPassword() {
   resettingPassword.value = false
   if (success) {
     navigateTo('/setup-password')
+  }
+}
+
+// ──────────────────────────── Guided tour reset ──────────────────────────
+const resettingTour = ref(false)
+
+async function handleResetTour() {
+  const ok = await confirm({
+    title: 'Reset guided tour',
+    message: 'This wipes the recorded tour progress so the welcome dialog and '
+      + 'walkthrough appear again on your next dashboard visit.',
+    confirmText: 'Reset',
+    variant: 'danger',
+  })
+  if (!ok) return
+  resettingTour.value = true
+  try {
+    await resetTourThreshold()
+    sessionStorage.removeItem(SESSION_SKIP_KEY)
+    navigateTo('/')
+  }
+  finally {
+    resettingTour.value = false
   }
 }
 </script>
@@ -2882,6 +2907,37 @@ async function handleResetPassword() {
             @click="handleResetPassword"
           >
             {{ resettingPassword ? 'Resetting…' : 'Reset' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Guided Tour reset -->
+    <div class="mb-6 space-y-4">
+      <h2 class="text-sm font-medium text-fg-muted">
+        Guided Tour
+      </h2>
+      <p class="text-xs text-fg-muted">
+        The tour appears on your first dashboard visit and stops auto-appearing once you've
+        advanced past the four required setup steps. Reset to replay the welcome dialog and
+        walkthrough from the top.
+      </p>
+      <div class="bg-surface-elevated border border-border">
+        <div class="px-4 py-2.5 flex items-center justify-between gap-4">
+          <div class="min-w-0">
+            <span class="text-sm font-medium text-fg-strong">Reset guided tour</span>
+            <div class="text-xs text-fg-muted mt-0.5">
+              Clear the recorded tour progress and return to the dashboard.
+            </div>
+          </div>
+          <button
+            :disabled="resettingTour"
+            class="shrink-0 px-3 py-1.5 text-xs font-medium text-white
+                   bg-red-600 hover:bg-red-700 disabled:bg-red-600/40
+                   disabled:cursor-not-allowed rounded-full transition-colors"
+            @click="handleResetTour"
+          >
+            {{ resettingTour ? 'Resetting…' : 'Reset' }}
           </button>
         </div>
       </div>

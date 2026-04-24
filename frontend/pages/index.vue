@@ -12,7 +12,7 @@ import type { Agent, LatencyHistogram, LatencyMetrics, LogEvent } from '~/types/
 // split) lives in ~/utils/latency-rows for unit-testability without
 // mounting the dashboard.
 import { buildLatencyRows, buildChartSeries, listAvailableChannels } from '~/utils/latency-rows'
-import { loadTourStatus, useGuidedTour } from '~/composables/useGuidedTour'
+import { loadTourStatus, SESSION_SKIP_KEY, useGuidedTour } from '~/composables/useGuidedTour'
 import TourIntroDialog from '~/components/TourIntroDialog.vue'
 
 interface ChannelStatus {
@@ -70,7 +70,6 @@ watchEffect(() => {
 // First-login auto-trigger. Threshold lives server-side; the session-skip
 // flag prevents re-popping after the user clicked Skip and is reloading or
 // navigating within the same session. Both gates must pass.
-const SESSION_SKIP_KEY = 'jclaw.tour.skippedThisSession'
 const showTourIntro = ref(false)
 const { start: startTour } = useGuidedTour()
 

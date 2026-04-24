@@ -2,6 +2,14 @@ import { driver, type Driver } from 'driver.js'
 
 const STORAGE_KEY = 'jclaw.tour.state'
 
+/**
+ * sessionStorage key for "user clicked Skip on the intro dialog this
+ * session." Suppresses the dialog until the next browser session, but
+ * persistent suppression once the user reaches the threshold lives in
+ * the Config DB (see ApiOnboardingController).
+ */
+export const SESSION_SKIP_KEY = 'jclaw.tour.skippedThisSession'
+
 interface TourState {
   step: number
   active: boolean
