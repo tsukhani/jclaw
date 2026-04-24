@@ -1,15 +1,5 @@
 import { driver, type Driver } from 'driver.js'
 
-const STORAGE_KEY = 'jclaw.tour.state'
-
-/**
- * sessionStorage key for "user clicked Skip on the intro dialog this
- * session." Suppresses the dialog until the next browser session, but
- * persistent suppression once the user reaches the threshold lives in
- * the Config DB (see ApiOnboardingController).
- */
-export const SESSION_SKIP_KEY = 'jclaw.tour.skippedThisSession'
-
 interface TourState {
   step: number
   active: boolean
@@ -18,7 +8,7 @@ interface TourState {
 interface TourStep {
   path: string
   selector: string
-  /** Action label — the "Step N of M — " prefix is added at render time. */
+  /** Step heading shown in the popover header. */
   title: string
   description: string
   /**
@@ -35,17 +25,14 @@ interface TourStep {
    */
   hideNextButton?: boolean
   /**
-   * Override the Next/Done button label for this step. Default is "Next" for
-   * intermediate steps and "Finish" for the final step. Use to signal optional
-   * continuation (e.g. "Continue (optional) →") on a step that's the last
-   * *required* step but has follow-on optional steps.
+   * Override the Next/Done button label for this step. Default is "Next →"
+   * for intermediate steps and "Finish" for the final step.
    */
   nextBtnText?: string
   /**
    * Show an explicit "Finish" button (rendered in driver.js's Previous slot)
    * that ends the tour. Use on optional-junction steps where the user may
-   * reasonably choose to stop rather than continue — the X close button is
-   * too subtle to carry that decision.
+   * reasonably choose to stop rather than continue.
    */
   showFinishButton?: boolean
 }
@@ -94,32 +81,6 @@ const steps: TourStep[] = [
 let driverInstance: Driver | null = null
 let advanceObserver: MutationObserver | null = null
 
-function loadState(): TourState {
-  if (import.meta.server) return { step: 0, active: false }
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { step: 0, active: false }
-    const parsed = JSON.parse(raw) as Partial<TourState>
-    return {
-      step: typeof parsed.step === 'number' && parsed.step >= 0 && parsed.step < steps.length ? parsed.step : 0,
-      active: !!parsed.active,
-    }
-  }
-  catch {
-    return { step: 0, active: false }
-  }
-}
-
-function saveState(state: TourState) {
-  if (import.meta.server) return
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  }
-  catch {
-    // localStorage full or disabled — tour becomes non-resumable on reload
-  }
-}
-
 /**
  * Poll the DOM for an element matching the selector. driver.js fails noisily
  * if the element isn't rendered yet; router.push() resolves before the new
@@ -142,7 +103,14 @@ export function useGuidedTour() {
   const router = useRouter()
   const route = useRoute()
 
+  // In-memory only. Reloading the page abandons the tour by design —
+  // the user opts back in via the "Guided Tour" sidebar entry.
   const state = useState<TourState>('jclaw-guided-tour', () => ({ step: 0, active: false }))
+
+  // Intro dialog open flag. Shared via useState so the sidebar button
+  // (default layout) and the first-login auto-show (also default layout,
+  // on mount) can both toggle it, and so components can v-bind to it.
+  const introOpen = useState<boolean>('jclaw-guided-tour-intro', () => false)
 
   function destroy() {
     if (driverInstance) {
@@ -184,52 +152,90 @@ export function useGuidedTour() {
     }
 
     const isLast = state.value.step === steps.length - 1
-    const buttons: ('next' | 'close')[] = ['close']
-    if (!step.hideNextButton) buttons.push('next')
+    const isFirst = state.value.step === 0
+    // showButtons intentionally omits 'close': the X in the popover header
+    // has been removed. The only way out of the walkthrough mid-flight is
+    // to reload the page (which clears the in-memory state and returns the
+    // user to the Guided Tour sidebar entry for a fresh start) or to reach
+    // the final step and press Finish.
+    const buttons: ('next')[] = ['next']
     // Single-step popovers render doneBtnText (not nextBtnText) by default, so
-    // set both to the same computed value.
-    const buttonText = step.nextBtnText ?? (isLast ? 'Finish' : 'Next')
+    // set both to the same computed value. Arrow suffix on "Next" signals the
+    // forward direction; "Finish" stays bare since it's terminal, not a step.
+    const buttonText = step.nextBtnText ?? (isLast ? 'Finish' : 'Next →')
     driverInstance = driver({
       popoverClass: 'jclaw-tour',
       overlayOpacity: 0.55,
-      allowClose: true,
+      allowClose: false,
       showButtons: buttons,
       nextBtnText: buttonText,
       doneBtnText: buttonText,
-      onCloseClick: () => {
-        end()
-      },
       onNextClick: () => {
         if (isLast) complete()
         else advance()
       },
-      // Custom Finish button: driver.js disables the Previous slot on single-
-      // step popovers (which ours always are), so we inject a real <button>
-      // instead of hijacking that slot. Tag the popover with a modifier class
-      // so CSS can equalize button widths when both are present.
+      // Footer customizations: driver.js gives us an empty-ish footer with a
+      // Next button. We inject (in left-to-right order):
+      //   1. A progress counter "N of M" in the leading slot.
+      //   2. A Previous button on steps beyond the first, unless the step
+      //      already reserves the secondary slot for Finish (optional-junction
+      //      steps treat early-exit as the meaningful backward action).
+      //   3. A Finish button when the step opts in via showFinishButton.
+      // All injection paths guard on popover.footerButtons existing — driver.js
+      // sometimes skips footer rendering entirely on hidden-Next steps.
       onPopoverRender: (popover) => {
-        if (!step.showFinishButton || !popover.footerButtons) return
-        popover.wrapper.classList.add('jclaw-tour-paired')
-        const finishBtn = document.createElement('button')
-        finishBtn.type = 'button'
-        finishBtn.textContent = 'Finish'
-        finishBtn.className = 'driver-popover-prev-btn'
-        finishBtn.addEventListener('click', (e) => {
-          e.preventDefault()
-          e.stopPropagation()
-          complete()
-        })
-        if (popover.nextButton) {
-          popover.footerButtons.insertBefore(finishBtn, popover.nextButton)
+        if (!popover.footerButtons) return
+
+        if (step.hideNextButton && popover.nextButton) {
+          popover.nextButton.style.display = 'none'
         }
-        else {
-          popover.footerButtons.appendChild(finishBtn)
+
+        const progress = document.createElement('span')
+        progress.className = 'jclaw-tour-progress'
+        progress.textContent = `${state.value.step + 1} of ${steps.length}`
+        popover.footerButtons.insertBefore(progress, popover.footerButtons.firstChild)
+
+        if (!isFirst && !step.showFinishButton) {
+          const prevBtn = document.createElement('button')
+          prevBtn.type = 'button'
+          prevBtn.textContent = '← Previous'
+          prevBtn.className = 'jclaw-tour-back-btn'
+          prevBtn.addEventListener('click', (e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            back()
+          })
+          if (popover.nextButton) {
+            popover.footerButtons.insertBefore(prevBtn, popover.nextButton)
+          }
+          else {
+            popover.footerButtons.appendChild(prevBtn)
+          }
+        }
+
+        if (step.showFinishButton) {
+          popover.wrapper.classList.add('jclaw-tour-paired')
+          const finishBtn = document.createElement('button')
+          finishBtn.type = 'button'
+          finishBtn.textContent = 'Finish'
+          finishBtn.className = 'driver-popover-prev-btn'
+          finishBtn.addEventListener('click', (e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            complete()
+          })
+          if (popover.nextButton) {
+            popover.footerButtons.insertBefore(finishBtn, popover.nextButton)
+          }
+          else {
+            popover.footerButtons.appendChild(finishBtn)
+          }
         }
       },
       steps: [{
         element: step.selector,
         popover: {
-          title: `Step ${state.value.step + 1} of ${steps.length} — ${step.title}`,
+          title: step.title,
           description: step.description,
           side: 'right',
           align: 'start',
@@ -244,13 +250,34 @@ export function useGuidedTour() {
     if (step.advanceOnAppearOf) installAdvanceObserver(step.advanceOnAppearOf)
   }
 
-  function start() {
+  /** Open the intro dialog. Always opens regardless of backend flag — the
+   *  flag governs auto-show on first login only. Manual invocation from the
+   *  sidebar should always succeed. */
+  function showIntro() {
+    introOpen.value = true
+  }
+
+  /** User clicked Start on the intro dialog → close dialog, kick off the
+   *  walkthrough, and mark the tour as seen so it doesn't auto-show again. */
+  function confirmStart() {
+    introOpen.value = false
+    // Flip the backend "seen" flag so the next login doesn't auto-show.
+    // Fire-and-forget: if the POST fails, the worst case is the user sees
+    // the intro once more; the backend clamps with Math.max so it's
+    // idempotent.
+    void recordStepReached(1)
     const first = steps[0]
     if (!first) return
     state.value = { step: 0, active: true }
-    saveState(state.value)
     if (route.path === first.path) showStepForCurrentPage()
     else router.push(first.path)
+  }
+
+  /** User dismissed the intro dialog without starting → close dialog and
+   *  mark the tour as seen. They can re-open via the sidebar at any time. */
+  function dismissIntro() {
+    introOpen.value = false
+    void recordStepReached(1)
   }
 
   function advance() {
@@ -270,15 +297,26 @@ export function useGuidedTour() {
     // clamps to Math.max so duplicates / out-of-order writes are safe.
     void recordStepReached(next + 1)
     state.value = { step: next, active: true }
-    saveState(state.value)
     if (route.path === nextStep.path) showStepForCurrentPage()
     else router.push(nextStep.path)
+  }
+
+  function back() {
+    destroy()
+    const prev = state.value.step - 1
+    const prevStep = steps[prev]
+    if (!prevStep) return
+    // No recordStepReached on backward navigation: maxStepReached is a
+    // high-water mark and the backend already clamps with Math.max, so
+    // moving backward through the tour must not lower it.
+    state.value = { step: prev, active: true }
+    if (route.path === prevStep.path) showStepForCurrentPage()
+    else router.push(prevStep.path)
   }
 
   function end() {
     destroy()
     state.value = { step: 0, active: false }
-    saveState(state.value)
   }
 
   function complete() {
@@ -286,11 +324,13 @@ export function useGuidedTour() {
     // Reaching the final step = recording total step count
     void recordStepReached(steps.length)
     state.value = { step: 0, active: false }
-    saveState(state.value)
   }
 
   return {
-    start,
+    showIntro,
+    confirmStart,
+    dismissIntro,
+    introOpen,
     end,
     isActive: computed(() => state.value.active),
     state,
@@ -299,22 +339,15 @@ export function useGuidedTour() {
 }
 
 /**
- * Install the route + mount hooks that drive the tour from wherever this is
- * called. Intended to be called once from the root layout. Keeping the hook
- * wiring in a separate function lets pages consume `useGuidedTour()` for its
+ * Install the route watch that keeps the popover in sync with the current
+ * page. Intended to be called once from the root layout. Keeping this
+ * separate from useGuidedTour() lets pages consume the composable for its
  * state without each one registering duplicate watchers.
  */
 export function installGuidedTourHooks() {
   if (import.meta.server) return
   const tour = useGuidedTour()
   const route = useRoute()
-
-  // Hydrate from localStorage on first mount
-  onMounted(() => {
-    const persisted = loadState()
-    tour.state.value = persisted
-    if (persisted.active) tour.showStepForCurrentPage()
-  })
 
   watch(() => route.path, () => {
     if (tour.isActive.value) tour.showStepForCurrentPage()
@@ -323,10 +356,9 @@ export function installGuidedTourHooks() {
 
 // ──────────────────────────── API helpers ────────────────────────────────
 //
-// The threshold state lives server-side in the Config DB — see
-// ApiOnboardingController. The in-progress cursor (jclaw.tour.state above)
-// stays in localStorage; only the "have they progressed past the auto-show
-// threshold?" rule needs cross-session persistence.
+// The "has the user ever seen/resolved the intro dialog?" flag lives
+// server-side in the Config DB — see ApiOnboardingController. maxStepReached
+// doubles as the flag: 0 means never seen, anything ≥ 1 means seen.
 
 export interface TourStatus {
   maxStepReached: number
@@ -392,16 +424,4 @@ export async function recordStepReached(step: number): Promise<void> {
  */
 export function __resetInFlightRecord() {
   inFlightRecord = null
-}
-
-export async function resetTourThreshold(): Promise<void> {
-  await $fetch('/api/onboarding/tour-reset', { method: 'POST' })
-  if (!import.meta.server) {
-    try {
-      localStorage.removeItem(STORAGE_KEY)
-    }
-    catch {
-      // ignore
-    }
-  }
 }

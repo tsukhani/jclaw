@@ -76,7 +76,7 @@ const passwordId = useId()
     >
       <div class="flex flex-col items-center mb-6">
         <img
-          src="/mascot-waving.png"
+          src="/clawdia-waving.webp"
           alt="JClaw"
           width="119"
           height="128"

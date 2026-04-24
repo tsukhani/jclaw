@@ -11,14 +11,28 @@
 .driver-popover.jclaw-tour {
   background-color: var(--surface-elevated);
   color: var(--fg-primary);
-  border: 1px solid hsl(0 0% 50% / 40%);
+  border: 0;
   border-radius: 12px;
-  box-shadow: 0 12px 32px rgb(0, 0, 0, 35%);
+  /* driver.js applies a default box-shadow that would stack on top of
+     our filter-based outline+depth. Reset it so only our filter
+     renders. */
+  box-shadow: none;
 
-  /* Top padding is larger than the others so the close button (absolute-
-     positioned at top:10, height:22) sits in its own header strip above the
-     title row — prevents long titles from colliding with the close button. */
-  padding: 42px 18px 14px;
+  /* Callout outline + depth shadow both applied via filter so they trace
+     the popover + arrow composite silhouette. A plain `border` stops at
+     the popover's rectangle and leaves the arrow unbordered; box-shadow
+     likewise ignores the arrow. Four 1px drop-shadows in the cardinal
+     directions stroke a continuous 1px outline around the whole shape
+     (including the two slanted sides of the arrow tail), and the final
+     long-blur shadow handles depth. */
+  filter:
+    drop-shadow(0 -1px 0 hsl(0 0% 50% / 40%))
+    drop-shadow(0 1px 0 hsl(0 0% 50% / 40%))
+    drop-shadow(-1px 0 0 hsl(0 0% 50% / 40%))
+    drop-shadow(1px 0 0 hsl(0 0% 50% / 40%))
+    drop-shadow(0 12px 32px rgb(0 0 0 / 35%));
+
+  padding: 18px 18px 14px;
   max-width: 360px;
 }
 
@@ -34,7 +48,10 @@
   color: var(--fg-primary);
   font-size: 13.5px;
   line-height: 1.55;
-  margin-bottom: 14px;
+  /* Gap to the footer (counter + buttons). Bumped from 14px so the body
+     text doesn't crowd the action row — the reference callout spec keeps
+     about 1.5 line-heights of air between prose and controls. */
+  margin-bottom: 22px;
 }
 
 .driver-popover.jclaw-tour .driver-popover-description strong {
@@ -48,33 +65,32 @@
 
 .driver-popover.jclaw-tour .driver-popover-footer {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
 }
 
-.driver-popover.jclaw-tour .driver-popover-close-btn {
-  /* Reposition the X from top-right corner and restyle to match sidebar
-     collapse button pattern — subtle border pill, transparent bg. */
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  color: var(--fg-muted);
-  background: transparent;
-  border: 1px solid hsl(0 0% 50% / 40%);
-  border-radius: 999px;
-  width: 22px;
-  height: 22px;
-  line-height: 18px;
-  padding: 0;
-  font-size: 14px;
-  text-align: center;
-  transition: color 120ms, border-color 120ms;
+/* Driver.js renders its own "N of N" progress span and a stock, disabled
+   Previous button inside every popover footer. We supply both from
+   onPopoverRender with correct content and styling, so suppress the stock
+   versions to avoid duplicates. The Finish button (also injected as
+   .driver-popover-prev-btn) never carries .driver-popover-btn-disabled, so
+   it remains visible. */
+.driver-popover.jclaw-tour .driver-popover-progress-text,
+.driver-popover.jclaw-tour .driver-popover-prev-btn.driver-popover-btn-disabled {
+  display: none;
 }
 
-.driver-popover.jclaw-tour .driver-popover-close-btn:hover {
-  color: var(--fg-strong);
-  border-color: var(--fg-muted);
+/* Step counter sits in the leading slot of the footer. margin-right:auto
+   pushes the button group to the trailing edge without needing a separate
+   flex container — the counter absorbs all the free space between itself
+   and the buttons. */
+.driver-popover.jclaw-tour .jclaw-tour-progress {
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--fg-muted);
+  letter-spacing: 0.01em;
 }
 
 /* Primary Next/Continue button — solid emerald fill. */
@@ -104,10 +120,16 @@
   background-color: hsl(152 69% 52%); /* emerald-400 */
 }
 
-/* Finish button — injected via onPopoverRender as a real <button>, not the
-   driver-managed Previous slot (which gets auto-disabled on single-step
-   popovers). Still uses .driver-popover-prev-btn class so these styles apply. */
-.driver-popover.jclaw-tour .driver-popover-prev-btn {
+/* Secondary actions — red to contrast with the primary emerald Next.
+   Covers both the "← Previous" navigation button (.jclaw-tour-back-btn,
+   injected per-step) and the "Finish" early-exit button (injected on
+   optional-junction steps via onPopoverRender, reusing .driver-popover-
+   prev-btn as its CSS hook because driver.js auto-disables its own
+   Previous slot on single-step popovers). Shape, padding, and font
+   mirror .driver-popover-next-btn so the pair reads as a balanced
+   decision row. */
+.driver-popover.jclaw-tour .driver-popover-prev-btn,
+.driver-popover.jclaw-tour .jclaw-tour-back-btn {
   background-color: hsl(0 72% 51%); /* red-600 */
   color: #fff;
   border: 0;
@@ -120,15 +142,18 @@
   transition: background-color 120ms;
 }
 
-.driver-popover.jclaw-tour .driver-popover-prev-btn:hover {
+.driver-popover.jclaw-tour .driver-popover-prev-btn:hover,
+.driver-popover.jclaw-tour .jclaw-tour-back-btn:hover {
   background-color: hsl(0 74% 42%); /* red-700 */
 }
 
-.dark .driver-popover.jclaw-tour .driver-popover-prev-btn {
+.dark .driver-popover.jclaw-tour .driver-popover-prev-btn,
+.dark .driver-popover.jclaw-tour .jclaw-tour-back-btn {
   background-color: hsl(0 84% 60%); /* red-500 */
 }
 
-.dark .driver-popover.jclaw-tour .driver-popover-prev-btn:hover {
+.dark .driver-popover.jclaw-tour .driver-popover-prev-btn:hover,
+.dark .driver-popover.jclaw-tour .jclaw-tour-back-btn:hover {
   background-color: hsl(0 72% 51%); /* red-600 */
 }
 
@@ -146,7 +171,16 @@
   text-align: center;
 }
 
-/* Arrow color follows the popover bg */
+/* Callout tail — driver.js ships a 5px-border triangle (~10px base) that
+   is easy to miss against a 360px-wide popover. Bumping to 9px gives an
+   18px base, which reads as a deliberate callout pointer attached to the
+   anchor element. Color follows the popover bg on whichever side faces
+   the anchor (the other three borders stay transparent via driver's
+   default per-side rules). */
+.driver-popover.jclaw-tour .driver-popover-arrow {
+  border-width: 9px;
+}
+
 .driver-popover.jclaw-tour .driver-popover-arrow-side-right.driver-popover-arrow {
   border-right-color: var(--surface-elevated);
 }
@@ -161,6 +195,19 @@
 
 .driver-popover.jclaw-tour .driver-popover-arrow-side-bottom.driver-popover-arrow {
   border-bottom-color: var(--surface-elevated);
+}
+
+/* Driver's default CSS centers an align-center arrow with margin-*: -5px
+   (half of the 10px arrow box). A 9px-border arrow is 18px across, so
+   the margin needs to grow to -9px to stay flush with the popover edge. */
+.driver-popover.jclaw-tour .driver-popover-arrow-side-left.driver-popover-arrow-align-center,
+.driver-popover.jclaw-tour .driver-popover-arrow-side-right.driver-popover-arrow-align-center {
+  margin-top: -9px;
+}
+
+.driver-popover.jclaw-tour .driver-popover-arrow-side-top.driver-popover-arrow-align-center,
+.driver-popover.jclaw-tour .driver-popover-arrow-side-bottom.driver-popover-arrow-align-center {
+  margin-left: -9px;
 }
 
 /* Intro dialog — lives in the shadcn Dialog tree (reka-ui portal), not driver.js,
@@ -186,29 +233,6 @@
   color: var(--fg-primary);
   font-size: 13.5px;
   line-height: 1.55;
-}
-
-.jclaw-tour-intro-close {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  color: var(--fg-muted);
-  background: transparent;
-  border: 1px solid hsl(0 0% 50% / 40%);
-  border-radius: 999px;
-  width: 22px;
-  height: 22px;
-  line-height: 18px;
-  padding: 0;
-  font-size: 14px;
-  text-align: center;
-  cursor: pointer;
-  transition: color 120ms, border-color 120ms;
-}
-
-.jclaw-tour-intro-close:hover {
-  color: var(--fg-strong);
-  border-color: var(--fg-muted);
 }
 
 .jclaw-tour-intro .jclaw-tour-intro-primary {

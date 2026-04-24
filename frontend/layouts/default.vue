@@ -22,11 +22,29 @@ import {
 // BotMessageSquare is Lucide's robot glyph — Heroicons doesn't ship a robot,
 // so this is the narrow exception where we drop down to Lucide for a nav icon.
 import { BotMessageSquare, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
+import { loadTourStatus } from '~/composables/useGuidedTour'
+import TourIntroDialog from '~/components/TourIntroDialog.vue'
 
 const { logout, username } = useAuth()
 const { themeMode, setTheme } = useTheme()
-const { start: startGuidedTour } = useGuidedTour()
+// Intro dialog is now the single entry point into the tour: first-login
+// auto-show (onMounted below) and the sidebar Guided Tour button both
+// route through showIntro. Start/skip is resolved inside the dialog.
+const {
+  showIntro: showTourIntro,
+  confirmStart: onTourStart,
+  dismissIntro: onTourSkip,
+  introOpen: tourIntroOpen,
+} = useGuidedTour()
 installGuidedTourHooks()
+
+// Auto-show the intro dialog once per install when the user has never
+// interacted with the tour (backend flag). Fire-and-forget: if the status
+// fetch fails, loadTourStatus returns shouldAutoShow=false so we stay quiet.
+onMounted(async () => {
+  const status = await loadTourStatus()
+  if (status.shouldAutoShow) showTourIntro()
+})
 const sidebarOpen = ref(true)
 const isMac = ref(true)
 const paletteOpen = ref(false)
@@ -178,7 +196,7 @@ const navGroups: NavGroup[] = [
     label: 'Help',
     items: [
       { label: 'Feedback', to: 'https://github.com/tsukhani/jclaw/issues', icon: MegaphoneIcon, external: true },
-      { label: 'Guided Tour', icon: MapIcon, onClick: startGuidedTour },
+      { label: 'Guided Tour', icon: MapIcon, onClick: showTourIntro },
     ],
   },
 ]
@@ -186,6 +204,19 @@ const navGroups: NavGroup[] = [
 
 <template>
   <div class="h-screen bg-surface text-fg-primary flex overflow-hidden">
+    <!--
+      Tour intro dialog lives at the layout level so both entry paths
+      (first-login auto-show via onMounted, and the sidebar "Guided Tour"
+      button) can reach it without pages having to re-render it locally.
+      Dismissing via Escape or overlay-click counts as skip.
+    -->
+    <TourIntroDialog
+      :open="tourIntroOpen"
+      @start="onTourStart"
+      @skip="onTourSkip"
+      @update:open="tourIntroOpen = $event"
+    />
+
     <!-- Sidebar -->
     <aside
       :class="sidebarOpen ? 'w-60' : 'w-0 -ml-60 lg:w-14 lg:ml-0'"
@@ -209,7 +240,7 @@ const navGroups: NavGroup[] = [
           class="flex items-center"
         >
           <img
-            src="/mascot.png"
+            src="/clawdia.webp"
             alt="JClaw"
             class="w-9 h-9 rounded-full"
           >

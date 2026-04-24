@@ -62,22 +62,15 @@ public class ApiOnboardingControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void statusReturnsRecordedValue() {
+    public void statusReturnsRecordedValueAndSuppressesAutoShow() {
+        // Any recorded progress (including step 1, which we write on intro
+        // Start or Skip) flips shouldAutoShow off. The "seen/unseen" flag is
+        // binary — it's just encoded in the same maxStepReached counter.
         seedTourMaxStep(2);
         var response = GET("/api/onboarding/tour-status");
         assertIsOk(response);
         var body = getContent(response);
         assertTrue(body.contains("\"maxStepReached\":2"), "got: " + body);
-        assertTrue(body.contains("\"shouldAutoShow\":true"), "got: " + body);
-    }
-
-    @Test
-    public void statusShouldAutoShowFalseAtThreshold() {
-        seedTourMaxStep(4);
-        var response = GET("/api/onboarding/tour-status");
-        assertIsOk(response);
-        var body = getContent(response);
-        assertTrue(body.contains("\"maxStepReached\":4"), "got: " + body);
         assertTrue(body.contains("\"shouldAutoShow\":false"), "got: " + body);
     }
 
@@ -138,32 +131,4 @@ public class ApiOnboardingControllerTest extends FunctionalTest {
         assertEquals(401, response.status.intValue());
     }
 
-    @Test
-    public void resetClearsToZero() {
-        seedTourMaxStep(4);
-        var response = POST("/api/onboarding/tour-reset", "application/json", "{}");
-        assertIsOk(response);
-        assertContentType("application/json", response);
-        var body = getContent(response);
-        assertTrue(body.contains("\"maxStepReached\":0"), "got: " + body);
-
-        var statusResponse = GET("/api/onboarding/tour-status");
-        assertTrue(getContent(statusResponse).contains("\"maxStepReached\":0"));
-        assertTrue(getContent(statusResponse).contains("\"shouldAutoShow\":true"));
-    }
-
-    @Test
-    public void resetIsIdempotent() {
-        // Reset on a fresh install should also succeed and report 0
-        var response = POST("/api/onboarding/tour-reset", "application/json", "{}");
-        assertIsOk(response);
-        assertTrue(getContent(response).contains("\"maxStepReached\":0"));
-    }
-
-    @Test
-    public void resetRequiresAuth() {
-        logout();
-        var response = POST("/api/onboarding/tour-reset", "application/json", "{}");
-        assertEquals(401, response.status.intValue());
-    }
 }

@@ -5,12 +5,10 @@ import {
   __resetInFlightRecord,
   loadTourStatus,
   recordStepReached,
-  resetTourThreshold,
 } from '~/composables/useGuidedTour'
 
 describe('useGuidedTour API helpers', () => {
   beforeEach(() => {
-    localStorage.clear()
     __resetInFlightRecord()
   })
 
@@ -66,20 +64,5 @@ describe('useGuidedTour API helpers', () => {
     // Three concurrent calls produce three sequential POSTs — see the
     // "Why not true single-flight?" rationale in useGuidedTour.ts.
     expect(calls).toBe(3)
-  })
-
-  it('resetTourThreshold calls the API and clears the resume cursor', async () => {
-    let resetCalled = false
-    registerEndpoint('/api/onboarding/tour-reset', {
-      method: 'POST',
-      handler: () => {
-        resetCalled = true
-        return { maxStepReached: 0 }
-      },
-    })
-    localStorage.setItem('jclaw.tour.state', JSON.stringify({ step: 2, active: true }))
-    await resetTourThreshold()
-    expect(resetCalled).toBe(true)
-    expect(localStorage.getItem('jclaw.tour.state')).toBeNull()
   })
 })

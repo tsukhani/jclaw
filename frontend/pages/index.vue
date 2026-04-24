@@ -12,8 +12,6 @@ import type { Agent, LatencyHistogram, LatencyMetrics, LogEvent } from '~/types/
 // split) lives in ~/utils/latency-rows for unit-testability without
 // mounting the dashboard.
 import { buildLatencyRows, buildChartSeries, listAvailableChannels } from '~/utils/latency-rows'
-import { loadTourStatus, SESSION_SKIP_KEY, useGuidedTour } from '~/composables/useGuidedTour'
-import TourIntroDialog from '~/components/TourIntroDialog.vue'
 
 interface ChannelStatus {
   channelType: string
@@ -65,57 +63,6 @@ watchEffect(() => {
   if (available.some(c => c.key === selectedChannel.value)) return
   selectedChannel.value = available[0]!.key
 })
-
-// ──────────────────────── Guided tour intro dialog ───────────────────────
-// First-login auto-trigger. Threshold lives server-side; the session-skip
-// flag prevents re-popping after the user clicked Skip and is reloading or
-// navigating within the same session. Both gates must pass.
-const showTourIntro = ref(false)
-const { start: startTour } = useGuidedTour()
-
-function tourSessionSkipped(): boolean {
-  // Wrapped because some browsers (Safari Private historically) throw on
-  // sessionStorage access. Failing to "true" would suppress the tour
-  // forever in those environments, so failing to "false" (let the dialog
-  // through) is the correct fallback.
-  try {
-    return sessionStorage.getItem(SESSION_SKIP_KEY) !== null
-  }
-  catch {
-    return false
-  }
-}
-
-onMounted(async () => {
-  if (tourSessionSkipped()) return
-  const status = await loadTourStatus()
-  // Re-check after the await — defensive against any future writer that
-  // sets the flag while the network round-trip is in flight. Today the
-  // only writer is onTourSkip in this same component (which can't fire
-  // before the dialog is visible), so this is belt-and-suspenders.
-  if (tourSessionSkipped()) return
-  if (status.shouldAutoShow) showTourIntro.value = true
-})
-
-function onTourStart() {
-  // Don't write the session-skip flag here — recordStepReached() in
-  // useGuidedTour writes the cross-session threshold as soon as the user
-  // advances one step, so suppression for "user is taking the tour" is
-  // already handled. Not writing here also means a Reset → revisit cycle
-  // correctly re-shows this dialog when the threshold has been cleared.
-  showTourIntro.value = false
-  startTour()
-}
-
-function onTourSkip() {
-  showTourIntro.value = false
-  try {
-    sessionStorage.setItem(SESSION_SKIP_KEY, '1')
-  }
-  catch {
-    // private mode
-  }
-}
 
 onMounted(() => {
   try {
@@ -206,12 +153,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div>
-    <TourIntroDialog
-      :open="showTourIntro"
-      @start="onTourStart"
-      @skip="onTourSkip"
-      @update:open="showTourIntro = $event"
-    />
     <h1 class="text-lg font-semibold text-fg-strong mb-6">
       Dashboard
     </h1>

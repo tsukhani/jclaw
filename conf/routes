@@ -24,7 +24,6 @@ POST    /api/auth/reset-password                ApiAuthController.resetPassword
 # Onboarding API
 GET     /api/onboarding/tour-status             ApiOnboardingController.status
 POST    /api/onboarding/tour-progress           ApiOnboardingController.recordProgress
-POST    /api/onboarding/tour-reset              ApiOnboardingController.reset
 
 # Tasks API
 GET     /api/tasks                              ApiTasksController.list

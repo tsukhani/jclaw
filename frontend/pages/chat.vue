@@ -7,6 +7,7 @@ import {
   ClipboardIcon,
   EyeIcon,
   LightBulbIcon,
+  MicrophoneIcon,
   PaperAirplaneIcon,
   PaperClipIcon,
   PencilIcon,
@@ -19,8 +20,10 @@ import {
 // composer's Think toggle means "thinking available", the solid+amber bulb
 // on an expanded reasoning block means "thoughts are here, shining." Solid
 // stop icon is the filled red square used to interrupt an in-flight stream.
+// Solid microphone pairs with the outline icon to signal "recording live."
 import {
   LightBulbIcon as LightBulbIconSolid,
+  MicrophoneIcon as MicrophoneIconSolid,
   StopIcon as StopIconSolid,
 } from '@heroicons/vue/24/solid'
 import { marked } from 'marked'
@@ -1234,6 +1237,130 @@ function removeAttachment(idx: number) {
   attachedFiles.value.splice(idx, 1)
 }
 
+// ────────────────────── Voice-note recording (browser mic) ─────────────────
+// One click starts the recorder; a second click stops it and attaches the
+// captured blob through the same addAttachments() pipeline as paperclip
+// uploads. Gated on audioSupported at the button level — consistent with
+// the Audio capability pill, and avoids a rejection on attach time.
+
+const isRecording = ref(false)
+// Kept as plain non-reactive bindings — Vue reactivity on a MediaRecorder
+// proxy would be wasteful and the ondataavailable callback can't walk a
+// reactive wrapper without surprises.
+let mediaRecorder: MediaRecorder | null = null
+let mediaStream: MediaStream | null = null
+let recordedChunks: Blob[] = []
+
+/** Pick the best supported MIME for this browser. Chromium ships
+ *  audio/webm (Opus); Safari exposes audio/mp4 instead. Returns null if
+ *  neither is supported so the caller can fall back to a default. */
+function pickAudioMime(): string | null {
+  if (typeof MediaRecorder === 'undefined') return null
+  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
+  for (const c of candidates) {
+    if (MediaRecorder.isTypeSupported(c)) return c
+  }
+  return null
+}
+
+function extensionForMime(mime: string): string {
+  if (mime.startsWith('audio/webm')) return 'webm'
+  if (mime.startsWith('audio/mp4')) return 'm4a'
+  return 'bin'
+}
+
+function releaseRecorder() {
+  if (mediaStream) {
+    for (const track of mediaStream.getTracks()) track.stop()
+  }
+  mediaStream = null
+  mediaRecorder = null
+  recordedChunks = []
+}
+
+async function startRecording() {
+  if (isRecording.value) return
+  // Cheap pre-check so we don't prompt for mic permission on a model that
+  // can't consume the resulting attachment anyway — addAttachments would
+  // reject it after the fact, which wastes both the permission grant and
+  // the recording itself. Mirrors the vision-gate error copy below.
+  if (!audioSupported.value) {
+    attachError.value = 'This model does not support audio'
+    return
+  }
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    attachError.value = 'Voice recording not supported in this browser'
+    return
+  }
+  let stream: MediaStream
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+  }
+  catch {
+    // NotAllowedError (denied) and NotFoundError (no device) both land here;
+    // the user-visible string is deliberately generic since the remedy —
+    // "check site permissions / plug in a mic" — covers both.
+    attachError.value = 'Microphone access denied or unavailable'
+    return
+  }
+  const mime = pickAudioMime()
+  mediaStream = stream
+  recordedChunks = []
+  try {
+    mediaRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined)
+  }
+  catch {
+    attachError.value = 'Voice recording not supported in this browser'
+    releaseRecorder()
+    return
+  }
+  mediaRecorder.ondataavailable = (e: BlobEvent) => {
+    if (e.data && e.data.size > 0) recordedChunks.push(e.data)
+  }
+  mediaRecorder.onstop = () => {
+    // mediaRecorder is nulled in releaseRecorder(); capture the type first.
+    const effectiveType = mediaRecorder?.mimeType || mime || 'audio/webm'
+    const blob = new Blob(recordedChunks, { type: effectiveType })
+    const ext = extensionForMime(effectiveType)
+    // YYYYMMDD-HHMMSS in local time — readable at a glance in the chip
+    // and unique enough across a single session. We skip the timezone
+    // because the filename doesn't roundtrip to the agent; it's just UX.
+    const d = new Date()
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const ts = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`
+      + `-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+    const file = new File([blob], `voice-${ts}.${ext}`, { type: effectiveType })
+    addAttachments([file])
+    releaseRecorder()
+  }
+  mediaRecorder.start()
+  isRecording.value = true
+}
+
+function stopRecording() {
+  if (!isRecording.value) return
+  isRecording.value = false
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    // onstop fires asynchronously after this call; releaseRecorder is
+    // invoked from inside the handler so the final blob is built before
+    // we tear down.
+    mediaRecorder.stop()
+  }
+  else {
+    releaseRecorder()
+  }
+}
+
+function toggleRecording() {
+  if (isRecording.value) stopRecording()
+  else void startRecording()
+}
+
+onBeforeUnmount(() => {
+  if (isRecording.value) stopRecording()
+  else releaseRecorder()
+})
+
 const formatAttachmentSize = formatSize
 
 async function uploadAttachments(agentId: number): Promise<UploadedAttachment[]> {
@@ -1425,7 +1552,7 @@ function exportConversation() {
             class="mx-auto w-full max-w-3xl flex flex-col items-center gap-3 px-4 pb-4 text-center"
           >
             <img
-              src="/mascot-typing.png"
+              src="/clawdia-typing.webp"
               alt=""
               class="h-32 w-auto select-none"
             >
@@ -1964,6 +2091,32 @@ function exportConversation() {
                   subtle, pressable surface.
                 -->
                   <PaperClipIcon
+                    class="w-4 h-4"
+                    aria-hidden="true"
+                  />
+                </button>
+                <!--
+                  Voice recorder — same affordance shape as the paperclip
+                  (round 32x32, neutral border) so the row reads as a row of
+                  attach-type actions. Always visible, parallel to the
+                  paperclip: the audio-capability gate fires at click time,
+                  not as a v-if, so the button disappearing can't surprise a
+                  user who just swapped models. While recording, the icon
+                  swaps to solid red and pulses so the operator can see from
+                  across the room that the mic is hot.
+                -->
+                <button
+                  type="button"
+                  class="inline-flex items-center justify-center w-8 h-8 rounded-full border transition-colors"
+                  :class="isRecording
+                    ? 'border-red-500 text-red-500 bg-red-500/10 animate-pulse'
+                    : 'border-border text-fg-muted hover:text-fg-strong hover:bg-muted'"
+                  :title="isRecording ? 'Stop recording' : 'Record voice'"
+                  :aria-pressed="isRecording"
+                  @click="toggleRecording"
+                >
+                  <component
+                    :is="isRecording ? MicrophoneIconSolid : MicrophoneIcon"
                     class="w-4 h-4"
                     aria-hidden="true"
                   />

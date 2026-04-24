@@ -43,21 +43,22 @@ function onSkip() {
       class="jclaw-tour-intro max-w-md"
       :show-close-button="false"
     >
-      <button
-        type="button"
-        class="jclaw-tour-intro-close"
-        aria-label="Close"
-        @click="onSkip"
-      >
-        ×
-      </button>
-      <DialogHeader>
+      <DialogHeader class="items-center text-center sm:items-center sm:text-center">
+        <img
+          src="/clawdia-waving.webp"
+          alt="Clawdia, the JClaw mascot, waving hello"
+          width="119"
+          height="128"
+          class="select-none mb-2"
+        >
         <DialogTitle>Welcome to JClaw</DialogTitle>
         <DialogDescription class="pt-2">
-          JClaw helps you wire AI agents to chat, skills, and channels — all from one place.
-          This 30-second tour walks you through the four things you need to set up before your
-          first conversation: an LLM provider, your Main Agent, the model you want it to use,
-          and the chat composer itself. You can come back to it any time from the sidebar.
+          Hi, I'm Clawdia — your JClaw sidekick. I help you wire up AI agents to chat, skills,
+          and channels, all from one place. Want me to show you around? This 30-second tour
+          walks through the four things to set up before your first real conversation: an LLM
+          provider, your Main Agent, the model it'll use, and the chat composer itself. If
+          you'd rather poke around on your own, no worries — I'll be waving from the sidebar
+          any time you want a refresher.
         </DialogDescription>
       </DialogHeader>
       <DialogFooter class="gap-2 sm:gap-2">

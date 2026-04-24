@@ -11,14 +11,18 @@ import java.util.Map;
 import static utils.GsonHolder.INSTANCE;
 
 /**
- * First-login guided-tour state. The frontend stores the in-progress step in
- * localStorage; this controller owns the server-side "have they progressed
- * far enough that we should stop auto-showing the intro dialog?" threshold.
+ * First-login guided-tour flag. Stores a high-water "farthest step reached"
+ * counter per install — 0 means the user has never interacted with the tour
+ * intro dialog, anything ≥ 1 means they have (either clicked Start/Skip on
+ * the intro, or advanced into the walkthrough itself). The dashboard reads
+ * this to decide whether to auto-show the intro dialog on mount; the tour
+ * walkthrough itself is purely in-memory, so reloading mid-tour abandons
+ * progress and the user must re-enter from the Guided Tour sidebar button.
  *
- * <p>Single Config key today (single-admin install). When per-user auth lands,
- * scope this per user — the prefix {@code onboarding.} will be reserved in
- * the Settings page's {@code MANAGED_PREFIXES} list (added in a later task)
- * so the unmanaged-keys diagnostic doesn't surface this key.
+ * <p>Single Config key today (single-admin install). When per-user auth
+ * lands, scope this per user — the prefix {@code onboarding.} is already
+ * reserved in the Settings page's {@code MANAGED_PREFIXES} list so the
+ * unmanaged-keys diagnostic doesn't surface this key.
  */
 @With(AuthCheck.class)
 public class ApiOnboardingController extends Controller {
@@ -27,18 +31,18 @@ public class ApiOnboardingController extends Controller {
 
     public static final String CONFIG_KEY = "onboarding.tourMaxStep";
     private static final int TOTAL_STEPS = 6;
-    private static final int AUTO_SHOW_THRESHOLD = 4;
 
     /** GET /api/onboarding/tour-status — returns the recorded max step,
      *  total step count, and whether the dashboard should auto-show the
-     *  intro dialog. Threshold lives server-side so the rule isn't
-     *  duplicated across the controller and the page. */
+     *  intro dialog. Auto-show fires when the user has never interacted
+     *  with the tour ({@code maxStep == 0}); once they click Start or Skip
+     *  on the intro dialog (or advance any step), the flag flips forever. */
     public static void status() {
         var maxStep = ConfigService.getInt(CONFIG_KEY, 0);
         renderJSON(gson.toJson(Map.of(
                 "maxStepReached", maxStep,
                 "totalSteps", TOTAL_STEPS,
-                "shouldAutoShow", maxStep < AUTO_SHOW_THRESHOLD)));
+                "shouldAutoShow", maxStep == 0)));
     }
 
     /** POST /api/onboarding/tour-progress — body {@code {"step":N}}.
@@ -64,28 +68,6 @@ public class ApiOnboardingController extends Controller {
                     "Tour progressed to step %d".formatted(newMax),
                     "previous=%d".formatted(existing));
         }
-        renderMaxStep(newMax);
-    }
-
-    /** POST /api/onboarding/tour-reset — wipes the threshold so the dashboard
-     *  intro dialog will appear again on next visit. Idempotent: clearing an
-     *  already-empty key still succeeds and returns 0. Logs even on no-op
-     *  resets — a Reset click is operator-initiated and worth recording in
-     *  the event log even when the threshold was already zero. */
-    public static void reset() {
-        var existing = ConfigService.getInt(CONFIG_KEY, 0);
-        ConfigService.delete(CONFIG_KEY);
-        EventLogger.info("onboarding",
-                "Tour state reset",
-                "previous=%d".formatted(existing));
-        renderMaxStep(0);
-    }
-
-    /** Single source of truth for the response envelope so all three actions
-     *  return identically-shaped JSON. The {@code status()} action additionally
-     *  emits {@code totalSteps} and {@code shouldAutoShow} — but they all
-     *  agree on {@code maxStepReached}. */
-    private static void renderMaxStep(int maxStep) {
-        renderJSON(gson.toJson(Map.of("maxStepReached", maxStep)));
+        renderJSON(gson.toJson(Map.of("maxStepReached", newMax)));
     }
 }
