@@ -322,17 +322,24 @@ export async function loadTourStatus(): Promise<TourStatus> {
   try {
     return await $fetch<TourStatus>('/api/onboarding/tour-status')
   }
-  catch {
+  catch (err) {
     // Fail closed — never pop a dialog over a broken state. Worst case,
-    // the user opens the tour from the sidebar manually.
+    // the user opens the tour from the sidebar manually. Log to console so
+    // an operator triaging "dialog didn't appear on first login" can see it.
+    console.warn('[guidedTour] failed to load tour status; suppressing intro dialog', err)
     return { maxStepReached: 0, totalSteps: steps.length, shouldAutoShow: false }
   }
 }
 
 export async function recordStepReached(step: number): Promise<void> {
-  // Single-flight: if a write is already pending, wait for it before issuing
-  // the next one. Click-spam on Next won't stack up POSTs, and out-of-order
-  // writes are still safe because the backend clamps to Math.max.
+  // Serialize concurrent writes — if a POST is in flight, wait for it before
+  // issuing this caller's own POST. Click-spam on Next produces N sequential
+  // requests, not N parallel ones (or one coalesced one — see ADR below).
+  // Why not true single-flight? B/C piggybacking on A's promise would skip
+  // their own step values entirely, and only the backend's Math.max clamp
+  // would prevent regression. The user's max step would be undercounted in
+  // a rapid-click burst. Sequential is correct AND simple given the tour
+  // is at most 5 Next clicks; we accept the small extra round-trips.
   if (inFlightRecord) {
     try {
       await inFlightRecord
@@ -353,6 +360,16 @@ export async function recordStepReached(step: number): Promise<void> {
   catch {
     // Worst case: user retakes the tour next login. Don't block UI.
   }
+}
+
+/**
+ * Test-only: reset the module-level in-flight slot. Vitest isolates per file
+ * but not per test; if a prior test leaks a still-pending promise into the
+ * slot, the next test's `if (inFlightRecord)` branch fires unexpectedly.
+ * Production callers should never invoke this.
+ */
+export function __resetInFlightRecord() {
+  inFlightRecord = null
 }
 
 export async function resetTourThreshold(): Promise<void> {

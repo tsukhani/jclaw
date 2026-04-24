@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { registerEndpoint } from '@nuxt/test-utils/runtime'
 import { readBody } from 'h3'
 import {
+  __resetInFlightRecord,
   loadTourStatus,
   recordStepReached,
   resetTourThreshold,
@@ -10,6 +11,7 @@ import {
 describe('useGuidedTour API helpers', () => {
   beforeEach(() => {
     localStorage.clear()
+    __resetInFlightRecord()
   })
 
   afterEach(() => {
@@ -47,7 +49,7 @@ describe('useGuidedTour API helpers', () => {
     expect(received).toEqual({ step: 3 })
   })
 
-  it('recordStepReached coalesces concurrent calls into a single in-flight request', async () => {
+  it('recordStepReached serializes concurrent calls (one in-flight at a time)', async () => {
     let calls = 0
     registerEndpoint('/api/onboarding/tour-progress', {
       method: 'POST',
@@ -61,12 +63,9 @@ describe('useGuidedTour API helpers', () => {
       recordStepReached(3),
       recordStepReached(4),
     ])
-    // We accept 1-3 calls — the spec calls for single-flight, so the goal is 1.
-    // The implementation we'll write queues serially, which results in 3 sequential
-    // POSTs. Both are acceptable from a correctness standpoint (backend clamps to
-    // Math.max). Tighten this assertion later if desired.
-    expect(calls).toBeGreaterThanOrEqual(1)
-    expect(calls).toBeLessThanOrEqual(3)
+    // Three concurrent calls produce three sequential POSTs — see the
+    // "Why not true single-flight?" rationale in useGuidedTour.ts.
+    expect(calls).toBe(3)
   })
 
   it('resetTourThreshold calls the API and clears the resume cursor', async () => {
