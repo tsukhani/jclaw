@@ -288,8 +288,16 @@ const navGroups: NavGroup[] = [
       </div>
 
       <!-- Nav -->
+      <!--
+        `pt-4` (16px) aligns the first nav item's content with each page's
+        `<h1>` title. Both sit below an `h-14` bar; the main column's
+        `p-6` gives 24px of top padding before the title, while the
+        button here adds its own `py-2` (8px) internally. Matching that
+        stack is 16 + 8 = 24, so the icon row and the page title share a
+        top edge. `pb-2` preserves the original bottom spacing.
+      -->
       <nav
-        class="flex-1 overflow-y-auto py-2"
+        class="flex-1 overflow-y-auto pt-4 pb-2"
         aria-label="Main navigation"
       >
         <div
