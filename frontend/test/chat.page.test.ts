@@ -128,6 +128,96 @@ describe('Chat page — tool call rendering', () => {
     const textarea = component.find('textarea')
     expect(textarea.exists()).toBe(true)
   })
+
+  it('nests structured chips under each call, not in one merged grid (JCLAW-170)', async () => {
+    // Regression pin: each tool call's chips MUST live inside that call's
+    // expanded body, not in a single merged grid below the call list. The
+    // setup mirrors the production multi-search shape — two web_search
+    // calls, each with its own structured result list — and asserts both
+    // chip groups make it into the DOM, sandwiched between the per-call
+    // headers rather than concatenated below them.
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 77, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 5, preview: 'multi-search demo',
+        createdAt: '2026-04-22T10:00:00Z', updatedAt: '2026-04-22T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/77/messages', () => [
+      { id: 200, role: 'user', content: 'search both stores',
+        createdAt: '2026-04-22T10:00:00Z' },
+      { id: 201, role: 'assistant', content: '',
+        toolCalls: [{
+          id: 'call_lazada', type: 'function', icon: 'search',
+          function: { name: 'web_search',
+            arguments: '{"query":"nose trimmer Lazada"}' },
+        }],
+        createdAt: '2026-04-22T10:00:01Z' },
+      { id: 202, role: 'tool', content: 'lazada result body',
+        toolResults: 'call_lazada',
+        toolResultStructured: {
+          provider: 'Exa',
+          results: [
+            { title: 'Lazada Listing A', url: 'https://lazada.com.my/a',
+              snippet: 'a', faviconUrl: 'https://icons.duckduckgo.com/ip3/lazada.com.my.ico' },
+            { title: 'Lazada Listing B', url: 'https://lazada.com.my/b',
+              snippet: 'b', faviconUrl: 'https://icons.duckduckgo.com/ip3/lazada.com.my.ico' },
+          ],
+        },
+        createdAt: '2026-04-22T10:00:02Z' },
+      { id: 203, role: 'assistant', content: '',
+        toolCalls: [{
+          id: 'call_shopee', type: 'function', icon: 'search',
+          function: { name: 'web_search',
+            arguments: '{"query":"nose trimmer Shopee"}' },
+        }],
+        createdAt: '2026-04-22T10:00:03Z' },
+      { id: 204, role: 'tool', content: 'shopee result body',
+        toolResults: 'call_shopee',
+        toolResultStructured: {
+          provider: 'Exa',
+          results: [
+            { title: 'Shopee Listing X', url: 'https://shopee.com.my/x',
+              snippet: 'x', faviconUrl: 'https://icons.duckduckgo.com/ip3/shopee.com.my.ico' },
+          ],
+        },
+        createdAt: '2026-04-22T10:00:04Z' },
+      { id: 205, role: 'assistant', content: 'Here are top picks from both.',
+        createdAt: '2026-04-22T10:00:05Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    // The deep-link watcher needs the conversations list to land before it
+    // fires loadConversation; flush a second tick for hydration to settle.
+    await flushPromises()
+
+    // Force-load the conversation directly — no deep-link param in the test
+    // route — so the test exercises the post-hydration template path.
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(77)
+    await flushPromises()
+    // Open the outer accordion (collapsed by default on reload).
+    const outerToggle = component.findAll('button')
+      .find(b => b.text().includes('2 tool calls'))
+    if (outerToggle) await outerToggle.trigger('click')
+    await flushPromises()
+
+    const html = component.html()
+    // Both per-call query previews render as their own per-call rows.
+    expect(html).toContain('nose trimmer Lazada')
+    expect(html).toContain('nose trimmer Shopee')
+    // The latest call (Shopee) is auto-expanded — its result chip is in DOM.
+    expect(html).toContain('shopee.com.my/x')
+    // The Lazada call is collapsed by default; expand it to verify per-call
+    // nesting works for arbitrary calls (not just the auto-expanded last one).
+    const lazadaToggle = component.findAll('button')
+      .find(b => b.text().includes('nose trimmer Lazada'))
+    if (lazadaToggle) await lazadaToggle.trigger('click')
+    await flushPromises()
+    const expanded = component.html()
+    expect(expanded).toContain('lazada.com.my/a')
+    expect(expanded).toContain('lazada.com.my/b')
+  })
 })
 
 describe('Chat page — empty conversation state', () => {

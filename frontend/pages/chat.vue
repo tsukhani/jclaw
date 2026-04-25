@@ -1551,7 +1551,7 @@ async function uploadAttachments(agentId: number): Promise<UploadedAttachment[]>
 // mountSuspended wait before calling the exposed method, so the async
 // gap doesn't manifest in practice.
 // eslint-disable-next-line vue/no-expose-after-await
-defineExpose({ addAttachments, attachedFiles, attachError })
+defineExpose({ addAttachments, attachedFiles, attachError, loadConversation, messages })
 
 function exportConversation() {
   if (!displayMessages.value.length) return
