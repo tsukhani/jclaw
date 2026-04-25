@@ -2082,17 +2082,28 @@ function exportConversation() {
                         @update:open="(v) => { if (!v) tokStatsHoverKey = null }"
                       >
                         <PopoverTrigger as-child>
-                          <button
-                            type="button"
-                            class="ml-1 px-2 py-0.5 text-xs font-mono tabular-nums text-fg-muted hover:text-fg-primary rounded-md transition-colors cursor-help"
-                            :aria-label="`Response speed: ${formatTokensPerSec(msg.usage)}`"
+                          <!-- JCLAW-175: tok/s is informational only — supplementary
+                               observability, not actionable. Rendered as a
+                               non-interactive span (no button semantics, no focus
+                               ring, no aria-label). The detailed breakdown opens
+                               on hover via the controlled :open binding; the
+                               summary number itself is always visible inline so
+                               the data is not hover-locked.
+
+                               Mouse-only handlers below intentionally lack focus
+                               siblings: the speed breakdown is supplementary
+                               metric data, not essential UI, and adding focus
+                               would re-introduce the visual "this is clickable"
+                               affordance the user explicitly removed. -->
+                          <!-- eslint-disable vuejs-accessibility/mouse-events-have-key-events, vuejs-accessibility/no-static-element-interactions -->
+                          <span
+                            class="ml-1 px-2 py-0.5 text-xs font-mono tabular-nums text-fg-muted hover:text-fg-primary rounded-md transition-colors cursor-help select-none"
                             @mouseenter="tokStatsHoverKey = msg.id ?? msg._key ?? null"
                             @mouseleave="tokStatsHoverKey = null"
-                            @focus="tokStatsHoverKey = msg.id ?? msg._key ?? null"
-                            @blur="tokStatsHoverKey = null"
                           >
                             {{ formatTokensPerSec(msg.usage) }}
-                          </button>
+                          </span>
+                          <!-- eslint-enable vuejs-accessibility/mouse-events-have-key-events, vuejs-accessibility/no-static-element-interactions -->
                         </PopoverTrigger>
                         <PopoverContent
                           side="top"
