@@ -1819,18 +1819,20 @@ function exportConversation() {
         />
 
         <!--
-          Empty-state hero with a brief fade-in on enter only. Leave
-          unmounts immediately — the composer's FLIP animation carries
-          the visual continuity. Adding a leave-active fade kept the
-          hero positioned in the DOM for its leave duration after the
-          surrounding spacers had already collapsed, producing the
-          "caption layout jump" past versions tried to dodge by
-          disabling all motion. Matches Unsloth's pattern: enter-only.
+          Empty-state hero: fades + slides down from above on enter,
+          unmounts instantly on leave. The 500ms duration and easing
+          match the composer's FLIP (above) so when the user starts a
+          new conversation the hero descends from the top while the
+          composer ascends from the bottom and they settle into the
+          centered layout together. Leave is instant because the
+          composer's FLIP carries the empty→active visual continuity;
+          a leave-active fade would keep the hero positioned in the
+          DOM after the spacers collapsed, producing layout jump.
         -->
         <Transition
-          enter-active-class="transition-opacity duration-150 ease-out"
-          enter-from-class="opacity-0"
-          enter-to-class="opacity-100"
+          enter-active-class="transition-all duration-500 ease-[cubic-bezier(0.32,0.72,0,1)]"
+          enter-from-class="opacity-0 -translate-y-8"
+          enter-to-class="opacity-100 translate-y-0"
         >
           <div
             v-if="isEmptyChat"
