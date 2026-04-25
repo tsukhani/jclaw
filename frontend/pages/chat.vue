@@ -438,6 +438,13 @@ function toggleToolCalls(msg: Message) {
     = !(msg as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed
 }
 
+// JCLAW-170: per-call expand toggle. Each tool call inside the outer block
+// has its own collapsible body (chip grid or result text), independent of
+// the surrounding "N tool calls" accordion.
+function toggleToolCallExpansion(tc: ToolCall) {
+  tc._expanded = !tc._expanded
+}
+
 /**
  * JCLAW-170: resolve the registry's semantic icon key to a Heroicon component.
  * Keys beyond this switch default to the generic wrench so an unknown tool
@@ -480,35 +487,38 @@ function toolCallPreview(tc: ToolCall): string {
 }
 
 const MAX_VISIBLE_RESULT_CHIPS = 6
+const MAX_RESULT_TEXT_PREVIEW = 600
 
-/** JCLAW-170: merge every structured search-result row across all tool calls
- *  on this assistant message into one de-duplicated chip list. Different
- *  search calls on the same turn commonly return overlapping URLs; dropping
- *  dupes keeps the strip dense. */
-function mergedResultChips(m: Message): ToolCallResultChip[] {
-  if (!m.toolCalls) return []
-  const seen = new Set<string>()
-  const chips: ToolCallResultChip[] = []
-  for (const tc of m.toolCalls) {
-    const list = tc.resultStructured?.results ?? []
-    for (const r of list) {
-      const key = r.url ?? ''
-      if (key) {
-        if (seen.has(key)) continue
-        seen.add(key)
-      }
-      chips.push(r)
-    }
-  }
-  return chips
+/** JCLAW-170: structured chips that belong to a single tool call. Returned
+ *  in their original order; the caller slices for "show first N + N more"
+ *  display. Tools without a structured payload return []. */
+function chipsForToolCall(tc: ToolCall): ToolCallResultChip[] {
+  return tc.resultStructured?.results ?? []
 }
 
-function visibleResultChips(m: Message): ToolCallResultChip[] {
-  return mergedResultChips(m).slice(0, MAX_VISIBLE_RESULT_CHIPS)
+function visibleChipsForCall(tc: ToolCall): ToolCallResultChip[] {
+  return chipsForToolCall(tc).slice(0, MAX_VISIBLE_RESULT_CHIPS)
 }
 
-function extraResultChipCount(m: Message): number {
-  return Math.max(0, mergedResultChips(m).length - MAX_VISIBLE_RESULT_CHIPS)
+function extraChipCountForCall(tc: ToolCall): number {
+  return Math.max(0, chipsForToolCall(tc).length - MAX_VISIBLE_RESULT_CHIPS)
+}
+
+/** Truncated text preview for tools that return plain text rather than a
+ *  structured result list. Keeps the per-call expansion useful for shell,
+ *  filesystem, web_fetch — anything whose output is the LLM-visible string.
+ *  Long results are clipped with an ellipsis so the block doesn't dominate
+ *  the transcript; clicking through to copy the full result happens via the
+ *  larger UX, not the per-call peek. */
+function truncatedToolResultText(tc: ToolCall): string {
+  const text = (tc.resultText ?? '').trim()
+  if (!text) return ''
+  if (text.length <= MAX_RESULT_TEXT_PREVIEW) return text
+  return text.slice(0, MAX_RESULT_TEXT_PREVIEW) + '…'
+}
+
+function toolCallHasExpandableBody(tc: ToolCall): boolean {
+  return chipsForToolCall(tc).length > 0 || !!truncatedToolResultText(tc)
 }
 
 function chipTitle(chip: ToolCallResultChip): string {
@@ -893,7 +903,16 @@ async function loadConversation(id: number) {
   // historical turns — same UX as the thinking card.
   hydrateToolCalls(loaded as unknown as Array<Record<string, unknown>>)
   for (const m of loaded) {
-    if (m.toolCalls?.length) (m as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed = true
+    if (!m.toolCalls?.length) continue
+    // Outer accordion: collapsed by default on historical turns to keep the
+    // transcript dense; users click "N tool calls" to drill in.
+    (m as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed = true
+    // Per-call expansion: pre-expand the LAST call so opening the accordion
+    // surfaces its chip grid immediately. Earlier calls stay collapsed —
+    // user can expand them individually if they want to compare results.
+    for (let i = 0; i < m.toolCalls.length; i++) {
+      m.toolCalls[i]!._expanded = i === m.toolCalls.length - 1
+    }
   }
   messages.value = loaded
   initCollapsedState(messages.value)
@@ -1109,12 +1128,15 @@ async function sendMessage() {
             // The accordion starts expanded so users see in-progress activity
             // the instant the first tool finishes; once content begins to
             // stream they can collapse it themselves, and it auto-collapses
-            // on reload for historical turns.
+            // on reload for historical turns. Per-call: collapse any prior
+            // calls and auto-expand the just-arrived one so its results are
+            // visible without an extra click.
             const m = messages.value[assistantIdx] as StreamingMessage
             if (!m.toolCalls) {
               m.toolCalls = []
               m.toolCallsCollapsed = false
             }
+            for (const prev of m.toolCalls) prev._expanded = false
             m.toolCalls.push({
               id: event.id,
               name: event.name,
@@ -1122,6 +1144,7 @@ async function sendMessage() {
               arguments: event.arguments ?? '',
               resultText: event.resultText ?? null,
               resultStructured: event.resultStructured ?? null,
+              _expanded: true,
             })
             scrollToBottom()
           }
@@ -1852,50 +1875,68 @@ function exportConversation() {
                         <div
                           v-for="tc in msg.toolCalls"
                           :key="tc.id"
-                          class="flex items-center gap-2 px-3 py-2 text-xs text-fg-muted border-b border-neutral-100 dark:border-neutral-800 last:border-b-0"
+                          class="border-b border-neutral-100 dark:border-neutral-800 last:border-b-0"
                         >
-                          <component
-                            :is="toolCallIcon(tc.icon)"
-                            class="w-3.5 h-3.5 shrink-0"
-                            aria-hidden="true"
-                          />
-                          <span class="truncate">
-                            <span class="text-fg-subtle">Used tool:</span>
-                            {{ toolCallPreview(tc) }}
-                          </span>
-                        </div>
-                        <div
-                          v-if="mergedResultChips(msg).length"
-                          class="flex flex-wrap gap-1.5 px-3 py-2 border-t border-neutral-200 dark:border-neutral-700"
-                        >
-                          <a
-                            v-for="(chip, cIdx) in visibleResultChips(msg)"
-                            :key="(chip.url ?? chip.title ?? '') + ':' + cIdx"
-                            :href="chip.url ?? '#'"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="inline-flex items-center gap-1.5 px-2 py-1 text-[11px] border border-neutral-200 dark:border-neutral-700 rounded-full text-fg-muted hover:text-fg-strong hover:bg-surface transition-colors max-w-[200px]"
-                            :title="chip.title ?? chip.url ?? ''"
+                          <button
+                            type="button"
+                            class="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-fg-muted hover:text-fg-strong focus:outline-none disabled:cursor-default disabled:hover:text-fg-muted"
+                            :disabled="!toolCallHasExpandableBody(tc)"
+                            :title="toolCallHasExpandableBody(tc) ? (tc._expanded ? 'Collapse this call' : 'Expand this call') : ''"
+                            @click="toggleToolCallExpansion(tc)"
                           >
-                            <img
-                              v-if="chip.faviconUrl"
-                              :src="chip.faviconUrl"
-                              class="w-3.5 h-3.5 shrink-0 rounded-sm"
-                              alt=""
-                              referrerpolicy="no-referrer"
-                              @error="onFaviconError"
-                            >
-                            <GlobeAltIcon
-                              v-else
+                            <component
+                              :is="toolCallIcon(tc.icon)"
                               class="w-3.5 h-3.5 shrink-0"
                               aria-hidden="true"
                             />
-                            <span class="truncate">{{ chipTitle(chip) }}</span>
-                          </a>
-                          <span
-                            v-if="extraResultChipCount(msg) > 0"
-                            class="inline-flex items-center px-2 py-1 text-[11px] border border-dashed border-neutral-200 dark:border-neutral-700 rounded-full text-fg-subtle"
-                          >+{{ extraResultChipCount(msg) }} more</span>
+                            <span class="truncate">
+                              <span class="text-fg-subtle">Used tool:</span>
+                              {{ toolCallPreview(tc) }}
+                            </span>
+                            <ChevronDownIcon
+                              v-if="toolCallHasExpandableBody(tc)"
+                              class="w-3.5 h-3.5 transition-transform ml-auto"
+                              :class="tc._expanded ? 'rotate-180' : '-rotate-90'"
+                              aria-hidden="true"
+                            />
+                          </button>
+                          <div
+                            v-if="tc._expanded && chipsForToolCall(tc).length"
+                            class="flex flex-wrap gap-1.5 px-3 pb-2"
+                          >
+                            <a
+                              v-for="(chip, cIdx) in visibleChipsForCall(tc)"
+                              :key="(chip.url ?? chip.title ?? '') + ':' + cIdx"
+                              :href="chip.url ?? '#'"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              class="inline-flex items-center gap-1.5 px-2 py-1 text-[11px] border border-neutral-200 dark:border-neutral-700 rounded-full text-fg-muted hover:text-fg-strong hover:bg-surface transition-colors max-w-[200px]"
+                              :title="chip.title ?? chip.url ?? ''"
+                            >
+                              <img
+                                v-if="chip.faviconUrl"
+                                :src="chip.faviconUrl"
+                                class="w-3.5 h-3.5 shrink-0 rounded-sm"
+                                alt=""
+                                referrerpolicy="no-referrer"
+                                @error="onFaviconError"
+                              >
+                              <GlobeAltIcon
+                                v-else
+                                class="w-3.5 h-3.5 shrink-0"
+                                aria-hidden="true"
+                              />
+                              <span class="truncate">{{ chipTitle(chip) }}</span>
+                            </a>
+                            <span
+                              v-if="extraChipCountForCall(tc) > 0"
+                              class="inline-flex items-center px-2 py-1 text-[11px] border border-dashed border-neutral-200 dark:border-neutral-700 rounded-full text-fg-subtle"
+                            >+{{ extraChipCountForCall(tc) }} more</span>
+                          </div>
+                          <pre
+                            v-else-if="tc._expanded && truncatedToolResultText(tc)"
+                            class="px-3 pb-2 text-[11px] text-fg-muted whitespace-pre-wrap break-words"
+                          >{{ truncatedToolResultText(tc) }}</pre>
                         </div>
                       </div>
                     </div>

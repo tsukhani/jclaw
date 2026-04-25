@@ -99,6 +99,9 @@ export interface ToolCall {
   arguments: string
   resultText?: string | null
   resultStructured?: ToolCallResultStructured | null
+  /** Client-only: whether this individual tool call's body (chip grid or
+   *  result text) is expanded under the per-call header (JCLAW-170). */
+  _expanded?: boolean
 }
 
 /** A single message within a conversation. */
