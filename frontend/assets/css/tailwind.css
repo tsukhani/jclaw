@@ -82,6 +82,7 @@
     --accent-foreground: hsl(0 0% 98%);
     --destructive: hsl(0 62.8% 30.6%);
     --destructive-foreground: hsl(0 0% 98%);
+
     /* Border lightness was hsl(0 0% 14.9%) — shadcn's default, but
        near-isoluminant with --surface-elevated (#222427 ≈ 14.7% L) so
        borders on tables, menus, cards, and form inputs effectively
@@ -113,6 +114,19 @@
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
+  }
+
+  /* Theme toggle uses View Transitions API to crossfade light↔dark via
+     a circular clip-path reveal anchored to the clicked button (see
+     useTheme.ts). Disable the browser's default crossfade animation so
+     the JS-driven clipPath on ::view-transition-new(root) takes full
+     control; mix-blend-mode: normal prevents the old/new layers from
+     blending in unexpected ways during the reveal. No effect on browsers
+     without View Transitions support — the rule simply doesn't apply. */
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+    mix-blend-mode: normal;
   }
 
   *,

@@ -492,7 +492,7 @@ const navGroups: NavGroup[] = [
               :class="themeMode === 'system' ? 'bg-muted text-fg-strong' : 'text-fg-muted hover:text-fg-strong'"
               class="p-1.5 rounded-full transition-colors"
               title="System theme"
-              @click="setTheme('system')"
+              @click="setTheme('system', $event.currentTarget)"
             >
               <ComputerDesktopIcon
                 class="w-4 h-4"
@@ -503,7 +503,7 @@ const navGroups: NavGroup[] = [
               :class="themeMode === 'light' ? 'bg-muted text-fg-strong' : 'text-fg-muted hover:text-fg-strong'"
               class="p-1.5 rounded-full transition-colors"
               title="Light theme"
-              @click="setTheme('light')"
+              @click="setTheme('light', $event.currentTarget)"
             >
               <SunIcon
                 class="w-4 h-4"
@@ -514,7 +514,7 @@ const navGroups: NavGroup[] = [
               :class="themeMode === 'dark' ? 'bg-muted text-fg-strong' : 'text-fg-muted hover:text-fg-strong'"
               class="p-1.5 rounded-full transition-colors"
               title="Dark theme"
-              @click="setTheme('dark')"
+              @click="setTheme('dark', $event.currentTarget)"
             >
               <MoonIcon
                 class="w-4 h-4"
