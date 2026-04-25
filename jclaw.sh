@@ -322,7 +322,8 @@ do_start_prod() {
     echo "JClaw is running (production):"
     echo "  App: http://localhost:$BACKEND_PORT  (pid: $(cat "$JCLAW_DIR/server.pid"))"
     echo ""
-    echo "Stop with: $0 ${DEPLOY_DIR:+--deploy $DEPLOY_DIR }stop"
+    echo "Tail logs with: $0 ${DEPLOY_DIR:+--deploy $DEPLOY_DIR }logs"
+    echo "Stop with:      $0 ${DEPLOY_DIR:+--deploy $DEPLOY_DIR }stop"
 }
 
 do_stop_prod() {
@@ -404,7 +405,8 @@ do_start_dev() {
     echo "  Frontend: http://localhost:$FRONTEND_PORT  (pid: $(cat "$JCLAW_DIR/$FRONTEND_PID_FILE"))"
     echo "  Logs:     logs/backend-dev.out, logs/frontend-dev.out"
     echo ""
-    echo "Stop with: $0 --dev stop"
+    echo "Tail logs with: $0 --dev logs"
+    echo "Stop with:      $0 --dev stop"
 }
 
 kill_tree() {

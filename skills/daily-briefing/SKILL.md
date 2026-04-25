@@ -1,7 +1,7 @@
 ---
 name: daily-briefing
 description: Generate a daily briefing with tech news, business news, world news, local weather, and upcoming events based on user's city, including the generation time
-version: 1.1.1
+version: 1.1.3
 tools: [datetime, web_search, web_fetch]
 ---
 # Daily Briefing
@@ -10,9 +10,11 @@ When asked to generate a daily briefing, follow these steps to produce a structu
 
 ## Steps
 
-1. **Ask for User's City**
-   - Prompt the user: "Which city would you like the briefing for?"
-   - Wait for the user's response before proceeding.
+1. **Determine the User's City**
+   - First, check in USER.md to see if the user's location is already specified (look for "Location:" field)
+   - If found in USER.md, use that location as the default city
+   - If not found in USER.md or if the user explicitly asks for a different city in their request, prompt the user: "Which city would you like the briefing for?"
+   - Wait for the user's response before proceeding only if no city can be determined from context
 
 2. **Get Current Time and Date**
    - Call the `datetime` tool with action `now` to get the accurate current date, time, and timezone.
@@ -56,12 +58,12 @@ When asked to generate a daily briefing, follow these steps to produce a structu
    - **Do NOT write a markdown file.** Simply return the formatted briefing as the response to the user.
    - Use clear section headers and bullet points.
    - Keep each bullet concise (1–2 sentences max).
-   - Include both the date and time in the header.
+   - Include the date (without time) in the header, and include both the date and time in the "Generated" timestamp line with timezone.
 
 ## Output Format
 
 ```
-# 📋 Daily Briefing — Monday, April 13, 2026 at 12:39 AM
+# 📋 Daily Briefing — Monday, April 13, 2026
 
 *Generated: Monday, April 13, 2026 at 12:39 AM (GMT+8, Asia/Kuala_Lumpur)*
 
@@ -120,7 +122,7 @@ When asked to generate a daily briefing, follow these steps to produce a structu
 - `web_fetch` — optionally fetch full articles if more detail is needed
 
 ## Guidelines
-- Always ask for the user's city first before proceeding
+- Check USER.md for the user's location first, only ask if not found or if the user explicitly requests a different city
 - Always include today's date **and current time** in the header, plus a "Generated" timestamp line with timezone
 - Prioritize recent, credible sources
 - If a section returns no results, note it gracefully (e.g., "No major updates found.")
