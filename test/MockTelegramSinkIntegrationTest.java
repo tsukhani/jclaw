@@ -101,10 +101,21 @@ public class MockTelegramSinkIntegrationTest extends UnitTest {
         // JCLAW-95 AC3: 10 sinks each with one update(), mock delays each
         // sendMessage by 200ms. Parallel → ~200ms total. Serialized →
         // ~2000ms. Assert under 500ms (generous epsilon for CI jitter).
-        // Post-JCLAW-121: the first flush on an EDIT_IN_PLACE sink sends a
-        // sendMessage placeholder, so we throttle that method instead of
-        // sendMessageDraft (which is no longer used).
-        // Global delay — mock's default Message-shape response suffices for sendMessage.
+        //
+        // Important: update() itself schedules a flush via the static
+        // scheduler with wait=0 (lastSentAt=0 makes the throttle math
+        // collapse to zero on a fresh sink), and the scheduled task
+        // spawns its own virtual thread per sink. That IS the production
+        // parallelism path — no need to also manually invoke flush() via
+        // reflection. The earlier version of this test did both, which
+        // produced a CI-flaky race: when the scheduler-spawned virtual
+        // thread won the per-sink synchronized lock first, the manually-
+        // spawned thread short-circuited via the re-entrance guard, its
+        // join(3000) returned immediately, and the assertion ran while
+        // the in-flight scheduled flushes were still mid-HTTP (count=0).
+        // Polling for the count to reach n is both correct (waits for the
+        // wire-level outcome rather than a proxy thread) and exercises
+        // the real production scheduling path.
         server.delay(200);
 
         int n = 10;
@@ -116,17 +127,15 @@ public class MockTelegramSinkIntegrationTest extends UnitTest {
                     (long) (100 + i), null);
         }
 
-        var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
-        flushMethod.setAccessible(true);
-
         long start = System.currentTimeMillis();
-        var threads = new Thread[n];
         for (int i = 0; i < n; i++) {
-            pokePending(sinks[i], "payload " + i);
-            final int idx = i;
-            threads[idx] = Thread.ofVirtual().start(() -> invokeQuietly(flushMethod, sinks[idx]));
+            sinks[i].update("payload " + i);
         }
-        for (var t : threads) t.join(3000);
+
+        long deadline = start + 3000;
+        while (server.countRequests("sendMessage") < n && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
         long elapsedMs = System.currentTimeMillis() - start;
 
         assertEquals(n, server.countRequests("sendMessage"),
