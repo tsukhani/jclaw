@@ -70,7 +70,12 @@ public class ConversationService {
 
         conversation.messageCount++;
         if (role == MessageRole.USER && content != null && conversation.preview == null) {
-            conversation.preview = content.substring(0, Math.min(content.length(), 100));
+            // Budget is the @Column(length=100) cap on Conversation.preview, not
+            // the input length — so truncate to 97 and reserve 3 chars for the
+            // ellipsis marker so the UI can show "real prompt was longer."
+            conversation.preview = content.length() <= 100
+                    ? content
+                    : content.substring(0, 97) + "...";
         }
 
         // Only save conversation for user/final-assistant messages to avoid redundant
