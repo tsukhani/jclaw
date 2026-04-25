@@ -324,8 +324,21 @@ public class SystemPromptAssembler {
             - Links in the [text](url) form
 
             NOT supported — will render as literal characters if emitted:
-            - Markdown tables. Present tabular data as bulleted lines instead, one row per
-              line. Example: "• Name: Foo — Status: active".
+            - Markdown tables (the `| col | col |` / `---` syntax). Telegram does not
+              parse them and will print the raw pipes. For tabular data, prefer a fenced
+              code block with manually space-padded columns — the monospaced font keeps
+              the columns aligned. Example:
+              ```
+              Name          | Status     | Cost
+              ------------- | ---------- | -----
+              AgentRunner   | Active     | Free
+              DailyBriefing | Active     | Free
+              WhatsApp      | Disabled   | Paid
+              ```
+              Pad each cell with spaces so the pipes line up vertically. Keep the table
+              narrow enough to fit on a phone screen (~40 chars wide is a safe ceiling);
+              if it would wrap, fall back to bulleted lines, one row per line, e.g.
+              "• Name: Foo — Status: active".
             - Headings (#, ##, ###). For section breaks, use a short bold label on its own
               line.
             - Task list checkboxes. Use plain bullets.
