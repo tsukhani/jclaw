@@ -43,7 +43,13 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     <DialogContent
       data-slot="sheet-content"
       :class="cn(
-        'bg-background data-[state=open]:animate-in data-[state=closed]:animate-out fixed z-50 flex flex-col gap-4 shadow-lg transition ease-in-out data-[state=closed]:duration-300 data-[state=open]:duration-500',
+        // JCLAW-174 (follow-up #3): text-foreground pairs with the bg-background
+        // token here so descendants (including the chevron close icon, which
+        // strokes with currentColor) get a theme-aware color. Without it, the
+        // DialogContent is portaled outside the JClaw layout and inherits the
+        // browser default black, which renders the close glyph invisible on
+        // dark backgrounds.
+        'bg-background text-foreground data-[state=open]:animate-in data-[state=closed]:animate-out fixed z-50 flex flex-col gap-4 shadow-lg transition ease-in-out data-[state=closed]:duration-300 data-[state=open]:duration-500',
         side === 'right'
           && 'data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right inset-y-0 right-0 h-full w-3/4 border-l sm:max-w-sm',
         side === 'left'

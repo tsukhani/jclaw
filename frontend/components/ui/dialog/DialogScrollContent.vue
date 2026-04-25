@@ -33,7 +33,10 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       <DialogContent
         :class="
           cn(
-            'relative z-50 grid w-full max-w-lg my-8 gap-4 border border-border bg-background p-6 shadow-lg duration-200 sm:rounded-lg md:w-full',
+            // JCLAW-174 (follow-up #3): text-foreground pairs with bg-background
+            // — see SheetContent.vue for the rationale (close X would inherit
+            // browser-default black on dark backgrounds otherwise).
+            'relative z-50 grid w-full max-w-lg my-8 gap-4 border border-border bg-background text-foreground p-6 shadow-lg duration-200 sm:rounded-lg md:w-full',
             props.class,
           )
         "
