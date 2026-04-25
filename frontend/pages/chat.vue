@@ -1354,6 +1354,29 @@ const isEmptyChat = computed(() =>
   && !streaming.value,
 )
 
+// FLIP the composer between its empty-state (centered) and active-state
+// (bottom-anchored) positions when isEmptyChat flips. Watcher's default
+// flush:'pre' fires after the reactive change but before the DOM updates,
+// so we capture the OLD rect there; nextTick yields the NEW rect; the
+// difference becomes the starting translateY, animated back to 0. This
+// is the same technique Unsloth uses via Framer Motion's layoutId.
+const composerEl = ref<HTMLElement | null>(null)
+watch(isEmptyChat, async () => {
+  const el = composerEl.value
+  if (!el) return
+  const before = el.getBoundingClientRect()
+  await nextTick()
+  if (!composerEl.value) return
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  const after = composerEl.value.getBoundingClientRect()
+  const dy = before.top - after.top
+  if (Math.abs(dy) < 4) return
+  composerEl.value.animate(
+    [{ transform: `translateY(${dy}px)` }, { transform: 'translateY(0)' }],
+    { duration: 500, easing: 'cubic-bezier(0.32, 0.72, 0, 1)' },
+  )
+})
+
 const fileInput = ref<HTMLInputElement | null>(null)
 const attachedFiles = ref<File[]>([])
 const attachError = ref<string | null>(null)
@@ -1778,15 +1801,14 @@ function exportConversation() {
 
       <!--
         Body wrapper: a flex-col with a pair of spacers (top + bottom)
-        that instantly reflow between 0 and 1fr. When the chat is empty
-        the spacers grow so the hero + composer sit at vertical center;
+        that reflow between 0 and 1fr. When the chat is empty the
+        spacers grow so the hero + composer sit at vertical center;
         when a conversation is active they collapse and the messages
-        scroller takes over. We deliberately do NOT transition flex-grow
-        — see Unsloth Studio, which swaps the composer between a
-        centered welcome slot and an absolute-bottom dock with zero
-        transition. The animated alternative competed with the hero fade
-        and the caption's v-if layout jump and looked jankier than a
-        snap reflow.
+        scroller takes over. The flex reflow itself is instant — the
+        composer's apparent travel from centered to docked is animated
+        via a FLIP watcher (see composerEl ref above) that snapshots the
+        composer's rect before/after the reflow and interpolates the
+        delta. Mirrors Unsloth Studio's motion.div layoutId mechanism.
       -->
       <div class="flex-1 flex flex-col min-h-0">
         <!-- Top spacer: grows to push content toward vertical center on empty. -->
@@ -1797,18 +1819,18 @@ function exportConversation() {
         />
 
         <!--
-          Empty-state hero with a brief fade-in. Matches Unsloth's
-          Tailwind Animate `animate-in fade-in slide-in-from-bottom-1`
-          default (~150ms) — long enough to read as intentional, short
-          enough to not compete with the instant spacer reflow above.
+          Empty-state hero with a brief fade-in on enter only. Leave
+          unmounts immediately — the composer's FLIP animation carries
+          the visual continuity. Adding a leave-active fade kept the
+          hero positioned in the DOM for its leave duration after the
+          surrounding spacers had already collapsed, producing the
+          "caption layout jump" past versions tried to dodge by
+          disabling all motion. Matches Unsloth's pattern: enter-only.
         -->
         <Transition
           enter-active-class="transition-opacity duration-150 ease-out"
           enter-from-class="opacity-0"
           enter-to-class="opacity-100"
-          leave-active-class="transition-opacity duration-100 ease-out"
-          leave-from-class="opacity-100"
-          leave-to-class="opacity-0"
         >
           <div
             v-if="isEmptyChat"
@@ -2319,7 +2341,10 @@ function exportConversation() {
         </div>
 
         <!-- Input -->
-        <div class="px-4 py-3 relative mx-auto w-full max-w-3xl">
+        <div
+          ref="composerEl"
+          class="px-4 py-3 relative mx-auto w-full max-w-3xl"
+        >
           <!-- JCLAW-114: /model NAME autocomplete popup, anchored above the
              form. Rendered outside the form so the form's overflow-hidden
              (needed for rounded borders) doesn't clip the popup. -->
