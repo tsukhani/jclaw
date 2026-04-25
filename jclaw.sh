@@ -355,6 +355,18 @@ do_start_dev() {
         exit 1
     fi
 
+    # Refuse to start if the port is held by anything (a foreign process,
+    # or a prior instance still inside its shutdown hooks). Without this,
+    # Play silently fails to bind, exits, and the polling loop below would
+    # see a stale listener and falsely declare success.
+    if lsof -ti :"$BACKEND_PORT" >/dev/null 2>&1; then
+        local holder
+        holder=$(lsof -ti :"$BACKEND_PORT" 2>/dev/null | tr '\n' ' ')
+        echo "Error: Port $BACKEND_PORT is already in use (pid: ${holder% })."
+        echo "       Run '$0 --dev stop' first, or kill the holder."
+        exit 1
+    fi
+
     # Ensure dependencies are installed
     echo "==> Checking frontend dependencies..."
     cd "$JCLAW_DIR/frontend"
@@ -379,16 +391,30 @@ do_start_dev() {
     # play run doesn't create server.pid — store the wrapper pid ourselves
     echo "$play_pid" > "$JCLAW_DIR/server.pid"
 
-    # Wait for backend to be ready by polling the port
+    # Wait for backend to be ready. Three exit conditions, in priority
+    # order: (1) wrapper died → fail with log tail; (2) port responds →
+    # success; (3) timeout → fail. The original loop conflated (1) and
+    # (3) and treated any listener on the port as our process — letting
+    # a still-shutting-down prior instance mask a fresh bind failure.
     echo "    Waiting for backend to start..."
     local waited=0
-    while ! curl -s -o /dev/null "http://localhost:$BACKEND_PORT" 2>/dev/null && kill -0 "$play_pid" 2>/dev/null; do
+    while true; do
+        if ! kill -0 "$play_pid" 2>/dev/null; then
+            echo "Error: Play backend exited during startup (pid $play_pid no longer alive)."
+            echo "       Last lines of logs/backend-dev.out:"
+            tail -20 "$JCLAW_DIR/logs/backend-dev.out" 2>/dev/null | sed 's/^/         /'
+            rm -f "$JCLAW_DIR/server.pid"
+            exit 1
+        fi
+        if curl -s -o /dev/null "http://localhost:$BACKEND_PORT" 2>/dev/null; then
+            break
+        fi
         sleep 1
         waited=$((waited + 1))
         if [[ $waited -ge 60 ]]; then
             echo "Error: Backend did not start within 60 seconds."
             echo "       Check logs/backend-dev.out for details."
-            kill "$play_pid" 2>/dev/null
+            kill_tree "$play_pid"
             rm -f "$JCLAW_DIR/server.pid"
             exit 1
         fi
@@ -417,6 +443,23 @@ kill_tree() {
         kill_tree "$child"
     done
     kill "$pid" 2>/dev/null || true
+}
+
+# Block until $port has no listener, or $timeout seconds elapse.
+# Returns 0 when freed, 1 on timeout. We rely on this during restart
+# because Play's shutdown hooks (telegram cooldown, DB pool, etc.) hold
+# the socket for several seconds after SIGTERM — without waiting, the
+# next `play run` races the dying JVM and silently fails to bind 9000.
+wait_for_port_free() {
+    local port=$1
+    local timeout=${2:-30}
+    local waited=0
+    while lsof -ti :"$port" >/dev/null 2>&1; do
+        sleep 1
+        waited=$((waited + 1))
+        (( waited >= timeout )) && return 1
+    done
+    return 0
 }
 
 do_stop_dev() {
@@ -449,15 +492,28 @@ do_stop_dev() {
         kill $orphan 2>/dev/null || true
     fi
 
-    # Stop backend (play run — we manage the pid file, not Play)
+    # Stop backend (play run — we manage the pid file, not Play). The
+    # wrapper may have grandchildren (Python `play` → JVM → forked workers),
+    # so kill_tree's recursive descent is necessary; pkill -P only catches
+    # direct children. We then BLOCK until port 9000 is actually free so a
+    # subsequent restart can't race the dying JVM's shutdown hooks.
     if [[ -f "server.pid" ]]; then
         local bpid
         bpid=$(cat "server.pid")
         if kill -0 "$bpid" 2>/dev/null; then
             echo "==> Stopping Play backend (pid: $bpid)..."
-            kill "$bpid" 2>/dev/null
-            # Also kill any child java processes in the group
-            pkill -P "$bpid" 2>/dev/null || true
+            kill_tree "$bpid"
+
+            if ! wait_for_port_free "$BACKEND_PORT" 30; then
+                local stragglers
+                stragglers=$(lsof -ti :"$BACKEND_PORT" 2>/dev/null) || true
+                if [[ -n "$stragglers" ]]; then
+                    echo "    Port $BACKEND_PORT still bound after 30s; SIGKILL on residual pids: $stragglers"
+                    kill -9 $stragglers 2>/dev/null || true
+                    wait_for_port_free "$BACKEND_PORT" 5 || true
+                fi
+            fi
+
             rm -f "server.pid"
             stopped=1
         else

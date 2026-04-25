@@ -638,11 +638,11 @@ public class AgentRunner {
             return;
         }
 
-        // Round 1 folded into turn-level usage. The first-round accumulator is
-        // also kept in scope so buildUsageJson can read reasoningDurationMs
-        // from it (that timing is anchored to round 1 per JCLAW-76 AC7).
+        // Round 1 folded into turn-level usage. addRound also propagates
+        // round-local reasoning/content timing into TurnUsage so the
+        // turn-level reasoningDurationMs spans first-reasoning → first-content
+        // across every round (matches the frontend's live measurement).
         turnUsage.addRound(accumulator);
-        var firstRoundAccumulator = accumulator;
         var content = accumulator.content;
 
         // Check for truncated response (max tokens hit mid-tool-call)
@@ -698,7 +698,7 @@ public class AgentRunner {
         // Build usage JSON before persisting so it can be stored alongside the message.
         // JCLAW-108: pass the conversation so resolved (override-aware) model identity
         // goes into usageJson rather than the agent's underlying fields.
-        var usageJson = buildUsageJson(turnUsage, firstRoundAccumulator, modelInfo, streamStartMs, agent, conversation);
+        var usageJson = buildUsageJson(turnUsage, modelInfo, streamStartMs, agent, conversation);
 
         // JCLAW-100: persist the assistant message concurrently with the
         // terminal delivery. No data dependency between them, and the
@@ -766,18 +766,19 @@ public class AgentRunner {
     /**
      * Build the usage JSON string from the turn-level cumulative token counts.
      * Token fields are summed across every LLM round in the turn (JCLAW-76);
-     * {@code reasoningDurationMs} remains a per-first-round measurement on
-     * {@code firstRoundAccumulator} since the reasoning phase timing is
-     * anchored to the first round where reasoning primarily happens in
-     * practice. Returns a compact JSON with just duration fields when no
-     * round reported provider usage.
+     * {@code reasoningDurationMs} is also turn-level — it spans from the
+     * first reasoning chunk of the turn to the first content chunk of the
+     * turn, including any tool-execution gap between rounds. This matches
+     * the frontend's live {@code _thinkingDurationMs} measurement so a turn
+     * shows the same "Thought for X seconds" value while streaming and
+     * after reload. Returns a compact JSON with just duration fields when
+     * no round reported provider usage.
      */
     public static String buildUsageJson(LlmProvider.TurnUsage turnUsage,
-                                        LlmProvider.StreamAccumulator firstRoundAccumulator,
                                         ModelInfo modelInfo, long streamStartMs, Agent agent,
                                         Conversation conversation) {
         var durationMs = System.currentTimeMillis() - streamStartMs;
-        var reasoningMs = firstRoundAccumulator != null ? firstRoundAccumulator.reasoningDurationMs() : 0L;
+        var reasoningMs = turnUsage.reasoningDurationMs(System.nanoTime());
         if (!turnUsage.hasProviderUsage) {
             return reasoningMs > 0L
                     ? "{\"durationMs\":%d,\"reasoningDurationMs\":%d}".formatted(durationMs, reasoningMs)

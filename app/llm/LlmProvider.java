@@ -602,6 +602,16 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         // label. See AgentRunner.buildUsageJson for the ms conversion.
         public volatile long reasoningStartNanos = 0L;
         public volatile long reasoningEndNanos = 0L;
+        /**
+         * Wall-clock nanoTime at the first content chunk of THIS round, or 0
+         * if the round produced no content (tool-only round, or reasoning-only
+         * response). {@link TurnUsage#addRound} aggregates the earliest
+         * non-zero value across rounds so the persisted "Thought for X
+         * seconds" matches what the user saw live: from first reasoning
+         * event to first content event of the entire turn (including any
+         * tool-execution gap between rounds).
+         */
+        public volatile long firstContentNanos = 0L;
         private final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
 
         public synchronized void appendReasoningText(String text) {
@@ -613,19 +623,23 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         }
 
         /**
-         * Bookend the reasoning phase at the moment the first content chunk
-         * arrives. Necessary when the provider batched all reasoning into a
-         * single SSE event (Gemini-3-flash-preview does this on short prompts):
-         * a single {@link #appendReasoningText} call sets reasoningStartNanos
-         * and reasoningEndNanos to the same instant, so {@link #reasoningDurationMs}
-         * rounds to 0 — which the persistence layer drops, so reloaded turns
-         * lose their "Thought for X seconds" header. This method is a no-op
-         * when reasoning was multi-chunk (reasoningEndNanos already advanced
-         * past reasoningStartNanos via prior appends).
+         * Record the timestamp of the first content chunk in this round.
+         * {@link TurnUsage#addRound} reads {@link #firstContentNanos} to
+         * compute turn-level reasoning duration (first reasoning event of the
+         * turn → first content event of the turn). Idempotent: only the first
+         * call records.
+         *
+         * <p>Also bookends {@link #reasoningEndNanos} for the single-chunk
+         * reasoning case, so the round-local {@link #reasoningDurationMs}
+         * still computes a non-zero value for diagnostic / per-round needs.
+         * Multi-chunk reasoning is unaffected (reasoningEndNanos was already
+         * advanced past reasoningStartNanos via prior appends).
          */
         public synchronized void noteFirstContentChunk() {
+            if (firstContentNanos != 0L) return;
+            firstContentNanos = System.nanoTime();
             if (reasoningStartNanos != 0L && reasoningEndNanos == reasoningStartNanos) {
-                reasoningEndNanos = System.nanoTime();
+                reasoningEndNanos = firstContentNanos;
             }
         }
 
@@ -668,9 +682,13 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      * round is a separate API call; it also matches user intuition for
      * reasoning/completion counts (the user sees all reasoning and all
      * synthesis output across rounds, not just round 1). Reasoning-phase
-     * <em>timing</em> remains a per-round concern captured on the first
-     * round's {@link StreamAccumulator}; see {@code AgentRunner.buildUsageJson}
-     * for how the two dimensions combine in the emitted usage JSON.
+     * <em>timing</em> is also turn-level (see {@link #turnReasoningStartNanos}
+     * and {@link #turnFirstContentNanos}): the persisted "Thought for X
+     * seconds" matches what the user saw live — from first reasoning event
+     * of the turn to first content event of the turn, including any tool-
+     * execution gap between rounds. Anchoring it to round 1 only (the
+     * pre-fix behaviour) made reloaded turns show e.g. 1.23s while the
+     * live UI showed 9.60s for the same turn.
      *
      * <p>See JCLAW-76 for the accounting defect this class fixes.
      */
@@ -689,6 +707,21 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         /** True once any round returned a non-null {@link Usage}. Gates the zero-usage JSON path. */
         public boolean hasProviderUsage;
         /**
+         * Wall-clock nanoTime at the first reasoning chunk anywhere in this
+         * turn (any round). Set on the first {@code addRound} that sees a
+         * non-zero {@link StreamAccumulator#reasoningStartNanos}; never
+         * overwritten — matches the frontend's "stamp once" semantics.
+         */
+        public volatile long turnReasoningStartNanos = 0L;
+        /**
+         * Wall-clock nanoTime at the first content chunk anywhere in this
+         * turn (any round). Same first-non-zero-wins propagation rule as
+         * {@link #turnReasoningStartNanos}. Stays 0 if the turn was
+         * reasoning-only (no content streamed); see
+         * {@link #reasoningDurationMs} for that fallback.
+         */
+        public volatile long turnFirstContentNanos = 0L;
+        /**
          * Concatenated reasoning text across every LLM round in the turn.
          * Matches what the frontend bubble displays live (reasoning SSE
          * events stream in across all rounds before the first content byte)
@@ -697,7 +730,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
          */
         private final StringBuilder reasoningText = new StringBuilder();
 
-        public void addRound(StreamAccumulator acc) {
+        public synchronized void addRound(StreamAccumulator acc) {
             if (acc == null) return;
             var u = acc.usage;
             if (u != null) {
@@ -712,11 +745,36 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
             if (acc.reasoningDetected) reasoningDetected = true;
             reasoningChars += acc.reasoningChars();
             reasoningText.append(acc.reasoningText());
+            if (acc.reasoningStartNanos != 0L && turnReasoningStartNanos == 0L) {
+                turnReasoningStartNanos = acc.reasoningStartNanos;
+            }
+            if (acc.firstContentNanos != 0L && turnFirstContentNanos == 0L) {
+                turnFirstContentNanos = acc.firstContentNanos;
+            }
         }
 
         /** Returns the aggregated reasoning text, or {@code null} if nothing was streamed. */
         public String reasoningText() {
             return reasoningText.length() == 0 ? null : reasoningText.toString();
+        }
+
+        /**
+         * Milliseconds from the first reasoning chunk of this turn to the
+         * first content chunk of this turn. Matches the frontend's live
+         * {@code _thinkingDurationMs} measurement so a turn shows the same
+         * "Thought for X seconds" value during streaming and after reload.
+         *
+         * <p>Reasoning-only turns (no content ever streamed) fall back to
+         * {@code turnEndNanos} — pass {@code System.nanoTime()} from the
+         * caller at end-of-turn. Returns 0 when no reasoning was detected
+         * (so the persistence layer can omit the field, matching the
+         * pre-feature historical-message rendering).
+         */
+        public synchronized long reasoningDurationMs(long turnEndNanos) {
+            if (turnReasoningStartNanos == 0L) return 0L;
+            long endNanos = turnFirstContentNanos != 0L ? turnFirstContentNanos : turnEndNanos;
+            long diffNanos = endNanos - turnReasoningStartNanos;
+            return diffNanos > 0L ? diffNanos / 1_000_000L : 0L;
         }
     }
 

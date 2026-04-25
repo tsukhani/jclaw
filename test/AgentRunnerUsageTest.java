@@ -73,7 +73,7 @@ public class AgentRunnerUsageTest extends UnitTest {
         turn.addRound(roundWithUsage(new Usage(100, 10, 110, 5, 0, 0)));
         turn.addRound(roundWithUsage(new Usage(200, 800, 1000, 15, 0, 0)));
 
-        var json = AgentRunner.buildUsageJson(turn, null, null, System.currentTimeMillis(), null, null);
+        var json = AgentRunner.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertEquals(300, obj.get("prompt").getAsInt());
@@ -90,7 +90,7 @@ public class AgentRunnerUsageTest extends UnitTest {
         var turn = new LlmProvider.TurnUsage();
         turn.addRound(roundWithUsage(new Usage(500, 300, 800, 50, 100, 0)));
 
-        var json = AgentRunner.buildUsageJson(turn, null, null, System.currentTimeMillis(), null, null);
+        var json = AgentRunner.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertEquals(500, obj.get("prompt").getAsInt());
@@ -109,7 +109,7 @@ public class AgentRunnerUsageTest extends UnitTest {
         var turn = new LlmProvider.TurnUsage();
         turn.addRound(roundWithUsage(null));
 
-        var json = AgentRunner.buildUsageJson(turn, null, null, System.currentTimeMillis(), null, null);
+        var json = AgentRunner.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
         assertFalse(json.contains("\"prompt\""), "no prompt field when zero usage: " + json);
         assertFalse(json.contains("\"completion\""), "no completion field when zero usage: " + json);
         assertTrue(json.contains("\"durationMs\""), "durationMs always present: " + json);
@@ -136,7 +136,7 @@ public class AgentRunnerUsageTest extends UnitTest {
         round2.appendReasoningText("B".repeat(100));
         turn.addRound(round2);
 
-        var json = AgentRunner.buildUsageJson(turn, round1, null, System.currentTimeMillis(), null, null);
+        var json = AgentRunner.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         // 300 chars / 4 chars-per-token, rounded up = 75
@@ -144,70 +144,100 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
-    public void buildUsageJsonPreservesReasoningDurationFromFirstRound() {
-        // JCLAW-76 AC7: reasoning-duration stays anchored to the first round's
-        // accumulator even though token counts now span all rounds.
-        var firstRound = new LlmProvider.StreamAccumulator();
-        firstRound.usage = new Usage(100, 10, 110, 5, 0, 0);
-        firstRound.appendReasoningText("thinking");
+    public void reasoningDurationMatchesFrontendLiveSemantics_singleRound() {
+        // The persisted "Thought for X seconds" must equal what the user saw
+        // streaming live — first reasoning chunk → first content chunk of the
+        // turn. For a single-round turn that's just the round's own
+        // appendReasoningText → noteFirstContentChunk span.
+        var round = new LlmProvider.StreamAccumulator();
+        round.usage = new Usage(100, 10, 110, 5, 0, 0);
+        round.appendReasoningText("thinking");
         try { Thread.sleep(2); } catch (InterruptedException _) {}
-        firstRound.appendReasoningText(" done");   // extends reasoningEndNanos
-        var durationMs = firstRound.reasoningDurationMs();
-        assertTrue(durationMs >= 1L, "setup sanity: first-round reasoning span must be >= 1ms");
+        round.noteFirstContentChunk();
 
         var turn = new LlmProvider.TurnUsage();
-        turn.addRound(firstRound);
-        turn.addRound(roundWithUsage(new Usage(200, 500, 700, 0, 0, 0)));
+        turn.addRound(round);
 
-        var json = AgentRunner.buildUsageJson(turn, firstRound, null, System.currentTimeMillis(), null, null);
+        var json = AgentRunner.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
-        assertTrue(obj.has("reasoningDurationMs"), "duration field present when first round had reasoning: " + json);
-        assertEquals(durationMs, obj.get("reasoningDurationMs").getAsLong());
+        assertTrue(obj.has("reasoningDurationMs"), "duration field present for single-round turn: " + json);
+        var persisted = obj.get("reasoningDurationMs").getAsLong();
+        assertTrue(persisted >= 1L, "reasoning span must be >= 1ms, got " + persisted);
     }
 
     @Test
-    public void singleChunkReasoningStillReportsNonZeroDurationAfterContent() {
-        // Regression: providers that batch all reasoning into one SSE event
-        // (observed: Gemini-3-flash-preview on short prompts) call
-        // appendReasoningText exactly once, so reasoningStartNanos and
-        // reasoningEndNanos collapse to the same instant and reasoningDurationMs
-        // returns 0. buildUsageJson then drops the field, and on reload the
-        // chat header degrades from "Thought for X seconds" to "Thinking".
-        // noteFirstContentChunk is the bookend that LlmProvider invokes when
-        // the first content delta arrives — verify it makes the duration land.
-        var firstRound = new LlmProvider.StreamAccumulator();
-        firstRound.usage = new Usage(50, 20, 70, 5, 0, 0);
-        firstRound.appendReasoningText("all my thinking arrives in one chunk");
-        try { Thread.sleep(2); } catch (InterruptedException _) {}
-        firstRound.noteFirstContentChunk();
-        var durationMs = firstRound.reasoningDurationMs();
-        assertTrue(durationMs >= 1L,
-                "single-chunk reasoning followed by content must report >= 1ms, got " + durationMs);
+    public void reasoningDurationSpansToolGapBetweenRounds() {
+        // The actual bug: tool-using turns showed 1.23s persisted vs 9.60s
+        // live because the persisted value was anchored to round 1's
+        // reasoning span only, missing the tool-execution gap and any
+        // subsequent rounds. Now the turn-level measurement runs from the
+        // first reasoning chunk of round 1 to the first content chunk of
+        // whatever round eventually emits content.
+        var round1 = new LlmProvider.StreamAccumulator();
+        round1.usage = new Usage(100, 0, 100, 5, 0, 0);
+        round1.appendReasoningText("planning the search");
+        // round 1 emits no content (only tool calls fire in real flows)
 
         var turn = new LlmProvider.TurnUsage();
-        turn.addRound(firstRound);
+        turn.addRound(round1);
+        var round1ReasoningEnd = round1.reasoningEndNanos;
 
-        var json = AgentRunner.buildUsageJson(turn, firstRound, null, System.currentTimeMillis(), null, null);
+        // Simulate tool execution gap — far longer than the in-round
+        // reasoning span, so round-1-anchored timing would massively
+        // underreport the user-perceived wait.
+        try { Thread.sleep(20); } catch (InterruptedException _) {}
+
+        var round2 = new LlmProvider.StreamAccumulator();
+        round2.usage = new Usage(150, 50, 200, 0, 0, 0);
+        round2.noteFirstContentChunk();   // round 2 streams content directly
+        turn.addRound(round2);
+
+        var json = AgentRunner.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
-        assertTrue(obj.has("reasoningDurationMs"),
-                "duration field must persist for single-chunk reasoning so reloaded turns keep their header: " + json);
-        assertEquals(durationMs, obj.get("reasoningDurationMs").getAsLong());
+        assertTrue(obj.has("reasoningDurationMs"), "duration field present: " + json);
+        var persisted = obj.get("reasoningDurationMs").getAsLong();
+        var roundLocal = (round1ReasoningEnd - round1.reasoningStartNanos) / 1_000_000L;
+        assertTrue(persisted >= 20L,
+                "turn-level duration must include the inter-round gap (>= 20ms), got " + persisted);
+        assertTrue(persisted > roundLocal + 10L,
+                "turn-level duration (" + persisted + "ms) must exceed round-1-only duration ("
+                        + roundLocal + "ms) by at least the gap");
     }
 
     @Test
-    public void noteFirstContentChunkIsNoOpForMultiChunkReasoning() {
-        // Defensive: bookend must not push reasoningEndNanos forward when
-        // reasoning was multi-chunk (multiple appendReasoningText calls already
-        // advanced reasoningEndNanos past reasoningStartNanos). The captured
-        // last-reasoning-chunk timestamp is the right anchor in that case.
+    public void reasoningDurationFallsBackToTurnEndWhenNoContentEverStreams() {
+        // Reasoning-only response (some providers, or tool-only turns where
+        // no content ever streams). Per-frontend convention the timer stops
+        // at stream completion; backend equivalent uses the turnEndNanos
+        // passed by buildUsageJson at end-of-turn.
+        var round = new LlmProvider.StreamAccumulator();
+        round.usage = new Usage(50, 0, 50, 5, 0, 0);
+        round.appendReasoningText("thought but never emitted content");
+
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(round);
+
+        try { Thread.sleep(5); } catch (InterruptedException _) {}
+        var duration = turn.reasoningDurationMs(System.nanoTime());
+
+        assertTrue(duration >= 5L,
+                "reasoning-only turn must use turnEndNanos as fallback; got " + duration);
+    }
+
+    @Test
+    public void roundLocalReasoningDurationStillUsesLastReasoningChunkForMultiChunk() {
+        // Defensive: the per-round reasoningDurationMs (kept for diagnostic
+        // use) anchors to the last appendReasoningText call. noteFirstContentChunk
+        // must not push reasoningEndNanos forward when reasoning was already
+        // multi-chunk (would over-report by the gap to first content).
         var acc = new LlmProvider.StreamAccumulator();
         acc.appendReasoningText("first");
         try { Thread.sleep(2); } catch (InterruptedException _) {}
         acc.appendReasoningText("second");
         var durationBeforeBookend = acc.reasoningDurationMs();
-        assertTrue(durationBeforeBookend >= 1L, "setup sanity: multi-chunk reasoning must already be >= 1ms");
+        assertTrue(durationBeforeBookend >= 1L, "setup sanity: multi-chunk reasoning >= 1ms");
 
         try { Thread.sleep(5); } catch (InterruptedException _) {}
         acc.noteFirstContentChunk();
@@ -228,7 +258,7 @@ public class AgentRunnerUsageTest extends UnitTest {
         var model = new ModelInfo("test-model", "Test", 128000, 4096, false,
                 3.0, 15.0, 0.30, 3.75);
 
-        var json = AgentRunner.buildUsageJson(turn, null, model, System.currentTimeMillis(), null, null);
+        var json = AgentRunner.buildUsageJson(turn, model, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertEquals(3.0, obj.get("promptPrice").getAsDouble(), 0.001);
@@ -250,7 +280,7 @@ public class AgentRunnerUsageTest extends UnitTest {
         agent.modelProvider = "openrouter";
         agent.modelId = "flash-preview";
 
-        var json = AgentRunner.buildUsageJson(turn, null, model, System.currentTimeMillis(), agent, null);
+        var json = AgentRunner.buildUsageJson(turn, model, System.currentTimeMillis(), agent, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertEquals("openrouter", obj.get("modelProvider").getAsString());
@@ -279,7 +309,7 @@ public class AgentRunnerUsageTest extends UnitTest {
         conversation.modelProviderOverride = "override-provider";
         conversation.modelIdOverride = "override-model";
 
-        var json = AgentRunner.buildUsageJson(turn, null, model, System.currentTimeMillis(), agent, conversation);
+        var json = AgentRunner.buildUsageJson(turn, model, System.currentTimeMillis(), agent, conversation);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertEquals("override-provider", obj.get("modelProvider").getAsString(),
@@ -305,7 +335,7 @@ public class AgentRunnerUsageTest extends UnitTest {
         conversation.modelProviderOverride = "only-provider-set";
         // modelIdOverride intentionally null
 
-        var json = AgentRunner.buildUsageJson(turn, null, null, System.currentTimeMillis(), agent, conversation);
+        var json = AgentRunner.buildUsageJson(turn, null, System.currentTimeMillis(), agent, conversation);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertEquals("agent-provider", obj.get("modelProvider").getAsString());
@@ -321,7 +351,7 @@ public class AgentRunnerUsageTest extends UnitTest {
         var turn = new LlmProvider.TurnUsage();
         turn.addRound(roundWithUsage(new Usage(100, 50, 150, 0, 0, 0)));
 
-        var json = AgentRunner.buildUsageJson(turn, null, null, System.currentTimeMillis(), null, null);
+        var json = AgentRunner.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertFalse(obj.has("modelProvider"), "no modelProvider field when agent is null: " + json);
