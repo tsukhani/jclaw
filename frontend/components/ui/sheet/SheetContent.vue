@@ -2,12 +2,13 @@
 import type { DialogContentEmits, DialogContentProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
-// JCLAW-174 (follow-up): use Heroicons SOLID XMarkIcon. The outline
-// variant at stroke-width 1.5 is actually lighter than the lucide X
-// (stroke 2) we replaced, so the close affordance still read as text.
-// Solid renders a filled X with rounded ends — the standard heavier
-// modal close glyph users expect.
-import { XMarkIcon } from "@heroicons/vue/24/solid"
+// JCLAW-174 (follow-up #2): the panel is a side-sheet that slides in
+// from the right edge. The close affordance reads as "push the panel
+// back to the right" rather than "destroy" — so the chevron-double-
+// right matches that physical metaphor better than an X. The Dialog
+// primitives (DialogContent / DialogScrollContent) keep the X since
+// modals genuinely close (no edge to slide back to).
+import { ChevronDoubleRightIcon } from "@heroicons/vue/24/outline"
 import {
   DialogClose,
   DialogContent,
@@ -53,13 +54,14 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
           && 'data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom inset-x-0 bottom-0 h-auto border-t',
         props.class)"
       v-bind="{ ...$attrs, ...forwarded }"
+      @open-auto-focus="(e) => e.preventDefault()"
     >
       <slot />
 
       <DialogClose
         class="ring-offset-background focus:ring-ring data-[state=open]:bg-secondary absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none"
       >
-        <XMarkIcon class="size-4" />
+        <ChevronDoubleRightIcon class="size-4" />
         <span class="sr-only">Close</span>
       </DialogClose>
     </DialogContent>
