@@ -4,12 +4,14 @@ import { flushPromises } from '@vue/test-utils'
 
 const FIXTURE_META = [
   {
+    // JCLAW-172: shell.enabled is gone — exec registers unconditionally and
+    // its requiresConfig hint is null. Per-agent enable still lives on the
+    // Tools page via AgentToolConfig.
     name: 'exec',
     category: 'System',
     icon: 'terminal',
     shortDescription: 'Execute shell commands on the host system.',
     system: false,
-    requiresConfig: 'shell.enabled',
     actions: [{ name: 'exec', description: 'Run a shell command' }],
   },
   {
@@ -55,7 +57,9 @@ describe('useToolMeta (JCLAW-72 backend-driven metadata)', () => {
     expect(TOOL_META.value.exec).toBeDefined()
     expect(TOOL_META.value.exec!.category).toBe('System')
     expect(TOOL_META.value.exec!.icon).toBe('terminal')
-    expect(TOOL_META.value.exec!.requiresConfig).toBe('shell.enabled')
+    // JCLAW-172: requiresConfig is no longer set on exec; the previous
+    // shell.enabled gate is gone.
+    expect(TOOL_META.value.exec!.requiresConfig).toBeUndefined()
     expect(TOOL_META.value.web_fetch!.category).toBe('Web')
   })
 

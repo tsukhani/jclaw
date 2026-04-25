@@ -26,6 +26,19 @@ public class PlaywrightToolTest extends UnitTest {
         deleteDir(AgentService.workspacePath("browser-test-agent"));
     }
 
+    /**
+     * JCLAW-172: gate live-Playwright tests on the {@code JCLAW_PLAYWRIGHT_TEST}
+     * env var. Replaces the previous {@code playwright.enabled} config gate that
+     * was tied to a production config key now removed. Set
+     * {@code JCLAW_PLAYWRIGHT_TEST=1} (or any truthy value) to opt in when the
+     * Chromium driver is installed locally; CI/dev environments without it
+     * skip the live tests cleanly.
+     */
+    private static boolean isPlaywrightTestEnabled() {
+        var v = System.getenv("JCLAW_PLAYWRIGHT_TEST");
+        return v != null && !v.isBlank() && !"0".equals(v) && !"false".equalsIgnoreCase(v);
+    }
+
     @Test
     public void toolHasCorrectNameAndDescription() {
         var tool = new PlaywrightBrowserTool();
@@ -148,7 +161,7 @@ public class PlaywrightToolTest extends UnitTest {
         // agent and asserts both return non-error results.
         //
         // Skipped when Playwright is not configured (no chromium install in CI).
-        if (!"true".equals(services.ConfigService.get("playwright.enabled", "false"))) {
+        if (!isPlaywrightTestEnabled()) {
             return;
         }
 
@@ -232,8 +245,8 @@ public class PlaywrightToolTest extends UnitTest {
     // ─── Session lifecycle (JCLAW-130 Phase 3) ────────────────────────────
     //
     // The three tests below exercise the navigate-under-failure, tab-reuse,
-    // and crash-recovery paths. Each gates on the same playwright.enabled
-    // flag the existing parallelBrowserOpsOnSameAgentDoNotCorruptPage test
+    // and crash-recovery paths. Each gates on the same JCLAW_PLAYWRIGHT_TEST
+    // env var the existing parallelBrowserOpsOnSameAgentDoNotCorruptPage test
     // uses, so headless-CI environments without a Chromium install simply
     // skip them rather than hang on browser launch.
 
@@ -245,7 +258,7 @@ public class PlaywrightToolTest extends UnitTest {
         // throwing or hanging. This is the regression surface JCLAW-126's
         // OkHttp retry cousin lived in — make sure the Playwright path has
         // the same crisp failure mode.
-        if (!"true".equals(services.ConfigService.get("playwright.enabled", "false"))) {
+        if (!isPlaywrightTestEnabled()) {
             return;
         }
         var tool = new PlaywrightBrowserTool();
@@ -271,7 +284,7 @@ public class PlaywrightToolTest extends UnitTest {
         // agent must hit the cached BrowserSession path rather than launching
         // a fresh chromium per call. Verified by reflecting into the private
         // static sessions map and asserting the entry count stays at 1.
-        if (!"true".equals(services.ConfigService.get("playwright.enabled", "false"))) {
+        if (!isPlaywrightTestEnabled()) {
             return;
         }
         var tool = new PlaywrightBrowserTool();
@@ -305,7 +318,7 @@ public class PlaywrightToolTest extends UnitTest {
         // in chromium from a test, but closing the session out-of-band is the
         // same observable state from the tool's POV — the next execute() must
         // see a fresh, working session rather than NPE on the closed Page.
-        if (!"true".equals(services.ConfigService.get("playwright.enabled", "false"))) {
+        if (!isPlaywrightTestEnabled()) {
             return;
         }
         var tool = new PlaywrightBrowserTool();

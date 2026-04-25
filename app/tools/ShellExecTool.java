@@ -101,9 +101,6 @@ public class ShellExecTool implements ToolRegistry.Tool {
     }
 
     @Override
-    public String requiresConfig() { return "shell.enabled"; }
-
-    @Override
     public java.util.List<agents.ToolAction> actions() {
         return java.util.List.of(
                 new agents.ToolAction("exec", "Run a shell command; validated against the permitted binary allowlist before execution")

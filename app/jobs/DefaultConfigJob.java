@@ -123,12 +123,13 @@ public class DefaultConfigJob extends Job<Void> {
         // Longer values improve prefix-reuse hit rates at the cost of GPU memory.
         seedIfAbsent("ollama.keepAlive", "30m");
 
-        // Playwright browser tool
-        seedIfAbsent("playwright.enabled", "true");
-        seedIfAbsent("playwright.headless", "true");
+        // JCLAW-172: playwright.enabled / playwright.headless / shell.enabled
+        // are gone — the browser is always headless and both tools register
+        // unconditionally; per-agent enable/disable still happens via the
+        // Tools page (AgentToolConfig). The shell allowlist + timeout knobs
+        // remain useful operator config and stay seeded.
 
-        // Shell execution tool
-        seedIfAbsent("shell.enabled", "true");
+        // Shell execution tool — operator-tunable knobs only.
         seedIfAbsent("shell.allowlist", tools.ShellExecTool.DEFAULT_ALLOWLIST);
         seedIfAbsent("shell.defaultTimeoutSeconds", "30");
         seedIfAbsent("shell.maxTimeoutSeconds", "300");

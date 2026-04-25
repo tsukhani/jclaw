@@ -23,12 +23,14 @@ public class ToolRegistrationJob extends Job<Void> {
         toolList.add(new DocumentsTool());
         toolList.add(new WebFetchTool());
         toolList.add(new WebSearchTool());
-        if ("true".equals(services.ConfigService.get("playwright.enabled"))) {
-            toolList.add(new PlaywrightBrowserTool());
-        }
-        if ("true".equals(services.ConfigService.get("shell.enabled"))) {
-            toolList.add(new ShellExecTool());
-        }
+        // JCLAW-172: PlaywrightBrowserTool and ShellExecTool used to be gated
+        // on global `playwright.enabled` / `shell.enabled` config keys, but
+        // that duplicated the per-agent enable that already lives on the
+        // Tools page (each agent's AgentToolConfig row decides binding).
+        // Both register unconditionally now; per-agent disable still hides
+        // them from any agent that doesn't want them.
+        toolList.add(new PlaywrightBrowserTool());
+        toolList.add(new ShellExecTool());
         if ("true".equals(services.ConfigService.get("provider.loadtest-mock.enabled"))) {
             toolList.add(new LoadTestSleepTool());
         }

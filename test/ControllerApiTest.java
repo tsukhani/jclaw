@@ -532,8 +532,12 @@ public class ControllerApiTest extends FunctionalTest {
             assertTrue(content.contains("\"Files\""),     "filesystem is Files");
             assertTrue(content.contains("\"Web\""),       "web_fetch is Web");
             assertTrue(content.contains("\"Utilities\""), "datetime is Utilities");
-            // ShellExecTool declares its config gate — gate must ride in the response.
-            assertTrue(content.contains("\"shell.enabled\""), "requiresConfig surfaced when set");
+            // JCLAW-172: ShellExecTool no longer declares a requiresConfig
+            // gate (shell.enabled is gone — the tool registers
+            // unconditionally). The metadata response carries no
+            // shell.enabled marker for it now.
+            assertFalse(content.contains("\"shell.enabled\""),
+                    "shell.enabled gate must not surface after JCLAW-172");
             // Presentational concerns must NOT leak into the backend response.
             assertFalse(content.contains("bg-neutral"), "no Tailwind classes in API");
             assertFalse(content.contains("<path"),      "no SVG markup in API");

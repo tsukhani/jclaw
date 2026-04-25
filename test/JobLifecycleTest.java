@@ -81,8 +81,6 @@ public class JobLifecycleTest extends UnitTest {
     public void toolRegistrationPublishesBaseTools() {
         // The always-on tools must land in the registry after registerAll.
         // This is the smoke test for the job's primary contract.
-        ConfigService.set("playwright.enabled", "false");
-        ConfigService.set("shell.enabled", "false");
         new jobs.ToolRegistrationJob().doJob();
 
         var names = ToolRegistry.listTools().stream()
@@ -95,36 +93,23 @@ public class JobLifecycleTest extends UnitTest {
     }
 
     @Test
-    public void toolRegistrationIncludesShellWhenEnabled() {
-        // Flipping shell.enabled from false → true + re-registering must
-        // add the exec tool. This is the path exercised by
-        // ConfigService.setWithSideEffects for operator toggles.
+    public void toolRegistrationIncludesExecAndBrowserUnconditionally() {
+        // JCLAW-172: shell.enabled and playwright.enabled used to gate these
+        // two tools, but the global toggles are gone — per-agent enable lives
+        // on the Tools page (AgentToolConfig) only. Both tools must register
+        // every time {@link jobs.ToolRegistrationJob#registerAll} runs,
+        // regardless of any config-DB state.
         ConfigService.set("shell.enabled", "false");
+        ConfigService.set("playwright.enabled", "false");
         jobs.ToolRegistrationJob.registerAll();
-        var before = ToolRegistry.listTools().stream()
-                .map(ToolRegistry.Tool::name)
-                .toList();
-        assertFalse(before.contains("exec"),
-                "exec must not be registered when shell.enabled=false");
 
-        ConfigService.set("shell.enabled", "true");
-        jobs.ToolRegistrationJob.registerAll();
-        var after = ToolRegistry.listTools().stream()
-                .map(ToolRegistry.Tool::name)
-                .toList();
-        assertTrue(after.contains("exec"),
-                "exec must be registered when shell.enabled=true");
-    }
-
-    @Test
-    public void toolRegistrationIncludesPlaywrightWhenEnabled() {
-        ConfigService.set("playwright.enabled", "true");
-        jobs.ToolRegistrationJob.registerAll();
         var names = ToolRegistry.listTools().stream()
                 .map(ToolRegistry.Tool::name)
                 .toList();
+        assertTrue(names.contains("exec"),
+                "exec must register unconditionally after JCLAW-172");
         assertTrue(names.contains("browser"),
-                "browser tool must be registered when playwright.enabled=true");
+                "browser must register unconditionally after JCLAW-172");
     }
 
     // === BrowserCleanupJob ===

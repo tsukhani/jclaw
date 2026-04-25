@@ -62,8 +62,10 @@ const MANAGED_PREFIXES = [
   'search.', // Search providers — Settings
   'scanner.', // Malware scanners — Settings
   'chat.', // Chat settings — Settings
-  'shell.', // Shell execution defaults + enabled toggle — Settings
-  'playwright.', // Playwright browser tool — Settings
+  'shell.', // Shell execution defaults — Settings (allowlist + timeout)
+  'playwright.', // JCLAW-172: namespace retired but kept in the prefix list
+  // so leftover playwright.enabled / playwright.headless rows on upgraded
+  // installs don't surface as "Unmanaged" diagnostic noise.
   'skillsPromotion.', // Skills promotion sanitization — Settings
   'agent.', // Per-agent config (shell privileges, queue mode, etc.) — Agents page
   'ollama.', // Ollama provider-specific settings — Settings
@@ -244,36 +246,13 @@ function agentsRoutingToProvider(name: string): number {
   return (agentsList.value ?? []).filter(a => a.modelProvider === name).length
 }
 
-// Playwright config
-const playwrightEnabled = computed(() => {
-  const entries = configData.value?.entries ?? []
-  return entries.find(e => e.key === 'playwright.enabled')?.value === 'true'
-})
-
-const playwrightHeadless = computed(() => {
-  const entries = configData.value?.entries ?? []
-  return entries.find(e => e.key === 'playwright.headless')?.value !== 'false'
-})
-
-async function togglePlaywrightEnabled() {
-  const newVal = playwrightEnabled.value ? 'false' : 'true'
-  await $fetch('/api/config', { method: 'POST', body: { key: 'playwright.enabled', value: newVal } })
-  refresh()
-}
-
-async function togglePlaywrightHeadless() {
-  const newVal = playwrightHeadless.value ? 'false' : 'true'
-  await $fetch('/api/config', { method: 'POST', body: { key: 'playwright.headless', value: newVal } })
-  refresh()
-}
+// JCLAW-172: Browser (Playwright) and global Shell-Enabled toggles were
+// removed. The browser tool is always headless; both tools register
+// unconditionally and per-agent enable/disable lives on the Tools page.
+// Shell allowlist + timeouts remain operator-tunable below.
 
 // Shell execution config
 const SHELL_KEYS = ['shell.allowlist', 'shell.defaultTimeoutSeconds', 'shell.maxTimeoutSeconds', 'shell.maxOutputBytes'] as const
-
-const shellEnabled = computed(() => {
-  const entries = configData.value?.entries ?? []
-  return entries.find(e => e.key === 'shell.enabled')?.value === 'true'
-})
 
 const shellConfig = computed(() => {
   const entries = configData.value?.entries ?? []
@@ -311,12 +290,6 @@ async function saveShellField(configKey: string, value: string) {
   finally {
     saving.value = false
   }
-}
-
-async function toggleShellEnabled() {
-  const newVal = shellEnabled.value ? 'false' : 'true'
-  await $fetch('/api/config', { method: 'POST', body: { key: 'shell.enabled', value: newVal } })
-  refresh()
 }
 
 // --- Search providers ---
@@ -2568,94 +2541,17 @@ async function handleResetPassword() {
       </div>
     </div>
 
-    <!-- Browser (Playwright) -->
-    <div class="mb-6 space-y-4">
-      <h2 class="text-sm font-medium text-fg-muted">
-        Browser (Playwright)
-      </h2>
-      <p class="text-xs text-fg-muted">
-        Headless browser automation for JS-heavy pages. Requires the Playwright driver bundle.
-      </p>
-      <div class="bg-surface-elevated border border-border">
-        <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <span class="text-sm font-medium text-fg-strong">Enabled</span>
-            <span
-              v-if="playwrightEnabled"
-              class="text-[10px] text-green-400 border border-green-400/30 px-1"
-            >active</span>
-            <span
-              v-else
-              class="text-[10px] text-fg-muted border border-input px-1"
-            >disabled</span>
-          </div>
-          <button
-            :class="playwrightEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
-            class="relative w-9 h-5 rounded-full transition-colors"
-            @click="togglePlaywrightEnabled"
-          >
-            <span
-              :class="playwrightEnabled ? 'translate-x-4' : 'translate-x-0.5'"
-              class="block w-4 h-4 bg-white rounded-full transition-transform"
-            />
-          </button>
-        </div>
-        <div class="px-4 py-2.5 flex items-center justify-between">
-          <div>
-            <span class="text-xs font-mono text-fg-muted">headless</span>
-            <p
-              v-if="!playwrightHeadless"
-              class="text-[10px] text-amber-400 mt-0.5"
-            >
-              Browser window will be visible on the host
-            </p>
-          </div>
-          <button
-            :class="playwrightHeadless ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
-            class="relative w-9 h-5 rounded-full transition-colors"
-            @click="togglePlaywrightHeadless"
-          >
-            <span
-              :class="playwrightHeadless ? 'translate-x-4' : 'translate-x-0.5'"
-              class="block w-4 h-4 bg-white rounded-full transition-transform"
-            />
-          </button>
-        </div>
-      </div>
-    </div>
-
     <!-- Shell Execution -->
     <div class="mb-6 space-y-4">
       <h2 class="text-sm font-medium text-fg-muted">
         Shell Execution
       </h2>
       <p class="text-xs text-fg-muted">
-        Allow agents to execute shell commands on the host.
+        Allowlist and timeout for the shell tool. Per-agent enable/disable
+        lives on the Tools page; this section configures the shared
+        execution policy.
       </p>
       <div class="bg-surface-elevated border border-border">
-        <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <span class="text-sm font-medium text-fg-strong">Enabled</span>
-            <span
-              v-if="shellEnabled"
-              class="text-[10px] text-green-400 border border-green-400/30 px-1"
-            >active</span>
-            <span
-              v-else
-              class="text-[10px] text-fg-muted border border-input px-1"
-            >disabled</span>
-          </div>
-          <button
-            :class="shellEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
-            class="relative w-9 h-5 rounded-full transition-colors"
-            @click="toggleShellEnabled"
-          >
-            <span
-              :class="shellEnabled ? 'translate-x-4' : 'translate-x-0.5'"
-              class="block w-4 h-4 bg-white rounded-full transition-transform"
-            />
-          </button>
-        </div>
         <div class="divide-y divide-border">
           <!-- Allowlist -->
           <div class="px-4 py-2.5 flex items-start gap-3">

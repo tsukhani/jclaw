@@ -82,8 +82,10 @@ public class ConfigService {
         if (key.startsWith("provider.")) {
             AgentService.syncEnabledStates();
         }
-        if (key.equals("shell.enabled") || key.equals("playwright.enabled")
-                || key.equals("provider.loadtest-mock.enabled")) {
+        // JCLAW-172: shell.enabled / playwright.enabled are gone — the tools
+        // register unconditionally now. Only the loadtest mock provider still
+        // toggles a tool registration via this side effect.
+        if (key.equals("provider.loadtest-mock.enabled")) {
             jobs.ToolRegistrationJob.registerAll();
         }
 
@@ -109,8 +111,9 @@ public class ConfigService {
         if (key.startsWith("provider.")) {
             AgentService.syncEnabledStates();
         }
-        if (key.equals("shell.enabled") || key.equals("playwright.enabled")
-                || key.equals("provider.loadtest-mock.enabled")) {
+        // JCLAW-172: see setWithSideEffects for the rationale — only the
+        // loadtest mock still triggers a tool re-registration on toggle.
+        if (key.equals("provider.loadtest-mock.enabled")) {
             jobs.ToolRegistrationJob.registerAll();
         }
     }

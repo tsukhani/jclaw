@@ -58,9 +58,6 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     }
 
     @Override
-    public String requiresConfig() { return "playwright.enabled"; }
-
-    @Override
     public java.util.List<agents.ToolAction> actions() {
         return java.util.List.of(
                 new agents.ToolAction("navigate",   "Load a URL, wait for network idle, and return page text"),
@@ -256,9 +253,11 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             ensureBrowserInstalled();
             var playwright = Playwright.create(new Playwright.CreateOptions()
                     .setEnv(Map.of("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")));
+            // JCLAW-172: headless is hardcoded — there is no UX where running a
+            // visible browser on the host serves an LLM-driven agent. The
+            // previous {@code playwright.headless} config key is gone.
             var browser = playwright.chromium().launch(
-                    new BrowserType.LaunchOptions().setHeadless(
-                            !"false".equals(services.ConfigService.get("playwright.headless", "true"))));
+                    new BrowserType.LaunchOptions().setHeadless(true));
             var page = browser.newPage();
             // JCLAW-116: abort any request (main frame, subresource, or
             // redirect target) whose URL fails the SSRF guard. Catches
