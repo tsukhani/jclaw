@@ -1,11 +1,12 @@
 ---
 name: visual-explainer
 description: Generate rich HTML pages or slide decks for diagrams, diff reviews, plan audits, data tables, and project recaps
-version: 1.0.0
+version: 1.0.1
 author: main
 tools: [filesystem, exec, documents]
 commands: []
 ---
+
 # Visual Explainer
 
 A skill that turns complex terminal output, diagrams, comparisons, and tables into styled HTML pages you actually want to read.
@@ -63,14 +64,14 @@ Any command can generate a slide deck instead of a scrollable page by adding a "
 
 ## Output Location
 
-Outputs are written to `workspace/{agent-name}/visual-explainer/` (e.g., `workspace/main/visual-explainer/`).
+Outputs are written to `visual-explainer/` at the root of the agent's workspace (e.g., `visual-explainer/`).
 
 ## Visualization Types
 
 The skill automatically selects the best visualization based on content:
 
 | Content Type | Visualization | Library/Tech |
-|--------------|---------------|--------------|
+|--------------|---------------|-------------|
 | Flowcharts & Diagrams | Interactive SVG | Mermaid.js |
 | System Architecture | Grid Layout | CSS Grid + Custom SVG |
 | Data Tables | Styled HTML Tables | HTML + CSS |

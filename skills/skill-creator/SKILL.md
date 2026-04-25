@@ -1,7 +1,7 @@
 ---
 name: skill-creator
 description: Create new skills or refactor existing skills to follow the standard directory structure.
-version: 1.1.0
+version: 1.1.1
 author: main
 tools: [filesystem]
 icon: 🛠️
@@ -73,7 +73,7 @@ Every skill MUST include an `author:` field in its frontmatter. The value is the
    - If the skill has entries in `commands:`, reference each bundled binary by its path in the body (e.g., `tools/wacli`) so the reader can find it
    - Example inputs and expected outputs
    - Edge cases and error handling
-   - **Output Location:** If this skill generates files (HTML diagrams, documents, etc.), include: `Outputs are written to \`workspace/{agent-name}/{skill-name}\` (e.g., \`workspace/main/my-skill/\`).`
+   - **Output Location:** If this skill generates files (HTML diagrams, documents, etc.), include: `Outputs are written to \`{skill-name}/\` at the root of the agent's workspace (e.g., \`my-skill/\`).`
    - **Leave the `version:` field out by default.** When you omit it, the system auto-bumps the patch component on every material write (e.g., `1.0.3 → 1.0.4`) and new skills start at `1.0.0`. **Set an explicit `version:` only when the user asks to promote the skill forward** — e.g., "bump to v1.0.0", "promote to 1.1", "this is a breaking change, make it 2.0.0". In that case, add `version: X.Y.Z` to the frontmatter with your intended target. The value MUST be strictly greater than the next auto-bump target; anything lower or invalid is silently ignored and the system uses its auto-bump instead. Patterns: minor bump (new feature) `1.0.3 → 1.1.0`, major bump (breaking change) `1.2.0 → 2.0.0`, stable promotion from alpha `0.0.6 → 1.0.0`. A version-only promotion (no other content changes) can be done with a single `editFile` that replaces the existing `version:` line.
 5. **Create** the skill using the filesystem tool:
    - Create the directory: `skills/{skill-name}/`
@@ -133,7 +133,7 @@ whatsapp-notifier/
 
 Note: the `version:` line is omitted from the frontmatter you write — the filesystem tool injects it deterministically when the file is saved. The `author:` line uses your own agent name (the example below assumes the `main` agent is creating this skill).
 
-**Output Location:** If this skill generates files (HTML, documents, etc.), store them in `workspace/{agent-name}/{skill-name}/` so users can easily find and download them.
+**Output Location:** If this skill generates files (HTML, documents, etc.), store them in `{skill-name}/` at the root of the agent's workspace (e.g., `my-skill/`) so users can easily find and download them.
 
 ```markdown
 ---
@@ -171,20 +171,18 @@ Rephrase the user's sentence in the requested tone. No tool calls needed — rep
 
 ## Output File Locations
 
-Skills that generate files (HTML diagrams, courses, reports, etc.) MUST store output in the user's workspace under a directory matching the skill name:
+Skills that generate files (HTML diagrams, courses, reports, etc.) MUST store output in a directory matching the skill name at the root of the agent's workspace:
 
 ```
-workspace/
-└── {agent-name}/
-    └── {skill-name}/           # e.g., visual-explainer/
-        └── {output-files}      # e.g., jclaw-architecture.html
+{skill-name}/           # e.g., visual-explainer/
+└── {output-files}      # e.g., black-hole-guide.html
 ```
 
 ### Rules
 
-1. **Destination:** All output files go to `workspace/<agent-name>/<skill-name>/`
+1. **Destination:** All output files go to `{skill-name}/` at the root of the agent's workspace (e.g., `visual-explainer/`)
 2. **Create if missing:** Use `filesystem` tool to create the directory if it doesn't exist
-3. **Filenames:** Use descriptive, kebab-case filenames (e.g., `jclaw-architecture.html`)
+3. **Filenames:** Use descriptive, kebab-case filenames (e.g., `black-hole-guide.html`)
 4. **No .agent directory:** Do NOT put skill outputs in `.agent/` or other hidden directories
 5. **Delivery:** After writing the file, provide a markdown link: `[filename](<relative/path>)` so the user can download it
 
@@ -192,9 +190,9 @@ workspace/
 
 A visual-explainer skill generating an architecture diagram:
 ```markdown
-1. Create directory `workspace/main/visual-explainer/` if it doesn't exist
-2. Write the HTML file to `workspace/main/visual-explainer/jclaw-architecture.html`
-3. Report: `[jclaw-architecture.html](workspace/main/visual-explainer/jclaw-architecture.html)`
+1. Create directory `visual-explainer/` at the root of the workspace if it doesn't exist
+2. Write the HTML file to `visual-explainer/jclaw-architecture.html`
+3. Report: `[jclaw-architecture.html](visual-explainer/jclaw-architecture.html)`
 ```
 
 ## Guidelines

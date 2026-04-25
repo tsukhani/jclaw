@@ -1,248 +1,702 @@
 ---
 name: codebase-to-course
-description: Transform any codebase into a beautiful, interactive single-page HTML course. Use this skill whenever someone wants to create an interactive course, tutorial, or educational walkthrough from a codebase or project. Also trigger when users mention 'turn this into a course,' 'explain this codebase interactively,' 'teach this code,' 'interactive tutorial from code,' 'codebase walkthrough,' 'learn from this codebase,' or 'make a course from this project.' This skill produces a stunning, self-contained HTML file with scroll-based navigation, animated visualizations, embedded quizzes, and code-with-plain-English side-by-side translations.
+description: Turn any codebase into a beautiful, interactive, single-page HTML course that teaches how the code works to non-technical vibe coders. Trigger on phrases like "turn this into a course", "explain this codebase interactively", "teach me how this code works", "make a course from this project", or "interactive tutorial from this code". Produces a self-contained HTML file with scroll-based modules, animated visualizations, embedded quizzes, and code↔plain-English side-by-side translations. Adapted from zarazhangrui/codebase-to-course.
 version: 1.0.0
-tools: [exec, filesystem, documents]
+author: main
+tools: [filesystem, exec, web_fetch, documents]
+commands: []
 ---
-
 # Codebase-to-Course
 
-Transform any codebase into a stunning, interactive course. The output is a **directory** containing a pre-built `styles.css`, `main.js`, per-module HTML files, and an assembled `index.html` — open it directly in the browser with no setup required (only external dependency: Google Fonts CDN). The course teaches how the code works through scroll-based modules, animated visualizations, embedded quizzes, and plain-English translations of code.
+Transform any codebase into a stunning, interactive, single-page HTML course. The output is **one self-contained `.html` file** — inline CSS and JS, only external dependency is Google Fonts — that teaches how the code works through scroll-based modules, animated visualizations, embedded quizzes, and plain-English translations.
+
+**Output location:** write the finished course to `codebase-to-course/<project-slug>.html` at the root of the workspace, then deliver to the user with a markdown link `[project-slug.html](<codebase-to-course/project-slug.html>)`.
 
 ## First-Run Welcome
 
-When the skill is first triggered and the user hasn't specified a codebase yet, introduce yourself and explain what you do:
+If the user invokes this skill without naming a codebase, introduce yourself:
 
 > **I can turn any codebase into an interactive course that teaches how it works — no coding knowledge required.**
 >
 > Just point me at a project:
-> - **A local folder** — e.g., "turn ./my-project into a course"
 > - **A GitHub link** — e.g., "make a course from https://github.com/user/repo"
-> - **The current project** — if you're already in a codebase, just say "turn this into a course"
+> - **A local folder in the workspace** — e.g., "turn ./my-project into a course"
 >
-> I'll read through the code, figure out how everything fits together, and generate a beautiful single-page HTML course with animated diagrams, plain-English code explanations, and interactive quizzes. The whole thing runs in your browser — no setup needed.
+> I'll read through the code, figure out how everything fits together, and generate a beautiful single-page HTML course with animated diagrams, plain-English code explanations, and interactive quizzes.
 
-If the user provides a GitHub link, clone the repo first using the `exec` tool (`git clone <url> /tmp/<repo-name>`) before starting the analysis. If they say "this codebase" or similar, use the current working directory.
+For a **GitHub URL**: clone into a temp directory with `exec` (`git clone <url> /tmp/<repo-slug>`) before starting analysis. For a **local path**: use it directly. Do **not** ask the user to explain the product — figure it out yourself by reading the README, entry points, and UI code.
 
 ## Who This Is For
 
-The target learner is a **"vibe coder"** — someone who builds software by instructing AI coding tools in natural language, without a traditional CS education. They may have built this project themselves (without looking at the code), or they may have found an interesting open-source project on GitHub and want to understand how it's built. Either way, they don't yet understand what's happening under the hood.
+The target learner is a **"vibe coder"** — someone who builds software by instructing AI coding tools in natural language, without a traditional CS education. They may have built this project themselves (without reading the code) or found an interesting open-source repo and want to understand how it's built.
 
-**Assume zero technical background.** Every CS concept — from variables to APIs to databases — needs to be explained in plain language as if the learner has never encountered it. No jargon without definition. No "as you probably know." The tone should be like a smart friend explaining things, not a professor lecturing.
+**Assume zero technical background.** Every CS concept — variables, APIs, databases, callbacks — needs to be explained in plain language. No jargon without definition. No "as you probably know." Tone: smart friend explaining things, not a professor lecturing.
 
 **Their goals are practical, not academic:**
-- Have enough technical knowledge to effectively **steer AI coding tools** — make better architectural and tech stack decisions
-- **Detect when AI is wrong** — spot hallucinations, catch bad patterns, know when something smells off
-- **Intervene when AI gets stuck** — break out of bug loops, debug issues, unblock themselves
-- Build more advanced software with **production-level quality and reliability**
-- Be **technically fluent** enough to discuss decisions with engineers confidently
-- **Acquire the vocabulary of software** — learn the precise technical terms so they can describe requirements clearly and unambiguously to AI coding agents (e.g., knowing to say "namespace package" instead of "shared folder thing")
+- **Steer AI coding tools** better — make smarter architectural and tech-stack decisions
+- **Detect when AI is wrong** — spot hallucinations, catch bad patterns
+- **Intervene when AI gets stuck** — break out of bug loops, debug faster
+- Build software with **production-level quality and reliability**
+- Be **technically fluent** enough to talk to engineers without feeling lost
+- **Acquire the vocabulary of software** — precise terms so they can describe requirements clearly to AI agents (e.g., "namespace package" instead of "shared folder thing")
 
-**They are NOT trying to become software engineers.** They want coding as a superpower that amplifies what they're already good at. They don't need to write code from scratch — they need to *read* it, *understand* it, and *direct* it.
+**They are NOT trying to become software engineers.** They want coding as a superpower that amplifies what they're already good at.
 
 ## Why This Approach Works
 
-This skill inverts traditional CS education. The old model is: memorize concepts for years → eventually build something → finally see the point (most people quit before step 3). This model is: **build something first → experience it working → now understand how it works.**
+This skill inverts traditional CS education. Old model: memorize concepts for years → eventually build something → finally see the point (most quit before step 3). This model: **build something first → experience it working → now understand how it works.**
 
-The learner already has context that traditional students don't — they've *used* the app, they know what it does, they may have even described its features in natural language. The course meets them where they are: "You know that button you click? Here's what happens under the hood when you click it."
-
-Every module answers **"why should I care?"** before "how does it work?" The answer to "why should I care?" is always practical: *because this knowledge helps you steer AI better, debug faster, or make smarter architectural decisions.*
-
-The directory-based output is intentional: separating CSS/JS from content means AI never regenerates boilerplate, each module is written independently (keeping output size small and quality high), and the assembled `index.html` works offline with zero setup.
+The learner already has context traditional students lack — they've *used* the app, they know what it does. The course meets them where they are: *"You know that button you click? Here's what happens under the hood."* Every module answers **"why should I care?"** before "how does it work?" — and the answer is always practical.
 
 ---
 
 ## The Process
 
-### Phase 1: Codebase Analysis
+### Phase 1 — Codebase Analysis
 
-Before writing course HTML, deeply understand the codebase. Read all the key files using the `filesystem` tool, trace the data flows, identify the "cast of characters" (main components/modules), and map how they communicate. Thoroughness here pays off — the more you understand, the better the course.
+Before writing any HTML, deeply understand the codebase. Use `filesystem` (listFiles/readFile) and `exec` (`grep`, `find`, `cat`) to read all key files, trace data flows, and map the architecture. Thoroughness here pays off.
 
 **What to extract:**
 - The main "actors" (components, services, modules) and their responsibilities
-- The primary user journey (what happens when someone uses the app end-to-end)
+- The primary user journey — what happens end-to-end when someone uses the app
 - Key APIs, data flows, and communication patterns
-- Clever engineering patterns (caching, lazy loading, error handling, etc.)
+- Clever engineering patterns (caching, lazy loading, error handling, chunking)
 - Real bugs or gotchas (if visible in git history or comments)
 - The tech stack and why each piece was chosen
 
-**Figure out what the app does yourself** by reading the README, the main entry points, and the UI code using the `filesystem` tool. Don't ask the user to explain the product — they may not be familiar with it either. The course should open by explaining what the app does in plain language (a brief "here's what this thing does and why it's interesting") before diving into how it works. The first module should start with a concrete user action — "imagine you paste a YouTube URL and click Analyze — here's what happens under the hood."
+**Figure out what the app does yourself** by reading the README, main entry points, and UI code. The course should open by explaining what the app does in plain language before diving into how it works. The first module should start with a concrete user action: *"Imagine you paste a YouTube URL and click Analyze — here's what happens under the hood."*
 
-### Phase 2: Curriculum Design
+### Phase 2 — Curriculum Design
 
-Structure the course as **4-6 modules**. Most courses need 4-6. Only go to 7-8 if the codebase genuinely has that many distinct concepts worth teaching. Fewer, better modules beat more, thinner ones.
+Structure the course as **4–6 modules**. Only go to 7–8 if the codebase genuinely has that many distinct concepts. Fewer, better modules beat more, thinner ones.
 
-The arc always starts from what the learner already knows (the user-facing behavior) and moves toward what they don't (the code underneath). Think of it as zooming in: start wide with the experience, then progressively peel back layers.
+The arc always starts from what the learner already knows (the user-facing behavior) and zooms inward. Think of it as progressively peeling back layers.
 
-| Module Position | Purpose | Why it matters for a vibe coder |
+**Module menu (pick what serves the codebase — this is NOT a checklist):**
+
+| # | Purpose | Why it matters for a vibe coder |
 |---|---|---|
-| 1 | "Here's what this app does — and what happens when you use it" | Start with the product (what it does, why it's interesting), then trace a core user action into the code. Grounds everything in something concrete. |
+| 1 | "Here's what this app does, and what happens when you use it" | Grounds everything in something concrete. Trace a core user action into the code. |
 | 2 | Meet the actors | Know which components exist so you can tell AI "put this logic in X, not Y" |
 | 3 | How the pieces talk | Understand data flow so you can debug "it's not showing up" problems |
-| 4 | The outside world (APIs, databases) | Know what's external so you can evaluate costs, rate limits, and failure modes |
+| 4 | The outside world (APIs, databases) | Know what's external so you can evaluate costs, rate limits, failure modes |
 | 5 | The clever tricks | Learn patterns (caching, chunking, error handling) so you can request them from AI |
 | 6 | When things break | Build debugging intuition so you can escape AI bug loops |
-| 7 | The big picture | See the full architecture so you can make better decisions about what to build next |
+| 7 | The big picture | See the full architecture so you can decide what to build next |
 
-This is a **menu, not a checklist**. Pick the modules that serve the codebase — a simple CLI tool needs 4, not 7. Adapt the arc to the codebase's complexity.
+**Every module must connect back to a practical skill** — steering AI, debugging, making decisions. If a module doesn't help the learner DO something better, cut it or reframe it.
 
-**The key principle:** Every module should connect back to a practical skill — steering AI, debugging, making decisions. If a module doesn't help the learner DO something better, cut it or reframe it until it does.
+**Each module contains:**
+- 3–6 screens (sub-sections that flow within the module)
+- At least one code↔English translation
+- At least one interactive element (quiz, visualization, animation)
+- 1–2 "aha!" callout boxes with universal CS insights
+- A metaphor that grounds the technical concept in everyday life
 
-**Each module should contain:**
-- 3-6 screens (sub-sections that flow within the module)
-- At least one code-with-English translation
-- At least one interactive element (quiz, visualization, or animation)
-- One or two "aha!" callout boxes with universal CS insights
-- A metaphor that grounds the technical concept in everyday life — but NEVER reuse the same metaphor across modules, and NEVER default to the "restaurant" metaphor (it's overused). Pick metaphors that organically fit the specific concept. The best metaphors feel *inevitable* for the concept, not forced.
-
-**Mandatory interactive elements (every course must include ALL of these):**
-- **Group Chat Animation** — at least one across the course. These are the iMessage/WeChat-style conversations between components. They're one of the most engaging elements and must always appear, even if you have to creatively frame a module's concept as a conversation between actors.
-- **Message Flow / Data Flow Animation** — at least one across the course. The step-by-step packet animation between actors. If the codebase has any kind of request/response, data pipeline, or multi-step process, animate it. Every codebase has data flowing somewhere — find it.
-- **Code ↔ English Translation Blocks** — at least one per module (already required above, but reiterating: this is non-negotiable).
-- **Quizzes** — at least one per module (multiple-choice, scenario, drag-and-drop, or spot-the-bug — any quiz type counts).
+**Mandatory across the whole course:**
+- **Group Chat Animation** — at least one. iMessage-style conversation between components. Creatively frame at least one module as a chat between actors.
+- **Message Flow / Data Flow Animation** — at least one. Step-by-step packet animation between actors.
+- **Code ↔ English Translation Blocks** — at least one per module.
+- **Quizzes** — at least one per module (multiple-choice, scenario, or spot-the-bug).
 - **Glossary Tooltips** — on every technical term, first use per module.
 
-These five element types are the backbone of every course. Other interactive elements (architecture diagrams, layer toggles, pattern cards, etc.) are optional and should be added when they fit. But the five above must ALWAYS be present — no exceptions.
+**Do NOT present the curriculum for approval — just build it.** The user wants a course, not a planning document. They'll give feedback after seeing the result.
 
-**Do NOT present the curriculum for approval — just build it.** The user wants a course, not a planning document. Design the curriculum internally, then go straight to building. If they want changes, they'll tell you after seeing the result.
+### Phase 3 — Build the HTML
 
-**After designing the curriculum, decide which build path to use:**
+Produce ONE self-contained HTML file: `<!DOCTYPE html>` → `<head>` (fonts, inline `<style>` with the full design system) → `<body>` (nav + all module sections) → inline `<script>` with all interactive-element engines. No external CSS or JS files, no build step. The file must open and work offline with only the Google Fonts CDN link.
 
-- **Simple codebase** (single-purpose CLI, small web app, library, one clear entry point, 5 or fewer modules) → go directly to Phase 3 Sequential.
-- **Complex codebase** (full-stack app, multiple services, content-heavy site, monorepo, or 6+ modules) → go to Phase 2.5 first, then Phase 3 Parallel.
+Write the file with `filesystem.writeFile` to `codebase-to-course/<project-slug>.html`. Because the file can be large, build it with `writeFile` for the opening shell, then `appendFile` for each module and for the closing `</body></html>`. Emit one module per `appendFile` call — this keeps each tool response small and lets you author arbitrarily long courses.
 
-### Phase 2.5: Module Briefs (complex codebases only)
+### Phase 4 — Review and Deliver
 
-For complex codebases, write a brief for each module before writing any HTML. This is the critical step that enables parallel writing — each brief gives an agent everything it needs without re-reading the codebase.
-
-Read `references/module-brief-template.md` using the `filesystem` tool for the template structure. Read `references/content-philosophy.md` using the `filesystem` tool for the content rules that should guide brief writing.
-
-**For each module, write a brief to `course-name/briefs/0N-slug.md` containing:**
-- Teaching arc (metaphor, opening hook, key insight)
-- Pre-extracted code snippets (copy-pasted from the codebase with file paths and line numbers)
-- Interactive elements checklist with enough detail to build them
-- Which sections of which reference files the writing agent needs
-- What the previous and next modules cover (for transitions)
-
-The code snippets are the critical token-saving step. By pre-extracting them into the brief, writing agents never need to read the codebase at all.
-
-### Phase 3: Build the Course
-
-The course output is a **directory**, not a single file. All CSS and JS are pre-built reference files — never regenerate them. Your job is to write only the HTML content.
-
-**Output structure:**
-```
-course-name/
-  styles.css       ← copied verbatim from references/styles.css
-  main.js          ← copied verbatim from references/main.js
-  _base.html       ← customized shell (title, accent color, nav dots)
-  _footer.html     ← copied verbatim from references/_footer.html
-  build.sh         ← copied verbatim from references/build.sh
-  briefs/          ← module briefs (complex codebases only, can delete after build)
-  modules/
-    01-intro.html
-    02-actors.html
-    ...
-  index.html       ← assembled by build.sh (do not write manually)
-```
-
-**Step 1 (both paths): Setup** — Create the course directory using the `filesystem` tool. Copy these four files verbatim using the `filesystem` tool (do not regenerate their contents):
-- `references/styles.css` → `course-name/styles.css`
-- `references/main.js` → `course-name/main.js`
-- `references/_footer.html` → `course-name/_footer.html`
-- `references/build.sh` → `course-name/build.sh`
-
-**Step 2 (both paths): Customize `_base.html`** — Read `references/_base.html` using the `filesystem` tool, then write it to `course-name/_base.html` with exactly three substitutions:
-- Both instances of `COURSE_TITLE` → the actual course title
-- The four `ACCENT_*` placeholders → the chosen accent color values (pick one palette from the comments in `_base.html`)
-- `NAV_DOTS` → one `<button class="nav-dot" ...>` per module
-
-**Step 3: Write modules** — This is where the paths diverge.
-
-#### Sequential path (simple codebases)
-
-Read `references/content-philosophy.md` and `references/gotchas.md` using the `filesystem` tool. Then write modules one at a time. For each module, write `course-name/modules/0N-slug.html` using the `filesystem` tool containing only the `<section class="module" id="module-N">` block and its contents. Do not include `<html>`, `<head>`, `<body>`, `<style>`, or `<script>` tags.
-
-Read `references/interactive-elements.md` using the `filesystem` tool for HTML patterns for each interactive element type. Read `references/design-system.md` using the `filesystem` tool for visual conventions.
-
-#### Parallel path (complex codebases)
-
-Dispatch modules to subagents in batches of up to 3. Each agent receives:
-- Its module brief (from `course-name/briefs/`)
-- `references/content-philosophy.md` and `references/gotchas.md`
-- Only the sections of `references/interactive-elements.md` and `references/design-system.md` listed in the brief
-
-Each agent writes its module file(s) to `course-name/modules/`. Short modules (3 screens, one quiz) can be paired — two briefs given to one agent.
-
-**What agents do NOT receive:** the full codebase (snippets are in the brief), SKILL.md, other modules' briefs, or unneeded reference file sections.
-
-After all agents finish, do a quick consistency check in the main context: nav dots match modules, transitions between modules are coherent, no obvious tone shifts.
-
-**Step 4 (both paths): Assemble** — Run `build.sh` from the course directory using the `exec` tool:
-```bash
-cd course-name && bash build.sh
-```
-This produces `index.html`. Open it in the browser.
-
-**Critical rules:**
-- **Never regenerate** `styles.css` or `main.js` — always copy from references
-- Module files contain only `<section>` content — no boilerplate
-- Use CSS `scroll-snap-type: y proximity` (NOT `mandatory`)
-- Use `min-height: 100dvh` with `100vh` fallback on `.module`
-- Interactive element JS is in `main.js`; wire up via `data-*` attributes and CSS class names as shown in `references/interactive-elements.md`
-- Chat containers need `id` attributes; flow animations need `data-steps='[...]'` JSON on `.flow-animation`
-
-### Phase 4: Review and Open
-
-After running `build.sh`, open `index.html` in the browser. Walk the user through what was built and ask for feedback on content, design, and interactivity.
+Deliver the file via a markdown link: `[<slug>.html](<codebase-to-course/<slug>.html>)`. Briefly summarize in chat:
+- Course title and module count
+- Which "clever tricks" from the codebase you highlighted
+- Invite the user to open it and request revisions
 
 ---
 
 ## Design Identity
 
-The visual design should feel like a **beautiful developer notebook** — warm, inviting, and distinctive. Read `references/design-system.md` using the `filesystem` tool for the full token system, but here are the non-negotiable principles:
+The visual design should feel like a **beautiful developer notebook** — warm, inviting, distinctive. Non-negotiable principles:
 
-- **Warm palette**: Off-white backgrounds (like aged paper), warm grays, NO cold whites or blues
-- **Bold accent**: One confident accent color (vermillion, coral, teal — NOT purple gradients)
-- **Distinctive typography**: Display font with personality for headings (Bricolage Grotesque, or similar bold geometric face — NEVER Inter, Roboto, Arial, or Space Grotesk). Clean sans-serif for body (DM Sans or similar). JetBrains Mono for code.
-- **Generous whitespace**: Modules breathe. Max 3-4 short paragraphs per screen.
-- **Alternating backgrounds**: Even/odd modules alternate between two warm background tones for visual rhythm
-- **Dark code blocks**: IDE-style with Catppuccin-inspired syntax highlighting on deep indigo-charcoal (#1E1E2E)
-- **Depth without harshness**: Subtle warm shadows, never black drop shadows
+- **Warm palette** — off-white backgrounds like aged paper, warm grays, NO cold whites or blues
+- **Bold accent** — one confident accent color (vermillion, coral, teal, amber, forest — NEVER purple gradients)
+- **Distinctive typography** — display font with personality (Bricolage Grotesque, or similar bold geometric face — NEVER Inter, Roboto, Arial, Space Grotesk). Body: DM Sans. Code: JetBrains Mono.
+- **Generous whitespace** — modules breathe. Max 3–4 short paragraphs per screen.
+- **Alternating backgrounds** — even/odd modules alternate between two warm background tones
+- **Dark code blocks** — IDE-style with Catppuccin-inspired syntax highlighting on deep indigo-charcoal (`#1E1E2E`)
+- **Depth without harshness** — subtle warm shadows, never pure black
+
+### Design System (paste the `:root` block into the `<style>` tag verbatim, adapt accent color as needed)
+
+```css
+:root {
+  /* BACKGROUNDS */
+  --color-bg:             #FAF7F2;
+  --color-bg-warm:        #F5F0E8;
+  --color-bg-code:        #1E1E2E;
+  --color-text:           #2C2A28;
+  --color-text-secondary: #6B6560;
+  --color-text-muted:     #9E9790;
+  --color-border:         #E5DFD6;
+  --color-border-light:   #EEEBE5;
+  --color-surface:        #FFFFFF;
+  --color-surface-warm:   #FDF9F3;
+
+  /* ACCENT — pick ONE. Default: vermillion.
+     Alternatives: coral (#E06B56), teal (#2A7B9B), amber (#D4A843), forest (#2D8B55). */
+  --color-accent:         #D94F30;
+  --color-accent-hover:   #C4432A;
+  --color-accent-light:   #FDEEE9;
+  --color-accent-muted:   #E8836C;
+
+  /* SEMANTIC */
+  --color-success:        #2D8B55;
+  --color-success-light:  #E8F5EE;
+  --color-error:          #C93B3B;
+  --color-error-light:    #FDE8E8;
+  --color-info:           #2A7B9B;
+  --color-info-light:     #E4F2F7;
+
+  /* ACTOR COLORS — assign to main components for chat bubbles & diagrams */
+  --color-actor-1: #D94F30;   /* vermillion */
+  --color-actor-2: #2A7B9B;   /* teal */
+  --color-actor-3: #7B6DAA;   /* muted plum */
+  --color-actor-4: #D4A843;   /* golden */
+  --color-actor-5: #2D8B55;   /* forest */
+
+  /* FONTS */
+  --font-display: 'Bricolage Grotesque', Georgia, serif;
+  --font-body:    'DM Sans', -apple-system, sans-serif;
+  --font-mono:    'JetBrains Mono', 'Fira Code', Consolas, monospace;
+
+  /* TYPE SCALE (1.25 ratio) */
+  --text-xs: .75rem; --text-sm: .875rem; --text-base: 1rem;
+  --text-lg: 1.125rem; --text-xl: 1.25rem; --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem; --text-4xl: 2.25rem; --text-5xl: 3rem; --text-6xl: 3.75rem;
+
+  /* LINE HEIGHTS */
+  --leading-tight: 1.15; --leading-snug: 1.3;
+  --leading-normal: 1.6; --leading-loose: 1.8;
+
+  /* SPACING */
+  --space-1: .25rem; --space-2: .5rem; --space-3: .75rem; --space-4: 1rem;
+  --space-5: 1.25rem; --space-6: 1.5rem; --space-8: 2rem; --space-10: 2.5rem;
+  --space-12: 3rem; --space-16: 4rem; --space-20: 5rem; --space-24: 6rem;
+
+  /* LAYOUT */
+  --content-width: 800px;
+  --content-width-wide: 1000px;
+  --nav-height: 50px;
+  --radius-sm: 8px; --radius-md: 12px; --radius-lg: 16px; --radius-full: 9999px;
+
+  /* SHADOWS — warm-tinted, never pure black */
+  --shadow-sm: 0 1px 2px rgba(44,42,40,.05);
+  --shadow-md: 0 4px 12px rgba(44,42,40,.08);
+  --shadow-lg: 0 8px 24px rgba(44,42,40,.10);
+  --shadow-xl: 0 16px 48px rgba(44,42,40,.12);
+
+  /* ANIMATION */
+  --ease-out: cubic-bezier(.16,1,.3,1);
+  --ease-in-out: cubic-bezier(.65,0,.35,1);
+  --duration-fast: 150ms; --duration-normal: 300ms; --duration-slow: 500ms;
+  --stagger-delay: 120ms;
+}
+```
+
+### Fonts `<link>` to put in `<head>`
+
+```html
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700;12..96,800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400;1,9..40,500&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+```
+
+### Global layout rules
+
+- Page scroll: `html { scroll-snap-type: y proximity; scroll-behavior: smooth; }` — **proximity, not mandatory**.
+- Each module: `.module { min-height: 100dvh; scroll-snap-align: start; padding: var(--space-16) var(--space-6); padding-top: calc(var(--nav-height) + var(--space-12)); }` with `100vh` fallback.
+- Even-numbered modules use `--color-bg`, odd-numbered use `--color-bg-warm` (alternating visual rhythm).
+- Code blocks wrap — `pre, code { white-space: pre-wrap; word-break: break-word; overflow-x: hidden; }`. **Never** a horizontal scrollbar.
+- Body background: subtle radial gradient with accent at ~3% opacity.
+
+### Syntax highlighting (Catppuccin-inspired, for dark code blocks)
+
+```css
+.code-keyword  { color: #CBA6F7; }  /* purple — if/else/return/function */
+.code-string   { color: #A6E3A1; }  /* green — "strings" */
+.code-function { color: #89B4FA; }  /* blue — function names */
+.code-comment  { color: #6C7086; }  /* muted gray — // comments */
+.code-number   { color: #FAB387; }  /* peach — numbers */
+.code-property { color: #F9E2AF; }  /* yellow — object keys */
+.code-operator { color: #94E2D5; }  /* teal — =, =>, + */
+.code-tag      { color: #F38BA8; }  /* pink — HTML tags */
+.code-attr     { color: #F9E2AF; }  /* yellow — HTML attributes */
+.code-value    { color: #A6E3A1; }  /* green — attribute values */
+```
 
 ---
 
-## Reference Files
+## Content Philosophy
 
-The `references/` directory contains detailed specs. **Read them using the `filesystem` tool only when you reach the relevant phase** — not upfront. This keeps context lean.
+**Show, don't tell.** Every screen is at least 50% visual. Max 2–3 sentences per text block. If something can be a diagram, animation, or interactive element — it shouldn't be a paragraph.
 
-- **`references/content-philosophy.md`** — Visual density rules, metaphor guidelines, quiz design, tooltip rules, code translation guidance. Read during Phase 2.5 (briefs) and Phase 3 (writing modules).
-- **`references/gotchas.md`** — Common failure points checklist. Read during Phase 3 and Phase 4 (review).
-- **`references/module-brief-template.md`** — Template for Phase 2.5 module briefs. Read only for complex codebases using the parallel path.
-- **`references/design-system.md`** — Complete CSS custom properties, color palette, typography scale, spacing system, shadows, animations, scrollbar styling. Read during Phase 3 when writing module HTML.
-- **`references/interactive-elements.md`** — Implementation patterns for every interactive element: drag-and-drop quizzes, multiple-choice quizzes, code↔English translations, group chat animations, message flow visualizations, architecture diagrams, pattern cards, callout boxes. Read the relevant sections during Phase 3.
-- **`references/_base.html`** — HTML template for the course shell. Read during Phase 3 Step 2.
-- **`references/_footer.html`** — Closing HTML tags. Copy verbatim during Phase 3 Step 1.
-- **`references/build.sh`** — Bash script to assemble course. Copy verbatim during Phase 3 Step 1.
-- **`references/styles.css`** — Complete CSS, never modify. Copy verbatim during Phase 3 Step 1.
-- **`references/main.js`** — Complete JavaScript, never modify. Copy verbatim during Phase 3 Step 1.
+**Quizzes test doing, not knowing.** No "What does API stand for?" Instead: *"A user reports stale data after switching pages. Where would you look first?"* Quizzes test whether the learner can USE what they learned on a new problem.
+
+**No recycled metaphors.** Each concept gets a metaphor that fits that specific idea. A database is a library with a card catalog. Auth is a bouncer checking IDs. Rate limiting is a nightclub with a capacity limit. **Never use the same metaphor twice. NEVER default to the restaurant metaphor — it's overused.** The best metaphors feel *inevitable* for the concept, not forced.
+
+**Original code only.** Code snippets are **exact copies** from the real codebase — never modified, trimmed, or simplified. Choose naturally short (5–10 line) sections that illustrate the concept. The learner should be able to open the actual file and see the same code.
+
+**Each English line in a translation block corresponds to 1–2 code lines.** Highlight the *why*, not just the *what* — "Include our API key so the server knows who we are" beats "Set the Authorization header."
 
 ---
 
-## Trigger Phrases
+## Interactive Element Patterns
 
-This skill activates when the user says:
-- "turn this into a course"
-- "explain this codebase interactively"
-- "make a course from this project"
-- "teach me how this code works"
-- "interactive tutorial from this code"
-- "codebase walkthrough"
-- "learn from this codebase"
-- "make a course from this project"
+All HTML/CSS/JS below is canonical. Inline them directly into the single output file.
+
+### 1. Code ↔ English Translation Block (mandatory per module)
+
+```html
+<div class="translation-block animate-in">
+  <div class="translation-code">
+    <span class="translation-label">CODE</span>
+    <pre><code><span class="code-line"><span class="code-keyword">const</span> response = <span class="code-keyword">await</span> <span class="code-function">fetch</span>(url, {</span>
+<span class="code-line">  <span class="code-property">method</span>: <span class="code-string">'POST'</span>,</span>
+<span class="code-line">  <span class="code-property">headers</span>: { <span class="code-string">'Authorization'</span>: apiKey }</span>
+<span class="code-line">});</span></code></pre>
+  </div>
+  <div class="translation-english">
+    <span class="translation-label">PLAIN ENGLISH</span>
+    <div class="translation-lines">
+      <p class="tl">Send a request to the URL and wait for a response.</p>
+      <p class="tl">We're sending data (POST), not just asking for it (GET).</p>
+      <p class="tl">Include our API key so the server knows who we are.</p>
+      <p class="tl">End of the request setup.</p>
+    </div>
+  </div>
+</div>
+```
+
+```css
+.translation-block { display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+  border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-md);
+  margin: var(--space-8) 0; }
+.translation-code { background: var(--color-bg-code); color: #CDD6F4;
+  padding: var(--space-6); font-family: var(--font-mono); font-size: var(--text-sm);
+  line-height: 1.7; position: relative; overflow-x: hidden; }
+.translation-code pre, .translation-code code {
+  white-space: pre-wrap; word-break: break-word; overflow-x: hidden; }
+.translation-english { background: var(--color-surface-warm); padding: var(--space-6);
+  font-size: var(--text-sm); line-height: 1.7;
+  border-left: 3px solid var(--color-accent); }
+.translation-label { position: absolute; top: var(--space-2); right: var(--space-3);
+  font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .1em; opacity: .5; }
+@media (max-width: 768px) {
+  .translation-block { grid-template-columns: 1fr; }
+  .translation-english { border-left: none; border-top: 3px solid var(--color-accent); }
+}
+```
+
+### 2. Multiple-Choice Quiz (mandatory per module)
+
+```html
+<div class="quiz-container" id="quiz-module3">
+  <div class="quiz-question-block"
+       data-correct="option-b"
+       data-explanation-right="Exactly — because X is responsible for Y in this architecture."
+       data-explanation-wrong="Not quite. Think about where Y lives in the codebase...">
+    <h3 class="quiz-question">Question text here?</h3>
+    <div class="quiz-options">
+      <button class="quiz-option" data-value="option-a" onclick="selectOption(this)">
+        <div class="quiz-option-radio"></div><span>Answer A</span>
+      </button>
+      <button class="quiz-option" data-value="option-b" onclick="selectOption(this)">
+        <div class="quiz-option-radio"></div><span>Answer B (correct)</span>
+      </button>
+      <button class="quiz-option" data-value="option-c" onclick="selectOption(this)">
+        <div class="quiz-option-radio"></div><span>Answer C</span>
+      </button>
+    </div>
+    <div class="quiz-feedback"></div>
+  </div>
+  <button class="quiz-check-btn" onclick="checkQuiz('quiz-module3')">Check Answers</button>
+  <button class="quiz-reset-btn" onclick="resetQuiz('quiz-module3')">Try Again</button>
+</div>
+```
+
+JS engine (put in the inline `<script>`):
+
+```javascript
+window.selectOption = function(btn) {
+  const block = btn.closest('.quiz-question-block');
+  block.querySelectorAll('.quiz-option').forEach(o => o.classList.remove('selected'));
+  btn.classList.add('selected');
+};
+window.checkQuiz = function(id) {
+  document.getElementById(id).querySelectorAll('.quiz-question-block').forEach(block => {
+    const selected = block.querySelector('.quiz-option.selected');
+    const feedback = block.querySelector('.quiz-feedback');
+    if (!selected) return;
+    const ok = selected.dataset.value === block.dataset.correct;
+    block.querySelectorAll('.quiz-option').forEach(o => o.classList.remove('correct','incorrect'));
+    selected.classList.add(ok ? 'correct' : 'incorrect');
+    feedback.textContent = ok ? block.dataset.explanationRight : block.dataset.explanationWrong;
+    feedback.className = 'quiz-feedback show ' + (ok ? 'success' : 'error');
+  });
+};
+window.resetQuiz = function(id) {
+  document.getElementById(id).querySelectorAll('.quiz-option').forEach(o =>
+    o.classList.remove('selected','correct','incorrect'));
+  document.getElementById(id).querySelectorAll('.quiz-feedback').forEach(f => f.className = 'quiz-feedback');
+};
+```
+
+### 3. Group Chat Animation (at least one per course)
+
+iMessage-style conversation between components — messages appear one by one with typing indicators.
+
+```html
+<div class="chat-window" id="chat-module2">
+  <div class="chat-messages">
+    <div class="chat-message" data-msg="0" data-sender="actor-a" style="display:none">
+      <div class="chat-avatar" style="background: var(--color-actor-1)">A</div>
+      <div class="chat-bubble">
+        <span class="chat-sender" style="color: var(--color-actor-1)">Actor A</span>
+        <p>Hey Background, I need the data for this item.</p>
+      </div>
+    </div>
+    <!-- more messages with incrementing data-msg -->
+  </div>
+  <div class="chat-typing" style="display:none">
+    <div class="chat-avatar">?</div>
+    <div class="chat-typing-dots">
+      <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
+    </div>
+  </div>
+  <div class="chat-controls">
+    <button class="btn chat-next-btn">Next Message</button>
+    <button class="btn chat-all-btn">Play All</button>
+    <button class="btn chat-reset-btn">Replay</button>
+    <span class="chat-progress"></span>
+  </div>
+</div>
+```
+
+JS engine — auto-initializes every `.chat-window`:
+
+```javascript
+document.querySelectorAll('.chat-window').forEach(win => {
+  const msgs = [...win.querySelectorAll('.chat-message')];
+  const typing = win.querySelector('.chat-typing');
+  const progress = win.querySelector('.chat-progress');
+  let idx = 0, playing = false;
+  const showNext = () => {
+    if (idx >= msgs.length) return;
+    typing.style.display = 'flex';
+    setTimeout(() => {
+      typing.style.display = 'none';
+      msgs[idx].style.display = 'flex';
+      idx++;
+      if (progress) progress.textContent = `${idx}/${msgs.length}`;
+    }, 700);
+  };
+  win.querySelector('.chat-next-btn')?.addEventListener('click', showNext);
+  win.querySelector('.chat-all-btn')?.addEventListener('click', () => {
+    if (playing) return; playing = true;
+    const tick = () => {
+      if (idx >= msgs.length) { playing = false; return; }
+      showNext(); setTimeout(tick, 1400);
+    };
+    tick();
+  });
+  win.querySelector('.chat-reset-btn')?.addEventListener('click', () => {
+    msgs.forEach(m => m.style.display = 'none'); idx = 0; playing = false;
+    if (progress) progress.textContent = `0/${msgs.length}`;
+  });
+});
+```
+
+### 4. Message Flow / Data Flow Animation (at least one per course)
+
+**⚠️ Single quotes in `data-steps` labels break parsing.** Either avoid apostrophes, use `&apos;`, or flip attribute delimiters to double-quoted with escaped inner quotes.
+
+```html
+<div class="flow-animation" data-steps='[
+  {"highlight":"flow-actor-1","label":"User clicks the button"},
+  {"highlight":"flow-actor-1","label":"Frontend sends request","packet":true,"from":"actor-1","to":"actor-2"},
+  {"highlight":"flow-actor-2","label":"Backend calls the database","packet":true,"from":"actor-2","to":"actor-3"}
+]'>
+  <div class="flow-actors">
+    <div class="flow-actor" id="flow-actor-1"><div class="flow-actor-icon">A</div><span>Actor 1</span></div>
+    <div class="flow-actor" id="flow-actor-2"><div class="flow-actor-icon">B</div><span>Actor 2</span></div>
+    <div class="flow-actor" id="flow-actor-3"><div class="flow-actor-icon">C</div><span>Actor 3</span></div>
+  </div>
+  <div class="flow-packet"></div>
+  <div class="flow-step-label">Click "Next Step" to begin</div>
+  <div class="flow-controls">
+    <button class="btn flow-next-btn">Next Step</button>
+    <button class="btn flow-reset-btn">Restart</button>
+    <span class="flow-progress"></span>
+  </div>
+</div>
+```
+
+JS engine:
+
+```javascript
+document.querySelectorAll('.flow-animation').forEach(flow => {
+  const steps = JSON.parse(flow.dataset.steps);
+  const label = flow.querySelector('.flow-step-label');
+  const progress = flow.querySelector('.flow-progress');
+  let idx = 0;
+  const reset = () => {
+    flow.querySelectorAll('.flow-actor').forEach(a => a.classList.remove('active'));
+  };
+  const step = () => {
+    if (idx >= steps.length) return;
+    reset();
+    const s = steps[idx];
+    const actor = flow.querySelector('#' + s.highlight);
+    if (actor) actor.classList.add('active');
+    label.textContent = s.label;
+    idx++;
+    if (progress) progress.textContent = `${idx}/${steps.length}`;
+  };
+  flow.querySelector('.flow-next-btn').addEventListener('click', step);
+  flow.querySelector('.flow-reset-btn').addEventListener('click', () => {
+    idx = 0; reset(); label.textContent = 'Click "Next Step" to begin';
+    if (progress) progress.textContent = `0/${steps.length}`;
+  });
+});
+```
+
+```css
+.flow-actor.active {
+  box-shadow: 0 0 0 3px var(--color-accent), 0 0 20px rgba(217,79,48,.2);
+  transform: scale(1.05);
+  transition: all var(--duration-normal) var(--ease-out);
+}
+```
+
+### 5. Glossary Tooltips (mandatory on every technical term, first use per module)
+
+Mark up EVERY technical term on first use in each module (API, DOM, callback, async, endpoint, middleware, etc.). Keep definitions to 1–2 sentences in everyday language. Use a metaphor in the definition when it helps.
+
+```html
+<p>The extension uses a
+  <span class="term" data-definition="A service worker is a background script that runs independently of the web page — like a behind-the-scenes assistant that's always on, even when you're not looking at the page.">service worker</span>
+  to handle API calls.</p>
+```
+
+Tooltip JS — uses `position: fixed` on `document.body` so the tooltip is NEVER clipped by `overflow: hidden` ancestors (critical — translation blocks have `overflow: hidden`):
+
+```javascript
+let activeTooltip = null;
+function positionTooltip(term, tip) {
+  const rect = term.getBoundingClientRect();
+  const tipWidth = 300;
+  let left = rect.left + rect.width/2 - tipWidth/2;
+  left = Math.max(8, Math.min(left, window.innerWidth - tipWidth - 8));
+  tip.style.left = left + 'px';
+  document.body.appendChild(tip);
+  const tipHeight = tip.offsetHeight;
+  if (rect.top - tipHeight - 8 < 0) {
+    tip.style.top = (rect.bottom + 8) + 'px'; tip.classList.add('flip');
+  } else {
+    tip.style.top = (rect.top - tipHeight - 8) + 'px'; tip.classList.remove('flip');
+  }
+}
+document.querySelectorAll('.term').forEach(term => {
+  const tip = document.createElement('span');
+  tip.className = 'term-tooltip';
+  tip.textContent = term.dataset.definition;
+  term.addEventListener('mouseenter', () => {
+    if (activeTooltip && activeTooltip !== tip) { activeTooltip.classList.remove('visible'); activeTooltip.remove(); }
+    positionTooltip(term, tip);
+    requestAnimationFrame(() => tip.classList.add('visible'));
+    activeTooltip = tip;
+  });
+  term.addEventListener('mouseleave', () => {
+    tip.classList.remove('visible');
+    setTimeout(() => { if (!tip.classList.contains('visible')) tip.remove(); }, 150);
+    activeTooltip = null;
+  });
+  term.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (activeTooltip && activeTooltip !== tip) { activeTooltip.classList.remove('visible'); activeTooltip.remove(); }
+    if (tip.classList.contains('visible')) { tip.classList.remove('visible'); tip.remove(); activeTooltip = null; }
+    else { positionTooltip(term, tip); requestAnimationFrame(() => tip.classList.add('visible')); activeTooltip = tip; }
+  });
+});
+document.addEventListener('click', () => {
+  if (activeTooltip) { activeTooltip.classList.remove('visible'); activeTooltip.remove(); activeTooltip = null; }
+});
+```
+
+```css
+.term { border-bottom: 1.5px dashed var(--color-accent-muted); cursor: pointer; position: relative; }
+.term:hover, .term.active { border-bottom-color: var(--color-accent); color: var(--color-accent); }
+.term-tooltip {
+  position: fixed;           /* CRITICAL — not absolute */
+  background: var(--color-bg-code); color: #CDD6F4;
+  padding: var(--space-3) var(--space-4); border-radius: var(--radius-sm);
+  font-size: var(--text-sm); font-family: var(--font-body); line-height: var(--leading-normal);
+  width: max(200px, min(320px, 80vw)); box-shadow: var(--shadow-lg);
+  pointer-events: none; opacity: 0; transition: opacity var(--duration-fast);
+  z-index: 10000;
+}
+.term-tooltip.visible { opacity: 1; }
+```
+
+### 6. Callout Boxes ("aha!" moments — max 2 per module)
+
+```html
+<div class="callout callout-accent">
+  <div class="callout-icon">💡</div>
+  <div class="callout-content">
+    <strong class="callout-title">Key Insight</strong>
+    <p>This pattern — splitting responsibilities into focused roles — is one of the most important ideas in software engineering. Engineers call it "separation of concerns."</p>
+  </div>
+</div>
+```
+
+Variants: `callout-accent` (CS insight), `callout-info` (good to know), `callout-warning` (common mistake).
+
+### 7. "Spot the Bug" Challenge
+
+Show code with a deliberate bug. User clicks the buggy line. Reveal explains the issue. Each `.bug-line` has `onclick="checkBugLine(this, true|false)"`; the correct line also carries class `bug-target`. Reveal feedback in `.bug-feedback`.
+
+### 8. Other useful patterns (add when they fit)
+
+- **Pattern/Feature Cards** (`.pattern-cards` grid) — for tech-stack or pattern highlights
+- **Visual File Tree** (`.file-tree` with `.ft-folder`/`.ft-file`) — instead of paragraphs describing directory structure
+- **Icon-Label Rows** (`.icon-rows`) — for bullet-point-style lists, but visual
+- **Numbered Step Cards** (`.step-cards`) — for sequences
+- **Interactive Architecture Diagram** (`.arch-diagram`) — full-system overview with click-to-describe components
+- **Layer Toggle Demo** (`.layer-demo`) — show how HTML/CSS/JS or data/logic/UI layers stack
+- **Scenario Quiz** — same engine as multiple-choice, wrapped in `.scenario-block` with longer context
+- **Drag-and-Drop Matching** — for matching concepts to descriptions (must include touch handlers for mobile)
 
 ---
 
-## Output
+## Navigation & Progress (always include)
 
-The final output is an `index.html` file and supporting files in a directory. Share the directory path with the user so they can open `index.html` in their browser.
+```html
+<nav class="nav">
+  <div class="progress-bar" role="progressbar" aria-valuenow="0"></div>
+  <div class="nav-inner">
+    <span class="nav-title">Course Title</span>
+    <div class="nav-dots">
+      <button class="nav-dot" data-target="module-1" data-tooltip="Module 1 Name" role="tab" aria-label="Module 1"></button>
+      <!-- one per module -->
+    </div>
+  </div>
+</nav>
+```
+
+JS:
+
+```javascript
+// Progress bar
+const progressBar = document.querySelector('.progress-bar');
+function updateProgressBar() {
+  const h = document.documentElement.scrollHeight - window.innerHeight;
+  progressBar.style.width = ((window.scrollY / h) * 100) + '%';
+}
+window.addEventListener('scroll', () => requestAnimationFrame(updateProgressBar), { passive: true });
+
+// Nav dots click → scroll to module
+document.querySelectorAll('.nav-dot').forEach(dot => {
+  dot.addEventListener('click', () => {
+    document.getElementById(dot.dataset.target)?.scrollIntoView({ behavior: 'smooth' });
+  });
+});
+
+// Keyboard navigation
+const modules = [...document.querySelectorAll('.module')];
+function currentModuleIndex() {
+  const y = window.scrollY + 100;
+  for (let i = modules.length - 1; i >= 0; i--) {
+    if (modules[i].offsetTop <= y) return i;
+  }
+  return 0;
+}
+function nextModule() { const i = currentModuleIndex(); if (i < modules.length - 1) modules[i+1].scrollIntoView({ behavior: 'smooth' }); }
+function prevModule() { const i = currentModuleIndex(); if (i > 0) modules[i-1].scrollIntoView({ behavior: 'smooth' }); }
+document.addEventListener('keydown', (e) => {
+  if (['INPUT','TEXTAREA'].includes(e.target.tagName)) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowRight') { nextModule(); e.preventDefault(); }
+  if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') { prevModule(); e.preventDefault(); }
+});
+
+// Scroll-triggered reveals
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) { entry.target.classList.add('visible'); observer.unobserve(entry.target); }
+  });
+}, { rootMargin: '0px 0px -10% 0px', threshold: 0.1 });
+document.querySelectorAll('.animate-in').forEach(el => observer.observe(el));
+```
+
+---
+
+## Module HTML Template
+
+```html
+<section class="module" id="module-N" style="background: var(--color-bg-warm);">
+  <div class="module-content">
+    <header class="module-header animate-in">
+      <span class="module-number">0N</span>
+      <h1 class="module-title">Module Title</h1>
+      <p class="module-subtitle">One-line description of what this module teaches</p>
+    </header>
+    <div class="module-body">
+      <section class="screen animate-in">
+        <h2 class="screen-heading">Screen Title</h2>
+        <p>Content...</p>
+        <!-- Interactive elements, translation blocks, etc. -->
+      </section>
+      <!-- more screens -->
+    </div>
+  </div>
+</section>
+```
+
+---
+
+## Gotchas Checklist (review before handing over)
+
+- [ ] `scroll-snap-type` is **`y proximity`**, not `mandatory` (mandatory traps scrolling)
+- [ ] Every module has `min-height: 100dvh` with `100vh` fallback
+- [ ] Even/odd modules alternate between `--color-bg` and `--color-bg-warm`
+- [ ] Every technical term on first use per module is wrapped in `.term` with `data-definition`
+- [ ] Tooltips are `position: fixed` and appended to `document.body` (not clipped by `overflow: hidden`)
+- [ ] At least one group chat animation somewhere in the course
+- [ ] At least one flow animation somewhere in the course
+- [ ] Every module has at least one `.translation-block` and one quiz
+- [ ] No apostrophes / single quotes inside `data-steps` labels (use `&apos;` or flip delimiters)
+- [ ] Code snippets are exact copies from the codebase — no trimming, no simplification
+- [ ] No recycled metaphors across modules; no restaurant metaphor
+- [ ] Accent color is bold and confident — NOT a purple gradient
+- [ ] Display font is Bricolage Grotesque (or equivalent personality face) — NOT Inter / Roboto / Arial / Space Grotesk
+- [ ] Body text max 3–4 short paragraphs per screen
+- [ ] Every quiz explanation tells the learner *why*, not just right/wrong
+- [ ] Nav dots count === module count
+- [ ] Google Fonts `<link>` preconnects and the full family URL are in `<head>`
+
+---
+
+## Delivery
+
+After running Phase 3 and passing the gotchas checklist, reply to the user with:
+
+1. A markdown download link: `[<slug>.html](<codebase-to-course/<slug>.html>)`
+2. A two-line summary: course title, module count, one interesting pattern from the codebase you highlighted
+3. An invitation: "Open it and let me know what you'd like to tweak."
+
+---
+
+*Adapted from [zarazhangrui/codebase-to-course](https://github.com/zarazhangrui/codebase-to-course) for JClaw. Original skill by Zara.*

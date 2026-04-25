@@ -1,12 +1,11 @@
 ---
 name: diagram-design
 description: Create technical and product diagrams — architecture, flowchart, sequence, state machine, ER / data model, timeline, swimlane, quadrant, nested, tree, layer stack, venn, pyramid — as standalone HTML files with inline SVG. Supports customizing colors and fonts to match your brand.
-version: 1.0.0
+version: 1.0.1
 author: main
 tools: [filesystem, web_fetch, documents]
 commands: []
 ---
-
 # Diagram Design
 
 Create visual diagrams as self-contained HTML files with inline SVG and CSS, following an opinionated editorial design system. Generate beautiful, clean diagrams with a consistent style that can be customized to match your brand.
@@ -60,7 +59,7 @@ The skill supports customizing the visual style to match the user's brand:
 
 ## Output Location
 
-Outputs are written to `workspace/main/diagram-design/`.
+Outputs are written to `diagram-design/` at the root of the agent's workspace.
 
 Each diagram is delivered as a standalone HTML file containing:
 - Embedded CSS (no external dependencies except Google Fonts)
