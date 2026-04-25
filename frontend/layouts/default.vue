@@ -254,29 +254,19 @@ const navGroups: NavGroup[] = [
             <div class="text-[10px] text-fg-muted uppercase tracking-wider font-medium">
               Control
             </div>
-            <div
-              class="text-sm font-semibold tracking-widest"
-              role="img"
-              aria-label="JClaw"
-            >
-              <span
-                class="text-emerald-700 dark:text-emerald-400"
-                aria-hidden="true"
-              >J</span><span
-                class="text-red-600 dark:text-red-500"
-                aria-hidden="true"
-              >Claw</span>
+            <div class="text-sm font-bold text-emerald-700 dark:text-emerald-400">
+              JClaw
             </div>
           </div>
-          <span
-            v-if="sidebarOpen"
-            class="inline-flex items-center justify-center
-                   rounded-full border border-fg-muted/40
-                   px-[5px] py-[2px]
-                   text-[8px] font-medium leading-none tracking-[0.04em]
-                   text-fg-muted"
-          >ALPHA</span>
         </div>
+        <span
+          v-if="sidebarOpen"
+          class="inline-flex items-center justify-center
+                 rounded-full border border-emerald-700 dark:border-emerald-400
+                 px-[5px] py-[2px]
+                 text-[8px] font-medium leading-none tracking-[0.04em]
+                 text-emerald-700 dark:text-emerald-400"
+        >ALPHA</span>
         <button
           v-if="sidebarOpen"
           class="p-1.5 rounded-full border border-fg-muted/40 text-fg-muted hover:text-fg-strong hover:border-fg-muted transition-colors"
