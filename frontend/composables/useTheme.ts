@@ -39,12 +39,22 @@ async function runWithCircularReveal(
   }
 
   const rect = anchor.getBoundingClientRect()
-  const x = rect.left + rect.width / 2
-  const y = rect.top + rect.height / 2
+  // Inset the visible center of the circle by 60px from any viewport edge.
+  // The toggle button is in the header's top-right corner; a clip-path
+  // circle anchored exactly there expands as a quarter-arc, and on wide
+  // aspect ratios the arc's leading edge sweeps near-vertically across
+  // the screen — the user perceives a horizontal wipe, not a radial reveal.
+  // Clamping by a small fixed inset brings the circle's center on-screen
+  // so the curvature is visible during the early phase, while still feeling
+  // anchored to the click.
+  const EDGE_INSET = 60
+  const cx = rect.left + rect.width / 2
+  const cy = rect.top + rect.height / 2
+  const x = Math.max(EDGE_INSET, Math.min(cx, window.innerWidth - EDGE_INSET))
+  const y = Math.max(EDGE_INSET, Math.min(cy, window.innerHeight - EDGE_INSET))
   // Distance from the anchor's center to the farthest viewport corner —
-  // guarantees the circle covers everything regardless of where the
-  // toggle sits. Math.max picks the larger of (left,right) and (top,bottom)
-  // halves; hypot turns those into the diagonal to the worst corner.
+  // guarantees the circle covers everything regardless of where the toggle
+  // sits.
   const maxRadius = Math.hypot(
     Math.max(x, window.innerWidth - x),
     Math.max(y, window.innerHeight - y),
@@ -58,8 +68,8 @@ async function runWithCircularReveal(
       ],
     },
     {
-      duration: 420,
-      easing: 'ease-in-out',
+      duration: 550,
+      easing: 'cubic-bezier(0.65, 0, 0.35, 1)',
       pseudoElement: '::view-transition-new(root)',
     },
   )
