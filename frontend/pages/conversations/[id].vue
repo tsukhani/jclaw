@@ -116,39 +116,12 @@ function exportConversation() {
 
 <template>
   <div>
-    <div class="flex items-center justify-between mb-4">
-      <button
-        class="text-xs text-fg-muted hover:text-fg-strong transition-colors"
-        @click="router.push('/conversations')"
-      >
-        &larr; Back to conversations
-      </button>
-      <div
-        v-if="conversation"
-        class="flex items-center gap-1"
-      >
-        <NuxtLink
-          :to="`/chat?conversation=${id}`"
-          class="p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
-          title="Open in Chat"
-        >
-          <ChatBubbleOvalLeftEllipsisIcon
-            class="w-5 h-5"
-            aria-hidden="true"
-          />
-        </NuxtLink>
-        <button
-          class="p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
-          title="Export conversation as Markdown"
-          @click="exportConversation"
-        >
-          <ArrowDownTrayIcon
-            class="w-5 h-5"
-            aria-hidden="true"
-          />
-        </button>
-      </div>
-    </div>
+    <button
+      class="text-xs text-fg-muted hover:text-fg-strong transition-colors mb-4"
+      @click="router.push('/conversations')"
+    >
+      &larr; Back to conversations
+    </button>
 
     <div
       v-if="!conversation"
@@ -158,40 +131,172 @@ function exportConversation() {
     </div>
 
     <template v-else>
-      <div class="bg-surface-elevated border border-border p-4 mb-4">
-        <h1 class="text-lg font-semibold text-fg-strong mb-2">
-          {{ conversation.preview || 'Conversation' }}
-        </h1>
-        <div class="flex flex-wrap gap-x-6 gap-y-1 text-xs text-fg-muted">
-          <span>Channel: <strong class="text-fg-primary">{{ conversation.channelType }}</strong></span>
-          <span>Agent: <strong class="text-fg-primary">{{ conversation.agentName }}</strong></span>
-          <span>Peer: <strong class="text-fg-primary font-mono">{{ conversation.peerId || '—' }}</strong></span>
-          <span>Messages: <strong class="text-fg-primary">{{ conversation.messageCount }}</strong></span>
-          <span>Created: <strong class="text-fg-primary">{{ new Date(conversation.createdAt).toLocaleString() }}</strong></span>
-          <span>Updated: <strong class="text-fg-primary">{{ new Date(conversation.updatedAt).toLocaleString() }}</strong></span>
+      <!--
+        JCLAW-176: restructured header. Three visually distinct zones stacked
+        in a single bordered card so each conceptual layer reads on its own:
+
+          1. Title zone  — preview text + secondary "{agent} · {channel}"
+             context line, with the action icons pinned on the right. Sets
+             itself apart from the metadata via a real bottom border.
+          2. Identity zone — six-cell definition-list grid for the conversation's
+             fixed metadata (channel, agent, peer, messages, created, updated).
+          3. Usage zone — same grid shape for the aggregated token/cost stats,
+             on a tinted surface so the "this is about cost, not identity"
+             grouping lands visually without another heading.
+
+        Each cell uses small-caps label over mono value so the 12 items read
+        as discrete key/value pairs rather than an inline run-on sentence.
+      -->
+      <div class="bg-surface-elevated border border-border rounded-md mb-4">
+        <!-- Title zone -->
+        <div class="flex items-start justify-between gap-4 p-4 border-b border-border">
+          <div class="min-w-0">
+            <h1 class="text-lg font-semibold text-fg-strong truncate">
+              {{ conversation.preview || 'Conversation' }}
+            </h1>
+            <p class="mt-0.5 text-xs text-fg-muted">
+              <span class="font-mono text-fg-primary">{{ conversation.agentName }}</span>
+              <span class="mx-1.5">·</span>
+              <span>{{ conversation.channelType }}</span>
+            </p>
+          </div>
+          <div class="flex items-center gap-1 shrink-0">
+            <NuxtLink
+              :to="`/chat?conversation=${id}`"
+              class="p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
+              title="Open in Chat"
+            >
+              <ChatBubbleOvalLeftEllipsisIcon
+                class="w-5 h-5"
+                aria-hidden="true"
+              />
+            </NuxtLink>
+            <button
+              class="p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
+              title="Export conversation as Markdown"
+              @click="exportConversation"
+            >
+              <ArrowDownTrayIcon
+                class="w-5 h-5"
+                aria-hidden="true"
+              />
+            </button>
+          </div>
         </div>
-        <div
+
+        <!-- Identity zone -->
+        <dl class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 p-4">
+          <div>
+            <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+              Channel
+            </dt>
+            <dd class="mt-1 text-sm font-mono text-fg-primary truncate">
+              {{ conversation.channelType }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+              Agent
+            </dt>
+            <dd class="mt-1 text-sm font-mono text-fg-primary truncate">
+              {{ conversation.agentName }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+              Peer
+            </dt>
+            <dd class="mt-1 text-sm font-mono text-fg-primary truncate">
+              {{ conversation.peerId || '—' }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+              Messages
+            </dt>
+            <dd class="mt-1 text-sm font-mono text-fg-primary tabular-nums">
+              {{ conversation.messageCount }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+              Created
+            </dt>
+            <dd class="mt-1 text-sm font-mono text-fg-primary tabular-nums">
+              {{ new Date(conversation.createdAt).toLocaleString() }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+              Updated
+            </dt>
+            <dd class="mt-1 text-sm font-mono text-fg-primary tabular-nums">
+              {{ new Date(conversation.updatedAt).toLocaleString() }}
+            </dd>
+          </div>
+        </dl>
+
+        <!-- Usage zone -->
+        <dl
           v-if="conversationStats.inputTokens > 0"
-          class="flex flex-wrap gap-x-6 gap-y-1 text-xs text-fg-muted mt-2 pt-2 border-t border-border"
+          class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 p-4 border-t border-border bg-muted/40"
         >
-          <span>Input: <strong class="text-fg-primary">{{ conversationStats.inputTokens.toLocaleString() }}</strong> tokens</span>
-          <span
+          <div>
+            <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+              Input tokens
+            </dt>
+            <dd class="mt-1 text-sm font-mono text-fg-primary tabular-nums">
+              {{ conversationStats.inputTokens.toLocaleString() }}
+            </dd>
+          </div>
+          <div
             v-if="conversationStats.cachedTokens > 0"
             :title="`${conversationStats.cachedTokens.toLocaleString()} of ${conversationStats.inputTokens.toLocaleString()} input tokens served from prompt cache`"
           >
-            Cached: <strong class="text-amber-400">{{ conversationStats.cachedTokens.toLocaleString() }}</strong> tokens
-          </span>
-          <span>Output: <strong class="text-fg-primary">{{ conversationStats.outputTokens.toLocaleString() }}</strong> tokens</span>
-          <span v-if="conversationStats.avgTokPerSec">Avg speed: <strong class="text-fg-primary">{{ conversationStats.avgTokPerSec.toFixed(1) }}</strong> tok/s</span>
-          <span v-if="conversationStats.totalCost !== null">Cost: <strong class="text-emerald-400">{{ conversationStats.totalCost < 0.0001 ? '< $0.0001' : '$' + conversationStats.totalCost.toFixed(4) }}</strong></span>
-          <span
+            <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+              Cached
+            </dt>
+            <dd class="mt-1 text-sm font-mono text-amber-400 tabular-nums">
+              {{ conversationStats.cachedTokens.toLocaleString() }}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+              Output tokens
+            </dt>
+            <dd class="mt-1 text-sm font-mono text-fg-primary tabular-nums">
+              {{ conversationStats.outputTokens.toLocaleString() }}
+            </dd>
+          </div>
+          <div v-if="conversationStats.avgTokPerSec">
+            <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+              Avg speed
+            </dt>
+            <dd class="mt-1 text-sm font-mono text-fg-primary tabular-nums">
+              {{ conversationStats.avgTokPerSec.toFixed(1) }} <span class="text-fg-muted">tok/s</span>
+            </dd>
+          </div>
+          <div v-if="conversationStats.totalCost !== null">
+            <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+              Cost
+            </dt>
+            <dd class="mt-1 text-sm font-mono text-emerald-400 tabular-nums">
+              {{ conversationStats.totalCost < 0.0001 ? '< $0.0001' : '$' + conversationStats.totalCost.toFixed(4) }}
+            </dd>
+          </div>
+          <div
             v-if="conversationStats.savings !== null"
             :title="`Estimated savings vs. paying full input rate for every token (${conversationStats.savingsPct.toFixed(0)}% off)`"
           >
-            Saved: <strong class="text-emerald-400">{{ conversationStats.savings < 0.0001 ? '< $0.0001' : '$' + conversationStats.savings.toFixed(4) }}</strong>
-            <span class="text-fg-muted">({{ conversationStats.savingsPct.toFixed(0) }}%)</span>
-          </span>
-        </div>
+            <dt class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+              Saved
+            </dt>
+            <dd class="mt-1 text-sm font-mono text-emerald-400 tabular-nums">
+              {{ conversationStats.savings < 0.0001 ? '< $0.0001' : '$' + conversationStats.savings.toFixed(4) }}
+              <span class="text-fg-muted">({{ conversationStats.savingsPct.toFixed(0) }}%)</span>
+            </dd>
+          </div>
+        </dl>
       </div>
 
       <div class="space-y-3">
