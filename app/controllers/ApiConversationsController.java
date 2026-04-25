@@ -92,28 +92,22 @@ public class ApiConversationsController extends Controller {
 
         setPaginationHeaders(total);
 
-        var result = convos.stream().map(c -> {
-            var map = new HashMap<String, Object>();
-            map.put("id", c.id);
-            map.put("agentId", c.agent.id);
-            map.put("agentName", c.agent.name);
-            map.put("channelType", c.channelType);
-            map.put("peerId", c.peerId);
-            map.put("createdAt", c.createdAt.toString());
-            map.put("updatedAt", c.updatedAt.toString());
-            map.put("messageCount", c.messageCount);
-            map.put("preview", c.preview != null ? c.preview : "");
-            // JCLAW-108: expose override fields so the chat UI's model
-            // dropdown can reflect the effective model for the open
-            // conversation, and so the cost aggregator's per-turn attribution
-            // knows whether subsequent turns inherit from the agent or from
-            // a persisted override.
-            map.put("modelProviderOverride", c.modelProviderOverride);
-            map.put("modelIdOverride", c.modelIdOverride);
-            return map;
-        }).toList();
+        var result = convos.stream().map(ApiConversationsController::conversationToMap).toList();
 
         renderJSON(gson.toJson(result));
+    }
+
+    /**
+     * GET /api/conversations/{id} — JCLAW-171: return a single conversation row
+     * in the same JSON shape as one element of {@link #listConversations}.
+     * Replaces the broken pattern of asking the list endpoint for {@code ?id=N}
+     * (which the list endpoint silently ignores, returning the most-recently-
+     * updated row regardless of the requested id).
+     */
+    public static void getConversation(Long id) {
+        Conversation conversation = Conversation.findById(id);
+        if (conversation == null) notFound();
+        renderJSON(gson.toJson(conversationToMap(conversation)));
     }
 
     /**
@@ -295,6 +289,35 @@ public class ApiConversationsController extends Controller {
     private static void setPaginationHeaders(long total) {
         response.setHeader("X-Total-Count", String.valueOf(total));
         response.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
+    }
+
+    /**
+     * JCLAW-171: shared row→map serialization used by both the list endpoint
+     * and the new single-conversation endpoint, so the wire shape stays
+     * identical between them. Adding a field here surfaces it in both
+     * places automatically — the alternative (two parallel inline blocks)
+     * was the kind of subtle drift this codebase has accumulated bug fixes
+     * for elsewhere.
+     */
+    private static Map<String, Object> conversationToMap(Conversation c) {
+        var map = new HashMap<String, Object>();
+        map.put("id", c.id);
+        map.put("agentId", c.agent.id);
+        map.put("agentName", c.agent.name);
+        map.put("channelType", c.channelType);
+        map.put("peerId", c.peerId);
+        map.put("createdAt", c.createdAt.toString());
+        map.put("updatedAt", c.updatedAt.toString());
+        map.put("messageCount", c.messageCount);
+        map.put("preview", c.preview != null ? c.preview : "");
+        // JCLAW-108: expose override fields so the chat UI's model
+        // dropdown can reflect the effective model for the open
+        // conversation, and so the cost aggregator's per-turn attribution
+        // knows whether subsequent turns inherit from the agent or from
+        // a persisted override.
+        map.put("modelProviderOverride", c.modelProviderOverride);
+        map.put("modelIdOverride", c.modelIdOverride);
+        return map;
     }
 
     /**

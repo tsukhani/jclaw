@@ -253,6 +253,52 @@ public class ApiConversationsControllerTest extends FunctionalTest {
                 "favicon URL must roundtrip, got: " + body);
     }
 
+    /**
+     * JCLAW-171: GET /api/conversations/{id} must return the conversation
+     * with the requested id, not whichever conversation is at the top of
+     * the most-recently-updated list. Seeds two conversations (A older,
+     * B newer) and asserts the response for A's id contains A's id —
+     * the bug returned B every time because the previous detail-page
+     * code used the list endpoint with an ignored ?id= filter.
+     */
+    @Test
+    public void getConversationReturnsRequestedIdEvenWhenAnotherIsNewer() {
+        login();
+        var ids = commitInFreshTx(() -> {
+            var agent = new Agent();
+            agent.name = "convo-detail-test";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+            // Older conversation (A).
+            var convA = ConversationService.create(agent, "web", "alice");
+            ConversationService.appendUserMessage(convA, "first thread");
+            // Newer conversation (B) — created after A, so B sits at the top
+            // of the most-recently-updated list and would have been returned
+            // by the broken `?id=` list-endpoint pattern.
+            var convB = ConversationService.create(agent, "web", "bob");
+            ConversationService.appendUserMessage(convB, "second thread");
+            return new long[]{convA.id, convB.id};
+        });
+
+        var response = GET("/api/conversations/" + ids[0]);
+        assertIsOk(response);
+        var body = getContent(response);
+        assertTrue(body.contains("\"id\":" + ids[0]),
+                "response must carry conversation A's id, got: " + body);
+        assertTrue(body.contains("\"peerId\":\"alice\""),
+                "response must carry conversation A's peer, got: " + body);
+        assertFalse(body.contains("\"peerId\":\"bob\""),
+                "response must not carry conversation B's peer, got: " + body);
+    }
+
+    @Test
+    public void getConversationReturns404ForUnknownId() {
+        login();
+        var response = GET("/api/conversations/999999");
+        assertEquals(404, response.status.intValue());
+    }
+
     private static <T> T commitInFreshTx(Supplier<T> block) {
         // FunctionalTest's carrier thread runs inside an ambient JPA tx that
         // doesn't commit until the test returns, so inline Tx.run writes are

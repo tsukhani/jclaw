@@ -14,11 +14,16 @@ const conversation = ref<Conversation | null>(null)
 const messages = ref<Message[]>([])
 
 try {
-  const [convos, msgs] = await Promise.all([
-    $fetch<Conversation[]>(`/api/conversations?limit=1&offset=0&id=${id}`),
+  // JCLAW-171: fetch the specific conversation by id. The previous
+  // pattern asked the list endpoint for {@code ?id=N}, but that
+  // parameter is silently ignored — the list returned the most-recent
+  // conversation instead, so the metadata header pointed at the wrong
+  // row even though the message body underneath was correct.
+  const [convo, msgs] = await Promise.all([
+    $fetch<Conversation>(`/api/conversations/${id}`),
     $fetch<Message[]>(`/api/conversations/${id}/messages`),
   ])
-  conversation.value = convos?.[0] ?? null
+  conversation.value = convo ?? null
   messages.value = msgs ?? []
 }
 catch {
