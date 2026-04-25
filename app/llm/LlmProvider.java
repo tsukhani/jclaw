@@ -265,7 +265,16 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                     }
                     for (var choice : chunk.choices()) {
                         var delta = choice.delta();
-                        if (delta.content() != null) {
+                        // Skip empty-content chunks: OpenAI-compatible providers
+                        // (e.g. OpenRouter routing Gemini-3-flash-preview, Kimi K2.5)
+                        // emit `content: ""` interleaved with every reasoning chunk
+                        // because the schema requires the field. Counting these as
+                        // real content stamps firstContentNanos at the same instant
+                        // as reasoningStartNanos → reasoningDurationMs collapses to 0
+                        // → the frontend renders the generic "Thinking" label after
+                        // reload. Mirrors the frontend's `if (!event.content) continue`
+                        // guard at chat.vue:1116.
+                        if (delta.content() != null && !delta.content().isEmpty()) {
                             accumulator.noteFirstContentChunk();
                             contentBuilder.append(delta.content());
                             onToken.accept(delta.content());

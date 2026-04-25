@@ -227,6 +227,31 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
+    public void noteFirstContentChunkIsIdempotentSoEmptyContentChunksDontCollapseDuration() {
+        // Regression for the v0.10.30 bug: OpenAI-compatible providers emit
+        // chunks where the `content` field is always present in the schema
+        // and defaults to "" when the chunk only carries reasoning. The
+        // streaming callback's outer guard now skips empty-content chunks,
+        // but verify here that even if noteFirstContentChunk DID fire on
+        // the same instant as appendReasoningText, the idempotency check
+        // protects subsequent (real) content chunks from re-stamping
+        // firstContentNanos. This ensures the actual "first non-empty
+        // content" instant wins.
+        var acc = new LlmProvider.StreamAccumulator();
+        // Simulate the racy pattern: reasoning chunk and a hypothetical
+        // empty-content stamp landing in the same nanosecond.
+        acc.appendReasoningText("reasoning");
+        acc.noteFirstContentChunk();   // first call records this instant
+        var earlyContentNanos = acc.firstContentNanos;
+
+        try { Thread.sleep(5); } catch (InterruptedException _) {}
+        acc.noteFirstContentChunk();   // second call MUST be idempotent
+
+        assertEquals(earlyContentNanos, acc.firstContentNanos,
+                "noteFirstContentChunk must record only the first call's instant");
+    }
+
+    @Test
     public void roundLocalReasoningDurationStillUsesLastReasoningChunkForMultiChunk() {
         // Defensive: the per-round reasoningDurationMs (kept for diagnostic
         // use) anchors to the last appendReasoningText call. noteFirstContentChunk
