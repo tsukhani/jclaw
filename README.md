@@ -1,4 +1,4 @@
-<h1 align="center">🦞 JClaw - Java-based Enterprise AI Assistant</h1>
+<h1 align="center">JClaw - Java-based Enterprise AI Assistant</h1>
 
 <p align="center">
   <img src="combined-logo.png" width="650" alt="JClaw Logo">
