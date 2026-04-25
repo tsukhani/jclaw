@@ -131,7 +131,17 @@ function renderMarkdown(text: string, agentId: number | null = null): string {
 const { data: agents, refresh: refreshAgents } = await useFetch<Agent[]>('/api/agents')
 const { data: configData } = await useFetch<ConfigResponse>('/api/config')
 
-const selectedAgentId = ref<number | null>(null)
+// Seed selectedAgentId synchronously from the agents we just loaded so the
+// conversations useFetch below has a valid agentId on its first render. If we
+// leave this null, useFetch evaluates the URL function to a string containing
+// "agentId=null" — harmless — but more importantly: an earlier version of this
+// page passed null as the URL itself, which Nuxt stringified to fetch `/null`,
+// got Nitro's SPA-fallback HTML back with a 200, and crashed downstream
+// consumers expecting an array. The auto-select watcher below still runs so
+// later agent reloads (e.g. refreshAgents) keep working.
+const selectedAgentId = ref<number | null>(
+  agents.value?.find(a => a.isMain)?.id ?? agents.value?.[0]?.id ?? null,
+)
 
 // A11y: generated ids for label/control association
 const agentSelectId = useId()
@@ -544,16 +554,15 @@ function onFaviconError(ev: Event) {
   if (img) img.style.display = 'none'
 }
 
-const conversationsUrl = computed(() =>
-  selectedAgentId.value
-    ? `/api/conversations?channel=web&agentId=${selectedAgentId.value}&limit=50`
-    : null,
-)
-// `conversationsUrl` is nullable — when null we want useFetch to skip, which
-// Nuxt supports at runtime. The public type signature doesn't model null, so
-// we cast the Ref down to the narrower runtime contract.
+// Function form (not a Ref) so Vue's reactivity tracks `selectedAgentId.value`
+// on every URL evaluation — useFetch refetches automatically when the user
+// picks a different agent. selectedAgentId is seeded synchronously above, so
+// the URL is well-formed on first render. (NEVER pass a value-may-be-null
+// Ref/function to useFetch: it stringifies null to "null" and fetches `/null`,
+// Nitro's SPA fallback returns 200 + the index HTML, and downstream consumers
+// crash trying to treat HTML as a Conversation[].)
 const { data: conversations, refresh: refreshConversations } = await useFetch<Conversation[]>(
-  conversationsUrl as unknown as Ref<string>,
+  () => `/api/conversations?channel=web&agentId=${selectedAgentId.value}&limit=50`,
 )
 const selectedConvoId = ref<number | null>(null)
 const messages = ref<Message[]>([])
@@ -843,7 +852,7 @@ watch(selectedAgentId, () => {
 })
 
 // Deep-link: once conversations are loaded, find and select the target conversation.
-// The conversationsUrl computed auto-fetches when selectedAgentId changes, so we
+// The useFetch URL function above re-fires when selectedAgentId changes, so we
 // watch the conversations data to detect when the right agent's list arrives.
 if (deepLinkConvoId) {
   const stopDeepLink = watch(conversations, async (convos) => {
@@ -869,9 +878,9 @@ if (deepLinkConvoId) {
         if (convo) {
           const agent = agents.value.find(a => a.name === convo.agentName)
           if (agent && agent.id !== selectedAgentId.value) {
-            // Switch agent — this triggers conversationsUrl to change, which
-            // triggers useFetch to refetch, which triggers this watcher again
-            // with the correct agent's conversation list.
+            // Switch agent — this changes the URL the useFetch function returns,
+            // which triggers a refetch, which fires this watcher again with the
+            // correct agent's conversation list.
             selectedAgentId.value = agent.id
             return // wait for next watcher fire with new conversations
           }
@@ -1879,7 +1888,7 @@ function exportConversation() {
                         >
                           <button
                             type="button"
-                            class="w-full flex items-center gap-2 px-3 py-2 text-left text-xs text-fg-muted hover:text-fg-strong focus:outline-none disabled:cursor-default disabled:hover:text-fg-muted"
+                            class="w-full flex items-center gap-2 px-3 py-3 text-left text-sm text-fg-muted hover:text-fg-strong focus:outline-none disabled:cursor-default disabled:hover:text-fg-muted"
                             :disabled="!toolCallHasExpandableBody(tc)"
                             :title="toolCallHasExpandableBody(tc) ? (tc._expanded ? 'Collapse this call' : 'Expand this call') : ''"
                             @click="toggleToolCallExpansion(tc)"
@@ -1902,7 +1911,7 @@ function exportConversation() {
                           </button>
                           <div
                             v-if="tc._expanded && chipsForToolCall(tc).length"
-                            class="flex flex-wrap gap-1.5 px-3 pb-2"
+                            class="flex flex-wrap gap-1.5 px-3 pb-3"
                           >
                             <a
                               v-for="(chip, cIdx) in visibleChipsForCall(tc)"
@@ -1910,7 +1919,7 @@ function exportConversation() {
                               :href="chip.url ?? '#'"
                               target="_blank"
                               rel="noopener noreferrer"
-                              class="inline-flex items-center gap-1.5 px-2 py-1 text-[11px] border border-neutral-200 dark:border-neutral-700 rounded-full text-fg-muted hover:text-fg-strong hover:bg-surface transition-colors max-w-[200px]"
+                              class="inline-flex items-center gap-1.5 px-2 py-1 text-sm border border-neutral-200 dark:border-neutral-700 rounded-full text-fg-muted hover:text-fg-strong hover:bg-surface transition-colors max-w-[200px]"
                               :title="chip.title ?? chip.url ?? ''"
                             >
                               <img
@@ -1930,12 +1939,12 @@ function exportConversation() {
                             </a>
                             <span
                               v-if="extraChipCountForCall(tc) > 0"
-                              class="inline-flex items-center px-2 py-1 text-[11px] border border-dashed border-neutral-200 dark:border-neutral-700 rounded-full text-fg-subtle"
+                              class="inline-flex items-center px-2 py-1 text-sm border border-dashed border-neutral-200 dark:border-neutral-700 rounded-full text-fg-subtle"
                             >+{{ extraChipCountForCall(tc) }} more</span>
                           </div>
                           <pre
                             v-else-if="tc._expanded && truncatedToolResultText(tc)"
-                            class="px-3 pb-2 text-[11px] text-fg-muted whitespace-pre-wrap break-words"
+                            class="px-3 pb-3 text-sm text-fg-muted whitespace-pre-wrap break-words"
                           >{{ truncatedToolResultText(tc) }}</pre>
                         </div>
                       </div>
@@ -1992,7 +2001,7 @@ function exportConversation() {
                       <div
                         v-if="!msg.thinkingCollapsed"
                         data-reasoning-body
-                        class="prose-chat px-4 pb-3 pt-1 text-base text-fg-primary break-words max-h-80 overflow-y-auto border-t border-neutral-200 dark:border-neutral-700"
+                        class="prose-chat px-4 pb-4 pt-3 text-sm text-fg-primary break-words max-h-80 overflow-y-auto border-t border-neutral-200 dark:border-neutral-700"
                         v-html="renderMarkdown(msg.reasoning, selectedAgentId)"
                       />
                       <!-- eslint-enable vue/no-v-html -->

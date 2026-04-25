@@ -266,6 +266,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                     for (var choice : chunk.choices()) {
                         var delta = choice.delta();
                         if (delta.content() != null) {
+                            accumulator.noteFirstContentChunk();
                             contentBuilder.append(delta.content());
                             onToken.accept(delta.content());
                         }
@@ -609,6 +610,23 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
             var now = System.nanoTime();
             if (reasoningStartNanos == 0L) reasoningStartNanos = now;
             reasoningEndNanos = now;
+        }
+
+        /**
+         * Bookend the reasoning phase at the moment the first content chunk
+         * arrives. Necessary when the provider batched all reasoning into a
+         * single SSE event (Gemini-3-flash-preview does this on short prompts):
+         * a single {@link #appendReasoningText} call sets reasoningStartNanos
+         * and reasoningEndNanos to the same instant, so {@link #reasoningDurationMs}
+         * rounds to 0 — which the persistence layer drops, so reloaded turns
+         * lose their "Thought for X seconds" header. This method is a no-op
+         * when reasoning was multi-chunk (reasoningEndNanos already advanced
+         * past reasoningStartNanos via prior appends).
+         */
+        public synchronized void noteFirstContentChunk() {
+            if (reasoningStartNanos != 0L && reasoningEndNanos == reasoningStartNanos) {
+                reasoningEndNanos = System.nanoTime();
+            }
         }
 
         /** Character count of accumulated reasoning text. Used for token estimation. */

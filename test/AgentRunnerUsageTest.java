@@ -167,6 +167,56 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
+    public void singleChunkReasoningStillReportsNonZeroDurationAfterContent() {
+        // Regression: providers that batch all reasoning into one SSE event
+        // (observed: Gemini-3-flash-preview on short prompts) call
+        // appendReasoningText exactly once, so reasoningStartNanos and
+        // reasoningEndNanos collapse to the same instant and reasoningDurationMs
+        // returns 0. buildUsageJson then drops the field, and on reload the
+        // chat header degrades from "Thought for X seconds" to "Thinking".
+        // noteFirstContentChunk is the bookend that LlmProvider invokes when
+        // the first content delta arrives — verify it makes the duration land.
+        var firstRound = new LlmProvider.StreamAccumulator();
+        firstRound.usage = new Usage(50, 20, 70, 5, 0, 0);
+        firstRound.appendReasoningText("all my thinking arrives in one chunk");
+        try { Thread.sleep(2); } catch (InterruptedException _) {}
+        firstRound.noteFirstContentChunk();
+        var durationMs = firstRound.reasoningDurationMs();
+        assertTrue(durationMs >= 1L,
+                "single-chunk reasoning followed by content must report >= 1ms, got " + durationMs);
+
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(firstRound);
+
+        var json = AgentRunner.buildUsageJson(turn, firstRound, null, System.currentTimeMillis(), null, null);
+        var obj = JsonParser.parseString(json).getAsJsonObject();
+
+        assertTrue(obj.has("reasoningDurationMs"),
+                "duration field must persist for single-chunk reasoning so reloaded turns keep their header: " + json);
+        assertEquals(durationMs, obj.get("reasoningDurationMs").getAsLong());
+    }
+
+    @Test
+    public void noteFirstContentChunkIsNoOpForMultiChunkReasoning() {
+        // Defensive: bookend must not push reasoningEndNanos forward when
+        // reasoning was multi-chunk (multiple appendReasoningText calls already
+        // advanced reasoningEndNanos past reasoningStartNanos). The captured
+        // last-reasoning-chunk timestamp is the right anchor in that case.
+        var acc = new LlmProvider.StreamAccumulator();
+        acc.appendReasoningText("first");
+        try { Thread.sleep(2); } catch (InterruptedException _) {}
+        acc.appendReasoningText("second");
+        var durationBeforeBookend = acc.reasoningDurationMs();
+        assertTrue(durationBeforeBookend >= 1L, "setup sanity: multi-chunk reasoning must already be >= 1ms");
+
+        try { Thread.sleep(5); } catch (InterruptedException _) {}
+        acc.noteFirstContentChunk();
+
+        assertEquals(durationBeforeBookend, acc.reasoningDurationMs(),
+                "bookend must not extend reasoningEndNanos when reasoning was multi-chunk");
+    }
+
+    @Test
     public void buildUsageJsonIncludesModelPricingWhenProvided() {
         // ModelInfo carries per-token pricing that the frontend multiplies
         // against token counts to render the $ badge. Pricing fields ride
