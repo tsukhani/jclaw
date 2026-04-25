@@ -427,6 +427,27 @@ function skillDisabledTools(skill: AgentSkill): string[] {
   return skill.tools.filter(name => toolMap.has(name) && !toolMap.get(name))
 }
 
+// Skills with no missing tool dependencies — these are the ones the per-skill
+// toggle would actually flip. Bulk toggle must filter the same way so we never
+// silently re-enable a skill that's structurally non-functional (its enabled
+// state would have no effect, and the UI's opacity-45 + cursor-not-allowed
+// already communicates "you can't toggle me").
+const toggleableAgentSkills = computed(() =>
+  agentSkills.value.filter(s => skillDisabledTools(s).length === 0),
+)
+
+const allAgentSkillsEnabled = computed(() =>
+  toggleableAgentSkills.value.length > 0 && toggleableAgentSkills.value.every(s => s.enabled),
+)
+
+async function toggleAllAgentSkills() {
+  const next = !allAgentSkillsEnabled.value
+  toggleableAgentSkills.value.forEach((s) => {
+    s.enabled = next
+  })
+  await Promise.all(toggleableAgentSkills.value.map(s => toggleSkill(s.name, next)))
+}
+
 async function loadAgentSkills(agentId: number) {
   try {
     agentSkills.value = await $fetch<AgentSkill[]>(`/api/agents/${agentId}/skills`)
@@ -1018,6 +1039,259 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         </div>
       </div>
 
+      <!-- Exec privileges (main agent only) -->
+      <div
+        v-if="editing && editing.isMain"
+        class="bg-surface-elevated border border-border"
+      >
+        <div class="px-4 py-2.5 border-b border-border">
+          <span class="text-sm font-medium text-fg-strong">Shell Exec Privileges</span>
+          <span class="ml-2 text-[10px] text-amber-400">main agent only</span>
+        </div>
+        <div class="divide-y divide-border">
+          <div class="px-4 py-2.5 flex items-center justify-between">
+            <div>
+              <span class="text-sm text-fg-strong">Bypass allowlist</span>
+              <div class="text-xs text-neutral-500 mt-0.5">
+                Allow any command without allowlist validation
+              </div>
+            </div>
+            <button
+              :class="execBypassAllowlist ? 'bg-amber-600 hover:bg-amber-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600'"
+              class="relative w-9 h-5 rounded-full transition-colors shrink-0"
+              @click="execBypassAllowlist = !execBypassAllowlist; toggleExecConfig('bypassAllowlist', execBypassAllowlist)"
+            >
+              <span
+                :class="execBypassAllowlist ? 'translate-x-4' : 'translate-x-0.5'"
+                class="block w-4 h-4 bg-white rounded-full transition-transform"
+              />
+            </button>
+          </div>
+          <div class="px-4 py-2.5 flex items-center justify-between">
+            <div>
+              <span class="text-sm text-fg-strong">Allow global paths</span>
+              <div class="text-xs text-neutral-500 mt-0.5">
+                Execute commands outside the agent workspace directory
+              </div>
+            </div>
+            <button
+              :class="execAllowGlobalPaths ? 'bg-amber-600 hover:bg-amber-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600'"
+              class="relative w-9 h-5 rounded-full transition-colors shrink-0"
+              @click="execAllowGlobalPaths = !execAllowGlobalPaths; toggleExecConfig('allowGlobalPaths', execAllowGlobalPaths)"
+            >
+              <span
+                :class="execAllowGlobalPaths ? 'translate-x-4' : 'translate-x-0.5'"
+                class="block w-4 h-4 bg-white rounded-full transition-transform"
+              />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!--
+        Effective shell allowlist — derived view of what this agent can run via
+        the exec tool. Aggregates the global shell.allowlist (edited in Settings)
+        with the commands each enabled skill contributes at install time.
+        Read-only: remove a per-skill grant by disabling or removing the skill;
+        change global by editing shell.allowlist in Settings.
+      -->
+      <div
+        v-if="editing && effectiveAllowlist"
+        class="bg-surface-elevated border border-border"
+      >
+        <button
+          class="w-full px-4 py-2.5 border-b border-border text-left hover:bg-muted transition-colors flex items-center justify-between"
+          @click="allowlistExpanded = !allowlistExpanded"
+        >
+          <span class="text-sm font-medium text-fg-strong">
+            Shell Allowlist
+            <span class="ml-2 text-xs font-normal text-neutral-500">
+              {{ effectiveAllowlist.global.length + Object.values(effectiveAllowlist.bySkill).reduce((n, arr) => n + arr.length, 0) }}
+              commands
+              ({{ effectiveAllowlist.global.length }} global +
+              {{ Object.values(effectiveAllowlist.bySkill).reduce((n, arr) => n + arr.length, 0) }}
+              from {{ Object.keys(effectiveAllowlist.bySkill).length }} skill{{ Object.keys(effectiveAllowlist.bySkill).length === 1 ? '' : 's' }})
+            </span>
+          </span>
+          <ChevronRightIcon
+            class="w-3 h-3 text-neutral-500 transition-transform"
+            :class="allowlistExpanded ? 'rotate-90' : ''"
+            aria-hidden="true"
+          />
+        </button>
+        <div
+          v-if="allowlistExpanded"
+          class="px-4 py-3"
+        >
+          <p class="text-[11px] text-neutral-500 mb-2">
+            What this agent can run via the exec tool. Global entries come from
+            <span class="font-mono text-fg-muted">shell.allowlist</span> in Settings;
+            per-skill entries come from the skill's declared
+            <span class="font-mono text-fg-muted">commands:</span>
+            and disappear when you disable or remove the skill.
+          </p>
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-neutral-500 text-[10px] uppercase tracking-wide">
+                <th class="text-left font-medium py-1 pr-4">
+                  Command
+                </th>
+                <th class="text-left font-medium py-1">
+                  Source
+                </th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-border">
+              <tr
+                v-for="cmd in effectiveAllowlist.global"
+                :key="'g:' + cmd"
+              >
+                <td class="py-1 pr-4 font-mono text-fg-primary">
+                  {{ cmd }}
+                </td>
+                <td class="py-1 text-neutral-500">
+                  Global (shell.allowlist)
+                </td>
+              </tr>
+              <template
+                v-for="(cmds, skillName) in effectiveAllowlist.bySkill"
+                :key="skillName"
+              >
+                <tr
+                  v-for="cmd in cmds"
+                  :key="skillName + ':' + cmd"
+                >
+                  <td class="py-1 pr-4 font-mono text-cyan-400/80">
+                    {{ cmd }}
+                  </td>
+                  <td class="py-1 text-neutral-500">
+                    Skill: <span class="font-mono text-fg-muted">{{ skillName }}</span>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Skills -->
+      <div
+        v-if="editing"
+        class="bg-surface-elevated border border-border"
+      >
+        <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium text-fg-strong">Skills</span>
+            <span class="text-xs text-neutral-500">{{ toggleableAgentSkills.filter(s => s.enabled).length }}/{{ toggleableAgentSkills.length }} enabled</span>
+          </div>
+          <button
+            v-if="toggleableAgentSkills.length"
+            :title="allAgentSkillsEnabled ? 'Disable all skills for this agent' : 'Enable all skills for this agent'"
+            class="shrink-0"
+            @click="toggleAllAgentSkills()"
+          >
+            <div
+              class="relative w-9 h-5 rounded-full transition-colors duration-200"
+              :class="allAgentSkillsEnabled ? 'bg-emerald-500' : 'bg-muted'"
+            >
+              <div
+                class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+                :class="allAgentSkillsEnabled ? 'left-[18px]' : 'left-0.5'"
+              />
+            </div>
+          </button>
+        </div>
+        <div class="divide-y divide-border">
+          <div
+            v-for="skill in agentSkills"
+            :key="skill.name"
+            class="px-4 py-2.5 flex items-start justify-between gap-3 transition-opacity"
+            :class="skillDisabledTools(skill).length ? 'opacity-45' : ''"
+          >
+            <div
+              class="flex-1 min-w-0 transition-[filter]"
+              :class="skillDisabledTools(skill).length ? 'blur-[0.4px]' : ''"
+            >
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-sm text-fg-strong font-mono">{{ skill.name }}</span>
+                <span
+                  v-if="skill.isGlobal"
+                  class="text-[10px] text-green-400 border border-green-400/30 px-1"
+                >global</span>
+              </div>
+              <div
+                v-if="skill.tools?.length"
+                class="flex flex-wrap gap-1 mt-1.5"
+              >
+                <span
+                  v-for="tool in skill.tools"
+                  :key="tool"
+                  class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm"
+                  :class="getPillClass(tool)"
+                >
+                  {{ tool }}
+                </span>
+              </div>
+              <!--
+                Shell commands this skill contributes to the agent's effective
+                allowlist. These are the binaries bundled under the skill's
+                tools/ directory, blessed at promotion time. Enabling this
+                skill grants execution rights for these exact names.
+              -->
+              <div
+                v-if="skill.commands?.length"
+                class="mt-1.5 text-[11px] text-neutral-500 flex flex-wrap items-center gap-1"
+              >
+                <span class="text-fg-muted uppercase tracking-wide text-[10px]">Provides:</span>
+                <span
+                  v-for="cmd in skill.commands"
+                  :key="cmd"
+                  class="font-mono text-cyan-400/80 bg-cyan-400/5 border border-cyan-400/20 px-1.5 py-0.5 rounded-sm"
+                >
+                  {{ cmd }}
+                </span>
+              </div>
+              <div
+                v-if="skillDisabledTools(skill).length"
+                class="text-[10px] text-amber-500/70 mt-1.5"
+              >
+                requires {{ skillDisabledTools(skill).join(', ') }}
+              </div>
+              <div
+                v-else-if="skill.description"
+                class="text-xs text-neutral-500 mt-1.5"
+              >
+                {{ skill.description }}
+              </div>
+            </div>
+            <button
+              :title="skillDisabledTools(skill).length
+                ? 'Enable ' + skillDisabledTools(skill).join(', ') + ' to use this skill'
+                : skill.enabled ? 'Disable skill' : 'Enable skill'"
+              class="shrink-0 pt-0.5"
+              :class="skillDisabledTools(skill).length ? 'cursor-not-allowed' : ''"
+              @click="if (!skillDisabledTools(skill).length) { skill.enabled = !skill.enabled; toggleSkill(skill.name, skill.enabled) }"
+            >
+              <div
+                class="relative w-9 h-5 rounded-full transition-colors duration-200"
+                :class="(!skillDisabledTools(skill).length && skill.enabled) ? 'bg-emerald-500' : 'bg-muted'"
+              >
+                <div
+                  class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+                  :class="(!skillDisabledTools(skill).length && skill.enabled) ? 'left-[18px]' : 'left-0.5'"
+                />
+              </div>
+            </button>
+          </div>
+        </div>
+        <div
+          v-if="!agentSkills.length"
+          class="px-4 py-4 text-xs text-fg-muted text-center"
+        >
+          No skills available
+        </div>
+      </div>
+
       <!-- Tools -->
       <div
         v-if="editing"
@@ -1122,241 +1396,6 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           class="px-4 py-4 text-xs text-fg-muted text-center"
         >
           No tools registered
-        </div>
-      </div>
-
-      <!-- Exec privileges (main agent only) -->
-      <div
-        v-if="editing && editing.isMain"
-        class="bg-surface-elevated border border-border"
-      >
-        <div class="px-4 py-2.5 border-b border-border">
-          <span class="text-sm font-medium text-fg-strong">Shell Exec Privileges</span>
-          <span class="ml-2 text-[10px] text-amber-400">main agent only</span>
-        </div>
-        <div class="divide-y divide-border">
-          <div class="px-4 py-2.5 flex items-center justify-between">
-            <div>
-              <span class="text-sm text-fg-strong">Bypass allowlist</span>
-              <div class="text-xs text-neutral-500 mt-0.5">
-                Allow any command without allowlist validation
-              </div>
-            </div>
-            <button
-              :class="execBypassAllowlist ? 'bg-amber-600 hover:bg-amber-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600'"
-              class="relative w-9 h-5 rounded-full transition-colors shrink-0"
-              @click="execBypassAllowlist = !execBypassAllowlist; toggleExecConfig('bypassAllowlist', execBypassAllowlist)"
-            >
-              <span
-                :class="execBypassAllowlist ? 'translate-x-4' : 'translate-x-0.5'"
-                class="block w-4 h-4 bg-white rounded-full transition-transform"
-              />
-            </button>
-          </div>
-          <div class="px-4 py-2.5 flex items-center justify-between">
-            <div>
-              <span class="text-sm text-fg-strong">Allow global paths</span>
-              <div class="text-xs text-neutral-500 mt-0.5">
-                Execute commands outside the agent workspace directory
-              </div>
-            </div>
-            <button
-              :class="execAllowGlobalPaths ? 'bg-amber-600 hover:bg-amber-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600'"
-              class="relative w-9 h-5 rounded-full transition-colors shrink-0"
-              @click="execAllowGlobalPaths = !execAllowGlobalPaths; toggleExecConfig('allowGlobalPaths', execAllowGlobalPaths)"
-            >
-              <span
-                :class="execAllowGlobalPaths ? 'translate-x-4' : 'translate-x-0.5'"
-                class="block w-4 h-4 bg-white rounded-full transition-transform"
-              />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Skills -->
-      <div
-        v-if="editing"
-        class="bg-surface-elevated border border-border"
-      >
-        <div class="px-4 py-2.5 border-b border-border">
-          <span class="text-sm font-medium text-fg-strong">Skills</span>
-          <span class="ml-2 text-xs text-neutral-500">{{ agentSkills.filter(s => s.enabled).length }}/{{ agentSkills.length }} enabled</span>
-        </div>
-        <div class="divide-y divide-border">
-          <div
-            v-for="skill in agentSkills"
-            :key="skill.name"
-            class="px-4 py-2.5 flex items-start justify-between gap-3 transition-opacity"
-            :class="skillDisabledTools(skill).length ? 'opacity-45' : ''"
-          >
-            <div
-              class="flex-1 min-w-0 transition-[filter]"
-              :class="skillDisabledTools(skill).length ? 'blur-[0.4px]' : ''"
-            >
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-sm text-fg-strong font-mono">{{ skill.name }}</span>
-                <span
-                  v-if="skill.isGlobal"
-                  class="text-[10px] text-green-400 border border-green-400/30 px-1"
-                >global</span>
-              </div>
-              <div
-                v-if="skill.tools?.length"
-                class="flex flex-wrap gap-1 mt-1.5"
-              >
-                <span
-                  v-for="tool in skill.tools"
-                  :key="tool"
-                  class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm"
-                  :class="getPillClass(tool)"
-                >
-                  {{ tool }}
-                </span>
-              </div>
-              <!--
-                Shell commands this skill contributes to the agent's effective
-                allowlist. These are the binaries bundled under the skill's
-                tools/ directory, blessed at promotion time. Enabling this
-                skill grants execution rights for these exact names.
-              -->
-              <div
-                v-if="skill.commands?.length"
-                class="mt-1.5 text-[11px] text-neutral-500 flex flex-wrap items-center gap-1"
-              >
-                <span class="text-fg-muted uppercase tracking-wide text-[10px]">Provides:</span>
-                <span
-                  v-for="cmd in skill.commands"
-                  :key="cmd"
-                  class="font-mono text-cyan-400/80 bg-cyan-400/5 border border-cyan-400/20 px-1.5 py-0.5 rounded-sm"
-                >
-                  {{ cmd }}
-                </span>
-              </div>
-              <div
-                v-if="skillDisabledTools(skill).length"
-                class="text-[10px] text-amber-500/70 mt-1.5"
-              >
-                requires {{ skillDisabledTools(skill).join(', ') }}
-              </div>
-              <div
-                v-else-if="skill.description"
-                class="text-xs text-neutral-500 mt-1.5"
-              >
-                {{ skill.description }}
-              </div>
-            </div>
-            <button
-              :title="skillDisabledTools(skill).length
-                ? 'Enable ' + skillDisabledTools(skill).join(', ') + ' to use this skill'
-                : skill.enabled ? 'Disable skill' : 'Enable skill'"
-              class="shrink-0 pt-0.5"
-              :class="skillDisabledTools(skill).length ? 'cursor-not-allowed' : ''"
-              @click="if (!skillDisabledTools(skill).length) { skill.enabled = !skill.enabled; toggleSkill(skill.name, skill.enabled) }"
-            >
-              <div
-                class="relative w-9 h-5 rounded-full transition-colors duration-200"
-                :class="(!skillDisabledTools(skill).length && skill.enabled) ? 'bg-emerald-500' : 'bg-muted'"
-              >
-                <div
-                  class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
-                  :class="(!skillDisabledTools(skill).length && skill.enabled) ? 'left-[18px]' : 'left-0.5'"
-                />
-              </div>
-            </button>
-          </div>
-        </div>
-        <div
-          v-if="!agentSkills.length"
-          class="px-4 py-4 text-xs text-fg-muted text-center"
-        >
-          No skills available
-        </div>
-      </div>
-
-      <!--
-        Effective shell allowlist — derived view of what this agent can run via
-        the exec tool. Aggregates the global shell.allowlist (edited in Settings)
-        with the commands each enabled skill contributes at install time.
-        Read-only: remove a per-skill grant by disabling or removing the skill;
-        change global by editing shell.allowlist in Settings.
-      -->
-      <div
-        v-if="editing && effectiveAllowlist"
-        class="bg-surface-elevated border border-border"
-      >
-        <button
-          class="w-full px-4 py-2.5 border-b border-border text-left hover:bg-muted transition-colors flex items-center justify-between"
-          @click="allowlistExpanded = !allowlistExpanded"
-        >
-          <span class="text-sm font-medium text-fg-strong">
-            Shell Allowlist
-            <span class="ml-2 text-xs font-normal text-neutral-500">
-              {{ effectiveAllowlist.global.length + Object.values(effectiveAllowlist.bySkill).reduce((n, arr) => n + arr.length, 0) }}
-              commands
-              ({{ effectiveAllowlist.global.length }} global +
-              {{ Object.values(effectiveAllowlist.bySkill).reduce((n, arr) => n + arr.length, 0) }}
-              from {{ Object.keys(effectiveAllowlist.bySkill).length }} skill{{ Object.keys(effectiveAllowlist.bySkill).length === 1 ? '' : 's' }})
-            </span>
-          </span>
-          <ChevronRightIcon
-            class="w-3 h-3 text-neutral-500 transition-transform"
-            :class="allowlistExpanded ? 'rotate-90' : ''"
-            aria-hidden="true"
-          />
-        </button>
-        <div
-          v-if="allowlistExpanded"
-          class="px-4 py-3"
-        >
-          <p class="text-[11px] text-neutral-500 mb-2">
-            What this agent can run via the exec tool. Global entries come from
-            <span class="font-mono text-fg-muted">shell.allowlist</span> in Settings;
-            per-skill entries come from the skill's declared
-            <span class="font-mono text-fg-muted">commands:</span>
-            and disappear when you disable or remove the skill.
-          </p>
-          <table class="w-full text-xs">
-            <thead>
-              <tr class="text-neutral-500 text-[10px] uppercase tracking-wide">
-                <th class="text-left font-medium py-1 pr-4">
-                  Command
-                </th>
-                <th class="text-left font-medium py-1">
-                  Source
-                </th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-border">
-              <tr
-                v-for="cmd in effectiveAllowlist.global"
-                :key="'g:' + cmd"
-              >
-                <td class="py-1 pr-4 font-mono text-fg-primary">
-                  {{ cmd }}
-                </td>
-                <td class="py-1 text-neutral-500">
-                  Global (shell.allowlist)
-                </td>
-              </tr>
-              <template
-                v-for="(cmds, skillName) in effectiveAllowlist.bySkill"
-                :key="skillName"
-              >
-                <tr
-                  v-for="cmd in cmds"
-                  :key="skillName + ':' + cmd"
-                >
-                  <td class="py-1 pr-4 font-mono text-cyan-400/80">
-                    {{ cmd }}
-                  </td>
-                  <td class="py-1 text-neutral-500">
-                    Skill: <span class="font-mono text-fg-muted">{{ skillName }}</span>
-                  </td>
-                </tr>
-              </template>
-            </tbody>
-          </table>
         </div>
       </div>
 

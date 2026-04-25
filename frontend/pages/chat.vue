@@ -282,6 +282,97 @@ function toggleThinkingPill() {
   }
 }
 
+// Hover/focus menu above the Think pill: lets the user pick a specific
+// reasoning level (low/medium/high — whatever the current model advertises)
+// without going through the off → on dance. Click-to-toggle on the pill
+// itself is preserved as the cheap one-click affordance; the menu is the
+// power-user path. The 150ms close delay covers the cursor traversing the
+// gap between pill and menu — without it the menu vanishes mid-traverse.
+//
+// The menu is teleported to <body> because the composer <form> has
+// overflow-hidden (necessary for its rounded-[22px] border) which would
+// otherwise clip the upward-growing menu — that's why bumping z-index
+// alone didn't fix the "Low is missing" report. With Teleport the menu
+// becomes a viewport-positioned floater anchored to the trigger button's
+// bounding rect; scroll/resize listeners keep it pinned while open.
+const thinkingMenuOpen = ref(false)
+const thinkPillRef = ref<HTMLButtonElement | null>(null)
+const thinkingMenuStyle = ref<Record<string, string>>({})
+let thinkingMenuCloseTimer: ReturnType<typeof setTimeout> | null = null
+let thinkingMenuListenersAttached = false
+
+function computeThinkingMenuStyle() {
+  const btn = thinkPillRef.value
+  if (!btn) return
+  const r = btn.getBoundingClientRect()
+  thinkingMenuStyle.value = {
+    left: `${r.left + r.width / 2}px`,
+    top: `${r.top - 6}px`,
+    transform: 'translate(-50%, -100%)',
+  }
+}
+
+function attachMenuTrackingListeners() {
+  if (thinkingMenuListenersAttached) return
+  // capture: true so scroll events on nested overflow-auto containers
+  // (the chat history scrollbox) reposition the floating menu too.
+  window.addEventListener('scroll', computeThinkingMenuStyle, { passive: true, capture: true })
+  window.addEventListener('resize', computeThinkingMenuStyle)
+  thinkingMenuListenersAttached = true
+}
+
+function detachMenuTrackingListeners() {
+  if (!thinkingMenuListenersAttached) return
+  window.removeEventListener('scroll', computeThinkingMenuStyle, { capture: true } as EventListenerOptions)
+  window.removeEventListener('resize', computeThinkingMenuStyle)
+  thinkingMenuListenersAttached = false
+}
+
+function openThinkingMenu() {
+  if (thinkingMenuCloseTimer) {
+    clearTimeout(thinkingMenuCloseTimer)
+    thinkingMenuCloseTimer = null
+  }
+  if (!thinkingSupported.value) return
+  if (thinkingLock.value.locked) return
+  if (!thinkingLevels.value.length) return
+  // Only surface the level picker when Think is currently on. The pill's
+  // click-to-toggle handles on/off; the menu is purely "now that thinking
+  // is on, let me change the level." Showing it for a disabled pill would
+  // confusingly let the user re-enable Think via a hover-then-click that
+  // looks like nothing more than picking a level.
+  if (!thinkingActive.value) return
+  computeThinkingMenuStyle()
+  thinkingMenuOpen.value = true
+  attachMenuTrackingListeners()
+}
+
+function scheduleCloseThinkingMenu() {
+  if (thinkingMenuCloseTimer) clearTimeout(thinkingMenuCloseTimer)
+  thinkingMenuCloseTimer = setTimeout(() => {
+    thinkingMenuOpen.value = false
+    thinkingMenuCloseTimer = null
+    detachMenuTrackingListeners()
+  }, 150)
+}
+
+function setThinkingLevel(level: string) {
+  if (!thinkingSupported.value) return
+  if (thinkingLock.value.locked) return
+  lastThinkingLevel.value = level
+  updateAgentSetting({ thinkingMode: level })
+  thinkingMenuOpen.value = false
+  detachMenuTrackingListeners()
+}
+
+onBeforeUnmount(() => {
+  if (thinkingMenuCloseTimer) {
+    clearTimeout(thinkingMenuCloseTimer)
+    thinkingMenuCloseTimer = null
+  }
+  detachMenuTrackingListeners()
+})
+
 function toggleVisionPill() {
   if (!visionSupported.value) return
   updateAgentSetting({ visionEnabled: !visionActive.value })
@@ -2430,6 +2521,7 @@ function exportConversation() {
               <div class="flex items-center gap-1.5 flex-wrap justify-self-center">
                 <button
                   v-if="thinkingSupported"
+                  ref="thinkPillRef"
                   type="button"
                   class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium transition-colors"
                   :class="[
@@ -2439,10 +2531,16 @@ function exportConversation() {
                     thinkingLock.locked ? 'cursor-not-allowed opacity-90' : '',
                   ]"
                   :aria-disabled="thinkingLock.locked"
+                  :aria-haspopup="thinkingActive && thinkingLevels.length > 1 && !thinkingLock.locked ? 'menu' : undefined"
+                  :aria-expanded="thinkingMenuOpen"
                   :title="thinkingLock.locked
                     ? thinkingLock.reason
-                    : (thinkingActive ? 'Thinking on — click to turn off' : 'Thinking off — click to turn on')"
+                    : (thinkingActive ? 'Thinking on — click to turn off, or hover to pick a level' : 'Thinking off — click to turn on')"
                   @click="toggleThinkingPill"
+                  @mouseenter="openThinkingMenu"
+                  @mouseleave="scheduleCloseThinkingMenu"
+                  @focus="openThinkingMenu"
+                  @blur="scheduleCloseThinkingMenu"
                 >
                   <LightBulbIcon
                     class="w-3.5 h-3.5"
@@ -2542,6 +2640,51 @@ function exportConversation() {
               </div>
             </div>
           </form>
+          <!--
+            Reasoning-level picker for the Think pill. Teleported to <body>
+            because the composer <form> above has overflow-hidden (needed for
+            its rounded-[22px] border) which would otherwise clip the upward-
+            growing menu — z-index alone can't escape an overflow:hidden
+            ancestor. With Teleport the menu becomes a viewport-anchored
+            floater positioned via thinkingMenuStyle (computed from the Think
+            button's bounding rect on open + scroll/resize).
+          -->
+          <Teleport to="body">
+            <Transition
+              enter-active-class="transition duration-100"
+              enter-from-class="opacity-0 translate-y-1"
+              enter-to-class="opacity-100 translate-y-0"
+              leave-active-class="transition duration-75"
+              leave-from-class="opacity-100 translate-y-0"
+              leave-to-class="opacity-0 translate-y-1"
+            >
+              <div
+                v-if="thinkingMenuOpen && thinkingActive && thinkingLevels.length > 1 && !thinkingLock.locked"
+                role="menu"
+                tabindex="-1"
+                class="fixed flex flex-col bg-surface-elevated border border-border rounded-lg shadow-lg overflow-hidden z-50 min-w-24"
+                :style="thinkingMenuStyle"
+                @mouseenter="openThinkingMenu"
+                @mouseleave="scheduleCloseThinkingMenu"
+                @focusin="openThinkingMenu"
+                @focusout="scheduleCloseThinkingMenu"
+              >
+                <button
+                  v-for="level in thinkingLevels"
+                  :key="level"
+                  role="menuitem"
+                  type="button"
+                  class="px-3 py-1.5 text-xs font-medium text-left whitespace-nowrap transition-colors"
+                  :class="selectedAgent?.thinkingMode === level
+                    ? 'bg-emerald-500/15 text-emerald-500 hover:bg-emerald-500/25'
+                    : 'text-fg-muted hover:text-fg-strong hover:bg-muted'"
+                  @click="setThinkingLevel(level)"
+                >
+                  {{ level.charAt(0).toUpperCase() + level.slice(1) }}
+                </button>
+              </div>
+            </Transition>
+          </Teleport>
           <p
             v-if="!isEmptyChat"
             class="mt-1.5 text-center text-[11px] text-fg-muted"

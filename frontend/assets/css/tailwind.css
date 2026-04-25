@@ -82,8 +82,19 @@
     --accent-foreground: hsl(0 0% 98%);
     --destructive: hsl(0 62.8% 30.6%);
     --destructive-foreground: hsl(0 0% 98%);
-    --border: hsl(0 0% 14.9%);
-    --input: hsl(0 0% 14.9%);
+    /* Border lightness was hsl(0 0% 14.9%) — shadcn's default, but
+       near-isoluminant with --surface-elevated (#222427 ≈ 14.7% L) so
+       borders on tables, menus, cards, and form inputs effectively
+       vanished. The visible borders in this app (sidebar outer chrome,
+       composer card, ChatContextMeter) all bypass the token with explicit
+       hsl(0 0% 25%)/50 or fg-muted/40 overrides. Lifting the token to
+       ~22% L (~#383838) gives ~7 points of contrast against the elevated
+       surface — clearly visible without becoming heavy chrome. The two
+       intentional-invisibility uses of `dark:border-border` in
+       layouts/default.vue have been switched to `dark:border-transparent`
+       to preserve their structural-spacer behavior. */
+    --border: hsl(0 0% 22%);
+    --input: hsl(0 0% 22%);
     --ring: hsl(0 0% 83.1%);
 
     /* ── JClaw semantic design tokens ──────────────────────────────────── */
