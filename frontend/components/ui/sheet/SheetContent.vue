@@ -2,10 +2,12 @@
 import type { DialogContentEmits, DialogContentProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
-// JCLAW-174: Heroicons XMarkIcon instead of lucide X — the rest of the
-// app uses Heroicons for every close affordance (chat.vue, settings.vue);
-// the lucide glyph at size-4 reads as text rather than an icon.
-import { XMarkIcon } from "@heroicons/vue/24/outline"
+// JCLAW-174 (follow-up): use Heroicons SOLID XMarkIcon. The outline
+// variant at stroke-width 1.5 is actually lighter than the lucide X
+// (stroke 2) we replaced, so the close affordance still read as text.
+// Solid renders a filled X with rounded ends — the standard heavier
+// modal close glyph users expect.
+import { XMarkIcon } from "@heroicons/vue/24/solid"
 import {
   DialogClose,
   DialogContent,

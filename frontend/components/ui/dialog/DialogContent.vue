@@ -2,8 +2,8 @@
 import type { DialogContentEmits, DialogContentProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
-// JCLAW-174: Heroicons XMarkIcon — see SheetContent.vue for the rationale.
-import { XMarkIcon } from "@heroicons/vue/24/outline"
+// JCLAW-174: Heroicons SOLID XMarkIcon — see SheetContent.vue for the rationale.
+import { XMarkIcon } from "@heroicons/vue/24/solid"
 import {
   DialogClose,
   DialogContent,
