@@ -240,6 +240,22 @@ do_start_prod() {
         play stop
     fi
 
+    # Refuse to start if the port is held by anything (a foreign process from
+    # a different deploy dir, or a prior instance still inside its shutdown
+    # hooks). The pid-file check above only catches OUR own server.pid; a
+    # JVM running from /tmp/JClaw/ — say, a pre-existing prod deploy — has
+    # its own pid file there and is invisible to us. Without this guard,
+    # Play tries to bind, fails with "Could not bind on port 9000", aborts
+    # startup → ShutdownJob fires → JPA work in the shutdown sequence
+    # produces a giant Hibernate trace that buries the real one-line error.
+    if lsof -ti :"$BACKEND_PORT" >/dev/null 2>&1; then
+        local holder
+        holder=$(lsof -ti :"$BACKEND_PORT" 2>/dev/null | tr '\n' ' ')
+        echo "Error: Port $BACKEND_PORT is already in use (pid: ${holder% })."
+        echo "       Run '$0 ${DEPLOY_DIR:+--deploy $DEPLOY_DIR }stop' first, or kill the holder."
+        exit 1
+    fi
+
     echo "==> Resolving backend dependencies..."
     play deps --sync
 
