@@ -6,9 +6,13 @@ FRONTEND_PID_FILE="frontend.pid"
 
 usage() {
     cat <<EOF
-Usage: jclaw.sh [options] <start|stop|restart|status|logs|loadtest|test>
+Usage: jclaw.sh [options] <setup|start|stop|restart|status|logs|loadtest|test>
 
 Commands:
+  setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
+            installs frontend dependencies (so pre-commit's lint-staged works),
+            and verifies both 'origin' and 'github' remotes exist. Run once
+            after every fresh clone. Idempotent — safe to re-run.
   start     Start the Play backend and Nuxt frontend
   stop      Stop the running Play backend and Nuxt frontend
   restart   Stop and start (combines stop + start)
@@ -41,6 +45,7 @@ Load-test options (only used with the 'loadtest' command):
   --clean                 Delete loadtest conversations/events from DB instead of running a test
 
 Examples:
+  ./jclaw.sh setup                                    # One-time setup after fresh clone
   ./jclaw.sh --dev start                              # Start in dev mode
   ./jclaw.sh --dev --backend-port 8080 start          # Dev mode with custom backend port
   ./jclaw.sh start                                    # Start production in current directory
@@ -115,7 +120,7 @@ while [[ $# -gt 0 ]]; do
             LT_CLEAN=true
             shift
             ;;
-        start|stop|restart|status|logs|loadtest|test)
+        setup|start|stop|restart|status|logs|loadtest|test)
             COMMAND="$1"
             shift
             ;;
@@ -192,6 +197,63 @@ elif [[ "$DEV_MODE" == true ]]; then
 else
     JCLAW_DIR="$(pwd)"
 fi
+
+# ─── First-time setup ───
+
+# Idempotent — safe to re-run on a clone that's already configured. The
+# things this fixes are all per-clone state that don't survive a fresh
+# `git clone` or `rm -rf && git clone` cycle, because they live in
+# `.git/config` (which git refuses to track) or under `frontend/node_modules/`
+# (gitignored). Running this once after a fresh clone restores the wiring
+# the rest of the workflow assumes.
+do_setup() {
+    cd "$JCLAW_DIR"
+
+    if [[ ! -f "conf/application.conf" ]]; then
+        echo "Error: Not a JClaw directory (conf/application.conf not found)"
+        echo "       Run from the jclaw directory."
+        exit 1
+    fi
+
+    echo "==> Wiring git hooks (.githooks/)..."
+    /usr/bin/git config --local core.hooksPath .githooks
+    echo "    core.hooksPath = $(/usr/bin/git config --local core.hooksPath)"
+
+    echo ""
+    echo "==> Installing frontend dependencies (so pre-commit's lint-staged is available)..."
+    if [[ ! -d "frontend" ]]; then
+        echo "    Skipped: frontend/ directory not found."
+    elif ! command -v pnpm &>/dev/null; then
+        echo "    Warning: pnpm not on PATH. Install with: npm install -g pnpm"
+        echo "             Then re-run: ./jclaw.sh setup"
+    else
+        (cd frontend && (pnpm install --frozen-lockfile 2>/dev/null || pnpm install))
+    fi
+
+    echo ""
+    echo "==> Checking git remotes..."
+    if /usr/bin/git remote get-url origin >/dev/null 2>&1; then
+        echo "    origin: $(/usr/bin/git remote get-url origin)"
+    else
+        echo "    Warning: 'origin' remote not configured (unusual for a fresh clone)."
+    fi
+    if /usr/bin/git remote get-url github >/dev/null 2>&1; then
+        echo "    github: $(/usr/bin/git remote get-url github)"
+    else
+        echo "    'github' remote not configured."
+        echo "    Add it with:"
+        echo "        /usr/bin/git remote add github https://github.com/<your-user>/jclaw.git"
+        echo "    The /deploy slash command requires both 'origin' and 'github' remotes."
+    fi
+
+    echo ""
+    echo "==> Setup complete."
+    echo ""
+    echo "Next steps:"
+    echo "  Start dev:        ./jclaw.sh --dev start"
+    echo "  Start prod:       ./jclaw.sh start"
+    echo "  Run tests:        ./jclaw.sh test"
+}
 
 # ─── Production deploy ───
 
@@ -777,6 +839,9 @@ do_test() {
 # ─── Execute ───
 
 case "$COMMAND" in
+    setup)
+        do_setup
+        ;;
     start)
         check_java
         if [[ "$DEV_MODE" == true ]]; then

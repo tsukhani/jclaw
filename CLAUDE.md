@@ -8,6 +8,18 @@ JClaw is an AI-powered automation platform built on **Play Framework 1.x** (Java
 
 **Status**: pre-v1 (alpha), work in progress.
 
+## First-time setup
+
+After every fresh clone (including `rm -rf` + re-clone cycles), run:
+
+```bash
+./jclaw.sh setup
+```
+
+This wires git hooks (`.githooks/`), installs frontend dependencies (so the pre-commit hook's `lint-staged` is available), and verifies both `origin` (Bitbucket) and `github` remotes are configured. Idempotent — safe to re-run any time.
+
+Why it's needed: `.git/config` lives inside `.git/` which git refuses to track, and `frontend/node_modules/` is gitignored. So `core.hooksPath`, the `github` remote, and `lint-staged` itself don't survive a fresh clone. Without the setup, hooks silently don't fire and `/deploy` fails on the github push.
+
 ## Development Commands
 
 ### Backend (Play 1.x)
@@ -40,7 +52,7 @@ Start the Play backend (`play run`) and the Nuxt frontend (`cd frontend && pnpm 
 
 ## Git Hooks
 
-Checked-in hooks live in `.githooks/`. Enable them on a fresh clone with:
+Checked-in hooks live in `.githooks/`. They're wired up automatically by `./jclaw.sh setup` (see [First-time setup](#first-time-setup) above). The underlying command, for reference or manual use:
 
 ```bash
 git config core.hooksPath .githooks
