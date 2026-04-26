@@ -13,9 +13,18 @@ logs/
 # Play precompiled files
 precompiled/
 
-# Claude Code and OpenAI Codex config
-.claude/
+# Claude Code and OpenAI Codex config.
+# Note: `.claude/*` (contents) instead of `.claude/` (directory) so git can
+# still descend into .claude/ and apply the negations below — git can't
+# re-include a path under a fully-ignored parent directory.
+.claude/*
 .agents/
+
+# …but keep checked-in slash commands so they survive fresh clones.
+# Other .claude/ subdirs (settings.local.json, state, etc.) stay ignored
+# because they hold per-developer state that shouldn't be checked in.
+!.claude/commands/
+!.claude/commands/**
 
 # Autoresearch state
 .autoresearch/
