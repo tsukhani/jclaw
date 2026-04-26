@@ -158,4 +158,38 @@ public class AuthTest extends FunctionalTest {
         var response = GET("/api/config");
         assertEquals(401, response.status.intValue());
     }
+
+    @Test
+    public void staleSessionRejectedWhenPasswordWiped() {
+        // Reproduce the fresh-install gotcha: a session cookie from before
+        // the password row was wiped (or surviving a rm-and-reclone) is
+        // still cryptographically valid because Play sessions are stateless
+        // cookies signed with application.secret — which doesn't change
+        // across DB mutations or reinstalls. Without AuthCheck's DB
+        // cross-check, that cookie would still pass the session.get("authenticated")
+        // == "true" gate and let the user into protected endpoints (and via
+        // the frontend middleware, into the home page) on a fresh install.
+        var loginBody = """
+                {"username": "admin", "password": "%s"}
+                """.formatted(TEST_PASSWORD);
+        var loginResponse = POST("/api/auth/login", "application/json", loginBody);
+        assertIsOk(loginResponse);
+
+        // Sanity check: cookie works while password is set.
+        var beforeWipe = GET("/api/config");
+        assertIsOk(beforeWipe);
+
+        // Wipe the password OUT-OF-BAND (simulating a fresh install or a
+        // reset done from another tab/machine). The session cookie itself
+        // is untouched — we still hold it.
+        AuthFixture.clearAdminPassword();
+
+        // Same cookie, different DB state. AuthCheck must reject.
+        var afterWipe = GET("/api/config");
+        assertEquals(401, afterWipe.status.intValue());
+        assertTrue(getContent(afterWipe).contains("password_unset"),
+                "expected password_unset code so the SPA can distinguish "
+                        + "'DB has no admin' from generic 'needs login'; got: "
+                        + getContent(afterWipe));
+    }
 }
