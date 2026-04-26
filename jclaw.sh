@@ -231,6 +231,27 @@ do_setup() {
     fi
 
     echo ""
+    echo "==> Installing BMAD (slash commands → .claude/skills/)..."
+    # _bmad/ and .claude/skills/ are both gitignored — they hold ~270 BMAD
+    # install files and ~42 generated skill manifests respectively. Tracking
+    # them caused massive diffs every time BMAD upgraded between minor
+    # versions (e.g. 6.2.2 → 6.5.0 deleted/moved hundreds of files), so we
+    # let setup regenerate them instead. Quick-update is the lightest action
+    # that keeps existing module settings AND re-registers the IDE; -y skips
+    # the prompts that would otherwise hang in non-interactive contexts;
+    # --directory pins it to this clone (otherwise it asks).
+    if ! command -v npx &>/dev/null; then
+        echo "    Warning: npx not on PATH. Install Node.js to enable BMAD."
+        echo "             Then re-run: ./jclaw.sh setup"
+    else
+        npx bmad-method install \
+            --directory "$JCLAW_DIR" \
+            --action quick-update \
+            --tools claude-code \
+            -y 2>&1 | tail -5
+    fi
+
+    echo ""
     echo "==> Checking git remotes..."
     if /usr/bin/git remote get-url origin >/dev/null 2>&1; then
         echo "    origin: $(/usr/bin/git remote get-url origin)"
