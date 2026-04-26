@@ -1,9 +1,14 @@
 import org.junit.jupiter.api.*;
 import play.test.*;
+import services.OcrHealthProbe;
 import tools.DocumentsTool;
 
+import java.awt.Color;
+import java.awt.Font;
+import java.awt.image.BufferedImage;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import javax.imageio.ImageIO;
 
 /**
  * Covers the collision-avoidance helpers used by {@link DocumentsTool#writeDocument}.
@@ -79,6 +84,110 @@ public class DocumentsToolTest extends UnitTest {
         var out = DocumentsTool.resolveNonConflicting(desired);
         assertEquals(tmp.resolve(".hidden-1"), out);
     }
+
+    // ----- JCLAW-177: Tika TesseractOCRParser integration ---------------------
+
+    @Test
+    public void readDocument_imageWithText_extractsTextViaTesseract() throws Exception {
+        // Skip when the binary isn't installed — the assertion below would
+        // otherwise spuriously fail on hosts that haven't run apt-get install
+        // tesseract-ocr / brew install tesseract. The companion test below
+        // covers the missing-tesseract code path independently.
+        var probe = OcrHealthProbe.probe();
+        Assumptions.assumeTrue(probe.available(),
+                "tesseract not on PATH (" + probe.reason() + ") — skipping OCR happy-path test");
+
+        var img = renderTextPng("OCR Hello World", 800, 200);
+        var file = tmp.resolve("ocr-sample.png");
+        ImageIO.write(img, "png", file.toFile());
+
+        var result = DocumentsTool.readDocument(file);
+
+        // Tesseract sometimes reads "Hello World" with stray punctuation around
+        // it depending on the rendered font's hinting; substring-match is the
+        // realistic assertion. A non-blank result that contains "Hello" is
+        // already proof OCR fired (a no-op parser would return empty text).
+        assertTrue(result.toLowerCase().contains("hello"),
+                "Expected OCR to extract 'Hello' from rendered image, got: " + result);
+    }
+
+    @Test
+    public void readDocument_imageWithNoText_andProbeUnavailable_returnsClearHint() throws Exception {
+        // Render a blank PNG so Tika legitimately returns empty text, then
+        // force the probe into the "unavailable" state so the diagnostic
+        // appends. This exercises the JCLAW-177 error-surfacing path on hosts
+        // where tesseract is actually installed (the developer's machine).
+        var saved = OcrHealthProbe.lastResult();
+        try {
+            OcrHealthProbe.setForTest(new OcrHealthProbe.ProbeResult(
+                    false, null, "tesseract --version exited 127: command not found"));
+
+            var img = new BufferedImage(20, 20, BufferedImage.TYPE_INT_RGB);
+            var g = img.createGraphics();
+            g.setColor(Color.WHITE);
+            g.fillRect(0, 0, 20, 20);
+            g.dispose();
+            var file = tmp.resolve("blank.png");
+            ImageIO.write(img, "png", file.toFile());
+
+            var result = DocumentsTool.readDocument(file);
+
+            assertTrue(result.contains("tesseract"),
+                    "Expected diagnostic to name 'tesseract', got: " + result);
+            assertTrue(result.contains("brew install tesseract"),
+                    "Expected diagnostic to suggest macOS install command, got: " + result);
+            assertTrue(result.contains("apt-get install tesseract-ocr"),
+                    "Expected diagnostic to suggest Debian/Ubuntu install command, got: " + result);
+        } finally {
+            OcrHealthProbe.setForTest(saved);
+        }
+    }
+
+    @Test
+    public void readDocument_blankImage_andProbeAvailable_omitsDiagnostic() throws Exception {
+        // Mirror image of the above: when probe says tesseract is fine, an
+        // empty extraction is a real "no text in this document" — don't
+        // muddy the response with a misleading install hint.
+        var saved = OcrHealthProbe.lastResult();
+        try {
+            OcrHealthProbe.setForTest(new OcrHealthProbe.ProbeResult(
+                    true, "tesseract 5.5.2 (test stub)", null));
+
+            var img = new BufferedImage(20, 20, BufferedImage.TYPE_INT_RGB);
+            var g = img.createGraphics();
+            g.setColor(Color.WHITE);
+            g.fillRect(0, 0, 20, 20);
+            g.dispose();
+            var file = tmp.resolve("blank-with-probe-ok.png");
+            ImageIO.write(img, "png", file.toFile());
+
+            var result = DocumentsTool.readDocument(file);
+
+            assertFalse(result.contains("tesseract is unavailable"),
+                    "Diagnostic must not appear when probe says tesseract is available, got: " + result);
+        } finally {
+            OcrHealthProbe.setForTest(saved);
+        }
+    }
+
+    private static BufferedImage renderTextPng(String text, int w, int h) {
+        var img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+        var g = img.createGraphics();
+        try {
+            g.setRenderingHint(java.awt.RenderingHints.KEY_TEXT_ANTIALIASING,
+                    java.awt.RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            g.setColor(Color.WHITE);
+            g.fillRect(0, 0, w, h);
+            g.setColor(Color.BLACK);
+            g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 64));
+            g.drawString(text, 30, h / 2 + 20);
+        } finally {
+            g.dispose();
+        }
+        return img;
+    }
+
+    // ----- pre-existing collision-helper coverage -----------------------------
 
     @Test
     public void replaceFinalSegment_flatPath() {

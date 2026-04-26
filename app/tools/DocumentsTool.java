@@ -7,10 +7,13 @@ import org.apache.tika.exception.TikaException;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.parser.AutoDetectParser;
 import org.apache.tika.parser.ParseContext;
+import org.apache.tika.parser.ocr.TesseractOCRConfig;
+import org.apache.tika.parser.pdf.PDFParserConfig;
 import org.apache.tika.sax.BodyContentHandler;
 import org.xml.sax.SAXException;
 import services.AgentService;
 import services.DocumentWriter;
+import services.OcrHealthProbe;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -290,9 +293,14 @@ public class DocumentsTool implements ToolRegistry.Tool {
 
     /**
      * Extract text from a rich document. Returns partial text when the per-file
-     * character cap is reached, with a trailing truncation notice.
+     * character cap is reached, with a trailing truncation notice. Image-only
+     * inputs and image-only PDFs go through Tika's TesseractOCRParser; when
+     * that parser returns blank because tesseract isn't on PATH, the response
+     * names the missing dependency rather than silently saying "no text"
+     * (JCLAW-177). Public + static so {@code DocumentsToolTest} can drive the
+     * Tika path without going through Agent/workspace plumbing.
      */
-    private String readDocument(Path path) {
+    public static String readDocument(Path path) {
         try {
             if (!Files.exists(path)) return "Error: File not found: %s".formatted(path.getFileName());
             var size = Files.size(path);
@@ -306,7 +314,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
             var metadata = new Metadata();
             boolean truncated = false;
             try (InputStream in = Files.newInputStream(path)) {
-                parser.parse(in, handler, metadata, new ParseContext());
+                parser.parse(in, handler, metadata, buildOcrParseContext());
             } catch (SAXException e) {
                 if (!e.getClass().getSimpleName().contains("WriteLimitReached")) {
                     return "Error parsing document: %s".formatted(e.getMessage());
@@ -315,8 +323,10 @@ public class DocumentsTool implements ToolRegistry.Tool {
             }
             var text = handler.toString();
             if (text.isBlank()) {
+                var hint = ocrUnavailableHint();
                 return "(Document parsed but contained no extractable text: "
-                        + path.getFileName() + ")";
+                        + path.getFileName() + ")"
+                        + (hint == null ? "" : " " + hint);
             }
             if (truncated) {
                 text += "\n\n[... truncated at " + MAX_DOCUMENT_TEXT_CHARS + " characters ...]";
@@ -327,5 +337,73 @@ public class DocumentsTool implements ToolRegistry.Tool {
         } catch (IOException e) {
             return "Error reading document: %s".formatted(e.getMessage());
         }
+    }
+
+    /**
+     * Build a {@link ParseContext} pre-loaded with TesseractOCRConfig and
+     * PDFParserConfig so image inputs (and image-only PDFs) reach Tesseract.
+     * Tunables come from application.conf — operators tweak language packs,
+     * timeout, and PDF strategy without code changes. Each parse rebuilds
+     * the context so live config edits apply on the next call.
+     */
+    private static ParseContext buildOcrParseContext() {
+        var ctx = new ParseContext();
+
+        var ocr = new TesseractOCRConfig();
+        ocr.setLanguage(stringOrDefault("ocr.tesseract.languages", "eng"));
+        ocr.setTimeoutSeconds(positiveIntOrDefault("ocr.tesseract.timeout", 60));
+        ocr.setSkipOcr(false);
+        ctx.set(TesseractOCRConfig.class, ocr);
+
+        var pdf = new PDFParserConfig();
+        pdf.setOcrStrategy(parsePdfStrategy(
+                stringOrDefault("ocr.pdf.strategy", "auto")));
+        pdf.setExtractInlineImages(true);
+        ctx.set(PDFParserConfig.class, pdf);
+
+        return ctx;
+    }
+
+    private static String stringOrDefault(String key, String fallback) {
+        var raw = play.Play.configuration != null
+                ? play.Play.configuration.getProperty(key) : null;
+        return (raw == null || raw.isBlank()) ? fallback : raw.trim();
+    }
+
+    private static int positiveIntOrDefault(String key, int fallback) {
+        var raw = play.Play.configuration != null
+                ? play.Play.configuration.getProperty(key) : null;
+        if (raw == null || raw.isBlank()) return fallback;
+        try {
+            int n = Integer.parseInt(raw.trim());
+            return n > 0 ? n : fallback;
+        } catch (NumberFormatException _) {
+            return fallback;
+        }
+    }
+
+    private static PDFParserConfig.OCR_STRATEGY parsePdfStrategy(String s) {
+        return switch (s.toLowerCase(Locale.ROOT)) {
+            case "no_ocr" -> PDFParserConfig.OCR_STRATEGY.NO_OCR;
+            case "ocr_only" -> PDFParserConfig.OCR_STRATEGY.OCR_ONLY;
+            case "ocr_and_text_extraction" -> PDFParserConfig.OCR_STRATEGY.OCR_AND_TEXT_EXTRACTION;
+            default -> PDFParserConfig.OCR_STRATEGY.AUTO;
+        };
+    }
+
+    /**
+     * Build an actionable error fragment when Tika returns empty text and the
+     * tesseract binary probe came back unavailable. Returns {@code null} when
+     * the probe says tesseract is fine — in that case an empty extraction is
+     * a real "no text in this document" result and shouldn't be muddied with
+     * a misleading install hint.
+     */
+    private static String ocrUnavailableHint() {
+        var probe = OcrHealthProbe.lastResult();
+        if (probe.available()) return null;
+        return "Note: tesseract is unavailable (" + probe.reason() + "). "
+                + "OCR-dependent inputs (image-only PDFs, plain images, scanned documents) "
+                + "require tesseract on PATH. Install: brew install tesseract (macOS), "
+                + "apt-get install tesseract-ocr (Debian/Ubuntu).";
     }
 }

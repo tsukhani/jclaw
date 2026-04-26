@@ -97,6 +97,31 @@ jclaw/
 - Node.js 20+ (24 recommended) for frontend
 - pnpm for frontend package management
 
+#### Optional system dependencies
+
+**Tesseract OCR** — required for text extraction from images, scanned PDFs,
+and image-only PDFs via the `documents` tool. Apache Tika invokes the
+`tesseract` binary as a subprocess; without it, image inputs return empty
+text. A startup probe logs a WARN line at boot if tesseract is missing so
+the missing capability is visible without trial and error.
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install tesseract-ocr
+
+# macOS
+brew install tesseract
+
+# Windows
+choco install tesseract
+# or: winget install --id UB-Mannheim.TesseractOCR
+```
+
+Additional language packs install separately. The default is English
+(`eng`); install `tesseract-ocr-fra`, `tesseract-ocr-jpn`, etc. for other
+languages, then update `ocr.tesseract.languages` in `conf/application.conf`
+(e.g. `eng+fra+jpn`).
+
 ### Clone
 
 ```bash
