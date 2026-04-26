@@ -58,7 +58,8 @@ public final class Commands {
         COMPACT("/compact", "Summarize older turns to free context"),
         HELP("/help", "Show available commands"),
         MODEL("/model", "Show current model and its capabilities"),
-        USAGE("/usage", "Show context usage for this conversation");
+        USAGE("/usage", "Show context usage for this conversation"),
+        STOP("/stop", "Interrupt the current generation");
 
         public final String literal;
         public final String shortDescription;
@@ -79,7 +80,8 @@ public final class Commands {
             • /compact — summarize older turns to free context (optional: /compact focus-hint)
             • /help — show this message
             • /model — show current model and its capabilities
-            • /usage — show context usage for this conversation""";
+            • /usage — show context usage for this conversation
+            • /stop — interrupt the current generation""";
 
     /**
      * Canned response for {@link Command#NEW}. The leading {@code >} line
@@ -184,6 +186,7 @@ public final class Commands {
             case HELP -> executeHelp(agent, channelType, current);
             case MODEL -> executeModel(agent, channelType, current, args);
             case USAGE -> executeUsage(agent, channelType, current);
+            case STOP -> executeStop(agent, channelType, current);
         };
     }
 
@@ -226,6 +229,50 @@ public final class Commands {
         EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
                 "/reset for conversation %d".formatted(convId));
         return new Result(updated != null ? updated : current, RESET_TEXT, Command.RESET);
+    }
+
+    /**
+     * {@code /stop} — interrupt an in-flight assistant turn for this conversation.
+     *
+     * <p>Sets {@link services.ConversationQueue#cancellationFlag} so
+     * {@link agents.AgentRunner}'s {@code checkCancelled} polls short-circuit
+     * the streaming loop on the next checkpoint. The shared
+     * {@code AtomicBoolean} works because {@code tryAcquire} (which any active
+     * stream has already passed through) creates the {@code QueueState} via
+     * {@code computeIfAbsent} — so the streaming thread and this dispatcher
+     * thread receive the same object reference, and the volatile write is
+     * visible immediately.
+     *
+     * <p>On Telegram this fully interrupts in-flight processing. On web,
+     * {@code AgentRunner.runStreaming} polls a per-request token created in
+     * {@code ApiChatController}, not {@code ConversationQueue.cancellationFlag},
+     * so this command is largely a no-op there — the in-product stop button
+     * remains the primary mechanism for the web channel. Worth keeping in
+     * the shared registry anyway: typed {@code /stop} surfaces uniformly
+     * across channels and the web reply is informative either way.
+     *
+     * <p>Like {@code /reset}, the ack is delivered via the channel transport
+     * (SSE complete frame on web, sink.seal on Telegram) but NOT persisted
+     * as a Message row — {@code /stop} is a control signal, not conversation
+     * content, and persisting "Stopped." next to whatever partial assistant
+     * content the cancelled stream left behind would clutter history and
+     * skew {@code /usage} accounting.
+     */
+    private static Result executeStop(Agent agent, String channelType, Conversation current) {
+        if (current == null) {
+            EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+                    "/stop with no current conversation");
+            return new Result(null, "No active conversation. Nothing to stop.", Command.STOP);
+        }
+        if (!services.ConversationQueue.isBusy(current.id)) {
+            EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+                    "/stop for conversation %d — nothing in flight".formatted(current.id));
+            return new Result(current, "Nothing to stop.", Command.STOP);
+        }
+        services.ConversationQueue.cancellationFlag(current.id).set(true);
+        EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+                "/stop signalled cancellation for conversation %d".formatted(current.id));
+        return new Result(current, "Stopped.", Command.STOP);
     }
 
     /**

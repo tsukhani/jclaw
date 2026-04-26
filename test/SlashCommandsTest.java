@@ -58,6 +58,7 @@ public class SlashCommandsTest extends UnitTest {
         assertEquals(Commands.Command.HELP, Commands.parse("/help").orElseThrow());
         assertEquals(Commands.Command.MODEL, Commands.parse("/model").orElseThrow());
         assertEquals(Commands.Command.USAGE, Commands.parse("/usage").orElseThrow());
+        assertEquals(Commands.Command.STOP, Commands.parse("/stop").orElseThrow());
     }
 
     // ── /compact ──────────────────────────────────────────────────────
@@ -284,6 +285,7 @@ public class SlashCommandsTest extends UnitTest {
         assertTrue(Commands.HELP_TEXT.contains("/help"));
         assertTrue(Commands.HELP_TEXT.contains("/model"));
         assertTrue(Commands.HELP_TEXT.contains("/usage"));
+        assertTrue(Commands.HELP_TEXT.contains("/stop"));
     }
 
     // ── /model ─────────────────────────────────────────────────────────
@@ -602,6 +604,78 @@ public class SlashCommandsTest extends UnitTest {
         var result = Commands.execute(Commands.Command.USAGE, agent, "web", "admin", null);
         assertNull(result.conversation());
         assertNotNull(result.responseText());
+    }
+
+    // ── /stop ──────────────────────────────────────────────────────────
+
+    @Test
+    public void stopWithNoCurrentConversationReturnsFallback() {
+        var result = Commands.execute(Commands.Command.STOP, agent, "web", "admin", null);
+        assertEquals(Commands.Command.STOP, result.command());
+        assertNull(result.conversation());
+        assertTrue(result.responseText().contains("No active conversation"),
+                "got: " + result.responseText());
+    }
+
+    @Test
+    public void stopOnIdleConversationReportsNothingToStop() {
+        // Conversation exists but no in-flight processing — ConversationQueue
+        // has never seen this conversation id, so isBusy returns false.
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        var result = Commands.execute(Commands.Command.STOP, agent, "web", "admin", convo);
+        assertEquals(Commands.Command.STOP, result.command());
+        assertEquals(convo.id, result.conversation().id);
+        assertEquals("Nothing to stop.", result.responseText());
+        // Flag must NOT be set when there's nothing to interrupt — a stale
+        // true would cancel the next legitimate turn before its first poll.
+        assertFalse(services.ConversationQueue.cancellationFlag(convo.id).get(),
+                "/stop on an idle conversation must not set the cancellation flag");
+    }
+
+    @Test
+    public void stopOnBusyConversationSetsCancellationFlag() {
+        // Drive the queue into "processing" state via tryAcquire so isBusy
+        // returns true. Then /stop must flip the cancellation flag — the
+        // streaming thread's checkCancelled poll observes it on its next
+        // checkpoint and short-circuits the loop.
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        var queueMsg = new services.ConversationQueue.QueuedMessage(
+                "in-flight prompt", "web", "admin", agent);
+        var acquired = services.ConversationQueue.tryAcquire(convo.id, queueMsg);
+        assertTrue(acquired, "tryAcquire on a fresh conversation should succeed");
+        try {
+            assertTrue(services.ConversationQueue.isBusy(convo.id),
+                    "conversation must register as busy after tryAcquire");
+
+            var result = Commands.execute(Commands.Command.STOP, agent, "web", "admin", convo);
+
+            assertEquals(Commands.Command.STOP, result.command());
+            assertEquals("Stopped.", result.responseText());
+            assertTrue(services.ConversationQueue.cancellationFlag(convo.id).get(),
+                    "/stop on a busy conversation must set the cancellation flag");
+        } finally {
+            // Release ownership so subsequent tests don't see this conversation
+            // as permanently busy. drain() with an empty pending deque flips
+            // processing back to false.
+            services.ConversationQueue.releaseOwnership(convo.id);
+        }
+    }
+
+    @Test
+    public void stopDoesNotPersistAck() {
+        // Mirror /reset: /stop is a control signal, not conversation content.
+        // Persisting "Stopped." next to a partial assistant message would
+        // skew /usage accounting and clutter history.
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        ConversationService.appendUserMessage(convo, "first");
+        ConversationService.appendAssistantMessage(convo, "second", null);
+        var countBefore = Message.count("conversation = ?1", convo);
+
+        Commands.execute(Commands.Command.STOP, agent, "web", "admin", convo);
+
+        var countAfter = Message.count("conversation = ?1", convo);
+        assertEquals(countBefore, countAfter,
+                "/stop must not persist any new Message row");
     }
 
     // ── handle() convenience ───────────────────────────────────────────
