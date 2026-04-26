@@ -144,6 +144,41 @@ public class DocumentsToolTest extends UnitTest {
     }
 
     @Test
+    public void readDocument_pdfWithEmbeddedImage_doesNotThrowOnInlineImageExtraction() throws Exception {
+        // Regression for the JCLAW-177 follow-up: extractInlineImages=true
+        // routes embedded PDF images through Tika's ImageGraphicsEngine, which
+        // calls org.apache.pdfbox.tools.imageio.ImageIOUtil. That class lives
+        // in the pdfbox-tools artifact; an over-eager exclude in
+        // conf/dependencies.yml previously dropped pdfbox-tools entirely,
+        // causing NoClassDefFoundError when an agent fed a scanned PDF to
+        // the documents tool. Build a synthetic PDF with one embedded image
+        // and assert the extraction completes — no exception, real result.
+        var img = renderTextPng("PDF OCR Hello World", 600, 200);
+        var pdfPath = tmp.resolve("scanned.pdf");
+        try (var pdf = new org.apache.pdfbox.pdmodel.PDDocument()) {
+            var page = new org.apache.pdfbox.pdmodel.PDPage();
+            pdf.addPage(page);
+            var pdImg = org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory
+                    .createFromImage(pdf, img);
+            try (var cs = new org.apache.pdfbox.pdmodel.PDPageContentStream(pdf, page)) {
+                cs.drawImage(pdImg, 50, 400, 500, 200);
+            }
+            pdf.save(pdfPath.toFile());
+        }
+
+        var result = DocumentsTool.readDocument(pdfPath);
+
+        // Whether OCR'd text comes back depends on tesseract availability —
+        // either way, the call must NOT throw NoClassDefFoundError, and the
+        // response must be a normal tool string (not a stack trace).
+        assertNotNull(result);
+        assertFalse(result.contains("NoClassDefFoundError"),
+                "PDF inline-image extraction must not throw NoClassDef, got: " + result);
+        assertFalse(result.contains("ImageIOUtil"),
+                "Diagnostic must not mention ImageIOUtil — that means pdfbox-tools is missing again. Got: " + result);
+    }
+
+    @Test
     public void readDocument_blankImage_andProbeAvailable_omitsDiagnostic() throws Exception {
         // Mirror image of the above: when probe says tesseract is fine, an
         // empty extraction is a real "no text in this document" — don't

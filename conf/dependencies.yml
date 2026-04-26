@@ -55,10 +55,16 @@ require:
             - com.vladsch.flexmark -> flexmark-test-util
             - com.vladsch.flexmark -> flexmark-test-specs
             - com.vladsch.flexmark -> flexmark-core-test
-            # pdfbox-tools ships PDFBox CLI front-ends (PDFDebugger,
-            # ExtractText, etc.) which the app never invokes, and picocli
-            # exists solely to support that CLI. Both are unused at source.
-            - org.apache.pdfbox -> pdfbox-tools
+            # pdfbox-tools ships two distinct things: (1) PDFBox CLI front-ends
+            # (PDFDebugger, ExtractText, ...) which the app never invokes, and
+            # (2) org.apache.pdfbox.tools.imageio.ImageIOUtil — a non-CLI helper
+            # that Tika's ImageGraphicsEngine.writeToBuffer calls when
+            # PDFParserConfig.extractInlineImages is true (JCLAW-177's
+            # scanned-PDF OCR path). Excluding the whole artifact bricks PDF
+            # OCR with NoClassDefFoundError, so we keep pdfbox-tools on the
+            # classpath. picocli stays excluded — its only consumers are the
+            # CLI front-end classes via @Command annotations, which Java
+            # loads lazily; nothing on the OCR path touches them.
             - info.picocli -> *
             # Some parsers transitively pull org.osgi.core as a
             # service-registry dep we never consume — same story as the
