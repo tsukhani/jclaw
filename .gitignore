@@ -114,6 +114,11 @@ coverage/
 jacoco.exec
 jacoco.xml
 
+# Code quality scanners — sonar-scanner CLI (and the SonarQube MCP that
+# wraps it) creates this on every analysis run to hold caches, the local
+# report, and scan metadata. Never tracked.
+.scannerwork/
+
 # Play modules (auto-downloaded)
 modules/*
 !modules/.gitkeep
