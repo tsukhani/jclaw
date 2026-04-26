@@ -3,22 +3,23 @@
 require:
     - play
     - play -> docviewer
-    # jsoup 1.21.2 matches the version Tika 3.2.3's parser modules (code,
-    # html) require; declaring the higher version explicitly keeps the
-    # resolved classpath version and the declared version in sync.
-    - org.jsoup -> jsoup 1.21.2
+    # jsoup 1.22.2 is one patch ahead of the 1.22.1 that Tika 3.3.0's
+    # parent POM pins for its parser modules (code, html); declaring it
+    # explicitly keeps the resolved classpath version and the declared
+    # version in sync.
+    - org.jsoup -> jsoup 1.22.2
     # Playwright's POM declares slf4j-simple as a runtime dep, which races
     # log4j-slf4j2-impl for the SLF4JServiceProvider ServiceLoader slot
     # (see JCLAW-88). Excluding it here eliminates the race; the
     # -Dslf4j.provider=... flag in jclaw.sh / Dockerfile becomes a no-op.
-    - com.microsoft.playwright -> playwright 1.52.0:
+    - com.microsoft.playwright -> playwright 1.59.0:
         exclude:
             - org.slf4j -> slf4j-simple
     # Tika's Ivy POM declares bndlib and OSGi with `conf="provided->..."`
     # scope. Play 1.x's Ivy resolver treats `provided` as runtime, so
     # without these excludes ~13 OSGi/bndlib JARs (~5 MB) land on the
     # classpath unused. None are loaded by Tika's SPI parsers.
-    - org.apache.tika -> tika-core 3.2.3:
+    - org.apache.tika -> tika-core 3.3.0:
         exclude:
             - javax.mail -> *
             - com.sun.mail -> *
@@ -30,7 +31,7 @@ require:
             - org.mockito -> *
             - biz.aQute.bnd -> *
             - org.osgi -> *
-    - org.apache.tika -> tika-parsers-standard-package 3.2.3:
+    - org.apache.tika -> tika-parsers-standard-package 3.3.0:
         exclude:
             - org.apache.lucene -> *
             - org.ow2.asm -> *
