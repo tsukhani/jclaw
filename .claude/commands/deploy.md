@@ -40,9 +40,9 @@ Reject anything else with a clear message; do not guess.
     - Title line: `Release vNEW_VERSION` (e.g. `Release v0.7.6`).
     - Body: one short paragraph summarizing the *why* of the changes being shipped — inferred from the staged diff, not just the version bump. If there are no meaningful changes other than the version, write `Version bump only; no code changes since v<OLD_VERSION>.`
     - Trailer: `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`
-11. Create the commit using a HEREDOC so line breaks survive the shell:
+11. Create the **signed** commit using a HEREDOC so line breaks survive the shell. The `-S` flag is explicit even though `commit.gpgsign=true` is set globally — this documents the workflow's intent in the file and survives if the global config is ever disabled or the deploy runs on a machine missing it:
     ```bash
-    /usr/bin/git commit -m "$(cat <<'EOF'
+    /usr/bin/git commit -S -m "$(cat <<'EOF'
     Release v<NEW_VERSION>
 
     <body paragraph>
@@ -51,21 +51,26 @@ Reject anything else with a clear message; do not guess.
     EOF
     )"
     ```
+12. Create a **signed annotated tag** pointing at the new commit. The lowercase `-s` flag makes it both annotated AND signed (lightweight tags can't be signed — they're just refs). Same defense-in-depth rationale as step 11. The tag message stays short because the full release notes live in the commit body:
+    ```bash
+    /usr/bin/git tag -s "v<NEW_VERSION>" -m "Release v<NEW_VERSION>"
+    ```
+    Verify the tag was created and signed: `/usr/bin/git tag -v "v<NEW_VERSION>"` should print `Good "git" signature`.
 
 **Phase 3: Push to both remotes**
 
-12. Confirm both remotes exist via `/usr/bin/git remote`. This project ships with two: `origin` (Bitbucket) and `github` (GitHub). If either is missing, stop and tell the user — do not silently push to only one.
-13. Push to `origin` first: `/usr/bin/git push origin HEAD`. Report the result.
-14. Push to `github`: `/usr/bin/git push github HEAD`. Report the result.
-15. If either push fails, surface the error verbatim and stop — do **not** retry with force, do not skip hooks, do not rewrite history. A failed push on one remote with a successful push on the other is a known-consistent state the user can recover from manually.
+13. Confirm both remotes exist via `/usr/bin/git remote`. This project ships with two: `origin` (Bitbucket) and `github` (GitHub). If either is missing, stop and tell the user — do not silently push to only one.
+14. Push to `origin` first: `/usr/bin/git push --follow-tags origin HEAD`. The `--follow-tags` flag pushes both the branch HEAD and any annotated tags reachable from it (i.e., the `v<NEW_VERSION>` tag we just created), so the commit and tag land in one atomic operation per remote. Report the result.
+15. Push to `github`: `/usr/bin/git push --follow-tags github HEAD`. Report the result.
+16. If either push fails, surface the error verbatim and stop — do **not** retry with force, do not skip hooks, do not rewrite history. A failed push on one remote with a successful push on the other is a known-consistent state the user can recover from manually. If the failure is `required_signatures hook declined` from GitHub, that means the commit isn't signed — fix local signing config (see CLAUDE.md / SSH signing setup) and re-run; do NOT bypass.
 
 **Phase 4: Report**
 
-16. Summarize in one message: new version, commit hash, branch name, and both push destinations with their reported ref updates. Example:
+17. Summarize in one message: new version, commit hash, tag name, branch name, and both push destinations with their reported ref updates. Example:
 
-    > Released **v0.7.6** as `a1b2c3d` on `main`.
-    > - origin (Bitbucket): `<old-sha>..a1b2c3d`
-    > - github: `<old-sha>..a1b2c3d`
+    > Released **v0.7.6** as `a1b2c3d` on `main` (signed, tagged `v0.7.6`).
+    > - origin (Bitbucket): `<old-sha>..a1b2c3d` + tag `v0.7.6`
+    > - github: `<old-sha>..a1b2c3d` + tag `v0.7.6`
 
 ---
 
