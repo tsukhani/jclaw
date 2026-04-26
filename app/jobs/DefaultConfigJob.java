@@ -129,6 +129,16 @@ public class DefaultConfigJob extends Job<Void> {
         // Tools page (AgentToolConfig). The shell allowlist + timeout knobs
         // remain useful operator config and stay seeded.
 
+        // OCR backends. The parse-time tunables (languages, timeout, pdf
+        // strategy) stay in conf/application.conf because they're read once
+        // per parse and don't need a UI; the user-facing on/off lives here
+        // so the Settings page OCR section can flip it. The actual binary's
+        // presence is detected at boot by jobs.TesseractProbeJob — when the
+        // probe says missing, the Settings UI greys out the toggle even if
+        // this row is "true", so the stored value tracks user intent rather
+        // than runtime availability.
+        seedIfAbsent("ocr.tesseract.enabled", "true");
+
         // Shell execution tool — operator-tunable knobs only.
         seedIfAbsent("shell.allowlist", tools.ShellExecTool.DEFAULT_ALLOWLIST);
         seedIfAbsent("shell.defaultTimeoutSeconds", "30");

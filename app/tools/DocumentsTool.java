@@ -312,9 +312,11 @@ public class DocumentsTool implements ToolRegistry.Tool {
             var parser = new AutoDetectParser();
             var handler = new BodyContentHandler(MAX_DOCUMENT_TEXT_CHARS);
             var metadata = new Metadata();
+            boolean ocrActive = ocrEnabled();
             boolean truncated = false;
             try (InputStream in = Files.newInputStream(path)) {
-                parser.parse(in, handler, metadata, buildOcrParseContext());
+                parser.parse(in, handler, metadata,
+                        ocrActive ? buildOcrParseContext() : new ParseContext());
             } catch (SAXException e) {
                 if (!e.getClass().getSimpleName().contains("WriteLimitReached")) {
                     return "Error parsing document: %s".formatted(e.getMessage());
@@ -323,7 +325,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
             }
             var text = handler.toString();
             if (text.isBlank()) {
-                var hint = ocrUnavailableHint();
+                var hint = ocrActive ? ocrUnavailableHint() : null;
                 return "(Document parsed but contained no extractable text: "
                         + path.getFileName() + ")"
                         + (hint == null ? "" : " " + hint);
@@ -389,6 +391,17 @@ public class DocumentsTool implements ToolRegistry.Tool {
             case "ocr_and_text_extraction" -> PDFParserConfig.OCR_STRATEGY.OCR_AND_TEXT_EXTRACTION;
             default -> PDFParserConfig.OCR_STRATEGY.AUTO;
         };
+    }
+
+    /**
+     * The user-facing kill switch for the Tesseract OCR backend, surfaced as
+     * the toggle in Settings → OCR. Reads the Config DB on every parse so a
+     * UI-driven flip applies on the next call without a restart. Defaults to
+     * true so a fresh install with no row seeded is still functional.
+     */
+    private static boolean ocrEnabled() {
+        return "true".equalsIgnoreCase(
+                services.ConfigService.get("ocr.tesseract.enabled", "true"));
     }
 
     /**

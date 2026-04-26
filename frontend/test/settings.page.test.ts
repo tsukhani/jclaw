@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
+import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 
 /**
@@ -22,6 +23,25 @@ import Settings from '~/pages/settings.vue'
  * </ul>
  */
 
+// Mutable so individual tests can swap the OCR shape (available/unavailable)
+// before mounting the page. Re-assigned by setupConfigApi() each call so a
+// preceding test's override doesn't leak into the next.
+let ocrStatusPayload: { providers: Array<Record<string, unknown>> } = {
+  providers: [
+    {
+      name: 'tesseract',
+      displayName: 'Tesseract OCR',
+      available: true,
+      enabled: true,
+      version: 'tesseract 5.5.2 (test stub)',
+      reason: null,
+      configKey: 'ocr.tesseract.enabled',
+      description: 'Apache Tika TesseractOCRParser test stub.',
+      installHint: 'brew install tesseract',
+    },
+  ],
+}
+
 function setupConfigApi() {
   registerEndpoint('/api/agents', () => [
     { id: 1, name: 'main', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5',
@@ -39,8 +59,11 @@ function setupConfigApi() {
       { key: 'provider.ollama-cloud.models', value:
         '[{"id":"kimi-k2.5","name":"Kimi K2.5","contextWindow":262144,"maxTokens":65535,"supportsThinking":true}]',
       updatedAt: '2026-04-22T10:00:00Z' },
+      { key: 'ocr.tesseract.enabled', value: 'true',
+        updatedAt: '2026-04-22T10:00:00Z' },
     ],
   }))
+  registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
 }
 
 describe('Settings page — provider section', () => {
@@ -124,6 +147,91 @@ describe('Settings page — form binding', () => {
     await flushPromises()
 
     expect(component.text().toLowerCase()).toContain('configured')
+  })
+})
+
+describe('Settings page — OCR section', () => {
+  // Nuxt's useFetch payload is keyed by URL by default; without clearing,
+  // the second mountSuspended in this describe block re-uses the first
+  // test's /api/ocr/status response and the per-test ocrStatusPayload swap
+  // never reaches the rendered DOM.
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  it('renders the OCR section between LLM Providers and Search Providers', async () => {
+    setupConfigApi()
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    const text = component.text()
+    expect(text).toContain('OCR')
+    expect(text).toContain('Tesseract OCR')
+
+    // Slot order: LLM Providers heading must appear before the OCR heading,
+    // which must appear before Search Providers. The heading text is unique
+    // enough to survive other matches in the page (no other element renders
+    // the bare string "OCR" at the section-heading level).
+    const html = component.html()
+    const llmIdx = html.indexOf('LLM Providers')
+    const ocrIdx = html.search(/<h2[^>]*>\s*OCR\s*</)
+    const searchIdx = html.indexOf('Search Providers')
+    expect(llmIdx).toBeGreaterThan(-1)
+    expect(ocrIdx).toBeGreaterThan(-1)
+    expect(searchIdx).toBeGreaterThan(-1)
+    expect(llmIdx).toBeLessThan(ocrIdx)
+    expect(ocrIdx).toBeLessThan(searchIdx)
+  })
+
+  it('shows the active pill and an interactive toggle when tesseract is detected', async () => {
+    ocrStatusPayload = {
+      providers: [{
+        name: 'tesseract', displayName: 'Tesseract OCR',
+        available: true, enabled: true,
+        version: 'tesseract 5.5.2', reason: null,
+        configKey: 'ocr.tesseract.enabled',
+        description: 'Apache Tika TesseractOCRParser.',
+        installHint: 'brew install tesseract',
+      }],
+    }
+    setupConfigApi()
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    expect(component.text()).toContain('active')
+    const toggle = component.find('button[aria-label*="Tesseract OCR"]')
+    expect(toggle.exists()).toBe(true)
+    expect(toggle.attributes('disabled')).toBeUndefined()
+  })
+
+  it('disables the toggle and shows "not detected" when probe says missing', async () => {
+    // The acceptance condition for the OCR section: when tesseract isn't on
+    // PATH, the toggle must NOT be interactive — installation is a host-side
+    // action, not a UI flip. Without this, an operator could "enable" a
+    // backend with no underlying binary and silently get empty extractions.
+    ocrStatusPayload = {
+      providers: [{
+        name: 'tesseract', displayName: 'Tesseract OCR',
+        available: false, enabled: true, // enabled in DB but probe says missing
+        version: null,
+        reason: 'tesseract --version exited 127: command not found',
+        configKey: 'ocr.tesseract.enabled',
+        description: 'Apache Tika TesseractOCRParser.',
+        installHint: 'brew install tesseract (macOS), apt-get install tesseract-ocr (Debian/Ubuntu)',
+      }],
+    }
+    setupConfigApi()
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    expect(component.text()).toContain('not detected')
+    expect(component.text()).toContain('apt-get install tesseract-ocr')
+
+    const toggle = component.find('button[aria-label*="Tesseract OCR"]')
+    expect(toggle.exists()).toBe(true)
+    // Vue normalizes :disabled="true" to the disabled attribute being present
+    // (value is the empty string in the rendered DOM).
+    expect(toggle.attributes('disabled')).toBeDefined()
   })
 })
 

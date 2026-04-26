@@ -79,6 +79,9 @@ GET     /api/events                             ApiEventsController.stream
 # Providers API
 POST    /api/providers/{name}/discover-models   ApiProvidersController.discoverModels
 
+# OCR backends — availability + enabled state for the Settings page
+GET     /api/ocr/status                         ApiOcrController.status
+
 # Config API
 GET     /api/config                             ApiConfigController.list
 POST    /api/config                             ApiConfigController.save

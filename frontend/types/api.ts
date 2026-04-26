@@ -139,6 +139,29 @@ export interface ConfigResponse {
   entries: ConfigEntry[]
 }
 
+/**
+ * One OCR backend in the GET /api/ocr/status response.
+ * `available` is the runtime probe (binary on PATH); `enabled` is the user
+ * toggle in the Config DB. The Settings page renders the toggle as
+ * uninteractive when `available=false`, so a host without the binary
+ * installed cannot have the backend turned on by accident.
+ */
+export interface OcrBackend {
+  name: string
+  displayName: string
+  available: boolean
+  enabled: boolean
+  version: string | null
+  reason: string | null
+  configKey: string
+  description: string
+  installHint: string
+}
+
+export interface OcrStatusResponse {
+  providers: OcrBackend[]
+}
+
 /** A single histogram for a latency segment, as returned by /api/metrics/latency. */
 export interface LatencyHistogram {
   count: number
