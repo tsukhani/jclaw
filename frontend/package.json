@@ -30,7 +30,7 @@
     "dompurify": "^3.4.0",
     "driver.js": "^1.4.0",
     "lucide-vue-next": "^1.0.0",
-    "marked": "^17.0.6",
+    "marked": "^18.0.0",
     "nuxt": "^4.0.0",
     "reka-ui": "^2.9.6",
     "shadcn-nuxt": "^2.6.2",
