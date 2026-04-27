@@ -55,13 +55,13 @@ RUN curl -fsSL https://repos.azul.com/azul-repo.key \
     apt-get install -y --no-install-recommends zulu25-jdk && \
     rm -rf /var/lib/apt/lists/*
 
-# Node.js 20 LTS via NodeSource. corepack ships with Node 16.13+ but
-# isn't enabled by default — `corepack enable` symlinks the corepack-
-# managed pnpm shim into a PATH location so jclaw.sh's
+# Node.js 24 (current LTS) via NodeSource. corepack ships with Node
+# 16.13+ but isn't enabled by default — `corepack enable` symlinks
+# the corepack-managed pnpm shim into a PATH location so jclaw.sh's
 # validate_corepack_pnpm can resolve `corepack pnpm` at start time.
 # The actual pnpm binary downloads on first use, verified against the
 # +sha512-... integrity hash pinned in frontend/package.json.
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/* && \
     corepack enable
