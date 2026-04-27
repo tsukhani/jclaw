@@ -21,19 +21,26 @@
 //       Used by Renovate to fetch release notes from github.com for any
 //       upstream package's changelog. Without it, anonymous GitHub rate
 //       limits hit fast on a busy run.
-//   - renovate-signing-key          (Secret text)
-//       Base64-encoded SSH private key used by Renovate to sign every
-//       commit it authors (bump commits and auto-merge commits both).
-//       The matching public key must be registered on the dedicated
-//       renovate-bot GitHub account's Signing Keys (distinct from auth
-//       keys) so commits land with the Verified badge on the github
-//       mirror. Generate and encode with:
+//   - renovate-signing-key          (Secret file)
+//       SSH private key file used by Renovate to sign every commit it
+//       authors (bump commits and auto-merge commits both). The matching
+//       public key must be registered on the dedicated renovate-bot
+//       GitHub account's Signing Keys (distinct from auth keys) so
+//       commits land with the Verified badge on the github mirror.
 //
+//       Credential type MUST be Secret file, NOT Secret text. Jenkins
+//       Secret text round-trips through an HTML <textarea>, which
+//       silently CRLF-encodes embedded newlines per the HTML spec —
+//       and ssh-keygen's libcrypto rejects the resulting PEM as
+//       malformed (we hit this in JCLAW-180). Secret file uploads the
+//       bytes verbatim with no transformation.
+//
+//       Generate the keypair with:
 //         ssh-keygen -t ed25519 -f /tmp/renovate-key -C 'renovate@abundent.com' -N ''
-//         base64 < /tmp/renovate-key | tr -d '\n'
 //
-//       Paste the base64 string as the credential value. See JCLAW-180
-//       for the full setup runbook including the GitHub-account flow.
+//       Then upload /tmp/renovate-key (the private half) as the Secret
+//       file content. The .pub half goes on the GitHub bot account.
+//       See JCLAW-180 for the full setup runbook.
 //
 // Single stage. Each Monday at ~6am the cron fires, the docker run pulls
 // the renovate/renovate image and points it at this clone's repo on
@@ -74,7 +81,7 @@ pipeline {
                         passwordVariable: 'RENOVATE_PASSWORD'
                     ),
                     string(credentialsId: 'github-token', variable: 'GITHUB_COM_TOKEN'),
-                    string(credentialsId: 'renovate-signing-key', variable: 'RENOVATE_GIT_PRIVATE_KEY'),
+                    file(credentialsId: 'renovate-signing-key', variable: 'RENOVATE_KEY_FILE'),
                 ]) {
                     // Bitbucket Server platform via username + PAT (Renovate
                     // treats RENOVATE_PASSWORD as the PAT for HTTP basic
@@ -90,13 +97,18 @@ pipeline {
                     // even though the platform is Bitbucket. It's NOT an
                     // auth credential for the platform itself.
                     //
-                    // RENOVATE_GIT_PRIVATE_KEY holds the base64-encoded SSH
-                    // private key Renovate uses to sign every commit it
-                    // authors. Renovate auto-detects SSH vs GPG from the
-                    // decoded content. The matching public key must be on
-                    // the renovate-bot GitHub account's Signing Keys for
-                    // commits to land Verified on the github mirror; see
-                    // the credentials block at the top of this file.
+                    // RENOVATE_GIT_PRIVATE_KEY holds the SSH private key
+                    // Renovate uses to sign every commit it authors. We
+                    // read the bytes from the Secret file at runtime via
+                    // $(cat "$RENOVATE_KEY_FILE") rather than passing the
+                    // value through a Secret text credential — the latter
+                    // round-trips through an HTML <textarea> in Jenkins'
+                    // form-edit UI and silently CRLF-encodes the newlines
+                    // inside the PEM, which ssh-keygen's libcrypto then
+                    // rejects (the rabbit hole we fell into in JCLAW-180).
+                    // The matching public key must be on the renovate-bot
+                    // GitHub account's Signing Keys for commits to land
+                    // Verified on the github mirror.
                     //
                     // LOG_LEVEL=info keeps the build console scannable.
                     // Bump to "debug" temporarily if Renovate skips a
@@ -108,7 +120,7 @@ pipeline {
                             -e RENOVATE_USERNAME="$RENOVATE_USERNAME" \\
                             -e RENOVATE_PASSWORD="$RENOVATE_PASSWORD" \\
                             -e RENOVATE_GIT_AUTHOR='Renovate Bot <renovate@abundent.com>' \\
-                            -e RENOVATE_GIT_PRIVATE_KEY="$RENOVATE_GIT_PRIVATE_KEY" \\
+                            -e RENOVATE_GIT_PRIVATE_KEY="$(cat "$RENOVATE_KEY_FILE")" \\
                             -e RENOVATE_REPOSITORIES='jclaw/jclaw' \\
                             -e GITHUB_COM_TOKEN="$GITHUB_COM_TOKEN" \\
                             -e LOG_LEVEL=info \\
