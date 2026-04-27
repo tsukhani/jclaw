@@ -85,7 +85,7 @@ pipeline {
                             -e RENOVATE_GIT_AUTHOR='Renovate Bot <renovate@abundent.com>' \\
                             -e RENOVATE_REPOSITORIES='jclaw/jclaw' \\
                             -e GITHUB_COM_TOKEN="$GITHUB_COM_TOKEN" \\
-                            -e LOG_LEVEL=info \\
+                            -e LOG_LEVEL=debug \\
                             renovate/renovate:latest
                     '''
                 }
