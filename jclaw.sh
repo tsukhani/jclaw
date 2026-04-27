@@ -73,14 +73,16 @@ EOF
 # 24-bit true color; older 256-color terminals fall back to nearest
 # match, still readable.
 show_intro() {
-    local emerald='' cyan='' dim='' reset=''
+    local emerald='' cyan='' yellow='' dim='' bold='' reset=''
     if [[ -t 1 ]]; then
         # Tailwind emerald-400 (#34d399) matches the bg-emerald-* accents
         # used elsewhere in the project (Settings UI toggles, "active"
         # badges) — same color story everywhere reads as one product.
         emerald=$'\033[38;2;52;211;153m'
         cyan=$'\033[1;36m'
+        yellow=$'\033[1;33m'
         dim=$'\033[2m'
+        bold=$'\033[1m'
         reset=$'\033[0m'
     fi
 
@@ -102,6 +104,24 @@ LLM agents, OCR, web tools.${reset}
   ${cyan}./jclaw.sh --help${reset}    Full command reference
 
 EOF
+
+    # First-run hint footer. When core.hooksPath != .githooks (the canonical
+    # signal that do_setup hasn't run yet), append a single highlighted line
+    # nudging the user at the setup command. Composable with everything —
+    # no interactivity, no stateful prompt, no scriptability hazard. Once
+    # setup runs, the hint disappears on its own.
+    #
+    # `|| true` after the git config substitution is load-bearing under
+    # `set -e`: outside a git repo (e.g. running jclaw.sh from a tarball
+    # extract or an ops box that copied the script standalone), git exits
+    # 128 and would otherwise kill the script. The empty hooks_path
+    # correctly trips the hint in that case.
+    local hooks_path
+    hooks_path=$(/usr/bin/git config --local core.hooksPath 2>/dev/null || true)
+    if [[ "$hooks_path" != ".githooks" ]]; then
+        echo "${yellow}${bold}→ Setup hasn't run on this clone yet. Run ${cyan}./jclaw.sh setup${yellow} to wire things up.${reset}"
+        echo ""
+    fi
 }
 
 # Parse arguments
