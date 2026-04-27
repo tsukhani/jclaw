@@ -60,6 +60,74 @@ EOF
     exit 1
 }
 
+# Detect first-run state and print a welcome banner with ASCII-art logo
+# before the user's first command tries to do real work. "First-run" means
+# do_setup hasn't wired core.hooksPath = .githooks yet — that single config
+# write is the canonical setup signal, idempotent across re-runs and stable
+# across worktree adds. Skipped when the user is already running setup
+# (no point telling them to run what they're invoking).
+#
+# This is the closest thing JClaw can offer to a "post-clone hook" — git
+# itself has none, because tracked files can't write into .git/hooks/ and
+# the directory doesn't exist until clone creates it. The first user
+# action we CAN intercept is the first ./jclaw.sh invocation, so the
+# welcome rides in there.
+#
+# TTY-aware: ANSI colors only when stdout is an interactive terminal,
+# so piping into less or redirecting into a logfile doesn't bury escape
+# codes in the output.
+maybe_show_welcome() {
+    [[ "$COMMAND" == "setup" ]] && return 0
+    # `|| true` is load-bearing under `set -e`: when the script runs outside
+    # a git repo (e.g. an ops box that copied jclaw.sh standalone), git
+    # config exits 128 and would otherwise kill the script before the
+    # welcome could even render. The empty hooks_path correctly trips the
+    # first-run banner in that case.
+    local hooks_path
+    hooks_path=$(/usr/bin/git config --local core.hooksPath 2>/dev/null || true)
+    [[ "$hooks_path" == ".githooks" ]] && return 0
+
+    local cyan='' yellow='' dim='' bold='' reset=''
+    if [[ -t 1 ]]; then
+        cyan=$'\033[1;36m'
+        yellow=$'\033[1;33m'
+        dim=$'\033[2m'
+        bold=$'\033[1m'
+        reset=$'\033[0m'
+    fi
+
+    cat <<EOF
+
+${cyan}     ██╗ ██████╗██╗      █████╗ ██╗    ██╗
+     ██║██╔════╝██║     ██╔══██╗██║    ██║
+     ██║██║     ██║     ███████║██║ █╗ ██║
+██   ██║██║     ██║     ██╔══██║██║███╗██║
+╚█████╔╝╚██████╗███████╗██║  ██║╚███╔███╔╝
+ ╚════╝  ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝ ${reset}
+
+${dim}Java-first AI automation platform — Play 1.x backend, Nuxt 3 SPA,
+LLM agents, OCR, web tools.${reset}
+
+${yellow}${bold}First run on this clone — setup hasn't wired things up yet.${reset}
+
+Run setup before launching:
+
+    ${cyan}./jclaw.sh setup${reset}
+
+Setup validates prerequisites (Java 25+, Python 3.9+, Node 20+, Play
+1.x, corepack), wires git hooks, installs frontend dependencies, and
+adds the github remote. Idempotent — safe to re-run any time.
+
+After setup, common entry points:
+
+    ${cyan}./jclaw.sh --dev start${reset}    Dev mode: Play autoreload + Nuxt HMR
+    ${cyan}./jclaw.sh start${reset}          Production: precompiled, ZGC, fixed heap
+    ${cyan}./jclaw.sh test${reset}           Backend + frontend test suites
+    ${cyan}./jclaw.sh${reset}                Full command reference
+
+EOF
+}
+
 # Parse arguments
 DEPLOY_DIR=""
 DEV_MODE=false
@@ -130,6 +198,8 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+maybe_show_welcome
 
 [[ -z "$COMMAND" ]] && usage
 

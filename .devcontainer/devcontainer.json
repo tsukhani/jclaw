@@ -1,0 +1,47 @@
+{
+  "name": "JClaw",
+  "//": "Read by VS Code Dev Containers, GitHub Codespaces, Cursor, JetBrains Gateway, and any other devcontainer-spec-compliant IDE. The base image (universal:2) ships Node.js, Python 3, multiple JDKs, and the standard CLI toolchain — enough for jclaw.sh setup to fire and surface clean errors for anything still missing (Play 1.x is a custom fork that needs a manual install; setup will print the install URL when check_play fails).",
+
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
+
+  "//features": "Pin Java to JDK 25 (matches conf/application.conf java.source) and Node to LTS — both required by check_prereqs at setup time.",
+  "features": {
+    "ghcr.io/devcontainers/features/java:1": {
+      "version": "25",
+      "installGradle": false,
+      "installMaven": false
+    },
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts"
+    }
+  },
+
+  "//postCreateCommand": "Auto-runs the same setup script a human would invoke after a fresh clone. Wires git hooks, installs frontend deps, validates prereqs, and adds the github remote. Setup is idempotent, so re-running on container rebuild is harmless.",
+  "postCreateCommand": "./jclaw.sh setup",
+
+  "//forwardPorts": "Backend on 9000, Nuxt dev server on 3000 — match the defaults in jclaw.sh's BACKEND_PORT / FRONTEND_PORT.",
+  "forwardPorts": [9000, 3000],
+  "portsAttributes": {
+    "9000": {
+      "label": "JClaw Backend (Play)",
+      "onAutoForward": "notify"
+    },
+    "3000": {
+      "label": "JClaw Frontend (Nuxt)",
+      "onAutoForward": "openBrowser"
+    }
+  },
+
+  "//customizations": "VS Code / Cursor extensions that match the project's stack. Vue + TypeScript for the frontend; Java extension pack for the backend; ESLint + Stylelint for the lint-staged pre-commit hook.",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "Vue.volar",
+        "vscjava.vscode-java-pack",
+        "dbaeumer.vscode-eslint",
+        "stylelint.vscode-stylelint",
+        "redhat.vscode-yaml"
+      ]
+    }
+  }
+}
