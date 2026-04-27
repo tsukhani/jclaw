@@ -96,23 +96,6 @@
       matchPackageNames: ["vitest", "@vitest/**", "@vue/test-utils", "happy-dom"],
     },
 
-    // Block major bumps for junit-vintage-engine. JUnit's three-component
-    // versioning (Jupiter X.Y.Z + Platform 1.Y.Z + Vintage X.Y.Z) is
-    // internally consistent within a major, so 5.13 → 5.14 is fine: Ivy
-    // resolves vintage's transitive platform dep upward, the whole 5.x
-    // graph stays aligned, and Play's testrunner doesn't pin platform.
-    // Crossing a major (5.x → 6.x) breaks that contract — JUnit 6 ships
-    // a Platform 2.x with API changes that Play 1.x's testrunner module
-    // wasn't built against. CI would catch the failure, but the noise of
-    // a perpetually-failing major bump every Renovate cycle is worth
-    // suppressing at config level. Patch and minor flow through the
-    // normal automerge gate below; CI is the safety net.
-    {
-      matchPackageNames: ["org.junit.vintage:junit-vintage-engine"],
-      matchUpdateTypes: ["major"],
-      enabled: false,
-    },
-
     // Auto-merge patch and minor bumps directly to main via signed git push,
     // skipping Bitbucket's merge UI (which can't sign commits on Bitbucket
     // Server 7.21.10 — see JCLAW-180). Renovate runs as a catch-all here:
