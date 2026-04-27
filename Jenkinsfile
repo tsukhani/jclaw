@@ -229,69 +229,38 @@ pipeline {
                 expression { params.PUBLISH_DEVCONTAINER }
             }
             steps {
-                script {
-                    // Tag with the commit short SHA for traceability + :latest
-                    // for the floating tag that .devcontainer/devcontainer.json
-                    // would reference (when/if the team flips from "build
-                    // locally on each dev's machine" to "pull a published image").
-                    // Independent of application.version on purpose — the dev
-                    // container's lifecycle is decoupled from app releases. New
-                    // image = Java/Node/Play/base bumps or Dockerfile structure
-                    // changes, NOT every patch release.
-                    def shortSha = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
-                    withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
-                        // Same multi-arch buildx pattern as the Release stage:
-                        // amd64 covers Intel/AMD Linux + Windows hosts; arm64
-                        // covers Apple Silicon + Linux ARM. Reuse the
-                        // jclaw-builder buildx instance (created in the Release
-                        // stage on the same agent), and the same QEMU binfmt
-                        // refresh so cross-arch RUN steps have working
-                        // emulation. --provenance=false keeps the GHCR package
-                        // index clean (no stray unknown/unknown manifests).
-                        sh """
-                            echo \$GH_TOKEN | docker login ghcr.io -u tsukhani --password-stdin
+                withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
+                    // Same multi-arch buildx pattern as the Release stage:
+                    // amd64 covers Intel/AMD Linux + Windows hosts; arm64
+                    // covers Apple Silicon + Linux ARM. Reuses the
+                    // jclaw-builder buildx instance (created in the Release
+                    // stage on the same agent) and the same QEMU binfmt
+                    // refresh so cross-arch RUN steps have working
+                    // emulation. --provenance=false keeps the GHCR package
+                    // index clean (no stray unknown/unknown manifests).
+                    //
+                    // Single :latest tag only — the Dev Container Dockerfile
+                    // changes infrequently (Java/Node/Play/base bumps every
+                    // few months at most for a project this size), and any
+                    // historical state is recoverable from git via
+                    // `git checkout <sha> && docker buildx build .devcontainer/`.
+                    // GHCR's untagged-orphan accumulation rate at this
+                    // publish cadence is negligible; if it ever becomes a
+                    // storage concern, add a cleanup stage modeled on
+                    // `Cleanup Old Releases` below.
+                    sh '''
+                        echo $GH_TOKEN | docker login ghcr.io -u tsukhani --password-stdin
 
-                            docker run --privileged --rm tonistiigi/binfmt --install all
+                        docker run --privileged --rm tonistiigi/binfmt --install all
 
-                            docker buildx create --use --name jclaw-builder --driver docker-container 2>/dev/null || docker buildx use jclaw-builder
-                            docker buildx build \\
-                                --provenance=false \\
-                                --platform linux/amd64,linux/arm64 \\
-                                -t ghcr.io/tsukhani/jclaw-devcontainer:${shortSha} \\
-                                -t ghcr.io/tsukhani/jclaw-devcontainer:latest \\
-                                --push \\
-                                .devcontainer/
-                        """
-                    }
-                }
-            }
-        }
-
-        stage('Cleanup Old Dev Container Versions') {
-            when {
-                expression { params.PUBLISH_DEVCONTAINER }
-            }
-            steps {
-                catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
-                    withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
-                        // Same retention policy as the prod jclaw image:
-                        // keep last 5 versions, never touch :latest. Without
-                        // pruning, every Publish Dev Container run leaves an
-                        // orphaned version in GHCR (the previous short-SHA
-                        // tag), and the package version list grows unbounded.
-                        sh '''
-                            echo "Pruning old GHCR jclaw-devcontainer versions (keeping last 5, preserving :latest)..."
-                            gh api --paginate /users/tsukhani/packages/container/jclaw-devcontainer/versions \
-                                | jq -r '[.[] | select((.metadata.container.tags | index("latest")) | not)]
-                                         | sort_by(.created_at) | reverse
-                                         | .[5:] | .[].id' \
-                                | while read id; do
-                                    [ -z "$id" ] && continue
-                                    echo "Deleting GHCR jclaw-devcontainer version id: $id"
-                                    gh api -X DELETE "/user/packages/container/jclaw-devcontainer/versions/$id" || true
-                                done
-                        '''
-                    }
+                        docker buildx create --use --name jclaw-builder --driver docker-container 2>/dev/null || docker buildx use jclaw-builder
+                        docker buildx build \\
+                            --provenance=false \\
+                            --platform linux/amd64,linux/arm64 \\
+                            -t ghcr.io/tsukhani/jclaw-devcontainer:latest \\
+                            --push \\
+                            .devcontainer/
+                    '''
                 }
             }
         }
