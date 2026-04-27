@@ -73,7 +73,7 @@ public final class LoadTestRunner {
             throw t instanceof Exception e ? e : new RuntimeException(t);
         }
 
-        var sessionCookie = internalLogin();
+        var sessionCookie = mintAdminSessionCookie();
 
         var baseUrl = "http://127.0.0.1:" + play.Play.configuration.getProperty("http.port", "9000");
         var body = "{\"agentId\":" + agentId + ",\"message\":\"Load test message\"}";
@@ -210,31 +210,33 @@ public final class LoadTestRunner {
         return agent.id;
     }
 
-    private static String internalLogin() throws Exception {
-        var baseUrl = "http://127.0.0.1:" + play.Play.configuration.getProperty("http.port", "9000");
-        var user = play.Play.configuration.getProperty("jclaw.admin.username");
-        var pass = play.Play.configuration.getProperty("jclaw.admin.password");
-        if (user == null || pass == null) {
-            throw new IllegalStateException("jclaw.admin.username/password not configured");
-        }
-        var body = "{\"username\":\"" + user + "\",\"password\":\"" + pass + "\"}";
-        var req = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/api/auth/login"))
-                .header("Content-Type", "application/json")
-                .timeout(Duration.ofSeconds(10))
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build();
-        var resp = utils.HttpClients.GENERAL.send(req, HttpResponse.BodyHandlers.discarding());
-        if (resp.statusCode() != 200) {
-            throw new RuntimeException("Internal login failed: HTTP " + resp.statusCode());
-        }
-        var cookies = resp.headers().allValues("Set-Cookie").stream()
-                .map(c -> c.split(";")[0])
-                .toList();
-        if (cookies.isEmpty()) {
-            throw new RuntimeException("Internal login returned no Set-Cookie header");
-        }
-        return String.join("; ", cookies);
+    /**
+     * Mint a PLAY_SESSION cookie value server-side with admin credentials,
+     * matching the format {@link play.mvc.CookieSessionStore#save} produces
+     * after a successful login. Used by the loadtest workers to drive
+     * authenticated traffic at /api/chat/stream without an HTTP login
+     * round-trip.
+     *
+     * <p>JCLAW-181 replaced the previous {@code internalLogin()} HTTP call
+     * with this in-process mint. The previous version read
+     * {@code jclaw.admin.password} from {@code application.conf} and POSTed
+     * {@code /api/auth/login}, but commit caf9422 moved the admin password
+     * to a PBKDF2 hash in the Config DB — there is no plaintext to log in
+     * with anymore. Signing with {@link play.Play#secretKey} produces a
+     * cookie {@link AuthCheck} accepts identically to a real login.
+     *
+     * <p>Session data: only the keys {@code AuthCheck} actually checks.
+     * No {@code ___TS} entry — application.session.maxAge is not set in
+     * jclaw, so {@link play.mvc.CookieSessionStore} doesn't enforce a
+     * timestamp and won't reject a cookie that lacks one.
+     */
+    private static String mintAdminSessionCookie() throws Exception {
+        var data = new java.util.LinkedHashMap<String, String>();
+        data.put("authenticated", "true");
+        data.put("username", "admin");
+        var sessionData = play.mvc.CookieDataCodec.encode(data);
+        var sign = play.libs.Crypto.sign(sessionData, play.Play.secretKey.getBytes());
+        return "PLAY_SESSION=" + sign + "-" + sessionData;
     }
 
     /**

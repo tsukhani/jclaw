@@ -1,8 +1,12 @@
 import org.junit.jupiter.api.*;
+import play.Play;
+import play.mvc.Http;
 import play.test.*;
 import services.ConfigService;
 import utils.LatencyStats;
 import utils.LatencyTrace;
+
+import java.util.HashMap;
 
 /**
  * Functional tests for ApiMetricsController. Drives the LatencyTrace/LatencyStats
@@ -24,6 +28,33 @@ public class ApiMetricsControllerTest extends FunctionalTest {
                 """;
         var response = POST("/api/auth/login", "application/json", body);
         assertIsOk(response);
+    }
+
+    /**
+     * Build a Request that exercises the LoadtestAuthCheck guard. Sets a
+     * loopback remoteAddress (FunctionalTest's newRequest leaves it null,
+     * which the guard correctly rejects) and optionally injects the
+     * X-Loadtest-Auth header. Pass {@code null} for headerValue to omit
+     * the header entirely; pass {@code "non-loopback"} for the
+     * remoteAddress to exercise the network-origin gate.
+     */
+    private Http.Request loadtestRequest(String remoteAddress, String headerValue) {
+        var req = newRequest();
+        req.remoteAddress = remoteAddress;
+        if (req.headers == null) {
+            req.headers = new HashMap<>();
+        }
+        if (headerValue != null) {
+            req.headers.put("x-loadtest-auth",
+                    new Http.Header("x-loadtest-auth", headerValue));
+        }
+        return req;
+    }
+
+    /** Convenience: loopback origin, valid auth header from configured application.secret. */
+    private Http.Request authedLoadtestRequest() {
+        return loadtestRequest("127.0.0.1",
+                Play.configuration.getProperty("application.secret"));
     }
 
     @Test
@@ -242,34 +273,78 @@ public class ApiMetricsControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"telegram\""), body);
     }
 
+    // ─────── LoadtestAuthCheck gate ───────────────────────────────────────────
+    // JCLAW-181 replaced @With(AuthCheck.class) on the loadtest endpoints with
+    // @With(LoadtestAuthCheck.class), which requires both a loopback origin
+    // and the X-Loadtest-Auth header carrying application.secret. The four
+    // tests below cover the AC matrix from the story: missing header, wrong
+    // header, non-loopback origin, and the correct combination.
+
     @Test
-    public void loadtestRequiresAuth() {
-        var response = POST("/api/metrics/loadtest", "application/json", "{}");
-        assertEquals(401, response.status.intValue());
+    public void loadtestRejectsMissingAuthHeader() {
+        // Loopback origin but no X-Loadtest-Auth header → 403, not 401.
+        var req = loadtestRequest("127.0.0.1", null);
+        var response = POST(req, "/api/metrics/loadtest", "application/json", "{}");
+        assertEquals(403, response.status.intValue());
+    }
+
+    @Test
+    public void loadtestRejectsWrongAuthHeader() {
+        // Header present but wrong value → 403. Constant-time compare in the
+        // guard means a near-miss must reject the same way as a wholly
+        // unrelated value; both are exercised here.
+        var nearMiss = Play.configuration.getProperty("application.secret") + "x";
+        var resp1 = POST(loadtestRequest("127.0.0.1", nearMiss),
+                "/api/metrics/loadtest", "application/json", "{}");
+        assertEquals(403, resp1.status.intValue());
+
+        var resp2 = POST(loadtestRequest("127.0.0.1", "obviously-wrong"),
+                "/api/metrics/loadtest", "application/json", "{}");
+        assertEquals(403, resp2.status.intValue());
+    }
+
+    @Test
+    public void loadtestRejectsNonLoopbackOrigin() {
+        // Correct header but request origin is not loopback → 403. Loadtest
+        // is bound to same-host operation by design.
+        var req = loadtestRequest("192.168.1.100",
+                Play.configuration.getProperty("application.secret"));
+        var response = POST(req, "/api/metrics/loadtest", "application/json", "{}");
+        assertEquals(403, response.status.intValue());
     }
 
     @Test
     public void loadtestRejectsInvalidConcurrency() {
-        login();
-        var response = POST("/api/metrics/loadtest", "application/json",
+        // With auth gate satisfied, body validation runs and returns 400.
+        // This test doubly proves the guard accepts a valid request — if the
+        // guard wrongly rejected, we'd see 403 not 400.
+        var response = POST(authedLoadtestRequest(),
+                "/api/metrics/loadtest", "application/json",
                 "{\"concurrency\":0,\"iterations\":1}");
         assertEquals(400, response.status.intValue());
     }
 
     @Test
     public void loadtestRejectsInvalidIterations() {
-        login();
-        var response = POST("/api/metrics/loadtest", "application/json",
+        var response = POST(authedLoadtestRequest(),
+                "/api/metrics/loadtest", "application/json",
                 "{\"concurrency\":1,\"iterations\":9999}");
         assertEquals(400, response.status.intValue());
     }
 
     @Test
     public void stopLoadtestEndpointAlwaysSucceeds() {
-        login();
-        var response = DELETE("/api/metrics/loadtest");
+        var response = DELETE(authedLoadtestRequest(), "/api/metrics/loadtest");
         assertIsOk(response);
         assertTrue(getContent(response).contains("\"status\":\"stopped\""));
+    }
+
+    @Test
+    public void stopLoadtestRequiresLoadtestAuth() {
+        // Verify the DELETE endpoint enforces the same gate as POST.
+        var response = DELETE(loadtestRequest("127.0.0.1", null),
+                "/api/metrics/loadtest");
+        assertEquals(403, response.status.intValue());
     }
 
     @Test
@@ -293,13 +368,14 @@ public class ApiMetricsControllerTest extends FunctionalTest {
         // /api/metrics/latency and /api/metrics/loadtest/data have orthogonal
         // scopes: the former clears runtime statistics, the latter clears DB
         // artifacts from load-test runs. Purging one should leave the other
-        // untouched.
+        // untouched. Mixed auth: latency endpoints use AuthCheck (login),
+        // loadtest endpoints use LoadtestAuthCheck (header).
         login();
         var trace = new LatencyTrace();
         trace.mark(LatencyTrace.PROLOGUE_DONE);
         trace.end();
 
-        var cleanResp = DELETE("/api/metrics/loadtest/data");
+        var cleanResp = DELETE(authedLoadtestRequest(), "/api/metrics/loadtest/data");
         assertIsOk(cleanResp);
         assertTrue(getContent(cleanResp).contains("\"status\":\"cleaned\""));
 
@@ -307,5 +383,13 @@ public class ApiMetricsControllerTest extends FunctionalTest {
         assertIsOk(response);
         // Histograms must survive the loadtest-data cleanup.
         assertTrue(getContent(response).contains("\"total\""), getContent(response));
+    }
+
+    @Test
+    public void cleanLoadtestRequiresLoadtestAuth() {
+        // The data-cleanup DELETE is also under LoadtestAuthCheck.
+        var response = DELETE(loadtestRequest("127.0.0.1", null),
+                "/api/metrics/loadtest/data");
+        assertEquals(403, response.status.intValue());
     }
 }

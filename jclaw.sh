@@ -1212,14 +1212,33 @@ do_logs() {
 # ─── Load test ───
 
 # Drive the in-process mock-provider load test against the running backend.
-# Authenticates as the admin user (credentials from application.conf), toggles
-# provider.loadtest-mock.enabled for the duration of the run, POSTs
-# /api/metrics/loadtest, and restores the prior enabled value on exit.
+# Auth: sends APPLICATION_SECRET in the X-Loadtest-Auth header; the matching
+# server-side guard on /api/metrics/loadtest checks both the header AND that
+# the request comes from a loopback address. APPLICATION_SECRET lives in
+# .env (gitignored) and is the same secret Play uses to sign session
+# cookies — reusing it here avoids introducing a separate operator-managed
+# credential. JCLAW-181: the previous flow read jclaw.admin.password from
+# application.conf and POSTed /api/auth/login, but commit caf9422 moved
+# the admin password to a PBKDF2 hash in the Config DB, leaving the script
+# with no plaintext to log in with.
 do_loadtest() {
     cd "$JCLAW_DIR"
 
     if [[ ! -f "conf/application.conf" ]]; then
         echo "Error: Not a JClaw directory (conf/application.conf not found)"
+        exit 1
+    fi
+
+    # Source .env so APPLICATION_SECRET is available. Same helper the start
+    # paths use; idempotent when the parent shell already exported it.
+    load_env_file
+    if [[ -z "${APPLICATION_SECRET:-}" ]]; then
+        echo "Error: APPLICATION_SECRET is not set."
+        echo "       Loadtest auth uses APPLICATION_SECRET (the same secret"
+        echo "       Play signs session cookies with), sent in the"
+        echo "       X-Loadtest-Auth header. It must be present in"
+        echo "       $JCLAW_DIR/.env or exported in the parent shell."
+        echo "       Generate or rotate via: $0 secret"
         exit 1
     fi
 
@@ -1230,35 +1249,12 @@ do_loadtest() {
         exit 1
     fi
 
-    # Read admin credentials straight from application.conf — same source
-    # LoadTestRunner uses for its own internal login path.
-    local admin_user admin_pass
-    admin_user=$(grep -E '^jclaw\.admin\.username=' conf/application.conf | head -1 | cut -d= -f2-)
-    admin_pass=$(grep -E '^jclaw\.admin\.password=' conf/application.conf | head -1 | cut -d= -f2-)
-    if [[ -z "$admin_user" || -z "$admin_pass" ]]; then
-        echo "Error: jclaw.admin.username/password not found in conf/application.conf"
-        exit 1
-    fi
-
-    cookie_jar=$(mktemp -t jclaw-loadtest-cookie.XXXXXX)
-    trap 'rm -f "$cookie_jar"' EXIT
-
-    echo "==> Authenticating as $admin_user..."
-    local login_status
-    login_status=$(curl -s -o /dev/null -w '%{http_code}' -c "$cookie_jar" \
-        -X POST "http://localhost:$BACKEND_PORT/api/auth/login" \
-        -H 'Content-Type: application/json' \
-        -d "{\"username\":\"$admin_user\",\"password\":\"$admin_pass\"}")
-    if [[ "$login_status" != "200" ]]; then
-        echo "Error: Login failed (HTTP $login_status). Check jclaw.admin.* credentials."
-        exit 1
-    fi
-
     # --clean: delete loadtest data and exit
     if [[ "$LT_CLEAN" == true ]]; then
         echo "==> Cleaning loadtest data..."
         local clean_status
-        clean_status=$(curl -s -o /dev/null -w '%{http_code}' -b "$cookie_jar" \
+        clean_status=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "X-Loadtest-Auth: $APPLICATION_SECRET" \
             -X DELETE "http://localhost:$BACKEND_PORT/api/metrics/loadtest/data")
         if [[ "$clean_status" == "200" ]]; then
             echo "==> Loadtest conversations, messages, and events deleted."
@@ -1278,9 +1274,10 @@ do_loadtest() {
         "$LT_CONCURRENCY" "$LT_ITERATIONS" "$LT_TTFT_MS" "$LT_TOKENS_PER_SECOND" "$LT_RESPONSE_TOKENS")
 
     local response http_code
-    response=$(curl -s -b "$cookie_jar" \
-        -X POST "http://localhost:$BACKEND_PORT/api/metrics/loadtest" \
+    response=$(curl -s \
+        -H "X-Loadtest-Auth: $APPLICATION_SECRET" \
         -H 'Content-Type: application/json' \
+        -X POST "http://localhost:$BACKEND_PORT/api/metrics/loadtest" \
         -d "$body" \
         -w '\n%{http_code}' \
         --max-time 300)

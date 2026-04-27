@@ -2,8 +2,8 @@ package controllers;
 
 import com.google.gson.JsonObject;
 import play.db.jpa.JPA;
+import play.mvc.Before;
 import play.mvc.Controller;
-import play.mvc.With;
 import services.ConfigService;
 import services.LoadTestHarness;
 import services.LoadTestRunner;
@@ -15,9 +15,35 @@ import static utils.GsonHolder.INSTANCE;
  * Runtime observability endpoints. In-memory only — histograms reset
  * on JVM restart or via {@link #resetLatency()}. Includes an auth-gated
  * load-test harness that uses an in-process mock LLM provider.
+ *
+ * <p>Two distinct auth guards apply, scoped via {@link Before}{@code (only=...)}
+ * filters because Play 1.x's {@code @With} annotation is class-level only
+ * (cannot be applied per-action):
+ * <ul>
+ *   <li>{@link AuthCheck#checkAuthentication} on the latency endpoints —
+ *       standard admin session check, same as the rest of the API.</li>
+ *   <li>{@link LoadtestAuthCheck#checkLoadtestAuth} on the loadtest
+ *       endpoints — loopback origin plus X-Loadtest-Auth header
+ *       containing application.secret. Required because the loadtest
+ *       pipeline has no plaintext admin password to authenticate with
+ *       after commit caf9422 (JCLAW-181).</li>
+ * </ul>
+ *
+ * <p>The interceptor methods below delegate to the canonical static
+ * checks so the gating logic stays single-sourced; this controller is
+ * just selecting which gate runs for which action.
  */
-@With(AuthCheck.class)
 public class ApiMetricsController extends Controller {
+
+    @Before(only = {"latency", "resetLatency"})
+    static void requireAdminSession() {
+        AuthCheck.checkAuthentication();
+    }
+
+    @Before(only = {"loadtest", "stopLoadtest", "cleanLoadtest"})
+    static void requireLoadtestAuth() {
+        LoadtestAuthCheck.checkLoadtestAuth();
+    }
 
     /** GET /api/metrics/latency — JSON snapshot of segment histograms. */
     public static void latency() {
