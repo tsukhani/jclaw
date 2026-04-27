@@ -81,8 +81,17 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
 ARG PLAY_VERSION=1.11.11
 RUN curl -fsSL "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
         -o /tmp/play.zip && \
-    unzip -q /tmp/play.zip -d /opt/ && \
+    # Exclude framework/test-src/* from the extract. Play's own test
+    # corpus contains files with non-UTF-8 zip-encoded filenames
+    # (deliberate I/O test fixtures: German, Chinese, Korean) that
+    # trip Info-ZIP unzip's warning-as-exit-1 behavior even though
+    # extraction itself succeeds. We only use Play as a tool here
+    # (play deps --sync, play start), never run Play's own self-tests
+    # against its fixtures, so dropping that subtree is harmless and
+    # avoids the spurious failure.
+    unzip -q /tmp/play.zip -x "*/framework/test-src/*" -d /opt/ && \
     rm /tmp/play.zip && \
+    test -x "/opt/play-${PLAY_VERSION}/play" && \
     ln -s "/opt/play-${PLAY_VERSION}/play" /usr/local/bin/play
 
 # Drop privileges. Ubuntu 24.04 ships with a default `ubuntu` user at
