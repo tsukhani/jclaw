@@ -66,13 +66,21 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     rm -rf /var/lib/apt/lists/* && \
     corepack enable
 
-# Play Framework 1.x — Abundent's custom fork. The upstream Play 1.x
-# project is unmaintained; this fork carries the JDK 25 compatibility
-# patches the backend depends on. Shallow clone keeps the image
-# small (we don't develop on Play itself, just invoke its CLI). The
-# symlink puts `play` on PATH for any user.
-RUN git clone --depth 1 https://github.com/tsukhani/play1 /opt/play1 && \
-    ln -s /opt/play1/play /usr/local/bin/play
+# Play Framework 1.x — Abundent's custom fork. Upstream Play 1.x is
+# unmaintained; this fork carries JDK 25 compatibility patches the
+# backend depends on. Pull the official tagged release zip rather
+# than shallow-cloning master, so the image gets a pinned version
+# (matches the `~ play! 1.11.11` banner from `play autotest`) and
+# can't silently pick up a breaking change on master between dev
+# container rebuilds. Same canonical distribution format upstream
+# Play has shipped for years: top-level play-${VERSION}/ directory
+# with the wrapper script, framework JARs, modules, and samples.
+ARG PLAY_VERSION=1.11.11
+RUN curl -fsSL "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
+        -o /tmp/play.zip && \
+    unzip -q /tmp/play.zip -d /opt/ && \
+    rm /tmp/play.zip && \
+    ln -s "/opt/play-${PLAY_VERSION}/play" /usr/local/bin/play
 
 # Drop privileges. Ubuntu 24.04 ships with a default `ubuntu` user at
 # UID 1000 — devcontainer best practice is to run as a non-root user
