@@ -315,8 +315,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
             boolean ocrActive = ocrEnabled();
             boolean truncated = false;
             try (InputStream in = Files.newInputStream(path)) {
-                parser.parse(in, handler, metadata,
-                        ocrActive ? buildOcrParseContext() : new ParseContext());
+                parser.parse(in, handler, metadata, buildParseContext(ocrActive));
             } catch (SAXException e) {
                 if (!e.getClass().getSimpleName().contains("WriteLimitReached")) {
                     return "Error parsing document: %s".formatted(e.getMessage());
@@ -325,7 +324,13 @@ public class DocumentsTool implements ToolRegistry.Tool {
             }
             var text = handler.toString();
             if (text.isBlank()) {
-                var hint = ocrActive ? ocrUnavailableHint() : null;
+                if (!ocrActive) {
+                    return "Error: OCR is disabled in Settings, so '"
+                            + path.getFileName() + "' (no extractable text layer) "
+                            + "could not be read. Re-enable OCR at Settings → OCR "
+                            + "to read scanned PDFs and image-only documents.";
+                }
+                var hint = ocrUnavailableHint();
                 return "(Document parsed but contained no extractable text: "
                         + path.getFileName() + ")"
                         + (hint == null ? "" : " " + hint);
@@ -342,25 +347,31 @@ public class DocumentsTool implements ToolRegistry.Tool {
     }
 
     /**
-     * Build a {@link ParseContext} pre-loaded with TesseractOCRConfig and
-     * PDFParserConfig so image inputs (and image-only PDFs) reach Tesseract.
-     * Tunables come from application.conf — operators tweak language packs,
-     * timeout, and PDF strategy without code changes. Each parse rebuilds
-     * the context so live config edits apply on the next call.
+     * Build a {@link ParseContext} configured for the current OCR toggle.
+     * When {@code ocrActive} is true, pre-loads TesseractOCRConfig and
+     * PDFParserConfig so image inputs (and image-only PDFs) reach Tesseract,
+     * with tunables from application.conf. When false, explicitly opts out:
+     * Tika's AutoDetectParser would otherwise invoke TesseractOCRParser by
+     * default whenever the binary is on PATH, ignoring an empty ParseContext.
+     * Each parse rebuilds the context so live config + toggle edits apply on
+     * the next call.
      */
-    private static ParseContext buildOcrParseContext() {
+    private static ParseContext buildParseContext(boolean ocrActive) {
         var ctx = new ParseContext();
 
         var ocr = new TesseractOCRConfig();
-        ocr.setLanguage(stringOrDefault("ocr.tesseract.languages", "eng"));
-        ocr.setTimeoutSeconds(positiveIntOrDefault("ocr.tesseract.timeout", 60));
-        ocr.setSkipOcr(false);
+        if (ocrActive) {
+            ocr.setLanguage(stringOrDefault("ocr.tesseract.languages", "eng"));
+            ocr.setTimeoutSeconds(positiveIntOrDefault("ocr.tesseract.timeout", 60));
+        }
+        ocr.setSkipOcr(!ocrActive);
         ctx.set(TesseractOCRConfig.class, ocr);
 
         var pdf = new PDFParserConfig();
-        pdf.setOcrStrategy(parsePdfStrategy(
-                stringOrDefault("ocr.pdf.strategy", "auto")));
-        pdf.setExtractInlineImages(true);
+        pdf.setOcrStrategy(ocrActive
+                ? parsePdfStrategy(stringOrDefault("ocr.pdf.strategy", "auto"))
+                : PDFParserConfig.OCR_STRATEGY.NO_OCR);
+        pdf.setExtractInlineImages(ocrActive);
         ctx.set(PDFParserConfig.class, pdf);
 
         return ctx;

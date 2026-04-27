@@ -1,5 +1,6 @@
 import org.junit.jupiter.api.*;
 import play.test.*;
+import services.ConfigService;
 import services.OcrHealthProbe;
 import tools.DocumentsTool;
 
@@ -176,6 +177,49 @@ public class DocumentsToolTest extends UnitTest {
                 "PDF inline-image extraction must not throw NoClassDef, got: " + result);
         assertFalse(result.contains("ImageIOUtil"),
                 "Diagnostic must not mention ImageIOUtil — that means pdfbox-tools is missing again. Got: " + result);
+    }
+
+    @Test
+    public void readDocument_scannedPdf_whenOcrToggleOff_returnsHardErrorAndSkipsTesseract() throws Exception {
+        // Regression: with ocr.tesseract.enabled=false the documents tool was
+        // still hitting Tesseract on scanned PDFs. Tika's AutoDetectParser
+        // service-loads TesseractOCRParser by default whenever the binary is
+        // on PATH, so an empty ParseContext is NOT sufficient — TesseractOCRConfig
+        // skipOcr=true plus PDFParserConfig OCR_STRATEGY.NO_OCR are the load-
+        // bearing settings.
+        //
+        // Contract: when the toggle is off and a document yields no extractable
+        // text, the tool returns an "Error: ..." string (not a soft hint) so the
+        // LLM treats it as a real tool failure and reliably surfaces the cause
+        // to the user instead of muddling around an inline note.
+        var saved = ConfigService.get("ocr.tesseract.enabled", "true");
+        try {
+            ConfigService.set("ocr.tesseract.enabled", "false");
+
+            var img = renderTextPng("PDF OCR Hello World", 600, 200);
+            var pdfPath = tmp.resolve("scanned-ocr-off.pdf");
+            try (var pdf = new org.apache.pdfbox.pdmodel.PDDocument()) {
+                var page = new org.apache.pdfbox.pdmodel.PDPage();
+                pdf.addPage(page);
+                var pdImg = org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory
+                        .createFromImage(pdf, img);
+                try (var cs = new org.apache.pdfbox.pdmodel.PDPageContentStream(pdf, page)) {
+                    cs.drawImage(pdImg, 50, 400, 500, 200);
+                }
+                pdf.save(pdfPath.toFile());
+            }
+
+            var result = DocumentsTool.readDocument(pdfPath);
+
+            assertFalse(result.toLowerCase().contains("hello"),
+                    "OCR must not fire when toggle is off — got OCR'd text: " + result);
+            assertTrue(result.startsWith("Error:"),
+                    "Expected hard 'Error:' prefix when toggle is off so the LLM surfaces the failure, got: " + result);
+            assertTrue(result.contains("OCR is disabled in Settings"),
+                    "Expected error to name the toggle so the user knows where to fix it, got: " + result);
+        } finally {
+            ConfigService.set("ocr.tesseract.enabled", saved);
+        }
     }
 
     @Test
