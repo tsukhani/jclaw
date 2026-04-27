@@ -16,7 +16,7 @@ COPY frontend/ ./
 RUN npx nuxi generate
 
 # ── Stage 2: Resolve + precompile with full JDK ──────────────────────────────
-FROM azul/zulu-openjdk:25 AS backend-build
+FROM azul/zulu-openjdk:26 AS backend-build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl unzip python3 jq && \
@@ -62,7 +62,7 @@ RUN play precompile
 RUN mkdir -p data logs
 
 # ── Stage 3: Runtime on JRE headless ─────────────────────────────────────────
-FROM azul/zulu-openjdk:25-jre-headless-latest AS runtime
+FROM azul/zulu-openjdk:26-jre-headless-latest AS runtime
 
 LABEL org.opencontainers.image.source=https://github.com/tsukhani/jclaw
 
