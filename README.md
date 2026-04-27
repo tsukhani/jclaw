@@ -131,6 +131,87 @@ cd jclaw
 
 Dependencies are automatically installed when you start with `jclaw.sh`.
 
+### Dev Container (Recommended)
+
+The fastest way to start coding without installing any of the [Prerequisites](#prerequisites) on your host machine is to use the included dev container. The `.devcontainer/Dockerfile` ships a pinned toolchain (Java 25, Python 3.14, Node 24, corepack, Play 1.11.12, tesseract-ocr) on top of Ubuntu 26.04 LTS — all the prerequisites listed above, already installed.
+
+#### Host prerequisites
+
+Just two things on your machine:
+
+1. **Docker Desktop** (macOS/Windows) or **Docker Engine** (Linux) — the dev container runs in a Docker container, so the Docker daemon needs to be running.
+2. **An IDE that supports the [Dev Containers spec](https://containers.dev/)** — any of:
+   - [Cursor](https://cursor.com/) (built-in support)
+   - [VS Code](https://code.visualstudio.com/) with the **Dev Containers** extension
+   - [JetBrains Gateway](https://www.jetbrains.com/remote-development/gateway/) with the Dev Containers plugin
+   - [GitHub Codespaces](https://github.com/features/codespaces) (cloud, no local Docker needed)
+
+#### First-time launch
+
+After cloning, open the project in your IDE and trigger the "Reopen in Container" command:
+
+| IDE | How to launch |
+|---|---|
+| **Cursor** | <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> → `Dev Containers: Reopen in Container` |
+| **VS Code** | Click the blue corner icon (bottom-left) → `Reopen in Container`, or <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> → same command |
+| **GitHub Codespaces** | Push your branch to GitHub → click `Code` → `Codespaces` tab → `Create codespace on main` |
+| **JetBrains Gateway** | New Connection → Dev Containers → point at the local `jclaw` folder |
+
+What happens automatically once you click:
+
+1. Docker builds the image from `.devcontainer/Dockerfile` (~5–10 min the first time, cached on subsequent rebuilds).
+2. Your local jclaw directory is bind-mounted into the container at `/workspaces/jclaw`. **Edits you make inside the container persist on your host** — the container is an environment, not a copy.
+3. The IDE runs `postCreateCommand: ./jclaw.sh setup` automatically, which:
+   - Validates all prerequisites (every check passes — they're baked into the image)
+   - Wires git hooks (`.githooks/pre-commit`, `.githooks/pre-push`)
+   - Validates the pinned pnpm version via corepack with integrity-hash verification
+   - Runs `pnpm install` for the frontend
+   - Adds the canonical `github` remote (`https://github.com/tsukhani/jclaw.git`)
+4. Recommended VS Code/Cursor extensions install (Volar, Java Pack, ESLint, Stylelint, YAML).
+5. The IDE attaches to the container — your terminal, file explorer, and editor are now running inside it.
+
+#### Day-to-day inside the container
+
+Everything works the same as it would on a native host. The container *is* a Linux dev box with the pre-installed toolchain:
+
+```bash
+./jclaw.sh --dev start    # dev mode (Play autoreload + Nuxt HMR)
+./jclaw.sh test           # backend + frontend test suites
+./jclaw.sh status         # check what's running
+./jclaw.sh stop
+```
+
+Ports `9000` (backend) and `3000` (Nuxt) are forwarded to your host automatically. Open `http://localhost:9000` and `http://localhost:3000` in your **host's browser** while the dev server runs inside the container. The Nuxt port is configured to auto-open the browser when it boots; the backend port emits a notification.
+
+#### Commits and `/deploy`
+
+The pre-commit hook (frontend lint-staged) and pre-push hook (full test suite) work inside the container without any extra setup. Two nuances:
+
+- **Signed commits** — `/deploy` produces signed commits and signed tags (`commit -S`, `tag -s`). Your host's GPG/SSH keys aren't visible inside the container by default. Two recovery options:
+  1. **Easiest**: do `/deploy` from your host shell (open a host terminal, `cd` into the project, run the slash command). Code inside the container, deploy from outside.
+  2. **More setup**: add a `mounts` block to `.devcontainer/devcontainer.json` to bind-mount `~/.ssh` and `~/.gnupg` into the container. Same end result, more configuration.
+- **File ownership** — files written inside the container land on your host with UID 1000 (`ubuntu` user). On macOS this maps to your user automatically; on Linux you may see "owned by 1000" in `ls -l` if your host UID differs. Usually harmless.
+
+#### Rebuilding
+
+When the toolchain changes (e.g., a new Play version, a JDK bump, a base-image bump), you'll want a fresh build:
+
+| IDE | How to rebuild |
+|---|---|
+| **Cursor / VS Code** | <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>P</kbd> → `Dev Containers: Rebuild Container` |
+| **JetBrains Gateway** | Container settings → `Rebuild` |
+| **CLI fallback** | `docker build -t jclaw-devcontainer:latest .devcontainer/` (manual, you'd then need to update the IDE config to use the rebuilt image) |
+
+Most rebuilds reuse cached apt + JDK + Node layers and only re-download what changed (e.g., the Play release zip if `PLAY_VERSION` was bumped). Full cold rebuilds run ~5–10 min.
+
+#### Troubleshooting
+
+- **"Docker not running"** — start Docker Desktop / `sudo systemctl start docker`.
+- **First build hangs on apt-get** — your network is slow or the Ubuntu mirror is rate-limiting. Retry; layers are cached so progress isn't lost.
+- **Postcreate fails on `./jclaw.sh setup`** — read the error; it'll point at the failing prereq. Open `.devcontainer/Dockerfile` to see what's installed; if a tool is missing, file an issue or patch the Dockerfile and rebuild.
+- **Edits in the IDE don't appear on host** — verify you opened the folder via "Reopen in Container," not by mounting a Docker volume. The bind-mount is what makes the edits round-trip.
+- **`docker rmi` to clean up** — `docker rmi jclaw-devcontainer:latest` (or the container image name your IDE assigns) removes the cached image. The next "Reopen in Container" rebuilds from scratch.
+
 ### Development
 
 ```bash
