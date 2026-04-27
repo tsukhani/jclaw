@@ -74,6 +74,25 @@ export default defineNuxtConfig({
         'driver.js',
       ],
     },
+    // Filter the cosmetic "Sourcemap is likely to be incorrect" warnings
+    // emitted six-plus times per `nuxi generate` by @tailwindcss/vite
+    // (Oxide engine) and nuxt:module-preload-polyfill. Both plugins
+    // transform code without producing sourcemap entries, which Rollup
+    // flags as a chain-integrity issue regardless of the user's
+    // sourcemap config — none of the obvious knobs (nuxt.sourcemap,
+    // vite.build.sourcemap, nitro.sourceMap) suppress them. The
+    // transformations themselves are correct; the warning is purely
+    // about a missing-map metadata gap in upstream plugins. Forwarding
+    // every other warning class to the default handler keeps real
+    // diagnostics visible.
+    build: {
+      rollupOptions: {
+        onwarn(warning, defaultHandler) {
+          if (warning.message?.includes('Sourcemap is likely to be incorrect')) return
+          defaultHandler(warning)
+        },
+      },
+    },
   },
 
   // @nuxt/eslint: stylistic rules double as the formatter (Prettier replacement).
