@@ -47,6 +47,10 @@
     "npm",
     "dockerfile",
     "docker-compose",
+    // custom.regex is the manager type for the customManagers block
+    // below — needed in this list so Renovate's manager-enable gate
+    // doesn't filter our regex manager out before it runs.
+    "custom.regex",
   ],
 
   // Same family-grouping intent as the previous .github/dependabot.yml:
@@ -104,6 +108,52 @@
       matchUpdateTypes: ["minor", "patch"],
       automerge: true,
       automergeType: "branch",
+    },
+  ],
+
+  // Renovate has no built-in manager for Play 1.x's Ivy-flavored
+  // dependencies.yml. The customManager below scans every top-level entry
+  // that looks like a Maven coordinate with a version and lets Renovate
+  // treat it as a Maven datasource lookup.
+  //
+  // Pattern semantics, line by line:
+  //   - `^\s+-\s+`           — top-level dep indent (4-space) plus the
+  //                            dash bullet. Excludes inside `exclude:` blocks
+  //                            sit at 12-space indent and also start with `-`,
+  //                            but they don't have versions (next bullet) so
+  //                            they fall through.
+  //   - `(?<groupId>[\w.-]+)` — Maven groupId (dotted alphanumerics).
+  //   - `\s*->\s*`           — Play's groupId/artifactId separator.
+  //   - `(?<artifactId>[\w.-]+)` — Maven artifactId (alphanumerics, hyphens,
+  //                            dots; never `*`, which is the exclude wildcard).
+  //   - `\s+(?<currentValue>[\d.]+)` — pure-numeric version (1.22.2,
+  //                            5.13.4, 0.64.8). All current entries match
+  //                            this shape; if a future dep ships a
+  //                            -SNAPSHOT or -rc tag, widen to [\w.-]+.
+  //   - `:?\s*$`             — optional trailing colon (deps with an
+  //                            `exclude:` block end with one) and any
+  //                            trailing whitespace.
+  //
+  // Lines this regex *deliberately skips* (and we want skipped):
+  //   - `- play`             — Play core, no `->` separator.
+  //   - `- play -> docviewer` — Play module, no Maven version.
+  //   - `- org.slf4j -> slf4j-simple` (under exclude:) — no version.
+  //   - `- javax.mail -> *` (under exclude:) — `*` doesn't match [\w.-]+.
+  //
+  // Renovate replaces only the `currentValue` substring, so the parent
+  // line's `:` (and everything below it under `exclude:`) is preserved
+  // byte-for-byte across bumps. The exclude blocks need no special
+  // handling.
+  customManagers: [
+    {
+      customType: "regex",
+      fileMatch: ["^conf/dependencies\\.yml$"],
+      matchStrings: [
+        "(?m)^\\s+-\\s+(?<groupId>[\\w.-]+)\\s*->\\s*(?<artifactId>[\\w.-]+)\\s+(?<currentValue>[\\d.]+):?\\s*$",
+      ],
+      datasourceTemplate: "maven",
+      depNameTemplate: "{{groupId}}:{{artifactId}}",
+      versioningTemplate: "maven",
     },
   ],
 }
