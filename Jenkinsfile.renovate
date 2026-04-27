@@ -13,10 +13,10 @@
 //
 // Required Jenkins credentials (Manage Jenkins → Credentials → Global):
 //
-//   - bitbucket-renovate-username  (Username with password)
-//       username: <bitbucket-server-service-account>
-//       password: <bitbucket-server-personal-access-token>
-//       Token scopes: Project READ, Repo WRITE on jclaw/jclaw
+//   - abundent                      (Username with password — already exists)
+//       Reuses the existing org-wide Abundent Bitbucket Server credential.
+//       The associated user/PAT must have Project READ + Repo WRITE scopes
+//       on jclaw/jclaw to let Renovate open PRs.
 //   - github-token                  (Secret text — already exists)
 //       Used by Renovate to fetch release notes from github.com for any
 //       upstream package's changelog. Without it, anonymous GitHub rate
@@ -53,7 +53,7 @@ pipeline {
             steps {
                 withCredentials([
                     usernamePassword(
-                        credentialsId: 'bitbucket-renovate-username',
+                        credentialsId: 'abundent',
                         usernameVariable: 'RENOVATE_USERNAME',
                         passwordVariable: 'RENOVATE_PASSWORD'
                     ),
