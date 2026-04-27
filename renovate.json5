@@ -9,13 +9,11 @@
     "config:recommended",
   ],
 
-  // Weekly Monday morning. Renovate's own schedule directive is independent of
-  // the Jenkins cron — Jenkins triggers Renovate to RUN, this schedule controls
-  // which packages it considers for PR-opening. Setting both is fine: Jenkins
-  // fires the runner, Renovate filters by schedule.
-  schedule: [
-    "before 6am on monday",
-  ],
+  // No `schedule` directive — Jenkinsfile.renovate's cron (`H 6 * * 1`) is the
+  // sole gate on when Renovate runs. A second Renovate-side schedule would
+  // need its `timezone` kept in sync with the Jenkins server's clock, with no
+  // error if they drift; cheaper to let the orchestrator decide. Each weekly
+  // run opens PRs for whatever drift exists at that moment.
 
   // Disabled — Bitbucket Server doesn't have a native issues UI for the
   // Dependency Dashboard pattern Renovate's GitHub support uses. Status
