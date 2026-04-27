@@ -460,13 +460,19 @@ do_setup() {
     else
         echo "    Warning: 'origin' remote not configured (unusual for a fresh clone)."
     fi
+    # JClaw is an internal Abundent project with one canonical GitHub mirror,
+    # so we auto-add the remote rather than prompting. /deploy requires both
+    # `origin` (Bitbucket) and `github` (GitHub) — without this auto-add, every
+    # fresh clone would have to read the help text and re-run a manual command
+    # before the first deploy. The default URL matches the badge in README.md
+    # and the JCLAW_GITHUB_REMOTE env var is the override hatch for the rare
+    # contributor working from a personal fork.
+    local github_url="${JCLAW_GITHUB_REMOTE:-https://github.com/tsukhani/jclaw.git}"
     if /usr/bin/git remote get-url github >/dev/null 2>&1; then
         echo "    github: $(/usr/bin/git remote get-url github)"
     else
-        echo "    'github' remote not configured."
-        echo "    Add it with:"
-        echo "        /usr/bin/git remote add github https://github.com/<your-user>/jclaw.git"
-        echo "    The /deploy slash command requires both 'origin' and 'github' remotes."
+        /usr/bin/git remote add github "$github_url"
+        echo "    github: $github_url (added)"
     fi
 
     echo ""
