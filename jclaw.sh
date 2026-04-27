@@ -159,19 +159,11 @@ resolve_play_pool() {
 
 # Route every `pnpm` invocation through corepack so the version pinned
 # in frontend/package.json's `packageManager` field is authoritative,
-# regardless of what's installed globally. Corepack ships with Node 16.13+
-# (JClaw requires Node 20+ per CLAUDE.md) and caches the first-run download
-# so subsequent calls are zero-cost. Falls back to the system pnpm via the
-# `command pnpm` escape hatch when corepack is genuinely unavailable —
-# important for operators on unusual environments where corepack was
-# explicitly removed, but the warning about version drift stays loud.
+# regardless of what's installed globally. corepack presence is enforced
+# upstream by check_prereqs at every dispatch entry point, so this
+# function never has to defend against the corepack-missing case.
 pnpm() {
-    if command -v corepack >/dev/null 2>&1; then
-        corepack pnpm "$@"
-    else
-        echo "[jclaw.sh] Warning: corepack unavailable; using system pnpm ($(command pnpm --version 2>/dev/null || echo unknown)) which may diverge from the pin in frontend/package.json." >&2
-        command pnpm "$@"
-    fi
+    corepack pnpm "$@"
 }
 
 # Read the packageManager pin from frontend/package.json. Echoes the raw
@@ -193,12 +185,6 @@ read_pnpm_pin() {
 setup_corepack_pnpm_pin() {
     local frontend_dir="$JCLAW_DIR/frontend"
     [[ -d "$frontend_dir" && -f "$frontend_dir/package.json" ]] || return 0
-
-    if ! command -v corepack >/dev/null 2>&1; then
-        echo "    Warning: corepack unavailable; cannot add pnpm integrity hash."
-        echo "             Install Node.js 20+ to get corepack, then re-run setup."
-        return 0
-    fi
 
     local current_pin
     current_pin=$(read_pnpm_pin)
@@ -238,12 +224,6 @@ validate_corepack_pnpm() {
     local frontend_dir="$JCLAW_DIR/frontend"
     [[ -d "$frontend_dir" && -f "$frontend_dir/package.json" ]] || return 0
 
-    if ! command -v corepack >/dev/null 2>&1; then
-        echo "    Warning: corepack unavailable; pnpm version pin cannot be validated."
-        echo "             Install Node.js 20+ to get corepack, then re-run."
-        return 0
-    fi
-
     local current_pin
     current_pin=$(read_pnpm_pin)
     if [[ -z "$current_pin" ]]; then
@@ -278,7 +258,7 @@ validate_corepack_pnpm() {
     echo "==> pnpm validated via corepack ($current_pin)"
 }
 
-# Verify Java 25+ is available
+# Verify Java 25+ is available. Required for Play backend (compile, run, test).
 check_java() {
     local java_version
     java_version=$(java -version 2>&1 | head -1 | grep -oE '"[0-9]+'| tr -d '"')
@@ -291,6 +271,87 @@ check_java() {
         echo "       Set JAVA_HOME or use jenv to configure JDK 25."
         exit 1
     fi
+}
+
+# Verify Node.js 20+ is available. Required for the Nuxt dev server, the
+# prod SPA build (npx nuxi generate), and corepack itself.
+check_node() {
+    if ! command -v node >/dev/null 2>&1; then
+        echo "Error: node not found. Node.js 20+ is required."
+        echo "       Install from https://nodejs.org/ (or use nvm/fnm/asdf)."
+        exit 1
+    fi
+    local node_major
+    node_major=$(node -v | sed -E 's/^v([0-9]+).*/\1/')
+    if [[ -z "$node_major" || "$node_major" -lt 20 ]]; then
+        echo "Error: Node $(node -v) found, but Node.js 20+ is required."
+        exit 1
+    fi
+}
+
+# Verify corepack is on PATH. Ships with Node 20+ by default but some
+# distros (Debian's `nodejs` package, certain Nix profiles) strip it. We
+# use it to validate the pnpm pin's +sha integrity hash on every start —
+# without it, the security gate goes inert.
+check_corepack() {
+    if ! command -v corepack >/dev/null 2>&1; then
+        echo "Error: corepack not found. It ships with Node 20+ — your install"
+        echo "       may have stripped it. Install with: npm install -g corepack"
+        exit 1
+    fi
+}
+
+# Verify the Play 1.x command is on PATH. Backend builds, dev runs, prod
+# starts, dependency syncs, and the test runner all shell out to play.
+check_play() {
+    if ! command -v play >/dev/null 2>&1; then
+        echo "Error: play not found. Play Framework 1.x is required."
+        echo "       Install Abundent's fork: https://github.com/tsukhani/play1"
+        echo "       Then add the play command to your PATH."
+        exit 1
+    fi
+}
+
+# Verify Python 3.9+ is available. Strictly speaking this is transitively
+# enforced by check_play (the play command is itself a Python wrapper
+# script), but a too-old or broken Python produces cryptic SyntaxErrors
+# from inside the wrapper. The explicit check here gives operators a
+# clean "Python X.Y is too old" diagnostic instead.
+check_python() {
+    local python_cmd=""
+    if command -v python3 >/dev/null 2>&1; then
+        python_cmd=python3
+    elif command -v python >/dev/null 2>&1; then
+        python_cmd=python
+    else
+        echo "Error: python not found. Python 3.9+ is required for the play command."
+        exit 1
+    fi
+    local py_version
+    py_version=$("$python_cmd" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null)
+    if [[ -z "$py_version" ]]; then
+        echo "Error: Could not determine Python version from $python_cmd."
+        exit 1
+    fi
+    local major minor
+    IFS=. read -r major minor <<< "$py_version"
+    if (( major < 3 )) || { (( major == 3 )) && (( minor < 9 )); }; then
+        echo "Error: Python $py_version found, but Python 3.9+ is required for the play command."
+        exit 1
+    fi
+}
+
+# Single entry point for prerequisite validation. Called from setup and
+# from each runtime entry point (start/restart/test) so an environment
+# missing a dependency fails at the dispatch level with a clean
+# diagnostic, instead of cryptically halfway through play deps --sync or
+# pnpm install. Cheap (5 fork-execs, ~50ms total on warm caches).
+check_prereqs() {
+    check_java
+    check_node
+    check_corepack
+    check_play
+    check_python
 }
 
 # Determine the working directory
@@ -319,6 +380,19 @@ do_setup() {
         exit 1
     fi
 
+    echo "==> Checking prerequisites..."
+    check_prereqs
+    echo "    Java:     $(java -version 2>&1 | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
+    echo "    Node:     $(node -v)"
+    echo "    Corepack: $(corepack -v 2>/dev/null || echo 'present')"
+    echo "    Play:     $(command -v play)"
+    if command -v python3 >/dev/null 2>&1; then
+        echo "    Python:   $(python3 -V 2>&1)"
+    else
+        echo "    Python:   $(python -V 2>&1)"
+    fi
+
+    echo ""
     echo "==> Wiring git hooks (.githooks/)..."
     /usr/bin/git config --local core.hooksPath .githooks
     echo "    core.hooksPath = $(/usr/bin/git config --local core.hooksPath)"
@@ -976,7 +1050,7 @@ case "$COMMAND" in
         do_setup
         ;;
     start)
-        check_java
+        check_prereqs
         if [[ "$DEV_MODE" == true ]]; then
             mkdir -p "$JCLAW_DIR/logs"
             do_start_dev
@@ -994,7 +1068,7 @@ case "$COMMAND" in
         fi
         ;;
     restart)
-        check_java
+        check_prereqs
         if [[ "$DEV_MODE" == true ]]; then
             do_stop_dev
             sleep 1
@@ -1018,7 +1092,7 @@ case "$COMMAND" in
         do_loadtest
         ;;
     test)
-        check_java
+        check_prereqs
         do_test
         ;;
 esac
