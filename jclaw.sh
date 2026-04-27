@@ -346,12 +346,30 @@ check_python() {
 # missing a dependency fails at the dispatch level with a clean
 # diagnostic, instead of cryptically halfway through play deps --sync or
 # pnpm install. Cheap (5 fork-execs, ~50ms total on warm caches).
+#
+# Order matters — foundational toolchains first, derived tools after,
+# so each successful check is unambiguous. If python is missing, we
+# want "Python not found" before "Play not found", because Play
+# happens to be a Python wrapper script — checking play first would
+# pass (the binary exists on PATH) only to have it fail later inside
+# the wrapper with a cryptic Python error. Same logic for corepack,
+# which ships inside Node's binary distribution.
+#
+# Dependency graph:
+#   java     — standalone
+#   python   — standalone (Play wrapper script depends on it)
+#   node     — standalone (corepack ships inside it)
+#   play     — depends on python
+#   corepack — depends on node
 check_prereqs() {
+    # Foundational — no dependencies on other checks
     check_java
-    check_node
-    check_corepack
-    check_play
     check_python
+    check_node
+
+    # Derived — each depends on a foundational check above
+    check_play       # Python wrapper script; check_python must pass first
+    check_corepack   # Ships with Node; check_node must pass first
 }
 
 # Determine the working directory
@@ -382,15 +400,17 @@ do_setup() {
 
     echo "==> Checking prerequisites..."
     check_prereqs
+    # Print in the same dependency-graph order as check_prereqs runs them:
+    # foundational toolchains first, then the wrappers/tools that ride them.
     echo "    Java:     $(java -version 2>&1 | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
-    echo "    Node:     $(node -v)"
-    echo "    Corepack: $(corepack -v 2>/dev/null || echo 'present')"
-    echo "    Play:     $(command -v play)"
     if command -v python3 >/dev/null 2>&1; then
         echo "    Python:   $(python3 -V 2>&1)"
     else
         echo "    Python:   $(python -V 2>&1)"
     fi
+    echo "    Node:     $(node -v)"
+    echo "    Play:     $(command -v play)"
+    echo "    Corepack: $(corepack -v 2>/dev/null || echo 'present')"
 
     echo ""
     echo "==> Wiring git hooks (.githooks/)..."
