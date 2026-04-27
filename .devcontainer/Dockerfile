@@ -14,7 +14,7 @@
 # wires git hooks, runs corepack install + pnpm install, and adds the
 # canonical github remote.
 
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -42,11 +42,14 @@ RUN apt-get update && \
         tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
-# JDK 25 via Azul's apt repo. Ubuntu 24.04's default repos top out at
-# JDK 21 but JClaw requires 25+ (java.source=25 in application.conf).
-# The signed-by= trusted-key flow is the modern replacement for the
-# deprecated apt-key add — keys live in a per-repo keyring rather
-# than the global /etc/apt/trusted.gpg.
+# JDK 25 via Azul's apt repo. Ubuntu's default repos lag behind JDK
+# releases and JClaw requires 25+ (java.source=25 in application.conf).
+# Azul publishes one universal `stable` distribution that covers all
+# supported Debian/Ubuntu versions, so the line below works on any
+# base image without per-codename branching. The signed-by= trusted-
+# key flow is the modern replacement for the deprecated apt-key add —
+# keys live in a per-repo keyring rather than the global
+# /etc/apt/trusted.gpg.
 RUN curl -fsSL https://repos.azul.com/azul-repo.key \
         | gpg --dearmor -o /usr/share/keyrings/azul.gpg && \
     echo "deb [signed-by=/usr/share/keyrings/azul.gpg] https://repos.azul.com/zulu/deb stable main" \
