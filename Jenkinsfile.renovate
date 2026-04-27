@@ -1,0 +1,101 @@
+// Self-hosted Renovate runner.
+//
+// This pipeline is consumed by a SEPARATE Jenkins job (not the main JClaw
+// build job). To wire it up, in Jenkins UI:
+//
+//   1. New Item → Pipeline → name "JClaw Renovate".
+//   2. Pipeline definition: "Pipeline script from SCM"
+//      → SCM: Git, URL: https://bitbucket.abundent.com/scm/jclaw/jclaw.git
+//      → Branch: */main
+//      → Script Path: Jenkinsfile.renovate
+//   3. Save. The cron trigger inside this file fires it weekly on its own;
+//      no Build Triggers needed in the UI.
+//
+// Required Jenkins credentials (Manage Jenkins → Credentials → Global):
+//
+//   - bitbucket-renovate-username  (Username with password)
+//       username: <bitbucket-server-service-account>
+//       password: <bitbucket-server-personal-access-token>
+//       Token scopes: Project READ, Repo WRITE on jclaw/jclaw
+//   - github-token                  (Secret text — already exists)
+//       Used by Renovate to fetch release notes from github.com for any
+//       upstream package's changelog. Without it, anonymous GitHub rate
+//       limits hit fast on a busy run.
+//
+// Single stage. Each Monday at ~6am the cron fires, the docker run pulls
+// the renovate/renovate image and points it at this clone's repo on
+// Bitbucket Server. Renovate scans renovate.json + the source tree,
+// opens PRs against the main branch on Bitbucket. You review + merge on
+// Bitbucket; the existing /deploy flow then propagates to the github
+// mirror via the second remote push.
+
+pipeline {
+    agent any
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '20', artifactNumToKeepStr: '0'))
+        // Renovate scans complete in 2-5 min for a project this size; cap
+        // at 30 min so a hung run doesn't lock the agent.
+        timeout(time: 30, unit: 'MINUTES')
+    }
+
+    triggers {
+        // Weekly, Monday 06:00 in Jenkins timezone. The "H 6 * * 1" form
+        // (rather than "0 6 * * 1") lets Jenkins jitter the minute across
+        // jobs to avoid stampedes when many cron-scheduled jobs share the
+        // same hour. Aligns with renovate.json's "before 6am on monday"
+        // schedule directive.
+        cron('H 6 * * 1')
+    }
+
+    stages {
+        stage('Renovate') {
+            steps {
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'bitbucket-renovate-username',
+                        usernameVariable: 'RENOVATE_USERNAME',
+                        passwordVariable: 'RENOVATE_PASSWORD'
+                    ),
+                    string(credentialsId: 'github-token', variable: 'GITHUB_COM_TOKEN'),
+                ]) {
+                    // Bitbucket Server platform via username + PAT (Renovate
+                    // treats RENOVATE_PASSWORD as the PAT for HTTP basic
+                    // auth, same model Bitbucket Server itself uses).
+                    //
+                    // RENOVATE_REPOSITORIES uses Bitbucket Server's
+                    // "<projectKey>/<repoSlug>" form — both lowercase.
+                    // The project key is the URL segment after /scm/ in
+                    // https://bitbucket.abundent.com/scm/jclaw/jclaw.git.
+                    //
+                    // GITHUB_COM_TOKEN is read by Renovate transparently to
+                    // hit the github.com REST API for release-note lookups
+                    // even though the platform is Bitbucket. It's NOT an
+                    // auth credential for the platform itself.
+                    //
+                    // LOG_LEVEL=info keeps the build console scannable.
+                    // Bump to "debug" temporarily if Renovate skips a
+                    // dependency unexpectedly and you need to see why.
+                    sh '''
+                        docker run --rm \\
+                            -e RENOVATE_PLATFORM=bitbucket-server \\
+                            -e RENOVATE_ENDPOINT=https://bitbucket.abundent.com \\
+                            -e RENOVATE_USERNAME="$RENOVATE_USERNAME" \\
+                            -e RENOVATE_PASSWORD="$RENOVATE_PASSWORD" \\
+                            -e RENOVATE_GIT_AUTHOR='Renovate Bot <renovate@abundent.com>' \\
+                            -e RENOVATE_REPOSITORIES='jclaw/jclaw' \\
+                            -e GITHUB_COM_TOKEN="$GITHUB_COM_TOKEN" \\
+                            -e LOG_LEVEL=info \\
+                            renovate/renovate:latest
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        cleanup {
+            cleanWs()
+        }
+    }
+}
