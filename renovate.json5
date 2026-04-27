@@ -96,6 +96,20 @@
       matchPackageNames: ["vitest", "@vitest/**", "@vue/test-utils", "happy-dom"],
     },
 
+    // junit-vintage-engine is pinned in conf/dependencies.yml to match
+    // the JUnit Platform that Play 1.x's testrunner module provides
+    // (1.13.x). JUnit 5.x is a coupled triplet — Jupiter X.Y.Z, Platform
+    // 1.Y.Z, Vintage X.Y.Z — and they MUST move in lockstep, otherwise
+    // play auto-test fails with the ClassFilter NoClassDefFoundError
+    // documented in the comment block above the dep. Play's testrunner
+    // is not getting upgraded for JUnit 5.14+ or 6.x on Play 1.x, so
+    // every Renovate cycle would otherwise propose a doomed bump.
+    // Disable proposals entirely until that constraint changes.
+    {
+      matchPackageNames: ["org.junit.vintage:junit-vintage-engine"],
+      enabled: false,
+    },
+
     // Auto-merge patch and minor bumps directly to main via signed git push,
     // skipping Bitbucket's merge UI (which can't sign commits on Bitbucket
     // Server 7.21.10 — see JCLAW-180). Renovate runs as a catch-all here:
