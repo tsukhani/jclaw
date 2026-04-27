@@ -433,6 +433,22 @@ load_env_file() {
     fi
 }
 
+# First-run helper for the start paths: if .env is absent AND the
+# operator hasn't set APPLICATION_SECRET in the parent shell, generate
+# one. This is what makes `./jclaw.sh start` work on a fresh jclaw.zip
+# install with no developer setup step. We DON'T auto-create when the
+# operator has already exported APPLICATION_SECRET externally — that'd
+# overwrite their intent with a stored random value they didn't ask
+# for. We DON'T auto-create from setup either; setup has its own
+# explicit gate. This is the start-path equivalent.
+ensure_env_for_start() {
+    local env_file="$JCLAW_DIR/.env"
+    if [[ ! -f "$env_file" && -z "${APPLICATION_SECRET:-}" ]]; then
+        echo "==> First run detected — no .env and no APPLICATION_SECRET in env."
+        do_secret
+    fi
+}
+
 # Hard-fail if APPLICATION_SECRET ends up unset by the time we're about to
 # launch the JVM. application.conf has no dev fallback (intentional — the
 # previous in-repo secret was an admin-session-forgery primitive), so an
@@ -441,9 +457,14 @@ load_env_file() {
 # stacktrace from CookieSessionStore.
 require_application_secret() {
     if [[ -z "${APPLICATION_SECRET:-}" ]]; then
-        echo "Error: APPLICATION_SECRET is not set."
-        echo "       Generate one with: $0 secret"
-        echo "       Or run: $0 setup  (creates .env on a fresh clone)"
+        # Reachable only when .env exists but lacks (or empties) the key,
+        # OR when the launcher set the env var to an empty string. The
+        # ensure_env_for_start guard upstream creates .env on first run,
+        # so this is operator-misconfiguration territory.
+        echo "Error: APPLICATION_SECRET resolved to empty after sourcing .env."
+        echo "       Check that .env contains a non-empty value:"
+        echo "         APPLICATION_SECRET=<some-64-char-string>"
+        echo "       Rotate or regenerate with: $0 secret"
         exit 1
     fi
 }
@@ -810,9 +831,11 @@ do_start_prod() {
         exit 1
     fi
 
-    # Source .env so APPLICATION_SECRET (and any other operator-set vars)
-    # are present in the JVM environment when play forks. The require_*
-    # check fails fast with an actionable message if .env was never set up.
+    # First-run guard for jclaw.zip distributions: if no .env and no
+    # APPLICATION_SECRET in the parent shell, generate one on the fly so
+    # end-users who skip the developer-only `setup` command don't get
+    # blocked. Then source .env into the JVM env and validate.
+    ensure_env_for_start
     load_env_file
     require_application_secret
 
@@ -947,6 +970,7 @@ do_start_dev() {
 
     # Source .env (APPLICATION_SECRET etc.) into the JVM environment.
     # See the prod-mode counterpart for the rationale.
+    ensure_env_for_start
     load_env_file
     require_application_secret
 
