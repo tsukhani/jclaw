@@ -16,7 +16,7 @@ COPY frontend/ ./
 RUN npx nuxi generate
 
 # ── Stage 2: Resolve + precompile with full JDK ──────────────────────────────
-FROM azul/zulu-openjdk:25 AS backend-build
+FROM azul/zulu-openjdk:25.0.3 AS backend-build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl unzip python3 jq && \
