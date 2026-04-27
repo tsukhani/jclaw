@@ -75,16 +75,23 @@ export default defineNuxtConfig({
       ],
     },
     // Filter the cosmetic "Sourcemap is likely to be incorrect" warnings
-    // emitted six-plus times per `nuxi generate` by @tailwindcss/vite
-    // (Oxide engine) and nuxt:module-preload-polyfill. Both plugins
-    // transform code without producing sourcemap entries, which Rollup
-    // flags as a chain-integrity issue regardless of the user's
-    // sourcemap config — none of the obvious knobs (nuxt.sourcemap,
-    // vite.build.sourcemap, nitro.sourceMap) suppress them. The
-    // transformations themselves are correct; the warning is purely
-    // about a missing-map metadata gap in upstream plugins. Forwarding
-    // every other warning class to the default handler keeps real
-    // diagnostics visible.
+    // from @tailwindcss/vite:generate:build and nuxt:module-preload-polyfill.
+    // Bisected to the Nuxt 3 -> 4 upgrade in commit 021bf0b (2026-04-16):
+    // pre-upgrade builds (Nuxt 3.21.2) are silent; the first build on Nuxt
+    // 4.4.2 already produces 6+ of these warnings, regardless of Tailwind
+    // version (verified across Tailwind 4.2.2 and 4.2.4). The warning fires
+    // inside Rollup's transform-chain integrity check, before output
+    // decisions, so sourcemap-disable knobs (nuxt.sourcemap,
+    // vite.build.sourcemap, nitro.sourceMap) suppress the .map artifacts
+    // but not the warnings.
+    //
+    // Tracked upstream:
+    //   Nuxt:     https://github.com/nuxt/nuxt/issues/34530  (tagged "upstream")
+    //   Tailwind: https://github.com/tailwindlabs/tailwindcss/issues/19930
+    //
+    // Fix landed in Vite 8 per the Nuxt issue thread; Nuxt 4.4.2 still
+    // pins Vite 7.3.2 as of 2026-04-28. REMOVE THIS BLOCK once Nuxt's
+    // lockfile picks up Vite 8 stable.
     build: {
       rollupOptions: {
         onwarn(warning, defaultHandler) {
