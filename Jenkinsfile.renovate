@@ -24,7 +24,7 @@
 //
 // Single stage. Each Monday at ~6am the cron fires, the docker run pulls
 // the renovate/renovate image and points it at this clone's repo on
-// Bitbucket Server. Renovate scans renovate.json + the source tree,
+// Bitbucket Server. Renovate scans renovate.json5 + the source tree,
 // opens PRs against the main branch on Bitbucket. You review + merge on
 // Bitbucket; the existing /deploy flow then propagates to the github
 // mirror via the second remote push.
@@ -43,7 +43,7 @@ pipeline {
         // Weekly, Monday 06:00 in Jenkins timezone. The "H 6 * * 1" form
         // (rather than "0 6 * * 1") lets Jenkins jitter the minute across
         // jobs to avoid stampedes when many cron-scheduled jobs share the
-        // same hour. Aligns with renovate.json's "before 6am on monday"
+        // same hour. Aligns with renovate.json5's "before 6am on monday"
         // schedule directive.
         cron('H 6 * * 1')
     }

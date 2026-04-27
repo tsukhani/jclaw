@@ -1,0 +1,95 @@
+{
+  // Self-hosted Renovate config. Run by Jenkinsfile.renovate against Bitbucket
+  // Server (origin). PRs land on Bitbucket; the existing /deploy flow propagates
+  // merges to the github mirror. Schema reference:
+  // https://docs.renovatebot.com/configuration-options/
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+
+  extends: [
+    "config:recommended",
+  ],
+
+  // Weekly Monday morning. Renovate's own schedule directive is independent of
+  // the Jenkins cron — Jenkins triggers Renovate to RUN, this schedule controls
+  // which packages it considers for PR-opening. Setting both is fine: Jenkins
+  // fires the runner, Renovate filters by schedule.
+  schedule: [
+    "before 6am on monday",
+  ],
+
+  // Disabled — Bitbucket Server doesn't have a native issues UI for the
+  // Dependency Dashboard pattern Renovate's GitHub support uses. Status
+  // visibility comes from the open PR list instead.
+  dependencyDashboard: false,
+
+  // Wait 3 days after a package version is published before opening a PR for
+  // it. Catches the 'shipped → breaking bug found → republished' cycle that
+  // hits weekly with active OSS packages.
+  stabilityDays: 3,
+
+  // Backpressure caps. prConcurrentLimit caps total open PRs Renovate has
+  // authored; prHourlyLimit caps how fast new ones land in a single run. Both
+  // keep the PR list scannable when many bumps converge.
+  prConcurrentLimit: 10,
+  prHourlyLimit: 5,
+
+  // Match JClaw's '<scope>: <message>' commit convention so bot commits read
+  // consistently with manual ones in git log.
+  commitMessagePrefix: "deps:",
+  commitMessageAction: "bump",
+
+  // config:recommended already enables the 'pep621' / 'npm' / 'dockerfile' /
+  // 'packageManager' managers among others. Listing explicitly here is
+  // documentation, not required configuration — Renovate's defaults already
+  // handle the corepack pin in frontend/package.json's packageManager field,
+  // which is the gap that triggered switching from Dependabot.
+  enabledManagers: [
+    "npm",
+    "dockerfile",
+    "docker-compose",
+  ],
+
+  // Same family-grouping intent as the previous .github/dependabot.yml:
+  // collapse the dozen-plus eslint plugins and similar lockstep-versioned
+  // packages into one PR per family per cycle. update-types limits grouping to
+  // minor+patch — major bumps land as individual PRs because they almost always
+  // need code changes.
+  packageRules: [
+    {
+      groupName: "vue",
+      matchManagers: ["npm"],
+      matchUpdateTypes: ["minor", "patch"],
+      matchPackageNames: ["vue", "@vue/**", "vue-*"],
+    },
+    {
+      groupName: "nuxt",
+      matchManagers: ["npm"],
+      matchUpdateTypes: ["minor", "patch"],
+      matchPackageNames: ["nuxt", "@nuxt/**", "nuxi", "h3"],
+    },
+    {
+      groupName: "eslint",
+      matchManagers: ["npm"],
+      matchUpdateTypes: ["minor", "patch"],
+      matchPackageNames: ["eslint", "@eslint/**", "eslint-*"],
+    },
+    {
+      groupName: "stylelint",
+      matchManagers: ["npm"],
+      matchUpdateTypes: ["minor", "patch"],
+      matchPackageNames: ["stylelint", "stylelint-*", "postcss-*"],
+    },
+    {
+      groupName: "tailwind",
+      matchManagers: ["npm"],
+      matchUpdateTypes: ["minor", "patch"],
+      matchPackageNames: ["tailwindcss", "@tailwindcss/**"],
+    },
+    {
+      groupName: "vitest",
+      matchManagers: ["npm"],
+      matchUpdateTypes: ["minor", "patch"],
+      matchPackageNames: ["vitest", "@vitest/**", "@vue/test-utils", "happy-dom"],
+    },
+  ],
+}
