@@ -87,8 +87,16 @@ maybe_show_welcome() {
     hooks_path=$(/usr/bin/git config --local core.hooksPath 2>/dev/null || true)
     [[ "$hooks_path" == ".githooks" ]] && return 0
 
-    local cyan='' yellow='' dim='' bold='' reset=''
+    local emerald='' cyan='' yellow='' dim='' bold='' reset=''
     if [[ -t 1 ]]; then
+        # 24-bit true color = Tailwind emerald-400 (#34d399) — matches the
+        # bg-emerald-* accents used elsewhere in the project (Settings UI
+        # toggles, "active" badges) and pops better on dark terminal
+        # backgrounds than the dim 16-color green. Modern terminals
+        # (iTerm2, macOS Terminal, Windows Terminal, VS Code/Cursor
+        # integrated, gnome-terminal) all render true color; older
+        # terminals fall back to nearest 256-color, still readable.
+        emerald=$'\033[38;2;52;211;153m'
         cyan=$'\033[1;36m'
         yellow=$'\033[1;33m'
         dim=$'\033[2m'
@@ -98,7 +106,7 @@ maybe_show_welcome() {
 
     cat <<EOF
 
-${cyan}     ██╗ ██████╗██╗      █████╗ ██╗    ██╗
+${emerald}     ██╗ ██████╗██╗      █████╗ ██╗    ██╗
      ██║██╔════╝██║     ██╔══██╗██║    ██║
      ██║██║     ██║     ███████║██║ █╗ ██║
 ██   ██║██║     ██║     ██╔══██║██║███╗██║
