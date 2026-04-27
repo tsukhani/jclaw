@@ -18,11 +18,19 @@ RUN npx nuxi generate
 # ── Stage 2: Resolve + precompile with full JDK ──────────────────────────────
 FROM azul/zulu-openjdk:25.0.3 AS backend-build
 
+# Pin the Play fork version. Previously this stage queried
+# tsukhani/play1's `releases/latest` at build time, so the same source +
+# same Dockerfile produced different images depending on when the build
+# ran — and could silently drift apart from .devcontainer/Dockerfile,
+# which is already pinned to 1.11.12. Same default here keeps prod and
+# dev container aligned. Override with --build-arg PLAY_VERSION=x.y.z
+# when bumping; bump intentionally, not by accident.
+ARG PLAY_VERSION=1.11.12
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        curl unzip python3 jq && \
-    PLAY_URL=$(curl -fsSL https://api.github.com/repos/tsukhani/play1/releases/latest | jq -r '.assets[0].browser_download_url') && \
-    PLAY_VERSION=$(curl -fsSL https://api.github.com/repos/tsukhani/play1/releases/latest | jq -r '.tag_name' | sed 's/^v//') && \
-    curl -fsSL -L "$PLAY_URL" -o /tmp/play.zip && \
+        curl unzip python3 && \
+    curl -fsSL -L "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
+        -o /tmp/play.zip && \
     unzip -q /tmp/play.zip -d /opt && \
     ln -s /opt/play-${PLAY_VERSION} /opt/play && \
     rm /tmp/play.zip && \
