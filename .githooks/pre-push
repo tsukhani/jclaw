@@ -25,6 +25,49 @@ if [[ -f "$cache_file" ]] && [[ "$(cat "$cache_file")" == "$current_sha" ]]; the
     exit 0
 fi
 
+# Path-aware skip: if the entire push range only touches documentation
+# (docs/**, *.md at any depth, .github/**) or only bumps the version
+# line in conf/application.conf, the ~80s test suite has nothing
+# meaningful to validate. Doc-only and version-only-bump pushes drop
+# to instant. Anything that touches real code paths (jclaw.sh, app/,
+# conf/* beyond the version line, frontend/, test/, etc.) still runs
+# the full suite. Cache the SHA on skip so the second remote push in
+# the two-remote /deploy flow also short-circuits.
+should_skip_for_docs() {
+    # No upstream → can't compute scope cheaply, fall through to tests
+    git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1 || return 1
+
+    local files
+    files=$(git diff --name-only "@{u}..HEAD" 2>/dev/null) || return 1
+    [[ -z "$files" ]] && return 1  # nothing changed (force-push?)
+
+    # Files that aren't pure documentation. Filter out docs/**, any *.md,
+    # and .github/** (CI configs). Anything left is a candidate for
+    # "real code change."
+    local non_docs
+    non_docs=$(echo "$files" | grep -vE '^(docs/|.*\.md$|\.github/)' || true)
+    [[ -z "$non_docs" ]] && return 0  # pure docs
+
+    # Tolerate a version-only bump in conf/application.conf as the
+    # single non-doc change. The diff in that file must contain only
+    # +/-application.version=... lines (no other content edits).
+    if [[ "$non_docs" == "conf/application.conf" ]]; then
+        local non_version
+        non_version=$(git diff "@{u}..HEAD" -- conf/application.conf \
+            | grep -E '^[+-][^+-]' \
+            | grep -vE '^[+-]application\.version=' || true)
+        [[ -z "$non_version" ]] && return 0
+    fi
+
+    return 1  # has real code change, run tests
+}
+
+if should_skip_for_docs; then
+    echo "[jclaw pre-push] Push range is docs-only or version-bump-only — skipping tests."
+    echo "$current_sha" > "$cache_file"
+    exit 0
+fi
+
 echo "[jclaw pre-push] Testing HEAD $current_sha before push..."
 if (cd "$repo_root" && ./jclaw.sh test); then
     echo "$current_sha" > "$cache_file"
