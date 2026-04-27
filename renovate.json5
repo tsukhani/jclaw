@@ -96,6 +96,22 @@
       matchPackageNames: ["vitest", "@vitest/**", "@vue/test-utils", "happy-dom"],
     },
 
+    // Disable Renovate's package-replacement preset for the regex
+    // (customManager) manager. Replacements assume a Maven-style
+    // groupId:artifactId coordinate when computing the replaceString,
+    // which doesn't match Play 1.x's `groupId -> artifactId` arrow
+    // form that our customManager extracts. Renovate logs "Cannot find
+    // replaceString in current file content" every cycle if we don't
+    // suppress this. Version updates (the actual value of the
+    // customManager) still work — those use the regex's literal match
+    // as the replaceString. If a Play 1.x dep ever genuinely needs a
+    // groupId/artifactId rename, we do it manually.
+    {
+      matchManagers: ["regex"],
+      matchUpdateTypes: ["replacement"],
+      enabled: false,
+    },
+
     // Auto-merge patch and minor bumps directly to main via signed git push,
     // skipping Bitbucket's merge UI (which can't sign commits on Bitbucket
     // Server 7.21.10 — see JCLAW-180). Renovate runs as a catch-all here:
