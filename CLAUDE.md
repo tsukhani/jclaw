@@ -129,7 +129,21 @@ Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-s
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
-### 1. Think Before Coding
+### 1. Communicate Concisely
+
+**Direct answers. Digestible nuggets. Progressive exchange.**
+
+The user is tracking the work as it happens, not reading a report at the end. Make it easy to follow.
+
+- Lead with the answer or the action. Skip the preamble. The user can ask for more if they want it.
+- Break multi-step work into small confirmable units rather than dumping a full multi-stage plan up front. Each step's outcome may change the next; don't pre-commit to plans the user hasn't seen the inputs for.
+- After each meaningful step, state in one or two sentences: what just happened, what's next, what (if anything) is blocked. So the user can track progress without re-reading prior messages.
+- Match response length to the size of the question. A one-line ask gets a one-line answer. A multi-step refactor gets the diff summary plus a "next step" hint, not a five-paragraph essay.
+- Keep insights and tangents brief. If a longer explanation might help, offer it ("want me to expand?") rather than emitting it by default.
+
+The signal you're getting this right: the user can scan your message in seconds and know exactly what state things are in.
+
+### 2. Think Before Coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
 
@@ -139,7 +153,7 @@ Before implementing:
 - If a simpler approach exists, say so. Push back when warranted.
 - If something is unclear, stop. Name what's confusing. Ask.
 
-### 2. Simplicity First
+### 3. Simplicity First
 
 **Minimum code that solves the problem. Nothing speculative.**
 
@@ -151,7 +165,7 @@ Before implementing:
 
 Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
 
-### 3. Surgical Changes
+### 4. Surgical Changes
 
 **Touch only what you must. Clean up only your own mess.**
 
@@ -167,7 +181,7 @@ When your changes create orphans:
 
 The test: Every changed line should trace directly to the user's request.
 
-### 4. Goal-Driven Execution
+### 5. Goal-Driven Execution
 
 **Define success criteria. Loop until verified.**
 
