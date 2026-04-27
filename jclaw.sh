@@ -4,8 +4,20 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FRONTEND_PID_FILE="frontend.pid"
 
+# Audience detection: developers run from a `git clone`, end users run
+# from an unzipped `play dist` tarball with no .git/ in tow. Used by
+# both show_intro (bare invocation banner) and usage (--help / unknown
+# arg) to render an appropriately-scoped command surface — no point
+# offering `setup` to someone who can't run it. Anchored at SCRIPT_DIR
+# so the classification follows where jclaw.sh lives, not where the
+# user happened to cd.
+is_developer_clone() {
+    /usr/bin/git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1
+}
+
 usage() {
-    cat <<EOF
+    if is_developer_clone; then
+        cat <<EOF
 Usage: jclaw.sh [options] <setup|start|stop|restart|status|logs|loadtest|test>
 
 Commands:
@@ -57,6 +69,45 @@ Examples:
   ./jclaw.sh loadtest                                 # Drive default 10×5 load test against :9000
   ./jclaw.sh --concurrency 50 --iterations 20 loadtest
 EOF
+    else
+        # User-facing reference: trimmed to the runtime commands and
+        # operator knobs that actually apply to a dist install. Setup,
+        # test, --dev, --deploy, --frontend-port, and the loadtest
+        # options are all developer-only and would either fail or
+        # silently no-op against an unzipped distribution, so they're
+        # omitted entirely. loadtest itself technically works against a
+        # running prod backend, but it's an operator/dev tool and not
+        # part of the "I just want to run JClaw" contract.
+        cat <<EOF
+Usage: jclaw.sh [options] <start|stop|restart|status|logs>
+
+Commands:
+  start     Start JClaw (Play backend serving the bundled SPA)
+  stop      Stop the running instance
+  restart   Stop and start (combines stop + start)
+  status    Show whether the backend is running
+  logs      Tail the application log
+
+Options:
+  --backend-port <port>   Backend HTTP port (default: 9000)
+  --play-pool <N>         Play invocation pool size. When omitted, the JVM-side
+                          plugins.PlayPoolAutoSizer auto-sizes to
+                          max(8, cores*2) at startup (respects container CPU
+                          limits). Pass an integer to force a specific value.
+
+Environment:
+  JCLAW_JVM_HEAP          JVM heap size (default: 2g). Sets -Xms == -Xmx.
+                          Example: JCLAW_JVM_HEAP=4g ./jclaw.sh start
+
+Examples:
+  ./jclaw.sh start                              # Start on default port 9000
+  ./jclaw.sh --backend-port 8080 start          # Start on a custom port
+  ./jclaw.sh status                             # Check whether it's running
+  ./jclaw.sh logs                               # Tail the application log
+  ./jclaw.sh stop                               # Stop the running instance
+  JCLAW_JVM_HEAP=4g ./jclaw.sh start            # Start with a 4 GB heap
+EOF
+    fi
 }
 
 # Render the JClaw landing screen on bare invocation: ASCII-art logo in
@@ -102,13 +153,9 @@ EOF
 
     # Audience split: a developer working from a `git clone` needs setup +
     # the full command surface; a user running an unzipped distribution
-    # (play dist + tar/zip) just needs to start/stop the app. The cleanest
-    # signal is "is the script's directory inside a git work tree" —
-    # covers clones AND worktrees but not dist tarballs (which strip
-    # .git/ at packaging time). Anchored at $SCRIPT_DIR rather than CWD
-    # so running ./jclaw.sh from a deeper subdirectory still classifies
-    # correctly.
-    if /usr/bin/git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    # just needs to start/stop the app. Detection lives in
+    # is_developer_clone — see the comment block above usage().
+    if is_developer_clone; then
         # Developer view: cloned repo
         cat <<EOF
   ${cyan}./jclaw.sh setup${reset}     One-time setup for a fresh clone
