@@ -113,7 +113,18 @@ pipeline {
                     // LOG_LEVEL=info keeps the build console scannable.
                     // Bump to "debug" temporarily if Renovate skips a
                     // dependency unexpectedly and you need to see why.
+                    // set +x is load-bearing: Jenkins runs sh blocks under
+                    // `bash -ex`, which echoes every command (including the
+                    // expanded $(cat "$RENOVATE_KEY_FILE")) to the build log
+                    // before execution. Bash command substitution evaluates
+                    // AFTER Jenkins' credential masking pass, so the file
+                    // contents — the entire private key — would land in the
+                    // log in plaintext (we observed this once in JCLAW-180
+                    // and rotated the key). Disabling -x for the rest of
+                    // the script keeps the docker run command — and the
+                    // expanded key inside it — out of the log entirely.
                     sh '''
+                        set +x
                         docker run --rm \\
                             -e RENOVATE_PLATFORM=bitbucket-server \\
                             -e RENOVATE_ENDPOINT=https://bitbucket.abundent.com \\
