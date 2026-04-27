@@ -2,6 +2,7 @@
   "name": "JClaw",
   "//": "Read by VS Code Dev Containers, GitHub Codespaces, Cursor, JetBrains Gateway, and any other devcontainer-spec-compliant IDE. Build from the local Dockerfile so the image carries a known-good toolchain (JDK 25, Node 20, corepack, Play 1.x, Python 3, tesseract-ocr) — no reliance on a generic base image plus features that may drift in version. The Dockerfile installs every prereq jclaw.sh setup's check_prereqs validates, so postCreateCommand never fails on a missing dep at this layer.",
 
+  "//build": "Each developer's IDE builds this Dockerfile locally on first 'Reopen in Container' (~5-10 min, then cached). To switch to pulling a pre-built image instead — recommended once there are 3+ active contributors or Codespaces is in use — first run a Jenkins build with PUBLISH_DEVCONTAINER=true (publishes ghcr.io/tsukhani/jclaw-devcontainer:latest), then replace the build block below with: \"image\": \"ghcr.io/tsukhani/jclaw-devcontainer:latest\" — that's the only change needed here.",
   "build": {
     "dockerfile": "Dockerfile"
   },
