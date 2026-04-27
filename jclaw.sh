@@ -823,7 +823,12 @@ do_start_prod() {
     # Play tries to bind, fails with "Could not bind on port 9000", aborts
     # startup → ShutdownJob fires → JPA work in the shutdown sequence
     # produces a giant Hibernate trace that buries the real one-line error.
-    if lsof -ti :"$BACKEND_PORT" >/dev/null 2>&1; then
+    #
+    # -sTCP:LISTEN is load-bearing: a plain `lsof -ti :PORT` matches any
+    # socket on the port, including client-side CLOSE_WAITs (e.g. a Chrome
+    # tab that was talking to a now-dead JVM). Only a LISTENing socket
+    # blocks bind(), so filtering by state avoids false positives.
+    if lsof -ti :"$BACKEND_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
         local holder
         holder=$(lsof -ti :"$BACKEND_PORT" 2>/dev/null | tr '\n' ' ')
         echo "Error: Port $BACKEND_PORT is already in use (pid: ${holder% })."
@@ -960,7 +965,12 @@ do_start_dev() {
     # or a prior instance still inside its shutdown hooks). Without this,
     # Play silently fails to bind, exits, and the polling loop below would
     # see a stale listener and falsely declare success.
-    if lsof -ti :"$BACKEND_PORT" >/dev/null 2>&1; then
+    #
+    # -sTCP:LISTEN is load-bearing: a plain `lsof -ti :PORT` matches any
+    # socket on the port, including client-side CLOSE_WAITs (e.g. a Chrome
+    # tab that was talking to a now-dead JVM). Only a LISTENing socket
+    # blocks bind(), so filtering by state avoids false positives.
+    if lsof -ti :"$BACKEND_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
         local holder
         holder=$(lsof -ti :"$BACKEND_PORT" 2>/dev/null | tr '\n' ' ')
         echo "Error: Port $BACKEND_PORT is already in use (pid: ${holder% })."
