@@ -1,5 +1,5 @@
 # ── Stage 1: Build frontend SPA ──────────────────────────────────────────────
-FROM node:24-slim AS frontend-build
+FROM node:25-slim AS frontend-build
 
 # Corepack resolves the pnpm version from frontend/package.json's
 # `packageManager` field at `pnpm install` time — no hardcoded version
