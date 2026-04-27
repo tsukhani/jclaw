@@ -105,7 +105,7 @@ Why this matters: every push to `main` triggers the `pre-push` hook's full backe
 - Nuxt 3 SPA in `frontend/` with Tailwind CSS
 - API proxy: dev requests to `/api/*` are forwarded to the Play backend via Nitro devProxy (see `frontend/nuxt.config.ts`)
 - `useApi<T>(path)` composable in `frontend/composables/useApi.ts` wraps `useFetch` for backend calls
-- Package manager: **pnpm** (pinned at 10.8.0)
+- Package manager: **pnpm**, version pinned in `frontend/package.json`'s `packageManager` field with a `+sha512-...` integrity hash. `jclaw.sh start` (both dev and prod) auto-runs `corepack install` before any pnpm step, which downloads the pinned version on first use and verifies the tarball against the hash on every subsequent run. The hash gate refuses to launch on mismatch — never bypass it. To bump the pin: `cd frontend && corepack use pnpm@<version>` (writes both the version and a fresh hash), then commit `frontend/package.json`.
 
 ### API Contract
 Backend exposes JSON endpoints under `/api/` (e.g., `ApiController.status` at `GET /api/status`). The frontend consumes these through the proxy — no CORS configuration needed.

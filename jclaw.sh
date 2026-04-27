@@ -174,6 +174,81 @@ pnpm() {
     fi
 }
 
+# Ensure the pnpm version pinned in frontend/package.json's `packageManager`
+# field is installed via corepack, with the integrity hash verified. Two
+# distinct concerns:
+#
+#   1. Pin completeness — `corepack use pnpm@VERSION` writes the field as
+#      `pnpm@VERSION+sha512-...`. The +sha hash is what corepack checks the
+#      downloaded tarball against on every install, so a tampered registry
+#      tarball can't slip in unnoticed. Pins authored by hand often omit the
+#      hash, leaving the security gate inert. We auto-add the hash on first
+#      run as a one-time security migration; subsequent runs land in the
+#      no-op branch because the hash is already there.
+#
+#   2. Local availability — `corepack install` (no args) reads packageManager,
+#      downloads that version if missing, and verifies it against the +sha
+#      hash. A mismatch (i.e. the tarball is not what was originally pinned)
+#      causes corepack to exit non-zero. We treat that as a fatal start-time
+#      error: refusing to launch beats running an unverified package manager.
+#
+# Idempotent and zero-cost on subsequent runs once the version is cached.
+# Skipped (with a warning) when corepack itself is unavailable, so operators
+# who ripped corepack out of their Node install can still use jclaw.sh.
+ensure_corepack_pnpm() {
+    local frontend_dir="$JCLAW_DIR/frontend"
+    [[ -d "$frontend_dir" && -f "$frontend_dir/package.json" ]] || return 0
+
+    if ! command -v corepack >/dev/null 2>&1; then
+        echo "    Warning: corepack unavailable; pnpm version pin cannot be validated."
+        echo "             Install Node.js 20+ to get corepack, then re-run."
+        return 0
+    fi
+
+    local current_pin
+    current_pin=$(sed -n 's/.*"packageManager": *"\([^"]*\)".*/\1/p' \
+        "$frontend_dir/package.json" | head -1)
+    if [[ -z "$current_pin" ]]; then
+        echo "    Warning: no packageManager pin in frontend/package.json — cannot validate pnpm."
+        return 0
+    fi
+
+    # First-run security migration: add an integrity hash if the pin lacks one.
+    # `corepack use pnpm@VERSION` re-pins to the same version string and
+    # appends the +sha512-... hash. This rewrites frontend/package.json,
+    # which we surface explicitly so the developer knows to commit it.
+    if [[ "$current_pin" != *"+sha"* ]]; then
+        local pin_version="${current_pin#pnpm@}"
+        echo "==> Adding pnpm integrity hash to package.json (one-time security migration)..."
+        echo "    Old pin: $current_pin"
+        if ! (cd "$frontend_dir" && corepack use "pnpm@$pin_version" >/dev/null 2>&1); then
+            echo "Error: corepack use failed; could not add integrity hash."
+            echo "       Try manually: cd frontend && corepack use pnpm@$pin_version"
+            exit 1
+        fi
+        local new_pin
+        new_pin=$(sed -n 's/.*"packageManager": *"\([^"]*\)".*/\1/p' \
+            "$frontend_dir/package.json" | head -1)
+        echo "    New pin: $new_pin"
+        echo "    Note: frontend/package.json was modified — review and commit."
+    fi
+
+    # Steady-state path: ensure the pinned version is present locally and
+    # verify its hash. Output is suppressed on success because corepack is
+    # noisy on cached hits; failures get the full output.
+    local install_log
+    install_log=$(cd "$frontend_dir" && corepack install 2>&1)
+    local install_status=$?
+    if (( install_status != 0 )); then
+        echo "Error: corepack install failed — pnpm hash validation may have failed."
+        echo "       frontend/package.json packageManager pin: $current_pin"
+        echo "       corepack output:"
+        echo "$install_log" | sed 's/^/         /'
+        exit 1
+    fi
+    echo "==> pnpm validated via corepack ($current_pin)"
+}
+
 # Verify Java 25+ is available
 check_java() {
     local java_version
@@ -358,6 +433,8 @@ do_start_prod() {
         echo "==> Skipping precompile (precompiled classes are up to date)"
     fi
 
+    ensure_corepack_pnpm
+
     echo "==> Installing frontend dependencies..."
     cd "$JCLAW_DIR/frontend"
     pnpm install --frozen-lockfile 2>/dev/null || pnpm install
@@ -467,6 +544,8 @@ do_start_dev() {
     fi
 
     # Ensure dependencies are installed
+    ensure_corepack_pnpm
+
     echo "==> Checking frontend dependencies..."
     cd "$JCLAW_DIR/frontend"
     pnpm install --frozen-lockfile 2>/dev/null || pnpm install
