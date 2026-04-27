@@ -26,10 +26,12 @@
   stabilityDays: 3,
 
   // Backpressure caps. prConcurrentLimit caps total open PRs Renovate has
-  // authored; prHourlyLimit caps how fast new ones land in a single run. Both
-  // keep the PR list scannable when many bumps converge.
+  // authored; prHourlyLimit caps how fast new ones land in a single run.
+  // Both are kept at 10 so a weekly run can drain a normal week's drift in
+  // one trigger — prConcurrentLimit still prevents the PR list from
+  // ballooning if merges fall behind.
   prConcurrentLimit: 10,
-  prHourlyLimit: 5,
+  prHourlyLimit: 10,
 
   // Match JClaw's '<scope>: <message>' commit convention so bot commits read
   // consistently with manual ones in git log.
