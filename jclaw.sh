@@ -98,6 +98,19 @@ ${emerald}     ██╗ ██████╗██╗      █████╗ 
 ${dim}Java-first AI automation platform — Play 1.x backend, Nuxt 3 SPA,
 LLM agents, OCR, web tools.${reset}
 
+EOF
+
+    # Audience split: a developer working from a `git clone` needs setup +
+    # the full command surface; a user running an unzipped distribution
+    # (play dist + tar/zip) just needs to start/stop the app. The cleanest
+    # signal is "is the script's directory inside a git work tree" —
+    # covers clones AND worktrees but not dist tarballs (which strip
+    # .git/ at packaging time). Anchored at $SCRIPT_DIR rather than CWD
+    # so running ./jclaw.sh from a deeper subdirectory still classifies
+    # correctly.
+    if /usr/bin/git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        # Developer view: cloned repo
+        cat <<EOF
   ${cyan}./jclaw.sh setup${reset}     One-time setup for a fresh clone
                        (validates prereqs, wires git hooks, installs deps,
                         adds github remote)
@@ -105,22 +118,28 @@ LLM agents, OCR, web tools.${reset}
 
 EOF
 
-    # First-run hint footer. When core.hooksPath != .githooks (the canonical
-    # signal that do_setup hasn't run yet), append a single highlighted line
-    # nudging the user at the setup command. Composable with everything —
-    # no interactivity, no stateful prompt, no scriptability hazard. Once
-    # setup runs, the hint disappears on its own.
-    #
-    # `|| true` after the git config substitution is load-bearing under
-    # `set -e`: outside a git repo (e.g. running jclaw.sh from a tarball
-    # extract or an ops box that copied the script standalone), git exits
-    # 128 and would otherwise kill the script. The empty hooks_path
-    # correctly trips the hint in that case.
-    local hooks_path
-    hooks_path=$(/usr/bin/git config --local core.hooksPath 2>/dev/null || true)
-    if [[ "$hooks_path" != ".githooks" ]]; then
-        echo "${yellow}${bold}→ Setup hasn't run on this clone yet. Run ${cyan}./jclaw.sh setup${yellow} to wire things up.${reset}"
-        echo ""
+        # First-run hint footer (developer-only — users have no setup to
+        # run, and the hooksPath signal doesn't apply outside a git work
+        # tree). When core.hooksPath != .githooks, append a single
+        # highlighted line nudging the user at the setup command. Once
+        # setup runs, the hint disappears on its own. `|| true` keeps
+        # the substitution safe under `set -e` if config lookup fails.
+        local hooks_path
+        hooks_path=$(/usr/bin/git -C "$SCRIPT_DIR" config --local core.hooksPath 2>/dev/null || true)
+        if [[ "$hooks_path" != ".githooks" ]]; then
+            echo "${yellow}${bold}→ Setup hasn't run on this clone yet. Run ${cyan}./jclaw.sh setup${yellow} to wire things up.${reset}"
+            echo ""
+        fi
+    else
+        # User view: unzipped distribution, no git context
+        cat <<EOF
+  ${cyan}./jclaw.sh start${reset}     Start JClaw (backend on :9000)
+  ${cyan}./jclaw.sh stop${reset}      Stop the running instance
+  ${cyan}./jclaw.sh status${reset}    Show whether the backend is running
+  ${cyan}./jclaw.sh logs${reset}      Tail the application log
+  ${cyan}./jclaw.sh --help${reset}    Full command reference
+
+EOF
     fi
 }
 
