@@ -174,28 +174,67 @@ pnpm() {
     fi
 }
 
-# Ensure the pnpm version pinned in frontend/package.json's `packageManager`
-# field is installed via corepack, with the integrity hash verified. Two
-# distinct concerns:
-#
-#   1. Pin completeness — `corepack use pnpm@VERSION` writes the field as
-#      `pnpm@VERSION+sha512-...`. The +sha hash is what corepack checks the
-#      downloaded tarball against on every install, so a tampered registry
-#      tarball can't slip in unnoticed. Pins authored by hand often omit the
-#      hash, leaving the security gate inert. We auto-add the hash on first
-#      run as a one-time security migration; subsequent runs land in the
-#      no-op branch because the hash is already there.
-#
-#   2. Local availability — `corepack install` (no args) reads packageManager,
-#      downloads that version if missing, and verifies it against the +sha
-#      hash. A mismatch (i.e. the tarball is not what was originally pinned)
-#      causes corepack to exit non-zero. We treat that as a fatal start-time
-#      error: refusing to launch beats running an unverified package manager.
-#
-# Idempotent and zero-cost on subsequent runs once the version is cached.
-# Skipped (with a warning) when corepack itself is unavailable, so operators
-# who ripped corepack out of their Node install can still use jclaw.sh.
-ensure_corepack_pnpm() {
+# Read the packageManager pin from frontend/package.json. Echoes the raw
+# value (e.g. "pnpm@10.33.1+sha512.abc...") on stdout, or empty when the
+# field or file is absent. Used by both the setup-time pin migration and
+# the start-time validation guard.
+read_pnpm_pin() {
+    local frontend_dir="$JCLAW_DIR/frontend"
+    [[ -f "$frontend_dir/package.json" ]] || return 0
+    sed -n 's/.*"packageManager": *"\([^"]*\)".*/\1/p' \
+        "$frontend_dir/package.json" | head -1
+}
+
+# Setup-time only: ensure the packageManager pin includes a +sha512-...
+# integrity hash. Idempotent — already-hashed pins land in the no-op
+# branch. Called from do_setup, never from start paths, so the
+# package.json mutation is scoped to an explicit "I'm setting up this
+# clone" action rather than appearing as a surprise during start.
+setup_corepack_pnpm_pin() {
+    local frontend_dir="$JCLAW_DIR/frontend"
+    [[ -d "$frontend_dir" && -f "$frontend_dir/package.json" ]] || return 0
+
+    if ! command -v corepack >/dev/null 2>&1; then
+        echo "    Warning: corepack unavailable; cannot add pnpm integrity hash."
+        echo "             Install Node.js 20+ to get corepack, then re-run setup."
+        return 0
+    fi
+
+    local current_pin
+    current_pin=$(read_pnpm_pin)
+    if [[ -z "$current_pin" ]]; then
+        echo "    Warning: no packageManager pin in frontend/package.json — nothing to migrate."
+        return 0
+    fi
+
+    if [[ "$current_pin" == *"+sha"* ]]; then
+        echo "    pnpm pin already includes integrity hash — no migration needed."
+        return 0
+    fi
+
+    # `corepack use pnpm@VERSION` re-pins to the same version string and
+    # appends the +sha512-... hash. Rewrites frontend/package.json — the
+    # mutation is the whole point of running setup.
+    local pin_version="${current_pin#pnpm@}"
+    echo "    Adding pnpm integrity hash via corepack use..."
+    echo "      Old pin: $current_pin"
+    if ! (cd "$frontend_dir" && corepack use "pnpm@$pin_version" >/dev/null 2>&1); then
+        echo "Error: corepack use failed; could not add integrity hash."
+        echo "       Try manually: cd frontend && corepack use pnpm@$pin_version"
+        exit 1
+    fi
+    local new_pin
+    new_pin=$(read_pnpm_pin)
+    echo "      New pin: $new_pin"
+    echo "      Note: frontend/package.json was modified — review and commit."
+}
+
+# Start-time only: validate that the pinned pnpm is present locally and
+# verifies against its +sha hash. Read-only — never mutates package.json.
+# Hard-fails on missing hash with an actionable error pointing at setup,
+# so the security gate doesn't silently degrade to no-op when someone
+# hand-edits the pin and drops the hash.
+validate_corepack_pnpm() {
     local frontend_dir="$JCLAW_DIR/frontend"
     [[ -d "$frontend_dir" && -f "$frontend_dir/package.json" ]] || return 0
 
@@ -206,39 +245,29 @@ ensure_corepack_pnpm() {
     fi
 
     local current_pin
-    current_pin=$(sed -n 's/.*"packageManager": *"\([^"]*\)".*/\1/p' \
-        "$frontend_dir/package.json" | head -1)
+    current_pin=$(read_pnpm_pin)
     if [[ -z "$current_pin" ]]; then
         echo "    Warning: no packageManager pin in frontend/package.json — cannot validate pnpm."
         return 0
     fi
 
-    # First-run security migration: add an integrity hash if the pin lacks one.
-    # `corepack use pnpm@VERSION` re-pins to the same version string and
-    # appends the +sha512-... hash. This rewrites frontend/package.json,
-    # which we surface explicitly so the developer knows to commit it.
     if [[ "$current_pin" != *"+sha"* ]]; then
-        local pin_version="${current_pin#pnpm@}"
-        echo "==> Adding pnpm integrity hash to package.json (one-time security migration)..."
-        echo "    Old pin: $current_pin"
-        if ! (cd "$frontend_dir" && corepack use "pnpm@$pin_version" >/dev/null 2>&1); then
-            echo "Error: corepack use failed; could not add integrity hash."
-            echo "       Try manually: cd frontend && corepack use pnpm@$pin_version"
-            exit 1
-        fi
-        local new_pin
-        new_pin=$(sed -n 's/.*"packageManager": *"\([^"]*\)".*/\1/p' \
-            "$frontend_dir/package.json" | head -1)
-        echo "    New pin: $new_pin"
-        echo "    Note: frontend/package.json was modified — review and commit."
+        echo "Error: pnpm pin lacks integrity hash (frontend/package.json: packageManager=$current_pin)."
+        echo "       Without the +sha512-... hash, corepack cannot verify the downloaded"
+        echo "       tarball against tampering — refusing to launch."
+        echo ""
+        echo "       Fix with one of:"
+        echo "         ./jclaw.sh setup"
+        echo "         cd frontend && corepack use ${current_pin}"
+        exit 1
     fi
 
-    # Steady-state path: ensure the pinned version is present locally and
-    # verify its hash. Output is suppressed on success because corepack is
-    # noisy on cached hits; failures get the full output.
-    local install_log
+    # `corepack install` reads packageManager, downloads the version if
+    # missing, and verifies it against the +sha hash. Output is suppressed
+    # on success because corepack is noisy on cached hits.
+    local install_log install_status
     install_log=$(cd "$frontend_dir" && corepack install 2>&1)
-    local install_status=$?
+    install_status=$?
     if (( install_status != 0 )); then
         echo "Error: corepack install failed — pnpm hash validation may have failed."
         echo "       frontend/package.json packageManager pin: $current_pin"
@@ -293,6 +322,10 @@ do_setup() {
     echo "==> Wiring git hooks (.githooks/)..."
     /usr/bin/git config --local core.hooksPath .githooks
     echo "    core.hooksPath = $(/usr/bin/git config --local core.hooksPath)"
+
+    echo ""
+    echo "==> Pinning pnpm via corepack (with integrity hash)..."
+    setup_corepack_pnpm_pin
 
     echo ""
     echo "==> Installing frontend dependencies (so pre-commit's lint-staged is available)..."
@@ -433,7 +466,7 @@ do_start_prod() {
         echo "==> Skipping precompile (precompiled classes are up to date)"
     fi
 
-    ensure_corepack_pnpm
+    validate_corepack_pnpm
 
     echo "==> Installing frontend dependencies..."
     cd "$JCLAW_DIR/frontend"
@@ -544,7 +577,7 @@ do_start_dev() {
     fi
 
     # Ensure dependencies are installed
-    ensure_corepack_pnpm
+    validate_corepack_pnpm
 
     echo "==> Checking frontend dependencies..."
     cd "$JCLAW_DIR/frontend"

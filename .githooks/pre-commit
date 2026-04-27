@@ -16,9 +16,38 @@
 
 set -euo pipefail
 
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+FRONTEND_DIR="$REPO_ROOT/frontend"
+
+# pnpm pin integrity-hash guard. Refuse commits to frontend/package.json
+# whose `packageManager` field lacks a +sha512-... hash — that hash is
+# what corepack uses to verify downloaded tarballs against tampering, and
+# a hand-edit that drops it silently disables the security gate enforced
+# by ./jclaw.sh start. Catches the regression at commit time so neither
+# `setup` nor `start` has to deal with it after the fact.
+#
+# Only fires when frontend/package.json is staged AND the staged content
+# pins pnpm without a hash. Reads the staged blob via `git show :` so a
+# fix-and-restage cycle (without `git add`) is detected correctly.
+if git diff --cached --name-only --diff-filter=ACMR | grep -qx 'frontend/package.json'; then
+    staged_pin=$(git show ':frontend/package.json' \
+        | sed -n 's/.*"packageManager": *"\([^"]*\)".*/\1/p' | head -1)
+    if [[ -n "$staged_pin" && "$staged_pin" != *"+sha"* ]]; then
+        echo "[jclaw pre-commit] frontend/package.json packageManager pin lacks +sha512-... integrity hash:" >&2
+        echo "[jclaw pre-commit]   staged pin: $staged_pin" >&2
+        echo "[jclaw pre-commit] Without the hash, corepack cannot verify the downloaded pnpm tarball" >&2
+        echo "[jclaw pre-commit] against tampering — refusing the commit." >&2
+        echo "" >&2
+        echo "[jclaw pre-commit] Fix with one of:" >&2
+        echo "[jclaw pre-commit]   ./jclaw.sh setup" >&2
+        echo "[jclaw pre-commit]   cd frontend && corepack use ${staged_pin}" >&2
+        echo "[jclaw pre-commit] then re-stage frontend/package.json and re-commit." >&2
+        exit 1
+    fi
+fi
+
 # Skip when lint-staged isn't installed (e.g. a fresh clone before
 # `pnpm install` runs in frontend/). Fail open rather than blocking commits.
-FRONTEND_DIR="$(git rev-parse --show-toplevel)/frontend"
 if [[ ! -x "$FRONTEND_DIR/node_modules/.bin/lint-staged" ]]; then
     echo "[jclaw pre-commit] lint-staged not installed yet — skipping." >&2
     echo "[jclaw pre-commit] Run 'cd frontend && pnpm install' to enable this hook." >&2

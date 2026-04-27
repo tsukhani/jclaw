@@ -105,7 +105,12 @@ Why this matters: every push to `main` triggers the `pre-push` hook's full backe
 - Nuxt 3 SPA in `frontend/` with Tailwind CSS
 - API proxy: dev requests to `/api/*` are forwarded to the Play backend via Nitro devProxy (see `frontend/nuxt.config.ts`)
 - `useApi<T>(path)` composable in `frontend/composables/useApi.ts` wraps `useFetch` for backend calls
-- Package manager: **pnpm**, version pinned in `frontend/package.json`'s `packageManager` field with a `+sha512-...` integrity hash. `jclaw.sh start` (both dev and prod) auto-runs `corepack install` before any pnpm step, which downloads the pinned version on first use and verifies the tarball against the hash on every subsequent run. The hash gate refuses to launch on mismatch — never bypass it. To bump the pin: `cd frontend && corepack use pnpm@<version>` (writes both the version and a fresh hash), then commit `frontend/package.json`.
+- Package manager: **pnpm**, version pinned in `frontend/package.json`'s `packageManager` field with a `+sha512-...` integrity hash. Three layers keep the hash present and verified:
+  1. `./jclaw.sh setup` runs `corepack use pnpm@<version>` to add the hash if missing (idempotent — no-op once the hash is in place).
+  2. The `.githooks/pre-commit` guard refuses to commit a `frontend/package.json` whose `packageManager` value lacks a hash, so a hand-edit that drops it can't slip through.
+  3. `./jclaw.sh start` (both dev and prod) runs `corepack install` before any pnpm step — read-only validate, never mutates `package.json`. Downloads the pinned version on first use, verifies the tarball against the hash on every subsequent run. Hard-fails the start on missing hash or mismatch — never bypass.
+
+  To bump the pin: `cd frontend && corepack use pnpm@<version>` (writes both the version and a fresh hash), then commit `frontend/package.json`.
 
 ### API Contract
 Backend exposes JSON endpoints under `/api/` (e.g., `ApiController.status` at `GET /api/status`). The frontend consumes these through the proxy — no CORS configuration needed.
