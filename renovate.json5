@@ -91,5 +91,19 @@
       matchUpdateTypes: ["minor", "patch"],
       matchPackageNames: ["vitest", "@vitest/**", "@vue/test-utils", "happy-dom"],
     },
+
+    // Auto-merge patch and minor bumps directly to main via signed git push,
+    // skipping Bitbucket's merge UI (which can't sign commits on Bitbucket
+    // Server 7.21.10 — see JCLAW-180). Renovate runs as a catch-all here:
+    // grouped bumps inherit automerge from this rule, ungrouped ones still
+    // match by updateType. Major bumps fall through (matchUpdateTypes excludes
+    // them) and continue to open PRs for human review, merged locally with a
+    // signed git merge. Requires gitPrivateKey configured on the runner so the
+    // resulting commits land verified on the github mirror.
+    {
+      matchUpdateTypes: ["minor", "patch"],
+      automerge: true,
+      automergeType: "branch",
+    },
   ],
 }

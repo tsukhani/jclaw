@@ -15,19 +15,33 @@
 //
 //   - Bitbucket                     (Username with password — already exists)
 //       Reuses the existing org-wide Abundent Bitbucket Server credential.
-//       The associated user/PAT must have Project READ + Repo WRITE scopes
-//       on jclaw/jclaw to let Renovate open PRs.
+//       The associated user/PAT must have Project READ and Repo WRITE
+//       scopes on jclaw/jclaw to let Renovate push branches and merge.
 //   - github-token                  (Secret text — already exists)
 //       Used by Renovate to fetch release notes from github.com for any
 //       upstream package's changelog. Without it, anonymous GitHub rate
 //       limits hit fast on a busy run.
+//   - renovate-signing-key          (Secret text)
+//       Base64-encoded SSH private key used by Renovate to sign every
+//       commit it authors (bump commits and auto-merge commits both).
+//       The matching public key must be registered on the dedicated
+//       renovate-bot GitHub account's Signing Keys (distinct from auth
+//       keys) so commits land with the Verified badge on the github
+//       mirror. Generate and encode with:
+//
+//         ssh-keygen -t ed25519 -f /tmp/renovate-key -C 'renovate@abundent.com' -N ''
+//         base64 < /tmp/renovate-key | tr -d '\n'
+//
+//       Paste the base64 string as the credential value. See JCLAW-180
+//       for the full setup runbook including the GitHub-account flow.
 //
 // Single stage. Each Monday at ~6am the cron fires, the docker run pulls
 // the renovate/renovate image and points it at this clone's repo on
 // Bitbucket Server. Renovate scans renovate.json5 + the source tree,
-// opens PRs against the main branch on Bitbucket. You review + merge on
-// Bitbucket; the existing /deploy flow then propagates to the github
-// mirror via the second remote push.
+// auto-merges patch and minor bumps directly to main via signed git push
+// (renovate.json5's automergeType: "branch" rule), and opens PRs only
+// for major bumps that need human review. The /deploy flow propagates
+// the resulting commits to the github mirror via its second remote push.
 
 pipeline {
     agent any
@@ -42,9 +56,11 @@ pipeline {
     triggers {
         // Weekly, Monday 06:00 in Jenkins timezone. The "H 6 * * 1" form
         // (rather than "0 6 * * 1") lets Jenkins jitter the minute across
-        // jobs to avoid stampedes when many cron-scheduled jobs share the
-        // same hour. Aligns with renovate.json5's "before 6am on monday"
-        // schedule directive.
+        // jobs to avoid stampedes when many cron-scheduled jobs share
+        // the same hour. Renovate has no schedule directive of its own
+        // (we removed it after diagnosing a timezone-misaligned filter
+        // in JCLAW-180), so this cron is the sole gate on when Renovate
+        // runs.
         cron('H 6 * * 1')
     }
 
@@ -58,6 +74,7 @@ pipeline {
                         passwordVariable: 'RENOVATE_PASSWORD'
                     ),
                     string(credentialsId: 'github-token', variable: 'GITHUB_COM_TOKEN'),
+                    string(credentialsId: 'renovate-signing-key', variable: 'RENOVATE_GIT_PRIVATE_KEY'),
                 ]) {
                     // Bitbucket Server platform via username + PAT (Renovate
                     // treats RENOVATE_PASSWORD as the PAT for HTTP basic
@@ -73,6 +90,14 @@ pipeline {
                     // even though the platform is Bitbucket. It's NOT an
                     // auth credential for the platform itself.
                     //
+                    // RENOVATE_GIT_PRIVATE_KEY holds the base64-encoded SSH
+                    // private key Renovate uses to sign every commit it
+                    // authors. Renovate auto-detects SSH vs GPG from the
+                    // decoded content. The matching public key must be on
+                    // the renovate-bot GitHub account's Signing Keys for
+                    // commits to land Verified on the github mirror; see
+                    // the credentials block at the top of this file.
+                    //
                     // LOG_LEVEL=info keeps the build console scannable.
                     // Bump to "debug" temporarily if Renovate skips a
                     // dependency unexpectedly and you need to see why.
@@ -83,6 +108,7 @@ pipeline {
                             -e RENOVATE_USERNAME="$RENOVATE_USERNAME" \\
                             -e RENOVATE_PASSWORD="$RENOVATE_PASSWORD" \\
                             -e RENOVATE_GIT_AUTHOR='Renovate Bot <renovate@abundent.com>' \\
+                            -e RENOVATE_GIT_PRIVATE_KEY="$RENOVATE_GIT_PRIVATE_KEY" \\
                             -e RENOVATE_REPOSITORIES='jclaw/jclaw' \\
                             -e GITHUB_COM_TOKEN="$GITHUB_COM_TOKEN" \\
                             -e LOG_LEVEL=info \\
