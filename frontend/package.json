@@ -54,11 +54,11 @@
     "@playwright/test": "^1.59.1",
     "@tailwindcss/vite": "^4.2.2",
     "@vitest/coverage-v8": "^4.1.2",
-    "@vue/test-utils": "^2.4.6",
+    "@vue/test-utils": "^2.4.8",
     "axe-core": "^4.11.3",
     "eslint": "^10.2.1",
     "eslint-plugin-vuejs-accessibility": "^2.5.0",
-    "happy-dom": "^20.8.9",
+    "happy-dom": "^20.9.0",
     "lint-staged": "^16.4.0",
     "postcss-html": "^1.8.1",
     "stylelint": "^17.8.0",
@@ -66,7 +66,7 @@
     "stylelint-config-standard-vue": "^1.0.0",
     "tailwindcss": "^4.2.2",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.2",
+    "vitest": "^4.1.5",
     "vue-axe": "^3.1.2",
     "vue-tsc": "^3.2.6"
   }
