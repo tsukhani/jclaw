@@ -57,50 +57,30 @@ Examples:
   ./jclaw.sh loadtest                                 # Drive default 10×5 load test against :9000
   ./jclaw.sh --concurrency 50 --iterations 20 loadtest
 EOF
-    exit 1
 }
 
-# Detect first-run state and print a welcome banner with ASCII-art logo
-# before the user's first command tries to do real work. "First-run" means
-# do_setup hasn't wired core.hooksPath = .githooks yet — that single config
-# write is the canonical setup signal, idempotent across re-runs and stable
-# across worktree adds. Skipped when the user is already running setup
-# (no point telling them to run what they're invoking).
-#
-# This is the closest thing JClaw can offer to a "post-clone hook" — git
-# itself has none, because tracked files can't write into .git/hooks/ and
-# the directory doesn't exist until clone creates it. The first user
-# action we CAN intercept is the first ./jclaw.sh invocation, so the
-# welcome rides in there.
+# Render the JClaw landing screen on bare invocation: ASCII-art logo in
+# emerald, one-line product blurb, and pointers at the two commands every
+# new contributor needs (setup for first-time wiring, --help for the full
+# reference). Always runs when ./jclaw.sh is invoked with no command —
+# the previous design suppressed it after the first setup, but that
+# hid the intro from anyone who wanted to see it again.
 #
 # TTY-aware: ANSI colors only when stdout is an interactive terminal,
 # so piping into less or redirecting into a logfile doesn't bury escape
-# codes in the output.
-maybe_show_welcome() {
-    [[ "$COMMAND" == "setup" ]] && return 0
-    # `|| true` is load-bearing under `set -e`: when the script runs outside
-    # a git repo (e.g. an ops box that copied jclaw.sh standalone), git
-    # config exits 128 and would otherwise kill the script before the
-    # welcome could even render. The empty hooks_path correctly trips the
-    # first-run banner in that case.
-    local hooks_path
-    hooks_path=$(/usr/bin/git config --local core.hooksPath 2>/dev/null || true)
-    [[ "$hooks_path" == ".githooks" ]] && return 0
-
-    local emerald='' cyan='' yellow='' dim='' bold='' reset=''
+# codes in the output. Modern terminals (iTerm2, macOS Terminal,
+# Windows Terminal, VS Code/Cursor integrated, gnome-terminal) render
+# 24-bit true color; older 256-color terminals fall back to nearest
+# match, still readable.
+show_intro() {
+    local emerald='' cyan='' dim='' reset=''
     if [[ -t 1 ]]; then
-        # 24-bit true color = Tailwind emerald-400 (#34d399) — matches the
-        # bg-emerald-* accents used elsewhere in the project (Settings UI
-        # toggles, "active" badges) and pops better on dark terminal
-        # backgrounds than the dim 16-color green. Modern terminals
-        # (iTerm2, macOS Terminal, Windows Terminal, VS Code/Cursor
-        # integrated, gnome-terminal) all render true color; older
-        # terminals fall back to nearest 256-color, still readable.
+        # Tailwind emerald-400 (#34d399) matches the bg-emerald-* accents
+        # used elsewhere in the project (Settings UI toggles, "active"
+        # badges) — same color story everywhere reads as one product.
         emerald=$'\033[38;2;52;211;153m'
         cyan=$'\033[1;36m'
-        yellow=$'\033[1;33m'
         dim=$'\033[2m'
-        bold=$'\033[1m'
         reset=$'\033[0m'
     fi
 
@@ -116,22 +96,10 @@ ${emerald}     ██╗ ██████╗██╗      █████╗ 
 ${dim}Java-first AI automation platform — Play 1.x backend, Nuxt 3 SPA,
 LLM agents, OCR, web tools.${reset}
 
-${yellow}${bold}First run on this clone — setup hasn't wired things up yet.${reset}
-
-Run setup before launching:
-
-    ${cyan}./jclaw.sh setup${reset}
-
-Setup validates prerequisites (Java 25+, Python 3.9+, Node 20+, Play
-1.x, corepack), wires git hooks, installs frontend dependencies, and
-adds the github remote. Idempotent — safe to re-run any time.
-
-After setup, common entry points:
-
-    ${cyan}./jclaw.sh --dev start${reset}    Dev mode: Play autoreload + Nuxt HMR
-    ${cyan}./jclaw.sh start${reset}          Production: precompiled, ZGC, fixed heap
-    ${cyan}./jclaw.sh test${reset}           Backend + frontend test suites
-    ${cyan}./jclaw.sh${reset}                Full command reference
+  ${cyan}./jclaw.sh setup${reset}     One-time setup for a fresh clone
+                       (validates prereqs, wires git hooks, installs deps,
+                        adds github remote)
+  ${cyan}./jclaw.sh --help${reset}    Full command reference
 
 EOF
 }
@@ -200,16 +168,27 @@ while [[ $# -gt 0 ]]; do
             COMMAND="$1"
             shift
             ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
         *)
             echo "Unknown argument: $1"
             usage
+            exit 1
             ;;
     esac
 done
 
-maybe_show_welcome
-
-[[ -z "$COMMAND" ]] && usage
+# Bare invocation (no command given) is a deliberate landing screen, not
+# an error — render the intro and exit cleanly. The --help flag above
+# is the path to the full command reference; the intro just points at
+# it. This frees `./jclaw.sh status` and friends from rendering a
+# 30-line banner on every invocation.
+if [[ -z "$COMMAND" ]]; then
+    show_intro
+    exit 0
+fi
 
 # Validate flag combinations
 if [[ "$DEV_MODE" == true && -n "$DEPLOY_DIR" ]]; then
