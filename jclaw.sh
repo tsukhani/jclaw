@@ -668,10 +668,27 @@ do_start_prod() {
         exit 1
     fi
 
-    # Stop any running instance before rebuilding
+    # Stop any running instance before rebuilding. `play stop` returns as
+    # soon as the signal is sent, but the JVM holds port $BACKEND_PORT for
+    # several more seconds while shutdown hooks run (DB pool drain, JPA
+    # cleanup, telegram cooldown). Without waiting here, the lsof guard
+    # below would mistake the dying instance for a foreign holder and
+    # error with the same misleading "already in use" message we just
+    # caused ourselves. Mirrors the wait+SIGKILL pattern in do_stop_dev.
     if [[ -f "server.pid" ]] && kill -0 "$(cat server.pid)" 2>/dev/null; then
         echo "==> Stopping running instance (pid: $(cat server.pid))..."
         play stop
+
+        if ! wait_for_port_free "$BACKEND_PORT" 30; then
+            local stragglers
+            stragglers=$(lsof -ti :"$BACKEND_PORT" 2>/dev/null) || true
+            if [[ -n "$stragglers" ]]; then
+                echo "    Port $BACKEND_PORT still bound after 30s; SIGKILL on residual pids: $stragglers"
+                kill -9 $stragglers 2>/dev/null || true
+                wait_for_port_free "$BACKEND_PORT" 5 || true
+            fi
+        fi
+        rm -f server.pid
     fi
 
     # Refuse to start if the port is held by anything (a foreign process from
