@@ -56,11 +56,11 @@ async function checkStatus() {
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), 5000)
-    const data = await $fetch<{ status: string, version: string }>('/api/status', {
+    const data = await $fetch<{ status: string, applicationVersion: string }>('/api/status', {
       signal: controller.signal,
     })
     clearTimeout(timeout)
-    apiVersion.value = data.version
+    apiVersion.value = data.applicationVersion
     apiOnline.value = data.status === 'ok'
   }
   catch {

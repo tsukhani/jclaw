@@ -14,7 +14,7 @@ public class ApiController extends Controller {
         json.addProperty("status", "ok");
         json.addProperty("application", play.Play.configuration.getProperty("application.name"));
         json.addProperty("mode", play.Play.mode.toString());
-        json.addProperty("version", play.Play.configuration.getProperty("application.version", "0.0.0"));
+        json.addProperty("applicationVersion", play.Play.configuration.getProperty("application.version", "0.0.0"));
         renderJSON(json.toString());
     }
 }
