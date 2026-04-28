@@ -105,7 +105,8 @@ The healthcheck uses bash's `/dev/tcp` to probe `:9000` — avoids pulling `curl
 
 ## Production configuration
 
-- Template: `conf/application.prod.example.conf`.
+All environment-specific config lives in the single `conf/application.conf` via Play's `%prod.` and `%test.` line prefixes — there is no separate `application.prod.conf` or template. The only operator-managed value outside the file is `application.secret`, which resolves from an env var (whose name is whatever conf's `application.secret=${VARNAME}` declares; `play secret` writes it to `.env`).
+
 - The shipped `application.conf` keeps DB on H2 file DB even in prod — PostgreSQL config is commented-in template (`%prod.db.url=jdbc:postgresql://…`). Switch and provide `DB_PASSWORD` env var before promoting.
 - `jpa.ddl=update` in prod (`%prod.jpa.ddl=update`). Explicit tradeoff for pre-1.0 — additive schema only; renames/type changes need manual intervention.
 - Pool: `%prod.db.pool.maxSize=30`, `%prod.db.pool.timeout=5000`.

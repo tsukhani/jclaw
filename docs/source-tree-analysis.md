@@ -68,8 +68,9 @@ jclaw/
 │   └── views/                    # Groovy templates (only Application, errors — SPA handles UI).
 │
 ├── conf/                         # Play configuration.
-│   ├── application.conf          # Main config (ports, DB, JPA, pools, %prod/%test overrides).
-│   ├── application.prod.example.conf  # Production template.
+│   ├── application.conf          # The only config file. All environment-specific
+│   │                             # values live here under %prod. / %test. prefixes;
+│   │                             # secrets resolve from .env via ${VARNAME} placeholder.
 │   ├── routes                    # URL table — ~70 /api/* endpoints + SPA catch-all.
 │   ├── dependencies.yml          # Play module deps: playwright, tika, flexmark, flying-saucer, etc.
 │   ├── log4j2.xml / log4j2-prod.xml  # Logging.

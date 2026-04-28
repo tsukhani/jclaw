@@ -88,9 +88,9 @@ frontend/.cache/
 public/spa/
 
 # Environment files (don't commit secrets!)
-conf/application.prod.conf
-conf/application.local.conf
-conf/secrets.conf
+# All environment overrides live in conf/application.conf with %prod. / %test.
+# prefixes — there are no per-environment conf files. Only secrets are
+# gitignored, via .env (loaded by jclaw.sh into the JVM environment).
 .env
 .env.local
 .env.*.local
