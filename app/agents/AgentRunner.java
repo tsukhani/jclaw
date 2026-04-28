@@ -929,7 +929,7 @@ public class AgentRunner {
             return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
         }
         if (isCancelled.get()) {
-            return priorContent;
+            return cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
         }
         EventLogger.info("tool", agent.name, null,
                 "Streaming round %d: executing %d tool call(s)".formatted(round + 1, toolCalls.size()));
@@ -942,7 +942,7 @@ public class AgentRunner {
                 cb.onStatus(), cb.onToolCall(), collectedImages, isCancelled);
         trace.addToolRound((System.nanoTime() - toolRoundStartNs) / 1_000_000L);
 
-        if (isCancelled.get()) return priorContent;
+        if (isCancelled.get()) return cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
 
         cb.onStatus().accept("Processing results (round %d)...".formatted(round + 1));
         EventLogger.info("llm", agent.name, null,
@@ -958,13 +958,14 @@ public class AgentRunner {
                 effectiveModelIdForCall, currentMessages, tools, cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode);
 
         try {
-            if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, null, cb)) return priorContent;
+            if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, null, cb))
+                return cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return priorContent;
+            return cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
         }
 
-        if (isCancelled.get()) return priorContent;
+        if (isCancelled.get()) return cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
 
         // Fold this round's usage into the turn-level cumulative (JCLAW-76).
         // Runs regardless of whether the round resolves to more tool calls,
@@ -1017,10 +1018,11 @@ public class AgentRunner {
             var retry = provider.chatStreamAccumulate(
                     effectiveModelIdForCall, retryMessages, tools, cb.onToken(), cb.onReasoning(), retryMaxTokens, thinkingMode);
             try {
-                if (!awaitAccumulatorOrCancel(retry, isCancelled, agent, null, cb)) return priorContent;
+                if (!awaitAccumulatorOrCancel(retry, isCancelled, agent, null, cb))
+                    return cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return priorContent;
+                return cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
             }
 
             // Retry round is a real LLM call — its usage counts too (JCLAW-76).
@@ -1049,6 +1051,46 @@ public class AgentRunner {
         return buildImagePrefix(collectedImages, accumulator.content)
                 + accumulator.content
                 + buildDownloadSuffix(collectedImages, accumulator.content, channelType);
+    }
+
+    /**
+     * Resolve the return value for a cancellation early-exit inside
+     * {@link #handleToolCallsStreaming}. When {@code priorContent} is non-blank
+     * (the round-1 model emitted a preamble before the tool calls), preserve it
+     * untouched — the user already saw it streamed.
+     *
+     * <p>When {@code priorContent} is empty, the model emitted only tool_calls
+     * on round 1 and the synthesis was about to run. Returning {@code ""} here
+     * was the silent-data-loss bug behind "(empty response)" reports: a
+     * heartbeat write fail, token write fail, or 600s safety timeout flips
+     * {@code cancelled}, the tool result is already on screen, and the
+     * synthesis disappears with no diagnostic. Emit a labeled fallback instead
+     * so the persisted assistant row is non-empty and the user sees what
+     * happened.
+     *
+     * <p>The fallback is also pushed via {@link StreamingCallbacks#onToken} for
+     * symmetry with {@link #handleToolCallsStreaming}'s empty-retry diagnostic.
+     * If the SSE channel is already dead the underlying {@code writeSse} call
+     * is a no-op (it catches the write exception); on Telegram the sink's
+     * {@code update} is similarly tolerant.
+     */
+    private static String cancelledReturn(String priorContent, List<String> collectedImages,
+                                           String channelType, StreamingCallbacks cb,
+                                           Agent agent, int round) {
+        if (priorContent != null && !priorContent.isBlank()) {
+            return priorContent;
+        }
+        EventLogger.warn("llm", agent != null ? agent.name : null, null,
+                "Cancelled in round %d before any synthesis content — emitting labeled fallback"
+                        .formatted(round + 1));
+        var images = collectedImages != null ? collectedImages : List.<String>of();
+        var fallbackPrefix = images.isEmpty() ? "" : String.join("\n\n", images) + "\n\n";
+        var fallbackSuffix = buildDownloadSuffix(images, "", channelType);
+        var fallback = fallbackPrefix
+                + "*[Synthesis was cancelled before the model produced any output. Tool results are in the conversation history above — try resending the request.]*"
+                + fallbackSuffix;
+        cb.onToken().accept(fallback);
+        return fallback;
     }
 
     /**

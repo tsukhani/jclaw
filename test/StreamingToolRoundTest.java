@@ -123,4 +123,95 @@ public class StreamingToolRoundTest extends UnitTest {
         assertTrue(maxRounds > 0 && maxRounds <= 20,
                 "MAX_TOOL_ROUNDS should be between 1 and 20, got: " + maxRounds);
     }
+
+    // === cancelledReturn: cancellation early-exit fallback resolution ===
+
+    private static java.lang.reflect.Method cancelledReturnMethod() throws Exception {
+        var m = AgentRunner.class.getDeclaredMethod("cancelledReturn",
+                String.class, List.class, String.class,
+                AgentRunner.StreamingCallbacks.class, models.Agent.class, int.class);
+        m.setAccessible(true);
+        return m;
+    }
+
+    private static AgentRunner.StreamingCallbacks recordingCallbacks(java.util.concurrent.atomic.AtomicReference<String> emitted) {
+        return new AgentRunner.StreamingCallbacks(
+                _ -> {}, emitted::set, _ -> {}, _ -> {}, _ -> {}, _ -> {}, _ -> {}, () -> {});
+    }
+
+    @Test
+    public void cancelledReturnPreservesNonBlankPriorContent() throws Exception {
+        // When the round-1 model emitted a preamble before the tool calls
+        // ("Looking that up for you…"), the user already saw it streamed.
+        // A cancellation must not replace it with a "(cancelled)" marker.
+        var emitted = new java.util.concurrent.atomic.AtomicReference<String>();
+        var cb = recordingCallbacks(emitted);
+        var agent = new models.Agent();
+        agent.name = "test-agent";
+
+        var result = (String) cancelledReturnMethod().invoke(null,
+                "Looking that up for you...", List.of(), "web", cb, agent, 0);
+
+        assertEquals("Looking that up for you...", result);
+        assertNull(emitted.get(), "no fallback token must be emitted when prior content is preserved");
+    }
+
+    @Test
+    public void cancelledReturnEmitsLabeledFallbackForEmptyPriorContent() throws Exception {
+        // The bug fix: when priorContent="" (round 1 emitted only tool_calls),
+        // returning "" was the silent-data-loss path. Emit a labeled fallback
+        // instead so the persisted assistant row is non-empty and the user
+        // sees what happened.
+        var emitted = new java.util.concurrent.atomic.AtomicReference<String>();
+        var cb = recordingCallbacks(emitted);
+        var agent = new models.Agent();
+        agent.name = "test-agent";
+
+        var result = (String) cancelledReturnMethod().invoke(null,
+                "", List.of(), "web", cb, agent, 0);
+
+        assertTrue(result.contains("Synthesis was cancelled"),
+                "fallback message must be returned, got: " + result);
+        assertEquals(result, emitted.get(),
+                "fallback must also be pushed via onToken so streamContent has it");
+    }
+
+    @Test
+    public void cancelledReturnTreatsNullAndBlankAsEmpty() throws Exception {
+        var emitted1 = new java.util.concurrent.atomic.AtomicReference<String>();
+        var emitted2 = new java.util.concurrent.atomic.AtomicReference<String>();
+        var agent = new models.Agent();
+        agent.name = "test-agent";
+
+        var nullResult = (String) cancelledReturnMethod().invoke(null,
+                null, List.of(), "web", recordingCallbacks(emitted1), agent, 0);
+        var blankResult = (String) cancelledReturnMethod().invoke(null,
+                "   \n\t  ", List.of(), "web", recordingCallbacks(emitted2), agent, 0);
+
+        assertTrue(nullResult.contains("Synthesis was cancelled"));
+        assertTrue(blankResult.contains("Synthesis was cancelled"));
+        assertNotNull(emitted1.get());
+        assertNotNull(emitted2.get());
+    }
+
+    @Test
+    public void cancelledReturnPrependsCollectedImagesOnFallback() throws Exception {
+        // Tool calls that produced images (screenshots, QR codes) before
+        // cancellation must not have those images dropped — they're already
+        // committed to the conversation history and the user expects to see
+        // them in the assistant bubble.
+        var emitted = new java.util.concurrent.atomic.AtomicReference<String>();
+        var cb = recordingCallbacks(emitted);
+        var agent = new models.Agent();
+        agent.name = "test-agent";
+
+        var images = List.of("![screenshot](attachments/abc123.png)");
+        var result = (String) cancelledReturnMethod().invoke(null,
+                "", images, "web", cb, agent, 1);
+
+        assertTrue(result.startsWith("![screenshot](attachments/abc123.png)"),
+                "collected images must prefix the fallback, got: " + result);
+        assertTrue(result.contains("Synthesis was cancelled"),
+                "fallback message must still be present alongside images");
+    }
 }
