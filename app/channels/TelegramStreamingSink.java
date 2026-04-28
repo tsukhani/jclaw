@@ -454,6 +454,35 @@ public final class TelegramStreamingSink {
     }
 
     /**
+     * Called when the turn was cancelled (JCLAW-181 follow-up: typing-indicator
+     * leak on {@code /stop}). Quiesces the sink without sending anything new:
+     * cancels the typing heartbeat, drops any pending flush, marks the sink
+     * sealed so late tokens become no-ops, and clears stream-checkpoint state
+     * so the recovery job does not try to resume an abandoned turn.
+     *
+     * <p>Distinct from {@link #errorFallback}: no error message is sent and
+     * any partial placeholder is left in place. The {@code /stop} slash command
+     * already sent its own "Stopped." acknowledgement on a separate sink, and
+     * the partial placeholder (when one exists) is informative — it shows the
+     * user what was generated up to the cancel point.
+     *
+     * <p>Idempotent: a second call after seal/error/cancel is a no-op.
+     */
+    public void cancel() {
+        if (!sealed.compareAndSet(false, true)) return;
+        cancelTypingHeartbeatLocked();
+        synchronized (this) {
+            cancelScheduledLocked();
+        }
+        // Match the seal/errorFallback ordering — a flush already mid-HTTP
+        // could land an edit after we return; awaiting it keeps lifecycle
+        // assertions in tests deterministic.
+        awaitInFlightFlush();
+        clearDraftBestEffort();
+        clearStreamCheckpoint();
+    }
+
+    /**
      * Called on LLM-side errors. Deletes the placeholder (if any) and sends
      * a short user-facing error message as a fresh Telegram message.
      */

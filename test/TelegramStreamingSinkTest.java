@@ -474,6 +474,50 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
+    public void typingHeartbeatCancelledByCancel() {
+        // /stop fires ConversationQueue.cancellationFlag, the streaming thread
+        // early-returns out of runStreaming, and runStreaming routes through
+        // sink.cancel() (wired as onCancel). cancel() must stop the heartbeat
+        // so the Telegram client doesn't keep showing "typing..." forever.
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        sink.startTypingHeartbeat();
+        assertTrue(sink.typingHeartbeatActiveForTest());
+
+        sink.cancel();
+        assertFalse(sink.typingHeartbeatActiveForTest(),
+                "cancel must stop the typing heartbeat");
+        assertTrue(sink.sealedForTest(),
+                "cancel must mark the sink sealed so late update() calls no-op");
+    }
+
+    @Test
+    public void cancelIsIdempotent() {
+        // Multiple checkCancelled checkpoints fire onCancel each time; cancel()
+        // must therefore tolerate repeated invocation without exploding or
+        // re-arming any state.
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        sink.startTypingHeartbeat();
+
+        sink.cancel();
+        sink.cancel(); // second call must be a no-op, not throw
+        assertFalse(sink.typingHeartbeatActiveForTest());
+    }
+
+    @Test
+    public void cancelAfterSealIsNoOp() {
+        // A sink that finished naturally (seal) and then gets a late
+        // cancel signal must not be re-sealed or otherwise disturbed.
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        sink.startTypingHeartbeat();
+        sink.seal("");
+        assertTrue(sink.sealedForTest());
+
+        sink.cancel(); // must be a no-op since sealed.compareAndSet returns false
+        assertTrue(sink.sealedForTest());
+        assertFalse(sink.typingHeartbeatActiveForTest());
+    }
+
+    @Test
     public void typingHeartbeatCancelledByErrorFallback() {
         // Error path must also cancel — the error message send will
         // replace the typing indicator, so leaving the heartbeat running

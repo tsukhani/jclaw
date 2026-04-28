@@ -513,7 +513,13 @@ public class ApiChatController extends Controller {
                             Map.of("type", "error", "content", "An error occurred: " + error.getMessage()), true);
                     EventLogger.error("channel", agent.name, "web",
                             "SSE stream error: %s".formatted(error.getMessage()));
-                }
+                },
+                // onCancel: web cancellation is signalled via SSE close, not via
+                // ConversationQueue.cancellationFlag (the only flag /stop flips),
+                // so the runner-level onCancel hook has no transport-side state
+                // to quiesce here. Kept as an explicit no-op so the Telegram path
+                // (typing-heartbeat cleanup) can rely on the callback firing.
+                () -> {}
         );
         AgentRunner.runStreaming(agent, conversationId, "web", username, messageText,
                 cancelled, callbacks, acceptedAtNs, ctx.attachments());

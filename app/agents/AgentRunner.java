@@ -99,8 +99,16 @@ public class AgentRunner {
     ) {}
 
     /**
-     * Callbacks for streaming mode. Groups the 7 event handlers that
+     * Callbacks for streaming mode. Groups the event handlers that
      * {@link #runStreaming} pushes SSE data through.
+     *
+     * <p>{@code onCancel} fires once when {@link #checkCancelled} detects a
+     * cancellation flag flip and the streaming thread is about to early-return.
+     * Unlike {@code onComplete} / {@code onError} it carries no payload — its
+     * job is to let transports quiesce side-channel state (the Telegram typing
+     * heartbeat is the motivating case: JCLAW-181 follow-up). Web's per-request
+     * cancellation is signalled via SSE close, not this hook, so the web
+     * caller passes a no-op.
      */
     public record StreamingCallbacks(
         Consumer<Conversation> onInit,
@@ -109,7 +117,8 @@ public class AgentRunner {
         Consumer<String> onStatus,
         Consumer<ToolCallEvent> onToolCall,
         Consumer<String> onComplete,
-        Consumer<Exception> onError
+        Consumer<Exception> onError,
+        Runnable onCancel
     ) {}
 
     private record PreparedData(
@@ -135,11 +144,17 @@ public class AgentRunner {
 
     /**
      * Check whether the streaming client has disconnected. Logs the cancellation
-     * when detected and returns {@code true} so the caller can short-circuit.
+     * when detected, fires {@code onCancel} so transports can quiesce side-channel
+     * state (e.g. the Telegram typing heartbeat — JCLAW-181 follow-up), and
+     * returns {@code true} so the caller can short-circuit. {@code onCancel}
+     * itself is idempotent on every wired implementation, so multiple checkpoints
+     * along an early-return path are safe.
      */
-    private static boolean checkCancelled(AtomicBoolean isCancelled, Agent agent, String channelType) {
+    private static boolean checkCancelled(AtomicBoolean isCancelled, Agent agent, String channelType,
+                                           StreamingCallbacks cb) {
         if (isCancelled.get()) {
             EventLogger.info("llm", agent.name, channelType, STREAM_CANCELLED_MSG);
+            if (cb != null && cb.onCancel() != null) cb.onCancel().run();
             return true;
         }
         return false;
@@ -435,7 +450,7 @@ public class AgentRunner {
 
                 trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
 
-                if (checkCancelled(isCancelled, agent, channelType)) return;
+                if (checkCancelled(isCancelled, agent, channelType, tracedCb)) return;
 
                 // Phase 2: Assemble prompt, resolve provider, call LLM in streaming loop
                 streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, tracedCb, trace);
@@ -481,6 +496,10 @@ public class AgentRunner {
                 },
                 error -> {
                     try { cb.onError().accept(error); }
+                    finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
+                },
+                () -> {
+                    try { cb.onCancel().run(); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
                 }
         );
@@ -558,7 +577,7 @@ public class AgentRunner {
             return;
         }
 
-        if (checkCancelled(isCancelled, agent, channelType)) return;
+        if (checkCancelled(isCancelled, agent, channelType, cb)) return;
 
         // Fold the remaining DB reads into ONE transaction. Tx.run short-circuits
         // nested calls, so inner helpers that also call Tx.run (e.g. loadRecentMessages
@@ -590,7 +609,7 @@ public class AgentRunner {
         var assembled = prepared.assembled();
         var messages = trimmedMessages;
 
-        if (checkCancelled(isCancelled, agent, channelType)) return;
+        if (checkCancelled(isCancelled, agent, channelType, cb)) return;
 
         trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
 
@@ -620,7 +639,7 @@ public class AgentRunner {
         var accumulator = primary.chatStreamAccumulate(
                 effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode);
 
-        if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType)) return;
+        if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return;
 
         // Retry once on transient 5xx errors
         if (accumulator.error != null && accumulator.error.getMessage() != null
@@ -628,10 +647,10 @@ public class AgentRunner {
             EventLogger.warn("llm", agent.name, null, "Retrying streaming after transient error");
             accumulator = primary.chatStreamAccumulate(
                     effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode);
-            if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType)) return;
+            if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return;
         }
 
-        if (checkCancelled(isCancelled, agent, channelType)) return;
+        if (checkCancelled(isCancelled, agent, channelType, cb)) return;
 
         if (accumulator.error != null) {
             cb.onError().accept(accumulator.error);
@@ -691,7 +710,7 @@ public class AgentRunner {
                     isCancelled, trace, turnUsage, turnImages, channelType);
         }
 
-        if (checkCancelled(isCancelled, agent, channelType)) return;
+        if (checkCancelled(isCancelled, agent, channelType, cb)) return;
 
         trace.mark(LatencyTrace.STREAM_BODY_END);
 
@@ -751,10 +770,11 @@ public class AgentRunner {
 
     private static boolean awaitAccumulatorOrCancel(LlmProvider.StreamAccumulator accumulator,
                                                      AtomicBoolean isCancelled,
-                                                     Agent agent, String channelType)
+                                                     Agent agent, String channelType,
+                                                     StreamingCallbacks cb)
             throws InterruptedException {
         while (!accumulator.awaitCompletion(5000)) {
-            if (checkCancelled(isCancelled, agent, channelType)) return false;
+            if (checkCancelled(isCancelled, agent, channelType, cb)) return false;
         }
         return true;
     }
@@ -938,7 +958,7 @@ public class AgentRunner {
                 effectiveModelIdForCall, currentMessages, tools, cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode);
 
         try {
-            if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, null)) return priorContent;
+            if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, null, cb)) return priorContent;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return priorContent;
@@ -997,7 +1017,7 @@ public class AgentRunner {
             var retry = provider.chatStreamAccumulate(
                     effectiveModelIdForCall, retryMessages, tools, cb.onToken(), cb.onReasoning(), retryMaxTokens, thinkingMode);
             try {
-                if (!awaitAccumulatorOrCancel(retry, isCancelled, agent, null)) return priorContent;
+                if (!awaitAccumulatorOrCancel(retry, isCancelled, agent, null, cb)) return priorContent;
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return priorContent;
@@ -1641,7 +1661,8 @@ public class AgentRunner {
                 _ -> {},                 // onStatus — not surfaced on Telegram
                 _ -> {},                 // onToolCall — JCLAW-170, web-only for now
                 sink::seal,              // onComplete — final edit / planner fallback
-                sink::errorFallback);    // onError — delete placeholder + send error
+                sink::errorFallback,     // onError — delete placeholder + send error
+                sink::cancel);           // onCancel — quiesce typing heartbeat on /stop
         runStreaming(agent, conversation.id, channelType, peerId, text,
                 isCancelled, cb, null, attachments);
     }
