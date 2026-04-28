@@ -129,6 +129,21 @@ describe('Chat page — tool call rendering', () => {
     expect(textarea.exists()).toBe(true)
   })
 
+  it('does not render the empty-response placeholder for an assistant message with tool calls', async () => {
+    // Bug repro: a tool-calling assistant turn with no text content rendered
+    // "(empty response)" because the v-else-if only checked `!msg.reasoning`.
+    // The fix gates the placeholder on `!msg.toolCalls?.length && !streaming`
+    // — a message that did meaningful tool work isn't empty just because the
+    // text channel is blank. The fixture from setupToolCallConversation has
+    // an assistant message (id 101) with `content: ''` and one toolCalls
+    // entry, exactly the shape the screenshot of the bug showed.
+    setupToolCallConversation()
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    expect(component.text()).not.toContain('(empty response)')
+  })
+
   it('nests structured chips under each call, not in one merged grid (JCLAW-170)', async () => {
     // Regression pin: each tool call's chips MUST live inside that call's
     // expanded body, not in a single merged grid below the call list. The

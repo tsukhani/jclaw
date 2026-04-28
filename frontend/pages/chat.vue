@@ -2130,7 +2130,7 @@ function exportConversation() {
                     />
                     <!-- eslint-enable vue/no-v-html -->
                     <div
-                      v-else-if="!msg.reasoning"
+                      v-else-if="!msg.reasoning && !msg.toolCalls?.length && !streaming"
                       class="text-fg-muted text-base italic"
                     >
                       (empty response)
