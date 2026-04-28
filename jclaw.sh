@@ -51,8 +51,15 @@ Options:
                           limits). Pass an integer to force a specific value.
 
 Environment:
-  JCLAW_JVM_HEAP          Production heap size (default: 2g). Sets -Xms == -Xmx.
+  JCLAW_JVM_HEAP          Production heap size (default: 2g). Sets both -Xms
+                          and -Xmx unless they are overridden individually.
                           Example: JCLAW_JVM_HEAP=4g ./jclaw.sh start
+  JCLAW_JVM_XMS           Override -Xms only (defaults to JCLAW_JVM_HEAP).
+  JCLAW_JVM_XMX           Override -Xmx only (defaults to JCLAW_JVM_HEAP).
+  JCLAW_JVM_OPTS          Extra JVM flags appended after the built-in set.
+                          Last-wins for value flags (e.g. MaxDirectMemorySize),
+                          so this lets you override most hardcoded settings.
+                          Example: JCLAW_JVM_OPTS='-XX:MaxDirectMemorySize=512m'
 
 Load-test options (only used with the 'loadtest' command):
   --concurrency <n>       Parallel workers (default: 10)
@@ -110,8 +117,15 @@ Options:
                           limits). Pass an integer to force a specific value.
 
 Environment:
-  JCLAW_JVM_HEAP          JVM heap size (default: 2g). Sets -Xms == -Xmx.
+  JCLAW_JVM_HEAP          JVM heap size (default: 2g). Sets both -Xms and -Xmx
+                          unless they are overridden individually.
                           Example: JCLAW_JVM_HEAP=4g ./jclaw.sh start
+  JCLAW_JVM_XMS           Override -Xms only (defaults to JCLAW_JVM_HEAP).
+  JCLAW_JVM_XMX           Override -Xmx only (defaults to JCLAW_JVM_HEAP).
+  JCLAW_JVM_OPTS          Extra JVM flags appended after the built-in set.
+                          Last-wins for value flags (e.g. MaxDirectMemorySize),
+                          so this lets you override most hardcoded settings.
+                          Example: JCLAW_JVM_OPTS='-XX:MaxDirectMemorySize=512m'
 
 Examples:
   ./jclaw.sh start                              # Start on default port 9000
@@ -870,6 +884,22 @@ do_start_prod() {
     echo "==> Resolving backend dependencies..."
     play deps --sync
 
+    # Wipe tmp/ on every start. It contains things that go stale across
+    # restarts but that the selective-precompile check below can't see:
+    #   - tmp/bytecode/<MODE>/   enhanced bytecode cache (BytecodeCache.java);
+    #                            keyed by class hash, but a wipe also clears
+    #                            entries for classes that were renamed/deleted.
+    #   - tmp/classes/           dev-mode JIT compile output; orphan .class
+    #                            files from refactors live here.
+    #   - tmp/uploads/           Apache MultipartParser staging; should be
+    #                            empty between requests, but a crashed app
+    #                            can leave half-written upload temp files.
+    # Cheap (≤10 MB typical) and the prod path doesn't read tmp/ at all
+    # (it loads precompiled/), so wiping is purely defensive here. The
+    # selective-precompile guard below still skips the compile step when
+    # sources are unchanged.
+    rm -rf tmp
+
     # Auto-precompile when the existing precompiled/ classes are stale or
     # missing. Play 1.x's `play start --%prod` loads precompiled/ as-is
     # and does NOT recompile when sources have changed — without this
@@ -906,8 +936,9 @@ do_start_prod() {
     #   - ZGC: sub-millisecond pause collector. Matters because SSE streams
     #     hold connections open for seconds/tens of seconds; a 100 ms G1
     #     pause would stutter token output to the client.
-    #   - Fixed heap (-Xms == -Xmx): avoids heap-resize pauses under load.
-    #     Default 2 GB; override with JCLAW_JVM_HEAP env var (e.g. 4g).
+    #   - Fixed heap (-Xms == -Xmx by default): avoids heap-resize pauses
+    #     under load. Default 2 GB; size it via JCLAW_JVM_HEAP, or split
+    #     -Xms / -Xmx with JCLAW_JVM_XMS / JCLAW_JVM_XMX.
     #   - HeapDumpOnOutOfMemoryError + ExitOnOutOfMemoryError: dump for
     #     postmortem, then exit cleanly so a process manager can restart.
     #   - MaxDirectMemorySize: caps Netty off-heap buffer allocation so a
@@ -920,10 +951,18 @@ do_start_prod() {
     # Play 1.x passes unrecognized args straight to the JVM (see
     # framework/pym/play/application.py:java_cmd), so these become the
     # actual java command line — no -J prefix needed.
+    #
+    # JCLAW_JVM_OPTS is appended last; the JVM uses last-wins for value
+    # flags, so a user can override e.g. MaxDirectMemorySize without
+    # editing the script. Boolean GC flags (UseZGC vs UseG1GC) conflict
+    # rather than override — switching collectors still requires editing
+    # the array below.
     local heap="${JCLAW_JVM_HEAP:-2g}"
+    local xms="${JCLAW_JVM_XMS:-$heap}"
+    local xmx="${JCLAW_JVM_XMX:-$heap}"
     local jvm_opts=(
-        "-Xms${heap}"
-        "-Xmx${heap}"
+        "-Xms${xms}"
+        "-Xmx${xmx}"
         "-XX:+UseZGC"
         "-XX:+HeapDumpOnOutOfMemoryError"
         "-XX:HeapDumpPath=$JCLAW_DIR/logs/heap-oom.hprof"
@@ -938,8 +977,22 @@ do_start_prod() {
     pool_arg=$(resolve_play_pool)
     [[ -n "$pool_arg" ]] && jvm_opts+=("$pool_arg")
 
+    # User-supplied extras go last so last-wins semantics let them override
+    # value flags (e.g. -XX:MaxDirectMemorySize=512m). Word-splitting on the
+    # env var is intentional: it lets the operator pass multiple flags.
+    if [[ -n "${JCLAW_JVM_OPTS:-}" ]]; then
+        # shellcheck disable=SC2206
+        local extra_opts=( ${JCLAW_JVM_OPTS} )
+        jvm_opts+=( "${extra_opts[@]}" )
+    fi
+
     echo "==> Starting Play backend on port $BACKEND_PORT (prod)..."
-    echo "    JVM: ${heap} heap, ZGC, GC log → logs/gc.log"
+    if [[ "$xms" == "$xmx" ]]; then
+        echo "    JVM: ${xms} heap (fixed), ZGC, GC log → logs/gc.log"
+    else
+        echo "    JVM: -Xms${xms} -Xmx${xmx}, ZGC, GC log → logs/gc.log"
+    fi
+    [[ -n "${JCLAW_JVM_OPTS:-}" ]] && echo "    Extra JVM opts: ${JCLAW_JVM_OPTS}"
     if [[ -n "$pool_arg" ]]; then
         echo "    Play invocation pool: ${pool_arg#-Dplay.pool=} (explicit override)"
     else
@@ -1017,6 +1070,13 @@ do_start_dev() {
 
     echo "==> Resolving backend dependencies..."
     play deps --sync
+
+    # Wipe tmp/ on every start. See the prod-path counterpart for the full
+    # rationale — same staleness concerns apply here. In dev the trade-off
+    # is that the first request after restart re-enhances every accessed
+    # class (a few seconds of latency on the first hit), which is the cost
+    # of a guaranteed-clean enhancer cache and bytecode store.
+    rm -rf tmp
 
     local pool_arg
     pool_arg=$(resolve_play_pool)

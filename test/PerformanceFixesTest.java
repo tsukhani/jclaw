@@ -327,6 +327,19 @@ public class PerformanceFixesTest extends UnitTest {
         var agentId = agent.id;
         var convoId = convo.id;
 
+        // Capture the baseline connection count before spawning the AgentRunner
+        // virtual thread. The test infrastructure holds connections we don't
+        // control (the @tests HTTP request Play tx, the test-runner Job tx,
+        // and this thread's own re-begun tx); measuring AgentRunner's
+        // contribution as a delta from baseline keeps the assertion robust to
+        // changes in framework threading. Pre-Loom, await() suspended the
+        // HTTP request and released its connection, so baseline was 1. With
+        // VT-aware await(), it blocks and the connection stays held for the
+        // duration of the test method, raising baseline to 2.
+        var ds = play.db.DB.getDataSource("default");
+        int baseline = (ds instanceof com.zaxxer.hikari.HikariDataSource baselineHds)
+                ? baselineHds.getHikariPoolMXBean().getActiveConnections() : -1;
+
         try {
             var testError = new java.util.concurrent.atomic.AtomicReference<Throwable>();
             var testThread = Thread.ofVirtual().start(() -> {
@@ -351,16 +364,16 @@ public class PerformanceFixesTest extends UnitTest {
             if (testError.get() != null) throw testError.get();
 
             // --- THE KEY ASSERTION ---
-            // The test thread's Play request transaction holds 1 connection.
-            // If run()'s Tx.run() scoping is correct, the virtual thread has
-            // released its connection before the HTTP call, so we see exactly 1.
-            // If run() leaked a connection, we'd see 2.
-            var ds = play.db.DB.getDataSource("default");
-            if (ds instanceof com.zaxxer.hikari.HikariDataSource hds) {
+            // AgentRunner.run on a virtual thread should add zero connections
+            // to the pool during the LLM HTTP call: each Tx.run() block opens
+            // and commits its own short transaction, with no JPA work in
+            // between except the LLM call itself (which is pure HTTP). Any
+            // delta above baseline means run() is leaking a JDBC connection.
+            if (baseline >= 0) {
                 var active = activeConnectionsDuringLlm.get();
-                assertTrue(active <= 1,
-                        "Expected at most 1 active connection (test thread's Play tx) during the LLM call, " +
-                        "but found %d — run() is leaking a JDBC connection".formatted(active));
+                assertTrue(active <= baseline,
+                        "Expected no extra connections beyond test-infrastructure baseline of %d during the LLM call, " +
+                        "but found %d — run() is leaking a JDBC connection".formatted(baseline, active));
             }
 
             llmGate.countDown();
