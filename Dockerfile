@@ -26,12 +26,14 @@ FROM azul/zulu-openjdk:25.0.3 AS backend-build
 # aligned. Override with --build-arg PLAY_VERSION=x.y.z when bumping;
 # bump intentionally, not by accident.
 #
-# 1.12.3 is the first release that ships the Python launcher's
+# 1.12.3 was the first release shipping the Python launcher's
 # loadDotEnv (which lets the bootstrap service in docker-compose.yml
 # write PLAY_SECRET into ./.env) and the .env-aware `play secret`
 # command. Earlier versions silently mutate conf/application.conf
 # inside the container, which the published image discards on exit.
-ARG PLAY_VERSION=1.12.3
+# Track the latest patch on the same minor — keeps the prod image
+# aligned with the host /opt/play1 the team develops against.
+ARG PLAY_VERSION=1.12.5
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl unzip python3 && \
