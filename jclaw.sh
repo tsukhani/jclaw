@@ -23,12 +23,14 @@ Usage: jclaw.sh [options] <secret|setup|start|stop|restart|status|logs|loadtest|
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
             installs frontend dependencies (so pre-commit's lint-staged works),
-            generates .env (with a fresh APPLICATION_SECRET) if missing, and
+            generates .env (with a fresh application secret) if missing, and
             verifies both 'origin' and 'github' remotes exist. Run once after
             every fresh clone. Idempotent — safe to re-run.
-  secret    Generate (or rotate) APPLICATION_SECRET in .env. Run after a
-            suspected leak or as routine hygiene. Restart the app to pick
-            up the new value.
+  secret    Generate (or rotate) the application secret in .env (delegates
+            to 'play secret', which writes the variable named in
+            application.conf's \${...} placeholder). Run after a suspected
+            leak or as routine hygiene. Restart the app to pick up the new
+            value.
   start     Start the Play backend and Nuxt frontend
   stop      Stop the running Play backend and Nuxt frontend
   restart   Stop and start (combines stop + start)
@@ -90,8 +92,10 @@ EOF
 Usage: jclaw.sh [options] <secret|start|stop|restart|status|logs>
 
 Commands:
-  secret    Generate (or rotate) APPLICATION_SECRET in .env. Restart the
-            app to pick up the new value.
+  secret    Generate (or rotate) the application secret in .env (delegates
+            to 'play secret', which writes the variable named in
+            application.conf's \${...} placeholder). Restart the app to
+            pick up the new value.
   start     Start JClaw (Play backend serving the bundled SPA)
   stop      Stop the running instance
   restart   Stop and start (combines stop + start)
@@ -416,16 +420,28 @@ validate_corepack_pnpm() {
     echo "==> pnpm validated via corepack ($current_pin)"
 }
 
-# Generate a fresh 64-char alphanumeric value for APPLICATION_SECRET.
-# Used by both `setup` (first-time .env creation) and `secret` (rotation).
-#
-# tr reads from /dev/urandom (infinite); head closes the pipe after 64
-# bytes; tr then exits 141 (SIGPIPE) on its next write. Under the
-# script's `set -o pipefail`, that propagates as a pipeline failure and
-# kills the caller. Running the pipe inside a subshell with pipefail
-# disabled scopes the relaxation to this one line.
-generate_secret() {
-    ( set +o pipefail; LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 64 )
+# Resolve the env-var name that backs `application.secret` in conf.
+# Mirrors framework/pym/play/utils.py:secretVarName so jclaw.sh and
+# `play secret` always agree on which variable to read/write — the
+# operator can rename `${APP_SECRET}` to anything in conf and this
+# helper picks it up automatically. Falls back to the framework's
+# DEFAULT_SECRET_VAR ("PLAY_SECRET") when conf is missing or the line
+# uses an unparseable form, matching the framework's behaviour.
+secret_var_name() {
+    local conf="$JCLAW_DIR/conf/application.conf"
+    if [[ ! -f "$conf" ]]; then
+        echo "PLAY_SECRET"
+        return
+    fi
+    # Match: application.secret=${VARNAME} (skip lines starting with # or !).
+    # The framework's regex anchors on a single ${...} placeholder; anything
+    # else (literal, missing braces, : default-value form) falls back below.
+    local name
+    name=$(grep -vE '^[[:space:]]*[#!]' "$conf" \
+        | grep -E '^[[:space:]]*application\.secret[[:space:]]*=[[:space:]]*\$\{[^}:]+\}[[:space:]]*$' \
+        | head -n1 \
+        | sed -E 's/^[[:space:]]*application\.secret[[:space:]]*=[[:space:]]*\$\{([^}:]+)\}[[:space:]]*$/\1/')
+    echo "${name:-PLAY_SECRET}"
 }
 
 # Source $JCLAW_DIR/.env into the current shell with auto-export so the
@@ -443,84 +459,81 @@ load_env_file() {
 }
 
 # First-run helper for the start paths: if .env is absent AND the
-# operator hasn't set APPLICATION_SECRET in the parent shell, generate
-# one. This is what makes `./jclaw.sh start` work on a fresh jclaw.zip
-# install with no developer setup step. We DON'T auto-create when the
-# operator has already exported APPLICATION_SECRET externally — that'd
-# overwrite their intent with a stored random value they didn't ask
-# for. We DON'T auto-create from setup either; setup has its own
-# explicit gate. This is the start-path equivalent.
+# conf-named secret variable is unset in the parent shell, generate one.
+# This is what makes `./jclaw.sh start` work on a fresh jclaw.zip install
+# with no developer setup step. We DON'T auto-create when the operator
+# has already exported the variable externally — that'd overwrite their
+# intent with a stored random value they didn't ask for. We DON'T
+# auto-create from setup either; setup has its own explicit gate.
 ensure_env_for_start() {
     local env_file="$JCLAW_DIR/.env"
-    if [[ ! -f "$env_file" && -z "${APPLICATION_SECRET:-}" ]]; then
-        echo "==> First run detected — no .env and no APPLICATION_SECRET in env."
+    local var_name
+    var_name=$(secret_var_name)
+    # Bash indirect expansion: `${!var_name:-}` reads the variable whose
+    # NAME is held in $var_name. Equivalent to `${APP_SECRET:-}` when
+    # var_name="APP_SECRET", but follows whatever the conf line dictates.
+    if [[ ! -f "$env_file" && -z "${!var_name:-}" ]]; then
+        echo "==> First run detected — no .env and no $var_name in env."
         do_secret
     fi
 }
 
-# Hard-fail if APPLICATION_SECRET ends up unset by the time we're about to
-# launch the JVM. application.conf has no dev fallback (intentional — the
-# previous in-repo secret was an admin-session-forgery primitive), so an
-# unresolved ${APPLICATION_SECRET} would yield an empty signing key. We
-# detect early to give a clean diagnostic instead of a Play startup
-# stacktrace from CookieSessionStore.
+# Hard-fail if the conf-named secret variable ends up unset by the time
+# we're about to launch the JVM. application.conf has no dev fallback
+# (intentional — the previous in-repo secret was an admin-session-forgery
+# primitive), so an unresolved placeholder would yield an empty signing
+# key. We detect early to give a clean diagnostic instead of a Play
+# startup stacktrace from CookieSessionStore.
 require_application_secret() {
-    if [[ -z "${APPLICATION_SECRET:-}" ]]; then
+    local var_name
+    var_name=$(secret_var_name)
+    if [[ -z "${!var_name:-}" ]]; then
         # Reachable only when .env exists but lacks (or empties) the key,
         # OR when the launcher set the env var to an empty string. The
         # ensure_env_for_start guard upstream creates .env on first run,
         # so this is operator-misconfiguration territory.
-        echo "Error: APPLICATION_SECRET resolved to empty after sourcing .env."
+        echo "Error: $var_name resolved to empty after sourcing .env."
         echo "       Check that .env contains a non-empty value:"
-        echo "         APPLICATION_SECRET=<some-64-char-string>"
+        echo "         $var_name=<some-64-char-string>"
         echo "       Rotate or regenerate with: $0 secret"
         exit 1
     fi
 }
 
-# Generate or rotate the APPLICATION_SECRET in $JCLAW_DIR/.env. Idempotent
-# in shape: existing .env files keep all other keys; only the
-# APPLICATION_SECRET line is rewritten (or appended if missing). New .env
-# files are created with restrictive perms so the secret is never
-# group/world-readable.
+# Generate or rotate the application secret in $JCLAW_DIR/.env. Delegates
+# the actual generation + .env write to `play secret`, which auto-detects
+# the env-var name from conf/application.conf's ${VARNAME} placeholder —
+# so renaming the variable in conf flows through here without touching
+# this script. The framework's writer preserves any other lines in .env;
+# rotation rewrites only the secret line.
 do_secret() {
     local env_file="$JCLAW_DIR/.env"
-    local new_secret
-    new_secret=$(generate_secret)
 
+    # Seed a brand-new .env with our self-documenting header BEFORE invoking
+    # `play secret`. The framework writer preserves existing lines and only
+    # appends/replaces the secret variable, so dropping a header here keeps
+    # those comments intact across future rotations. umask 077 ensures the
+    # file is owner-only readable from creation, before the secret lands.
     if [[ ! -f "$env_file" ]]; then
-        # Brand-new .env. Header makes it self-documenting if the operator
-        # ever opens it; the umask-style chmod ensures no other process
-        # users can read it before we even write the secret.
         (
             umask 077
             printf '%s\n' \
                 "# Per-clone environment overrides sourced by jclaw.sh." \
                 "# Generated by '$0 secret' or '$0 setup' — do not commit." \
-                "APPLICATION_SECRET=$new_secret" > "$env_file"
+                > "$env_file"
         )
-        echo "==> Created .env with a fresh APPLICATION_SECRET."
-    elif grep -q '^APPLICATION_SECRET=' "$env_file"; then
-        # Existing .env with the key present — rewrite just that line.
-        # macOS sed needs the empty -i argument; we use a tempfile route
-        # instead so the same code works on Linux.
-        local tmp
-        tmp=$(mktemp "${env_file}.XXXXXX")
-        # awk is more robust than sed for "replace one line" because it
-        # handles secrets containing sed-special chars (/, &, etc.) without
-        # any escaping dance.
-        awk -v new="APPLICATION_SECRET=$new_secret" \
-            'BEGIN{done=0} /^APPLICATION_SECRET=/ && !done {print new; done=1; next} {print}' \
-            "$env_file" > "$tmp"
-        chmod 600 "$tmp"
-        mv "$tmp" "$env_file"
-        echo "==> Rotated APPLICATION_SECRET in .env."
-    else
-        # .env exists but lacks the key — append it.
-        printf 'APPLICATION_SECRET=%s\n' "$new_secret" >> "$env_file"
-        chmod 600 "$env_file"
-        echo "==> Added APPLICATION_SECRET to existing .env."
     fi
+
+    # `play secret` reads ${VARNAME} from application.conf's
+    # `application.secret=${VARNAME}` line, generates a fresh 64-char
+    # alphanumeric value, and writes <VARNAME>=<value> to .env. Run from
+    # $JCLAW_DIR so it locates the right conf.
+    (cd "$JCLAW_DIR" && play secret)
+
+    # `play secret` doesn't tighten perms, so re-apply chmod 600 — the
+    # secret is the admin-session-forgery primitive; non-owner reads would
+    # defeat the point of having it in .env at all.
+    chmod 600 "$env_file"
 
     # DEV_MODE is "true"/"false" string — `${VAR:+...}` would print on
     # both because the string is always non-empty. Compare to "true"
@@ -845,10 +858,11 @@ do_start_prod() {
         exit 1
     fi
 
-    # First-run guard for jclaw.zip distributions: if no .env and no
-    # APPLICATION_SECRET in the parent shell, generate one on the fly so
-    # end-users who skip the developer-only `setup` command don't get
-    # blocked. Then source .env into the JVM env and validate.
+    # First-run guard for jclaw.zip distributions: if no .env and the
+    # conf-named secret variable isn't already set in the parent shell,
+    # generate one on the fly so end-users who skip the developer-only
+    # `setup` command don't get blocked. Then source .env into the JVM
+    # env and validate.
     ensure_env_for_start
     load_env_file
     require_application_secret
@@ -987,8 +1001,8 @@ do_start_dev() {
         exit 1
     fi
 
-    # Source .env (APPLICATION_SECRET etc.) into the JVM environment.
-    # See the prod-mode counterpart for the rationale.
+    # Source .env (the conf-named secret variable, plus any other overrides)
+    # into the JVM environment. See the prod-mode counterpart for the rationale.
     ensure_env_for_start
     load_env_file
     require_application_secret
@@ -1221,15 +1235,16 @@ do_logs() {
 # ─── Load test ───
 
 # Drive the in-process mock-provider load test against the running backend.
-# Auth: sends APPLICATION_SECRET in the X-Loadtest-Auth header; the matching
-# server-side guard on /api/metrics/loadtest checks both the header AND that
-# the request comes from a loopback address. APPLICATION_SECRET lives in
-# .env (gitignored) and is the same secret Play uses to sign session
-# cookies — reusing it here avoids introducing a separate operator-managed
-# credential. JCLAW-181: the previous flow read jclaw.admin.password from
-# application.conf and POSTed /api/auth/login, but commit caf9422 moved
-# the admin password to a PBKDF2 hash in the Config DB, leaving the script
-# with no plaintext to log in with.
+# Auth: sends the application secret in the X-Loadtest-Auth header; the
+# matching server-side guard on /api/metrics/loadtest checks both the header
+# AND that the request comes from a loopback address. The secret lives in
+# .env (gitignored) under whatever variable name application.conf's
+# `application.secret=${VARNAME}` declares, and is the same value Play uses
+# to sign session cookies — reusing it here avoids introducing a separate
+# operator-managed credential. JCLAW-181: the previous flow read
+# jclaw.admin.password from application.conf and POSTed /api/auth/login,
+# but commit caf9422 moved the admin password to a PBKDF2 hash in the
+# Config DB, leaving the script with no plaintext to log in with.
 do_loadtest() {
     cd "$JCLAW_DIR"
 
@@ -1238,12 +1253,15 @@ do_loadtest() {
         exit 1
     fi
 
-    # Source .env so APPLICATION_SECRET is available. Same helper the start
-    # paths use; idempotent when the parent shell already exported it.
+    # Source .env so the secret variable is available, then resolve its name
+    # the same way the start paths do (read from conf — operator-renameable).
     load_env_file
-    if [[ -z "${APPLICATION_SECRET:-}" ]]; then
-        echo "Error: APPLICATION_SECRET is not set."
-        echo "       Loadtest auth uses APPLICATION_SECRET (the same secret"
+    local var_name secret
+    var_name=$(secret_var_name)
+    secret=${!var_name:-}
+    if [[ -z "$secret" ]]; then
+        echo "Error: $var_name is not set."
+        echo "       Loadtest auth uses $var_name (the same secret"
         echo "       Play signs session cookies with), sent in the"
         echo "       X-Loadtest-Auth header. It must be present in"
         echo "       $JCLAW_DIR/.env or exported in the parent shell."
@@ -1263,7 +1281,7 @@ do_loadtest() {
         echo "==> Cleaning loadtest data..."
         local clean_status
         clean_status=$(curl -s -o /dev/null -w '%{http_code}' \
-            -H "X-Loadtest-Auth: $APPLICATION_SECRET" \
+            -H "X-Loadtest-Auth: $secret" \
             -X DELETE "http://localhost:$BACKEND_PORT/api/metrics/loadtest/data")
         if [[ "$clean_status" == "200" ]]; then
             echo "==> Loadtest conversations, messages, and events deleted."
@@ -1284,7 +1302,7 @@ do_loadtest() {
 
     local response http_code
     response=$(curl -s \
-        -H "X-Loadtest-Auth: $APPLICATION_SECRET" \
+        -H "X-Loadtest-Auth: $secret" \
         -H 'Content-Type: application/json' \
         -X POST "http://localhost:$BACKEND_PORT/api/metrics/loadtest" \
         -d "$body" \
