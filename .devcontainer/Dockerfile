@@ -73,12 +73,12 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
 # unmaintained; this fork carries JDK 25 compatibility patches the
 # backend depends on. Pull the official tagged release zip rather
 # than shallow-cloning master, so the image gets a pinned version
-# (matches the `~ play! 1.11.11` banner from `play autotest`) and
-# can't silently pick up a breaking change on master between dev
+# and can't silently pick up a breaking change on master between dev
 # container rebuilds. Same canonical distribution format upstream
 # Play has shipped for years: top-level play-${VERSION}/ directory
 # with the wrapper script, framework JARs, modules, and samples.
-ARG PLAY_VERSION=1.11.12
+# Kept aligned with the production Dockerfile's PLAY_VERSION pin.
+ARG PLAY_VERSION=1.12.3
 RUN curl -fsSL "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
         -o /tmp/play.zip && \
     unzip -q /tmp/play.zip -d /opt/ && \

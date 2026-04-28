@@ -133,7 +133,7 @@ Dependencies are automatically installed when you start with `jclaw.sh`.
 
 ### Dev Container (Recommended)
 
-The fastest way to start coding without installing any of the [Prerequisites](#prerequisites) on your host machine is to use the included dev container. The `.devcontainer/Dockerfile` ships a pinned toolchain (Java 25, Python 3.14, Node 24, corepack, Play 1.11.12, tesseract-ocr) on top of Ubuntu 26.04 LTS — all the prerequisites listed above, already installed.
+The fastest way to start coding without installing any of the [Prerequisites](#prerequisites) on your host machine is to use the included dev container. The `.devcontainer/Dockerfile` ships a pinned toolchain (Java 25, Python 3.14, Node 24, corepack, Play 1.12.3, tesseract-ocr) on top of Ubuntu 26.04 LTS — all the prerequisites listed above, already installed.
 
 #### Host prerequisites
 
@@ -261,6 +261,23 @@ To start an existing deployment (without re-packaging):
 
 The simplest way to run JClaw in production is with Docker Compose. The shipped `docker-compose.yml` pulls the prebuilt image from GHCR, publishes the app on **:9000**, and persists `data/`, `logs/`, `workspace/`, and `skills/` to the host so config and conversations survive restarts.
 
+#### One-time bootstrap
+
+Before the first `docker compose up`, generate a `.env` containing `PLAY_SECRET` (used to sign session cookies — JClaw refuses to start without it). The bundled `bootstrap` profile runs `play secret` inside the published image, so no local Play install is needed:
+
+```bash
+# Create the file first (Docker materializes a missing bind-mount source
+# as a directory, which would break the file write).
+touch .env
+
+# Generate PLAY_SECRET into ./.env via the canonical `play secret` command.
+docker compose --profile bootstrap run --rm bootstrap
+```
+
+Run this once per deployment. To rotate the secret later, re-run the same command — `play secret` overwrites the existing `PLAY_SECRET` line in place and preserves any other variables in `.env`.
+
+#### Running the service
+
 ```bash
 # Start in the background
 docker compose up -d
@@ -275,7 +292,7 @@ docker compose down
 JCLAW_PORT=8080 docker compose up -d
 ```
 
-You can also set `JCLAW_PORT` in a `.env` file alongside `docker-compose.yml` instead of passing it inline.
+You can also set `JCLAW_PORT` in `.env` alongside `docker-compose.yml` instead of passing it inline — Compose reads the same file for variable interpolation in the YAML and for the runtime environment of the `jclaw` service.
 
 The container runs in production mode — the Nuxt SPA is already built into the image, so no local Node.js, pnpm, or Play toolchain is required on the host. Open `http://localhost:9000` (or your custom port) once the container is healthy.
 

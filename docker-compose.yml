@@ -2,6 +2,12 @@ services:
   jclaw:
     image: ghcr.io/tsukhani/jclaw:latest
     pull_policy: always
+    # Inject ./.env into the container's environment so application.conf's
+    # ${PLAY_SECRET} placeholder resolves at boot. Compose refuses to start
+    # if .env is missing, surfacing the misconfig loudly rather than booting
+    # with an unresolved placeholder. Generate the file once via the
+    # `bootstrap` service below — see the README's Docker section.
+    env_file: .env
     ports:
       - "${JCLAW_PORT:-9000}:9000"
     volumes:
@@ -19,3 +25,22 @@ services:
       timeout: 5s
       retries: 3
       start_period: 60s
+
+  # One-time secret bootstrap. Runs `play secret` inside the published image
+  # to write a fresh PLAY_SECRET into ./.env on the host, so first-time
+  # operators don't need a local Play install. Profile-gated so a stray
+  # `compose up` can't trigger it and trample an existing secret — invoke
+  # explicitly:
+  #
+  #     touch .env
+  #     docker compose --profile bootstrap run --rm bootstrap
+  #
+  # The `touch` is required because Docker materializes a missing bind-mount
+  # source as an empty directory, and `play secret` writes a regular file.
+  bootstrap:
+    image: ghcr.io/tsukhani/jclaw:latest
+    pull_policy: always
+    profiles: [bootstrap]
+    volumes:
+      - ./.env:/app/.env
+    command: ["play", "secret"]

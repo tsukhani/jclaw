@@ -22,10 +22,16 @@ FROM azul/zulu-openjdk:25.0.3 AS backend-build
 # tsukhani/play1's `releases/latest` at build time, so the same source +
 # same Dockerfile produced different images depending on when the build
 # ran — and could silently drift apart from .devcontainer/Dockerfile,
-# which is already pinned to 1.11.12. Same default here keeps prod and
-# dev container aligned. Override with --build-arg PLAY_VERSION=x.y.z
-# when bumping; bump intentionally, not by accident.
-ARG PLAY_VERSION=1.11.12
+# which is pinned to the same version. Keep prod and dev container
+# aligned. Override with --build-arg PLAY_VERSION=x.y.z when bumping;
+# bump intentionally, not by accident.
+#
+# 1.12.3 is the first release that ships the Python launcher's
+# loadDotEnv (which lets the bootstrap service in docker-compose.yml
+# write PLAY_SECRET into ./.env) and the .env-aware `play secret`
+# command. Earlier versions silently mutate conf/application.conf
+# inside the container, which the published image discards on exit.
+ARG PLAY_VERSION=1.12.3
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl unzip python3 && \
