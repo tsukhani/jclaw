@@ -59,6 +59,10 @@ Load-test options (only used with the 'loadtest' command):
   --tokens-per-second <n> Simulated token throughput (default: 50)
   --response-tokens <n>   Tokens per simulated response (default: 40)
   --clean                 Delete loadtest conversations/events from DB instead of running a test
+  --compress              Send 'Accept-Encoding: br, gzip' on each loadtest request so the
+                          server's HttpContentCompressor engages — measures the cost of the
+                          encoding path. Default off (Java HttpClient sends no Accept-Encoding,
+                          so compression doesn't engage even when wired into the pipeline).
 
 Examples:
   ./jclaw.sh setup                                    # One-time setup after fresh clone
@@ -209,6 +213,7 @@ LT_TTFT_MS="100"
 LT_TOKENS_PER_SECOND="50"
 LT_RESPONSE_TOKENS="40"
 LT_CLEAN=false
+LT_COMPRESS=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -254,6 +259,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --clean)
             LT_CLEAN=true
+            shift
+            ;;
+        --compress)
+            LT_COMPRESS=true
             shift
             ;;
         secret|setup|start|stop|restart|status|logs|loadtest|test)
@@ -1266,12 +1275,12 @@ do_loadtest() {
     fi
 
     echo "==> Running load test: concurrency=$LT_CONCURRENCY iterations=$LT_ITERATIONS"
-    echo "    ttft=${LT_TTFT_MS}ms tokens/s=$LT_TOKENS_PER_SECOND response=${LT_RESPONSE_TOKENS} tokens"
+    echo "    ttft=${LT_TTFT_MS}ms tokens/s=$LT_TOKENS_PER_SECOND response=${LT_RESPONSE_TOKENS} tokens compress=$LT_COMPRESS"
     echo ""
 
     local body
-    body=$(printf '{"concurrency":%s,"iterations":%s,"ttftMs":%s,"tokensPerSecond":%s,"responseTokens":%s}' \
-        "$LT_CONCURRENCY" "$LT_ITERATIONS" "$LT_TTFT_MS" "$LT_TOKENS_PER_SECOND" "$LT_RESPONSE_TOKENS")
+    body=$(printf '{"concurrency":%s,"iterations":%s,"ttftMs":%s,"tokensPerSecond":%s,"responseTokens":%s,"compress":%s}' \
+        "$LT_CONCURRENCY" "$LT_ITERATIONS" "$LT_TTFT_MS" "$LT_TOKENS_PER_SECOND" "$LT_RESPONSE_TOKENS" "$LT_COMPRESS")
 
     local response http_code
     response=$(curl -s \

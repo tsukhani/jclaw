@@ -66,8 +66,16 @@ public class ApiMetricsController extends Controller {
      *   "iterations": 5,
      *   "ttftMs": 100,
      *   "tokensPerSecond": 50,
-     *   "responseTokens": 40
+     *   "responseTokens": 40,
+     *   "compress": false
      * }</pre>
+     *
+     * <p>{@code compress=true} adds {@code Accept-Encoding: br, gzip} to each
+     * harness request so the pipeline's {@link io.netty.handler.codec.http.HttpContentCompressor}
+     * (when wired) actually engages on the response. Without it, Java's
+     * {@code HttpClient} sends no Accept-Encoding and the compressor passes
+     * traffic through as identity — so loadtest results reflect the controller
+     * hot path, not the encoding path.
      *
      * <p>Returns the aggregate counts + wall-clock. Use GET
      * /api/metrics/latency afterwards for per-segment histograms.
@@ -81,6 +89,7 @@ public class ApiMetricsController extends Controller {
         int responseTokens = readInt(body, "responseTokens", 40);
         int simulatedToolCalls = readInt(body, "simulatedToolCalls", 0);
         int toolSleepMs = readInt(body, "toolSleepMs", 200);
+        boolean compress = readBool(body, "compress", false);
 
         int maxConcurrency = ConfigService.getInt("provider.loadtest-mock.maxConcurrency", 100);
         int maxIterations = ConfigService.getInt("provider.loadtest-mock.maxIterations", 50);
@@ -105,7 +114,7 @@ public class ApiMetricsController extends Controller {
 
         try {
             var result = LoadTestRunner.run(new LoadTestRunner.Request(
-                    concurrency, iterations,
+                    concurrency, iterations, compress,
                     new LoadTestHarness.Scenario(ttftMs, tokensPerSecond, responseTokens,
                             simulatedToolCalls, toolSleepMs)));
 
@@ -150,6 +159,16 @@ public class ApiMetricsController extends Controller {
             return body.get(key).getAsInt();
         } catch (Exception _) {
             error(400, "Invalid integer for '" + key + "'");
+            return defaultValue; // unreachable
+        }
+    }
+
+    private static boolean readBool(com.google.gson.JsonObject body, String key, boolean defaultValue) {
+        if (body == null || !body.has(key) || body.get(key).isJsonNull()) return defaultValue;
+        try {
+            return body.get(key).getAsBoolean();
+        } catch (Exception _) {
+            error(400, "Invalid boolean for '" + key + "'");
             return defaultValue; // unreachable
         }
     }

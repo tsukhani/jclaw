@@ -41,7 +41,8 @@ public final class LoadTestRunner {
     public static final String LOADTEST_PROVIDER = "loadtest-mock";
     private static final String LOADTEST_MODEL = "mock-model";
 
-    public record Request(int concurrency, int iterations, LoadTestHarness.Scenario scenario) {}
+    public record Request(int concurrency, int iterations, boolean compress,
+                          LoadTestHarness.Scenario scenario) {}
 
     public record Result(
             int totalRequests,
@@ -91,7 +92,7 @@ public final class LoadTestRunner {
         // sample without losing data accumulated by prior runs (or by real
         // chat traffic the operator cares about).
         var resetPoint = utils.LatencyStats.captureResetPoint();
-        warmupRequest(client, baseUrl, sessionCookie, body);
+        warmupRequest(client, baseUrl, sessionCookie, body, req.compress());
         resetPoint.run();
 
         var success = new AtomicInteger();
@@ -109,13 +110,14 @@ public final class LoadTestRunner {
                         for (int i = 0; i < req.iterations(); i++) {
                             long t0 = System.nanoTime();
                             try {
-                                var httpReq = HttpRequest.newBuilder()
+                                var builder = HttpRequest.newBuilder()
                                         .uri(URI.create(baseUrl + "/api/chat/stream"))
                                         .header("Content-Type", "application/json")
                                         .header("Cookie", sessionCookie)
                                         .timeout(Duration.ofSeconds(120))
-                                        .POST(HttpRequest.BodyPublishers.ofString(body))
-                                        .build();
+                                        .POST(HttpRequest.BodyPublishers.ofString(body));
+                                if (req.compress()) builder.header("Accept-Encoding", "br, gzip");
+                                var httpReq = builder.build();
                                 var resp = client.send(httpReq, HttpResponse.BodyHandlers.discarding());
                                 if (resp.statusCode() == 200) success.incrementAndGet();
                                 else error.incrementAndGet();
@@ -149,15 +151,16 @@ public final class LoadTestRunner {
     }
 
     private static void warmupRequest(HttpClient client, String baseUrl,
-                                       String sessionCookie, String body) {
+                                       String sessionCookie, String body, boolean compress) {
         try {
-            var req = HttpRequest.newBuilder()
+            var builder = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + "/api/chat/stream"))
                     .header("Content-Type", "application/json")
                     .header("Cookie", sessionCookie)
                     .timeout(Duration.ofSeconds(60))
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build();
+                    .POST(HttpRequest.BodyPublishers.ofString(body));
+            if (compress) builder.header("Accept-Encoding", "br, gzip");
+            var req = builder.build();
             client.send(req, HttpResponse.BodyHandlers.discarding());
             // The warmup response populates all the caches but does not count
             // in the result set. Histograms recorded during warmup will show
