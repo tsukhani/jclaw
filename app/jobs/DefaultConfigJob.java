@@ -103,6 +103,16 @@ public class DefaultConfigJob extends Job<Void> {
                 [{"id":"qwen3.5","name":"Qwen 3.5","contextWindow":262144,"maxTokens":65535,"supportsThinking":true,"thinkingLevels":["low","medium","high"]},\
                 {"id":"kimi-k2.5","name":"Kimi K2.5","contextWindow":262144,"maxTokens":65535,"supportsThinking":true,"thinkingLevels":["low","medium","high"]}]""");
 
+        // JCLAW-178: ollama-local routes to OllamaProvider via the substring
+        // match in LlmProvider.forConfig — no new provider class needed. The
+        // apiKey is a non-blank sentinel because ProviderRegistry.refreshInner
+        // skips rows with a blank apiKey, and local Ollama ignores the
+        // Authorization header. models is empty so operators populate it from
+        // the Settings UI's discovery flow against their own pulled models.
+        seedIfAbsent("provider.ollama-local.baseUrl", "http://localhost:11434/v1");
+        seedIfAbsent("provider.ollama-local.apiKey", "ollama-local");
+        seedIfAbsent("provider.ollama-local.models", "[]");
+
         seedIfAbsent("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
         seedIfAbsent("provider.openrouter.apiKey", "");
         seedIfAbsent("provider.openrouter.leaderboardUrl", "https://openrouter.ai/rankings");

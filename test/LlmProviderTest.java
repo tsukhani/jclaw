@@ -54,6 +54,15 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
+    public void forConfigRoutesOllamaLocalToOllamaProvider() {
+        // JCLAW-178 AC #2: ollama-local must route through OllamaProvider via
+        // the substring match on "ollama" — no new provider class.
+        var p = LlmProvider.forConfig(new ProviderConfig(
+                "ollama-local", "http://localhost:11434/v1", "ollama-local", List.of()));
+        assertInstanceOf(OllamaProvider.class, p);
+    }
+
+    @Test
     public void forConfigDefaultsToOpenAiForUnknownNames() {
         var p = LlmProvider.forConfig(new ProviderConfig(
                 "lambda-labs", "https://api.lambdalabs.com/v1", "k", List.of()));

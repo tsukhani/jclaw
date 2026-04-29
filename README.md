@@ -122,6 +122,38 @@ Additional language packs install separately. The default is English
 languages, then update `ocr.tesseract.languages` in `conf/application.conf`
 (e.g. `eng+fra+jpn`).
 
+**Local Ollama** — required only if you want to bind agents to the
+`ollama-local` LLM provider for self-hosted inference. JClaw seeds
+`provider.ollama-local.baseUrl=http://localhost:11434/v1` at first boot,
+so the provider is already listed in Settings without further wiring —
+install Ollama on the host and pull a model to make it usable. A startup
+probe logs INFO with the model count when the local server is reachable,
+and WARN with an install hint when the server is reachable but broken;
+a fresh install with no Ollama running stays silent (no spurious WARN
+on every JVM start).
+
+```bash
+# Linux
+curl https://ollama.com/install.sh | sh
+
+# macOS
+brew install ollama
+
+# Windows — download the installer from https://ollama.com/download
+```
+
+After installing, pull a model:
+
+```bash
+ollama pull qwen2.5
+```
+
+Then open the Settings page, expand the `ollama-local` card, and either
+run Discover Models against `http://localhost:11434/v1` or paste the
+JSON for the model you pulled into the `models` field. Bind an agent
+to `ollama-local` from the Agent Edit page to start chatting against
+your local model.
+
 ### Clone
 
 ```bash

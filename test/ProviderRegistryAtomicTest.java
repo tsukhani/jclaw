@@ -89,6 +89,24 @@ public class ProviderRegistryAtomicTest extends UnitTest {
     }
 
     @Test
+    public void registersOllamaLocalAsOllamaProvider() {
+        // JCLAW-178 AC #2: seeding the ollama-local config keys and refreshing
+        // the registry must yield an OllamaProvider instance — no new Java
+        // provider code, just substring routing through LlmProvider.forConfig.
+        ConfigService.set("provider.ollama-local.baseUrl", "http://localhost:11434/v1");
+        ConfigService.set("provider.ollama-local.apiKey", "ollama-local");
+        ConfigService.set("provider.ollama-local.models", "[]");
+
+        ProviderRegistry.refresh();
+
+        var provider = ProviderRegistry.get("ollama-local");
+        assertNotNull(provider, "ollama-local should be registered after refresh");
+        assertInstanceOf(llm.OllamaProvider.class, provider,
+                "ollama-local must route through OllamaProvider via the substring match");
+        assertEquals("http://localhost:11434/v1", provider.config().baseUrl());
+    }
+
+    @Test
     public void refreshAfterProviderRemoved() {
         ConfigService.set("provider.removable.baseUrl", "https://test.ai/v1");
         ConfigService.set("provider.removable.apiKey", "sk-test");

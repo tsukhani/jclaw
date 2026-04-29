@@ -78,6 +78,28 @@ public class AgentRunnerCoreTest extends UnitTest {
                 "Should have user + assistant messages, got " + messages.size());
     }
 
+    // --- JCLAW-178: ollama-local end-to-end ---
+
+    @Test
+    public void agentBoundToOllamaLocalReceivesCannedResponse() throws Exception {
+        // Pin the routing path: Config DB seed → ProviderRegistry refresh →
+        // forConfig substring match on "ollama" → OllamaProvider HTTP call →
+        // canned response surfaces back to the agent.
+        startLlmServer(simpleResponse("Hello from local Ollama"));
+        configureOllamaLocal();
+
+        var agent = createAgent("ollama-local-agent", "ollama-local", "qwen2.5");
+        var convo = ConversationService.create(agent, "web", "user1");
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var result = runOnVirtualThread(agent, convo, "Hi there");
+
+        assertEquals("Hello from local Ollama", result.response(),
+                "agent bound to ollama-local should receive the mocked response");
+    }
+
     // --- Tool call loop ---
 
     @Test
@@ -452,6 +474,17 @@ public class AgentRunnerCoreTest extends UnitTest {
         ConfigService.set("provider.test-provider.apiKey", "sk-test");
         ConfigService.set("provider.test-provider.models",
                 "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":4096}]");
+        llm.ProviderRegistry.refresh();
+    }
+
+    private void configureOllamaLocal() {
+        // Mirror the production seed shape: sentinel apiKey because
+        // ProviderRegistry rejects blank-key rows, baseUrl pointing at the
+        // test mock instead of localhost:11434.
+        ConfigService.set("provider.ollama-local.baseUrl", "http://127.0.0.1:" + port);
+        ConfigService.set("provider.ollama-local.apiKey", "ollama-local");
+        ConfigService.set("provider.ollama-local.models",
+                "[{\"id\":\"qwen2.5\",\"name\":\"Qwen 2.5\",\"contextWindow\":131072,\"maxTokens\":4096}]");
         llm.ProviderRegistry.refresh();
     }
 
