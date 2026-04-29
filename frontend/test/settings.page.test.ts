@@ -67,13 +67,72 @@ function setupConfigApi() {
 }
 
 describe('Settings page — provider section', () => {
+  // JCLAW-182: the grouping test below reshapes the /api/config response, so
+  // clear Nuxt's useFetch cache between tests — otherwise the next test re-uses
+  // the prior test's payload (same gotcha the OCR section's beforeEach calls out).
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
   it('surfaces the configured provider name from the config payload', async () => {
     setupConfigApi()
     const component = await mountSuspended(Settings)
     await flushPromises()
 
     expect(component.text()).toContain('LLM Providers')
-    expect(component.text()).toContain('ollama-cloud')
+    // JCLAW-182: provider cards now render the friendly display label
+    // (PROVIDER_LABELS map) rather than the raw kebab-case name.
+    expect(component.text()).toContain('Ollama Cloud')
+  })
+
+  it('groups providers under Remote and Local subheadings in that order', async () => {
+    // JCLAW-182 AC #4-#6: with all four providers configured, the LLM Providers
+    // section emits a Remote heading containing ollama-cloud + openrouter, then
+    // a Local heading containing ollama-local + lm-studio. The order is
+    // load-bearing — operators expect remote/hosted options first.
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/config', () => ({
+      entries: [
+        { key: 'provider.ollama-cloud.baseUrl', value: 'https://ollama.com/v1', updatedAt: '2026-04-29T10:00:00Z' },
+        { key: 'provider.ollama-cloud.apiKey', value: 'sk-cloud', updatedAt: '2026-04-29T10:00:00Z' },
+        { key: 'provider.openrouter.baseUrl', value: 'https://openrouter.ai/api/v1', updatedAt: '2026-04-29T10:00:00Z' },
+        { key: 'provider.openrouter.apiKey', value: 'sk-or', updatedAt: '2026-04-29T10:00:00Z' },
+        { key: 'provider.ollama-local.baseUrl', value: 'http://localhost:11434/v1', updatedAt: '2026-04-29T10:00:00Z' },
+        { key: 'provider.ollama-local.apiKey', value: 'ollama-local', updatedAt: '2026-04-29T10:00:00Z' },
+        { key: 'provider.lm-studio.baseUrl', value: 'http://localhost:1234/v1', updatedAt: '2026-04-29T10:00:00Z' },
+        { key: 'provider.lm-studio.apiKey', value: 'lm-studio', updatedAt: '2026-04-29T10:00:00Z' },
+      ],
+    }))
+    registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
+
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    const html = component.html()
+
+    // Search for the H3 headings specifically — "Local" appears as a substring
+    // in "Ollama Local" otherwise, and "Remote" could collide with future class
+    // names. The H3 element is unique to the group dividers.
+    const remoteHeadingIdx = html.search(/<h3[^>]*>\s*Remote\s*<\/h3>/)
+    const localHeadingIdx = html.search(/<h3[^>]*>\s*Local\s*<\/h3>/)
+    expect(remoteHeadingIdx).toBeGreaterThan(-1)
+    expect(localHeadingIdx).toBeGreaterThan(-1)
+    expect(remoteHeadingIdx).toBeLessThan(localHeadingIdx)
+
+    // Remote group contains Ollama Cloud + OpenRouter, both before the Local heading.
+    const ollamaCloudIdx = html.indexOf('Ollama Cloud')
+    const openRouterIdx = html.indexOf('OpenRouter')
+    expect(ollamaCloudIdx).toBeGreaterThan(remoteHeadingIdx)
+    expect(openRouterIdx).toBeGreaterThan(remoteHeadingIdx)
+    expect(ollamaCloudIdx).toBeLessThan(localHeadingIdx)
+    expect(openRouterIdx).toBeLessThan(localHeadingIdx)
+
+    // Local group contains Ollama Local + LM Studio, both after the Local heading.
+    const ollamaLocalIdx = html.indexOf('Ollama Local')
+    const lmStudioIdx = html.indexOf('LM Studio')
+    expect(ollamaLocalIdx).toBeGreaterThan(localHeadingIdx)
+    expect(lmStudioIdx).toBeGreaterThan(localHeadingIdx)
   })
 
   it('surfaces a models count badge from the persisted models JSON', async () => {

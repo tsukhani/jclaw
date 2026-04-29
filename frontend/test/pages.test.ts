@@ -113,7 +113,8 @@ describe('Settings page', () => {
 
     expect(component.text()).toContain('Settings')
     expect(component.text()).toContain('LLM Providers')
-    expect(component.text()).toContain('ollama-cloud')
+    // JCLAW-182: provider cards now render the friendly display label.
+    expect(component.text()).toContain('Ollama Cloud')
   })
 
   it('does not expose an add-entry form for ad-hoc config', async () => {

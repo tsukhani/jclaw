@@ -113,6 +113,15 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("provider.ollama-local.apiKey", "ollama-local");
         seedIfAbsent("provider.ollama-local.models", "[]");
 
+        // JCLAW-182: lm-studio falls through to OpenAiProvider via the factory
+        // default — LM Studio speaks OpenAI-compatible /v1/chat/completions on
+        // localhost:1234 and accepts any non-blank Authorization. Same
+        // sentinel-apiKey trick as ollama-local so ProviderRegistry registers
+        // the row out of the box.
+        seedIfAbsent("provider.lm-studio.baseUrl", "http://localhost:1234/v1");
+        seedIfAbsent("provider.lm-studio.apiKey", "lm-studio");
+        seedIfAbsent("provider.lm-studio.models", "[]");
+
         seedIfAbsent("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
         seedIfAbsent("provider.openrouter.apiKey", "");
         seedIfAbsent("provider.openrouter.leaderboardUrl", "https://openrouter.ai/rankings");

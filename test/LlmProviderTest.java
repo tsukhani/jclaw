@@ -71,6 +71,18 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
+    public void forConfigRoutesLmStudioToOpenAiProviderViaFallback() {
+        // JCLAW-182 AC #2: lm-studio doesn't match either Ollama or OpenRouter
+        // substrings, so the factory falls through to OpenAiProvider — perfect
+        // because LM Studio speaks OpenAI-compatible /v1/chat/completions
+        // natively. Pin the fallback so a future name-matching tweak doesn't
+        // accidentally route lm-studio elsewhere.
+        var p = LlmProvider.forConfig(new ProviderConfig(
+                "lm-studio", "http://localhost:1234/v1", "lm-studio", List.of()));
+        assertInstanceOf(OpenAiProvider.class, p);
+    }
+
+    @Test
     public void forConfigMatchesNameCaseInsensitively() {
         var p = LlmProvider.forConfig(new ProviderConfig(
                 "OpenRouter-Mirror", "https://example.com", "k", List.of()));

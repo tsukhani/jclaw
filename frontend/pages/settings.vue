@@ -915,6 +915,45 @@ const providerEntries = computed(() => {
   return { providers, other }
 })
 
+// JCLAW-182: split LLM Providers into Remote and Local subsections in the
+// Settings UI. Encoded as a static map rather than a backend field — only
+// four providers, names are stable, no need for a generic "is this a local
+// provider" property on Config. Unknown providers default to remote.
+const PROVIDER_GROUPS: Record<string, 'remote' | 'local'> = {
+  'ollama-cloud': 'remote',
+  'openrouter': 'remote',
+  'ollama-local': 'local',
+  'lm-studio': 'local',
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  'ollama-cloud': 'Ollama Cloud',
+  'openrouter': 'OpenRouter',
+  'ollama-local': 'Ollama Local',
+  'lm-studio': 'LM Studio',
+}
+
+function providerGroup(name: string): 'remote' | 'local' {
+  return PROVIDER_GROUPS[name] ?? 'remote'
+}
+
+function providerLabel(name: string): string {
+  return PROVIDER_LABELS[name] ?? name
+}
+
+const groupedProviders = computed(() => {
+  const remote: Array<[string, ConfigEntry[]]> = []
+  const local: Array<[string, ConfigEntry[]]> = []
+  for (const [name, entries] of providerEntries.value.providers) {
+    if (providerGroup(name) === 'local') local.push([name, entries])
+    else remote.push([name, entries])
+  }
+  return [
+    { group: 'remote' as const, label: 'Remote', items: remote },
+    { group: 'local' as const, label: 'Local', items: local },
+  ]
+})
+
 // ──────────────────── Password / account management ─────────────────────
 const { resetPassword } = useAuth()
 const { confirm } = useConfirm()
@@ -960,244 +999,493 @@ async function handleResetPassword() {
       <p class="text-xs text-fg-muted">
         Enter an API key for at least one provider to enable chat. Base URLs and models are pre-configured.
       </p>
-      <div
-        v-for="[name, entries] in providerEntries.providers"
-        :key="name"
-        :class="isProviderEnabled(name) ? '' : 'opacity-60'"
-        class="bg-surface-elevated border border-border transition-opacity"
+      <template
+        v-for="group in groupedProviders"
+        :key="group.group"
       >
-        <div class="px-4 py-2.5 border-b border-border">
-          <div class="flex items-center gap-2">
-            <span class="text-sm font-medium text-fg-strong">{{ name }}</span>
-            <span
-              v-if="entries.find((e: any) => e.key.endsWith('.apiKey') && e.value && !e.value.startsWith('****') && e.value !== '****')"
-              class="text-[10px] text-green-400 border border-green-400/30 px-1"
-            >configured</span>
-            <span
-              v-if="!isProviderEnabled(name)"
-              class="text-[10px] text-fg-muted border border-input px-1"
-            >disabled</span>
-            <!-- JCLAW-113: audit pill when any agent still has this disabled
-                 provider as their default. Makes the "hide from selector, not
-                 a kill switch" semantics visible without requiring the user
-                 to read the hint text below. -->
-            <span
-              v-if="!isProviderEnabled(name) && agentsRoutingToProvider(name) > 0"
-              class="text-[10px] text-amber-400 border border-amber-400/40 px-1"
-              :title="`${agentsRoutingToProvider(name)} agent(s) still route LLM calls to this provider`"
-            >{{ agentsRoutingToProvider(name) }} agent{{ agentsRoutingToProvider(name) === 1 ? '' : 's' }} still routing</span>
-            <!-- JCLAW-110: per-provider enable/disable toggle. Hidden from
-                 the /model selector and chat dropdown when off. -->
-            <button
-              :aria-label="`${isProviderEnabled(name) ? 'Disable' : 'Enable'} ${name} provider`"
-              :title="isProviderEnabled(name)
-                ? 'Hide this provider from the model selector'
-                : 'Show this provider in the model selector'"
-              :class="isProviderEnabled(name) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
-              class="ml-auto relative w-9 h-5 rounded-full transition-colors"
-              @click="toggleProviderEnabled(name)"
-            >
+        <h3
+          v-if="group.items.length > 0"
+          class="text-[11px] font-semibold text-fg-muted uppercase tracking-wide pt-2 first:pt-0"
+        >
+          {{ group.label }}
+        </h3>
+        <div
+          v-for="[name, entries] in group.items"
+          :key="name"
+          :class="isProviderEnabled(name) ? '' : 'opacity-60'"
+          class="bg-surface-elevated border border-border transition-opacity"
+        >
+          <div class="px-4 py-2.5 border-b border-border">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium text-fg-strong">{{ providerLabel(name) }}</span>
               <span
-                :class="isProviderEnabled(name) ? 'translate-x-4' : 'translate-x-0.5'"
-                class="block w-4 h-4 bg-white rounded-full transition-transform"
-              />
-            </button>
+                v-if="entries.find((e: any) => e.key.endsWith('.apiKey') && e.value && !e.value.startsWith('****') && e.value !== '****')"
+                class="text-[10px] text-green-400 border border-green-400/30 px-1"
+              >configured</span>
+              <span
+                v-if="!isProviderEnabled(name)"
+                class="text-[10px] text-fg-muted border border-input px-1"
+              >disabled</span>
+              <!-- JCLAW-113: audit pill when any agent still has this disabled
+                   provider as their default. Makes the "hide from selector, not
+                   a kill switch" semantics visible without requiring the user
+                   to read the hint text below. -->
+              <span
+                v-if="!isProviderEnabled(name) && agentsRoutingToProvider(name) > 0"
+                class="text-[10px] text-amber-400 border border-amber-400/40 px-1"
+                :title="`${agentsRoutingToProvider(name)} agent(s) still route LLM calls to this provider`"
+              >{{ agentsRoutingToProvider(name) }} agent{{ agentsRoutingToProvider(name) === 1 ? '' : 's' }} still routing</span>
+              <!-- JCLAW-110: per-provider enable/disable toggle. Hidden from
+                   the /model selector and chat dropdown when off. -->
+              <button
+                :aria-label="`${isProviderEnabled(name) ? 'Disable' : 'Enable'} ${name} provider`"
+                :title="isProviderEnabled(name)
+                  ? 'Hide this provider from the model selector'
+                  : 'Show this provider in the model selector'"
+                :class="isProviderEnabled(name) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+                class="ml-auto relative w-9 h-5 rounded-full transition-colors"
+                @click="toggleProviderEnabled(name)"
+              >
+                <span
+                  :class="isProviderEnabled(name) ? 'translate-x-4' : 'translate-x-0.5'"
+                  class="block w-4 h-4 bg-white rounded-full transition-transform"
+                />
+              </button>
+            </div>
+            <!-- JCLAW-113: explain "disabled" means hide-from-selector, not
+                 kill-switch. Hidden when the toggle is on — the default state
+                 is unambiguous and needs no explanation. -->
+            <p
+              v-if="!isProviderEnabled(name)"
+              class="mt-1.5 text-[10px] text-fg-muted leading-snug"
+            >
+              Hidden from the model selector. Agents and conversations already using this provider will
+              continue to route here — delete the provider row below to fully disconnect it.
+            </p>
           </div>
-          <!-- JCLAW-113: explain "disabled" means hide-from-selector, not
-               kill-switch. Hidden when the toggle is on — the default state
-               is unambiguous and needs no explanation. -->
-          <p
-            v-if="!isProviderEnabled(name)"
-            class="mt-1.5 text-[10px] text-fg-muted leading-snug"
-          >
-            Hidden from the model selector. Agents and conversations already using this provider will
-            continue to route here — delete the provider row below to fully disconnect it.
-          </p>
-        </div>
-        <div class="divide-y divide-border">
-          <!-- Non-models entries (baseUrl, apiKey) -->
-          <div
-            v-for="entry in entries.filter((e: any) => !e.key.endsWith('.models'))"
-            :key="entry.key"
-            class="px-4 py-2 flex items-center gap-3"
-          >
-            <span class="text-xs font-mono text-fg-muted w-48 shrink-0">{{ entry.key.split('.').slice(2).join('.') }}</span>
-            <template v-if="editingKey === entry.key">
-              <input
-                v-model="editValue"
-                :type="isSensitive(entry.key) ? 'password' : 'text'"
-                :aria-label="`Edit value for ${entry.key}`"
-                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              >
-              <button
-                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-                title="Save"
-                @click="updateEntry(entry.key)"
-              >
-                <CheckIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                title="Cancel"
-                @click="editingKey = null"
-              >
-                <XMarkIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
-            <template v-else>
-              <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ entry.value || '(empty)' }}</span>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                title="Edit"
-                @click="startEdit(entry)"
-              >
-                <PencilIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
-          </div>
-          <!-- Ollama-specific: keepAlive setting -->
-          <div
-            v-if="name.toLowerCase().includes('ollama')"
-            class="px-4 py-2 flex items-center gap-3"
-          >
-            <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
-              keepAlive
-              <span class="relative group/tip">
-                <InformationCircleIcon
-                  class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
-                  aria-hidden="true"
-                />
-                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-56 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
-                  How long the model stays loaded between requests. Use <code class="font-mono text-fg-primary">30m</code> for 30 minutes, <code class="font-mono text-fg-primary">-1</code> to keep forever.
+          <div class="divide-y divide-border">
+            <!-- Non-models entries (baseUrl, apiKey) -->
+            <div
+              v-for="entry in entries.filter((e: any) => !e.key.endsWith('.models'))"
+              :key="entry.key"
+              class="px-4 py-2 flex items-center gap-3"
+            >
+              <span class="text-xs font-mono text-fg-muted w-48 shrink-0">{{ entry.key.split('.').slice(2).join('.') }}</span>
+              <template v-if="editingKey === entry.key">
+                <input
+                  v-model="editValue"
+                  :type="isSensitive(entry.key) ? 'password' : 'text'"
+                  :aria-label="`Edit value for ${entry.key}`"
+                  class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+                >
+                <button
+                  class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                  title="Save"
+                  @click="updateEntry(entry.key)"
+                >
+                  <CheckIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+                <button
+                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                  title="Cancel"
+                  @click="editingKey = null"
+                >
+                  <XMarkIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+              </template>
+              <template v-else>
+                <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ entry.value || '(empty)' }}</span>
+                <button
+                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                  title="Edit"
+                  @click="startEdit(entry)"
+                >
+                  <PencilIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+              </template>
+            </div>
+            <!-- Ollama-specific: keepAlive setting -->
+            <div
+              v-if="name.toLowerCase().includes('ollama')"
+              class="px-4 py-2 flex items-center gap-3"
+            >
+              <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+                keepAlive
+                <span class="relative group/tip">
+                  <InformationCircleIcon
+                    class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
+                    aria-hidden="true"
+                  />
+                  <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-56 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+                    How long the model stays loaded between requests. Use <code class="font-mono text-fg-primary">30m</code> for 30 minutes, <code class="font-mono text-fg-primary">-1</code> to keep forever.
+                  </span>
                 </span>
               </span>
-            </span>
-            <template v-if="editingKey === 'ollama.keepAlive'">
-              <input
-                v-model="editValue"
-                class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              >
+              <template v-if="editingKey === 'ollama.keepAlive'">
+                <input
+                  v-model="editValue"
+                  class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+                >
+                <button
+                  class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                  title="Save"
+                  @click="updateEntry('ollama.keepAlive')"
+                >
+                  <CheckIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+                <button
+                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                  title="Cancel"
+                  @click="editingKey = null"
+                >
+                  <XMarkIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+              </template>
+              <template v-else>
+                <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ ollamaKeepAlive }}</span>
+                <button
+                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                  title="Edit"
+                  @click="editingKey = 'ollama.keepAlive'; editValue = ollamaKeepAlive"
+                >
+                  <PencilIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+              </template>
+            </div>
+            <!-- Models row -->
+            <div class="px-4 py-2 flex items-center gap-3">
+              <span class="text-xs font-mono text-fg-muted w-48 shrink-0">models</span>
+              <span class="flex-1 text-sm text-fg-primary">{{ getProviderModels(name).length }} model{{ getProviderModels(name).length !== 1 ? 's' : '' }}</span>
               <button
-                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-                title="Save"
-                @click="updateEntry('ollama.keepAlive')"
+                :disabled="discoveryLoading && discoveryProvider === name"
+                class="p-1 text-fg-muted hover:text-blue-400 disabled:animate-spin transition-colors"
+                title="Discover models from provider"
+                @click="startDiscovery(name)"
               >
-                <CheckIcon
+                <ArrowPathIcon
                   class="w-3.5 h-3.5"
                   aria-hidden="true"
                 />
               </button>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                title="Cancel"
-                @click="editingKey = null"
+                :title="expandedModelsProvider === name ? 'Close models' : 'Manage models'"
+                @click="toggleModelsPanel(name)"
               >
-                <XMarkIcon
+                <ChevronUpIcon
+                  v-if="expandedModelsProvider === name"
+                  class="w-3.5 h-3.5"
+                  aria-hidden="true"
+                />
+                <Cog6ToothIcon
+                  v-else
                   class="w-3.5 h-3.5"
                   aria-hidden="true"
                 />
               </button>
-            </template>
-            <template v-else>
-              <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ ollamaKeepAlive }}</span>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                title="Edit"
-                @click="editingKey = 'ollama.keepAlive'; editValue = ollamaKeepAlive"
-              >
-                <PencilIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
+            </div>
           </div>
-          <!-- Models row -->
-          <div class="px-4 py-2 flex items-center gap-3">
-            <span class="text-xs font-mono text-fg-muted w-48 shrink-0">models</span>
-            <span class="flex-1 text-sm text-fg-primary">{{ getProviderModels(name).length }} model{{ getProviderModels(name).length !== 1 ? 's' : '' }}</span>
-            <button
-              :disabled="discoveryLoading && discoveryProvider === name"
-              class="p-1 text-fg-muted hover:text-blue-400 disabled:animate-spin transition-colors"
-              title="Discover models from provider"
-              @click="startDiscovery(name)"
-            >
-              <ArrowPathIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-            <button
-              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-              :title="expandedModelsProvider === name ? 'Close models' : 'Manage models'"
-              @click="toggleModelsPanel(name)"
-            >
-              <ChevronUpIcon
-                v-if="expandedModelsProvider === name"
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-              <Cog6ToothIcon
-                v-else
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-          </div>
-        </div>
 
-        <!-- Expanded model management panel -->
-        <div
-          v-if="expandedModelsProvider === name"
-          class="border-t border-input"
-        >
-          <div class="divide-y divide-border">
-            <div
-              v-for="(model, idx) in getProviderModels(name)"
-              :key="model.id"
-              class="px-4 py-2.5"
-            >
-              <!-- Editing a model -->
-              <template v-if="editingModelIdx === idx">
+          <!-- Expanded model management panel -->
+          <div
+            v-if="expandedModelsProvider === name"
+            class="border-t border-input"
+          >
+            <div class="divide-y divide-border">
+              <div
+                v-for="(model, idx) in getProviderModels(name)"
+                :key="model.id"
+                class="px-4 py-2.5"
+              >
+                <!-- Editing a model -->
+                <template v-if="editingModelIdx === idx">
+                  <div class="grid grid-cols-2 gap-2 mb-2">
+                    <label
+                      :for="`model-id-${name}`"
+                      class="block"
+                    >
+                      <span class="block text-[10px] text-fg-muted mb-0.5">ID</span>
+                      <input
+                        :id="`model-id-${name}`"
+                        v-model="modelForm.id"
+                        class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                      >
+                    </label>
+                    <label
+                      :for="`model-name-${name}`"
+                      class="block"
+                    >
+                      <span class="block text-[10px] text-fg-muted mb-0.5">Display Name</span>
+                      <input
+                        :id="`model-name-${name}`"
+                        v-model="modelForm.name"
+                        class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong focus:outline-hidden"
+                      >
+                    </label>
+                    <label
+                      :for="`model-ctx-${name}`"
+                      class="block"
+                    >
+                      <span class="block text-[10px] text-fg-muted mb-0.5">Context Window</span>
+                      <input
+                        :id="`model-ctx-${name}`"
+                        v-model.number="modelForm.contextWindow"
+                        type="number"
+                        class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                      >
+                      <span
+                        v-if="!modelForm.contextWindow || modelForm.contextWindow <= 0"
+                        class="block text-[10px] text-warning mt-0.5"
+                      >Unknown — set from provider docs. Compaction and /usage depend on this.</span>
+                    </label>
+                    <label
+                      :for="`model-maxtok-${name}`"
+                      class="block"
+                    >
+                      <span class="block text-[10px] text-fg-muted mb-0.5">Max Tokens</span>
+                      <input
+                        :id="`model-maxtok-${name}`"
+                        v-model.number="modelForm.maxTokens"
+                        type="number"
+                        class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                      >
+                    </label>
+                    <label
+                      :for="`model-price-in-${name}`"
+                      class="block"
+                    >
+                      <span class="block text-[10px] text-fg-muted mb-0.5">Input $/M tokens</span>
+                      <input
+                        :id="`model-price-in-${name}`"
+                        v-model.number="modelForm.promptPrice"
+                        type="number"
+                        step="0.01"
+                        class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                      >
+                    </label>
+                    <label
+                      :for="`model-price-out-${name}`"
+                      class="block"
+                    >
+                      <span class="block text-[10px] text-fg-muted mb-0.5">Output $/M tokens</span>
+                      <input
+                        :id="`model-price-out-${name}`"
+                        v-model.number="modelForm.completionPrice"
+                        type="number"
+                        step="0.01"
+                        class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                      >
+                    </label>
+                    <label
+                      :for="`model-cache-read-${name}`"
+                      class="block"
+                      title="Anthropic: ~0.1× input. OpenAI: ~0.5× input. Leave -1 to auto-default."
+                    >
+                      <span class="block text-[10px] text-fg-muted mb-0.5">Cache read $/M</span>
+                      <input
+                        :id="`model-cache-read-${name}`"
+                        v-model.number="modelForm.cachedReadPrice"
+                        type="number"
+                        step="0.01"
+                        class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                      >
+                    </label>
+                    <label
+                      :for="`model-cache-write-${name}`"
+                      class="block"
+                      title="Anthropic 5-min TTL: ~1.25× input. OpenAI: n/a. Leave -1 to auto-default."
+                    >
+                      <span class="block text-[10px] text-fg-muted mb-0.5">Cache write $/M</span>
+                      <input
+                        :id="`model-cache-write-${name}`"
+                        v-model.number="modelForm.cacheWritePrice"
+                        type="number"
+                        step="0.01"
+                        class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
+                      >
+                    </label>
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3 flex-wrap">
+                      <label
+                        :for="`model-thinking-${name}`"
+                        class="flex items-center gap-1.5 text-xs text-fg-muted"
+                      >
+                        <input
+                          :id="`model-thinking-${name}`"
+                          v-model="modelForm.supportsThinking"
+                          type="checkbox"
+                          class="accent-white"
+                        > Supports Thinking
+                      </label>
+                      <label
+                        :for="`model-vision-${name}`"
+                        class="flex items-center gap-1.5 text-xs text-fg-muted"
+                      >
+                        <input
+                          :id="`model-vision-${name}`"
+                          v-model="modelForm.supportsVision"
+                          type="checkbox"
+                          class="accent-white"
+                        > Supports Vision
+                      </label>
+                      <label
+                        :for="`model-audio-${name}`"
+                        class="flex items-center gap-1.5 text-xs text-fg-muted"
+                      >
+                        <input
+                          :id="`model-audio-${name}`"
+                          v-model="modelForm.supportsAudio"
+                          type="checkbox"
+                          class="accent-white"
+                        > Supports Audio
+                      </label>
+                    </div>
+                    <div class="flex items-center gap-1">
+                      <button
+                        class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                        title="Save"
+                        @click="saveEditedModel(name)"
+                      >
+                        <CheckIcon
+                          class="w-3.5 h-3.5"
+                          aria-hidden="true"
+                        />
+                      </button>
+                      <button
+                        class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                        title="Cancel"
+                        @click="editingModelIdx = null"
+                      >
+                        <XMarkIcon
+                          class="w-3.5 h-3.5"
+                          aria-hidden="true"
+                        />
+                      </button>
+                      <button
+                        class="p-1 text-fg-muted hover:text-red-400 transition-colors"
+                        title="Delete model"
+                        @click="deleteModel(name, idx)"
+                      >
+                        <TrashIcon
+                          class="w-3.5 h-3.5"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </div>
+                  </div>
+                </template>
+                <!-- Display a model -->
+                <template v-else>
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      <span
+                        v-if="getModelRank(name, model.id)"
+                        class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded"
+                        :class="getModelRank(name, model.id)! <= 3 ? 'text-amber-400 bg-amber-400/10 border border-amber-400/30' : 'text-fg-muted bg-muted border border-input'"
+                        :title="`#${getModelRank(name, model.id)} on provider leaderboard`"
+                      >
+                        #{{ getModelRank(name, model.id) }}
+                      </span>
+                      <div>
+                        <span class="text-sm text-fg-strong font-mono">{{ model.id }}</span>
+                        <span
+                          v-if="model.name"
+                          class="ml-2 text-xs text-fg-muted"
+                        >{{ model.name }}</span>
+                        <span
+                          v-if="model.supportsThinking"
+                          class="ml-2 text-[10px] text-blue-400 border border-blue-400/30 px-1"
+                        >thinking</span>
+                        <span
+                          v-if="model.supportsVision"
+                          class="ml-2 text-[10px] text-amber-400 border border-amber-400/30 px-1"
+                        >vision</span>
+                        <span
+                          v-if="model.supportsAudio"
+                          class="ml-2 text-[10px] text-violet-400 border border-violet-400/30 px-1"
+                        >audio</span>
+                      </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <span
+                        v-if="(model.promptPrice ?? 0) > 0"
+                        class="text-xs text-amber-500/70 font-mono"
+                        :title="`Input: $${model.promptPrice}/M tokens, Output: $${model.completionPrice}/M tokens`"
+                      >
+                        ${{ (model.promptPrice ?? 0) < 1 ? (model.promptPrice ?? 0).toFixed(2) : (model.promptPrice ?? 0).toFixed(0) }}/M
+                      </span>
+                      <span class="text-xs text-fg-muted font-mono">{{ ((model.contextWindow ?? 0) / 1024).toFixed(0) }}K ctx</span>
+                      <span class="text-xs text-fg-muted font-mono">{{ ((model.maxTokens ?? 0) / 1024).toFixed(0) }}K out</span>
+                      <button
+                        class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                        title="Edit model"
+                        @click="startEditModel(name, idx)"
+                      >
+                        <PencilIcon
+                          class="w-3.5 h-3.5"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </div>
+
+            <!-- Add model form -->
+            <div class="px-4 py-2.5 border-t border-border">
+              <template v-if="addingModel">
                 <div class="grid grid-cols-2 gap-2 mb-2">
                   <label
-                    :for="`model-id-${name}`"
+                    :for="`addmodel-id-${name}`"
                     class="block"
                   >
                     <span class="block text-[10px] text-fg-muted mb-0.5">ID</span>
                     <input
-                      :id="`model-id-${name}`"
+                      :id="`addmodel-id-${name}`"
                       v-model="modelForm.id"
+                      placeholder="model-id"
                       class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                     >
                   </label>
                   <label
-                    :for="`model-name-${name}`"
+                    :for="`addmodel-name-${name}`"
                     class="block"
                   >
                     <span class="block text-[10px] text-fg-muted mb-0.5">Display Name</span>
                     <input
-                      :id="`model-name-${name}`"
+                      :id="`addmodel-name-${name}`"
                       v-model="modelForm.name"
+                      placeholder="Model Name"
                       class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong focus:outline-hidden"
                     >
                   </label>
                   <label
-                    :for="`model-ctx-${name}`"
+                    :for="`addmodel-ctx-${name}`"
                     class="block"
                   >
                     <span class="block text-[10px] text-fg-muted mb-0.5">Context Window</span>
                     <input
-                      :id="`model-ctx-${name}`"
+                      :id="`addmodel-ctx-${name}`"
                       v-model.number="modelForm.contextWindow"
                       type="number"
                       class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
@@ -1208,24 +1496,24 @@ async function handleResetPassword() {
                     >Unknown — set from provider docs. Compaction and /usage depend on this.</span>
                   </label>
                   <label
-                    :for="`model-maxtok-${name}`"
+                    :for="`addmodel-maxtok-${name}`"
                     class="block"
                   >
                     <span class="block text-[10px] text-fg-muted mb-0.5">Max Tokens</span>
                     <input
-                      :id="`model-maxtok-${name}`"
+                      :id="`addmodel-maxtok-${name}`"
                       v-model.number="modelForm.maxTokens"
                       type="number"
                       class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
                     >
                   </label>
                   <label
-                    :for="`model-price-in-${name}`"
+                    :for="`addmodel-price-in-${name}`"
                     class="block"
                   >
                     <span class="block text-[10px] text-fg-muted mb-0.5">Input $/M tokens</span>
                     <input
-                      :id="`model-price-in-${name}`"
+                      :id="`addmodel-price-in-${name}`"
                       v-model.number="modelForm.promptPrice"
                       type="number"
                       step="0.01"
@@ -1233,12 +1521,12 @@ async function handleResetPassword() {
                     >
                   </label>
                   <label
-                    :for="`model-price-out-${name}`"
+                    :for="`addmodel-price-out-${name}`"
                     class="block"
                   >
                     <span class="block text-[10px] text-fg-muted mb-0.5">Output $/M tokens</span>
                     <input
-                      :id="`model-price-out-${name}`"
+                      :id="`addmodel-price-out-${name}`"
                       v-model.number="modelForm.completionPrice"
                       type="number"
                       step="0.01"
@@ -1246,13 +1534,13 @@ async function handleResetPassword() {
                     >
                   </label>
                   <label
-                    :for="`model-cache-read-${name}`"
+                    :for="`addmodel-cache-read-${name}`"
                     class="block"
                     title="Anthropic: ~0.1× input. OpenAI: ~0.5× input. Leave -1 to auto-default."
                   >
                     <span class="block text-[10px] text-fg-muted mb-0.5">Cache read $/M</span>
                     <input
-                      :id="`model-cache-read-${name}`"
+                      :id="`addmodel-cache-read-${name}`"
                       v-model.number="modelForm.cachedReadPrice"
                       type="number"
                       step="0.01"
@@ -1260,13 +1548,13 @@ async function handleResetPassword() {
                     >
                   </label>
                   <label
-                    :for="`model-cache-write-${name}`"
+                    :for="`addmodel-cache-write-${name}`"
                     class="block"
                     title="Anthropic 5-min TTL: ~1.25× input. OpenAI: n/a. Leave -1 to auto-default."
                   >
                     <span class="block text-[10px] text-fg-muted mb-0.5">Cache write $/M</span>
                     <input
-                      :id="`model-cache-write-${name}`"
+                      :id="`addmodel-cache-write-${name}`"
                       v-model.number="modelForm.cacheWritePrice"
                       type="number"
                       step="0.01"
@@ -1277,33 +1565,33 @@ async function handleResetPassword() {
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-3 flex-wrap">
                     <label
-                      :for="`model-thinking-${name}`"
+                      :for="`addmodel-thinking-${name}`"
                       class="flex items-center gap-1.5 text-xs text-fg-muted"
                     >
                       <input
-                        :id="`model-thinking-${name}`"
+                        :id="`addmodel-thinking-${name}`"
                         v-model="modelForm.supportsThinking"
                         type="checkbox"
                         class="accent-white"
                       > Supports Thinking
                     </label>
                     <label
-                      :for="`model-vision-${name}`"
+                      :for="`addmodel-vision-${name}`"
                       class="flex items-center gap-1.5 text-xs text-fg-muted"
                     >
                       <input
-                        :id="`model-vision-${name}`"
+                        :id="`addmodel-vision-${name}`"
                         v-model="modelForm.supportsVision"
                         type="checkbox"
                         class="accent-white"
                       > Supports Vision
                     </label>
                     <label
-                      :for="`model-audio-${name}`"
+                      :for="`addmodel-audio-${name}`"
                       class="flex items-center gap-1.5 text-xs text-fg-muted"
                     >
                       <input
-                        :id="`model-audio-${name}`"
+                        :id="`addmodel-audio-${name}`"
                         v-model="modelForm.supportsAudio"
                         type="checkbox"
                         class="accent-white"
@@ -1312,9 +1600,10 @@ async function handleResetPassword() {
                   </div>
                   <div class="flex items-center gap-1">
                     <button
-                      class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-                      title="Save"
-                      @click="saveEditedModel(name)"
+                      :disabled="!modelForm.id.trim()"
+                      class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 disabled:opacity-40 transition-colors"
+                      title="Add model"
+                      @click="saveNewModel(name)"
                     >
                       <CheckIcon
                         class="w-3.5 h-3.5"
@@ -1324,498 +1613,259 @@ async function handleResetPassword() {
                     <button
                       class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                       title="Cancel"
-                      @click="editingModelIdx = null"
+                      @click="addingModel = false"
                     >
                       <XMarkIcon
                         class="w-3.5 h-3.5"
                         aria-hidden="true"
                       />
                     </button>
-                    <button
-                      class="p-1 text-fg-muted hover:text-red-400 transition-colors"
-                      title="Delete model"
-                      @click="deleteModel(name, idx)"
-                    >
-                      <TrashIcon
-                        class="w-3.5 h-3.5"
-                        aria-hidden="true"
-                      />
-                    </button>
                   </div>
                 </div>
               </template>
-              <!-- Display a model -->
               <template v-else>
-                <div class="flex items-center justify-between">
-                  <div class="flex items-center gap-2">
-                    <span
-                      v-if="getModelRank(name, model.id)"
-                      class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded"
-                      :class="getModelRank(name, model.id)! <= 3 ? 'text-amber-400 bg-amber-400/10 border border-amber-400/30' : 'text-fg-muted bg-muted border border-input'"
-                      :title="`#${getModelRank(name, model.id)} on provider leaderboard`"
-                    >
-                      #{{ getModelRank(name, model.id) }}
-                    </span>
-                    <div>
-                      <span class="text-sm text-fg-strong font-mono">{{ model.id }}</span>
-                      <span
-                        v-if="model.name"
-                        class="ml-2 text-xs text-fg-muted"
-                      >{{ model.name }}</span>
-                      <span
-                        v-if="model.supportsThinking"
-                        class="ml-2 text-[10px] text-blue-400 border border-blue-400/30 px-1"
-                      >thinking</span>
-                      <span
-                        v-if="model.supportsVision"
-                        class="ml-2 text-[10px] text-amber-400 border border-amber-400/30 px-1"
-                      >vision</span>
-                      <span
-                        v-if="model.supportsAudio"
-                        class="ml-2 text-[10px] text-violet-400 border border-violet-400/30 px-1"
-                      >audio</span>
-                    </div>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <span
-                      v-if="(model.promptPrice ?? 0) > 0"
-                      class="text-xs text-amber-500/70 font-mono"
-                      :title="`Input: $${model.promptPrice}/M tokens, Output: $${model.completionPrice}/M tokens`"
-                    >
-                      ${{ (model.promptPrice ?? 0) < 1 ? (model.promptPrice ?? 0).toFixed(2) : (model.promptPrice ?? 0).toFixed(0) }}/M
-                    </span>
-                    <span class="text-xs text-fg-muted font-mono">{{ ((model.contextWindow ?? 0) / 1024).toFixed(0) }}K ctx</span>
-                    <span class="text-xs text-fg-muted font-mono">{{ ((model.maxTokens ?? 0) / 1024).toFixed(0) }}K out</span>
-                    <button
-                      class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                      title="Edit model"
-                      @click="startEditModel(name, idx)"
-                    >
-                      <PencilIcon
-                        class="w-3.5 h-3.5"
-                        aria-hidden="true"
-                      />
-                    </button>
-                  </div>
-                </div>
+                <button
+                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                  title="Add model"
+                  @click="startAddModel"
+                >
+                  <PlusIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
               </template>
+            </div>
+
+            <!-- No models -->
+            <div
+              v-if="!getProviderModels(name).length && !addingModel"
+              class="px-4 py-4 text-xs text-fg-muted text-center"
+            >
+              No models configured
             </div>
           </div>
 
-          <!-- Add model form -->
-          <div class="px-4 py-2.5 border-t border-border">
-            <template v-if="addingModel">
-              <div class="grid grid-cols-2 gap-2 mb-2">
-                <label
-                  :for="`addmodel-id-${name}`"
-                  class="block"
+          <!-- Model discovery panel -->
+          <div
+            v-if="discoveryProvider === name"
+            class="border-t border-blue-200 dark:border-blue-800/40 bg-blue-50 dark:bg-blue-950/20"
+          >
+            <div class="px-4 py-3 flex items-center justify-between border-b border-border">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-medium text-blue-700 dark:text-blue-400">Discover Models</span>
+                <span
+                  v-if="!discoveryLoading && discoveredModels.length"
+                  class="text-[10px] text-fg-muted"
                 >
-                  <span class="block text-[10px] text-fg-muted mb-0.5">ID</span>
-                  <input
-                    :id="`addmodel-id-${name}`"
-                    v-model="modelForm.id"
-                    placeholder="model-id"
-                    class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
-                  >
-                </label>
-                <label
-                  :for="`addmodel-name-${name}`"
-                  class="block"
-                >
-                  <span class="block text-[10px] text-fg-muted mb-0.5">Display Name</span>
-                  <input
-                    :id="`addmodel-name-${name}`"
-                    v-model="modelForm.name"
-                    placeholder="Model Name"
-                    class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong focus:outline-hidden"
-                  >
-                </label>
-                <label
-                  :for="`addmodel-ctx-${name}`"
-                  class="block"
-                >
-                  <span class="block text-[10px] text-fg-muted mb-0.5">Context Window</span>
-                  <input
-                    :id="`addmodel-ctx-${name}`"
-                    v-model.number="modelForm.contextWindow"
-                    type="number"
-                    class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
-                  >
-                  <span
-                    v-if="!modelForm.contextWindow || modelForm.contextWindow <= 0"
-                    class="block text-[10px] text-warning mt-0.5"
-                  >Unknown — set from provider docs. Compaction and /usage depend on this.</span>
-                </label>
-                <label
-                  :for="`addmodel-maxtok-${name}`"
-                  class="block"
-                >
-                  <span class="block text-[10px] text-fg-muted mb-0.5">Max Tokens</span>
-                  <input
-                    :id="`addmodel-maxtok-${name}`"
-                    v-model.number="modelForm.maxTokens"
-                    type="number"
-                    class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
-                  >
-                </label>
-                <label
-                  :for="`addmodel-price-in-${name}`"
-                  class="block"
-                >
-                  <span class="block text-[10px] text-fg-muted mb-0.5">Input $/M tokens</span>
-                  <input
-                    :id="`addmodel-price-in-${name}`"
-                    v-model.number="modelForm.promptPrice"
-                    type="number"
-                    step="0.01"
-                    class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
-                  >
-                </label>
-                <label
-                  :for="`addmodel-price-out-${name}`"
-                  class="block"
-                >
-                  <span class="block text-[10px] text-fg-muted mb-0.5">Output $/M tokens</span>
-                  <input
-                    :id="`addmodel-price-out-${name}`"
-                    v-model.number="modelForm.completionPrice"
-                    type="number"
-                    step="0.01"
-                    class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
-                  >
-                </label>
-                <label
-                  :for="`addmodel-cache-read-${name}`"
-                  class="block"
-                  title="Anthropic: ~0.1× input. OpenAI: ~0.5× input. Leave -1 to auto-default."
-                >
-                  <span class="block text-[10px] text-fg-muted mb-0.5">Cache read $/M</span>
-                  <input
-                    :id="`addmodel-cache-read-${name}`"
-                    v-model.number="modelForm.cachedReadPrice"
-                    type="number"
-                    step="0.01"
-                    class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
-                  >
-                </label>
-                <label
-                  :for="`addmodel-cache-write-${name}`"
-                  class="block"
-                  title="Anthropic 5-min TTL: ~1.25× input. OpenAI: n/a. Leave -1 to auto-default."
-                >
-                  <span class="block text-[10px] text-fg-muted mb-0.5">Cache write $/M</span>
-                  <input
-                    :id="`addmodel-cache-write-${name}`"
-                    v-model.number="modelForm.cacheWritePrice"
-                    type="number"
-                    step="0.01"
-                    class="w-full px-2 py-1 bg-muted border border-input text-xs text-fg-strong font-mono focus:outline-hidden"
-                  >
-                </label>
+                  {{ discoveredModels.length }} available
+                </span>
               </div>
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-3 flex-wrap">
-                  <label
-                    :for="`addmodel-thinking-${name}`"
-                    class="flex items-center gap-1.5 text-xs text-fg-muted"
-                  >
-                    <input
-                      :id="`addmodel-thinking-${name}`"
-                      v-model="modelForm.supportsThinking"
-                      type="checkbox"
-                      class="accent-white"
-                    > Supports Thinking
-                  </label>
-                  <label
-                    :for="`addmodel-vision-${name}`"
-                    class="flex items-center gap-1.5 text-xs text-fg-muted"
-                  >
-                    <input
-                      :id="`addmodel-vision-${name}`"
-                      v-model="modelForm.supportsVision"
-                      type="checkbox"
-                      class="accent-white"
-                    > Supports Vision
-                  </label>
-                  <label
-                    :for="`addmodel-audio-${name}`"
-                    class="flex items-center gap-1.5 text-xs text-fg-muted"
-                  >
-                    <input
-                      :id="`addmodel-audio-${name}`"
-                      v-model="modelForm.supportsAudio"
-                      type="checkbox"
-                      class="accent-white"
-                    > Supports Audio
-                  </label>
-                </div>
-                <div class="flex items-center gap-1">
-                  <button
-                    :disabled="!modelForm.id.trim()"
-                    class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 disabled:opacity-40 transition-colors"
-                    title="Add model"
-                    @click="saveNewModel(name)"
-                  >
-                    <CheckIcon
-                      class="w-3.5 h-3.5"
-                      aria-hidden="true"
-                    />
-                  </button>
-                  <button
-                    class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                    title="Cancel"
-                    @click="addingModel = false"
-                  >
-                    <XMarkIcon
-                      class="w-3.5 h-3.5"
-                      aria-hidden="true"
-                    />
-                  </button>
-                </div>
-              </div>
-            </template>
-            <template v-else>
               <button
                 class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                title="Add model"
-                @click="startAddModel"
+                title="Close"
+                @click="closeDiscovery"
               >
-                <PlusIcon
+                <XMarkIcon
                   class="w-3.5 h-3.5"
                   aria-hidden="true"
                 />
               </button>
-            </template>
-          </div>
-
-          <!-- No models -->
-          <div
-            v-if="!getProviderModels(name).length && !addingModel"
-            class="px-4 py-4 text-xs text-fg-muted text-center"
-          >
-            No models configured
-          </div>
-        </div>
-
-        <!-- Model discovery panel -->
-        <div
-          v-if="discoveryProvider === name"
-          class="border-t border-blue-200 dark:border-blue-800/40 bg-blue-50 dark:bg-blue-950/20"
-        >
-          <div class="px-4 py-3 flex items-center justify-between border-b border-border">
-            <div class="flex items-center gap-2">
-              <span class="text-xs font-medium text-blue-700 dark:text-blue-400">Discover Models</span>
-              <span
-                v-if="!discoveryLoading && discoveredModels.length"
-                class="text-[10px] text-fg-muted"
-              >
-                {{ discoveredModels.length }} available
-              </span>
             </div>
-            <button
-              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-              title="Close"
-              @click="closeDiscovery"
+
+            <!-- Loading -->
+            <div
+              v-if="discoveryLoading"
+              class="px-4 py-6 text-center"
             >
-              <XMarkIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-          </div>
-
-          <!-- Loading -->
-          <div
-            v-if="discoveryLoading"
-            class="px-4 py-6 text-center"
-          >
-            <span class="text-xs text-fg-muted animate-pulse">Fetching models from {{ name }}...</span>
-          </div>
-
-          <!-- Error -->
-          <div
-            v-else-if="discoveryError"
-            class="px-4 py-4 text-center"
-          >
-            <span class="text-xs text-red-400">{{ discoveryError }}</span>
-          </div>
-
-          <!-- Results -->
-          <template v-else-if="discoveredModels.length">
-            <!-- Search + filters -->
-            <div class="px-4 py-2 flex items-center gap-2 border-b border-border">
-              <MagnifyingGlassIcon
-                class="w-3.5 h-3.5 text-fg-muted shrink-0"
-                aria-hidden="true"
-              />
-              <input
-                v-model="discoverySearch"
-                placeholder="Search models..."
-                aria-label="Search discovered models"
-                class="flex-1 px-2 py-1 bg-transparent text-xs text-fg-strong placeholder-fg-muted focus:outline-hidden"
-              >
-              <select
-                v-model="discoveryFilterThinking"
-                aria-label="Filter by thinking support"
-                class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
-              >
-                <option value="all">
-                  Thinking: All
-                </option>
-                <option value="yes">
-                  Thinking: Yes
-                </option>
-                <option value="no">
-                  Thinking: No
-                </option>
-              </select>
-              <select
-                v-if="discoveryHasPricing"
-                v-model="discoveryFilterCost"
-                aria-label="Filter by cost"
-                class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
-              >
-                <option value="all">
-                  Cost: All
-                </option>
-                <option value="free">
-                  Free
-                </option>
-                <option value="paid">
-                  Paid
-                </option>
-              </select>
-              <select
-                v-if="discoveryHasRankings"
-                v-model="discoveryFilterPopular"
-                aria-label="Filter by leaderboard rank"
-                class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
-              >
-                <option value="all">
-                  Rank: All
-                </option>
-                <option value="top10">
-                  Top 10
-                </option>
-                <option value="top25">
-                  Top 25
-                </option>
-                <option value="ranked">
-                  All Ranked
-                </option>
-              </select>
-              <span class="text-[10px] text-fg-muted shrink-0">{{ filteredDiscoveredModels.length }}</span>
-              <button
-                class="text-[10px] text-fg-muted hover:text-fg-strong transition-colors shrink-0"
-                @click="selectAllDiscovered"
-              >
-                {{ discoverySelected.size === filteredDiscoveredModels.length ? 'None' : 'All' }}
-              </button>
+              <span class="text-xs text-fg-muted animate-pulse">Fetching models from {{ name }}...</span>
             </div>
 
-            <!-- Model list -->
-            <div class="max-h-72 overflow-y-auto divide-y divide-border">
-              <button
-                v-for="model in filteredDiscoveredModels"
-                :key="model.id"
-                type="button"
-                :class="discoverySelected.has(model.id) ? 'bg-blue-100 dark:bg-blue-900/20' : ''"
-                class="w-full text-left px-4 py-1.5 flex items-center gap-3 hover:bg-muted cursor-pointer transition-colors bg-transparent border-0"
-                @click="toggleDiscoverySelect(model.id)"
-              >
-                <span
-                  class="shrink-0 w-3.5 h-3.5 border border-input flex items-center justify-center text-[10px]"
-                  :class="discoverySelected.has(model.id) ? 'bg-blue-500 border-blue-500 text-white' : ''"
+            <!-- Error -->
+            <div
+              v-else-if="discoveryError"
+              class="px-4 py-4 text-center"
+            >
+              <span class="text-xs text-red-400">{{ discoveryError }}</span>
+            </div>
+
+            <!-- Results -->
+            <template v-else-if="discoveredModels.length">
+              <!-- Search + filters -->
+              <div class="px-4 py-2 flex items-center gap-2 border-b border-border">
+                <MagnifyingGlassIcon
+                  class="w-3.5 h-3.5 text-fg-muted shrink-0"
+                  aria-hidden="true"
+                />
+                <input
+                  v-model="discoverySearch"
+                  placeholder="Search models..."
+                  aria-label="Search discovered models"
+                  class="flex-1 px-2 py-1 bg-transparent text-xs text-fg-strong placeholder-fg-muted focus:outline-hidden"
                 >
-                  <span v-if="discoverySelected.has(model.id)">&#10003;</span>
-                </span>
-                <span
-                  v-if="model.leaderboardRank"
-                  class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded"
-                  :class="model.leaderboardRank <= 3 ? 'text-amber-400 bg-amber-400/10 border border-amber-400/30' : 'text-fg-muted bg-muted border border-input'"
-                  :title="`#${model.leaderboardRank} on provider leaderboard`"
+                <select
+                  v-model="discoveryFilterThinking"
+                  aria-label="Filter by thinking support"
+                  class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
                 >
-                  #{{ model.leaderboardRank }}
-                </span>
-                <div class="flex-1 min-w-0">
-                  <span class="text-xs text-fg-strong font-mono truncate block">{{ model.id }}</span>
+                  <option value="all">
+                    Thinking: All
+                  </option>
+                  <option value="yes">
+                    Thinking: Yes
+                  </option>
+                  <option value="no">
+                    Thinking: No
+                  </option>
+                </select>
+                <select
+                  v-if="discoveryHasPricing"
+                  v-model="discoveryFilterCost"
+                  aria-label="Filter by cost"
+                  class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
+                >
+                  <option value="all">
+                    Cost: All
+                  </option>
+                  <option value="free">
+                    Free
+                  </option>
+                  <option value="paid">
+                    Paid
+                  </option>
+                </select>
+                <select
+                  v-if="discoveryHasRankings"
+                  v-model="discoveryFilterPopular"
+                  aria-label="Filter by leaderboard rank"
+                  class="bg-muted border border-input text-[10px] text-fg-muted px-1.5 py-0.5 focus:outline-hidden"
+                >
+                  <option value="all">
+                    Rank: All
+                  </option>
+                  <option value="top10">
+                    Top 10
+                  </option>
+                  <option value="top25">
+                    Top 25
+                  </option>
+                  <option value="ranked">
+                    All Ranked
+                  </option>
+                </select>
+                <span class="text-[10px] text-fg-muted shrink-0">{{ filteredDiscoveredModels.length }}</span>
+                <button
+                  class="text-[10px] text-fg-muted hover:text-fg-strong transition-colors shrink-0"
+                  @click="selectAllDiscovered"
+                >
+                  {{ discoverySelected.size === filteredDiscoveredModels.length ? 'None' : 'All' }}
+                </button>
+              </div>
+
+              <!-- Model list -->
+              <div class="max-h-72 overflow-y-auto divide-y divide-border">
+                <button
+                  v-for="model in filteredDiscoveredModels"
+                  :key="model.id"
+                  type="button"
+                  :class="discoverySelected.has(model.id) ? 'bg-blue-100 dark:bg-blue-900/20' : ''"
+                  class="w-full text-left px-4 py-1.5 flex items-center gap-3 hover:bg-muted cursor-pointer transition-colors bg-transparent border-0"
+                  @click="toggleDiscoverySelect(model.id)"
+                >
                   <span
-                    v-if="model.name && model.name !== model.id"
-                    class="text-[10px] text-fg-muted"
-                  >{{ model.name }}</span>
-                </div>
-                <div class="flex items-center gap-2 shrink-0">
-                  <span
-                    v-if="model.isFree"
-                    class="text-[10px] text-green-400 border border-green-400/30 px-1"
-                  >free</span>
-                  <span
-                    v-else-if="(model.promptPrice ?? -1) >= 0"
-                    class="text-[10px] text-fg-muted font-mono"
-                    :title="`$${(model.promptPrice ?? 0).toFixed(2)}/M in, $${(model.completionPrice ?? 0).toFixed(2)}/M out`"
+                    class="shrink-0 w-3.5 h-3.5 border border-input flex items-center justify-center text-[10px]"
+                    :class="discoverySelected.has(model.id) ? 'bg-blue-500 border-blue-500 text-white' : ''"
                   >
-                    ${{ (model.promptPrice ?? 0) < 1 ? (model.promptPrice ?? 0).toFixed(2) : (model.promptPrice ?? 0).toFixed(0) }}/M
+                    <span v-if="discoverySelected.has(model.id)">&#10003;</span>
                   </span>
                   <span
-                    v-if="model.supportsThinking && model.thinkingDetectedFromProvider"
-                    class="text-[10px] text-blue-400 border border-blue-400/30 px-1"
-                    title="Thinking support confirmed by provider"
-                  >thinking</span>
-                  <span
-                    v-else-if="model.supportsThinking"
-                    class="text-[10px] text-fg-muted border border-input px-1"
-                    title="Thinking support guessed from model name (not confirmed by provider)"
-                  >thinking?</span>
-                  <span
-                    v-if="model.supportsVision && model.visionDetectedFromProvider"
-                    class="text-[10px] text-amber-400 border border-amber-400/30 px-1"
-                    title="Vision support confirmed by provider"
-                  >vision</span>
-                  <span
-                    v-else-if="model.supportsVision"
-                    class="text-[10px] text-fg-muted border border-input px-1"
-                    title="Vision support guessed from model name (not confirmed by provider)"
-                  >vision?</span>
-                  <span
-                    v-if="model.supportsAudio && model.audioDetectedFromProvider"
-                    class="text-[10px] text-violet-400 border border-violet-400/30 px-1"
-                    title="Audio support confirmed by provider"
-                  >audio</span>
-                  <span
-                    v-else-if="model.supportsAudio"
-                    class="text-[10px] text-fg-muted border border-input px-1"
-                    title="Audio support guessed from model name (not confirmed by provider)"
-                  >audio?</span>
-                  <span
-                    v-if="model.contextWindow"
-                    class="text-[10px] text-fg-muted font-mono"
-                  >{{ (model.contextWindow / 1024).toFixed(0) }}K</span>
-                </div>
-              </button>
-            </div>
+                    v-if="model.leaderboardRank"
+                    class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded"
+                    :class="model.leaderboardRank <= 3 ? 'text-amber-400 bg-amber-400/10 border border-amber-400/30' : 'text-fg-muted bg-muted border border-input'"
+                    :title="`#${model.leaderboardRank} on provider leaderboard`"
+                  >
+                    #{{ model.leaderboardRank }}
+                  </span>
+                  <div class="flex-1 min-w-0">
+                    <span class="text-xs text-fg-strong font-mono truncate block">{{ model.id }}</span>
+                    <span
+                      v-if="model.name && model.name !== model.id"
+                      class="text-[10px] text-fg-muted"
+                    >{{ model.name }}</span>
+                  </div>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <span
+                      v-if="model.isFree"
+                      class="text-[10px] text-green-400 border border-green-400/30 px-1"
+                    >free</span>
+                    <span
+                      v-else-if="(model.promptPrice ?? -1) >= 0"
+                      class="text-[10px] text-fg-muted font-mono"
+                      :title="`$${(model.promptPrice ?? 0).toFixed(2)}/M in, $${(model.completionPrice ?? 0).toFixed(2)}/M out`"
+                    >
+                      ${{ (model.promptPrice ?? 0) < 1 ? (model.promptPrice ?? 0).toFixed(2) : (model.promptPrice ?? 0).toFixed(0) }}/M
+                    </span>
+                    <span
+                      v-if="model.supportsThinking && model.thinkingDetectedFromProvider"
+                      class="text-[10px] text-blue-400 border border-blue-400/30 px-1"
+                      title="Thinking support confirmed by provider"
+                    >thinking</span>
+                    <span
+                      v-else-if="model.supportsThinking"
+                      class="text-[10px] text-fg-muted border border-input px-1"
+                      title="Thinking support guessed from model name (not confirmed by provider)"
+                    >thinking?</span>
+                    <span
+                      v-if="model.supportsVision && model.visionDetectedFromProvider"
+                      class="text-[10px] text-amber-400 border border-amber-400/30 px-1"
+                      title="Vision support confirmed by provider"
+                    >vision</span>
+                    <span
+                      v-else-if="model.supportsVision"
+                      class="text-[10px] text-fg-muted border border-input px-1"
+                      title="Vision support guessed from model name (not confirmed by provider)"
+                    >vision?</span>
+                    <span
+                      v-if="model.supportsAudio && model.audioDetectedFromProvider"
+                      class="text-[10px] text-violet-400 border border-violet-400/30 px-1"
+                      title="Audio support confirmed by provider"
+                    >audio</span>
+                    <span
+                      v-else-if="model.supportsAudio"
+                      class="text-[10px] text-fg-muted border border-input px-1"
+                      title="Audio support guessed from model name (not confirmed by provider)"
+                    >audio?</span>
+                    <span
+                      v-if="model.contextWindow"
+                      class="text-[10px] text-fg-muted font-mono"
+                    >{{ (model.contextWindow / 1024).toFixed(0) }}K</span>
+                  </div>
+                </button>
+              </div>
 
-            <!-- Add selected -->
-            <div class="px-4 py-2.5 border-t border-border flex items-center justify-between">
-              <span class="text-[10px] text-fg-muted">{{ discoverySelected.size }} selected</span>
-              <button
-                :disabled="discoverySelected.size === 0"
-                class="px-3 py-1 bg-blue-600 text-white text-xs font-medium hover:bg-blue-500 disabled:opacity-40 transition-colors"
-                @click="addDiscoveredModels"
-              >
-                Add Selected
-              </button>
-            </div>
-          </template>
+              <!-- Add selected -->
+              <div class="px-4 py-2.5 border-t border-border flex items-center justify-between">
+                <span class="text-[10px] text-fg-muted">{{ discoverySelected.size }} selected</span>
+                <button
+                  :disabled="discoverySelected.size === 0"
+                  class="px-3 py-1 bg-blue-600 text-white text-xs font-medium hover:bg-blue-500 disabled:opacity-40 transition-colors"
+                  @click="addDiscoveredModels"
+                >
+                  Add Selected
+                </button>
+              </div>
+            </template>
 
-          <!-- Empty results -->
-          <div
-            v-else-if="!discoveryLoading"
-            class="px-4 py-6 text-center"
-          >
-            <span class="text-xs text-fg-muted">All available models are already configured</span>
+            <!-- Empty results -->
+            <div
+              v-else-if="!discoveryLoading"
+              class="px-4 py-6 text-center"
+            >
+              <span class="text-xs text-fg-muted">All available models are already configured</span>
+            </div>
           </div>
         </div>
-      </div>
+      </template>
     </div>
 
     <!-- OCR Backends -->

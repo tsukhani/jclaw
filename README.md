@@ -154,6 +154,25 @@ JSON for the model you pulled into the `models` field. Bind an agent
 to `ollama-local` from the Agent Edit page to start chatting against
 your local model.
 
+**LM Studio** — required only if you want to bind agents to the
+`lm-studio` LLM provider. JClaw seeds
+`provider.lm-studio.baseUrl=http://localhost:1234/v1` at first boot
+so the provider is already listed under "Local" in Settings. Same
+boot-time probe as ollama-local: INFO when reachable, WARN with a
+launch hint when reachable-but-broken, silent (DEBUG) when LM Studio
+isn't running.
+
+LM Studio is a desktop application — install it from
+[https://lmstudio.ai](https://lmstudio.ai) (macOS DMG, Windows
+installer, or Linux AppImage). After launching, load a model in the
+**My Models** tab, then switch to the **Server** tab and click
+**Start Server**. The default port is 1234.
+
+In JClaw Settings, expand the `lm-studio` card and either run
+Discover Models against `http://localhost:1234/v1` or paste the JSON
+for the model you loaded into the `models` field. Bind an agent to
+`lm-studio` from the Agent Edit page to use it.
+
 ### Clone
 
 ```bash
