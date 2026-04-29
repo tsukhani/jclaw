@@ -53,11 +53,14 @@ Options:
   --frontend-port <port>  Nuxt dev server port, dev mode only (default: 3000)
 
 Environment:
-  JCLAW_JVM_HEAP          Production heap size (default: 2g). Sets both -Xms
-                          and -Xmx unless they are overridden individually.
+  JCLAW_JVM_HEAP          Symmetric heap override — sets both -Xms and -Xmx to
+                          the same value. Default is asymmetric (Xms 512m, Xmx
+                          2g) to avoid committing 2 GB at boot on idle deploys;
+                          ZGC handles resize without pauses, so a fixed heap
+                          isn't required for latency.
                           Example: JCLAW_JVM_HEAP=4g ./jclaw.sh start
-  JCLAW_JVM_XMS           Override -Xms only (defaults to JCLAW_JVM_HEAP).
-  JCLAW_JVM_XMX           Override -Xmx only (defaults to JCLAW_JVM_HEAP).
+  JCLAW_JVM_XMS           Override -Xms only (default: 512m).
+  JCLAW_JVM_XMX           Override -Xmx only (default: 2g).
   JCLAW_JVM_OPTS          Extra JVM flags appended after the built-in set.
                           Last-wins for value flags (e.g. MaxDirectMemorySize),
                           so this lets you override most hardcoded settings.
@@ -116,11 +119,13 @@ Options:
   --backend-port <port>   Backend HTTP port (default: 9000)
 
 Environment:
-  JCLAW_JVM_HEAP          JVM heap size (default: 2g). Sets both -Xms and -Xmx
-                          unless they are overridden individually.
+  JCLAW_JVM_HEAP          Symmetric heap override — sets both -Xms and -Xmx
+                          to the same value. Default is asymmetric (Xms 512m,
+                          Xmx 2g): JClaw commits ~512 MB at boot and grows
+                          to 2 GB on demand. ZGC resizes without pauses.
                           Example: JCLAW_JVM_HEAP=4g ./jclaw.sh start
-  JCLAW_JVM_XMS           Override -Xms only (defaults to JCLAW_JVM_HEAP).
-  JCLAW_JVM_XMX           Override -Xmx only (defaults to JCLAW_JVM_HEAP).
+  JCLAW_JVM_XMS           Override -Xms only (default: 512m).
+  JCLAW_JVM_XMX           Override -Xmx only (default: 2g).
   JCLAW_JVM_OPTS          Extra JVM flags appended after the built-in set.
                           Last-wins for value flags (e.g. MaxDirectMemorySize),
                           so this lets you override most hardcoded settings.
@@ -257,9 +262,10 @@ Options:
   --frontend-port <port>  Nuxt dev server port, dev mode only (default: 3000)
 
 Environment:
-  JCLAW_JVM_HEAP          Production heap size (default: 2g). Sets both -Xms
-                          and -Xmx unless overridden individually.
-  JCLAW_JVM_XMS / XMX     Override -Xms / -Xmx independently.
+  JCLAW_JVM_HEAP          Symmetric heap — sets both -Xms and -Xmx to the
+                          same value. Default is asymmetric (Xms 512m, Xmx 2g).
+  JCLAW_JVM_XMS / XMX     Override -Xms / -Xmx independently
+                          (defaults: 512m / 2g).
   JCLAW_JVM_OPTS          Extra JVM flags appended last (last-wins for value
                           flags, e.g. -XX:MaxDirectMemorySize=512m).
 
@@ -282,9 +288,10 @@ Options:
   --backend-port <port>   Backend HTTP port (default: 9000)
 
 Environment:
-  JCLAW_JVM_HEAP          JVM heap size (default: 2g). Sets both -Xms and
-                          -Xmx unless overridden individually.
-  JCLAW_JVM_XMS / XMX     Override -Xms / -Xmx independently.
+  JCLAW_JVM_HEAP          Symmetric heap — sets both -Xms and -Xmx to the
+                          same value. Default is asymmetric (Xms 512m, Xmx 2g).
+  JCLAW_JVM_XMS / XMX     Override -Xms / -Xmx independently
+                          (defaults: 512m / 2g).
   JCLAW_JVM_OPTS          Extra JVM flags appended last (last-wins).
 
 Examples:
@@ -1406,9 +1413,14 @@ do_start_prod() {
     #   - ZGC: sub-millisecond pause collector. Matters because SSE streams
     #     hold connections open for seconds/tens of seconds; a 100 ms G1
     #     pause would stutter token output to the client.
-    #   - Fixed heap (-Xms == -Xmx by default): avoids heap-resize pauses
-    #     under load. Default 2 GB; size it via JCLAW_JVM_HEAP, or split
-    #     -Xms / -Xmx with JCLAW_JVM_XMS / JCLAW_JVM_XMX.
+    #   - Asymmetric heap by default (-Xms 512m, -Xmx 2g): the steady-state
+    #     working set fits in ~512 MB, so committing the full 2 GB at boot
+    #     would waste resident memory on idle deployments. ZGC handles
+    #     heap resizing without stop-the-world pauses, so the
+    #     resize-under-load argument that motivates fixed heaps in G1/CMS
+    #     doesn't apply. To force a fixed heap (the previous default),
+    #     set JCLAW_JVM_HEAP=2g — that pins -Xms == -Xmx == 2g. To split
+    #     them independently, use JCLAW_JVM_XMS / JCLAW_JVM_XMX.
     #   - HeapDumpOnOutOfMemoryError + ExitOnOutOfMemoryError: dump for
     #     postmortem, then exit cleanly so a process manager can restart.
     #   - MaxDirectMemorySize: caps Netty off-heap buffer allocation so a
@@ -1427,9 +1439,14 @@ do_start_prod() {
     # editing the script. Boolean GC flags (UseZGC vs UseG1GC) conflict
     # rather than override — switching collectors still requires editing
     # the array below.
-    local heap="${JCLAW_JVM_HEAP:-2g}"
-    local xms="${JCLAW_JVM_XMS:-$heap}"
-    local xmx="${JCLAW_JVM_XMX:-$heap}"
+    # Resolution order (highest priority first):
+    #   1. JCLAW_JVM_XMS / JCLAW_JVM_XMX — explicit per-flag override.
+    #   2. JCLAW_JVM_HEAP — symmetric override (sets both flags to same value).
+    #   3. Asymmetric default — Xms 512m, Xmx 2g.
+    # The nested ${var:-${other:-default}} expansion encodes that order in one line.
+    local heap="${JCLAW_JVM_HEAP:-}"
+    local xms="${JCLAW_JVM_XMS:-${heap:-512m}}"
+    local xmx="${JCLAW_JVM_XMX:-${heap:-2g}}"
     local jvm_opts=(
         "-Xms${xms}"
         "-Xmx${xmx}"

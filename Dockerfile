@@ -106,4 +106,15 @@ WORKDIR /app
 
 EXPOSE 9000
 
-CMD ["play", "run", "--%prod"]
+# Heap sizing mirrors `./jclaw.sh start`: asymmetric default (Xms 512m,
+# Xmx 2g) so an idle deploy doesn't commit 2 GB at boot. Operators can
+# override individually with -e JCLAW_JVM_XMS / -e JCLAW_JVM_XMX, or
+# symmetrically with -e JCLAW_JVM_HEAP=4g (which pins both flags to the
+# same value).
+#
+# Shell-form CMD is required because exec-form (the JSON array) doesn't
+# expand env vars. `exec` on the right-hand side replaces the sh process
+# with the JVM so SIGTERM lands on Java directly, preserving Play's
+# graceful-shutdown hook chain. Play 1.x's CLI passes unrecognized args
+# straight through to the JVM, so -Xms / -Xmx don't need a -J prefix.
+CMD ["sh", "-c", "exec play run --%prod -Xms${JCLAW_JVM_XMS:-${JCLAW_JVM_HEAP:-512m}} -Xmx${JCLAW_JVM_XMX:-${JCLAW_JVM_HEAP:-2g}}"]
