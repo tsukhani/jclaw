@@ -42,7 +42,13 @@ public class OllamaLocalProbe {
      */
     public static ProbeResult probe(String baseUrl) {
         try {
+            // Force HTTP/1.1 for symmetry with the LM Studio probe and the
+            // shared utils.HttpClients singletons — see those for the
+            // rationale. Local Ollama happens to handle h2c gracefully
+            // today, but pinning HTTP/1.1 keeps the failure mode
+            // identical across the two local-provider probes.
             var client = HttpClient.newBuilder()
+                    .version(HttpClient.Version.HTTP_1_1)
                     .connectTimeout(Duration.ofSeconds(2))
                     .build();
             var req = HttpRequest.newBuilder()

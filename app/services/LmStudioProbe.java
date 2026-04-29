@@ -32,7 +32,11 @@ public class LmStudioProbe {
 
     public static ProbeResult probe(String baseUrl) {
         try {
+            // Force HTTP/1.1 — see utils.HttpClients for the rationale.
+            // LM Studio's bundled HTTP server hangs on Java's default
+            // HTTP/2 h2c upgrade attempt, so the probe must opt out.
             var client = HttpClient.newBuilder()
+                    .version(HttpClient.Version.HTTP_1_1)
                     .connectTimeout(Duration.ofSeconds(2))
                     .build();
             var req = HttpRequest.newBuilder()
