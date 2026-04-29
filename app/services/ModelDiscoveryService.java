@@ -41,16 +41,41 @@ public class ModelDiscoveryService {
      * Fetch the model catalog from a provider's /models endpoint, apply leaderboard
      * rankings if configured, and return normalized model info sorted by rank.
      *
-     * <p>Dispatches on provider name: any provider containing {@code "ollama"}
-     * uses the native {@code /api/tags} + {@code /api/show} pair (JCLAW-118),
-     * which returns real {@code context_length} and the {@code capabilities}
-     * array. Everything else uses the OpenAI-compatible {@code /models}
-     * endpoint as before — OpenRouter returns rich metadata there, and
-     * plain OpenAI-compat providers at least supply ids.
+     * <p>Dispatches on provider name and exposes the JCLAW-183 tiered filter:
+     *
+     * <ul>
+     *   <li><b>Tier 1, Ollama</b> (any name containing {@code "ollama"}):
+     *       native {@code /api/tags} + {@code /api/show} pair (JCLAW-118).
+     *       Real {@code context_length} comes back, and the
+     *       {@code capabilities} array distinguishes chat-capable models
+     *       from embedding-only ones — {@link #parseOllamaShow} drops
+     *       entries whose capabilities lack {@code "completion"}.</li>
+     *   <li><b>Tier 1, LM Studio</b> (any name containing {@code "lm-studio"}):
+     *       prefer the native {@code /api/v0/models} endpoint via
+     *       {@link #discoverLmStudioNative}, which exposes a {@code type}
+     *       field per model ({@code "llm"}, {@code "vlm"}, {@code "embeddings"},
+     *       {@code "tts"}, {@code "stt"}). Only {@code "llm"} and
+     *       {@code "vlm"} pass through. Falls back to the OpenAI-compat
+     *       path if the native endpoint is missing (older LM Studio
+     *       versions ship before {@code /api/v0}).</li>
+     *   <li><b>Tier 2 / Tier 3, everything else</b>: OpenAI-compatible
+     *       {@code /v1/models} endpoint. OpenRouter returns rich metadata
+     *       (catalog is empirically chat-only, filter is a no-op);
+     *       plain providers (OpenAI, Groq, vanilla OpenAI-compat) get the
+     *       Tier 3 ID heuristic from {@link EmbeddingModelFilter}.</li>
+     * </ul>
      */
     public static DiscoveryResult discover(String providerName, String baseUrl, String apiKey) {
-        if (providerName != null && providerName.toLowerCase().contains("ollama")) {
+        var lower = providerName == null ? "" : providerName.toLowerCase();
+        if (lower.contains("ollama")) {
             return discoverOllamaNative(providerName, baseUrl, apiKey);
+        }
+        if (lower.contains("lm-studio")) {
+            var lmStudioResult = discoverLmStudioNative(providerName, baseUrl, apiKey);
+            // null = native endpoint missing or returned non-200; fall through
+            // so the caller still gets a result via the OpenAI-compat path,
+            // applying the ID heuristic in lieu of the type field.
+            if (lmStudioResult != null) return lmStudioResult;
         }
         return discoverOpenAiCompat(providerName, baseUrl, apiKey);
     }
@@ -75,6 +100,12 @@ public class ModelDiscoveryService {
 
             var body = JsonParser.parseString(response.body()).getAsJsonObject();
             var models = parseModels(body);
+
+            // JCLAW-183 Tier 3: drop entries whose id matches a non-chat
+            // pattern. Safe to apply universally — chat-model ids never
+            // collide with the embedding/audio/image-gen prefixes the
+            // filter checks for.
+            models.removeIf(m -> EmbeddingModelFilter.isLikelyNonChat((String) m.get("id")));
 
             var leaderboardUrl = ConfigService.get("provider." + providerName + ".leaderboardUrl");
             var rankings = fetchLeaderboard(leaderboardUrl);
@@ -453,6 +484,115 @@ public class ModelDiscoveryService {
         return id.replaceAll("-\\d{6,}$", "").replaceAll("-\\d{3,4}$", "");
     }
 
+    // ─── LM Studio native discovery (JCLAW-183) ──────────────────────
+
+    /**
+     * LM Studio Tier 1 path. Hits the native {@code /api/v0/models}
+     * endpoint, which returns a {@code type} field per model — one of
+     * {@code "llm"}, {@code "vlm"} (vision-language), {@code "embeddings"},
+     * {@code "tts"} (text-to-speech), {@code "stt"} (speech-to-text).
+     * Keeps {@code "llm"} and {@code "vlm"}; drops the other three so
+     * an operator can't accidentally bind a chat agent to an embedding
+     * or audio model.
+     *
+     * <p>Returns {@code null} on any failure (404 from older LM Studio
+     * versions that predate the native endpoint, malformed JSON,
+     * connection refused) so the caller can fall back to the standard
+     * OpenAI-compat path with the Tier 3 id heuristic.
+     */
+    static DiscoveryResult discoverLmStudioNative(String providerName, String baseUrl, String apiKey) {
+        try {
+            var nativeBase = stripV1Suffix(baseUrl);
+            var url = nativeBase + "/api/v0/models";
+            var httpReq = HttpRequest.newBuilder()
+                    .uri(URI.create(url))
+                    .header("Authorization", "Bearer " + (apiKey != null ? apiKey : ""))
+                    .header("Accept", "application/json")
+                    .timeout(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS))
+                    .GET()
+                    .build();
+            var resp = utils.HttpClients.forLlmBaseUrl(baseUrl).send(httpReq, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) return null;
+
+            var body = JsonParser.parseString(resp.body()).getAsJsonObject();
+            var models = parseLmStudioNativeResponse(body);
+
+            models.sort((a, b) -> {
+                var nameA = a.get("name") != null ? a.get("name").toString() : a.get("id").toString();
+                var nameB = b.get("name") != null ? b.get("name").toString() : b.get("id").toString();
+                return nameA.compareToIgnoreCase(nameB);
+            });
+
+            return new DiscoveryResult.Ok(models);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Parse a {@code /api/v0/models} response body into the same Map shape
+     * other discovery paths produce. Filters on the {@code type} field —
+     * keeps {@code "llm"} and {@code "vlm"}, drops everything else
+     * ({@code "embeddings"}, {@code "tts"}, {@code "stt"}, plus any
+     * future type LM Studio adds that we haven't accounted for).
+     *
+     * <p>Vision support is inferred from {@code type == "vlm"} and
+     * marked {@code visionDetectedFromProvider=true} since the type
+     * field is authoritative. Thinking and audio are left
+     * detector-defaulted because the native API doesn't enumerate them
+     * — id-based heuristics in the standard detectors fill in.
+     */
+    public static List<Map<String, Object>> parseLmStudioNativeResponse(JsonObject body) {
+        var results = new ArrayList<Map<String, Object>>();
+        if (!body.has("data") || !body.get("data").isJsonArray()) return results;
+
+        for (var el : body.getAsJsonArray("data")) {
+            if (!el.isJsonObject()) continue;
+            var entry = el.getAsJsonObject();
+
+            var type = getString(entry, "type", "").toLowerCase();
+            if (!"llm".equals(type) && !"vlm".equals(type)) continue;
+
+            var id = getString(entry, "id", "");
+            if (id.isBlank()) continue;
+
+            var ctxWin = entry.has("max_context_length") && !entry.get("max_context_length").isJsonNull()
+                    ? entry.get("max_context_length").getAsInt()
+                    : 0;
+
+            var model = new LinkedHashMap<String, Object>();
+            model.put("id", id);
+            model.put("name", id.contains("/") ? id.substring(id.lastIndexOf('/') + 1) : id);
+            model.put("contextWindow", ctxWin);
+            model.put("maxTokens", 0);
+
+            // Vision is authoritative from the type field.
+            boolean isVlm = "vlm".equals(type);
+            model.put("supportsVision", isVlm);
+            model.put("visionDetectedFromProvider", true);
+
+            // Thinking and audio aren't enumerated in the native API.
+            // Leave fromProvider=false so the existing id-based heuristic
+            // picks up known thinking models (deepseek-r1, qwq, etc.)
+            // without overriding a confirmed answer here.
+            model.put("supportsThinking", false);
+            model.put("thinkingDetectedFromProvider", false);
+            model.put("supportsAudio", false);
+            model.put("audioDetectedFromProvider", false);
+
+            // Local models — no pricing data.
+            model.put("promptPrice", -1.0);
+            model.put("completionPrice", -1.0);
+            model.put("cachedReadPrice", -1.0);
+            model.put("cacheWritePrice", -1.0);
+            model.put("isFree", false);
+
+            results.add(model);
+        }
+
+        return results;
+    }
+
     // ─── Ollama native discovery (JCLAW-118) ─────────────────────────
 
     /**
@@ -501,8 +641,12 @@ public class ModelDiscoveryService {
                 }
             }
             if (results.isEmpty()) {
+                // JCLAW-183: covers both "every /api/show call failed" and
+                // "every model was filtered out as non-chat" (e.g. an Ollama
+                // install with only nomic-embed-text pulled). Either way the
+                // operator gets a clear "nothing chat-capable here" message.
                 return new DiscoveryResult.Error(502,
-                        "All /api/show calls failed for provider " + providerName);
+                        "No chat-capable models discovered for provider " + providerName);
             }
 
             var leaderboardUrl = ConfigService.get("provider." + providerName + ".leaderboardUrl");
@@ -593,6 +737,28 @@ public class ModelDiscoveryService {
      * the OpenRouter/Anthropic logic.
      */
     public static Map<String, Object> parseOllamaShow(String id, JsonObject show) {
+        // JCLAW-183 Tier 1: drop embedding-only models. Ollama's
+        // /api/show capabilities array distinguishes "completion"
+        // (chat-capable) from "embedding" (vector-only). When the array
+        // is present and non-empty but lacks "completion", the model
+        // can't serve chat — return null so {@code discoverOllamaNative}
+        // drops it from the discovery list. A model with no capabilities
+        // array (older Ollama versions) is kept; the existing detectors
+        // fall back to id-based heuristics.
+        if (show.has("capabilities") && show.get("capabilities").isJsonArray()) {
+            var caps = show.getAsJsonArray("capabilities");
+            if (caps.size() > 0) {
+                boolean hasCompletion = false;
+                for (var c : caps) {
+                    if (c.isJsonPrimitive() && "completion".equalsIgnoreCase(c.getAsString())) {
+                        hasCompletion = true;
+                        break;
+                    }
+                }
+                if (!hasCompletion) return null;
+            }
+        }
+
         var model = new LinkedHashMap<String, Object>();
         model.put("id", id);
         model.put("name", id);

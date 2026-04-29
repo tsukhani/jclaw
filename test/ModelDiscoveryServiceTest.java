@@ -477,4 +477,120 @@ public class ModelDiscoveryServiceTest extends UnitTest {
         assertTrue(result.confirmed(), "thinking should be detected from capabilities array");
         assertTrue(result.fromProvider(), "detection should be marked as provider-confirmed");
     }
+
+    // --- JCLAW-183: Ollama embedding-only filter via parseOllamaShow ---
+
+    @Test
+    public void parseOllamaShowReturnsNullForEmbeddingOnlyModel() {
+        // Capabilities array contains "embedding" but not "completion" —
+        // the model can't serve chat. parseOllamaShow returns null so
+        // discoverOllamaNative drops the entry.
+        var json = JsonParser.parseString("""
+                {
+                  "model_info": {"nomic-bert.context_length": 2048},
+                  "capabilities": ["embedding"]
+                }
+                """).getAsJsonObject();
+        var model = ModelDiscoveryService.parseOllamaShow("nomic-embed-text:latest", json);
+        assertNull(model, "embedding-only Ollama model should be filtered out");
+    }
+
+    @Test
+    public void parseOllamaShowKeepsModelWithEmptyCapabilitiesArray() {
+        // Empty capabilities array = no signal. Treat as unknown and let
+        // the model through; downstream UI / id-heuristic decides what
+        // capabilities to mark.
+        var json = JsonParser.parseString("""
+                {"model_info": {"family.context_length": 8192}, "capabilities": []}
+                """).getAsJsonObject();
+        var model = ModelDiscoveryService.parseOllamaShow("opaque-model", json);
+        assertNotNull(model, "empty capabilities array must not trigger the filter");
+        assertEquals(8192, model.get("contextWindow"));
+    }
+
+    // --- JCLAW-183: LM Studio native /api/v0/models parsing ---
+
+    @Test
+    public void parseLmStudioNativeResponseFiltersOutNonChatTypes() {
+        // Mirrors the live /api/v0/models response shape. type field is
+        // authoritative — keep llm and vlm, drop embeddings/tts/stt.
+        var json = JsonParser.parseString("""
+                {
+                  "data": [
+                    {"id": "zai-org/glm-4.7-flash", "type": "llm", "max_context_length": 202752},
+                    {"id": "google/gemma-4-e4b", "type": "vlm", "max_context_length": 131072},
+                    {"id": "openai/gpt-oss-20b", "type": "llm", "max_context_length": 131072},
+                    {"id": "text-embedding-nomic-embed-text-v1.5", "type": "embeddings"},
+                    {"id": "kokoro-tts", "type": "tts"},
+                    {"id": "whisper-base", "type": "stt"}
+                  ]
+                }
+                """).getAsJsonObject();
+
+        var models = ModelDiscoveryService.parseLmStudioNativeResponse(json);
+
+        assertEquals(3, models.size(), "should keep 3 chat-capable models, drop 3 non-chat");
+        var ids = models.stream().map(m -> m.get("id").toString()).toList();
+        assertTrue(ids.contains("zai-org/glm-4.7-flash"));
+        assertTrue(ids.contains("google/gemma-4-e4b"));
+        assertTrue(ids.contains("openai/gpt-oss-20b"));
+        assertFalse(ids.contains("text-embedding-nomic-embed-text-v1.5"));
+        assertFalse(ids.contains("kokoro-tts"));
+        assertFalse(ids.contains("whisper-base"));
+    }
+
+    @Test
+    public void parseLmStudioNativeResponseMarksVlmAsVisionFromProvider() {
+        // type "vlm" is authoritative for vision support — both the boolean
+        // flag and the from-provider marker must reflect it so the UI can
+        // lock the vision checkbox without falling through to id heuristics.
+        var json = JsonParser.parseString("""
+                {"data": [{"id": "google/gemma-4-e4b", "type": "vlm", "max_context_length": 131072}]}
+                """).getAsJsonObject();
+
+        var models = ModelDiscoveryService.parseLmStudioNativeResponse(json);
+
+        assertEquals(1, models.size());
+        var m = models.get(0);
+        assertEquals(true, m.get("supportsVision"));
+        assertEquals(true, m.get("visionDetectedFromProvider"));
+        assertEquals(131072, m.get("contextWindow"));
+    }
+
+    @Test
+    public void parseLmStudioNativeResponseLeavesThinkingAndAudioToHeuristic() {
+        // type "llm" tells us nothing about thinking or audio — leave
+        // fromProvider=false so the existing id-based heuristic in
+        // detectThinkingSupport / detectAudioSupport can still kick in
+        // for known families (deepseek-r1, whisper, etc.) downstream.
+        var json = JsonParser.parseString("""
+                {"data": [{"id": "openai/gpt-oss-20b", "type": "llm"}]}
+                """).getAsJsonObject();
+
+        var models = ModelDiscoveryService.parseLmStudioNativeResponse(json);
+
+        assertEquals(1, models.size());
+        var m = models.get(0);
+        assertEquals(false, m.get("supportsThinking"));
+        assertEquals(false, m.get("thinkingDetectedFromProvider"));
+        assertEquals(false, m.get("supportsAudio"));
+        assertEquals(false, m.get("audioDetectedFromProvider"));
+    }
+
+    @Test
+    public void parseLmStudioNativeResponseSkipsEntriesWithBlankId() {
+        var json = JsonParser.parseString("""
+                {"data": [{"id": "", "type": "llm"}, {"type": "llm"}, {"id": "valid", "type": "llm"}]}
+                """).getAsJsonObject();
+        var models = ModelDiscoveryService.parseLmStudioNativeResponse(json);
+        assertEquals(1, models.size());
+        assertEquals("valid", models.get(0).get("id"));
+    }
+
+    @Test
+    public void parseLmStudioNativeResponseHandlesMissingDataArray() {
+        var json = JsonParser.parseString("{}").getAsJsonObject();
+        var models = ModelDiscoveryService.parseLmStudioNativeResponse(json);
+        assertTrue(models.isEmpty());
+    }
 }

@@ -1652,13 +1652,22 @@ async function handleResetPassword() {
             class="border-t border-blue-200 dark:border-blue-800/40 bg-blue-50 dark:bg-blue-950/20"
           >
             <div class="px-4 py-3 flex items-center justify-between border-b border-border">
-              <div class="flex items-center gap-2">
-                <span class="text-xs font-medium text-blue-700 dark:text-blue-400">Discover Models</span>
-                <span
-                  v-if="!discoveryLoading && discoveredModels.length"
-                  class="text-[10px] text-fg-muted"
-                >
-                  {{ discoveredModels.length }} available
+              <div class="flex flex-col gap-0.5">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-medium text-blue-700 dark:text-blue-400">Discover Models</span>
+                  <span
+                    v-if="!discoveryLoading && discoveredModels.length"
+                    class="text-[10px] text-fg-muted"
+                  >
+                    {{ discoveredModels.length }} available
+                  </span>
+                </div>
+                <!-- JCLAW-183: tell operators why a model they expected to see
+                     might be missing. The backend filter drops embedding /
+                     audio / image-generation models because binding a chat
+                     agent to one would fail at the first chat call. -->
+                <span class="text-[10px] text-fg-muted">
+                  Embedding-only and audio-only models are hidden; bind chat agents to chat-capable models.
                 </span>
               </div>
               <button
