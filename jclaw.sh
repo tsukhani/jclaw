@@ -18,7 +18,7 @@ is_developer_clone() {
 usage() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh [options] <secret|setup|start|stop|restart|status|logs|loadtest|test>
+Usage: jclaw.sh [options] <secret|setup|reset|start|stop|restart|status|logs|loadtest|test|help>
 
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
@@ -31,6 +31,11 @@ Commands:
             application.conf's \${...} placeholder). Run after a suspected
             leak or as routine hygiene. Restart the app to pick up the new
             value.
+  reset     Clear the admin password hash from the Config DB so the next
+            launch routes through the in-app /setup-password flow. Use
+            when the operator has forgotten the password and is locked
+            out of the running instance. Safe to run while the app is
+            up (db.url has AUTO_SERVER=TRUE).
   start     Start the Play backend and Nuxt frontend
   stop      Stop the running Play backend and Nuxt frontend
   restart   Stop and start (combines stop + start)
@@ -39,16 +44,13 @@ Commands:
   loadtest  Drive the in-process load-test harness against /api/chat/stream
   test      Run backend (play auto-test) + frontend (pnpm test) and report a
             consolidated pass/fail summary. Exits non-zero on any failure.
+  help      Print this usage reference and exit. Equivalent to --help / -h.
 
 Options:
   --dev                   Run in development mode (play run + pnpm dev)
   --deploy <dir>          Package with play dist, copy to <dir>, and run in production
   --backend-port <port>   Play backend port (default: 9000)
   --frontend-port <port>  Nuxt dev server port, dev mode only (default: 3000)
-  --play-pool <N>         Explicit Play invocation pool size. When omitted, the
-                          JVM-side plugins.PlayPoolAutoSizer auto-sizes to
-                          max(8, cores*2) at startup (respects container CPU
-                          limits). Pass an integer to force a specific value.
 
 Environment:
   JCLAW_JVM_HEAP          Production heap size (default: 2g). Sets both -Xms
@@ -96,25 +98,22 @@ EOF
         # running prod backend, but it's an operator/dev tool and not
         # part of the "I just want to run JClaw" contract.
         cat <<EOF
-Usage: jclaw.sh [options] <secret|start|stop|restart|status|logs>
+Usage: jclaw.sh [options] <reset|start|stop|restart|status|logs|help>
 
 Commands:
-  secret    Generate (or rotate) the application secret in .env (delegates
-            to 'play secret', which writes the variable named in
-            application.conf's \${...} placeholder). Restart the app to
-            pick up the new value.
+  reset     Clear the admin password hash from the Config DB so the next
+            launch routes through the in-app /setup-password flow. Use
+            when you've forgotten the password and are locked out of
+            the running instance.
   start     Start JClaw (Play backend serving the bundled SPA)
   stop      Stop the running instance
   restart   Stop and start (combines stop + start)
   status    Show whether the backend is running
   logs      Tail the application log
+  help      Print this usage reference and exit. Equivalent to --help / -h.
 
 Options:
   --backend-port <port>   Backend HTTP port (default: 9000)
-  --play-pool <N>         Play invocation pool size. When omitted, the JVM-side
-                          plugins.PlayPoolAutoSizer auto-sizes to
-                          max(8, cores*2) at startup (respects container CPU
-                          limits). Pass an integer to force a specific value.
 
 Environment:
   JCLAW_JVM_HEAP          JVM heap size (default: 2g). Sets both -Xms and -Xmx
@@ -134,6 +133,355 @@ Examples:
   ./jclaw.sh logs                               # Tail the application log
   ./jclaw.sh stop                               # Stop the running instance
   JCLAW_JVM_HEAP=4g ./jclaw.sh start            # Start with a 4 GB heap
+EOF
+    fi
+}
+
+# True if the argument is a recognized subcommand. Used by the help-routing
+# logic so that `./jclaw.sh help <cmd>` falls back to the top-level banner
+# when <cmd> is unknown rather than blowing up — and so the parser can
+# distinguish the per-command help path from the bare-help path.
+is_known_command() {
+    case "$1" in
+        secret|setup|reset|start|stop|restart|status|logs|loadtest|test)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Dispatch per-command help. Caller has already verified the argument
+# names a real subcommand via is_known_command, so the wildcard arm is
+# only reachable through programmer error and hands back the full banner.
+usage_for() {
+    case "$1" in
+        secret)   usage_secret   ;;
+        setup)    usage_setup    ;;
+        reset)    usage_reset    ;;
+        start)    usage_start    ;;
+        stop)     usage_stop     ;;
+        restart)  usage_restart  ;;
+        status)   usage_status   ;;
+        logs)     usage_logs     ;;
+        loadtest) usage_loadtest ;;
+        test)     usage_test     ;;
+        *)        usage          ;;
+    esac
+}
+
+usage_secret() {
+    cat <<EOF
+Usage: jclaw.sh secret
+
+Generate or rotate the application secret. Delegates to 'play secret',
+which writes the variable named in conf/application.conf's \${...}
+placeholder (default: PLAY_SECRET) into a per-clone .env file. The .env
+is created with mode 600 on first run and preserved across rotations
+(only the secret line is rewritten).
+
+Restart the app to pick up the new value.
+
+Examples:
+  ./jclaw.sh secret              # Generate or rotate
+  ./jclaw.sh restart             # Pick up the new value
+EOF
+}
+
+usage_setup() {
+    if is_developer_clone; then
+        cat <<EOF
+Usage: jclaw.sh setup
+
+One-time per-clone bootstrap (developer flow). Wires git hooks
+(.githooks/), installs frontend dependencies so pre-commit's
+lint-staged is available, generates .env with a fresh application
+secret if missing, and verifies both 'origin' and 'github' remotes
+are configured. Idempotent — safe to re-run after every fresh clone.
+
+Example:
+  ./jclaw.sh setup
+EOF
+    else
+        cat <<EOF
+Usage: jclaw.sh setup
+
+Not available in this distribution. The 'setup' command is part of
+the developer flow (run after a fresh git clone — wires git hooks,
+installs frontend deps, etc.). End-user 'play dist' installs don't
+need it: start the app directly with ./jclaw.sh start.
+
+For the full list of commands in this distribution: ./jclaw.sh help
+EOF
+    fi
+}
+
+usage_reset() {
+    cat <<EOF
+Usage: jclaw.sh reset
+
+Clear the admin password hash from the Config DB so the next launch
+routes through the in-app /setup-password flow. Use when the operator
+has forgotten the password and is locked out of the running instance.
+Safe to run while the app is up — db.url has AUTO_SERVER=TRUE so a
+second JDBC connection joins the running H2 instance without
+contention.
+
+Prompts for confirmation before touching the DB. Set JCLAW_RESET_YES=1
+to skip the prompt for scripted use.
+
+Environment:
+  JCLAW_RESET_YES=1       Skip the y/N confirmation prompt.
+
+Examples:
+  ./jclaw.sh reset                       # Interactive
+  JCLAW_RESET_YES=1 ./jclaw.sh reset     # No prompt
+EOF
+}
+
+usage_start() {
+    if is_developer_clone; then
+        cat <<EOF
+Usage: jclaw.sh [options] start
+
+Start JClaw in production mode (Play backend serving the bundled SPA),
+or with --dev start the Play dev backend plus the Nuxt frontend on
+separate ports. First run on a fresh checkout auto-generates .env
+with a random application secret if one isn't already present.
+
+Options:
+  --dev                   Run in development mode (play run + pnpm dev)
+  --deploy <dir>          Package with play dist, copy to <dir>, and run prod from there
+  --backend-port <port>   Play backend port (default: 9000)
+  --frontend-port <port>  Nuxt dev server port, dev mode only (default: 3000)
+
+Environment:
+  JCLAW_JVM_HEAP          Production heap size (default: 2g). Sets both -Xms
+                          and -Xmx unless overridden individually.
+  JCLAW_JVM_XMS / XMX     Override -Xms / -Xmx independently.
+  JCLAW_JVM_OPTS          Extra JVM flags appended last (last-wins for value
+                          flags, e.g. -XX:MaxDirectMemorySize=512m).
+
+Examples:
+  ./jclaw.sh start                              # Production in current directory
+  ./jclaw.sh --dev start                        # Dev mode
+  ./jclaw.sh --dev --backend-port 8080 start    # Dev with custom backend port
+  ./jclaw.sh --deploy /tmp start                # Build, copy to /tmp/jclaw, run
+  JCLAW_JVM_HEAP=4g ./jclaw.sh start            # 4 GB heap
+EOF
+    else
+        cat <<EOF
+Usage: jclaw.sh [options] start
+
+Start JClaw on the bundled Play backend (which serves the SPA from
+this distribution package). First run auto-generates .env with a
+random application secret if one isn't already present.
+
+Options:
+  --backend-port <port>   Backend HTTP port (default: 9000)
+
+Environment:
+  JCLAW_JVM_HEAP          JVM heap size (default: 2g). Sets both -Xms and
+                          -Xmx unless overridden individually.
+  JCLAW_JVM_XMS / XMX     Override -Xms / -Xmx independently.
+  JCLAW_JVM_OPTS          Extra JVM flags appended last (last-wins).
+
+Examples:
+  ./jclaw.sh start                              # Default port 9000
+  ./jclaw.sh --backend-port 8080 start          # Custom port
+  JCLAW_JVM_HEAP=4g ./jclaw.sh start            # 4 GB heap
+EOF
+    fi
+}
+
+usage_stop() {
+    if is_developer_clone; then
+        cat <<EOF
+Usage: jclaw.sh [options] stop
+
+Stop the running JClaw instance. Reads the PID file the matching
+start path wrote; in --dev mode also stops the Nuxt frontend.
+
+Options:
+  --dev                   Stop dev-mode services
+  --deploy <dir>          Stop services running from <dir>
+
+Examples:
+  ./jclaw.sh stop                # Stop production in current directory
+  ./jclaw.sh --dev stop          # Stop dev mode
+  ./jclaw.sh --deploy /tmp stop  # Stop services in /tmp/jclaw
+EOF
+    else
+        cat <<EOF
+Usage: jclaw.sh stop
+
+Stop the running JClaw instance. Reads the PID file written by
+the matching start path.
+
+Example:
+  ./jclaw.sh stop
+EOF
+    fi
+}
+
+usage_restart() {
+    if is_developer_clone; then
+        cat <<EOF
+Usage: jclaw.sh [options] restart
+
+Stop and start as one operation. Accepts the same flags as 'start'.
+
+Options:
+  --dev                   Restart in dev mode
+  --deploy <dir>          Re-deploy from <dir> and restart
+  --backend-port <port>   Play backend port (default: 9000)
+  --frontend-port <port>  Nuxt dev server port, dev mode only (default: 3000)
+
+Environment:
+  JCLAW_JVM_HEAP, JCLAW_JVM_XMS, JCLAW_JVM_XMX, JCLAW_JVM_OPTS — see 'start --help'.
+
+Examples:
+  ./jclaw.sh restart
+  ./jclaw.sh --dev restart
+EOF
+    else
+        cat <<EOF
+Usage: jclaw.sh [options] restart
+
+Stop and start as one operation. Accepts the same flags as 'start'.
+
+Options:
+  --backend-port <port>   Backend HTTP port (default: 9000)
+
+Environment:
+  JCLAW_JVM_HEAP, JCLAW_JVM_XMS, JCLAW_JVM_XMX, JCLAW_JVM_OPTS — see 'start --help'.
+
+Example:
+  ./jclaw.sh restart
+EOF
+    fi
+}
+
+usage_status() {
+    if is_developer_clone; then
+        cat <<EOF
+Usage: jclaw.sh [options] status
+
+Show whether the Play backend (and, in --dev, the Nuxt frontend) is
+running. Reports PID and port when up; "not running" otherwise.
+
+Options:
+  --dev                   Check dev-mode services
+
+Example:
+  ./jclaw.sh status
+EOF
+    else
+        cat <<EOF
+Usage: jclaw.sh status
+
+Show whether the backend is running. Reports PID and port when up;
+"not running" otherwise.
+
+Example:
+  ./jclaw.sh status
+EOF
+    fi
+}
+
+usage_logs() {
+    if is_developer_clone; then
+        cat <<EOF
+Usage: jclaw.sh [options] logs
+
+Tail the production application log (logs/application.log) — equivalent
+to 'tail -f' on that file. Ctrl+C to exit.
+
+Options:
+  --dev                   Tail the dev-mode backend log instead
+
+Example:
+  ./jclaw.sh logs
+EOF
+    else
+        cat <<EOF
+Usage: jclaw.sh logs
+
+Tail the application log (logs/application.log) — equivalent to
+'tail -f' on that file. Ctrl+C to exit.
+
+Example:
+  ./jclaw.sh logs
+EOF
+    fi
+}
+
+usage_loadtest() {
+    if is_developer_clone; then
+        cat <<EOF
+Usage: jclaw.sh [options] loadtest
+
+Drive the in-process load-test harness against /api/chat/stream. The
+harness simulates LLM streaming with controllable TTFT and throughput
+so you can measure serving overhead, queueing, and latency percentiles
+without spinning up a real upstream.
+
+Options:
+  --concurrency <n>       Parallel workers (default: 10)
+  --iterations <n>        Requests per worker (default: 5)
+  --ttft-ms <n>           Simulated time-to-first-token in ms (default: 100)
+  --tokens-per-second <n> Simulated token throughput (default: 50)
+  --response-tokens <n>   Tokens per simulated response (default: 40)
+  --backend-port <port>   Target port (default: 9000)
+  --clean                 Delete loadtest conversations/events from the DB
+                          instead of running a test
+  --compress              Send 'Accept-Encoding: br, gzip' so the server's
+                          HttpContentCompressor engages — measures the cost
+                          of the encoding path.
+
+Examples:
+  ./jclaw.sh loadtest                                          # Default 10×5
+  ./jclaw.sh --concurrency 50 --iterations 20 loadtest         # Heavier run
+  ./jclaw.sh --clean loadtest                                  # Cleanup only
+EOF
+    else
+        cat <<EOF
+Usage: jclaw.sh loadtest
+
+Not available in this distribution. The 'loadtest' command is a
+developer/operator tool that exercises /api/chat/stream with a
+synthetic LLM stream — it lives in the dev workflow, not the
+end-user runtime.
+
+For the full list of commands in this distribution: ./jclaw.sh help
+EOF
+    fi
+}
+
+usage_test() {
+    if is_developer_clone; then
+        cat <<EOF
+Usage: jclaw.sh test
+
+Run the backend (play auto-test) + frontend (pnpm test) suites and
+print a consolidated pass/fail summary. Logs at logs/test-backend.log
+and logs/test-frontend.log. Exits non-zero if either suite fails, so
+it's safe to wire into git hooks or CI.
+
+Example:
+  ./jclaw.sh test
+EOF
+    else
+        cat <<EOF
+Usage: jclaw.sh test
+
+Not available in this distribution. The 'test' command runs the
+backend + frontend suites against a developer checkout (it needs the
+test/ directory and the frontend Vitest project, neither of which
+ship with 'play dist' tarballs).
+
+For the full list of commands in this distribution: ./jclaw.sh help
 EOF
     fi
 }
@@ -189,7 +537,7 @@ EOF
   ${cyan}./jclaw.sh setup${reset}     One-time setup for a fresh clone
                        (validates prereqs, wires git hooks, installs deps,
                         adds github remote)
-  ${cyan}./jclaw.sh --help${reset}    Full command reference
+  ${cyan}./jclaw.sh help${reset}      Full command reference
 
 EOF
 
@@ -212,7 +560,7 @@ EOF
   ${cyan}./jclaw.sh stop${reset}      Stop the running instance
   ${cyan}./jclaw.sh status${reset}    Show whether the backend is running
   ${cyan}./jclaw.sh logs${reset}      Tail the application log
-  ${cyan}./jclaw.sh --help${reset}    Full command reference
+  ${cyan}./jclaw.sh help${reset}      Full command reference
 
 EOF
     fi
@@ -223,7 +571,6 @@ DEPLOY_DIR=""
 DEV_MODE=false
 BACKEND_PORT="9000"
 FRONTEND_PORT="3000"
-PLAY_POOL=""
 COMMAND=""
 LT_CONCURRENCY="10"
 LT_ITERATIONS="5"
@@ -249,10 +596,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --frontend-port)
             FRONTEND_PORT="$2"
-            shift 2
-            ;;
-        --play-pool)
-            PLAY_POOL="$2"
             shift 2
             ;;
         --concurrency)
@@ -283,12 +626,55 @@ while [[ $# -gt 0 ]]; do
             LT_COMPRESS=true
             shift
             ;;
-        secret|setup|start|stop|restart|status|logs|loadtest|test)
+        secret|reset|start|stop|restart|status|logs)
+            COMMAND="$1"
+            shift
+            ;;
+        setup|loadtest|test)
+            # Developer-only commands. Available on a `git clone` because
+            # they touch repo state (hooks, fixtures, frontend deps); not
+            # available on a `play dist` install where there's no .git
+            # and the frontend ships pre-built. The end-user banner
+            # already advertises a narrower subcommand list — this gate
+            # makes the runtime parse match that advertisement, so a
+            # mistyped `./jclaw.sh setup` on a dist fails with a clear
+            # "developer-only" message instead of silently running into
+            # check_prereqs / git mid-execution.
+            if ! is_developer_clone; then
+                echo "Error: '$1' is a developer-only command, not available in this distribution."
+                echo "       This install supports: secret, reset, start, stop, restart, status, logs, help."
+                exit 1
+            fi
             COMMAND="$1"
             shift
             ;;
         --help|-h)
-            usage
+            # Contextual when a subcommand has been parsed, top-level
+            # otherwise — matches `git <cmd> --help` and friends.
+            if [[ -n "$COMMAND" ]]; then
+                usage_for "$COMMAND"
+            else
+                usage
+            fi
+            exit 0
+            ;;
+        help)
+            # Bare `help` → top-level. `help <cmd>` → per-command. The
+            # post-COMMAND form (`<cmd> help`) is intentionally NOT a
+            # help signal — it falls through to the unknown-argument arm
+            # so operators get steered toward the supported
+            # `<cmd> --help` shape (per clig.dev / git / kubectl).
+            if [[ -n "$COMMAND" ]]; then
+                echo "Unknown argument: help"
+                usage
+                exit 1
+            fi
+            shift
+            if [[ $# -gt 0 ]] && is_known_command "$1"; then
+                usage_for "$1"
+            else
+                usage
+            fi
             exit 0
             ;;
         *)
@@ -314,24 +700,6 @@ if [[ "$DEV_MODE" == true && -n "$DEPLOY_DIR" ]]; then
     echo "Error: --dev and --deploy cannot be used together."
     exit 1
 fi
-
-# Resolve an explicit -Dplay.pool=N override from $PLAY_POOL. Prints the JVM
-# arg on stdout, or an empty string when no override was requested. The
-# default (no flag) is intentionally empty so the JVM-side plugin
-# plugins.PlayPoolAutoSizer performs the auto-sizing — that way bare-metal,
-# Docker, and Kubernetes all get the same behavior (respecting container
-# CPU quotas via Runtime.availableProcessors()).
-resolve_play_pool() {
-    local requested="$PLAY_POOL"
-    [[ -z "$requested" ]] && return 0
-
-    if [[ "$requested" =~ ^[0-9]+$ ]] && (( requested > 0 )); then
-        echo "-Dplay.pool=$requested"
-    else
-        echo "Error: --play-pool expects a positive integer, got '$requested'" >&2
-        exit 1
-    fi
-}
 
 # Route every `pnpm` invocation through corepack so the version pinned
 # in frontend/package.json's `packageManager` field is authoritative,
@@ -558,6 +926,108 @@ do_secret() {
     [[ "$DEV_MODE" == true ]] && dev_flag="--dev "
     echo "    Restart the app to pick up the new value:"
     echo "      $0 ${dev_flag}${DEPLOY_DIR:+--deploy $DEPLOY_DIR }restart"
+}
+
+# Locate the H2 jar shipped with the Play framework, falling back to a
+# bundled copy in the dist's lib/. Used by do_reset to invoke the H2
+# Shell tool standalone — no JVM-side classpath assembly needed.
+locate_h2_jar() {
+    local jar
+    # Dist tarball layout: every dependency including h2 sits in lib/.
+    jar=$(ls "$JCLAW_DIR"/lib/h2-*.jar 2>/dev/null | head -1)
+    if [[ -n "$jar" ]]; then
+        echo "$jar"
+        return 0
+    fi
+    # Developer layout: framework/lib/ inside the play install. Resolve
+    # the play CLI's real path (jenv shims aren't symlinks, but realpath
+    # on a non-symlink is a no-op so it's safe to call unconditionally).
+    if command -v play >/dev/null 2>&1; then
+        local play_real play_home
+        play_real=$(python3 -c "import os, shutil; print(os.path.realpath(shutil.which('play')))" 2>/dev/null || true)
+        if [[ -n "$play_real" ]]; then
+            play_home=$(dirname "$play_real")
+            jar=$(ls "$play_home"/framework/lib/h2-*.jar 2>/dev/null | head -1)
+            if [[ -n "$jar" ]]; then
+                echo "$jar"
+                return 0
+            fi
+        fi
+    fi
+    return 1
+}
+
+# Clear the admin password hash from the Config DB so the next launch
+# routes through the in-app /setup-password flow. The recovery path for
+# an operator who's locked themselves out — the in-app
+# POST /api/auth/reset-password endpoint requires being signed in, which
+# is impossible when you've forgotten the password.
+#
+# Safe to run while the app is up because db.url is configured with
+# AUTO_SERVER=TRUE — H2 promotes the file lock to a TCP server on first
+# connect, so a second process (this one) can join the same database
+# without contention. Idempotent: re-running on a fresh install where
+# no password has ever been set succeeds with 0 rows deleted.
+do_reset() {
+    local data_file="$JCLAW_DIR/data/jclaw.mv.db"
+    if [[ ! -f "$data_file" ]]; then
+        echo "Error: No database found at $data_file."
+        echo "       Nothing to reset — the app hasn't been started yet,"
+        echo "       so there's no password hash to clear. Just start the"
+        echo "       app and use the in-app /setup-password flow."
+        exit 1
+    fi
+
+    check_java
+
+    local h2_jar
+    h2_jar=$(locate_h2_jar) || {
+        echo "Error: Could not locate H2 jar. Looked in:"
+        echo "  - $JCLAW_DIR/lib/h2-*.jar  (dist layout)"
+        echo "  - <play-home>/framework/lib/h2-*.jar  (developer layout)"
+        echo "       Without the H2 driver this script can't talk to the DB."
+        exit 1
+    }
+
+    # Confirmation gate. The reset wipes the credentials that gate
+    # access to the running instance — anyone who reaches the post-reset
+    # /setup-password page can claim the admin role. Make the operator
+    # acknowledge that surface before we touch the DB. JCLAW_RESET_YES=1
+    # in the environment skips the prompt for scripted use.
+    if [[ "${JCLAW_RESET_YES:-}" != "1" ]]; then
+        echo "About to clear the admin password hash from $data_file."
+        echo "After this, the next visit to the app will land on the"
+        echo "/setup-password page and the first arriver claims the"
+        echo "admin role."
+        read -r -p "Proceed? [y/N] " reply
+        case "$reply" in
+            y|Y|yes|YES) ;;
+            *) echo "Aborted."; exit 0 ;;
+        esac
+    fi
+
+    # AUTO_SERVER=TRUE matches application.conf's db.url so a running
+    # app's file lock doesn't block us. MODE=MYSQL is irrelevant for a
+    # DELETE but kept for parity with the canonical URL — H2 caches
+    # connection-time options per file, and a mismatch would cost a
+    # short reconnect dance.
+    #
+    # No -user / -password flags: the app is configured with neither
+    # db.user nor db.pass set in conf, so Play opens the database with
+    # null credentials. Subsequent connects MUST use the same null
+    # pattern — passing -user sa -password "" lands a 28000 invalid-
+    # auth error against the very database we created.
+    local jdbc_url="jdbc:h2:file:$JCLAW_DIR/data/jclaw;MODE=MYSQL;AUTO_SERVER=TRUE"
+    local sql="DELETE FROM config WHERE config_key='auth.admin.passwordHash';"
+
+    echo "==> Clearing auth.admin.passwordHash..."
+    if ! java -cp "$h2_jar" org.h2.tools.Shell -url "$jdbc_url" -sql "$sql"; then
+        echo "Error: H2 Shell command failed. Inspect the output above."
+        exit 1
+    fi
+
+    echo "==> Done. Open the app and use /setup-password to set a new password."
+    echo "    (No restart needed — ApiAuthController reads the hash on every login.)"
 }
 
 # Verify Java 25+ is available. Required for Play backend (compile, run, test).
@@ -973,10 +1443,6 @@ do_start_prod() {
         "-Xlog:gc*:file=$JCLAW_DIR/logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M"
     )
 
-    local pool_arg
-    pool_arg=$(resolve_play_pool)
-    [[ -n "$pool_arg" ]] && jvm_opts+=("$pool_arg")
-
     # User-supplied extras go last so last-wins semantics let them override
     # value flags (e.g. -XX:MaxDirectMemorySize=512m). Word-splitting on the
     # env var is intentional: it lets the operator pass multiple flags.
@@ -993,11 +1459,6 @@ do_start_prod() {
         echo "    JVM: -Xms${xms} -Xmx${xmx}, ZGC, GC log → logs/gc.log"
     fi
     [[ -n "${JCLAW_JVM_OPTS:-}" ]] && echo "    Extra JVM opts: ${JCLAW_JVM_OPTS}"
-    if [[ -n "$pool_arg" ]]; then
-        echo "    Play invocation pool: ${pool_arg#-Dplay.pool=} (explicit override)"
-    else
-        echo "    Play invocation pool: auto (sized by PlayPoolAutoSizer at startup)"
-    fi
     play start --%prod --http.port="$BACKEND_PORT" "${jvm_opts[@]}"
 
     echo ""
@@ -1078,17 +1539,8 @@ do_start_dev() {
     # of a guaranteed-clean enhancer cache and bytecode store.
     rm -rf tmp
 
-    local pool_arg
-    pool_arg=$(resolve_play_pool)
-
     echo "==> Starting Play backend on port $BACKEND_PORT (dev)..."
-    if [[ -n "$pool_arg" ]]; then
-        echo "    Play invocation pool: ${pool_arg#-Dplay.pool=} (explicit override)"
-        nohup play run --http.port="$BACKEND_PORT" "$pool_arg" > "$JCLAW_DIR/logs/backend-dev.out" 2>&1 &
-    else
-        echo "    Play invocation pool: auto (sized by PlayPoolAutoSizer at startup)"
-        nohup play run --http.port="$BACKEND_PORT" > "$JCLAW_DIR/logs/backend-dev.out" 2>&1 &
-    fi
+    nohup play run --http.port="$BACKEND_PORT" > "$JCLAW_DIR/logs/backend-dev.out" 2>&1 &
     local play_pid=$!
     # play run doesn't create server.pid — store the wrapper pid ourselves
     echo "$play_pid" > "$JCLAW_DIR/server.pid"
@@ -1469,6 +1921,9 @@ case "$COMMAND" in
         ;;
     setup)
         do_setup
+        ;;
+    reset)
+        do_reset
         ;;
     start)
         check_prereqs

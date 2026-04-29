@@ -78,7 +78,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
 # Play has shipped for years: top-level play-${VERSION}/ directory
 # with the wrapper script, framework JARs, modules, and samples.
 # Kept aligned with the production Dockerfile's PLAY_VERSION pin.
-ARG PLAY_VERSION=1.12.5
+ARG PLAY_VERSION=1.12.6
 RUN curl -fsSL "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
         -o /tmp/play.zip && \
     unzip -q /tmp/play.zip -d /opt/ && \

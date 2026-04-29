@@ -33,7 +33,7 @@ FROM azul/zulu-openjdk:25.0.3 AS backend-build
 # inside the container, which the published image discards on exit.
 # Track the latest patch on the same minor — keeps the prod image
 # aligned with the host /opt/play1 the team develops against.
-ARG PLAY_VERSION=1.12.5
+ARG PLAY_VERSION=1.12.6
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         curl unzip python3 && \
