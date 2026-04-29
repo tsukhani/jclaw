@@ -77,12 +77,17 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
 # container rebuilds. Same canonical distribution format upstream
 # Play has shipped for years: top-level play-${VERSION}/ directory
 # with the wrapper script, framework JARs, modules, and samples.
-# Kept aligned with the production Dockerfile's PLAY_VERSION pin.
-ARG PLAY_VERSION=1.12.6
-RUN curl -fsSL "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
+#
+# Version is read from the .play-version file at repo root — the
+# single source of truth shared with the production Dockerfile.
+# Renovate auto-bumps that file from GitHub releases (see
+# renovate.json5's customManagers block).
+COPY .play-version /tmp/play-version
+RUN PLAY_VERSION=$(tr -d '[:space:]' < /tmp/play-version) && \
+    curl -fsSL "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
         -o /tmp/play.zip && \
     unzip -q /tmp/play.zip -d /opt/ && \
-    rm /tmp/play.zip && \
+    rm /tmp/play.zip /tmp/play-version && \
     test -x "/opt/play-${PLAY_VERSION}/play" && \
     ln -s "/opt/play-${PLAY_VERSION}/play" /usr/local/bin/play
 

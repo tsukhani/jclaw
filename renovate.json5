@@ -171,5 +171,22 @@
       depNameTemplate: "{{groupId}}:{{artifactId}}",
       versioningTemplate: "maven",
     },
+
+    // Bump the Play fork pin in .play-version from tsukhani/play1's
+    // GitHub releases. The file is the single source of truth — both
+    // Dockerfile and .devcontainer/Dockerfile COPY it in and read its
+    // contents at build time, so a one-line change here propagates to
+    // both images. extractVersion strips the leading 'v' so semver
+    // comparison happens on bare versions (1.12.7), matching the file
+    // contents.
+    {
+      customType: "regex",
+      fileMatch: ["^\\.play-version$"],
+      matchStrings: ["^(?<currentValue>.+?)\\s*$"],
+      datasourceTemplate: "github-releases",
+      depNameTemplate: "tsukhani/play1",
+      extractVersionTemplate: "^v(?<version>.+)$",
+      versioningTemplate: "semver",
+    },
   ],
 }

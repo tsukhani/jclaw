@@ -18,30 +18,27 @@ RUN npx nuxi generate
 # ── Stage 2: Resolve + precompile with full JDK ──────────────────────────────
 FROM azul/zulu-openjdk:25.0.3 AS backend-build
 
-# Pin the Play fork version. Previously this stage queried
-# tsukhani/play1's `releases/latest` at build time, so the same source +
-# same Dockerfile produced different images depending on when the build
-# ran — and could silently drift apart from .devcontainer/Dockerfile,
-# which is pinned to the same version. Keep prod and dev container
-# aligned. Override with --build-arg PLAY_VERSION=x.y.z when bumping;
-# bump intentionally, not by accident.
+# Pin the Play fork version through a single source of truth — the
+# .play-version file at repo root. Both this Dockerfile and
+# .devcontainer/Dockerfile COPY it in, so a bump only ever needs one
+# line edited. Renovate watches GitHub releases on tsukhani/play1 and
+# auto-opens a PR when a new version lands (see renovate.json5's
+# customManagers block).
 #
-# 1.12.3 was the first release shipping the Python launcher's
-# loadDotEnv (which lets the bootstrap service in docker-compose.yml
-# write PLAY_SECRET into ./.env) and the .env-aware `play secret`
-# command. Earlier versions silently mutate conf/application.conf
-# inside the container, which the published image discards on exit.
-# Track the latest patch on the same minor — keeps the prod image
-# aligned with the host /opt/play1 the team develops against.
-ARG PLAY_VERSION=1.12.6
+# Previously this stage queried tsukhani/play1's `releases/latest` at
+# build time, so the same source + same Dockerfile produced different
+# images depending on when the build ran. The .play-version pin
+# preserves reproducibility — same source, same image, every time.
+COPY .play-version /tmp/play-version
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN PLAY_VERSION=$(tr -d '[:space:]' < /tmp/play-version) && \
+    apt-get update && apt-get install -y --no-install-recommends \
         curl unzip python3 && \
     curl -fsSL -L "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
         -o /tmp/play.zip && \
     unzip -q /tmp/play.zip -d /opt && \
     ln -s /opt/play-${PLAY_VERSION} /opt/play && \
-    rm /tmp/play.zip && \
+    rm /tmp/play.zip /tmp/play-version && \
     rm -rf /var/lib/apt/lists/*
 
 ENV PLAY_HOME=/opt/play
