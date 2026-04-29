@@ -66,7 +66,7 @@ public class ModelDiscoveryService {
                     .GET()
                     .build();
 
-            var response = utils.HttpClients.GENERAL.send(httpReq, HttpResponse.BodyHandlers.ofString());
+            var response = utils.HttpClients.forLlmBaseUrl(baseUrl).send(httpReq, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() != 200) {
                 return new DiscoveryResult.Error(502, "Provider returned HTTP %d: %s".formatted(
@@ -474,7 +474,7 @@ public class ModelDiscoveryService {
                     .timeout(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS))
                     .GET()
                     .build();
-            var tagsResp = utils.HttpClients.GENERAL.send(tagsReq, HttpResponse.BodyHandlers.ofString());
+            var tagsResp = utils.HttpClients.forLlmBaseUrl(nativeBase).send(tagsReq, HttpResponse.BodyHandlers.ofString());
             if (tagsResp.statusCode() != 200) {
                 return new DiscoveryResult.Error(502,
                         "Provider returned HTTP %d from /api/tags: %s".formatted(
@@ -573,7 +573,7 @@ public class ModelDiscoveryService {
                     .timeout(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS))
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
-            var resp = utils.HttpClients.GENERAL.send(req, HttpResponse.BodyHandlers.ofString());
+            var resp = utils.HttpClients.forLlmBaseUrl(url).send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) return null;
             return parseOllamaShow(id, JsonParser.parseString(resp.body()).getAsJsonObject());
         } catch (Exception _) {

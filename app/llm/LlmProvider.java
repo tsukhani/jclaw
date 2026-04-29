@@ -215,7 +215,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                 var json = serializeRequest(request);
                 var httpReq = buildRequest("/chat/completions", json);
 
-                var response = utils.HttpClients.LLM.send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
+                var response = utils.HttpClients.forLlmBaseUrl(config.baseUrl()).send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
                 if (response.statusCode() != 200) {
                     var body = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
                     onError.accept(new LlmException("HTTP %d: %s".formatted(response.statusCode(), body)));
@@ -477,7 +477,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             try {
                 var httpReq = buildRequest(path, json, timeoutSeconds);
-                var response = utils.HttpClients.LLM.send(httpReq, HttpResponse.BodyHandlers.ofString());
+                var response = utils.HttpClients.forLlmBaseUrl(config.baseUrl()).send(httpReq, HttpResponse.BodyHandlers.ofString());
 
                 if (response.statusCode() == 200) return response.body();
 
