@@ -134,4 +134,71 @@ public class ConfigServiceTest extends UnitTest {
         assertNull(ConfigService.get("evict.me"),
                 "cache must not serve a stale value after delete");
     }
+
+    // --- setWithSideEffects: ollama-cloud LLM key → ollama search key linkage ---
+
+    @Test
+    public void setWithSideEffectsMirrorsOllamaCloudKeyToSearchWhenSearchKeyEmpty() {
+        // Fresh state: no search.ollama.apiKey set. Operator sets the LLM key
+        // via Settings — both providers hit the same Ollama account, so the
+        // search key should auto-populate AND the search provider should flip
+        // enabled=true. Saves the operator a redundant paste.
+        assertNull(ConfigService.get("search.ollama.apiKey"));
+
+        var error = ConfigService.setWithSideEffects(
+                "provider.ollama-cloud.apiKey", "sk-ollama-abc");
+        assertNull(error);
+
+        assertEquals("sk-ollama-abc", ConfigService.get("provider.ollama-cloud.apiKey"));
+        assertEquals("sk-ollama-abc", ConfigService.get("search.ollama.apiKey"),
+                "search key must be auto-populated from the LLM key");
+        assertEquals("true", ConfigService.get("search.ollama.enabled"),
+                "web search must be enabled when the search key is auto-populated");
+    }
+
+    @Test
+    public void setWithSideEffectsLeavesExistingSearchKeyAlone() {
+        // The "set once, owned by you" rule: once the operator has explicitly
+        // set search.ollama.apiKey, a later rotation of the LLM key must NOT
+        // overwrite it. Search-key independence is preserved.
+        ConfigService.set("search.ollama.apiKey", "operator-set-key");
+        ConfigService.set("search.ollama.enabled", "false");
+
+        var error = ConfigService.setWithSideEffects(
+                "provider.ollama-cloud.apiKey", "sk-ollama-xyz");
+        assertNull(error);
+
+        assertEquals("operator-set-key", ConfigService.get("search.ollama.apiKey"),
+                "operator-set search key must not be overwritten");
+        assertEquals("false", ConfigService.get("search.ollama.enabled"),
+                "operator-set enabled flag must not be flipped");
+    }
+
+    @Test
+    public void setWithSideEffectsDoesNotMirrorBlankLlmKey() {
+        // Clearing the LLM key (operator pastes empty / removes credentials)
+        // must not mirror the empty value into the search key — that would
+        // silently break a working search-only setup. The mirror is a
+        // strictly-additive convenience.
+        var error = ConfigService.setWithSideEffects(
+                "provider.ollama-cloud.apiKey", "");
+        assertNull(error);
+
+        assertNull(ConfigService.get("search.ollama.apiKey"),
+                "blank LLM key must not propagate to the search key");
+        assertNull(ConfigService.get("search.ollama.enabled"),
+                "blank LLM key must not enable the search provider");
+    }
+
+    @Test
+    public void setWithSideEffectsIgnoresUnrelatedProviderApiKey() {
+        // Sanity guard: the linkage is specific to provider.ollama-cloud.apiKey.
+        // Setting a different provider's apiKey must not touch search.ollama.*.
+        var error = ConfigService.setWithSideEffects(
+                "provider.openrouter.apiKey", "sk-or-some-key");
+        assertNull(error);
+
+        assertNull(ConfigService.get("search.ollama.apiKey"));
+        assertNull(ConfigService.get("search.ollama.enabled"));
+    }
 }

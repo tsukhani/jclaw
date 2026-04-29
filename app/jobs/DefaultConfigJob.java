@@ -148,32 +148,41 @@ public class DefaultConfigJob extends Job<Void> {
         // Web search providers — independent engines, first enabled + keyed one is used.
         // All config lives in the Config DB (editable via Settings UI), not application.conf.
         // See WebSearchTool.SearchProvider for the read paths that consume these values.
-        seedIfAbsent("search.exa.enabled", "true");
+        //
+        // First-run defaults: every provider is seeded `enabled=false` because each
+        // requires an operator-supplied API key (or, for Ollama, an account/key bound
+        // to the same endpoint as the chat provider). Ordering by priority is
+        // Ollama → Exa → Perplexity → Brave → Tavily → Felo, matching the seed
+        // block below; the operator enables the ones they have keys for via the
+        // Settings UI, and the first enabled+keyed provider in priority order wins.
+        // seedIfAbsent only writes when the key is absent, so this change is a
+        // no-op against existing installations — operator-tuned values are preserved.
+        seedIfAbsent("search.ollama.enabled", "false");
+        seedIfAbsent("search.ollama.apiKey", "");
+        seedIfAbsent("search.ollama.baseUrl", "https://ollama.com/api/web_search");
+        seedIfAbsent("search.ollama.priority", "0");
+        seedIfAbsent("search.exa.enabled", "false");
         seedIfAbsent("search.exa.apiKey", "");
         seedIfAbsent("search.exa.baseUrl", "https://api.exa.ai/search");
-        seedIfAbsent("search.exa.priority", "0");
-        seedIfAbsent("search.brave.enabled", "true");
-        seedIfAbsent("search.brave.apiKey", "");
-        seedIfAbsent("search.brave.baseUrl", "https://api.search.brave.com/res/v1/web/search");
-        seedIfAbsent("search.brave.priority", "1");
-        seedIfAbsent("search.tavily.enabled", "true");
-        seedIfAbsent("search.tavily.apiKey", "");
-        seedIfAbsent("search.tavily.baseUrl", "https://api.tavily.com/search");
-        seedIfAbsent("search.tavily.priority", "2");
-        seedIfAbsent("search.perplexity.enabled", "true");
+        seedIfAbsent("search.exa.priority", "1");
+        seedIfAbsent("search.perplexity.enabled", "false");
         seedIfAbsent("search.perplexity.apiKey", "");
         seedIfAbsent("search.perplexity.baseUrl", "https://api.perplexity.ai/search");
-        seedIfAbsent("search.perplexity.priority", "3");
+        seedIfAbsent("search.perplexity.priority", "2");
         // Server-side recency filter for Perplexity's /search endpoint. One of
         // hour|day|week|month|year, or "none" to disable. Defaults to "month"
         // so "latest X" queries don't return year-old snippets — the LLM will
         // not reliably add year/month keywords on its own.
         seedIfAbsent("search.perplexity.recencyFilter", "month");
-        seedIfAbsent("search.ollama.enabled", "true");
-        seedIfAbsent("search.ollama.apiKey", "");
-        seedIfAbsent("search.ollama.baseUrl", "https://ollama.com/api/web_search");
-        seedIfAbsent("search.ollama.priority", "4");
-        seedIfAbsent("search.felo.enabled", "true");
+        seedIfAbsent("search.brave.enabled", "false");
+        seedIfAbsent("search.brave.apiKey", "");
+        seedIfAbsent("search.brave.baseUrl", "https://api.search.brave.com/res/v1/web/search");
+        seedIfAbsent("search.brave.priority", "3");
+        seedIfAbsent("search.tavily.enabled", "false");
+        seedIfAbsent("search.tavily.apiKey", "");
+        seedIfAbsent("search.tavily.baseUrl", "https://api.tavily.com/search");
+        seedIfAbsent("search.tavily.priority", "4");
+        seedIfAbsent("search.felo.enabled", "false");
         seedIfAbsent("search.felo.apiKey", "");
         seedIfAbsent("search.felo.baseUrl", "https://openapi.felo.ai/v2/chat");
         seedIfAbsent("search.felo.priority", "5");

@@ -321,3 +321,53 @@ describe('Chat page — JCLAW-131 per-kind upload caps and audio gate', () => {
   // coverage is the authoritative enforcement; frontend UX testing stays
   // focused on the attach-time gates here.
 })
+
+describe('Chat page — composer focus on entry', () => {
+  // Pin the "land the cursor in the message box" contract: any path that
+  // resets the chat to a typeable state should leave the textarea focused
+  // so the user can start typing without an extra click. Two entry points
+  // share the same focusInput() helper:
+  //
+  //   - newChat (the PencilSquareIcon button) — clears state then focuses.
+  //   - loadConversation (deep-link from /conversations, in-page Recents
+  //     click, or any other navigation that lands on a fresh conversation).
+
+  it('focuses the textarea after the New conversation button is clicked', async () => {
+    setupBaseChatApi()
+    const component = await mountSuspended(Chat, { attachTo: document.body })
+    await flushPromises()
+
+    // The composer's "New conversation" button is identified by its title
+    // attribute — it carries the PencilSquareIcon glyph but the title is
+    // the stable contract.
+    const newChatBtn = component.find('button[title="New conversation"]')
+    expect(newChatBtn.exists()).toBe(true)
+    await newChatBtn.trigger('click')
+    await flushPromises()
+    // focusInput() schedules its focus() call inside nextTick; flushPromises
+    // doesn't drain Vue's microtask queue, so add an extra tick.
+    await new Promise(r => setTimeout(r, 0))
+
+    const textarea = component.find('textarea').element as HTMLTextAreaElement
+    expect(document.activeElement).toBe(textarea)
+  })
+
+  it('focuses the textarea after loadConversation lands a conversation', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations/55/messages', () => [])
+    const component = await mountSuspended(Chat, { attachTo: document.body })
+    await flushPromises()
+
+    // Reach into the exposed surface to drive loadConversation directly —
+    // mirrors what the deep-link watcher and in-page route-query watcher do.
+    const vm = component.vm as unknown as {
+      loadConversation: (id: number) => Promise<void>
+    }
+    await vm.loadConversation(55)
+    await flushPromises()
+    await new Promise(r => setTimeout(r, 0))
+
+    const textarea = component.find('textarea').element as HTMLTextAreaElement
+    expect(document.activeElement).toBe(textarea)
+  })
+})

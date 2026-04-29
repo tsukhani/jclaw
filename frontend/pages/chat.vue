@@ -1017,6 +1017,22 @@ async function loadConversation(id: number) {
   messages.value = loaded
   initCollapsedState(messages.value)
   scrollToBottom()
+  focusInput()
+}
+
+// Land the cursor in the composer textarea so the user can start typing
+// immediately. Used after loadConversation (deep-link from /conversations,
+// in-page Recents click, or any other entry that lands on a fresh
+// conversation) and after newChat (reset state, ready for a new turn).
+//
+// nextTick guards two race conditions: (1) the textarea's :disabled binding
+// flips with `streaming`, and a synchronously-disabled element silently
+// rejects focus(); (2) on first deep-link load the template-ref is bound
+// after the surrounding microtask, so a same-tick focus would no-op.
+function focusInput() {
+  nextTick(() => {
+    chatInput.value?.focus()
+  })
 }
 
 // Sidebar Recents deep-link from within /chat: NuxtLink swaps the query
@@ -1340,6 +1356,7 @@ function newChat() {
   input.value = ''
   attachedFiles.value = []
   attachError.value = null
+  focusInput()
 }
 
 /**

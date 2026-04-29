@@ -224,20 +224,31 @@ const columns: ColumnDef<Conversation, unknown>[] = [
       h('button', {
         type: 'button',
         class: 'p-1.5 text-fg-muted hover:text-fg-strong transition-colors',
-        title: 'Open in Chat',
+        title: 'View details',
         onClick: (e: Event) => {
           e.stopPropagation()
-          navigateTo(`/chat?conversation=${row.original.id}`)
+          navigateTo(`/conversations/${row.original.id}`)
         },
       }, [
         h('svg', {
           class: 'w-4 h-4', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24',
         }, [
+          // Heroicons v2 "eye" outline — outer almond + inner pupil. Two
+          // paths because the row-click default (open in /chat) covers the
+          // chat affordance, so this slot is repurposed for "view this
+          // conversation's detail page" — the read-only deep view that
+          // doesn't load the agent runner.
           h('path', {
             'stroke-linecap': 'round',
             'stroke-linejoin': 'round',
             'stroke-width': '1.5',
-            'd': 'M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z',
+            'd': 'M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z',
+          }),
+          h('path', {
+            'stroke-linecap': 'round',
+            'stroke-linejoin': 'round',
+            'stroke-width': '1.5',
+            'd': 'M15 12a3 3 0 11-6 0 3 3 0 016 0z',
           }),
         ]),
       ]),
@@ -299,7 +310,7 @@ const columns: ColumnDef<Conversation, unknown>[] = [
         :data="conversations"
         :loading="loading"
         empty-message="No conversations yet"
-        @row-click="(c: Conversation) => navigateTo(`/conversations/${c.id}`)"
+        @row-click="(c: Conversation) => navigateTo(`/chat?conversation=${c.id}`)"
       />
       <div
         v-if="total > 0"

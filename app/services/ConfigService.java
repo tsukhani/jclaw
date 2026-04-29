@@ -89,6 +89,29 @@ public class ConfigService {
             jobs.ToolRegistrationJob.registerAll();
         }
 
+        // Convenience linkage: when the operator first sets the Ollama Cloud
+        // LLM apiKey, mirror that value into the Ollama search provider's
+        // apiKey AND flip search.ollama.enabled to true — but ONLY if the
+        // search key is currently empty. Both providers authenticate against
+        // the same Ollama account, so the usual case is one key serving
+        // both surfaces; this saves the operator a redundant paste.
+        //
+        // Once the search key has any value (operator-set or previously
+        // mirrored), this branch becomes a no-op — subsequent rotations of
+        // the LLM key don't drag the search key along, preserving the
+        // "set once, owned by you" model that operators expect from
+        // independent settings.
+        if (key.equals("provider.ollama-cloud.apiKey") && value != null && !value.isBlank()) {
+            String existingSearchKey = get("search.ollama.apiKey");
+            if (existingSearchKey == null || existingSearchKey.isBlank()) {
+                set("search.ollama.apiKey", value);
+                set("search.ollama.enabled", "true");
+                services.EventLogger.info("config",
+                        "Mirrored ollama-cloud LLM apiKey into search.ollama.apiKey "
+                                + "and enabled web search (search key was empty)");
+            }
+        }
+
         return null;
     }
 
