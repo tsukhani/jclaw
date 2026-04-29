@@ -1,11 +1,16 @@
 package jobs;
 
 import agents.ToolRegistry;
+import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import tools.*;
 
+// All DB-touching calls below (ConfigService.get, EventLogger.info) wrap
+// their own work in Tx.run, so no outer JPA tx is needed. @NoTransaction
+// keeps the cleanup-time EntityManager.close() out of the shutdown race.
 @OnApplicationStart
+@NoTransaction
 public class ToolRegistrationJob extends Job<Void> {
 
     @Override

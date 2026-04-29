@@ -69,11 +69,31 @@ public class Task extends Model {
         updatedAt = Instant.now();
     }
 
+    /**
+     * Identify the Task entity to Hibernate by NAME rather than by class literal.
+     * In Play 1.x the {@code ApplicationClassloader} can cycle (dev-mode source
+     * reload, prod-mode init/teardown races between precompile and runtime),
+     * leaving Hibernate's metamodel holding {@code Task.class} from one
+     * classloader instance while a runtime call site captures the literal from
+     * another. Both classes are named {@code models.Task} but
+     * {@code clazz1 != clazz2}, so the typed query fails with
+     * "Type specified for TypedQuery [models.Task] is incompatible with the
+     * query return type of the same name". Using
+     * {@link org.hibernate.query.NativeQuery#addEntity(String)} sidesteps the
+     * mismatch — Hibernate looks the entity up in its own metadata by string
+     * name, so whichever Class instance the metamodel holds is the one applied.
+     */
+    private static final String TASK_ENTITY_NAME = "models.Task";
+
     @SuppressWarnings("unchecked")
     public static List<Task> findPendingDue() {
-        // Use string comparison to avoid Play 1.x classloader enum mismatch during hot-reload
+        // Status passed as String (.name()) to avoid the same classloader trap
+        // hitting the enum-parameter binding path. Native SQL compares VARCHAR
+        // to VARCHAR; no enum reflection involved.
         return play.db.jpa.JPA.em()
-                .createNativeQuery("SELECT * FROM task WHERE status = ?1 AND next_run_at <= ?2", Task.class)
+                .createNativeQuery("SELECT * FROM task WHERE status = ?1 AND next_run_at <= ?2")
+                .unwrap(org.hibernate.query.NativeQuery.class)
+                .addEntity(TASK_ENTITY_NAME)
                 .setParameter(1, Status.PENDING.name())
                 .setParameter(2, Instant.now())
                 .getResultList();
@@ -82,7 +102,9 @@ public class Task extends Model {
     @SuppressWarnings("unchecked")
     public static List<Task> findByStatus(Status status) {
         return play.db.jpa.JPA.em()
-                .createNativeQuery("SELECT * FROM task WHERE status = ?1", Task.class)
+                .createNativeQuery("SELECT * FROM task WHERE status = ?1")
+                .unwrap(org.hibernate.query.NativeQuery.class)
+                .addEntity(TASK_ENTITY_NAME)
                 .setParameter(1, status.name())
                 .getResultList();
     }

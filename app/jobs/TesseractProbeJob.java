@@ -1,6 +1,7 @@
 package jobs;
 
 import play.Logger;
+import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.OcrHealthProbe;
@@ -17,6 +18,7 @@ import services.OcrHealthProbe;
  * the new state.
  */
 @OnApplicationStart
+@NoTransaction // No DB access — just probes the tesseract binary; skip the JPA wrapper.
 public class TesseractProbeJob extends Job<Void> {
 
     @Override

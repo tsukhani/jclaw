@@ -3,6 +3,7 @@ package jobs;
 import channels.TelegramChannel;
 import models.TelegramBinding;
 import org.telegram.telegrambots.meta.api.objects.commands.BotCommand;
+import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.EventLogger;
@@ -30,7 +31,12 @@ import java.util.List;
  * mid-session are not covered — they'll get autocomplete at the next
  * restart. Hooking into the binding-save path is tracked separately.
  */
+// DB read (TelegramBinding::findAllEnabled) is wrapped in Tx.run; the rest
+// is HTTP to api.telegram.org. @NoTransaction skips the redundant outer
+// JPA wrapper so the cleanup-time EntityManager.close() doesn't race the
+// shutdown hook on restart.
 @OnApplicationStart
+@NoTransaction
 public class TelegramCommandsRegistrationJob extends Job<Void> {
 
     @Override
