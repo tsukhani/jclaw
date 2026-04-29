@@ -379,7 +379,7 @@ public class TelegramChannel implements Channel {
                 // has already been delivered by the time the background upload
                 // might fail, so a late error can't retroactively fail the turn.
                 if (fs.isBackground()) {
-                    Thread.ofVirtual().start(() -> {
+                    Thread.ofVirtual().name("telegram-bg-send").start(() -> {
                         try {
                             if (!sendFileSegment(channel, chatId, fs)) {
                                 EventLogger.warn("channel", null, "telegram",

@@ -555,7 +555,7 @@ public final class TelegramStreamingSink {
             // hasn't landed yet. Each tick spawns a VT so the scheduler
             // thread stays free for other sinks' flushes.
             typingHeartbeat = scheduler().scheduleAtFixedRate(
-                    () -> Thread.ofVirtual().start(() ->
+                    () -> Thread.ofVirtual().name("telegram-typing").start(() ->
                             TelegramChannel.sendTypingAction(botToken, chatId)),
                     0L, TYPING_HEARTBEAT_MS, TimeUnit.MILLISECONDS);
         }
@@ -577,7 +577,7 @@ public final class TelegramStreamingSink {
         // Scheduler thread only spawns the flush; the flush itself runs on a
         // fresh virtual thread so cross-sink flushes don't serialize (JCLAW-95).
         scheduledFlush = scheduler().schedule(
-                () -> Thread.ofVirtual().start(this::flush),
+                () -> Thread.ofVirtual().name("telegram-stream-flush").start(this::flush),
                 wait, TimeUnit.MILLISECONDS);
     }
 
@@ -631,7 +631,7 @@ public final class TelegramStreamingSink {
                 // on a fresh virtual thread (same pattern as scheduleFlushLocked).
                 if (pending.length() > lastSentText.length() && !sealed.get() && !streamCapReached) {
                     scheduledFlush = scheduler().schedule(
-                            () -> Thread.ofVirtual().start(this::flush),
+                            () -> Thread.ofVirtual().name("telegram-stream-flush").start(this::flush),
                             currentThrottleMs, TimeUnit.MILLISECONDS);
                 }
             }

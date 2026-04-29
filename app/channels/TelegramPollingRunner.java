@@ -297,7 +297,7 @@ public final class TelegramPollingRunner {
      */
     private static void dispatchMerged(String sendToken, Agent sendAgent, String userId,
                                         TelegramChannel.InboundMessage merged) {
-        Thread.ofVirtual().start(() -> {
+        Thread.ofVirtual().name("telegram-dispatch").start(() -> {
             try {
                 final String sendChatId = merged.chatId();
                 var inputs = TelegramChannel.prepareInboundAttachments(

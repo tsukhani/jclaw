@@ -327,7 +327,7 @@ public class ApiSkillsController extends Controller {
         // requesting agent's id so the service can gate promotion on the
         // skill-creator capability (see SkillPromotionService.promoteInBackground).
         var requestingAgentId = agent.id;
-        Thread.ofVirtual().start(() -> {
+        Thread.ofVirtual().name("skill-promote").start(() -> {
             try {
                 services.Tx.run(() -> services.SkillPromotionService.promoteInBackground(
                         skillDir, skillName, requestingAgentId));

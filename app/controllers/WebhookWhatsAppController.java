@@ -82,7 +82,7 @@ public class WebhookWhatsAppController extends Controller {
 
         // Mark as read and process async
         var finalConfig = config;
-        Thread.ofVirtual().start(() -> {
+        Thread.ofVirtual().name("webhook-whatsapp").start(() -> {
             if (finalConfig != null) {
                 WhatsAppChannel.markAsRead(finalConfig, message.messageId());
             }

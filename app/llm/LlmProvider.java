@@ -209,7 +209,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                            Consumer<ChatCompletionChunk> onChunk,
                            Runnable onComplete, Consumer<Exception> onError,
                            Integer maxTokens, String thinkingMode) {
-        Thread.ofVirtual().start(() -> {
+        Thread.ofVirtual().name("llm-stream").start(() -> {
             try {
                 var request = new ChatRequest(model, messages, tools, true, maxTokens, thinkingMode);
                 var json = serializeRequest(request);

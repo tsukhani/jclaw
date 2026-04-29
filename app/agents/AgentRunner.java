@@ -436,7 +436,7 @@ public class AgentRunner {
                                     StreamingCallbacks cb,
                                     Long acceptedAtNs,
                                     java.util.List<services.AttachmentService.Input> attachments) {
-        Thread.ofVirtual().start(() -> {
+        Thread.ofVirtual().name("agent-stream").start(() -> {
             final Long[] conversationIdRef = {null};
             var trace = LatencyTrace.forTurn(channelType, acceptedAtNs);
             trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
@@ -683,7 +683,7 @@ public class AgentRunner {
             // processQueueDrain needs the conversation committed so the next
             // queued turn loads fresh history.
             long truncPersistStartNs = System.nanoTime();
-            var truncPersistFuture = Thread.ofVirtual().start(() -> {
+            var truncPersistFuture = Thread.ofVirtual().name("agent-trunc-persist").start(() -> {
                 services.Tx.run(() -> {
                     var conv = ConversationService.findById(conversation.id);
                     ConversationService.appendAssistantMessage(conv, finalContent, null);
@@ -730,7 +730,7 @@ public class AgentRunner {
         var finalContent = content;
         var finalReasoning = turnUsage.reasoningText();
         long persistStartNs = System.nanoTime();
-        var persistFuture = Thread.ofVirtual().start(() -> {
+        var persistFuture = Thread.ofVirtual().name("agent-persist").start(() -> {
             services.Tx.run(() -> {
                 var conv = ConversationService.findById(conversation.id);
                 ConversationService.appendAssistantMessage(conv, finalContent, null, usageJson, finalReasoning);
@@ -1190,7 +1190,7 @@ public class AgentRunner {
             // One virtual thread per parallel-safe call — full concurrency.
             for (int idx : safeCalls) {
                 final int i = idx;
-                Thread.ofVirtual().start(() -> {
+                Thread.ofVirtual().name("agent-tool-parallel").start(() -> {
                     try {
                         if (isCancelled != null && isCancelled.get()) return;
                         var tc = toolCalls.get(i);
@@ -1211,7 +1211,7 @@ public class AgentRunner {
             // One virtual thread per non-parallel-safe tool-name group —
             // calls within execute sequentially in declared order.
             for (var group : unsafeGroups.values()) {
-                Thread.ofVirtual().start(() -> {
+                Thread.ofVirtual().name("agent-tool-serial").start(() -> {
                     try {
                         for (int idx : group) {
                             if (isCancelled != null && isCancelled.get()) break;
@@ -1544,7 +1544,7 @@ public class AgentRunner {
         var drained = services.ConversationQueue.drain(conversationId);
         if (drained.isEmpty()) return;
 
-        Thread.ofVirtual().start(() -> {
+        Thread.ofVirtual().name("agent-drain").start(() -> {
             var combined = services.ConversationQueue.formatCollectedMessages(drained);
             var msg = drained.getFirst(); // channel info is the same for all queued messages
             boolean runStarted = false;

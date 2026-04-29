@@ -94,7 +94,7 @@ public class WebhookTelegramController extends Controller {
                     ok();
                     return;
                 }
-                Thread.ofVirtual().start(() ->
+                Thread.ofVirtual().name("webhook-telegram-callback").start(() ->
                         channels.TelegramCallbackDispatcher.dispatch(
                                 ctx.botToken(), ctx.agent(), callback));
                 ok();
@@ -131,7 +131,7 @@ public class WebhookTelegramController extends Controller {
             // media_group_id → immediate dispatch).
             final BindingCtx captured = ctx;
             channels.TelegramMediaGroupBuffer.add(message, merged ->
-                    Thread.ofVirtual().start(() -> processMessage(captured, merged)));
+                    Thread.ofVirtual().name("webhook-telegram-process").start(() -> processMessage(captured, merged)));
         } catch (Exception e) {
             EventLogger.error("channel", null, "telegram",
                     "Webhook parse error for binding %d: %s".formatted(bindingId, e.getMessage()));

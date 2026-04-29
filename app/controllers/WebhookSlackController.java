@@ -74,7 +74,7 @@ public class WebhookSlackController extends Controller {
                 "Message received from %s in %s".formatted(message.userId(), message.channelId()));
 
         // Process async
-        Thread.ofVirtual().start(() -> processMessage(config, message));
+        Thread.ofVirtual().name("webhook-slack").start(() -> processMessage(config, message));
 
         ok();
     }

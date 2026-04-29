@@ -399,7 +399,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
             // after the loop, but only a watchdog kill should produce the
             // "timed out" markers in the result.
             var timedOut = new java.util.concurrent.atomic.AtomicBoolean(false);
-            Thread.ofVirtual().start(() -> {
+            Thread.ofVirtual().name("shell-exec-watchdog").start(() -> {
                 try {
                     if (!process.waitFor(timeoutSec, TimeUnit.SECONDS)) {
                         timedOut.set(true);
