@@ -85,7 +85,9 @@ public final class TelegramFileDownloader {
         try {
             var url = apiBaseUrl + "/getFile?file_id=" + pending.telegramFileId();
             var req = new okhttp3.Request.Builder().url(url).get().build();
-            try (var resp = HttpFactories.general(GETFILE_TIMEOUT).newCall(req).execute()) {
+            var call = HttpFactories.general().newCall(req);
+            call.timeout().timeout(GETFILE_TIMEOUT.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+            try (var resp = call.execute()) {
                 if (resp.code() != 200) {
                     return new DownloadFailed("getFile HTTP " + resp.code());
                 }
@@ -126,7 +128,9 @@ public final class TelegramFileDownloader {
         try {
             var downloadUrl = fileBaseUrl + "/" + filePath;
             var req = new okhttp3.Request.Builder().url(downloadUrl).get().build();
-            try (var resp = HttpFactories.general(DOWNLOAD_TIMEOUT).newCall(req).execute()) {
+            var call = HttpFactories.general().newCall(req);
+            call.timeout().timeout(DOWNLOAD_TIMEOUT.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+            try (var resp = call.execute()) {
                 if (resp.code() != 200) {
                     return new DownloadFailed("download HTTP " + resp.code());
                 }

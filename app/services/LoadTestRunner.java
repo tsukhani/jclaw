@@ -105,8 +105,9 @@ public final class LoadTestRunner {
         // production LLM stack uses — virtual-thread dispatcher, 64-slot
         // ConnectionPool — so concurrent loadtest workers exercise the
         // exact connection-pooling and threading model that production chat
-        // traffic does.
-        var client = utils.HttpFactories.llmSingleShot(Duration.ofSeconds(120));
+        // traffic does. Per-call 120s timeout is set on each individual
+        // Call below.
+        var client = utils.HttpFactories.llmSingleShot();
 
         // Warmup: a single sequential request ensures agent lookup, provider
         // cache, session affinity, and JIT are stable before concurrent workers
@@ -140,7 +141,9 @@ public final class LoadTestRunner {
                                         .header("Cookie", sessionCookie)
                                         .post(okhttp3.RequestBody.create(body, JSON_MEDIA_TYPE));
                                 if (req.compress()) builder.header("Accept-Encoding", "br, gzip");
-                                try (var resp = client.newCall(builder.build()).execute()) {
+                                var call = client.newCall(builder.build());
+                                call.timeout().timeout(120, java.util.concurrent.TimeUnit.SECONDS);
+                                try (var resp = call.execute()) {
                                     // Drain the SSE body so the timing covers the full
                                     // round-trip — matches the JDK
                                     // BodyHandlers.discarding() semantics where bytes
@@ -186,7 +189,9 @@ public final class LoadTestRunner {
                     .header("Cookie", sessionCookie)
                     .post(okhttp3.RequestBody.create(body, JSON_MEDIA_TYPE));
             if (compress) builder.header("Accept-Encoding", "br, gzip");
-            try (var resp = client.newCall(builder.build()).execute()) {
+            var call = client.newCall(builder.build());
+            call.timeout().timeout(60, java.util.concurrent.TimeUnit.SECONDS);
+            try (var resp = call.execute()) {
                 if (resp.body() != null) resp.body().bytes();  // drain
             }
             // The warmup response populates all the caches but does not count

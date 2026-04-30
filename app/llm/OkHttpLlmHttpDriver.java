@@ -13,6 +13,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
@@ -43,13 +44,15 @@ final class OkHttpLlmHttpDriver {
      */
     static HttpReply send(URI uri, String authHeader, String jsonBody, Duration timeout)
             throws IOException, InterruptedException {
-        var client = utils.HttpFactories.llmSingleShot(timeout);
         var req = new Request.Builder()
                 .url(uri.toString())
                 .header("Authorization", authHeader)
                 .post(RequestBody.create(jsonBody, JSON))
                 .build();
-        try (var resp = client.newCall(req).execute()) {
+        var call = utils.HttpFactories.llmSingleShot().newCall(req);
+        // Per-call timeout via Call.timeout() — no per-call client allocation.
+        call.timeout().timeout(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        try (var resp = call.execute()) {
             var body = resp.body() != null ? resp.body().string() : "";
             var retryAfter = Optional.ofNullable(resp.header("Retry-After"))
                     .flatMap(OkHttpLlmHttpDriver::parseRetryAfter);
@@ -102,10 +105,16 @@ final class OkHttpLlmHttpDriver {
             }
         };
 
-        EventSources.createFactory(utils.HttpFactories.llmStreaming()).newEventSource(req, listener);
+        var eventSource = EventSources.createFactory(utils.HttpFactories.llmStreaming())
+                .newEventSource(req, listener);
         try {
             done.await();
         } catch (InterruptedException ie) {
+            // Tell OkHttp to abort the in-flight call so the underlying
+            // socket connection isn't held open until readTimeout fires.
+            // Without this, a cancelled chat (user clicks Stop, route
+            // navigation, etc.) would leak its connection for up to 180s.
+            eventSource.cancel();
             Thread.currentThread().interrupt();
             onError.accept(ie);
         }

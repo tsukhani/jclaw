@@ -7,12 +7,12 @@ import utils.HttpFactories;
 import java.io.IOException;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
-import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 
 final class LocalProviderProbeSupport {
 
     /** Boot probes don't need the LLM single-shot's 180s default — 7s is plenty. */
-    private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(7);
+    private static final long PROBE_TIMEOUT_SECONDS = 7;
 
     record Result(boolean available, int modelCount, String reason, boolean connectionRefused) { }
 
@@ -30,7 +30,9 @@ final class LocalProviderProbeSupport {
                 .url(baseUrl + "/models")
                 .get()
                 .build();
-        try (var resp = HttpFactories.llmSingleShot(PROBE_TIMEOUT).newCall(req).execute()) {
+        var call = HttpFactories.llmSingleShot().newCall(req);
+        call.timeout().timeout(PROBE_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        try (var resp = call.execute()) {
             if (resp.code() != 200) {
                 return new Result(false, 0,
                         "GET %s/models returned HTTP %d".formatted(baseUrl, resp.code()),

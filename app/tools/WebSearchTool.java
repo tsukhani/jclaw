@@ -14,7 +14,6 @@ import utils.HttpFactories;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -189,11 +188,12 @@ public class WebSearchTool implements ToolRegistry.Tool {
                     "Searching via %s: \"%s\" (numResults=%d)".formatted(provider.displayName(), query, numResults));
 
             var request = provider.buildRequest(apiKey, query, numResults);
-            var client = HttpFactories.general(Duration.ofSeconds(TIMEOUT_SECONDS));
+            var call = HttpFactories.general().newCall(request);
+            call.timeout().timeout(TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
 
             int statusCode;
             String responseBody;
-            try (var response = client.newCall(request).execute()) {
+            try (var response = call.execute()) {
                 statusCode = response.code();
                 responseBody = response.body() != null ? response.body().string() : "";
             }

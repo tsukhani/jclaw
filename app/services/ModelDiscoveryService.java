@@ -3,7 +3,6 @@ package services;
 import com.google.gson.*;
 import utils.Strings;
 
-import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -86,11 +85,12 @@ public class ModelDiscoveryService {
                     .header("Accept", "application/json")
                     .get()
                     .build();
-            var client = utils.HttpFactories.llmSingleShot(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS));
+            var call = utils.HttpFactories.llmSingleShot().newCall(req);
+            call.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             int statusCode;
             String responseBody;
-            try (var response = client.newCall(req).execute()) {
+            try (var response = call.execute()) {
                 statusCode = response.code();
                 responseBody = response.body() != null ? response.body().string() : "";
             }
@@ -390,10 +390,11 @@ public class ModelDiscoveryService {
                     .header("Accept", "text/html,application/json")
                     .get()
                     .build();
-            var client = utils.HttpFactories.general(Duration.ofSeconds(LEADERBOARD_TIMEOUT_SECONDS));
+            var call = utils.HttpFactories.general().newCall(req);
+            call.timeout().timeout(LEADERBOARD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             String body;
-            try (var response = client.newCall(req).execute()) {
+            try (var response = call.execute()) {
                 if (response.code() != 200) return List.of();
                 body = response.body() != null ? response.body().string() : "";
             }
@@ -513,11 +514,12 @@ public class ModelDiscoveryService {
                     .header("Accept", "application/json")
                     .get()
                     .build();
-            var client = utils.HttpFactories.llmSingleShot(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS));
+            var call = utils.HttpFactories.llmSingleShot().newCall(req);
+            call.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             int statusCode;
             String responseBody;
-            try (var resp = client.newCall(req).execute()) {
+            try (var resp = call.execute()) {
                 statusCode = resp.code();
                 responseBody = resp.body() != null ? resp.body().string() : "";
             }
@@ -622,11 +624,12 @@ public class ModelDiscoveryService {
                     .header("Accept", "application/json")
                     .get()
                     .build();
-            var client = utils.HttpFactories.llmSingleShot(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS));
+            var tagsCall = utils.HttpFactories.llmSingleShot().newCall(tagsReq);
+            tagsCall.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             int tagsStatus;
             String tagsResponseBody;
-            try (var tagsResp = client.newCall(tagsReq).execute()) {
+            try (var tagsResp = tagsCall.execute()) {
                 tagsStatus = tagsResp.code();
                 tagsResponseBody = tagsResp.body() != null ? tagsResp.body().string() : "";
             }
@@ -731,11 +734,12 @@ public class ModelDiscoveryService {
                     .header("Accept", "application/json")
                     .post(okhttp3.RequestBody.create(body, jsonMediaType))
                     .build();
-            var client = utils.HttpFactories.llmSingleShot(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS));
+            var call = utils.HttpFactories.llmSingleShot().newCall(req);
+            call.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
             int statusCode;
             String responseBody;
-            try (var resp = client.newCall(req).execute()) {
+            try (var resp = call.execute()) {
                 statusCode = resp.code();
                 responseBody = resp.body() != null ? resp.body().string() : "";
             }

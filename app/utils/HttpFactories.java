@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Single source of truth for outbound HTTP-client provisioning. Callers
- * declare <em>intent</em> ({@link #llmStreaming()}, {@link #llmSingleShot},
+ * declare <em>intent</em> ({@link #llmStreaming()}, {@link #llmSingleShot()},
  * {@link #general()}) and receive an appropriately-tuned
  * {@link OkHttpClient}; they never see the underlying connection pools,
  * dispatcher, or timeout policy. That makes this class the GRASP
@@ -28,21 +28,25 @@ import java.util.concurrent.TimeUnit;
  *       blocking socket reads (the architectural insight that closed the
  *       Phase-1 perf gap to the JDK {@code HttpClient}).</li>
  *
- *   <li>{@link #llmSingleShot(Duration)} — single-shot LLM calls (chat,
- *       embeddings, discovery, boot probes) with caller-specified
- *       {@code callTimeout}. Same shared pool + VT dispatcher as streaming
- *       so connection reuse is unified across the LLM stack.</li>
+ *   <li>{@link #llmSingleShot()} — single-shot LLM calls (chat, embeddings,
+ *       discovery, boot probes). 180s default {@code callTimeout}; callers
+ *       override per-call via {@link okhttp3.Call#timeout()
+ *       Call.timeout()}, which doesn't allocate a new client. Same shared
+ *       pool + VT dispatcher as streaming so connection reuse is unified
+ *       across the LLM stack.</li>
  *
- *   <li>{@link #general()} / {@link #general(Duration)} — non-LLM HTTP:
- *       channel webhooks, the openrouter leaderboard fetch, scanner
- *       production HTTP, web search. Conventional cached-thread-pool
- *       dispatcher (no VT — request volume here is well below the point
- *       where platform-thread scheduling overhead matters), smaller
- *       32-slot connection pool, default 60s {@code callTimeout}.
- *       The {@code (Duration)} overload returns a derived client with the
- *       caller's {@code callTimeout} and {@code readTimeout} both set —
- *       cheap because the underlying pool and dispatcher are shared by
- *       reference via {@link OkHttpClient.Builder#newBuilder()}.</li>
+ *   <li>{@link #general()} — non-LLM HTTP: channel webhooks, the
+ *       openrouter leaderboard fetch, scanner production HTTP, web search.
+ *       Default 60s {@code callTimeout}; callers override per-call via
+ *       {@link okhttp3.Call#timeout() Call.timeout()}. Smaller 32-slot
+ *       connection pool. Uses {@link #GEN_DISPATCHER} with the same
+ *       {@code 128/64} caps as the LLM tier — overrides OkHttp's default
+ *       {@code 64/5} so concurrent webhook bursts to the same host don't
+ *       silently queue at the dispatcher (mirrors the Phase-1 fix the LLM
+ *       tier needed; preemptive here since current general workloads stay
+ *       well under {@code 5} per host but future batch flows might not).
+ *       Conventional cached-thread-pool executor on the dispatcher (no VT —
+ *       general request volume doesn't justify VT scheduling overhead).</li>
  * </ul>
  *
  * <p>No SSRF guard here — provider URLs and channel webhook URLs are
@@ -57,6 +61,16 @@ import java.util.concurrent.TimeUnit;
  * tests, low cohesion across two near-identical files. The factory-method
  * shape gives a single Information Expert, declared intent at every call
  * site, and a single place to evolve tuning.
+ *
+ * <p><b>Per-call timeouts.</b> Use {@link okhttp3.Call#timeout()
+ * Call.timeout()} on the returned call, not a derived client. That sets
+ * the per-call deadline directly on the {@code RealCall} without
+ * allocating a new {@code OkHttpClient}. Example:
+ * <pre>{@code
+ * var call = HttpFactories.general().newCall(request);
+ * call.timeout().timeout(15, TimeUnit.SECONDS);
+ * try (var resp = call.execute()) { ... }
+ * }</pre>
  */
 public final class HttpFactories {
 
@@ -80,6 +94,13 @@ public final class HttpFactories {
         LLM_DISPATCHER.setMaxRequestsPerHost(64);
     }
 
+    private static final Dispatcher GEN_DISPATCHER;
+    static {
+        GEN_DISPATCHER = new Dispatcher();   // OkHttp's default cached-thread-pool executor
+        GEN_DISPATCHER.setMaxRequests(128);
+        GEN_DISPATCHER.setMaxRequestsPerHost(64);
+    }
+
     private static final OkHttpClient LLM_STREAMING_CLIENT = new OkHttpClient.Builder()
             .connectTimeout(Duration.ofSeconds(10))
             .readTimeout(Duration.ofSeconds(180))
@@ -89,7 +110,7 @@ public final class HttpFactories {
             .dispatcher(LLM_DISPATCHER)
             .build();
 
-    private static final OkHttpClient LLM_SINGLE_SHOT_BASE = new OkHttpClient.Builder()
+    private static final OkHttpClient LLM_SINGLE_SHOT_CLIENT = new OkHttpClient.Builder()
             .connectTimeout(Duration.ofSeconds(10))
             .readTimeout(Duration.ofSeconds(180))
             .writeTimeout(Duration.ofSeconds(30))
@@ -98,67 +119,42 @@ public final class HttpFactories {
             .dispatcher(LLM_DISPATCHER)
             .build();
 
-    private static final OkHttpClient GENERAL_BASE = new OkHttpClient.Builder()
+    private static final OkHttpClient GENERAL_CLIENT = new OkHttpClient.Builder()
             .connectTimeout(Duration.ofSeconds(10))
             .readTimeout(Duration.ofSeconds(30))
             .writeTimeout(Duration.ofSeconds(30))
             .callTimeout(Duration.ofSeconds(60))
             .connectionPool(GEN_POOL)
+            .dispatcher(GEN_DISPATCHER)
             .build();
 
     private HttpFactories() { }
 
     /**
-     * Streaming LLM SSE client. Always returns the same shared instance —
-     * its {@code callTimeout(0)} means individual streams set their own
-     * pacing via per-frame {@code readTimeout}, so there's no per-call
-     * timeout to derive.
+     * Streaming LLM SSE client. {@code callTimeout(0)} so individual streams
+     * are bounded only by per-frame {@code readTimeout}, not by an overall
+     * call deadline.
      */
     public static OkHttpClient llmStreaming() {
         return LLM_STREAMING_CLIENT;
     }
 
     /**
-     * Single-shot LLM client honoring the caller's {@code callTimeout}.
-     * Returns the shared base client when the requested timeout matches
-     * the 180s default (the typical case for non-streaming chat); otherwise
-     * derives a per-call client via {@link OkHttpClient.Builder#newBuilder()}
-     * so the underlying connection pool and dispatcher are shared by
-     * reference.
-     *
-     * <p>Sets {@code readTimeout} to the same duration as {@code callTimeout}
-     * — for short-lived single-shot calls there's no per-frame slowness to
-     * accommodate, so a single bound is the right semantics.
+     * Single-shot LLM client. 180s default {@code callTimeout}; callers
+     * override per-call via {@link okhttp3.Call#timeout() Call.timeout()}.
+     * Always returns the same shared instance — no per-call client allocation.
      */
-    public static OkHttpClient llmSingleShot(Duration callTimeout) {
-        if (callTimeout.equals(Duration.ofSeconds(180))) return LLM_SINGLE_SHOT_BASE;
-        return LLM_SINGLE_SHOT_BASE.newBuilder()
-                .callTimeout(callTimeout)
-                .readTimeout(callTimeout)
-                .build();
+    public static OkHttpClient llmSingleShot() {
+        return LLM_SINGLE_SHOT_CLIENT;
     }
 
     /**
-     * General-purpose non-LLM client at default tunings (60s callTimeout,
-     * 30s readTimeout). The same shared instance for every caller; per-call
-     * timeout overrides go through {@link #general(Duration)}.
+     * General-purpose non-LLM client. 60s default {@code callTimeout};
+     * callers override per-call via {@link okhttp3.Call#timeout()
+     * Call.timeout()}. Always returns the same shared instance — no
+     * per-call client allocation.
      */
     public static OkHttpClient general() {
-        return GENERAL_BASE;
-    }
-
-    /**
-     * General-purpose client with a caller-specified {@code callTimeout}.
-     * {@code readTimeout} is set to the same duration so callers don't
-     * need to think about both axes — for non-LLM HTTP the two bounds are
-     * almost always correlated. Cheap to derive (shares the underlying
-     * pool by reference); a fresh client per call is acceptable when the
-     * call site really needs a non-default timeout.
-     */
-    public static OkHttpClient general(Duration callTimeout) {
-        return GENERAL_BASE.newBuilder()
-                .callTimeout(callTimeout)
-                .readTimeout(callTimeout)
-                .build();
+        return GENERAL_CLIENT;
     }
 }
