@@ -1,12 +1,9 @@
 package services;
 
 import models.Agent;
+import okhttp3.MediaType;
 import play.db.jpa.JPA;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -40,6 +37,7 @@ public final class LoadTestRunner {
      */
     public static final String LOADTEST_PROVIDER = "loadtest-mock";
     private static final String LOADTEST_MODEL = "mock-model";
+    private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json");
 
     /**
      * Default real-provider name when {@link Request#realProvider} is true and
@@ -116,10 +114,12 @@ public final class LoadTestRunner {
 
         var baseUrl = "http://127.0.0.1:" + play.Play.configuration.getProperty("http.port", "9000");
         var body = "{\"agentId\":" + agentId + ",\"message\":\"Load test message\"}";
-        var client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(10))
-                .executor(Executors.newVirtualThreadPerTaskExecutor())
-                .build();
+        // JCLAW-186: drive the loadtest through the same OkHttp client that
+        // the production LLM stack uses. SINGLE_SHOT carries the shared
+        // virtual-thread Dispatcher and 64-slot ConnectionPool from Phase 1,
+        // so concurrent loadtest workers exercise the exact same connection-
+        // pooling and threading model that production chat traffic exercises.
+        var client = llm.LlmOkHttpClient.singleShot(Duration.ofSeconds(120));
 
         // Warmup: a single sequential request ensures agent lookup, provider
         // cache, session affinity, and JIT are stable before concurrent workers
@@ -148,17 +148,20 @@ public final class LoadTestRunner {
                         for (int i = 0; i < req.iterations(); i++) {
                             long t0 = System.nanoTime();
                             try {
-                                var builder = HttpRequest.newBuilder()
-                                        .uri(URI.create(baseUrl + "/api/chat/stream"))
-                                        .header("Content-Type", "application/json")
+                                var builder = new okhttp3.Request.Builder()
+                                        .url(baseUrl + "/api/chat/stream")
                                         .header("Cookie", sessionCookie)
-                                        .timeout(Duration.ofSeconds(120))
-                                        .POST(HttpRequest.BodyPublishers.ofString(body));
+                                        .post(okhttp3.RequestBody.create(body, JSON_MEDIA_TYPE));
                                 if (req.compress()) builder.header("Accept-Encoding", "br, gzip");
-                                var httpReq = builder.build();
-                                var resp = client.send(httpReq, HttpResponse.BodyHandlers.discarding());
-                                if (resp.statusCode() == 200) success.incrementAndGet();
-                                else error.incrementAndGet();
+                                try (var resp = client.newCall(builder.build()).execute()) {
+                                    // Drain the SSE body so the timing covers the full
+                                    // round-trip — matches the JDK
+                                    // BodyHandlers.discarding() semantics where bytes
+                                    // are consumed-and-discarded as they arrive.
+                                    if (resp.body() != null) resp.body().bytes();
+                                    if (resp.code() == 200) success.incrementAndGet();
+                                    else error.incrementAndGet();
+                                }
                             } catch (Exception _) {
                                 error.incrementAndGet();
                             } finally {
@@ -219,18 +222,17 @@ public final class LoadTestRunner {
         else play.Play.configuration.setProperty("play.llm.client", saved);
     }
 
-    private static void warmupRequest(HttpClient client, String baseUrl,
+    private static void warmupRequest(okhttp3.OkHttpClient client, String baseUrl,
                                        String sessionCookie, String body, boolean compress) {
         try {
-            var builder = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/api/chat/stream"))
-                    .header("Content-Type", "application/json")
+            var builder = new okhttp3.Request.Builder()
+                    .url(baseUrl + "/api/chat/stream")
                     .header("Cookie", sessionCookie)
-                    .timeout(Duration.ofSeconds(60))
-                    .POST(HttpRequest.BodyPublishers.ofString(body));
+                    .post(okhttp3.RequestBody.create(body, JSON_MEDIA_TYPE));
             if (compress) builder.header("Accept-Encoding", "br, gzip");
-            var req = builder.build();
-            client.send(req, HttpResponse.BodyHandlers.discarding());
+            try (var resp = client.newCall(builder.build()).execute()) {
+                if (resp.body() != null) resp.body().bytes();  // drain
+            }
             // The warmup response populates all the caches but does not count
             // in the result set. Histograms recorded during warmup will show
             // in GET /api/metrics/latency — the caller is expected to reset.

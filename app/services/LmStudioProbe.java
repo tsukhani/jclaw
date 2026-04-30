@@ -21,9 +21,12 @@ public class LmStudioProbe {
     private static final AtomicReference<ProbeResult> result = new AtomicReference<>(UNRUN);
 
     public static ProbeResult probe(String baseUrl) {
-        // LM Studio's Express server hangs on Java's default h2c upgrade — pin HTTP/1.1.
+        // JCLAW-186: probeModels now uses OkHttp under the hood. OkHttp does
+        // not attempt h2c upgrade on plain HTTP, so the LM Studio
+        // Express/Node upgrade-event hang the JDK driver had to dodge is
+        // structurally absent — no version pin needed.
         return setResult(fromShared(LocalProviderProbeSupport.probeModels(
-                baseUrl, "LM Studio", java.net.http.HttpClient.Version.HTTP_1_1)));
+                baseUrl, "LM Studio")));
     }
 
     public static ProbeResult lastResult() {

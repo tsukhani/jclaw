@@ -83,22 +83,27 @@ public class ModelDiscoveryService {
     private static DiscoveryResult discoverOpenAiCompat(String providerName, String baseUrl, String apiKey) {
         try {
             var url = baseUrl.endsWith("/") ? baseUrl + "models" : baseUrl + "/models";
-            var httpReq = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
+            var req = new okhttp3.Request.Builder()
+                    .url(url)
                     .header("Authorization", "Bearer " + apiKey)
                     .header("Accept", "application/json")
-                    .timeout(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS))
-                    .GET()
+                    .get()
                     .build();
+            var client = llm.LlmOkHttpClient.singleShot(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS));
 
-            var response = utils.HttpClients.forLlmProvider(providerName).send(httpReq, HttpResponse.BodyHandlers.ofString());
-
-            if (response.statusCode() != 200) {
-                return new DiscoveryResult.Error(502, "Provider returned HTTP %d: %s".formatted(
-                        response.statusCode(), Strings.truncate(response.body(), 200)));
+            int statusCode;
+            String responseBody;
+            try (var response = client.newCall(req).execute()) {
+                statusCode = response.code();
+                responseBody = response.body() != null ? response.body().string() : "";
             }
 
-            var body = JsonParser.parseString(response.body()).getAsJsonObject();
+            if (statusCode != 200) {
+                return new DiscoveryResult.Error(502, "Provider returned HTTP %d: %s".formatted(
+                        statusCode, Strings.truncate(responseBody, 200)));
+            }
+
+            var body = JsonParser.parseString(responseBody).getAsJsonObject();
             var models = parseModels(body);
 
             // JCLAW-183 Tier 3: drop entries whose id matches a non-chat
@@ -504,17 +509,23 @@ public class ModelDiscoveryService {
         try {
             var nativeBase = stripV1Suffix(baseUrl);
             var url = nativeBase + "/api/v0/models";
-            var httpReq = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
+            var req = new okhttp3.Request.Builder()
+                    .url(url)
                     .header("Authorization", "Bearer " + (apiKey != null ? apiKey : ""))
                     .header("Accept", "application/json")
-                    .timeout(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS))
-                    .GET()
+                    .get()
                     .build();
-            var resp = utils.HttpClients.forLlmProvider(providerName).send(httpReq, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) return null;
+            var client = llm.LlmOkHttpClient.singleShot(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS));
 
-            var body = JsonParser.parseString(resp.body()).getAsJsonObject();
+            int statusCode;
+            String responseBody;
+            try (var resp = client.newCall(req).execute()) {
+                statusCode = resp.code();
+                responseBody = resp.body() != null ? resp.body().string() : "";
+            }
+            if (statusCode != 200) return null;
+
+            var body = JsonParser.parseString(responseBody).getAsJsonObject();
             var models = parseLmStudioNativeResponse(body);
 
             models.sort((a, b) -> {
@@ -607,20 +618,26 @@ public class ModelDiscoveryService {
     static DiscoveryResult discoverOllamaNative(String providerName, String baseUrl, String apiKey) {
         try {
             var nativeBase = stripV1Suffix(baseUrl);
-            var tagsReq = HttpRequest.newBuilder()
-                    .uri(URI.create(nativeBase + "/api/tags"))
+            var tagsReq = new okhttp3.Request.Builder()
+                    .url(nativeBase + "/api/tags")
                     .header("Authorization", "Bearer " + (apiKey != null ? apiKey : ""))
                     .header("Accept", "application/json")
-                    .timeout(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS))
-                    .GET()
+                    .get()
                     .build();
-            var tagsResp = utils.HttpClients.forLlmProvider(providerName).send(tagsReq, HttpResponse.BodyHandlers.ofString());
-            if (tagsResp.statusCode() != 200) {
+            var client = llm.LlmOkHttpClient.singleShot(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS));
+
+            int tagsStatus;
+            String tagsResponseBody;
+            try (var tagsResp = client.newCall(tagsReq).execute()) {
+                tagsStatus = tagsResp.code();
+                tagsResponseBody = tagsResp.body() != null ? tagsResp.body().string() : "";
+            }
+            if (tagsStatus != 200) {
                 return new DiscoveryResult.Error(502,
                         "Provider returned HTTP %d from /api/tags: %s".formatted(
-                                tagsResp.statusCode(), Strings.truncate(tagsResp.body(), 200)));
+                                tagsStatus, Strings.truncate(tagsResponseBody, 200)));
             }
-            var tagsBody = JsonParser.parseString(tagsResp.body()).getAsJsonObject();
+            var tagsBody = JsonParser.parseString(tagsResponseBody).getAsJsonObject();
             var modelIds = extractTagIds(tagsBody);
             if (modelIds.isEmpty()) return new DiscoveryResult.Ok(List.of());
 
@@ -709,17 +726,23 @@ public class ModelDiscoveryService {
     private static Map<String, Object> fetchOllamaShow(String providerName, String url, String apiKey, String id) {
         try {
             var body = "{\"name\":\"" + id.replace("\"", "\\\"") + "\"}";
-            var req = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
+            var jsonMediaType = okhttp3.MediaType.get("application/json");
+            var req = new okhttp3.Request.Builder()
+                    .url(url)
                     .header("Authorization", "Bearer " + (apiKey != null ? apiKey : ""))
-                    .header("Content-Type", "application/json")
                     .header("Accept", "application/json")
-                    .timeout(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS))
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .post(okhttp3.RequestBody.create(body, jsonMediaType))
                     .build();
-            var resp = utils.HttpClients.forLlmProvider(providerName).send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) return null;
-            return parseOllamaShow(id, JsonParser.parseString(resp.body()).getAsJsonObject());
+            var client = llm.LlmOkHttpClient.singleShot(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS));
+
+            int statusCode;
+            String responseBody;
+            try (var resp = client.newCall(req).execute()) {
+                statusCode = resp.code();
+                responseBody = resp.body() != null ? resp.body().string() : "";
+            }
+            if (statusCode != 200) return null;
+            return parseOllamaShow(id, JsonParser.parseString(responseBody).getAsJsonObject());
         } catch (Exception _) {
             return null;
         }

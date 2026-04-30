@@ -58,7 +58,7 @@ import java.util.concurrent.TimeUnit;
  * virtual thread that yields its carrier to other work whenever the socket
  * has nothing to deliver. This is the fix that closes the residual gap.
  */
-final class LlmOkHttpClient {
+public final class LlmOkHttpClient {
 
     /**
      * Shared connection pool across both clients. 64 idle slots covers the
@@ -66,7 +66,7 @@ final class LlmOkHttpClient {
      * keep-alive matches OkHttp's default and is well within Ollama's
      * idle-disconnect window.
      */
-    static final ConnectionPool POOL = new ConnectionPool(64, 5, TimeUnit.MINUTES);
+    public static final ConnectionPool POOL = new ConnectionPool(64, 5, TimeUnit.MINUTES);
 
     /**
      * Executor that hands every dispatched OkHttp call its own virtual
@@ -85,14 +85,14 @@ final class LlmOkHttpClient {
      * dispatcher does not impose its own per-host cap on top of whatever
      * the connection pool and the underlying provider negotiate.
      */
-    static final Dispatcher DISPATCHER;
+    public static final Dispatcher DISPATCHER;
     static {
         DISPATCHER = new Dispatcher(VTHREAD_EXEC);
         DISPATCHER.setMaxRequests(128);
         DISPATCHER.setMaxRequestsPerHost(64);
     }
 
-    static final OkHttpClient STREAMING = new OkHttpClient.Builder()
+    public static final OkHttpClient STREAMING = new OkHttpClient.Builder()
             .connectTimeout(Duration.ofSeconds(10))
             .readTimeout(Duration.ofSeconds(180))
             .writeTimeout(Duration.ofSeconds(30))
@@ -101,7 +101,7 @@ final class LlmOkHttpClient {
             .dispatcher(DISPATCHER)
             .build();
 
-    static final OkHttpClient SINGLE_SHOT = new OkHttpClient.Builder()
+    public static final OkHttpClient SINGLE_SHOT = new OkHttpClient.Builder()
             .connectTimeout(Duration.ofSeconds(10))
             .readTimeout(Duration.ofSeconds(180))
             .writeTimeout(Duration.ofSeconds(30))
@@ -116,7 +116,7 @@ final class LlmOkHttpClient {
      * derives a per-call client (cheap — shares the base pool, dispatcher, and
      * connection pool via {@link OkHttpClient.Builder#newBuilder}).
      */
-    static OkHttpClient singleShot(Duration timeout) {
+    public static OkHttpClient singleShot(Duration timeout) {
         if (timeout.equals(Duration.ofSeconds(180))) return SINGLE_SHOT;
         return SINGLE_SHOT.newBuilder()
                 .callTimeout(timeout)
