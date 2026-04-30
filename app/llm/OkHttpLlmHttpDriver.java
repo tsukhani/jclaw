@@ -53,7 +53,7 @@ final class OkHttpLlmHttpDriver {
         // Per-call timeout via Call.timeout() — no per-call client allocation.
         call.timeout().timeout(timeout.toMillis(), TimeUnit.MILLISECONDS);
         try (var resp = call.execute()) {
-            var body = resp.body() != null ? resp.body().string() : "";
+            var body = resp.body().string();
             var retryAfter = Optional.ofNullable(resp.header("Retry-After"))
                     .flatMap(OkHttpLlmHttpDriver::parseRetryAfter);
             return new HttpReply(resp.code(), body, retryAfter);
@@ -91,7 +91,7 @@ final class OkHttpLlmHttpDriver {
                 try {
                     if (resp != null && resp.code() != 200) {
                         var body = "";
-                        try { body = resp.body() != null ? resp.body().string() : ""; }
+                        try { body = resp.body().string(); }
                         catch (IOException _) { /* body already consumed or absent */ }
                         onError.accept(new LlmProvider.LlmException(
                                 "HTTP %d: %s".formatted(resp.code(), body)));

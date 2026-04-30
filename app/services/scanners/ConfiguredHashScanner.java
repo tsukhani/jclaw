@@ -59,7 +59,7 @@ abstract class ConfiguredHashScanner implements Scanner {
             var status = response.code();
             if (cleanOnNotFound && status == 404) return Verdict.clean();
             if (status < 200 || status >= 300) {
-                warn("%s returned HTTP %d for hash %s — failing open"
+                warn("%s returned HTTP %s for hash %s — failing open"
                         .formatted(scannerName, status, hashPrefix(sha256)));
                 return Verdict.clean();
             }
