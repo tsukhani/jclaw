@@ -162,7 +162,7 @@ require:
     # hamcrest-core is dead weight. JUnit 4's Assert.assertThat(T, Matcher)
     # references Matcher reflectively; if play autotest goes red with
     # NoClassDefFoundError, drop this exclude.
-    - org.junit.vintage -> junit-vintage-engine 5.14.3:
+    - org.junit.vintage -> junit-vintage-engine 5.14.4:
         exclude:
             - org.hamcrest -> hamcrest-core
     # Telegram Bot API SDK. telegrambots-client ships the OkHttpTelegramClient +
