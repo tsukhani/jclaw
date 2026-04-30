@@ -211,13 +211,29 @@ public class LlmProviderTest extends UnitTest {
     @Test
     public void serializeMessagesPreservesToolCallId() throws Exception {
         var req = new ChatRequest("gpt-4o",
-                List.of(ChatMessage.toolResult("call-99", "result text")),
+                List.of(ChatMessage.toolResult("call-99", "web_fetch", "result text")),
                 null, false, null, null);
         var body = serialize(openAi(), req);
         var msg = body.getAsJsonArray("messages").get(0).getAsJsonObject();
         assertEquals("tool", msg.get("role").getAsString());
         assertEquals("call-99", msg.get("tool_call_id").getAsString());
+        assertEquals("web_fetch", msg.get("name").getAsString());
         assertEquals("result text", msg.get("content").getAsString());
+    }
+
+    @Test
+    public void serializeMessagesOmitsNameWhenToolNameUnknown() throws Exception {
+        // Historical messages predating JCLAW-193 won't carry the name in DB.
+        // We must not emit "name": null or empty — Ollama Cloud's Gemini bridge
+        // rejects empty names with HTTP 400.
+        var req = new ChatRequest("gpt-4o",
+                List.of(ChatMessage.toolResult("call-99", null, "result text")),
+                null, false, null, null);
+        var body = serialize(openAi(), req);
+        var msg = body.getAsJsonArray("messages").get(0).getAsJsonObject();
+        assertEquals("tool", msg.get("role").getAsString());
+        assertEquals("call-99", msg.get("tool_call_id").getAsString());
+        assertFalse(msg.has("name"));
     }
 
     // =====================

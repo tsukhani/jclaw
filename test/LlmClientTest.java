@@ -23,9 +23,10 @@ public class LlmClientTest extends UnitTest {
         var asst = ChatMessage.assistant("Hi there");
         assertEquals("assistant", asst.role());
 
-        var tool = ChatMessage.toolResult("call-1", "result data");
+        var tool = ChatMessage.toolResult("call-1", "web_fetch", "result data");
         assertEquals("tool", tool.role());
         assertEquals("call-1", tool.toolCallId());
+        assertEquals("web_fetch", tool.toolName());
     }
 
     @Test
@@ -435,7 +436,7 @@ public class LlmClientTest extends UnitTest {
         var req = chatRequest("anthropic/claude-3-7-sonnet",
                 List.of(llm.LlmTypes.ChatMessage.system("sys"),
                         llm.LlmTypes.ChatMessage.user("hello"),
-                        llm.LlmTypes.ChatMessage.toolResult("call_1", "tool output")));
+                        llm.LlmTypes.ChatMessage.toolResult("call_1", "web_fetch", "tool output")));
 
         var body = serialize(openRouterProvider(), req);
         var messages = body.getAsJsonArray("messages");

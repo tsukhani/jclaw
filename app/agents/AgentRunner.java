@@ -14,6 +14,7 @@ import services.EventLogger;
 import utils.LatencyTrace;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -1246,7 +1247,7 @@ public class AgentRunner {
             var tc = toolCalls.get(i);
             var text = result.text();
             var structured = result.structuredJson();
-            currentMessages.add(ChatMessage.toolResult(tc.id(), text));
+            currentMessages.add(ChatMessage.toolResult(tc.id(), tc.function().name(), text));
             if (imageCollector != null) {
                 extractImageUrls(text, imageCollector);
             }
@@ -1349,12 +1350,20 @@ public class AgentRunner {
                 parts.add(Map.of("type", "input_audio", "input_audio", inner));
             }
         }
-        return new ChatMessage(MessageRole.USER.value, parts, null, null);
+        return new ChatMessage(MessageRole.USER.value, parts, null, null, null);
     }
 
     private static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation) {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(systemPrompt));
+
+        // JCLAW-193: tool-row history doesn't store the function name, but
+        // Ollama Cloud's Gemini bridge requires it on the tool-result message.
+        // Recover it from the immediately-preceding ASSISTANT row's tool_calls
+        // by registering id->name as we iterate; the loop is in chronological
+        // order, so the assistant row containing the matching call is always
+        // visited before its TOOL row.
+        var toolNamesById = new HashMap<String, String>();
 
         var history = ConversationService.loadRecentMessages(conversation);
         for (var msg : history) {
@@ -1364,6 +1373,11 @@ public class AgentRunner {
                 case ASSISTANT -> {
                     if (msg.toolCalls != null && !msg.toolCalls.isBlank()) {
                         var toolCalls = parseToolCalls(msg.toolCalls);
+                        for (var tc : toolCalls) {
+                            if (tc.id() != null && tc.function() != null && tc.function().name() != null) {
+                                toolNamesById.put(tc.id(), tc.function().name());
+                            }
+                        }
                         yield ChatMessage.assistant(msg.content, toolCalls);
                     }
                     yield ChatMessage.assistant(msg.content != null ? msg.content : "");
@@ -1373,7 +1387,10 @@ public class AgentRunner {
                 // Paired normalization is deterministic — same input string
                 // produces the same output on both sides of the pair — so this
                 // does not break pairing.
-                case TOOL -> ChatMessage.toolResult(sanitizeToolCallId(msg.toolResults), msg.content);
+                case TOOL -> {
+                    var sanitizedId = sanitizeToolCallId(msg.toolResults);
+                    yield ChatMessage.toolResult(sanitizedId, toolNamesById.get(sanitizedId), msg.content);
+                }
                 case SYSTEM -> ChatMessage.system(msg.content);
             });
         }

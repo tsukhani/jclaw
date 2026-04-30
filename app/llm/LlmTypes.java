@@ -27,26 +27,32 @@ public final class LlmTypes {
             String role,
             Object content,
             List<ToolCall> toolCalls,
-            String toolCallId
+            String toolCallId,
+            String toolName
     ) {
         public static ChatMessage system(String text) {
-            return new ChatMessage(MessageRole.SYSTEM.value, text, null, null);
+            return new ChatMessage(MessageRole.SYSTEM.value, text, null, null, null);
         }
 
         public static ChatMessage user(String text) {
-            return new ChatMessage(MessageRole.USER.value, text, null, null);
+            return new ChatMessage(MessageRole.USER.value, text, null, null, null);
         }
 
         public static ChatMessage assistant(String text) {
-            return new ChatMessage(MessageRole.ASSISTANT.value, text, null, null);
+            return new ChatMessage(MessageRole.ASSISTANT.value, text, null, null, null);
         }
 
         public static ChatMessage assistant(String text, List<ToolCall> toolCalls) {
-            return new ChatMessage(MessageRole.ASSISTANT.value, text, toolCalls, null);
+            return new ChatMessage(MessageRole.ASSISTANT.value, text, toolCalls, null, null);
         }
 
-        public static ChatMessage toolResult(String toolCallId, String content) {
-            return new ChatMessage(MessageRole.TOOL.value, content, null, toolCallId);
+        // toolName is the function name from the matching tool_call. Some adapters
+        // require it on the tool-result message — Ollama Cloud's Gemini bridge in
+        // particular rejects with HTTP 400 "function_response.name: Name cannot
+        // be empty" when it's missing. OpenAI's own API tolerates a "name" field
+        // here, so emitting it unconditionally is safe across providers.
+        public static ChatMessage toolResult(String toolCallId, String toolName, String content) {
+            return new ChatMessage(MessageRole.TOOL.value, content, null, toolCallId, toolName);
         }
     }
 

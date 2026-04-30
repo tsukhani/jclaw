@@ -346,7 +346,7 @@ public class SessionCompactorTest extends UnitTest {
 
     @Test
     public void firstChoiceText_returnsStringContent() {
-        var msg = new ChatMessage("assistant", "The answer is 42", null, null);
+        var msg = new ChatMessage("assistant", "The answer is 42", null, null, null);
         var resp = new ChatResponse("r1", "m",
                 List.of(new Choice(0, msg, "stop")),
                 new Usage(10, 5, 15, 0, 0, 0));

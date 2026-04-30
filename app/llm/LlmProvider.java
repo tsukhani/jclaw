@@ -382,6 +382,9 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
             if (msg.toolCallId() != null) {
                 obj.addProperty("tool_call_id", msg.toolCallId());
             }
+            if (msg.toolName() != null) {
+                obj.addProperty("name", msg.toolName());
+            }
             array.add(obj);
         }
         return array;
@@ -439,7 +442,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
             toolCallId = msgObj.get("tool_call_id").getAsString();
         }
 
-        return new ChatMessage(role, content, toolCalls, toolCallId);
+        return new ChatMessage(role, content, toolCalls, toolCallId, null);
     }
 
     /**
