@@ -91,7 +91,7 @@ public class ModelDiscoveryService {
                     .GET()
                     .build();
 
-            var response = utils.HttpClients.forLlmBaseUrl(baseUrl).send(httpReq, HttpResponse.BodyHandlers.ofString());
+            var response = utils.HttpClients.forLlmProvider(providerName).send(httpReq, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() != 200) {
                 return new DiscoveryResult.Error(502, "Provider returned HTTP %d: %s".formatted(
@@ -511,7 +511,7 @@ public class ModelDiscoveryService {
                     .timeout(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS))
                     .GET()
                     .build();
-            var resp = utils.HttpClients.forLlmBaseUrl(baseUrl).send(httpReq, HttpResponse.BodyHandlers.ofString());
+            var resp = utils.HttpClients.forLlmProvider(providerName).send(httpReq, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) return null;
 
             var body = JsonParser.parseString(resp.body()).getAsJsonObject();
@@ -614,7 +614,7 @@ public class ModelDiscoveryService {
                     .timeout(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS))
                     .GET()
                     .build();
-            var tagsResp = utils.HttpClients.forLlmBaseUrl(nativeBase).send(tagsReq, HttpResponse.BodyHandlers.ofString());
+            var tagsResp = utils.HttpClients.forLlmProvider(providerName).send(tagsReq, HttpResponse.BodyHandlers.ofString());
             if (tagsResp.statusCode() != 200) {
                 return new DiscoveryResult.Error(502,
                         "Provider returned HTTP %d from /api/tags: %s".formatted(
@@ -628,7 +628,7 @@ public class ModelDiscoveryService {
             var results = new ArrayList<Map<String, Object>>(modelIds.size());
             try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
                 var futures = modelIds.stream()
-                        .map(id -> executor.submit(() -> fetchOllamaShow(showUrl, apiKey, id)))
+                        .map(id -> executor.submit(() -> fetchOllamaShow(providerName, showUrl, apiKey, id)))
                         .toList();
                 for (int i = 0; i < futures.size(); i++) {
                     try {
@@ -706,7 +706,7 @@ public class ModelDiscoveryService {
         return out;
     }
 
-    private static Map<String, Object> fetchOllamaShow(String url, String apiKey, String id) {
+    private static Map<String, Object> fetchOllamaShow(String providerName, String url, String apiKey, String id) {
         try {
             var body = "{\"name\":\"" + id.replace("\"", "\\\"") + "\"}";
             var req = HttpRequest.newBuilder()
@@ -717,7 +717,7 @@ public class ModelDiscoveryService {
                     .timeout(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS))
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
-            var resp = utils.HttpClients.forLlmBaseUrl(url).send(req, HttpResponse.BodyHandlers.ofString());
+            var resp = utils.HttpClients.forLlmProvider(providerName).send(req, HttpResponse.BodyHandlers.ofString());
             if (resp.statusCode() != 200) return null;
             return parseOllamaShow(id, JsonParser.parseString(resp.body()).getAsJsonObject());
         } catch (Exception _) {

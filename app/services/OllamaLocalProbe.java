@@ -31,7 +31,11 @@ public class OllamaLocalProbe {
      * Ollama's /v1 endpoint returns the same shape.
      */
     public static ProbeResult probe(String baseUrl) {
-        return setResult(fromShared(LocalProviderProbeSupport.probeModels(baseUrl, "Ollama")));
+        // Ollama's server handles h2c gracefully (ignores the upgrade and
+        // responds HTTP/1.1). HTTP/2 default is fine here — it'll fall back
+        // transparently and we get HTTP/2 free if Ollama ever ships it.
+        return setResult(fromShared(LocalProviderProbeSupport.probeModels(
+                baseUrl, "Ollama", java.net.http.HttpClient.Version.HTTP_2)));
     }
 
     public static ProbeResult lastResult() {

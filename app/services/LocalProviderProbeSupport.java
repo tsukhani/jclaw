@@ -17,10 +17,18 @@ final class LocalProviderProbeSupport {
 
     private LocalProviderProbeSupport() {}
 
-    static Result probeModels(String baseUrl, String notRunningLabel) {
+    /**
+     * Probe a local LLM provider's {@code /models} endpoint with a short
+     * timeout. The {@code version} parameter is explicit so each probe
+     * can pick the right HTTP version for its target server: LM Studio
+     * needs {@link HttpClient.Version#HTTP_1_1} to dodge the
+     * Express/Node h2c-upgrade hang; Ollama Local handles h2c gracefully
+     * and uses {@link HttpClient.Version#HTTP_2}.
+     */
+    static Result probeModels(String baseUrl, String notRunningLabel, HttpClient.Version version) {
         try {
             var client = HttpClient.newBuilder()
-                    .version(HttpClient.Version.HTTP_1_1)
+                    .version(version)
                     .connectTimeout(Duration.ofSeconds(2))
                     .build();
             var req = HttpRequest.newBuilder()

@@ -6,14 +6,17 @@ import java.net.http.HttpClient;
 
 /**
  * Pins the HTTP-version configuration on {@link HttpClients} and the
- * routing logic in {@link HttpClients#forLlmBaseUrl(String)}.
+ * routing logic in {@link HttpClients#forLlmProvider(String)}.
  *
  * <p>The HTTP/1.1 pin on {@link HttpClients#LLM_HTTP_1_1} exists because
- * LM Studio's bundled HTTP server parses Java's {@code Upgrade: h2c}
- * header on plain-HTTP requests but never completes the upgrade, hanging
- * the request for the full response timeout. The routing helper picks
- * that client for loopback URLs and the HTTP/2-capable default for
- * HTTPS, preserving HTTP/2 multiplexing on cloud LLM providers.
+ * LM Studio's local API (Express on Node) hangs on Java HttpClient's
+ * default {@code Upgrade: h2c} attempt: Node's {@code http.Server}
+ * fires an {@code 'upgrade'} event for that header, Express doesn't
+ * register an upgrade handler, and the request never reaches the
+ * regular pipeline. The routing helper picks that client only for
+ * provider names containing "lm-studio"; everything else (cloud LLMs,
+ * Ollama Local, future LAN-hosted providers) gets HTTP/2-default and
+ * relies on ALPN-or-h2c-with-fallback to negotiate the right protocol.
  *
  * <p>Java's embedded {@link com.sun.net.httpserver.HttpServer} is
  * HTTP/1.1 only and never reproduces the LM Studio quirk, so a
@@ -26,65 +29,62 @@ public class HttpClientsTest extends UnitTest {
     @Test
     public void llmDefaultClientUsesHttp2() {
         assertEquals(HttpClient.Version.HTTP_2, HttpClients.LLM.version(),
-                "HTTPS LLM endpoints (ollama-cloud, openrouter, ...) keep HTTP/2 — "
-                        + "ALPN negotiates cleanly over TLS, no h2c risk");
+                "the default LLM client must keep HTTP/2 — ALPN handles HTTPS providers, "
+                        + "h2c-with-fallback handles HTTP/1.1-only servers like Ollama");
     }
 
     @Test
     public void llmHttp11ClientPinsHttp11() {
         assertEquals(HttpClient.Version.HTTP_1_1, HttpClients.LLM_HTTP_1_1.version(),
-                "Plain-HTTP loopback LLM endpoints must pin HTTP/1.1 to dodge "
-                        + "LM Studio's h2c-upgrade hang");
+                "the LM Studio client must pin HTTP/1.1 to dodge the Express/Node "
+                        + "upgrade-event hang on h2c");
     }
 
     @Test
     public void generalClientUsesHttp2() {
         assertEquals(HttpClient.Version.HTTP_2, HttpClients.GENERAL.version(),
-                "Channel webhooks (Slack/Telegram/WhatsApp) are always HTTPS — "
+                "channel webhooks (Slack/Telegram/WhatsApp) are always HTTPS — "
                         + "no h2c risk, HTTP/2 fine");
     }
 
     @Test
-    public void forLlmBaseUrlPicksHttp11ForLoopbackUrls() {
-        for (var url : new String[] {
-                "http://localhost:11434/v1",
-                "http://localhost:1234/v1",
-                "http://127.0.0.1:1234/v1",
-                "http://127.42.0.1:8080",
-                "http://[::1]:1234/v1",
-                "http://0.0.0.0:1234/v1",
-                "HTTP://LOCALHOST:1234"
+    public void forLlmProviderPicksHttp11ForLmStudio() {
+        for (var name : new String[] {
+                "lm-studio",
+                "LM-Studio",
+                "lm-studio-mirror",       // any name that *contains* the substring routes the same
+                "my-lm-studio-instance",
+                "LM-STUDIO"
         }) {
-            assertSame(HttpClients.LLM_HTTP_1_1, HttpClients.forLlmBaseUrl(url),
-                    "expected loopback URL to route to LLM_HTTP_1_1: " + url);
+            assertSame(HttpClients.LLM_HTTP_1_1, HttpClients.forLlmProvider(name),
+                    "expected lm-studio-named provider to route to LLM_HTTP_1_1: " + name);
         }
     }
 
     @Test
-    public void forLlmBaseUrlPicksDefaultForRemoteUrls() {
-        // HTTPS endpoints get HTTP/2 via ALPN. Non-loopback plain-HTTP also
-        // falls through to the default — the h2c-hang risk is correlated
-        // with quirky local servers (LM Studio specifically), so we don't
-        // pessimize all plain-HTTP traffic. Operators with a LAN-hosted
-        // local model that exhibits the same hang can override at the
-        // call site if it ever comes up.
-        for (var url : new String[] {
-                "https://ollama.com/v1",
-                "https://openrouter.ai/api/v1",
-                "https://api.openai.com/v1",
-                "http://192.168.1.5:1234/v1",
-                "http://corp-internal.example.com/v1"
+    public void forLlmProviderPicksDefaultForOtherProviders() {
+        // Ollama Local explicitly included: under the new rule it uses HTTP/2
+        // default, since Ollama's server handles h2c gracefully and falls back
+        // transparently. The rule is now provider-based, not URL-loopback-based.
+        for (var name : new String[] {
+                "ollama-cloud",
+                "openrouter",
+                "ollama-local",
+                "openai",
+                "anthropic",
+                "groq",
+                "lambda-labs"
         }) {
-            assertSame(HttpClients.LLM, HttpClients.forLlmBaseUrl(url),
-                    "expected non-loopback URL to route to LLM (HTTP/2-default): " + url);
+            assertSame(HttpClients.LLM, HttpClients.forLlmProvider(name),
+                    "expected non-lm-studio provider to route to LLM (HTTP/2-default): " + name);
         }
     }
 
     @Test
-    public void forLlmBaseUrlHandlesNullBaseUrl() {
-        // Null baseUrl is a misconfiguration the registry would reject before
-        // the call ever fires, but the helper shouldn't NPE on the path that
-        // gets there anyway.
-        assertSame(HttpClients.LLM, HttpClients.forLlmBaseUrl(null));
+    public void forLlmProviderHandlesNullName() {
+        // Null provider name is a misconfiguration the registry would reject before
+        // the call ever fires, but the helper shouldn't NPE on the path that gets
+        // there anyway.
+        assertSame(HttpClients.LLM, HttpClients.forLlmProvider(null));
     }
 }

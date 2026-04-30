@@ -21,7 +21,9 @@ public class LmStudioProbe {
     private static final AtomicReference<ProbeResult> result = new AtomicReference<>(UNRUN);
 
     public static ProbeResult probe(String baseUrl) {
-        return setResult(fromShared(LocalProviderProbeSupport.probeModels(baseUrl, "LM Studio")));
+        // LM Studio's Express server hangs on Java's default h2c upgrade — pin HTTP/1.1.
+        return setResult(fromShared(LocalProviderProbeSupport.probeModels(
+                baseUrl, "LM Studio", java.net.http.HttpClient.Version.HTTP_1_1)));
     }
 
     public static ProbeResult lastResult() {
