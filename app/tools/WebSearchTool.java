@@ -1,6 +1,8 @@
 package tools;
 
 import agents.ToolRegistry;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import services.ConfigService;
@@ -236,15 +238,54 @@ public class WebSearchTool implements ToolRegistry.Tool {
         if (results.isEmpty()) return "No results found.";
         var sb = new StringBuilder("Found %d results (via %s):\n\n".formatted(results.size(), providerDisplayName));
         for (int i = 0; i < results.size(); i++) {
-            var r = results.get(i);
-            sb.append("### %d. %s\n".formatted(i + 1, r.title() == null ? "Untitled" : r.title()));
-            sb.append("URL: %s\n".formatted(r.url() == null ? "" : r.url()));
-            if (r.snippet() != null && !r.snippet().isBlank()) {
-                sb.append("> %s\n".formatted(r.snippet().strip()));
-            }
+            appendMarkdownResult(sb, i + 1, results.get(i));
             sb.append("\n");
         }
         return sb.toString().strip();
+    }
+
+    private static void appendMarkdownResult(StringBuilder sb, int number, SearchResult result) {
+        sb.append("### %d. %s\n".formatted(number, result.title() == null ? "Untitled" : result.title()));
+        sb.append("URL: %s\n".formatted(result.url() == null ? "" : result.url()));
+        if (result.snippet() != null && !result.snippet().isBlank()) {
+            sb.append("> %s\n".formatted(result.snippet().strip()));
+        }
+    }
+
+    @FunctionalInterface
+    private interface SnippetReader {
+        String snippet(JsonObject result);
+    }
+
+    private static List<SearchResult> parseResultArray(JsonArray arr, String urlKey, SnippetReader snippetReader) {
+        var out = new ArrayList<SearchResult>(arr.size());
+        for (var el : arr) {
+            var r = el.getAsJsonObject();
+            var title = stringOrDefault(r, "title", "Untitled");
+            var url = stringOrDefault(r, urlKey, "");
+            out.add(new SearchResult(title, url, snippetReader.snippet(r), faviconUrlFor(url)));
+        }
+        return out;
+    }
+
+    private static String stringOrDefault(JsonObject obj, String key, String fallback) {
+        return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsString() : fallback;
+    }
+
+    private static String nullableString(JsonObject obj, String key) {
+        return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsString() : null;
+    }
+
+    private static String trimmedContentSnippet(JsonObject obj) {
+        var content = nullableString(obj, "content");
+        if (content == null) return null;
+        content = content.strip();
+        return content.length() > 500 ? content.substring(0, 500) + "..." : content;
+    }
+
+    private static JsonArray topLevelArray(String responseJson, String key) {
+        var json = JsonParser.parseString(responseJson).getAsJsonObject();
+        return json.has(key) && !json.getAsJsonArray(key).isEmpty() ? json.getAsJsonArray(key) : null;
     }
 
     // --- Provider interface ---
@@ -306,26 +347,9 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
         @Override
         public List<SearchResult> parseResults(String responseJson) {
-            var json = JsonParser.parseString(responseJson).getAsJsonObject();
-            if (!json.has("results") || json.getAsJsonArray("results").isEmpty()) return List.of();
-            var arr = json.getAsJsonArray("results");
-            var out = new ArrayList<SearchResult>(arr.size());
-            for (var el : arr) {
-                var r = el.getAsJsonObject();
-                var title = r.has("title") ? r.get("title").getAsString() : "Untitled";
-                var url = r.has("url") ? r.get("url").getAsString() : "";
-                String snippet = null;
-                if (r.has("highlights") && r.getAsJsonArray("highlights").size() > 0) {
-                    var sb = new StringBuilder();
-                    for (var h : r.getAsJsonArray("highlights")) {
-                        if (!sb.isEmpty()) sb.append(' ');
-                        sb.append(h.getAsString().strip());
-                    }
-                    snippet = sb.toString();
-                }
-                out.add(new SearchResult(title, url, snippet, faviconUrlFor(url)));
-            }
-            return out;
+            var arr = topLevelArray(responseJson, "results");
+            if (arr == null) return List.of();
+            return parseResultArray(arr, "url", ExaProvider::joinedHighlights);
         }
 
         @Override
@@ -339,9 +363,9 @@ public class WebSearchTool implements ToolRegistry.Tool {
             var sb = new StringBuilder("Found %d results (via Exa):\n\n".formatted(parsed.size()));
             for (int i = 0; i < arr.size(); i++) {
                 var r = arr.get(i).getAsJsonObject();
-                sb.append("### %d. %s\n".formatted(i + 1,
-                        r.has("title") ? r.get("title").getAsString() : "Untitled"));
-                sb.append("URL: %s\n".formatted(r.has("url") ? r.get("url").getAsString() : ""));
+                var result = parsed.get(i);
+                sb.append("### %d. %s\n".formatted(i + 1, result.title()));
+                sb.append("URL: %s\n".formatted(result.url()));
                 if (r.has("highlights") && r.getAsJsonArray("highlights").size() > 0) {
                     for (var h : r.getAsJsonArray("highlights")) {
                         sb.append("> %s\n".formatted(h.getAsString().strip()));
@@ -350,6 +374,16 @@ public class WebSearchTool implements ToolRegistry.Tool {
                 sb.append("\n");
             }
             return sb.toString().strip();
+        }
+
+        private static String joinedHighlights(JsonObject result) {
+            if (!result.has("highlights") || result.getAsJsonArray("highlights").isEmpty()) return null;
+            var sb = new StringBuilder();
+            for (var h : result.getAsJsonArray("highlights")) {
+                if (!sb.isEmpty()) sb.append(' ');
+                sb.append(h.getAsString().strip());
+            }
+            return sb.toString();
         }
     }
 
@@ -381,18 +415,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
                 return List.of();
             }
             var arr = json.getAsJsonObject("web").getAsJsonArray("results");
-            var out = new ArrayList<SearchResult>(arr.size());
-            for (var el : arr) {
-                var r = el.getAsJsonObject();
-                var title = r.has("title") ? r.get("title").getAsString() : "Untitled";
-                var url = r.has("url") ? r.get("url").getAsString() : "";
-                String snippet = null;
-                if (r.has("description") && !r.get("description").isJsonNull()) {
-                    snippet = r.get("description").getAsString();
-                }
-                out.add(new SearchResult(title, url, snippet, faviconUrlFor(url)));
-            }
-            return out;
+            return parseResultArray(arr, "url", r -> nullableString(r, "description"));
         }
     }
 
@@ -421,23 +444,8 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
         @Override
         public List<SearchResult> parseResults(String responseJson) {
-            var json = JsonParser.parseString(responseJson).getAsJsonObject();
-            if (!json.has("results") || json.getAsJsonArray("results").isEmpty()) return List.of();
-            var arr = json.getAsJsonArray("results");
-            var out = new ArrayList<SearchResult>(arr.size());
-            for (var el : arr) {
-                var r = el.getAsJsonObject();
-                var title = r.has("title") ? r.get("title").getAsString() : "Untitled";
-                var url = r.has("url") ? r.get("url").getAsString() : "";
-                String snippet = null;
-                if (r.has("content") && !r.get("content").isJsonNull()) {
-                    var content = r.get("content").getAsString().strip();
-                    if (content.length() > 500) content = content.substring(0, 500) + "...";
-                    snippet = content;
-                }
-                out.add(new SearchResult(title, url, snippet, faviconUrlFor(url)));
-            }
-            return out;
+            var arr = topLevelArray(responseJson, "results");
+            return arr == null ? List.of() : parseResultArray(arr, "url", WebSearchTool::trimmedContentSnippet);
         }
     }
 
@@ -478,21 +486,8 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
         @Override
         public List<SearchResult> parseResults(String responseJson) {
-            var json = JsonParser.parseString(responseJson).getAsJsonObject();
-            if (!json.has("results") || json.getAsJsonArray("results").isEmpty()) return List.of();
-            var arr = json.getAsJsonArray("results");
-            var out = new ArrayList<SearchResult>(arr.size());
-            for (var el : arr) {
-                var r = el.getAsJsonObject();
-                var title = r.has("title") ? r.get("title").getAsString() : "Untitled";
-                var url = r.has("url") ? r.get("url").getAsString() : "";
-                String snippet = null;
-                if (r.has("snippet") && !r.get("snippet").isJsonNull()) {
-                    snippet = r.get("snippet").getAsString();
-                }
-                out.add(new SearchResult(title, url, snippet, faviconUrlFor(url)));
-            }
-            return out;
+            var arr = topLevelArray(responseJson, "results");
+            return arr == null ? List.of() : parseResultArray(arr, "url", r -> nullableString(r, "snippet"));
         }
     }
 
@@ -519,23 +514,8 @@ public class WebSearchTool implements ToolRegistry.Tool {
 
         @Override
         public List<SearchResult> parseResults(String responseJson) {
-            var json = JsonParser.parseString(responseJson).getAsJsonObject();
-            if (!json.has("results") || json.getAsJsonArray("results").isEmpty()) return List.of();
-            var arr = json.getAsJsonArray("results");
-            var out = new ArrayList<SearchResult>(arr.size());
-            for (var el : arr) {
-                var r = el.getAsJsonObject();
-                var title = r.has("title") ? r.get("title").getAsString() : "Untitled";
-                var url = r.has("url") ? r.get("url").getAsString() : "";
-                String snippet = null;
-                if (r.has("content") && !r.get("content").isJsonNull()) {
-                    var content = r.get("content").getAsString().strip();
-                    if (content.length() > 500) content = content.substring(0, 500) + "...";
-                    snippet = content;
-                }
-                out.add(new SearchResult(title, url, snippet, faviconUrlFor(url)));
-            }
-            return out;
+            var arr = topLevelArray(responseJson, "results");
+            return arr == null ? List.of() : parseResultArray(arr, "url", WebSearchTool::trimmedContentSnippet);
         }
     }
 
@@ -565,18 +545,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
             var data = json.getAsJsonObject("data");
             if (!data.has("resources") || data.getAsJsonArray("resources").isEmpty()) return List.of();
             var arr = data.getAsJsonArray("resources");
-            var out = new ArrayList<SearchResult>(arr.size());
-            for (var el : arr) {
-                var r = el.getAsJsonObject();
-                var title = r.has("title") ? r.get("title").getAsString() : "Untitled";
-                var url = r.has("link") ? r.get("link").getAsString() : "";
-                String snippet = null;
-                if (r.has("snippet") && !r.get("snippet").isJsonNull()) {
-                    snippet = r.get("snippet").getAsString();
-                }
-                out.add(new SearchResult(title, url, snippet, faviconUrlFor(url)));
-            }
-            return out;
+            return parseResultArray(arr, "link", r -> nullableString(r, "snippet"));
         }
 
         @Override

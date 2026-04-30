@@ -1,14 +1,8 @@
 package services.scanners;
 
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import services.ConfigService;
-import services.EventLogger;
-import utils.HttpClients;
-
 import java.net.URI;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 
@@ -25,83 +19,52 @@ import java.util.ArrayList;
  * <p>Fails <b>open</b> on any error: network outage, timeout, HTTP 4xx/5xx,
  * quota exhaustion, or malformed response all return {@link Verdict#clean()}
  * and log a warning. Scanner outages must never block skill workflows. All
- * outcomes are audit-logged via {@link EventLogger}.
+ * outcomes are audit-logged.
  *
  * <p>Free public API: 500 requests/day at 4 req/minute. Get a key at
  * https://www.virustotal.com/gui/join-us and save it under
  * {@code scanner.virustotal.apiKey}.
  */
-public class VirusTotalScanner implements Scanner {
+public class VirusTotalScanner extends ConfiguredHashScanner {
 
     public static final String NAME = "VirusTotal";
 
-    @Override
-    public String name() { return NAME; }
-
     private static final OneShotWarning MISSING_KEY_WARNING = new OneShotWarning();
 
-    @Override
-    public boolean isEnabled() {
-        var enabled = "true".equalsIgnoreCase(
-                ConfigService.get("scanner.virustotal.enabled", "true"));
-        if (!enabled) return false;
-        var key = ConfigService.get("scanner.virustotal.apiKey");
-        if (key == null || key.isBlank()) {
-            MISSING_KEY_WARNING.warnOnce(
-                    "VirusTotal scanning is enabled but scanner.virustotal.apiKey is not set — "
-                            + "this scanner is a no-op. Get a free 500 req/day key at "
-                            + "https://www.virustotal.com/gui/join-us and save it via the Config table.");
-            return false;
-        }
-        return true;
+    public VirusTotalScanner() {
+        this(ScannerDependencies.production());
+    }
+
+    public VirusTotalScanner(ScannerDependencies dependencies) {
+        super(NAME,
+                "scanner.virustotal.enabled",
+                "scanner.virustotal.apiKey",
+                MISSING_KEY_WARNING,
+                "VirusTotal scanning is enabled but scanner.virustotal.apiKey is not set — "
+                        + "this scanner is a no-op. Get a free 500 req/day key at "
+                        + "https://www.virustotal.com/gui/join-us and save it via the Config table.",
+                dependencies);
     }
 
     /** Test-only hook to reset the one-shot warning between key-toggle tests. */
     static void resetMissingKeyWarning() {
-        MISSING_KEY_WARNING.reset();
+        new VirusTotalScanner().resetWarningForTest();
     }
 
     @Override
     public Verdict lookup(String sha256) {
-        var baseUrl = ConfigService.get(
-                "scanner.virustotal.url", "https://www.virustotal.com/api/v3/");
-        if (!baseUrl.endsWith("/")) baseUrl = baseUrl + "/";
-        var timeoutMs = Scanner.parseInt(ConfigService.get(
-                "scanner.virustotal.timeoutMs", "5000"), 5000);
-        var apiKey = ConfigService.get("scanner.virustotal.apiKey");
+        var baseUrl = config().get("scanner.virustotal.url", "https://www.virustotal.com/api/v3/");
+        baseUrl = ensureTrailingSlash(baseUrl);
+        var timeoutMs = config().getInt("scanner.virustotal.timeoutMs", "5000", 5000);
+        var apiKey = config().get("scanner.virustotal.apiKey");
 
-        try {
-            var request = HttpRequest.newBuilder(URI.create(baseUrl + "files/" + sha256))
-                    .timeout(Duration.ofMillis(timeoutMs))
-                    .header("x-apikey", apiKey)
-                    .header("Accept", "application/json")
-                    .GET()
-                    .build();
-
-            var response = HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
-            var status = response.statusCode();
-
-            // 404 = VirusTotal has never seen this hash (unknown → clean, matching
-            // MetaDefender's 404 and MalwareBazaar's hash_not_found).
-            if (status == 404) {
-                return Verdict.clean();
-            }
-            if (status < 200 || status >= 300) {
-                EventLogger.warn("scanner",
-                        "VirusTotal returned HTTP %d for hash %s — failing open"
-                                .formatted(status, sha256.substring(0, 12)));
-                return Verdict.clean();
-            }
-
-            var json = JsonParser.parseString(response.body()).getAsJsonObject();
-            return parseVerdict(json);
-
-        } catch (Exception e) {
-            EventLogger.warn("scanner",
-                    "VirusTotal lookup failed for hash %s: %s — failing open"
-                            .formatted(sha256.substring(0, 12), e.getMessage()));
-            return Verdict.clean();
-        }
+        var request = HttpRequest.newBuilder(URI.create(baseUrl + "files/" + sha256))
+                .timeout(Duration.ofMillis(timeoutMs))
+                .header("x-apikey", apiKey)
+                .header("Accept", "application/json")
+                .GET()
+                .build();
+        return sendJsonLookup(sha256, request, true, this::parseVerdict);
     }
 
     /**

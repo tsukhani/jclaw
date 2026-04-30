@@ -8,6 +8,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
+import services.scanners.ScannerRegistry;
 
 /**
  * Seeds default runtime configuration and default agent on first startup.
@@ -208,24 +209,11 @@ public class DefaultConfigJob extends Job<Void> {
 
         // Malware scanners — independent hash-lookup APIs, composed under OR.
         // Keys are seeded empty; each scanner is inert until an operator provides its key.
-        // All scanner configuration lives in the Config DB (editable via Settings UI),
-        // not in application.conf. See MalwareBazaarScanner/MetaDefenderCloudScanner for
-        // the read paths that consume these values.
-        // MalwareBazaar Auth-Key: free, from https://auth.abuse.ch/
-        seedIfAbsent("scanner.malwarebazaar.enabled", "true");
-        seedIfAbsent("scanner.malwarebazaar.authKey", "");
-        seedIfAbsent("scanner.malwarebazaar.url", "https://mb-api.abuse.ch/api/v1/");
-        seedIfAbsent("scanner.malwarebazaar.timeoutMs", "5000");
-        // MetaDefender Cloud API key: free 4,000 req/day, from https://metadefender.opswat.com/
-        seedIfAbsent("scanner.metadefender.enabled", "true");
-        seedIfAbsent("scanner.metadefender.apiKey", "");
-        seedIfAbsent("scanner.metadefender.url", "https://api.metadefender.com/v4/");
-        seedIfAbsent("scanner.metadefender.timeoutMs", "5000");
-        // VirusTotal API key: free 500 req/day at 4 req/min, from https://www.virustotal.com/gui/join-us
-        seedIfAbsent("scanner.virustotal.enabled", "true");
-        seedIfAbsent("scanner.virustotal.apiKey", "");
-        seedIfAbsent("scanner.virustotal.url", "https://www.virustotal.com/api/v3/");
-        seedIfAbsent("scanner.virustotal.timeoutMs", "5000");
+        // All scanner defaults live in ScannerRegistry so registering a scanner
+        // and seeding its config stay in one place.
+        for (var entry : ScannerRegistry.defaultConfig()) {
+            seedIfAbsent(entry.key(), entry.value());
+        }
     }
 
     private void seedDefaultAgent() {

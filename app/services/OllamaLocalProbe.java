@@ -1,15 +1,5 @@
 package services;
 
-import com.google.gson.JsonParser;
-
-import java.io.IOException;
-import java.net.ConnectException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpConnectTimeoutException;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -41,45 +31,7 @@ public class OllamaLocalProbe {
      * Ollama's /v1 endpoint returns the same shape.
      */
     public static ProbeResult probe(String baseUrl) {
-        try {
-            // Force HTTP/1.1 for symmetry with the LM Studio probe and the
-            // shared utils.HttpClients singletons — see those for the
-            // rationale. Local Ollama happens to handle h2c gracefully
-            // today, but pinning HTTP/1.1 keeps the failure mode
-            // identical across the two local-provider probes.
-            var client = HttpClient.newBuilder()
-                    .version(HttpClient.Version.HTTP_1_1)
-                    .connectTimeout(Duration.ofSeconds(2))
-                    .build();
-            var req = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/models"))
-                    .timeout(Duration.ofSeconds(5))
-                    .GET()
-                    .build();
-            var resp = client.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) {
-                return setResult(new ProbeResult(false, 0,
-                        "GET %s/models returned HTTP %d".formatted(baseUrl, resp.statusCode()),
-                        false));
-            }
-            var json = JsonParser.parseString(resp.body()).getAsJsonObject();
-            var data = json.has("data") ? json.getAsJsonArray("data") : null;
-            int count = data == null ? 0 : data.size();
-            return setResult(new ProbeResult(true, count, null, false));
-        } catch (ConnectException | HttpConnectTimeoutException e) {
-            return setResult(new ProbeResult(false, 0,
-                    "%s not reachable (Ollama not running)".formatted(baseUrl),
-                    true));
-        } catch (IOException e) {
-            return setResult(new ProbeResult(false, 0,
-                    "%s probe failed: %s".formatted(baseUrl, e.getMessage()),
-                    false));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return setResult(new ProbeResult(false, 0,
-                    "%s probe interrupted".formatted(baseUrl),
-                    false));
-        }
+        return setResult(fromShared(LocalProviderProbeSupport.probeModels(baseUrl, "Ollama")));
     }
 
     public static ProbeResult lastResult() {
@@ -98,5 +50,9 @@ public class OllamaLocalProbe {
     private static ProbeResult setResult(ProbeResult r) {
         result.set(r);
         return r;
+    }
+
+    private static ProbeResult fromShared(LocalProviderProbeSupport.Result r) {
+        return new ProbeResult(r.available(), r.modelCount(), r.reason(), r.connectionRefused());
     }
 }

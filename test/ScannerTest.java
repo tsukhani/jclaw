@@ -5,6 +5,7 @@ import services.ConfigService;
 import services.scanners.MalwareBazaarScanner;
 import services.scanners.MetaDefenderCloudScanner;
 import services.scanners.Scanner;
+import services.scanners.ScannerRegistry;
 import services.scanners.VirusTotalScanner;
 
 import java.io.IOException;
@@ -97,6 +98,21 @@ public class ScannerTest extends UnitTest {
             exchange.sendResponseHeaders(status, -1);
             exchange.close();
         });
+    }
+
+    @Test
+    public void registryCreatesDefaultScannersAndConfigDefaults() {
+        var names = ScannerRegistry.createDefaultScanners().stream()
+                .map(Scanner::name)
+                .toList();
+        assertEquals(java.util.List.of("MalwareBazaar", "MetaDefender", "VirusTotal"), names);
+
+        var keys = ScannerRegistry.defaultConfig().stream()
+                .map(ScannerRegistry.ConfigDefault::key)
+                .collect(java.util.stream.Collectors.toSet());
+        assertTrue(keys.contains("scanner.malwarebazaar.authKey"));
+        assertTrue(keys.contains("scanner.metadefender.apiKey"));
+        assertTrue(keys.contains("scanner.virustotal.apiKey"));
     }
 
     // =============================================================

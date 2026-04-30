@@ -1,14 +1,8 @@
 package services.scanners;
 
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
-import services.ConfigService;
-import services.EventLogger;
-import utils.HttpClients;
-
 import java.net.URI;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 
@@ -26,46 +20,36 @@ import java.util.ArrayList;
  * <p>Like {@link MalwareBazaarScanner}, this scanner fails <b>open</b> on any
  * error: network outage, timeout, HTTP 5xx, quota exhaustion, or malformed
  * response all return {@link Verdict#clean()} and log a warning. Scanner
- * outages must not block skill workflows. All outcomes are audit-logged via
- * {@link EventLogger}.
+ * outages must not block skill workflows. All outcomes are audit-logged.
  *
  * <p>Free tier: 4,000 requests/day with no per-minute throttling. Get a key
  * at https://metadefender.opswat.com/ and save it under
  * {@code scanner.metadefender.apiKey}.
  */
-public class MetaDefenderCloudScanner implements Scanner {
+public class MetaDefenderCloudScanner extends ConfiguredHashScanner {
 
     public static final String NAME = "MetaDefender";
 
-    @Override
-    public String name() { return NAME; }
-
-    /**
-     * True if MetaDefender lookups are enabled AND an API key is configured.
-     * Matches the MalwareBazaar pattern: "enabled but no key" is treated as
-     * disabled, with a one-shot warning on first check.
-     */
     private static final OneShotWarning MISSING_KEY_WARNING = new OneShotWarning();
 
-    @Override
-    public boolean isEnabled() {
-        var enabled = "true".equalsIgnoreCase(
-                ConfigService.get("scanner.metadefender.enabled", "true"));
-        if (!enabled) return false;
-        var key = ConfigService.get("scanner.metadefender.apiKey");
-        if (key == null || key.isBlank()) {
-            MISSING_KEY_WARNING.warnOnce(
-                    "MetaDefender scanning is enabled but scanner.metadefender.apiKey is not set — "
-                            + "this scanner is a no-op. Get a free 4,000 req/day key at "
-                            + "https://metadefender.opswat.com/ and save it via the Config table.");
-            return false;
-        }
-        return true;
+    public MetaDefenderCloudScanner() {
+        this(ScannerDependencies.production());
+    }
+
+    public MetaDefenderCloudScanner(ScannerDependencies dependencies) {
+        super(NAME,
+                "scanner.metadefender.enabled",
+                "scanner.metadefender.apiKey",
+                MISSING_KEY_WARNING,
+                "MetaDefender scanning is enabled but scanner.metadefender.apiKey is not set — "
+                        + "this scanner is a no-op. Get a free 4,000 req/day key at "
+                        + "https://metadefender.opswat.com/ and save it via the Config table.",
+                dependencies);
     }
 
     /** Test-only hook to reset the one-shot warning between key-toggle tests. */
     static void resetMissingKeyWarning() {
-        MISSING_KEY_WARNING.reset();
+        new MetaDefenderCloudScanner().resetWarningForTest();
     }
 
     /**
@@ -74,44 +58,18 @@ public class MetaDefenderCloudScanner implements Scanner {
      */
     @Override
     public Verdict lookup(String sha256) {
-        var baseUrl = ConfigService.get(
-                "scanner.metadefender.url", "https://api.metadefender.com/v4/");
-        if (!baseUrl.endsWith("/")) baseUrl = baseUrl + "/";
-        var timeoutMs = Scanner.parseInt(ConfigService.get(
-                "scanner.metadefender.timeoutMs", "5000"), 5000);
-        var apiKey = ConfigService.get("scanner.metadefender.apiKey");
+        var baseUrl = config().get("scanner.metadefender.url", "https://api.metadefender.com/v4/");
+        baseUrl = ensureTrailingSlash(baseUrl);
+        var timeoutMs = config().getInt("scanner.metadefender.timeoutMs", "5000", 5000);
+        var apiKey = config().get("scanner.metadefender.apiKey");
 
-        try {
-            var request = HttpRequest.newBuilder(URI.create(baseUrl + "hash/" + sha256))
-                    .timeout(Duration.ofMillis(timeoutMs))
-                    .header("apikey", apiKey)
-                    .header("Accept", "application/json")
-                    .GET()
-                    .build();
-
-            var response = HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
-            var status = response.statusCode();
-
-            // 404 = hash not seen by any engine (unknown → clean, matching MalwareBazaar's hash_not_found)
-            if (status == 404) {
-                return Verdict.clean();
-            }
-            if (status < 200 || status >= 300) {
-                EventLogger.warn("scanner",
-                        "MetaDefender returned HTTP %d for hash %s — failing open"
-                                .formatted(status, sha256.substring(0, 12)));
-                return Verdict.clean();
-            }
-
-            var json = JsonParser.parseString(response.body()).getAsJsonObject();
-            return parseVerdict(json, sha256);
-
-        } catch (Exception e) {
-            EventLogger.warn("scanner",
-                    "MetaDefender lookup failed for hash %s: %s — failing open"
-                            .formatted(sha256.substring(0, 12), e.getMessage()));
-            return Verdict.clean();
-        }
+        var request = HttpRequest.newBuilder(URI.create(baseUrl + "hash/" + sha256))
+                .timeout(Duration.ofMillis(timeoutMs))
+                .header("apikey", apiKey)
+                .header("Accept", "application/json")
+                .GET()
+                .build();
+        return sendJsonLookup(sha256, request, true, json -> parseVerdict(json, sha256));
     }
 
     /**

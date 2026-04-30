@@ -39,22 +39,24 @@ public interface Scanner {
         public static Verdict malicious(String reason) { return new Verdict(true, reason); }
     }
 
-    /**
-     * Reusable one-shot warning guard. Ensures a warning message is emitted at
-     * most once per JVM lifetime, with a test hook to reset between test runs.
-     * Eliminates the duplicate volatile-boolean + synchronized pattern that was
-     * independently implemented in each scanner.
-     */
     /** Parse an integer from a config string, falling back to the default on failure. */
     static int parseInt(String s, int fallback) {
         try { return Integer.parseInt(s); } catch (NumberFormatException _) { return fallback; }
     }
 
+    /**
+     * Reusable one-shot warning guard. Ensures a warning message is emitted at
+     * most once per JVM lifetime, with a test hook to reset between test runs.
+     */
     class OneShotWarning {
         private final java.util.concurrent.atomic.AtomicBoolean warned = new java.util.concurrent.atomic.AtomicBoolean(false);
 
+        public boolean shouldWarn() {
+            return warned.compareAndSet(false, true);
+        }
+
         public void warnOnce(String message) {
-            if (warned.compareAndSet(false, true)) {
+            if (shouldWarn()) {
                 services.EventLogger.warn("scanner", message);
             }
         }

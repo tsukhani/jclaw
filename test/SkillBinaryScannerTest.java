@@ -4,10 +4,12 @@ import services.ConfigService;
 import services.SkillBinaryScanner;
 import services.scanners.MalwareBazaarScanner;
 import services.scanners.MetaDefenderCloudScanner;
+import services.scanners.Scanner;
 import services.scanners.VirusTotalScanner;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * End-to-end smoke test for the malware scanner. Hits the real MalwareBazaar,
@@ -145,6 +147,26 @@ public class SkillBinaryScannerTest extends UnitTest {
     public void scanHandlesNonExistentDirectoryGracefully() {
         var violations = SkillBinaryScanner.scan(Path.of("/nonexistent/path/does/not/exist"));
         assertEquals(0, violations.size());
+    }
+
+    @Test
+    public void scanAcceptsInjectedScannerList() throws Exception {
+        var tools = tmpSkill.resolve("tools");
+        Files.createDirectories(tools);
+        Files.write(tools.resolve("flagged.bin"), new byte[] {9, 8, 7, 6});
+
+        Scanner fakeScanner = new Scanner() {
+            @Override public String name() { return "FakeScanner"; }
+            @Override public boolean isEnabled() { return true; }
+            @Override public Verdict lookup(String sha256) { return Verdict.malicious("Injected verdict"); }
+        };
+
+        var violations = SkillBinaryScanner.scan(tmpSkill, List.of(fakeScanner));
+
+        assertEquals(1, violations.size());
+        assertEquals("tools/flagged.bin", violations.getFirst().relativePath());
+        assertEquals("FakeScanner", violations.getFirst().scanner());
+        assertEquals("Injected verdict", violations.getFirst().reason());
     }
 
     // ==================== MetaDefender Cloud Scanner ====================

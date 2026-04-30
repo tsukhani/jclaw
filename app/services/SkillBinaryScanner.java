@@ -1,10 +1,8 @@
 package services;
 
 import agents.SkillLoader;
-import services.scanners.MalwareBazaarScanner;
-import services.scanners.MetaDefenderCloudScanner;
 import services.scanners.Scanner;
-import services.scanners.VirusTotalScanner;
+import services.scanners.ScannerRegistry;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -39,18 +37,6 @@ import java.util.List;
  */
 public class SkillBinaryScanner {
 
-    /**
-     * All scanners the orchestrator consults. Each one decides whether it is
-     * actually enabled via its own {@link Scanner#isEnabled()} check. Adding a
-     * new scanner is a one-line change here plus a new {@link Scanner}
-     * implementation class.
-     */
-    private static final List<Scanner> SCANNERS = List.of(
-            new MalwareBazaarScanner(),
-            new MetaDefenderCloudScanner(),
-            new VirusTotalScanner()
-    );
-
     public record Violation(String relativePath, String sha256, String scanner, String reason) {
         /** Short, user-facing description suitable for error messages. */
         public String describe() {
@@ -64,6 +50,10 @@ public class SkillBinaryScanner {
      * @return list of violations (empty = clean or all scanners failed open)
      */
     public static List<Violation> scan(Path skillDir) {
+        return scan(skillDir, ScannerRegistry.createDefaultScanners());
+    }
+
+    public static List<Violation> scan(Path skillDir, List<Scanner> scanners) {
         var violations = new ArrayList<Violation>();
         if (skillDir == null || !Files.isDirectory(skillDir)) return violations;
 
@@ -72,7 +62,8 @@ public class SkillBinaryScanner {
 
         // Snapshot enabled scanners once per scan so every file is checked by the same set —
         // avoids weird mid-scan config flips and makes the audit log consistent.
-        var activeScanners = SCANNERS.stream().filter(Scanner::isEnabled).toList();
+        var availableScanners = scanners != null ? scanners : List.<Scanner>of();
+        var activeScanners = availableScanners.stream().filter(Scanner::isEnabled).toList();
         if (activeScanners.isEmpty()) {
             return violations;
         }
