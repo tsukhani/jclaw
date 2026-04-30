@@ -203,3 +203,14 @@ require:
     # transitively; declaring okhttp-jvm 5.3.2 here forces Ivy to upgrade
     # that dep so the classpath stays single-versioned on 5.x.
     - com.squareup.okhttp3 -> okhttp-jvm 5.3.2
+    # JCLAW-185: okhttp-sse for the parallel OkHttp streaming chat path
+    # behind play.llm.client=okhttp. Unlike okhttp itself this artifact ships
+    # as a plain (non-multiplatform) POM that declares a runtime dep on
+    # okhttp-jvm, so the unsuffixed coord is the right one — `okhttp-sse-jvm`
+    # does not exist on Maven Central.
+    - com.squareup.okhttp3 -> okhttp-sse 5.3.2
+    # JCLAW-185: MockWebServer 5.x — the okhttp-5-era replacement for the
+    # legacy `mockwebserver` artifact that the Telegram SDK exclusions
+    # already block. Same plain-POM shape as okhttp-sse above. Drives the
+    # SSE byte-identical fixture in OkHttpLlmDriverTest.
+    - com.squareup.okhttp3 -> mockwebserver3 5.3.2

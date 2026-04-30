@@ -4,12 +4,7 @@ import com.google.gson.*;
 import llm.LlmTypes.*;
 import services.EventLogger;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -21,6 +16,38 @@ import java.util.function.Function;
  * Abstract base for LLM provider integrations. Implements shared OpenAI-compatible
  * HTTP, retry, streaming, and serialization logic. Subclasses override template methods
  * to handle provider-specific differences (reasoning params, response parsing, etc.).
+ *
+ * <h2>HTTP transport ({@code play.llm.client})</h2>
+ *
+ * <p>Outbound HTTP runs through a swappable seam, {@link LlmHttpDriver}, with
+ * two implementations selected by the {@code play.llm.client} configuration
+ * flag (default {@code jdk}):
+ *
+ * <ul>
+ *   <li>{@code jdk} — wraps {@link java.net.http.HttpClient} via
+ *       {@link utils.HttpClients#forLlmProvider(String)}, preserving the
+ *       LM-Studio HTTP/1.1 pin. This is the production default.</li>
+ *   <li>{@code okhttp} — wraps OkHttp 5.x with {@code okhttp-sse} for
+ *       streaming. Opt-in for the JCLAW-185 evaluation phase. OkHttp does
+ *       not issue an {@code Upgrade: h2c} on plain HTTP, so it has no
+ *       LM-Studio quirk to dodge — phase 3 (JCLAW-187) deletes the
+ *       {@code forLlmProvider} routing helper outright once this driver
+ *       becomes the default.</li>
+ * </ul>
+ *
+ * <p><b>Per-request commit semantics.</b> The flag is read exactly once,
+ * at the entry of {@link #chat}, {@link #chatStream}, and
+ * {@link #embeddings}, and the chosen driver is captured into a local
+ * final for the duration of that request. An operator who flips the flag
+ * mid-session affects only the next request; an in-flight chat or stream
+ * never gets split across two transports. {@link #executeWithRetry}
+ * captures the driver once before the retry loop, so a flip during a 429
+ * backoff cannot send retry attempts through different drivers either.
+ *
+ * <p>Validation lives in {@code test/LlmHttpDriverSseTest} (AC1 + AC2:
+ * byte-identical SSE chunks across drivers, one onChunk per data: line,
+ * onComplete after [DONE]) and {@code test/OkHttpLlmDriverBenchmark}
+ * (AC3: p50/p95/p99 perf baseline against a real cloud provider).
  */
 public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider, OpenRouterProvider {
 
@@ -209,35 +236,30 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                            Consumer<ChatCompletionChunk> onChunk,
                            Runnable onComplete, Consumer<Exception> onError,
                            Integer maxTokens, String thinkingMode) {
+        // Per-request commit (JCLAW-185 AC4): capture the driver here so a
+        // play.llm.client flip mid-session affects only the next call, never
+        // this one. The lambda below closes over `driver`, not the flag.
+        var driver = LlmHttpDriver.pick(config.name());
         Thread.ofVirtual().name("llm-stream").start(() -> {
             try {
                 var request = new ChatRequest(model, messages, tools, true, maxTokens, thinkingMode);
                 var json = serializeRequest(request);
-                var httpReq = buildRequest("/chat/completions", json);
-
-                var response = utils.HttpClients.forLlmProvider(config.name()).send(httpReq, HttpResponse.BodyHandlers.ofInputStream());
-                if (response.statusCode() != 200) {
-                    var body = new String(response.body().readAllBytes(), StandardCharsets.UTF_8);
-                    onError.accept(new LlmException("HTTP %d: %s".formatted(response.statusCode(), body)));
-                    return;
-                }
-
-                try (var reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        if (line.startsWith("data: ")) {
-                            var data = line.substring(6).strip();
-                            if ("[DONE]".equals(data)) break;
+                driver.streamSse(buildUri("/chat/completions"),
+                        "Bearer " + config.apiKey(), json, Duration.ofSeconds(180),
+                        data -> {
+                            // Both drivers emit `[DONE]` as a normal payload; the server
+                            // closes the stream right after, so we just skip parsing it.
+                            if ("[DONE]".equals(data)) return;
                             try {
                                 var chunk = gson.fromJson(data, ChatCompletionChunk.class);
                                 if (chunk != null) onChunk.accept(augmentChunkUsage(chunk, data));
                             } catch (JsonSyntaxException _) {
                                 // Skip malformed chunks
                             }
-                        }
-                    }
-                }
-                onComplete.run();
+                        },
+                        onComplete,
+                        t -> onError.accept(t instanceof Exception ex
+                                ? ex : new LlmException("Stream error", t)));
             } catch (Exception e) {
                 onError.accept(e);
             }
@@ -449,22 +471,16 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         return new ChatMessage(role, content, toolCalls, toolCallId);
     }
 
-    protected HttpRequest buildRequest(String path, String json) {
-        return buildRequest(path, json, null);
-    }
-
-    protected HttpRequest buildRequest(String path, String json, Integer timeoutSeconds) {
+    /**
+     * Build the absolute request URL by joining {@link ProviderConfig#baseUrl}
+     * with {@code path}. Tolerates either a trailing slash on baseUrl or a
+     * leading slash on path; emits exactly one slash between them.
+     */
+    protected URI buildUri(String path) {
         var url = config.baseUrl().endsWith("/")
                 ? config.baseUrl() + path.substring(1)
                 : config.baseUrl() + path;
-
-        return HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + config.apiKey())
-                .timeout(Duration.ofSeconds(timeoutSeconds != null ? timeoutSeconds : 180))
-                .POST(HttpRequest.BodyPublishers.ofString(json))
-                .build();
+        return URI.create(url);
     }
 
     protected String executeWithRetry(String path, String json) {
@@ -472,32 +488,37 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
     }
 
     protected String executeWithRetry(String path, String json, Integer timeoutSeconds) {
+        // Per-request commit (JCLAW-185 AC4): capture once, then every retry
+        // attempt for this logical request goes through the same driver. A
+        // play.llm.client flip during a 429 backoff cannot split the request
+        // across two transports.
+        var driver = LlmHttpDriver.pick(config.name());
+        var uri = buildUri(path);
+        var auth = "Bearer " + config.apiKey();
+        var timeout = Duration.ofSeconds(timeoutSeconds != null ? timeoutSeconds : 180);
         Exception lastException = null;
 
         for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             try {
-                var httpReq = buildRequest(path, json, timeoutSeconds);
-                var response = utils.HttpClients.forLlmProvider(config.name()).send(httpReq, HttpResponse.BodyHandlers.ofString());
+                var reply = driver.send(uri, auth, json, timeout);
 
-                if (response.statusCode() == 200) return response.body();
+                if (reply.statusCode() == 200) return reply.body();
 
-                if (response.statusCode() == 429) {
+                if (reply.statusCode() == 429) {
                     var defaultBackoff = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)] / 1000;
-                    var retryAfter = response.headers().firstValue("Retry-After")
-                            .map(v -> { try { return Long.parseLong(v); } catch (NumberFormatException _) { return defaultBackoff; } })
-                            .orElse(defaultBackoff);
+                    var retryAfter = reply.retryAfterSeconds().orElse(defaultBackoff);
                     EventLogger.warn("llm", "Rate limited by %s, retrying after %ds".formatted(config.name(), retryAfter));
                     Thread.sleep(retryAfter * 1000);
                     continue;
                 }
 
-                if (response.statusCode() >= 400 && response.statusCode() < 500) {
+                if (reply.statusCode() >= 400 && reply.statusCode() < 500) {
                     throw new LlmException("HTTP %d from %s: %s".formatted(
-                            response.statusCode(), config.name(), response.body()));
+                            reply.statusCode(), config.name(), reply.body()));
                 }
 
                 lastException = new LlmException("HTTP %d from %s: %s".formatted(
-                        response.statusCode(), config.name(), response.body()));
+                        reply.statusCode(), config.name(), reply.body()));
 
             } catch (LlmException e) {
                 throw e;
