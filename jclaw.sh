@@ -1536,36 +1536,46 @@ do_stop_prod() {
 
     local pid
     pid=$(cat server.pid 2>/dev/null)
-    echo "==> Stopping Play backend (pid: ${pid:-?})..."
+    if [[ -z "$pid" ]]; then
+        echo "Warning: server.pid is empty — cannot wait for JVM exit."
+        play stop
+        return
+    fi
+    echo "==> Stopping Play backend (pid: $pid)..."
     play stop
 
-    # JCLAW-190: `play stop` returns to the shell as soon as it has signalled
-    # the JVM, NOT when the JVM has actually exited. The shutdown hook
-    # (ShutdownJob + Hikari close + Telegram poller drain) takes a few
-    # seconds. If we return now, a follow-up `play start` will boot a new
-    # JVM that overlaps the old one — old still polling Telegram, both
-    # bound to the same bot token, 409 Conflict on the new JVM's first
-    # poll. Wait for server.pid to disappear before returning.
+    # JCLAW-190: `play stop` (framework/pym/play/commands/daemon.py:84-86)
+    # signals the JVM with SIGTERM and immediately removes server.pid —
+    # it does NOT wait for the JVM to actually exit. The shutdown hook
+    # (ShutdownJob + Play plugins + Hikari close) keeps running for up
+    # to Play's 30s scheduler-shutdown budget. If we return now, a
+    # follow-up `play start` boots a new JVM that overlaps the old one
+    # — both polling Telegram with the same bot token, 409 Conflict on
+    # the new JVM's first getUpdates.
     #
-    # Bound the wait at 60s so a wedged JVM doesn't hang the shell forever
-    # — at that point an operator can investigate manually.
+    # Polling on `[[ -f server.pid ]]` is therefore wrong (the file is
+    # gone within milliseconds of `play stop`). The only reliable
+    # liveness signal is `kill -0 $pid` — sends signal 0, which probes
+    # the process without delivering a signal.
+    #
+    # Bound the wait at 60s so a wedged JVM doesn't hang the shell
+    # forever; at that point an operator can investigate manually.
     local elapsed_ds=0
     local max_ds=120   # 60 seconds, polling every 0.5s = 120 deciseconds
-    while [[ -f server.pid && $elapsed_ds -lt $max_ds ]]; do
-        if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
-            # Process is gone but server.pid lingers — Play normally
-            # removes it on clean exit, but a force-kill could leave it.
-            rm -f server.pid
+    while [[ $elapsed_ds -lt $max_ds ]]; do
+        if ! kill -0 "$pid" 2>/dev/null; then
             break
         fi
         sleep 0.5
         elapsed_ds=$((elapsed_ds + 1))
     done
 
-    if [[ -f server.pid ]]; then
-        echo "Warning: server.pid still present after $((max_ds / 2))s — JVM may still be shutting down."
-        echo "         If a follow-up start fails, check 'ps -p $pid' and remove server.pid manually."
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "Warning: pid $pid still alive after $((max_ds / 2))s — JVM may still be shutting down."
+        echo "         If a follow-up start fails, check 'ps -p $pid' and decide whether to kill -9."
     else
+        # Clean up a stray pid file if Play left one behind (force-kill, crash, etc.)
+        [[ -f server.pid ]] && rm -f server.pid
         echo ""
         echo "JClaw stopped."
     fi
