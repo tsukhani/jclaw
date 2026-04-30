@@ -42,25 +42,31 @@ public final class LoadTestRunner {
     private static final String LOADTEST_MODEL = "mock-model";
 
     /**
-     * Real-provider name used when {@link Request#realProvider} is true.
-     * Routes through {@link llm.OllamaProvider} via the substring match in
+     * Default real-provider name when {@link Request#realProvider} is true and
+     * {@link Request#provider} is null/blank. Routes through
+     * {@link llm.OllamaProvider} via the substring match in
      * {@link llm.LlmProvider#forConfig}; the provider config is seeded by
      * {@link jobs.DefaultConfigJob} at boot.
      */
-    public static final String REAL_PROVIDER = "ollama-local";
+    public static final String DEFAULT_REAL_PROVIDER = "ollama-local";
 
     /**
      * Load-test request shape. {@code client} (jdk|okhttp) flips
      * {@code play.llm.client} for the duration of the run, then restores
      * the prior value in a finally block — so an okhttp ↔ jdk comparison is
      * one operator command per driver. {@code realProvider} swaps the
-     * in-process mock for {@link #REAL_PROVIDER} (ollama-local) running
+     * in-process mock for a real provider (default
+     * {@link #DEFAULT_REAL_PROVIDER}, override via {@code provider}) running
      * {@code model}; the AC3 perf baseline for JCLAW-185 needs real network
-     * and real SSE timing, which the mock can't reproduce.
+     * and real SSE timing, which the mock can't reproduce. {@code provider}
+     * is the registered name of any real provider in the registry —
+     * {@code ollama-local} for loopback runs, {@code ollama-cloud} or
+     * {@code openrouter} for cloud runs.
      */
     public record Request(int concurrency, int iterations, boolean compress,
                           LoadTestHarness.Scenario scenario,
-                          String client, boolean realProvider, String model) {}
+                          String client, boolean realProvider,
+                          String provider, String model) {}
 
     public record Result(
             int totalRequests,
@@ -94,11 +100,13 @@ public final class LoadTestRunner {
         // Run setup in a dedicated transaction so the __loadtest__ agent and
         // provider config are committed and visible to the HTTP request threads
         // before any loadtest requests fire.
+        var realProviderName = (req.provider() == null || req.provider().isBlank())
+                ? DEFAULT_REAL_PROVIDER : req.provider();
         long agentId;
         try {
             agentId = JPA.withTransaction("default", false,
                     (play.libs.F.Function0<Long>) () -> req.realProvider()
-                            ? ensureLoadtestAgentRealInner(req.model())
+                            ? ensureLoadtestAgentRealInner(realProviderName, req.model())
                             : ensureLoadtestAgentInner(mockPort));
         } catch (Throwable t) {
             throw t instanceof Exception e ? e : new RuntimeException(t);
@@ -276,14 +284,22 @@ public final class LoadTestRunner {
 
     /**
      * Real-provider twin of {@link #ensureLoadtestAgentInner}: leaves
-     * {@code provider.ollama-local.*} alone (DefaultConfigJob seeds it at
-     * boot) and just rebinds the {@code __loadtest__} agent to ollama-local
-     * with the requested model. The agent name stays
+     * {@code provider.<name>.*} alone (DefaultConfigJob and operator
+     * configuration seed those at boot or via the Settings UI) and just
+     * rebinds the {@code __loadtest__} agent to the requested provider with
+     * the requested model. The agent name stays
      * {@link #LOADTEST_AGENT_NAME} so the API-layer hide/reject filters
      * still apply, and so {@link #cleanupConversations} can find data from
      * either run mode through one query.
+     *
+     * <p>{@code providerName} must match a registered provider in
+     * {@link llm.ProviderRegistry} (e.g. {@code ollama-local},
+     * {@code ollama-cloud}, {@code openrouter}, {@code openai}). Validation
+     * is intentionally lazy — an unknown name fails at chat time with the
+     * provider's own clear error rather than a duplicated up-front check
+     * here that could rot out of sync with the registry.
      */
-    private static long ensureLoadtestAgentRealInner(String model) {
+    private static long ensureLoadtestAgentRealInner(String providerName, String model) {
         if (model == null || model.isBlank()) {
             throw new IllegalArgumentException(
                     "model is required when realProvider=true");
@@ -293,7 +309,7 @@ public final class LoadTestRunner {
             agent = new Agent();
             agent.name = LOADTEST_AGENT_NAME;
         }
-        agent.modelProvider = REAL_PROVIDER;
+        agent.modelProvider = providerName;
         agent.modelId = model;
         agent.enabled = true;
         agent.save();

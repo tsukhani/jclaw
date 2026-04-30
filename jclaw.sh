@@ -80,11 +80,15 @@ Load-test options (only used with the 'loadtest' command):
   --okhttp                Flip play.llm.client to 'okhttp' for the run, so the agent's
                           outbound LLM calls go through OkHttp 5.x + okhttp-sse instead
                           of the JDK HttpClient (JCLAW-185). Restored after the run.
-  --real                  Bind the loadtest agent to ollama-local instead of the in-process
-                          mock harness. Required to capture real-network/SSE timing for
-                          the OkHttp baseline (mock latency is deterministic stubs).
-  --model <name>          Ollama model to drive when --real is set (default: gemma4:latest).
-                          Must be pulled locally (e.g. 'ollama pull gemma3:4b').
+  --real                  Bind the loadtest agent to a real provider instead of the
+                          in-process mock harness. Required to capture real-network/SSE
+                          timing for the OkHttp baseline (mock latency is deterministic
+                          stubs). Default provider is ollama-local; override with --provider.
+  --provider <name>       Real-provider name when --real is set (default: ollama-local).
+                          Any registered provider works: ollama-cloud, openrouter, openai, etc.
+                          The provider must already be configured (apiKey/baseUrl set).
+  --model <name>          Model to drive when --real is set (default: gemma4:latest).
+                          Must be pullable/serveable by the chosen provider.
 
 Examples:
   ./jclaw.sh setup                                    # One-time setup after fresh clone
@@ -457,22 +461,29 @@ Options:
   --okhttp                Flip play.llm.client to 'okhttp' for the duration
                           of the run. Default keeps the JDK HttpClient path
                           (JCLAW-185 phase 1).
-  --real                  Drive ollama-local with --model instead of the mock
-                          harness. Lets the run capture real network and SSE
-                          timing — the AC3 baseline for the OkHttp migration.
-                          The mock path is fine for pipeline checks but its
-                          latency is stubbed, so an okhttp-vs-jdk comparison
-                          on the mock isn't meaningful.
-  --model <name>          Ollama model when --real is set (default: gemma4:latest).
-                          Must be pulled locally first (e.g. 'ollama pull gemma3:4b').
+  --real                  Drive a real provider with --model instead of the
+                          mock harness. Lets the run capture real network and
+                          SSE timing — the AC3 baseline for the OkHttp
+                          migration. The mock path is fine for pipeline
+                          checks but its latency is stubbed, so an
+                          okhttp-vs-jdk comparison on the mock isn't
+                          meaningful. Default provider is ollama-local.
+  --provider <name>       Real-provider name when --real is set
+                          (default: ollama-local). Any registered provider:
+                          ollama-cloud, openrouter, openai, anthropic-via-
+                          openrouter, etc. The provider must already be
+                          configured (apiKey/baseUrl set in Settings).
+  --model <name>          Model when --real is set (default: gemma4:latest).
+                          Must be pullable/serveable by the chosen provider.
 
 Examples:
   ./jclaw.sh loadtest                                                 # mock + jdk (default)
   ./jclaw.sh --concurrency 50 --iterations 20 loadtest                # heavier mock run
   ./jclaw.sh --okhttp loadtest                                        # mock + okhttp pipeline check
-  ./jclaw.sh --real loadtest                                          # ollama-local + jdk baseline
-  ./jclaw.sh --okhttp --real loadtest                                 # ollama-local + okhttp (AC3 sample)
-  ./jclaw.sh --okhttp --real --model gemma3:4b loadtest               # override model
+  ./jclaw.sh --real loadtest                                          # ollama-local + jdk
+  ./jclaw.sh --okhttp --real loadtest                                 # ollama-local + okhttp
+  ./jclaw.sh --real --provider ollama-cloud --model gemini-flash loadtest    # cloud + jdk
+  ./jclaw.sh --okhttp --real --provider ollama-cloud --model gemini-flash loadtest  # cloud + okhttp
   ./jclaw.sh --clean loadtest                                         # cleanup only
 EOF
     else
@@ -611,6 +622,7 @@ LT_CLEAN=false
 LT_COMPRESS=false
 LT_OKHTTP=false
 LT_REAL=false
+LT_PROVIDER=""
 LT_MODEL="gemma4:latest"
 
 while [[ $# -gt 0 ]]; do
@@ -666,6 +678,10 @@ while [[ $# -gt 0 ]]; do
         --real)
             LT_REAL=true
             shift
+            ;;
+        --provider)
+            LT_PROVIDER="$2"
+            shift 2
             ;;
         --model)
             LT_MODEL="$2"
@@ -1865,16 +1881,18 @@ do_loadtest() {
         lt_extra=" client=okhttp"
     fi
     if [[ "$LT_REAL" == true ]]; then
-        lt_extra="$lt_extra real=ollama-local model=$LT_MODEL"
+        local lt_real_provider="${LT_PROVIDER:-ollama-local}"
+        lt_extra="$lt_extra real=$lt_real_provider model=$LT_MODEL"
     fi
     echo "==> Running load test: concurrency=$LT_CONCURRENCY iterations=$LT_ITERATIONS$lt_extra"
     echo "    ttft=${LT_TTFT_MS}ms tokens/s=$LT_TOKENS_PER_SECOND response=${LT_RESPONSE_TOKENS} tokens compress=$LT_COMPRESS"
     echo ""
 
-    # Build the JSON body. Include client / real / model only when set so the
-    # default mock-provider + jdk-driver path stays bit-identical to the
-    # pre-JCLAW-185 wire format. JSON-quote $LT_MODEL because Ollama tags carry
-    # a colon (`gemma4:latest`) which would otherwise look like a JSON struct.
+    # Build the JSON body. Include client / real / provider / model only when
+    # set so the default mock-provider + jdk-driver path stays bit-identical
+    # to the pre-JCLAW-185 wire format. JSON-quote $LT_MODEL because Ollama
+    # tags carry a colon (`gemma4:latest`) which would otherwise look like a
+    # JSON struct.
     local body
     body=$(printf '{"concurrency":%s,"iterations":%s,"ttftMs":%s,"tokensPerSecond":%s,"responseTokens":%s,"compress":%s' \
         "$LT_CONCURRENCY" "$LT_ITERATIONS" "$LT_TTFT_MS" "$LT_TOKENS_PER_SECOND" "$LT_RESPONSE_TOKENS" "$LT_COMPRESS")
@@ -1883,6 +1901,9 @@ do_loadtest() {
     fi
     if [[ "$LT_REAL" == true ]]; then
         body="$body,\"real\":true,\"model\":\"$LT_MODEL\""
+        if [[ -n "$LT_PROVIDER" ]]; then
+            body="$body,\"provider\":\"$LT_PROVIDER\""
+        fi
     fi
     body="$body}"
 
