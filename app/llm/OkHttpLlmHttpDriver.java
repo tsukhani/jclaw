@@ -16,22 +16,32 @@ import java.util.concurrent.CountDownLatch;
 import java.util.function.Consumer;
 
 /**
- * OkHttp 5.x-backed driver. Single-shot calls go through
- * {@link LlmOkHttpClient#SINGLE_SHOT}; streaming calls use
- * {@link LlmOkHttpClient#STREAMING} via {@link EventSources}.
+ * OkHttp 5.x-backed LLM transport. The only HTTP path for outbound LLM
+ * traffic since JCLAW-187 deleted the JDK alternative; static utility
+ * methods because the class has no per-instance state — all configuration
+ * lives on the shared {@link LlmOkHttpClient#SINGLE_SHOT} and
+ * {@link LlmOkHttpClient#STREAMING} singletons.
  *
- * <p>OkHttp doesn't issue an {@code Upgrade: h2c} on plain HTTP, so it
- * has no LM-Studio quirk to dodge — provider name is irrelevant here, and
- * the entire {@link utils.HttpClients#forLlmProvider} routing collapses
- * to a single client. Phase 3 of the migration (JCLAW-187) deletes the
- * routing helper outright once this driver becomes the default.
+ * <p>OkHttp does not issue an {@code Upgrade: h2c} on plain HTTP, so the
+ * LM-Studio Express upgrade-event hang the previous JDK driver had to
+ * dodge with the {@code forLlmProvider} routing rule is structurally
+ * absent — JCLAW-187 deleted that helper as well.
  */
-final class OkHttpLlmHttpDriver implements LlmHttpDriver {
+final class OkHttpLlmHttpDriver {
 
     private static final MediaType JSON = MediaType.get("application/json");
 
-    @Override
-    public HttpReply send(URI uri, String authHeader, String jsonBody, Duration timeout)
+    /** Single-shot HTTP response. */
+    record HttpReply(int statusCode, String body, Optional<Long> retryAfterSeconds) { }
+
+    private OkHttpLlmHttpDriver() { }
+
+    /**
+     * Single-shot POST. Returns the full response. Throws on transport failure
+     * (connection refused, timeout, malformed URL); HTTP errors are reflected
+     * as non-200 status codes in the result, not thrown.
+     */
+    static HttpReply send(URI uri, String authHeader, String jsonBody, Duration timeout)
             throws IOException, InterruptedException {
         var client = LlmOkHttpClient.singleShot(timeout);
         var req = new Request.Builder()
@@ -47,8 +57,16 @@ final class OkHttpLlmHttpDriver implements LlmHttpDriver {
         }
     }
 
-    @Override
-    public void streamSse(URI uri, String authHeader, String jsonBody, Duration timeout,
+    /**
+     * Streaming POST consuming {@code text/event-stream}. Yields each SSE
+     * event's {@code data:} field value (already-stripped) to {@code onEvent};
+     * calls {@code onComplete} when the server closes the stream cleanly;
+     * calls {@code onError} on transport failure or non-200 HTTP status.
+     *
+     * <p>The {@code [DONE]} sentinel is NOT filtered out here — the caller in
+     * {@link LlmProvider#chatStream} skips it before parsing.
+     */
+    static void streamSse(URI uri, String authHeader, String jsonBody, Duration timeout,
                           Consumer<String> onEvent, Runnable onComplete, Consumer<Throwable> onError) {
         var req = new Request.Builder()
                 .url(uri.toString())

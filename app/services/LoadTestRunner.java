@@ -49,21 +49,17 @@ public final class LoadTestRunner {
     public static final String DEFAULT_REAL_PROVIDER = "ollama-local";
 
     /**
-     * Load-test request shape. {@code client} (jdk|okhttp) flips
-     * {@code play.llm.client} for the duration of the run, then restores
-     * the prior value in a finally block — so an okhttp ↔ jdk comparison is
-     * one operator command per driver. {@code realProvider} swaps the
-     * in-process mock for a real provider (default
-     * {@link #DEFAULT_REAL_PROVIDER}, override via {@code provider}) running
-     * {@code model}; the AC3 perf baseline for JCLAW-185 needs real network
-     * and real SSE timing, which the mock can't reproduce. {@code provider}
-     * is the registered name of any real provider in the registry —
-     * {@code ollama-local} for loopback runs, {@code ollama-cloud} or
-     * {@code openrouter} for cloud runs.
+     * Load-test request shape. {@code realProvider} swaps the in-process
+     * mock for a real provider (default {@link #DEFAULT_REAL_PROVIDER},
+     * override via {@code provider}) running {@code model} — useful when
+     * the mock's deterministic stubs can't reproduce real network and SSE
+     * timing. {@code provider} is the registered name of any real provider
+     * in the registry — {@code ollama-local} for loopback runs,
+     * {@code ollama-cloud} or {@code openrouter} for cloud runs.
      */
     public record Request(int concurrency, int iterations, boolean compress,
                           LoadTestHarness.Scenario scenario,
-                          String client, boolean realProvider,
+                          boolean realProvider,
                           String provider, String model) {}
 
     public record Result(
@@ -84,15 +80,6 @@ public final class LoadTestRunner {
             throw new IllegalArgumentException("concurrency and iterations must be ≥ 1");
         }
 
-        // Flip play.llm.client for the duration of this run if requested. Each
-        // chat request reads the flag at LlmHttpDriver.pick() — flipping here
-        // before the worker pool starts means every request the loadtest fires
-        // sees the new value; AC4's per-request commit guarantees no in-flight
-        // request gets split across drivers. We restore in finally below so a
-        // crashed run doesn't leave the JVM in the wrong mode for subsequent
-        // chat traffic.
-        var savedClient = swapClientFlag(req.client());
-        try {
         var mockPort = req.realProvider() ? -1 : ensureHarnessStarted();
         if (!req.realProvider()) LoadTestHarness.setScenario(req.scenario());
         // Run setup in a dedicated transaction so the __loadtest__ agent and
@@ -189,37 +176,6 @@ public final class LoadTestRunner {
                 maxDur.get() == Long.MIN_VALUE ? 0 : maxDur.get(),
                 mockPort,
                 agentId);
-        } finally {
-            restoreClientFlag(savedClient);
-        }
-    }
-
-    /**
-     * Read the current {@code play.llm.client} value, set it to {@code requested}
-     * (when non-null and different), and return the prior value so
-     * {@link #restoreClientFlag} can put it back when the run ends. When
-     * {@code requested} is null or matches the current value this is a no-op
-     * and the returned saved value is the current value (restoring it back is
-     * also a no-op). The flag mutates {@link play.Play#configuration} globally;
-     * concurrent operator-initiated chat traffic during a loadtest run will
-     * pick up the loadtest's chosen driver — that's acceptable because the
-     * loadtest is the only thing supposed to be running.
-     */
-    private static String swapClientFlag(String requested) {
-        if (requested == null || requested.isBlank()) return null;
-        if (!"jdk".equals(requested) && !"okhttp".equals(requested)) {
-            throw new IllegalArgumentException(
-                    "client must be 'jdk' or 'okhttp', got: " + requested);
-        }
-        var prior = play.Play.configuration.getProperty("play.llm.client");
-        play.Play.configuration.setProperty("play.llm.client", requested);
-        return prior == null ? "" : prior;  // empty sentinel = "was unset"
-    }
-
-    private static void restoreClientFlag(String saved) {
-        if (saved == null) return;  // no swap performed
-        if (saved.isEmpty()) play.Play.configuration.remove("play.llm.client");
-        else play.Play.configuration.setProperty("play.llm.client", saved);
     }
 
     private static void warmupRequest(okhttp3.OkHttpClient client, String baseUrl,

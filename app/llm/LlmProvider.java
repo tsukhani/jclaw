@@ -17,43 +17,12 @@ import java.util.function.Function;
  * HTTP, retry, streaming, and serialization logic. Subclasses override template methods
  * to handle provider-specific differences (reasoning params, response parsing, etc.).
  *
- * <h2>HTTP transport ({@code play.llm.client})</h2>
- *
- * <p>Outbound HTTP runs through a swappable seam, {@link LlmHttpDriver}, with
- * two implementations selected by the {@code play.llm.client} configuration
- * flag (default {@code jdk}):
- *
- * <ul>
- *   <li>{@code jdk} — wraps {@link java.net.http.HttpClient} via
- *       {@link utils.HttpClients#forLlmProvider(String)}, preserving the
- *       LM-Studio HTTP/1.1 pin. This is the production default.</li>
- *   <li>{@code okhttp} — wraps OkHttp 5.x with {@code okhttp-sse} for
- *       streaming. Opt-in for the JCLAW-185 evaluation phase. OkHttp does
- *       not issue an {@code Upgrade: h2c} on plain HTTP, so it has no
- *       LM-Studio quirk to dodge — phase 3 (JCLAW-187) deletes the
- *       {@code forLlmProvider} routing helper outright once this driver
- *       becomes the default.</li>
- * </ul>
- *
- * <p><b>Per-request commit semantics.</b> The flag is read exactly once,
- * at the entry of {@link #chat}, {@link #chatStream}, and
- * {@link #embeddings}, and the chosen driver is captured into a local
- * final for the duration of that request. An operator who flips the flag
- * mid-session affects only the next request; an in-flight chat or stream
- * never gets split across two transports. {@link #executeWithRetry}
- * captures the driver once before the retry loop, so a flip during a 429
- * backoff cannot send retry attempts through different drivers either.
- *
- * <p>Validation lives in {@code test/LlmHttpDriverSseTest} (AC1 + AC2:
- * byte-identical SSE chunks across drivers, one onChunk per data: line,
- * onComplete after [DONE]). The AC3 perf baseline runs through the
- * existing load-test harness, gated by two flags on
- * {@code services.LoadTestRunner.Request}: {@code client} flips
- * {@code play.llm.client} for the duration of the run; {@code realProvider}
- * swaps the in-process mock for a real local provider (ollama-local). The
- * operator drives both via {@code ./jclaw.sh --client okhttp --real
- * loadtest} and inspects {@code GET /api/metrics/latency} between runs to
- * compare distributions.
+ * <p>Outbound HTTP runs through {@link OkHttpLlmHttpDriver} (OkHttp 5.x +
+ * {@code okhttp-sse} for streaming). The previous JDK alternative and the
+ * {@code play.llm.client} flag that toggled between them were deleted in
+ * JCLAW-187 once cloud benchmarks confirmed parity (median 0.94x avg
+ * across 7 cloud runs, 0.85x local with NUM_PARALLEL=8). Validation for
+ * the streaming SSE path lives in {@code test/ChatStreamSseTest}.
  */
 public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider, OpenRouterProvider {
 
@@ -242,19 +211,15 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                            Consumer<ChatCompletionChunk> onChunk,
                            Runnable onComplete, Consumer<Exception> onError,
                            Integer maxTokens, String thinkingMode) {
-        // Per-request commit (JCLAW-185 AC4): capture the driver here so a
-        // play.llm.client flip mid-session affects only the next call, never
-        // this one. The lambda below closes over `driver`, not the flag.
-        var driver = LlmHttpDriver.pick(config.name());
         Thread.ofVirtual().name("llm-stream").start(() -> {
             try {
                 var request = new ChatRequest(model, messages, tools, true, maxTokens, thinkingMode);
                 var json = serializeRequest(request);
-                driver.streamSse(buildUri("/chat/completions"),
+                OkHttpLlmHttpDriver.streamSse(buildUri("/chat/completions"),
                         "Bearer " + config.apiKey(), json, Duration.ofSeconds(180),
                         data -> {
-                            // Both drivers emit `[DONE]` as a normal payload; the server
-                            // closes the stream right after, so we just skip parsing it.
+                            // The server closes the stream right after the [DONE]
+                            // sentinel, so we skip parsing it here.
                             if ("[DONE]".equals(data)) return;
                             try {
                                 var chunk = gson.fromJson(data, ChatCompletionChunk.class);
@@ -494,11 +459,6 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
     }
 
     protected String executeWithRetry(String path, String json, Integer timeoutSeconds) {
-        // Per-request commit (JCLAW-185 AC4): capture once, then every retry
-        // attempt for this logical request goes through the same driver. A
-        // play.llm.client flip during a 429 backoff cannot split the request
-        // across two transports.
-        var driver = LlmHttpDriver.pick(config.name());
         var uri = buildUri(path);
         var auth = "Bearer " + config.apiKey();
         var timeout = Duration.ofSeconds(timeoutSeconds != null ? timeoutSeconds : 180);
@@ -506,7 +466,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
         for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             try {
-                var reply = driver.send(uri, auth, json, timeout);
+                var reply = OkHttpLlmHttpDriver.send(uri, auth, json, timeout);
 
                 if (reply.statusCode() == 200) return reply.body();
 

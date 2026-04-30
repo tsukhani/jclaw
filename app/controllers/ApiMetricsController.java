@@ -91,13 +91,11 @@ public class ApiMetricsController extends Controller {
         int toolSleepMs = readInt(body, "toolSleepMs", 200);
         boolean compress = readBool(body, "compress", false);
 
-        // JCLAW-185: client (jdk|okhttp) flips play.llm.client for the run;
         // real=true swaps the mock harness for a registered provider plus the
         // supplied model. provider defaults to ollama-local; pass
         // ollama-cloud, openrouter, openai, etc. to drive cloud baselines.
         // The AC3 perf baseline needs real network and real SSE timing,
         // which the mock can't reproduce.
-        String client = readString(body, "client", null);
         boolean real = readBool(body, "real", false);
         String provider = readString(body, "provider", null);
         String model = readString(body, "model", null);
@@ -135,7 +133,7 @@ public class ApiMetricsController extends Controller {
                     concurrency, iterations, compress,
                     new LoadTestHarness.Scenario(ttftMs, tokensPerSecond, responseTokens,
                             simulatedToolCalls, toolSleepMs),
-                    client, real, provider, model));
+                    real, provider, model));
 
             if (!real) {
                 LoadTestHarness.stop();
@@ -152,7 +150,6 @@ public class ApiMetricsController extends Controller {
             out.addProperty("maxPerRequestMs", result.maxPerRequestMs());
             out.addProperty("mockPort", result.mockPort());
             out.addProperty("agentId", result.agentId());
-            if (client != null) out.addProperty("client", client);
             out.addProperty("realProvider", real);
             if (real) {
                 out.addProperty("provider",
