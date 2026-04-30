@@ -3,9 +3,6 @@ package services;
 import com.google.gson.*;
 import utils.Strings;
 
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.Executors;
@@ -388,17 +385,20 @@ public class ModelDiscoveryService {
         if (leaderboardUrl == null || leaderboardUrl.isBlank()) return List.of();
 
         try {
-            var httpReq = HttpRequest.newBuilder()
-                    .uri(URI.create(leaderboardUrl))
+            var req = new okhttp3.Request.Builder()
+                    .url(leaderboardUrl)
                     .header("Accept", "text/html,application/json")
-                    .timeout(Duration.ofSeconds(LEADERBOARD_TIMEOUT_SECONDS))
-                    .GET()
+                    .get()
+                    .build();
+            var client = utils.OkHttpClients.GENERAL.newBuilder()
+                    .callTimeout(Duration.ofSeconds(LEADERBOARD_TIMEOUT_SECONDS))
                     .build();
 
-            var response = utils.HttpClients.GENERAL.send(httpReq, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() != 200) return List.of();
-
-            var body = response.body();
+            String body;
+            try (var response = client.newCall(req).execute()) {
+                if (response.code() != 200) return List.of();
+                body = response.body() != null ? response.body().string() : "";
+            }
 
             try {
                 var json = JsonParser.parseString(body);

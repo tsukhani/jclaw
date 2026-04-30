@@ -7,12 +7,8 @@ import services.EventLogger;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.Map;
@@ -57,25 +53,23 @@ public class SlackChannel implements Channel {
     }
 
     private SendResult trySend(SlackConfig config, String channelId, String text) {
-        var body = gson.toJson(Map.of("channel", channelId, "text", text));
-        try {
-            var request = HttpRequest.newBuilder()
-                    .uri(URI.create("https://slack.com/api/chat.postMessage"))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + config.botToken())
-                    .timeout(Duration.ofSeconds(15))
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build();
-
-            var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() == 429) {
-                var retryAfterHeader = response.headers().firstValue("Retry-After").orElse(null);
+        var jsonBody = gson.toJson(Map.of("channel", channelId, "text", text));
+        var jsonMediaType = okhttp3.MediaType.get("application/json");
+        var request = new okhttp3.Request.Builder()
+                .url("https://slack.com/api/chat.postMessage")
+                .header("Authorization", "Bearer " + config.botToken())
+                .post(okhttp3.RequestBody.create(jsonBody, jsonMediaType))
+                .build();
+        try (var response = utils.OkHttpClients.GENERAL.newCall(request).execute()) {
+            if (response.code() == 429) {
+                var retryAfterHeader = response.header("Retry-After");
                 long retryAfterMs = parseRetryAfterMs(retryAfterHeader);
                 EventLogger.warn("channel", null, "slack",
                         "Rate-limited; Retry-After=%sms".formatted(retryAfterMs));
                 return SendResult.rateLimited(retryAfterMs);
             }
-            var result = JsonParser.parseString(response.body()).getAsJsonObject();
+            var responseBody = response.body() != null ? response.body().string() : "";
+            var result = JsonParser.parseString(responseBody).getAsJsonObject();
 
             if (result.get("ok").getAsBoolean()) {
                 EventLogger.info("channel", null, "slack",
@@ -84,7 +78,7 @@ public class SlackChannel implements Channel {
             }
 
             EventLogger.warn("channel", null, "slack",
-                    "Slack API error: %s".formatted(result.has("error") ? result.get("error").getAsString() : response.body()));
+                    "Slack API error: %s".formatted(result.has("error") ? result.get("error").getAsString() : responseBody));
             return SendResult.FAILED;
         } catch (Exception e) {
             EventLogger.warn("channel", null, "slack",

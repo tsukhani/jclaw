@@ -1,3 +1,9 @@
+import okhttp3.MediaType;
+import okhttp3.Protocol;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
+import okio.Buffer;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.scanners.MalwareBazaarScanner;
@@ -7,18 +13,12 @@ import services.scanners.ScannerDependencies;
 import services.scanners.ScannerHttpClient;
 import services.scanners.VirusTotalScanner;
 
-import javax.net.ssl.SSLSession;
 import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpHeaders;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.io.InterruptedIOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * Coverage for the dependency-injection seam introduced by
@@ -29,11 +29,14 @@ import java.util.Optional;
  * classification of network-level exceptions vs. HTTP-status failures.
  *
  * <p>The HTTP-server-backed {@code ScannerTest} remains the source of truth
- * for end-to-end happy paths (real socket, real {@code HttpClient}, real
+ * for end-to-end happy paths (real socket, real {@code OkHttpClient}, real
  * {@code ConfigService}). These tests run in tens of microseconds with no
  * sockets — fast enough that future scanner implementations can rely on the
  * DI for unit-test coverage and use the slower integration path only for
  * smoke tests.
+ *
+ * <p>JCLAW-188 reshaped the 11 fixtures around OkHttp {@link Request} +
+ * {@link Response} after the scanner DI moved off the JDK HttpClient.
  */
 public class ScannerDependencyInjectionTest extends UnitTest {
 
@@ -54,7 +57,7 @@ public class ScannerDependencyInjectionTest extends UnitTest {
         var deps = new FakeDeps();
         deps.config.put("scanner.virustotal.url", "https://vt.example/v3/");
         deps.config.put("scanner.virustotal.apiKey", "key-vt");
-        deps.responder = req -> stubResponse(200,
+        deps.responder = (req, timeoutMs) -> stubResponse(req, 200,
                 "{\"data\":{\"attributes\":{\"last_analysis_stats\":{\"malicious\":0}}}}");
 
         new VirusTotalScanner(deps.build()).lookup(SHA);
@@ -62,9 +65,9 @@ public class ScannerDependencyInjectionTest extends UnitTest {
         assertEquals(1, deps.requests.size(), "exactly one request must fire");
         var req = deps.requests.get(0);
         assertEquals("GET", req.method());
-        assertEquals("https://vt.example/v3/files/" + SHA, req.uri().toString());
-        assertEquals(Optional.of("key-vt"), req.headers().firstValue("x-apikey"));
-        assertEquals(Optional.of("application/json"), req.headers().firstValue("Accept"));
+        assertEquals("https://vt.example/v3/files/" + SHA, req.url().toString());
+        assertEquals("key-vt", req.header("x-apikey"));
+        assertEquals("application/json", req.header("Accept"));
     }
 
     @Test
@@ -75,41 +78,47 @@ public class ScannerDependencyInjectionTest extends UnitTest {
         var deps = new FakeDeps();
         deps.config.put("scanner.metadefender.url", "https://md.example/v4/");
         deps.config.put("scanner.metadefender.apiKey", "key-md");
-        deps.responder = req -> stubResponse(200, "{\"scan_results\":{\"scan_all_result_i\":0}}");
+        deps.responder = (req, timeoutMs) -> stubResponse(req, 200,
+                "{\"scan_results\":{\"scan_all_result_i\":0}}");
 
         new MetaDefenderCloudScanner(deps.build()).lookup(SHA);
 
         assertEquals(1, deps.requests.size());
         var req = deps.requests.get(0);
         assertEquals("GET", req.method());
-        assertEquals("https://md.example/v4/hash/" + SHA, req.uri().toString());
-        assertEquals(Optional.of("key-md"), req.headers().firstValue("apikey"));
-        assertEquals(Optional.of("application/json"), req.headers().firstValue("Accept"));
+        assertEquals("https://md.example/v4/hash/" + SHA, req.url().toString());
+        assertEquals("key-md", req.header("apikey"));
+        assertEquals("application/json", req.header("Accept"));
     }
 
     @Test
-    public void malwareBazaar_buildsPostFormRequestWithAuthKeyHeader() {
+    public void malwareBazaar_buildsPostFormRequestWithAuthKeyHeader() throws Exception {
         // MalwareBazaar is the odd one out: POST + form-encoded body + the
         // distinctive Auth-Key header. Pin all three because each diverges
         // from the other two scanners.
         var deps = new FakeDeps();
         deps.config.put("scanner.malwarebazaar.url", "https://mb.example/api/v1/");
         deps.config.put("scanner.malwarebazaar.authKey", "key-mb");
-        deps.responder = req -> stubResponse(200, "{\"query_status\":\"hash_not_found\"}");
+        deps.responder = (req, timeoutMs) -> stubResponse(req, 200,
+                "{\"query_status\":\"hash_not_found\"}");
 
         new MalwareBazaarScanner(deps.build()).lookup(SHA);
 
         assertEquals(1, deps.requests.size());
         var req = deps.requests.get(0);
         assertEquals("POST", req.method());
-        assertEquals("https://mb.example/api/v1/", req.uri().toString());
-        assertEquals(Optional.of("key-mb"), req.headers().firstValue("Auth-Key"));
-        assertEquals(Optional.of("application/x-www-form-urlencoded"),
-                req.headers().firstValue("Content-Type"));
+        assertEquals("https://mb.example/api/v1/", req.url().toString());
+        assertEquals("key-mb", req.header("Auth-Key"));
+        var contentType = req.body() != null && req.body().contentType() != null
+                ? req.body().contentType().toString() : "";
+        assertTrue(contentType.startsWith("application/x-www-form-urlencoded"),
+                "body MIME must be form-urlencoded (with optional charset suffix): " + contentType);
         var expectedBody = "query=get_info&hash=" + SHA;
-        assertEquals(expectedBody.length(),
-                req.bodyPublisher().orElseThrow().contentLength(),
-                "body must be the form-encoded query=get_info&hash=<sha>");
+        try (var sink = new Buffer()) {
+            req.body().writeTo(sink);
+            assertEquals(expectedBody, sink.readUtf8(),
+                    "body must be the form-encoded query=get_info&hash=<sha>");
+        }
     }
 
     @Test
@@ -122,13 +131,13 @@ public class ScannerDependencyInjectionTest extends UnitTest {
         var deps = new FakeDeps();
         deps.config.put("scanner.malwarebazaar.url", "https://mb.example/api/v1/");
         deps.config.put("scanner.malwarebazaar.authKey", "");
-        deps.responder = req -> stubResponse(200, "{\"query_status\":\"hash_not_found\"}");
+        deps.responder = (req, timeoutMs) -> stubResponse(req, 200,
+                "{\"query_status\":\"hash_not_found\"}");
 
         new MalwareBazaarScanner(deps.build()).lookup(SHA);
 
         assertEquals(1, deps.requests.size());
-        assertEquals(Optional.empty(),
-                deps.requests.get(0).headers().firstValue("Auth-Key"),
+        assertNull(deps.requests.get(0).header("Auth-Key"),
                 "blank authKey must result in no Auth-Key header at all");
     }
 
@@ -144,15 +153,15 @@ public class ScannerDependencyInjectionTest extends UnitTest {
         // wired up correctly without needing to mutate ConfigService.
         var deps = new FakeDeps();
         deps.config.put("scanner.virustotal.apiKey", "key");
-        deps.responder = req -> stubResponse(200,
+        deps.responder = (req, timeoutMs) -> stubResponse(req, 200,
                 "{\"data\":{\"attributes\":{\"last_analysis_stats\":{\"malicious\":0}}}}");
 
         new VirusTotalScanner(deps.build()).lookup(SHA);
 
         assertEquals(1, deps.requests.size());
-        assertTrue(deps.requests.get(0).uri().toString().startsWith("https://www.virustotal.com/api/v3/"),
+        assertTrue(deps.requests.get(0).url().toString().startsWith("https://www.virustotal.com/api/v3/"),
                 "default URL must be applied via the config fallback path: "
-                        + deps.requests.get(0).uri());
+                        + deps.requests.get(0).url());
     }
 
     // =====================================================================
@@ -162,7 +171,7 @@ public class ScannerDependencyInjectionTest extends UnitTest {
     @Test
     public void virusTotal_logsHttp500WithStatusAndFailOpenMarker() {
         var deps = configuredVtDeps();
-        deps.responder = req -> stubResponse(500, "internal server error");
+        deps.responder = (req, timeoutMs) -> stubResponse(req, 500, "internal server error");
 
         var verdict = new VirusTotalScanner(deps.build()).lookup(SHA);
 
@@ -179,10 +188,10 @@ public class ScannerDependencyInjectionTest extends UnitTest {
         // IOException thrown by the HttpClient itself (DNS failure, socket
         // reset before any HTTP response) is a distinct path from a 5xx
         // response. The DI is the only way to exercise it deterministically;
-        // the HttpServer mock can simulate a 5xx but cannot make the JDK
-        // HttpClient throw before reading a response.
+        // the HttpServer mock can simulate a 5xx but cannot make OkHttp
+        // throw before reading a response.
         var deps = configuredMdDeps();
-        deps.responder = req -> { throw new IOException("simulated network failure"); };
+        deps.responder = (req, timeoutMs) -> { throw new IOException("simulated network failure"); };
 
         var verdict = new MetaDefenderCloudScanner(deps.build()).lookup(SHA);
 
@@ -202,7 +211,8 @@ public class ScannerDependencyInjectionTest extends UnitTest {
         // The DI lets us assert that the warning carries the unknown status
         // verbatim so an operator reading the log knows what came back.
         var deps = configuredMbDeps();
-        deps.responder = req -> stubResponse(200, "{\"query_status\":\"illegal_auth_key\"}");
+        deps.responder = (req, timeoutMs) -> stubResponse(req, 200,
+                "{\"query_status\":\"illegal_auth_key\"}");
 
         var verdict = new MalwareBazaarScanner(deps.build()).lookup(SHA);
 
@@ -220,7 +230,7 @@ public class ScannerDependencyInjectionTest extends UnitTest {
         // worth alerting on). MalwareBazaar's lookup uses cleanOnNotFound=false
         // because it conveys not-found via the JSON body, not the status code.
         var deps = configuredVtDeps();
-        deps.responder = req -> stubResponse(404, "");
+        deps.responder = (req, timeoutMs) -> stubResponse(req, 404, "");
 
         var verdict = new VirusTotalScanner(deps.build()).lookup(SHA);
 
@@ -230,19 +240,19 @@ public class ScannerDependencyInjectionTest extends UnitTest {
     }
 
     // =====================================================================
-    // Exception classification — InterruptedException distinct from IOException
+    // Exception classification — InterruptedIOException distinct from generic IOException
     // =====================================================================
 
     @Test
-    public void interruptedExceptionRestoresThreadInterruptStatus() {
-        // ConfiguredHashScanner.sendJsonLookup catches InterruptedException
+    public void interruptedIoExceptionRestoresThreadInterruptStatus() {
+        // ConfiguredHashScanner.sendJsonLookup catches InterruptedIOException
         // separately from generic IOException because Java requires the catch
-        // to re-set Thread.currentThread().interrupt(). The DI is the only
-        // way to deterministically trigger this — the HttpServer mock cannot
-        // make the JDK HttpClient throw InterruptedException without genuinely
-        // interrupting a thread mid-call.
+        // to re-set Thread.currentThread().interrupt(). OkHttp throws
+        // InterruptedIOException when its Call.timeout fires or the call's
+        // thread is interrupted mid-read; the DI lets us deterministically
+        // inject that exception without genuinely interrupting a thread.
         var deps = configuredVtDeps();
-        deps.responder = req -> { throw new InterruptedException("simulated"); };
+        deps.responder = (req, timeoutMs) -> { throw new InterruptedIOException("simulated"); };
         // Clear any pre-existing interrupt state from previous tests.
         Thread.interrupted();
 
@@ -250,7 +260,7 @@ public class ScannerDependencyInjectionTest extends UnitTest {
 
         assertFalse(verdict.malicious(), "interrupted lookup must fail open");
         assertTrue(Thread.interrupted(),
-                "InterruptedException catch must re-set the thread's interrupt flag");
+                "InterruptedIOException catch must re-set the thread's interrupt flag");
         assertFalse(deps.warnings.isEmpty(), "interrupted must log a warning");
         assertTrue(deps.warnings.get(0).contains("interrupted"),
                 "warning must distinguish interrupted from generic IO: " + deps.warnings.get(0));
@@ -292,9 +302,9 @@ public class ScannerDependencyInjectionTest extends UnitTest {
      */
     static class FakeDeps {
         final Map<String, String> config = new HashMap<>();
-        final List<HttpRequest> requests = new ArrayList<>();
+        final List<Request> requests = new ArrayList<>();
         final List<String> warnings = new ArrayList<>();
-        ScannerHttpClient responder = req -> stubResponse(200, "{}");
+        ScannerHttpClient responder = (req, timeoutMs) -> stubResponse(req, 200, "{}");
 
         ScannerDependencies build() {
             return new ScannerDependencies(
@@ -304,9 +314,9 @@ public class ScannerDependencyInjectionTest extends UnitTest {
                             return config.getOrDefault(key, fallback);
                         }
                     },
-                    request -> {
+                    (request, timeoutMs) -> {
                         requests.add(request);
-                        return responder.send(request);
+                        return responder.send(request, timeoutMs);
                     },
                     warnings::add
             );
@@ -334,17 +344,14 @@ public class ScannerDependencyInjectionTest extends UnitTest {
         return d;
     }
 
-    /** Build a minimal {@link HttpResponse<String>} stub that returns {@code status} and {@code body}. */
-    private static HttpResponse<String> stubResponse(int status, String body) {
-        return new HttpResponse<>() {
-            @Override public int statusCode() { return status; }
-            @Override public HttpRequest request() { return null; }
-            @Override public Optional<HttpResponse<String>> previousResponse() { return Optional.empty(); }
-            @Override public HttpHeaders headers() { return HttpHeaders.of(Map.of(), (a, b) -> true); }
-            @Override public String body() { return body; }
-            @Override public Optional<SSLSession> sslSession() { return Optional.empty(); }
-            @Override public URI uri() { return URI.create("http://stub/"); }
-            @Override public HttpClient.Version version() { return HttpClient.Version.HTTP_1_1; }
-        };
+    /** Build a minimal OkHttp {@link Response} stub. */
+    private static Response stubResponse(Request request, int code, String body) {
+        return new Response.Builder()
+                .request(request)
+                .protocol(Protocol.HTTP_1_1)
+                .code(code)
+                .message(code == 200 ? "OK" : "stub")
+                .body(ResponseBody.create(body, MediaType.get("application/json")))
+                .build();
     }
 }

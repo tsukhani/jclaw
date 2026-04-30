@@ -101,6 +101,16 @@ Why this matters: every push to `main` triggers the `pre-push` hook's full backe
 - Tests in `test/` — JUnit 5, extending Play's `UnitTest` or `FunctionalTest`
 - Test mode uses H2 in-memory database (`%test.db.url` in application.conf)
 
+### Outbound HTTP — OkHttp 5
+JClaw uses **OkHttp 5.x** (with `okhttp-sse` for streaming) as its single outbound HTTP stack. The JDK `java.net.http.HttpClient` is no longer used in `app/` (only mentioned in Javadoc comparisons). The migration was JCLAW-185 through JCLAW-188; the rationale stack:
+
+- **No h2c upgrade on cleartext** — OkHttp doesn't send `Upgrade: h2c` on plain HTTP, so the LM Studio Express upgrade-event hang the JDK client had to dodge with a routing rule is structurally absent. One client config, no per-provider HTTP-version pin needed.
+- **Virtual-thread-clean** — Okio 3 has no synchronized blocks in its read path (verified by zero `monitorenter` in disassembled `RealBufferedSource.class` plus zero `Thread is pinned` events under `-Djdk.tracePinnedThreads=full` during a 50-stream c=10 sweep). Pointing OkHttp's `Dispatcher` at `Executors.newVirtualThreadPerTaskExecutor()` gives blocking socket reads the same unmount-during-block behavior the JDK client gets via `AsynchronousSocketChannel`.
+- **Ergonomic SSE** — `okhttp-sse`'s `EventSourceListener` model is more direct than parsing `data:` lines off a `BufferedReader` from the JDK client. Streaming chat ships through a single `OkHttpLlmHttpDriver.streamSse` call.
+- **Performance parity** — cloud median 0.94× JDK avg across 7 c=10 runs (kimi-k2.5, qwen3.5, gemini-3-flash-preview); local with `OLLAMA_NUM_PARALLEL=8` at 0.85×. AC3 ±5% met at the median.
+
+Two LLM-tuned client singletons live in `app/llm/LlmOkHttpClient.java` (`STREAMING` for SSE with `callTimeout(0)`, `SINGLE_SHOT` for sync chat/embeddings/discovery/probes). One general-purpose singleton lives in `app/utils/OkHttpClients.java` (`GENERAL`, used by Slack/WhatsApp/Telegram-non-SDK channels, the openrouter leaderboard fetch, scanner production HTTP, web search). The Telegram SDK and `WebFetchTool`/`SsrfGuard` build their own clients with stack-specific tuning (the SDK has its own internal usage; SsrfGuard plugs in a per-request DNS allow-list against tool-fetch SSRF).
+
 ### Frontend
 - Nuxt 3 SPA in `frontend/` with Tailwind CSS
 - API proxy: dev requests to `/api/*` are forwarded to the Play backend via Nitro devProxy (see `frontend/nuxt.config.ts`)

@@ -272,21 +272,17 @@ public class TelegramChannel implements Channel {
      */
     public static boolean clearMessageDraft(String botToken, String chatId, int draftId) {
         if (botToken == null || botToken.isBlank() || chatId == null) return false;
-        try {
-            var url = TELEGRAM_API_BASE + "/bot" + botToken + "/sendMessageDraft";
-            var body = "{\"chat_id\":%s,\"draft_id\":%d,\"text\":\"\"}".formatted(chatId, draftId);
-            var req = java.net.http.HttpRequest.newBuilder()
-                    .uri(java.net.URI.create(url))
-                    .header("Content-Type", "application/json")
-                    .timeout(java.time.Duration.ofSeconds(BOT_API_READ_TIMEOUT_SEC))
-                    .POST(java.net.http.HttpRequest.BodyPublishers.ofString(body))
-                    .build();
-            var resp = utils.HttpClients.GENERAL.send(
-                    req, java.net.http.HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) {
+        var url = TELEGRAM_API_BASE + "/bot" + botToken + "/sendMessageDraft";
+        var body = "{\"chat_id\":%s,\"draft_id\":%d,\"text\":\"\"}".formatted(chatId, draftId);
+        var req = new okhttp3.Request.Builder()
+                .url(url)
+                .post(okhttp3.RequestBody.create(body, okhttp3.MediaType.get("application/json")))
+                .build();
+        try (var resp = utils.OkHttpClients.GENERAL.newCall(req).execute()) {
+            if (resp.code() != 200) {
                 EventLogger.warn("channel", null, "telegram",
                         "clearMessageDraft returned HTTP %d for chat %s"
-                                .formatted(resp.statusCode(), chatId));
+                                .formatted(resp.code(), chatId));
                 return false;
             }
             return true;

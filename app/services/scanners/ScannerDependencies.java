@@ -2,10 +2,10 @@ package services.scanners;
 
 import services.ConfigService;
 import services.EventLogger;
-import utils.HttpClients;
+import utils.OkHttpClients;
 
-import java.net.http.HttpResponse;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 
 public record ScannerDependencies(
         ScannerConfig config,
@@ -24,7 +24,11 @@ public record ScannerDependencies(
                     return ConfigService.get(key, fallback);
                 }
             },
-            request -> HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString()),
+            (request, timeoutMs) -> {
+                var call = OkHttpClients.GENERAL.newCall(request);
+                call.timeout().timeout(timeoutMs, TimeUnit.MILLISECONDS);
+                return call.execute();
+            },
             message -> EventLogger.warn("scanner", message)
     );
 

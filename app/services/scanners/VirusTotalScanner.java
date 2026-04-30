@@ -1,9 +1,8 @@
 package services.scanners;
 
 import com.google.gson.JsonObject;
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.time.Duration;
+import okhttp3.Request;
+
 import java.util.ArrayList;
 
 /**
@@ -58,13 +57,13 @@ public class VirusTotalScanner extends ConfiguredHashScanner {
         var timeoutMs = config().getInt("scanner.virustotal.timeoutMs", "5000", 5000);
         var apiKey = config().get("scanner.virustotal.apiKey");
 
-        var request = HttpRequest.newBuilder(URI.create(baseUrl + "files/" + sha256))
-                .timeout(Duration.ofMillis(timeoutMs))
+        var request = new Request.Builder()
+                .url(baseUrl + "files/" + sha256)
                 .header("x-apikey", apiKey)
                 .header("Accept", "application/json")
-                .GET()
+                .get()
                 .build();
-        return sendJsonLookup(sha256, request, true, this::parseVerdict);
+        return sendJsonLookup(sha256, request, timeoutMs, true, this::parseVerdict);
     }
 
     /**

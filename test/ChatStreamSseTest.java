@@ -8,7 +8,6 @@ import mockwebserver3.MockWebServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import play.Play;
 import play.test.UnitTest;
 
 import java.util.List;
@@ -19,34 +18,21 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * SSE streaming contract for {@link llm.LlmHttpDriver} drivers, exercised
- * through {@link LlmProvider#chatStream}. Backs JCLAW-185 acceptance
- * criteria 1 and 2:
+ * SSE streaming contract for {@link LlmProvider#chatStream}, exercised
+ * through {@link llm.OkHttpLlmHttpDriver} (the only LLM HTTP transport
+ * since JCLAW-187 deleted the JDK alternative).
  *
- * <ul>
- *   <li><b>AC1</b>: {@code play.llm.client=jdk} and {@code play.llm.client=okhttp}
- *       drive the same SSE fixture and yield byte-identical content streams.
- *       The {@code byteIdentical_jdkAndOkHttp} test enforces this by
- *       collecting the streamed content payloads from both paths against
- *       a single {@link MockWebServer} fixture and asserting equality.</li>
- *   <li><b>AC2</b>: For each {@code data:} line the server emits, the
- *       driver fires {@code onChunk} exactly once; once the server closes
- *       the stream after the {@code [DONE]} marker, {@code onComplete}
- *       fires. Verified by both {@code chatStream_jdk_emitsOneChunkPerDataLine}
- *       and the OkHttp twin.</li>
- * </ul>
- *
- * <p>Tests use the same fixture for both drivers — the only difference
- * between runs is the {@code play.llm.client} flag, which is restored to
- * its prior value in {@link #tearDown}. Streaming runs on a virtual
- * thread inside {@code chatStream}; we wait on a {@link CountDownLatch}
- * counted down by either {@code onComplete} or {@code onError}.
+ * <p>For each {@code data:} line the server emits, the driver fires
+ * {@code onChunk} exactly once; once the server closes the stream after
+ * the {@code [DONE]} marker, {@code onComplete} fires. Streaming runs on
+ * a virtual thread inside {@code chatStream}; we wait on a
+ * {@link CountDownLatch} counted down by either {@code onComplete} or
+ * {@code onError}.
  */
-public class LlmHttpDriverSseTest extends UnitTest {
+public class ChatStreamSseTest extends UnitTest {
 
     private MockWebServer server;
     private LlmProvider provider;
-    private String savedClient;
 
     @BeforeEach
     public void setUp() throws Exception {
@@ -55,59 +41,23 @@ public class LlmHttpDriverSseTest extends UnitTest {
         var baseUrl = server.url("/v1").toString();
         var config = new ProviderConfig("test-provider", baseUrl, "fake-key", List.of());
         provider = new OpenAiProvider(config);
-        savedClient = Play.configuration.getProperty("play.llm.client");
     }
 
     @AfterEach
     public void tearDown() throws Exception {
-        if (savedClient != null) Play.configuration.setProperty("play.llm.client", savedClient);
-        else Play.configuration.remove("play.llm.client");
         server.close();
     }
 
     @Test
-    public void chatStream_jdk_emitsOneChunkPerDataLine_thenCompletes() throws Exception {
+    public void chatStream_emitsOneChunkPerDataLine_thenCompletes() throws Exception {
         server.enqueue(threeChunkSseResponse());
-        var collected = streamAndCollect("jdk");
+        var collected = streamAndCollect();
         assertEquals(3, collected.chunks.size(),
                 "one chunk per data: line, [DONE] sentinel filtered by LlmProvider");
         assertTrue(collected.completed.get(),
                 "onComplete must fire after the server closes the stream");
         assertNull(collected.error.get(), "no error expected on a clean SSE response");
         assertEquals("Hello world!", joinContent(collected.chunks));
-    }
-
-    @Test
-    public void chatStream_okhttp_emitsOneChunkPerDataLine_thenCompletes() throws Exception {
-        server.enqueue(threeChunkSseResponse());
-        var collected = streamAndCollect("okhttp");
-        assertEquals(3, collected.chunks.size(),
-                "one chunk per data: line, [DONE] sentinel filtered by LlmProvider");
-        assertTrue(collected.completed.get(),
-                "onComplete must fire after the server closes the stream");
-        assertNull(collected.error.get(), "no error expected on a clean SSE response");
-        assertEquals("Hello world!", joinContent(collected.chunks));
-    }
-
-    /**
-     * AC1: both drivers consume the same SSE fixture and yield the same
-     * sequence of content tokens. Byte-identical means: same number of
-     * chunks, same payloads in the same order. The fixture is enqueued
-     * twice (once per driver) since {@link MockWebServer} consumes one
-     * response per call.
-     */
-    @Test
-    public void chatStream_jdkAndOkHttp_yieldByteIdenticalContent() throws Exception {
-        server.enqueue(threeChunkSseResponse());
-        var jdk = streamAndCollect("jdk");
-        server.enqueue(threeChunkSseResponse());
-        var okhttp = streamAndCollect("okhttp");
-
-        assertNull(jdk.error.get(), "jdk path must not error");
-        assertNull(okhttp.error.get(), "okhttp path must not error");
-        assertEquals(jdk.chunks.size(), okhttp.chunks.size(), "chunk count must match (AC1)");
-        assertEquals(joinContent(jdk.chunks), joinContent(okhttp.chunks),
-                "concatenated content must match byte-for-byte (AC1)");
     }
 
     private MockResponse threeChunkSseResponse() {
@@ -132,8 +82,7 @@ public class LlmHttpDriverSseTest extends UnitTest {
                 .build();
     }
 
-    private Collected streamAndCollect(String mode) throws Exception {
-        Play.configuration.setProperty("play.llm.client", mode);
+    private Collected streamAndCollect() throws Exception {
         var collected = new Collected();
         var latch = new CountDownLatch(1);
         provider.chatStream("x", List.of(ChatMessage.user("hi")), null,
@@ -142,7 +91,7 @@ public class LlmHttpDriverSseTest extends UnitTest {
                 e -> { collected.error.set(e); latch.countDown(); },
                 null, null);
         assertTrue(latch.await(5, TimeUnit.SECONDS),
-                "stream should complete within 5s on " + mode + " driver");
+                "stream should complete within 5s");
         return collected;
     }
 

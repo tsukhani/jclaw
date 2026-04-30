@@ -20,10 +20,10 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * End-to-end coverage for the three malware-scanner implementations
  * (VirusTotal, MetaDefender Cloud, MalwareBazaar). Each scanner fetches its
- * base URL from {@link ConfigService} and talks to it over JDK
- * {@link java.net.http.HttpClient}; the test spins up a
- * {@link HttpServer}-backed mock on loopback, overrides the scanner's URL
- * config key to point at it, and asserts the scanner's
+ * base URL from {@link ConfigService} and talks to it over OkHttp via
+ * {@link services.scanners.ScannerDependencies}; the test spins up a
+ * {@link HttpServer}-backed HTTP/1.1 mock on loopback, overrides the
+ * scanner's URL config key to point at it, and asserts the scanner's
  * {@link Scanner.Verdict} against programmed responses.
  *
  * <p><strong>URL-override admin risk (JCLAW-147)</strong>: the

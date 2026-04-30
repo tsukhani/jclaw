@@ -5,13 +5,14 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
+import okhttp3.MediaType;
+import okhttp3.Request;
+import okhttp3.RequestBody;
 import services.ConfigService;
 import services.EventLogger;
-import utils.HttpClients;
+import utils.OkHttpClients;
 
 import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -33,6 +34,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
     private static final int TIMEOUT_SECONDS = 30;
     private static final int DEFAULT_NUM_RESULTS = 5;
     private static final int MAX_NUM_RESULTS = 10;
+    private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json");
 
     /**
      * JCLAW-170: structured per-result shape the UI renders as clickable chips.
@@ -187,19 +189,28 @@ public class WebSearchTool implements ToolRegistry.Tool {
                     "Searching via %s: \"%s\" (numResults=%d)".formatted(provider.displayName(), query, numResults));
 
             var request = provider.buildRequest(apiKey, query, numResults);
-            var response = HttpClients.LLM.send(request, HttpResponse.BodyHandlers.ofString());
+            var client = OkHttpClients.GENERAL.newBuilder()
+                    .callTimeout(Duration.ofSeconds(TIMEOUT_SECONDS))
+                    .build();
 
-            if (response.statusCode() != 200) {
-                EventLogger.error("search", agent != null ? agent.name : null, null,
-                        "%s API returned HTTP %d: %s".formatted(provider.displayName(), response.statusCode(),
-                                response.body().substring(0, Math.min(response.body().length(), 200))));
-                return SearchOutcome.error("Error: %s API returned HTTP %d: %s".formatted(
-                        provider.displayName(), response.statusCode(),
-                        response.body().substring(0, Math.min(response.body().length(), 200))));
+            int statusCode;
+            String responseBody;
+            try (var response = client.newCall(request).execute()) {
+                statusCode = response.code();
+                responseBody = response.body() != null ? response.body().string() : "";
             }
 
-            var results = provider.parseResults(response.body());
-            var markdown = provider.formatResults(response.body(), results);
+            if (statusCode != 200) {
+                EventLogger.error("search", agent != null ? agent.name : null, null,
+                        "%s API returned HTTP %d: %s".formatted(provider.displayName(), statusCode,
+                                responseBody.substring(0, Math.min(responseBody.length(), 200))));
+                return SearchOutcome.error("Error: %s API returned HTTP %d: %s".formatted(
+                        provider.displayName(), statusCode,
+                        responseBody.substring(0, Math.min(responseBody.length(), 200))));
+            }
+
+            var results = provider.parseResults(responseBody);
+            var markdown = provider.formatResults(responseBody, results);
             EventLogger.info("search", agent != null ? agent.name : null, null,
                     "%s returned %d chars for \"%s\"".formatted(provider.displayName(), markdown.length(), query));
 
@@ -294,7 +305,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
         String id();
         String displayName();
         String defaultBaseUrl();
-        HttpRequest buildRequest(String apiKey, String query, int numResults);
+        Request buildRequest(String apiKey, String query, int numResults);
 
         /** JCLAW-170: parse the provider's raw response into the structured
          *  per-result shape used both by the UI (chips with favicons) and by
@@ -331,17 +342,15 @@ public class WebSearchTool implements ToolRegistry.Tool {
         @Override public String defaultBaseUrl() { return "https://api.exa.ai/search"; }
 
         @Override
-        public HttpRequest buildRequest(String apiKey, String query, int numResults) {
+        public Request buildRequest(String apiKey, String query, int numResults) {
             var body = new java.util.HashMap<String, Object>();
             body.put("query", query);
             body.put("numResults", numResults);
             body.put("contents", Map.of("highlights", Map.of("maxCharacters", 4000)));
-            return HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl()))
-                    .header("Content-Type", "application/json")
+            return new Request.Builder()
+                    .url(baseUrl())
                     .header("x-api-key", apiKey)
-                    .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
-                    .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body), StandardCharsets.UTF_8))
+                    .post(RequestBody.create(gson.toJson(body).getBytes(StandardCharsets.UTF_8), JSON_MEDIA_TYPE))
                     .build();
         }
 
@@ -395,15 +404,14 @@ public class WebSearchTool implements ToolRegistry.Tool {
         @Override public String defaultBaseUrl() { return "https://api.search.brave.com/res/v1/web/search"; }
 
         @Override
-        public HttpRequest buildRequest(String apiKey, String query, int numResults) {
+        public Request buildRequest(String apiKey, String query, int numResults) {
             var encodedQuery = java.net.URLEncoder.encode(query, StandardCharsets.UTF_8);
             var url = "%s?q=%s&count=%d".formatted(baseUrl(), encodedQuery, numResults);
-            return HttpRequest.newBuilder()
-                    .uri(URI.create(url))
+            return new Request.Builder()
+                    .url(url)
                     .header("Accept", "application/json")
                     .header("X-Subscription-Token", apiKey)
-                    .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
-                    .GET()
+                    .get()
                     .build();
         }
 
@@ -427,18 +435,16 @@ public class WebSearchTool implements ToolRegistry.Tool {
         @Override public String defaultBaseUrl() { return "https://api.tavily.com/search"; }
 
         @Override
-        public HttpRequest buildRequest(String apiKey, String query, int numResults) {
+        public Request buildRequest(String apiKey, String query, int numResults) {
             var body = new java.util.HashMap<String, Object>();
             body.put("query", query);
             body.put("max_results", numResults);
             body.put("search_depth", "basic");
             body.put("include_answer", false);
-            return HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl()))
-                    .header("Content-Type", "application/json")
+            return new Request.Builder()
+                    .url(baseUrl())
                     .header("Authorization", "Bearer " + apiKey)
-                    .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
-                    .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body), StandardCharsets.UTF_8))
+                    .post(RequestBody.create(gson.toJson(body).getBytes(StandardCharsets.UTF_8), JSON_MEDIA_TYPE))
                     .build();
         }
 
@@ -467,7 +473,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
         @Override public String defaultBaseUrl() { return "https://api.perplexity.ai/search"; }
 
         @Override
-        public HttpRequest buildRequest(String apiKey, String query, int numResults) {
+        public Request buildRequest(String apiKey, String query, int numResults) {
             var body = new java.util.HashMap<String, Object>();
             body.put("query", query);
             body.put("max_results", numResults);
@@ -475,12 +481,10 @@ public class WebSearchTool implements ToolRegistry.Tool {
             if (recency != null && !recency.isBlank() && !"none".equalsIgnoreCase(recency)) {
                 body.put("search_recency_filter", recency);
             }
-            return HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl()))
-                    .header("Content-Type", "application/json")
+            return new Request.Builder()
+                    .url(baseUrl())
                     .header("Authorization", "Bearer " + apiKey)
-                    .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
-                    .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body), StandardCharsets.UTF_8))
+                    .post(RequestBody.create(gson.toJson(body).getBytes(StandardCharsets.UTF_8), JSON_MEDIA_TYPE))
                     .build();
         }
 
@@ -499,16 +503,14 @@ public class WebSearchTool implements ToolRegistry.Tool {
         @Override public String defaultBaseUrl() { return "https://ollama.com/api/web_search"; }
 
         @Override
-        public HttpRequest buildRequest(String apiKey, String query, int numResults) {
+        public Request buildRequest(String apiKey, String query, int numResults) {
             var body = new java.util.HashMap<String, Object>();
             body.put("query", query);
             body.put("max_results", Math.min(numResults, 10));
-            return HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl()))
-                    .header("Content-Type", "application/json")
+            return new Request.Builder()
+                    .url(baseUrl())
                     .header("Authorization", "Bearer " + apiKey)
-                    .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
-                    .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body), StandardCharsets.UTF_8))
+                    .post(RequestBody.create(gson.toJson(body).getBytes(StandardCharsets.UTF_8), JSON_MEDIA_TYPE))
                     .build();
         }
 
@@ -527,14 +529,12 @@ public class WebSearchTool implements ToolRegistry.Tool {
         @Override public String defaultBaseUrl() { return "https://openapi.felo.ai/v2/chat"; }
 
         @Override
-        public HttpRequest buildRequest(String apiKey, String query, int numResults) {
+        public Request buildRequest(String apiKey, String query, int numResults) {
             var body = Map.of("query", query);
-            return HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl()))
-                    .header("Content-Type", "application/json")
+            return new Request.Builder()
+                    .url(baseUrl())
                     .header("Authorization", "Bearer " + apiKey)
-                    .timeout(Duration.ofSeconds(TIMEOUT_SECONDS))
-                    .POST(HttpRequest.BodyPublishers.ofString(gson.toJson(body), StandardCharsets.UTF_8))
+                    .post(RequestBody.create(gson.toJson(body).getBytes(StandardCharsets.UTF_8), JSON_MEDIA_TYPE))
                     .build();
         }
 

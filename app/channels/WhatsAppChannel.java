@@ -7,12 +7,8 @@ import services.EventLogger;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.Duration;
 import java.util.HexFormat;
 import java.util.Map;
 
@@ -23,6 +19,7 @@ public class WhatsAppChannel implements Channel {
 
     private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
     private static final String API_BASE = "https://graph.facebook.com/v21.0/";
+    private static final okhttp3.MediaType JSON_MEDIA_TYPE = okhttp3.MediaType.get("application/json");
 
     public record WhatsAppConfig(String phoneNumberId, String accessToken, String appSecret, String verifyToken) {
         public static WhatsAppConfig load() {
@@ -61,24 +58,21 @@ public class WhatsAppChannel implements Channel {
                 "type", "text",
                 "text", Map.of("body", text)
         ));
-        try {
-            var request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + config.accessToken())
-                    .timeout(Duration.ofSeconds(15))
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build();
-
-            var response = utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() == 200) {
+        var request = new okhttp3.Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer " + config.accessToken())
+                .post(okhttp3.RequestBody.create(body, JSON_MEDIA_TYPE))
+                .build();
+        try (var response = utils.OkHttpClients.GENERAL.newCall(request).execute()) {
+            if (response.code() == 200) {
                 EventLogger.info("channel", null, "whatsapp",
                         "Message sent to %s".formatted(peerId));
                 return SendResult.OK;
             }
 
+            var responseBody = response.body() != null ? response.body().string() : "";
             EventLogger.warn("channel", null, "whatsapp",
-                    "WhatsApp API error (HTTP %d): %s".formatted(response.statusCode(), response.body()));
+                    "WhatsApp API error (HTTP %d): %s".formatted(response.code(), responseBody));
             return SendResult.FAILED;
         } catch (Exception e) {
             EventLogger.warn("channel", null, "whatsapp",
@@ -95,15 +89,14 @@ public class WhatsAppChannel implements Channel {
                 "message_id", messageId
         ));
 
-        try {
-            var request = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .header("Content-Type", "application/json")
-                    .header("Authorization", "Bearer " + config.accessToken())
-                    .timeout(Duration.ofSeconds(10))
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
-                    .build();
-            utils.HttpClients.GENERAL.send(request, HttpResponse.BodyHandlers.discarding());
+        var request = new okhttp3.Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer " + config.accessToken())
+                .post(okhttp3.RequestBody.create(body, JSON_MEDIA_TYPE))
+                .build();
+        try (var resp = utils.OkHttpClients.GENERAL.newCall(request).execute()) {
+            // Drain the body so the connection returns to the pool; result discarded.
+            if (resp.body() != null) resp.body().bytes();
         } catch (Exception _) {
             // Read receipt failure is non-critical
         }

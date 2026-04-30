@@ -5,14 +5,11 @@ import com.google.gson.JsonParser;
 import services.AgentService;
 import services.AttachmentService;
 import utils.Filenames;
-import utils.HttpClients;
+import utils.OkHttpClients;
 import utils.Strings;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -87,16 +84,17 @@ public final class TelegramFileDownloader {
         JsonObject getFileResp;
         try {
             var url = apiBaseUrl + "/getFile?file_id=" + pending.telegramFileId();
-            var req = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(GETFILE_TIMEOUT)
-                    .GET()
+            var req = new okhttp3.Request.Builder().url(url).get().build();
+            var client = OkHttpClients.GENERAL.newBuilder()
+                    .callTimeout(GETFILE_TIMEOUT)
                     .build();
-            var resp = HttpClients.GENERAL.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() != 200) {
-                return new DownloadFailed("getFile HTTP " + resp.statusCode());
+            try (var resp = client.newCall(req).execute()) {
+                if (resp.code() != 200) {
+                    return new DownloadFailed("getFile HTTP " + resp.code());
+                }
+                var body = resp.body() != null ? resp.body().string() : "";
+                getFileResp = JsonParser.parseString(body).getAsJsonObject();
             }
-            getFileResp = JsonParser.parseString(resp.body()).getAsJsonObject();
         } catch (Exception e) {
             return new DownloadFailed("getFile: " + e.getMessage());
         }
@@ -130,18 +128,21 @@ public final class TelegramFileDownloader {
 
         try {
             var downloadUrl = fileBaseUrl + "/" + filePath;
-            var req = HttpRequest.newBuilder()
-                    .uri(URI.create(downloadUrl))
-                    .timeout(DOWNLOAD_TIMEOUT)
-                    .GET()
+            var req = new okhttp3.Request.Builder().url(downloadUrl).get().build();
+            var client = OkHttpClients.GENERAL.newBuilder()
+                    .callTimeout(DOWNLOAD_TIMEOUT)
+                    .readTimeout(DOWNLOAD_TIMEOUT)
                     .build();
-            var resp = HttpClients.GENERAL.send(req,
-                    HttpResponse.BodyHandlers.ofInputStream());
-            if (resp.statusCode() != 200) {
-                return new DownloadFailed("download HTTP " + resp.statusCode());
-            }
-            try (InputStream in = resp.body()) {
-                Files.copy(in, stagedPath, StandardCopyOption.REPLACE_EXISTING);
+            try (var resp = client.newCall(req).execute()) {
+                if (resp.code() != 200) {
+                    return new DownloadFailed("download HTTP " + resp.code());
+                }
+                if (resp.body() == null) {
+                    return new DownloadFailed("download body absent");
+                }
+                try (InputStream in = resp.body().byteStream()) {
+                    Files.copy(in, stagedPath, StandardCopyOption.REPLACE_EXISTING);
+                }
             }
             long actualSize = Files.size(stagedPath);
             if (actualSize > MAX_FILE_BYTES) {

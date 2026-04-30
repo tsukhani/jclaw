@@ -2,8 +2,7 @@ package services.scanners;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-
-import java.net.http.HttpRequest;
+import okhttp3.Request;
 
 abstract class ConfiguredHashScanner implements Scanner {
 
@@ -54,19 +53,22 @@ abstract class ConfiguredHashScanner implements Scanner {
         return dependencies.config();
     }
 
-    protected Verdict sendJsonLookup(String sha256, HttpRequest request, boolean cleanOnNotFound,
-                                     JsonVerdictParser parser) {
-        try {
-            var response = dependencies.httpClient().send(request);
-            var status = response.statusCode();
+    protected Verdict sendJsonLookup(String sha256, Request request, int timeoutMs,
+                                     boolean cleanOnNotFound, JsonVerdictParser parser) {
+        try (var response = dependencies.httpClient().send(request, timeoutMs)) {
+            var status = response.code();
             if (cleanOnNotFound && status == 404) return Verdict.clean();
             if (status < 200 || status >= 300) {
                 warn("%s returned HTTP %d for hash %s — failing open"
                         .formatted(scannerName, status, hashPrefix(sha256)));
                 return Verdict.clean();
             }
-            return parser.parse(JsonParser.parseString(response.body()).getAsJsonObject());
-        } catch (InterruptedException e) {
+            var body = response.body() != null ? response.body().string() : "";
+            return parser.parse(JsonParser.parseString(body).getAsJsonObject());
+        } catch (java.io.InterruptedIOException e) {
+            // OkHttp throws InterruptedIOException when a Call is interrupted
+            // (Call.timeout firing, Thread.interrupt mid-call, etc.). Re-set
+            // the interrupt flag so callers up the stack can observe it.
             Thread.currentThread().interrupt();
             warn("%s lookup interrupted for hash %s — failing open"
                     .formatted(scannerName, hashPrefix(sha256)));

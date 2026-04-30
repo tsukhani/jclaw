@@ -1,9 +1,8 @@
 package services.scanners;
 
 import com.google.gson.JsonObject;
-import java.net.URI;
-import java.net.http.HttpRequest;
-import java.time.Duration;
+import okhttp3.Request;
+
 import java.util.ArrayList;
 
 /**
@@ -63,13 +62,13 @@ public class MetaDefenderCloudScanner extends ConfiguredHashScanner {
         var timeoutMs = config().getInt("scanner.metadefender.timeoutMs", "5000", 5000);
         var apiKey = config().get("scanner.metadefender.apiKey");
 
-        var request = HttpRequest.newBuilder(URI.create(baseUrl + "hash/" + sha256))
-                .timeout(Duration.ofMillis(timeoutMs))
+        var request = new Request.Builder()
+                .url(baseUrl + "hash/" + sha256)
                 .header("apikey", apiKey)
                 .header("Accept", "application/json")
-                .GET()
+                .get()
                 .build();
-        return sendJsonLookup(sha256, request, true, json -> parseVerdict(json, sha256));
+        return sendJsonLookup(sha256, request, timeoutMs, true, json -> parseVerdict(json, sha256));
     }
 
     /**
