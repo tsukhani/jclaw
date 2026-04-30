@@ -86,7 +86,7 @@ public class ModelDiscoveryService {
                     .header("Accept", "application/json")
                     .get()
                     .build();
-            var client = llm.LlmOkHttpClient.singleShot(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS));
+            var client = utils.HttpFactories.llmSingleShot(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS));
 
             int statusCode;
             String responseBody;
@@ -390,9 +390,7 @@ public class ModelDiscoveryService {
                     .header("Accept", "text/html,application/json")
                     .get()
                     .build();
-            var client = utils.OkHttpClients.GENERAL.newBuilder()
-                    .callTimeout(Duration.ofSeconds(LEADERBOARD_TIMEOUT_SECONDS))
-                    .build();
+            var client = utils.HttpFactories.general(Duration.ofSeconds(LEADERBOARD_TIMEOUT_SECONDS));
 
             String body;
             try (var response = client.newCall(req).execute()) {
@@ -515,7 +513,7 @@ public class ModelDiscoveryService {
                     .header("Accept", "application/json")
                     .get()
                     .build();
-            var client = llm.LlmOkHttpClient.singleShot(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS));
+            var client = utils.HttpFactories.llmSingleShot(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS));
 
             int statusCode;
             String responseBody;
@@ -624,7 +622,7 @@ public class ModelDiscoveryService {
                     .header("Accept", "application/json")
                     .get()
                     .build();
-            var client = llm.LlmOkHttpClient.singleShot(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS));
+            var client = utils.HttpFactories.llmSingleShot(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS));
 
             int tagsStatus;
             String tagsResponseBody;
@@ -733,7 +731,7 @@ public class ModelDiscoveryService {
                     .header("Accept", "application/json")
                     .post(okhttp3.RequestBody.create(body, jsonMediaType))
                     .build();
-            var client = llm.LlmOkHttpClient.singleShot(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS));
+            var client = utils.HttpFactories.llmSingleShot(Duration.ofSeconds(DISCOVER_TIMEOUT_SECONDS));
 
             int statusCode;
             String responseBody;

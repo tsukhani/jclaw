@@ -1,9 +1,8 @@
 package services;
 
 import com.google.gson.JsonParser;
-import llm.LlmOkHttpClient;
-import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import utils.HttpFactories;
 
 import java.io.IOException;
 import java.net.ConnectException;
@@ -12,20 +11,10 @@ import java.time.Duration;
 
 final class LocalProviderProbeSupport {
 
-    record Result(boolean available, int modelCount, String reason, boolean connectionRefused) { }
+    /** Boot probes don't need the LLM single-shot's 180s default — 7s is plenty. */
+    private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(7);
 
-    /**
-     * Short-timeout client for boot probes — 2s connect, 5s read, no SSE so
-     * no extended call timeout. Derived from {@link LlmOkHttpClient#SINGLE_SHOT}
-     * via {@link OkHttpClient#newBuilder()} so it shares the same shared
-     * connection pool and dispatcher; the only overrides are the tighter
-     * timeouts that "is the local provider alive at boot" deserves.
-     */
-    private static final OkHttpClient PROBE_CLIENT = LlmOkHttpClient.SINGLE_SHOT.newBuilder()
-            .connectTimeout(Duration.ofSeconds(2))
-            .readTimeout(Duration.ofSeconds(5))
-            .callTimeout(Duration.ofSeconds(7))
-            .build();
+    record Result(boolean available, int modelCount, String reason, boolean connectionRefused) { }
 
     private LocalProviderProbeSupport() {}
 
@@ -41,7 +30,7 @@ final class LocalProviderProbeSupport {
                 .url(baseUrl + "/models")
                 .get()
                 .build();
-        try (var resp = PROBE_CLIENT.newCall(req).execute()) {
+        try (var resp = HttpFactories.llmSingleShot(PROBE_TIMEOUT).newCall(req).execute()) {
             if (resp.code() != 200) {
                 return new Result(false, 0,
                         "GET %s/models returned HTTP %d".formatted(baseUrl, resp.code()),

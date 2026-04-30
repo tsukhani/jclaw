@@ -2,7 +2,7 @@ package services.scanners;
 
 import services.ConfigService;
 import services.EventLogger;
-import utils.OkHttpClients;
+import utils.HttpFactories;
 
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
@@ -25,7 +25,7 @@ public record ScannerDependencies(
                 }
             },
             (request, timeoutMs) -> {
-                var call = OkHttpClients.GENERAL.newCall(request);
+                var call = HttpFactories.general().newCall(request);
                 call.timeout().timeout(timeoutMs, TimeUnit.MILLISECONDS);
                 return call.execute();
             },

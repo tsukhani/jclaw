@@ -101,12 +101,12 @@ public final class LoadTestRunner {
 
         var baseUrl = "http://127.0.0.1:" + play.Play.configuration.getProperty("http.port", "9000");
         var body = "{\"agentId\":" + agentId + ",\"message\":\"Load test message\"}";
-        // JCLAW-186: drive the loadtest through the same OkHttp client that
-        // the production LLM stack uses. SINGLE_SHOT carries the shared
-        // virtual-thread Dispatcher and 64-slot ConnectionPool from Phase 1,
-        // so concurrent loadtest workers exercise the exact same connection-
-        // pooling and threading model that production chat traffic exercises.
-        var client = llm.LlmOkHttpClient.singleShot(Duration.ofSeconds(120));
+        // Drive the loadtest through the same OkHttp client tuning that the
+        // production LLM stack uses — virtual-thread dispatcher, 64-slot
+        // ConnectionPool — so concurrent loadtest workers exercise the
+        // exact connection-pooling and threading model that production chat
+        // traffic does.
+        var client = utils.HttpFactories.llmSingleShot(Duration.ofSeconds(120));
 
         // Warmup: a single sequential request ensures agent lookup, provider
         // cache, session affinity, and JIT are stable before concurrent workers

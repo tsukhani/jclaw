@@ -18,9 +18,9 @@ import java.util.function.Consumer;
 /**
  * OkHttp 5.x-backed LLM transport. The only HTTP path for outbound LLM
  * traffic since JCLAW-187 deleted the JDK alternative; static utility
- * methods because the class has no per-instance state — all configuration
- * lives on the shared {@link LlmOkHttpClient#SINGLE_SHOT} and
- * {@link LlmOkHttpClient#STREAMING} singletons.
+ * methods because the class has no per-instance state — clients are
+ * sourced via {@link utils.HttpFactories#llmStreaming()} and
+ * {@link utils.HttpFactories#llmSingleShot(Duration)}.
  *
  * <p>OkHttp does not issue an {@code Upgrade: h2c} on plain HTTP, so the
  * LM-Studio Express upgrade-event hang the previous JDK driver had to
@@ -43,7 +43,7 @@ final class OkHttpLlmHttpDriver {
      */
     static HttpReply send(URI uri, String authHeader, String jsonBody, Duration timeout)
             throws IOException, InterruptedException {
-        var client = LlmOkHttpClient.singleShot(timeout);
+        var client = utils.HttpFactories.llmSingleShot(timeout);
         var req = new Request.Builder()
                 .url(uri.toString())
                 .header("Authorization", authHeader)
@@ -102,7 +102,7 @@ final class OkHttpLlmHttpDriver {
             }
         };
 
-        EventSources.createFactory(LlmOkHttpClient.STREAMING).newEventSource(req, listener);
+        EventSources.createFactory(utils.HttpFactories.llmStreaming()).newEventSource(req, listener);
         try {
             done.await();
         } catch (InterruptedException ie) {

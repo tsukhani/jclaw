@@ -60,7 +60,7 @@ public class SlackChannel implements Channel {
                 .header("Authorization", "Bearer " + config.botToken())
                 .post(okhttp3.RequestBody.create(jsonBody, jsonMediaType))
                 .build();
-        try (var response = utils.OkHttpClients.GENERAL.newCall(request).execute()) {
+        try (var response = utils.HttpFactories.general().newCall(request).execute()) {
             if (response.code() == 429) {
                 var retryAfterHeader = response.header("Retry-After");
                 long retryAfterMs = parseRetryAfterMs(retryAfterHeader);

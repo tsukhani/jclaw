@@ -10,7 +10,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import services.ConfigService;
 import services.EventLogger;
-import utils.OkHttpClients;
+import utils.HttpFactories;
 
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -189,9 +189,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
                     "Searching via %s: \"%s\" (numResults=%d)".formatted(provider.displayName(), query, numResults));
 
             var request = provider.buildRequest(apiKey, query, numResults);
-            var client = OkHttpClients.GENERAL.newBuilder()
-                    .callTimeout(Duration.ofSeconds(TIMEOUT_SECONDS))
-                    .build();
+            var client = HttpFactories.general(Duration.ofSeconds(TIMEOUT_SECONDS));
 
             int statusCode;
             String responseBody;

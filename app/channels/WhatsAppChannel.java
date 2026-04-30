@@ -63,7 +63,7 @@ public class WhatsAppChannel implements Channel {
                 .header("Authorization", "Bearer " + config.accessToken())
                 .post(okhttp3.RequestBody.create(body, JSON_MEDIA_TYPE))
                 .build();
-        try (var response = utils.OkHttpClients.GENERAL.newCall(request).execute()) {
+        try (var response = utils.HttpFactories.general().newCall(request).execute()) {
             if (response.code() == 200) {
                 EventLogger.info("channel", null, "whatsapp",
                         "Message sent to %s".formatted(peerId));
@@ -94,7 +94,7 @@ public class WhatsAppChannel implements Channel {
                 .header("Authorization", "Bearer " + config.accessToken())
                 .post(okhttp3.RequestBody.create(body, JSON_MEDIA_TYPE))
                 .build();
-        try (var resp = utils.OkHttpClients.GENERAL.newCall(request).execute()) {
+        try (var resp = utils.HttpFactories.general().newCall(request).execute()) {
             // Drain the body so the connection returns to the pool; result discarded.
             if (resp.body() != null) resp.body().bytes();
         } catch (Exception _) {

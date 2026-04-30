@@ -5,7 +5,7 @@ import com.google.gson.JsonParser;
 import services.AgentService;
 import services.AttachmentService;
 import utils.Filenames;
-import utils.OkHttpClients;
+import utils.HttpFactories;
 import utils.Strings;
 
 import java.io.IOException;
@@ -85,10 +85,7 @@ public final class TelegramFileDownloader {
         try {
             var url = apiBaseUrl + "/getFile?file_id=" + pending.telegramFileId();
             var req = new okhttp3.Request.Builder().url(url).get().build();
-            var client = OkHttpClients.GENERAL.newBuilder()
-                    .callTimeout(GETFILE_TIMEOUT)
-                    .build();
-            try (var resp = client.newCall(req).execute()) {
+            try (var resp = HttpFactories.general(GETFILE_TIMEOUT).newCall(req).execute()) {
                 if (resp.code() != 200) {
                     return new DownloadFailed("getFile HTTP " + resp.code());
                 }
@@ -129,11 +126,7 @@ public final class TelegramFileDownloader {
         try {
             var downloadUrl = fileBaseUrl + "/" + filePath;
             var req = new okhttp3.Request.Builder().url(downloadUrl).get().build();
-            var client = OkHttpClients.GENERAL.newBuilder()
-                    .callTimeout(DOWNLOAD_TIMEOUT)
-                    .readTimeout(DOWNLOAD_TIMEOUT)
-                    .build();
-            try (var resp = client.newCall(req).execute()) {
+            try (var resp = HttpFactories.general(DOWNLOAD_TIMEOUT).newCall(req).execute()) {
                 if (resp.code() != 200) {
                     return new DownloadFailed("download HTTP " + resp.code());
                 }

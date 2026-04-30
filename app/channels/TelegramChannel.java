@@ -278,7 +278,7 @@ public class TelegramChannel implements Channel {
                 .url(url)
                 .post(okhttp3.RequestBody.create(body, okhttp3.MediaType.get("application/json")))
                 .build();
-        try (var resp = utils.OkHttpClients.GENERAL.newCall(req).execute()) {
+        try (var resp = utils.HttpFactories.general().newCall(req).execute()) {
             if (resp.code() != 200) {
                 EventLogger.warn("channel", null, "telegram",
                         "clearMessageDraft returned HTTP %d for chat %s"
