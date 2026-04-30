@@ -77,6 +77,14 @@ Load-test options (only used with the 'loadtest' command):
                           server's HttpContentCompressor engages — measures the cost of the
                           encoding path. Default off (Java HttpClient sends no Accept-Encoding,
                           so compression doesn't engage even when wired into the pipeline).
+  --okhttp                Flip play.llm.client to 'okhttp' for the run, so the agent's
+                          outbound LLM calls go through OkHttp 5.x + okhttp-sse instead
+                          of the JDK HttpClient (JCLAW-185). Restored after the run.
+  --real                  Bind the loadtest agent to ollama-local instead of the in-process
+                          mock harness. Required to capture real-network/SSE timing for
+                          the OkHttp baseline (mock latency is deterministic stubs).
+  --model <name>          Ollama model to drive when --real is set (default: gemma4:latest).
+                          Must be pulled locally (e.g. 'ollama pull gemma3:4b').
 
 Examples:
   ./jclaw.sh setup                                    # One-time setup after fresh clone
@@ -446,11 +454,26 @@ Options:
   --compress              Send 'Accept-Encoding: br, gzip' so the server's
                           HttpContentCompressor engages — measures the cost
                           of the encoding path.
+  --okhttp                Flip play.llm.client to 'okhttp' for the duration
+                          of the run. Default keeps the JDK HttpClient path
+                          (JCLAW-185 phase 1).
+  --real                  Drive ollama-local with --model instead of the mock
+                          harness. Lets the run capture real network and SSE
+                          timing — the AC3 baseline for the OkHttp migration.
+                          The mock path is fine for pipeline checks but its
+                          latency is stubbed, so an okhttp-vs-jdk comparison
+                          on the mock isn't meaningful.
+  --model <name>          Ollama model when --real is set (default: gemma4:latest).
+                          Must be pulled locally first (e.g. 'ollama pull gemma3:4b').
 
 Examples:
-  ./jclaw.sh loadtest                                          # Default 10×5
-  ./jclaw.sh --concurrency 50 --iterations 20 loadtest         # Heavier run
-  ./jclaw.sh --clean loadtest                                  # Cleanup only
+  ./jclaw.sh loadtest                                                 # mock + jdk (default)
+  ./jclaw.sh --concurrency 50 --iterations 20 loadtest                # heavier mock run
+  ./jclaw.sh --okhttp loadtest                                        # mock + okhttp pipeline check
+  ./jclaw.sh --real loadtest                                          # ollama-local + jdk baseline
+  ./jclaw.sh --okhttp --real loadtest                                 # ollama-local + okhttp (AC3 sample)
+  ./jclaw.sh --okhttp --real --model gemma3:4b loadtest               # override model
+  ./jclaw.sh --clean loadtest                                         # cleanup only
 EOF
     else
         cat <<EOF
@@ -586,6 +609,9 @@ LT_TOKENS_PER_SECOND="50"
 LT_RESPONSE_TOKENS="40"
 LT_CLEAN=false
 LT_COMPRESS=false
+LT_OKHTTP=false
+LT_REAL=false
+LT_MODEL="gemma4:latest"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -632,6 +658,18 @@ while [[ $# -gt 0 ]]; do
         --compress)
             LT_COMPRESS=true
             shift
+            ;;
+        --okhttp)
+            LT_OKHTTP=true
+            shift
+            ;;
+        --real)
+            LT_REAL=true
+            shift
+            ;;
+        --model)
+            LT_MODEL="$2"
+            shift 2
             ;;
         secret|reset|start|stop|restart|status|logs)
             COMMAND="$1"
@@ -1821,13 +1859,38 @@ do_loadtest() {
         return
     fi
 
-    echo "==> Running load test: concurrency=$LT_CONCURRENCY iterations=$LT_ITERATIONS"
+    local lt_client="" lt_extra=""
+    if [[ "$LT_OKHTTP" == true ]]; then
+        lt_client="okhttp"
+        lt_extra=" client=okhttp"
+    fi
+    if [[ "$LT_REAL" == true ]]; then
+        lt_extra="$lt_extra real=ollama-local model=$LT_MODEL"
+    fi
+    echo "==> Running load test: concurrency=$LT_CONCURRENCY iterations=$LT_ITERATIONS$lt_extra"
     echo "    ttft=${LT_TTFT_MS}ms tokens/s=$LT_TOKENS_PER_SECOND response=${LT_RESPONSE_TOKENS} tokens compress=$LT_COMPRESS"
     echo ""
 
+    # Build the JSON body. Include client / real / model only when set so the
+    # default mock-provider + jdk-driver path stays bit-identical to the
+    # pre-JCLAW-185 wire format. JSON-quote $LT_MODEL because Ollama tags carry
+    # a colon (`gemma4:latest`) which would otherwise look like a JSON struct.
     local body
-    body=$(printf '{"concurrency":%s,"iterations":%s,"ttftMs":%s,"tokensPerSecond":%s,"responseTokens":%s,"compress":%s}' \
+    body=$(printf '{"concurrency":%s,"iterations":%s,"ttftMs":%s,"tokensPerSecond":%s,"responseTokens":%s,"compress":%s' \
         "$LT_CONCURRENCY" "$LT_ITERATIONS" "$LT_TTFT_MS" "$LT_TOKENS_PER_SECOND" "$LT_RESPONSE_TOKENS" "$LT_COMPRESS")
+    if [[ -n "$lt_client" ]]; then
+        body="$body,\"client\":\"$lt_client\""
+    fi
+    if [[ "$LT_REAL" == true ]]; then
+        body="$body,\"real\":true,\"model\":\"$LT_MODEL\""
+    fi
+    body="$body}"
+
+    # The okhttp/real path can take much longer than the default mock run
+    # (each turn waits on a real model), so raise the curl wall-clock cap
+    # accordingly. Default 300s stays for the existing mock path.
+    local lt_max_time=300
+    if [[ "$LT_REAL" == true ]]; then lt_max_time=1800; fi
 
     local response http_code
     response=$(curl -s \
@@ -1836,7 +1899,7 @@ do_loadtest() {
         -X POST "http://localhost:$BACKEND_PORT/api/metrics/loadtest" \
         -d "$body" \
         -w '\n%{http_code}' \
-        --max-time 300)
+        --max-time "$lt_max_time")
     http_code=$(echo "$response" | tail -1)
     local json
     json=$(echo "$response" | sed '$d')

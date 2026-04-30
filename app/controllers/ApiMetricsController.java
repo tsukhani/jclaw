@@ -91,6 +91,14 @@ public class ApiMetricsController extends Controller {
         int toolSleepMs = readInt(body, "toolSleepMs", 200);
         boolean compress = readBool(body, "compress", false);
 
+        // JCLAW-185: client (jdk|okhttp) flips play.llm.client for the run;
+        // real=true swaps the mock harness for ollama-local + the supplied
+        // model so the AC3 perf baseline sees real network and real SSE
+        // timing instead of the mock's deterministic stubs.
+        String client = readString(body, "client", null);
+        boolean real = readBool(body, "real", false);
+        String model = readString(body, "model", null);
+
         int maxConcurrency = ConfigService.getInt("provider.loadtest-mock.maxConcurrency", 100);
         int maxIterations = ConfigService.getInt("provider.loadtest-mock.maxIterations", 50);
         if (concurrency < 1 || concurrency > maxConcurrency) {
@@ -99,27 +107,37 @@ public class ApiMetricsController extends Controller {
         if (iterations < 1 || iterations > maxIterations) {
             error(400, "iterations must be between 1 and " + maxIterations);
         }
+        if (real && (model == null || model.isBlank())) {
+            error(400, "model is required when real=true");
+        }
 
         // Enable the mock provider in its own transaction so it's committed
         // before the loadtest requests fire (they use separate connections).
-        try {
-            JPA.withTransaction("default", false,
-                    (play.libs.F.Function0<Void>) () -> {
-                        ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "true");
-                        return null;
-                    });
-        } catch (Throwable t) {
-            error(500, "Failed to enable mock provider: " + t.getMessage());
+        // Skip when real=true — that path uses ollama-local, which the
+        // DefaultConfigJob already seeded at boot.
+        if (!real) {
+            try {
+                JPA.withTransaction("default", false,
+                        (play.libs.F.Function0<Void>) () -> {
+                            ConfigService.setWithSideEffects("provider.loadtest-mock.enabled", "true");
+                            return null;
+                        });
+            } catch (Throwable t) {
+                error(500, "Failed to enable mock provider: " + t.getMessage());
+            }
         }
 
         try {
             var result = LoadTestRunner.run(new LoadTestRunner.Request(
                     concurrency, iterations, compress,
                     new LoadTestHarness.Scenario(ttftMs, tokensPerSecond, responseTokens,
-                            simulatedToolCalls, toolSleepMs)));
+                            simulatedToolCalls, toolSleepMs),
+                    client, real, model));
 
-            LoadTestHarness.stop();
-            LoadTestRunner.disable();
+            if (!real) {
+                LoadTestHarness.stop();
+                LoadTestRunner.disable();
+            }
 
             var out = new JsonObject();
             out.addProperty("totalRequests", result.totalRequests());
@@ -131,12 +149,17 @@ public class ApiMetricsController extends Controller {
             out.addProperty("maxPerRequestMs", result.maxPerRequestMs());
             out.addProperty("mockPort", result.mockPort());
             out.addProperty("agentId", result.agentId());
+            if (client != null) out.addProperty("client", client);
+            out.addProperty("realProvider", real);
+            if (real) out.addProperty("model", model);
             renderJSON(INSTANCE.toJson(out));
         } catch (play.mvc.results.Result r) {
             throw r;
         } catch (Exception e) {
-            LoadTestHarness.stop();
-            LoadTestRunner.disable();
+            if (!real) {
+                LoadTestHarness.stop();
+                LoadTestRunner.disable();
+            }
             error(500, "Load test failed: " + e.getMessage());
         }
     }
@@ -169,6 +192,16 @@ public class ApiMetricsController extends Controller {
             return body.get(key).getAsBoolean();
         } catch (Exception _) {
             error(400, "Invalid boolean for '" + key + "'");
+            return defaultValue; // unreachable
+        }
+    }
+
+    private static String readString(com.google.gson.JsonObject body, String key, String defaultValue) {
+        if (body == null || !body.has(key) || body.get(key).isJsonNull()) return defaultValue;
+        try {
+            return body.get(key).getAsString();
+        } catch (Exception _) {
+            error(400, "Invalid string for '" + key + "'");
             return defaultValue; // unreachable
         }
     }

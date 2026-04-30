@@ -46,8 +46,14 @@ import java.util.function.Function;
  *
  * <p>Validation lives in {@code test/LlmHttpDriverSseTest} (AC1 + AC2:
  * byte-identical SSE chunks across drivers, one onChunk per data: line,
- * onComplete after [DONE]) and {@code test/OkHttpLlmDriverBenchmark}
- * (AC3: p50/p95/p99 perf baseline against a real cloud provider).
+ * onComplete after [DONE]). The AC3 perf baseline runs through the
+ * existing load-test harness, gated by two flags on
+ * {@code services.LoadTestRunner.Request}: {@code client} flips
+ * {@code play.llm.client} for the duration of the run; {@code realProvider}
+ * swaps the in-process mock for a real local provider (ollama-local). The
+ * operator drives both via {@code ./jclaw.sh --client okhttp --real
+ * loadtest} and inspects {@code GET /api/metrics/latency} between runs to
+ * compare distributions.
  */
 public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider, OpenRouterProvider {
 

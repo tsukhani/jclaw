@@ -41,8 +41,26 @@ public final class LoadTestRunner {
     public static final String LOADTEST_PROVIDER = "loadtest-mock";
     private static final String LOADTEST_MODEL = "mock-model";
 
+    /**
+     * Real-provider name used when {@link Request#realProvider} is true.
+     * Routes through {@link llm.OllamaProvider} via the substring match in
+     * {@link llm.LlmProvider#forConfig}; the provider config is seeded by
+     * {@link jobs.DefaultConfigJob} at boot.
+     */
+    public static final String REAL_PROVIDER = "ollama-local";
+
+    /**
+     * Load-test request shape. {@code client} (jdk|okhttp) flips
+     * {@code play.llm.client} for the duration of the run, then restores
+     * the prior value in a finally block — so an okhttp ↔ jdk comparison is
+     * one operator command per driver. {@code realProvider} swaps the
+     * in-process mock for {@link #REAL_PROVIDER} (ollama-local) running
+     * {@code model}; the AC3 perf baseline for JCLAW-185 needs real network
+     * and real SSE timing, which the mock can't reproduce.
+     */
     public record Request(int concurrency, int iterations, boolean compress,
-                          LoadTestHarness.Scenario scenario) {}
+                          LoadTestHarness.Scenario scenario,
+                          String client, boolean realProvider, String model) {}
 
     public record Result(
             int totalRequests,
@@ -61,15 +79,27 @@ public final class LoadTestRunner {
         if (req.concurrency() < 1 || req.iterations() < 1) {
             throw new IllegalArgumentException("concurrency and iterations must be ≥ 1");
         }
-        var mockPort = ensureHarnessStarted();
-        LoadTestHarness.setScenario(req.scenario());
+
+        // Flip play.llm.client for the duration of this run if requested. Each
+        // chat request reads the flag at LlmHttpDriver.pick() — flipping here
+        // before the worker pool starts means every request the loadtest fires
+        // sees the new value; AC4's per-request commit guarantees no in-flight
+        // request gets split across drivers. We restore in finally below so a
+        // crashed run doesn't leave the JVM in the wrong mode for subsequent
+        // chat traffic.
+        var savedClient = swapClientFlag(req.client());
+        try {
+        var mockPort = req.realProvider() ? -1 : ensureHarnessStarted();
+        if (!req.realProvider()) LoadTestHarness.setScenario(req.scenario());
         // Run setup in a dedicated transaction so the __loadtest__ agent and
         // provider config are committed and visible to the HTTP request threads
         // before any loadtest requests fire.
         long agentId;
         try {
             agentId = JPA.withTransaction("default", false,
-                    (play.libs.F.Function0<Long>) () -> ensureLoadtestAgentInner(mockPort));
+                    (play.libs.F.Function0<Long>) () -> req.realProvider()
+                            ? ensureLoadtestAgentRealInner(req.model())
+                            : ensureLoadtestAgentInner(mockPort));
         } catch (Throwable t) {
             throw t instanceof Exception e ? e : new RuntimeException(t);
         }
@@ -148,6 +178,37 @@ public final class LoadTestRunner {
                 maxDur.get() == Long.MIN_VALUE ? 0 : maxDur.get(),
                 mockPort,
                 agentId);
+        } finally {
+            restoreClientFlag(savedClient);
+        }
+    }
+
+    /**
+     * Read the current {@code play.llm.client} value, set it to {@code requested}
+     * (when non-null and different), and return the prior value so
+     * {@link #restoreClientFlag} can put it back when the run ends. When
+     * {@code requested} is null or matches the current value this is a no-op
+     * and the returned saved value is the current value (restoring it back is
+     * also a no-op). The flag mutates {@link play.Play#configuration} globally;
+     * concurrent operator-initiated chat traffic during a loadtest run will
+     * pick up the loadtest's chosen driver — that's acceptable because the
+     * loadtest is the only thing supposed to be running.
+     */
+    private static String swapClientFlag(String requested) {
+        if (requested == null || requested.isBlank()) return null;
+        if (!"jdk".equals(requested) && !"okhttp".equals(requested)) {
+            throw new IllegalArgumentException(
+                    "client must be 'jdk' or 'okhttp', got: " + requested);
+        }
+        var prior = play.Play.configuration.getProperty("play.llm.client");
+        play.Play.configuration.setProperty("play.llm.client", requested);
+        return prior == null ? "" : prior;  // empty sentinel = "was unset"
+    }
+
+    private static void restoreClientFlag(String saved) {
+        if (saved == null) return;  // no swap performed
+        if (saved.isEmpty()) play.Play.configuration.remove("play.llm.client");
+        else play.Play.configuration.setProperty("play.llm.client", saved);
     }
 
     private static void warmupRequest(HttpClient client, String baseUrl,
@@ -208,6 +269,32 @@ public final class LoadTestRunner {
         }
         agent.modelProvider = LOADTEST_PROVIDER;
         agent.modelId = LOADTEST_MODEL;
+        agent.enabled = true;
+        agent.save();
+        return agent.id;
+    }
+
+    /**
+     * Real-provider twin of {@link #ensureLoadtestAgentInner}: leaves
+     * {@code provider.ollama-local.*} alone (DefaultConfigJob seeds it at
+     * boot) and just rebinds the {@code __loadtest__} agent to ollama-local
+     * with the requested model. The agent name stays
+     * {@link #LOADTEST_AGENT_NAME} so the API-layer hide/reject filters
+     * still apply, and so {@link #cleanupConversations} can find data from
+     * either run mode through one query.
+     */
+    private static long ensureLoadtestAgentRealInner(String model) {
+        if (model == null || model.isBlank()) {
+            throw new IllegalArgumentException(
+                    "model is required when realProvider=true");
+        }
+        var agent = Agent.findByName(LOADTEST_AGENT_NAME);
+        if (agent == null) {
+            agent = new Agent();
+            agent.name = LOADTEST_AGENT_NAME;
+        }
+        agent.modelProvider = REAL_PROVIDER;
+        agent.modelId = model;
         agent.enabled = true;
         agent.save();
         return agent.id;
