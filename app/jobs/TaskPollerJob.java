@@ -51,15 +51,24 @@ public class TaskPollerJob extends Job<Void> {
     }
 
     /**
-     * Interrupt all in-flight tasks and wait for them to finish.
+     * Interrupt all in-flight tasks and wait briefly for them to finish.
      * Called by {@link ShutdownJob} during application shutdown.
+     *
+     * <p>JCLAW-191: 5s timeout (was 30s). The previous 30s alone consumed
+     * the framework's entire scheduler-shutdown budget, triggering the
+     * "Jobs scheduler did not terminate within 30000 ms" warn on every
+     * restart. Tasks that don't respect interrupt within 5s are abandoned
+     * — they may leave their {@link models.Task} row in {@code RUNNING}
+     * state until a recovery sweep, but losing 5s of work on a forced
+     * restart is acceptable; losing 30s of clean-shutdown budget on every
+     * restart was not.
      */
     public static void shutdownGracefully() {
         var executor = activeExecutor;
         if (executor != null) {
             executor.shutdownNow();
             try {
-                executor.awaitTermination(30, TimeUnit.SECONDS);
+                executor.awaitTermination(5, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }

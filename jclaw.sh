@@ -1529,13 +1529,45 @@ do_start_prod() {
 do_stop_prod() {
     cd "$JCLAW_DIR"
 
-    if [[ -f "server.pid" ]]; then
-        echo "==> Stopping Play backend..."
-        play stop
+    if [[ ! -f "server.pid" ]]; then
+        echo "Nothing to stop — JClaw does not appear to be running in $JCLAW_DIR"
+        return
+    fi
+
+    local pid
+    pid=$(cat server.pid 2>/dev/null)
+    echo "==> Stopping Play backend (pid: ${pid:-?})..."
+    play stop
+
+    # JCLAW-190: `play stop` returns to the shell as soon as it has signalled
+    # the JVM, NOT when the JVM has actually exited. The shutdown hook
+    # (ShutdownJob + Hikari close + Telegram poller drain) takes a few
+    # seconds. If we return now, a follow-up `play start` will boot a new
+    # JVM that overlaps the old one — old still polling Telegram, both
+    # bound to the same bot token, 409 Conflict on the new JVM's first
+    # poll. Wait for server.pid to disappear before returning.
+    #
+    # Bound the wait at 60s so a wedged JVM doesn't hang the shell forever
+    # — at that point an operator can investigate manually.
+    local elapsed_ds=0
+    local max_ds=120   # 60 seconds, polling every 0.5s = 120 deciseconds
+    while [[ -f server.pid && $elapsed_ds -lt $max_ds ]]; do
+        if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+            # Process is gone but server.pid lingers — Play normally
+            # removes it on clean exit, but a force-kill could leave it.
+            rm -f server.pid
+            break
+        fi
+        sleep 0.5
+        elapsed_ds=$((elapsed_ds + 1))
+    done
+
+    if [[ -f server.pid ]]; then
+        echo "Warning: server.pid still present after $((max_ds / 2))s — JVM may still be shutting down."
+        echo "         If a follow-up start fails, check 'ps -p $pid' and remove server.pid manually."
+    else
         echo ""
         echo "JClaw stopped."
-    else
-        echo "Nothing to stop — JClaw does not appear to be running in $JCLAW_DIR"
     fi
 }
 
@@ -2030,8 +2062,10 @@ case "$COMMAND" in
             mkdir -p "$JCLAW_DIR/logs"
             do_start_dev
         else
+            # JCLAW-190: do_stop_prod now waits for server.pid removal
+            # before returning, so we don't need a separate sleep here.
+            # The new JVM only boots once the old one has fully exited.
             do_stop_prod
-            sleep 1
             [[ -n "$DEPLOY_DIR" ]] && do_deploy
             mkdir -p "$JCLAW_DIR/logs"
             do_start_prod
