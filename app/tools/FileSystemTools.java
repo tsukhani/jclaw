@@ -1025,8 +1025,9 @@ public class FileSystemTools implements ToolRegistry.Tool {
             }
 
             int searchStart = 0;
-            if (chunk.anchor().isPresent()) {
-                var anchor = chunk.anchor().get();
+            var anchorOpt = chunk.anchor();
+            if (anchorOpt.isPresent()) {
+                var anchor = anchorOpt.get();
                 if (!anchor.isEmpty()) {
                     var anchorIdx = working.indexOf(anchor);
                     if (anchorIdx < 0) {

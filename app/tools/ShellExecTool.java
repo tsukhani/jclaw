@@ -405,7 +405,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
                         timedOut.set(true);
                         process.destroyForcibly();
                     }
-                } catch (InterruptedException _) {}
+                } catch (InterruptedException _) { Thread.currentThread().interrupt(); }
             });
 
             // Blocking read loop — wrap in InputStreamReader with explicit UTF-8

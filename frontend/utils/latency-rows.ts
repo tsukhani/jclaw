@@ -211,7 +211,7 @@ export function listAvailableChannels<H extends { count: number } = LatencyHisto
   // Any channel not in CHANNEL_ORDER, alphabetically.
   const remaining = Object.keys(payload)
     .filter(c => !seen.has(c))
-    .sort()
+    .sort((a, b) => a.localeCompare(b))
   for (const channel of remaining) {
     if (hasAnySample(channel)) {
       options.push({ key: channel, label: labelForChannel(channel) })

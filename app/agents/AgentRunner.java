@@ -457,6 +457,7 @@ public class AgentRunner {
                 streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, tracedCb, trace);
 
             } catch (Exception e) {
+                if (e instanceof InterruptedException) Thread.currentThread().interrupt();
                 EventLogger.error("llm", agent.name, channelType,
                         "Streaming error: %s".formatted(e.getMessage()));
                 tracedCb.onError().accept(e);
@@ -802,8 +803,8 @@ public class AgentRunner {
         var reasoningMs = turnUsage.reasoningDurationMs(System.nanoTime());
         if (!turnUsage.hasProviderUsage) {
             return reasoningMs > 0L
-                    ? "{\"durationMs\":%d,\"reasoningDurationMs\":%d}".formatted(durationMs, reasoningMs)
-                    : "{\"durationMs\":%d}".formatted(durationMs);
+                    ? "{\"durationMs\":%s,\"reasoningDurationMs\":%s}".formatted(durationMs, reasoningMs)
+                    : "{\"durationMs\":%s}".formatted(durationMs);
         }
 
         var reasoningCount = effectiveReasoningTokens(turnUsage);
@@ -844,7 +845,7 @@ public class AgentRunner {
         if (turnUsage.hasProviderUsage) {
             var reasoningCount = effectiveReasoningTokens(turnUsage);
             var extras = new StringBuilder();
-            if (reasoningCount > 0) extras.append(", %d reasoning".formatted(reasoningCount));
+            if (reasoningCount > 0) extras.append(", %s reasoning".formatted(reasoningCount));
             if (turnUsage.cachedTokens > 0) extras.append(", %d cached".formatted(turnUsage.cachedTokens));
             if (turnUsage.cacheCreationTokens > 0) extras.append(", %d cache-write".formatted(turnUsage.cacheCreationTokens));
             var usageSummary = " [%d prompt, %d completion, %d total tokens%s, %.1fs]".formatted(

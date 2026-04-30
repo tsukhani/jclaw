@@ -491,6 +491,9 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
             } catch (LlmException e) {
                 throw e;
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new LlmException("Interrupted during request to " + config.name(), ie);
             } catch (Exception e) {
                 lastException = e;
             }

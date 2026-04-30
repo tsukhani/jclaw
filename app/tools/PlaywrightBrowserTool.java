@@ -23,7 +23,7 @@ import java.util.concurrent.locks.ReentrantLock;
 public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 
     private static final int MAX_TEXT_LENGTH = 50_000;
-    private static final long IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+    private static final long IDLE_TIMEOUT_MS = 5L * 60 * 1000; // 5 minutes
     private static final ConcurrentHashMap<String, BrowserSession> sessions = new ConcurrentHashMap<>();
 
     /**
@@ -369,6 +369,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                 }
                 browserInstalled = true;
             } catch (Exception e) {
+                if (e instanceof InterruptedException) Thread.currentThread().interrupt();
                 browserInstalled = true; // don't retry on every session
                 EventLogger.warn("tool", "Playwright chromium install failed: %s".formatted(e.getMessage()));
             }

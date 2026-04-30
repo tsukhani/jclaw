@@ -361,12 +361,14 @@ public class SkillLoader {
     private static final Pattern DESCRIPTION_VALUE = Pattern.compile("^description:\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
     private static final Pattern TOOLS_VALUE = Pattern.compile("^tools:\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
     private static final Pattern VERSION_VALUE = Pattern.compile("^version:\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
-    private static final Pattern NAME_MULTI = Pattern.compile("^name:\\s*[|>]\\s*\\n((?:  .*\\n?)+)", Pattern.MULTILINE);
-    private static final Pattern DESCRIPTION_MULTI = Pattern.compile("^description:\\s*[|>]\\s*\\n((?:  .*\\n?)+)", Pattern.MULTILINE);
-    private static final Pattern TOOLS_MULTI = Pattern.compile("^tools:\\s*[|>]\\s*\\n((?:  .*\\n?)+)", Pattern.MULTILINE);
-    private static final Pattern VERSION_MULTI = Pattern.compile("^version:\\s*[|>]\\s*\\n((?:  .*\\n?)+)", Pattern.MULTILINE);
+    // S5998: possessive `++` prevents catastrophic backtracking on pathological YAML
+    // input. Equivalent for any valid frontmatter; just refuses to backtrack.
+    private static final Pattern NAME_MULTI = Pattern.compile("^name:\\s*[|>]\\s*\\n((?:  .*\\n?)++)", Pattern.MULTILINE);
+    private static final Pattern DESCRIPTION_MULTI = Pattern.compile("^description:\\s*[|>]\\s*\\n((?:  .*\\n?)++)", Pattern.MULTILINE);
+    private static final Pattern TOOLS_MULTI = Pattern.compile("^tools:\\s*[|>]\\s*\\n((?:  .*\\n?)++)", Pattern.MULTILINE);
+    private static final Pattern VERSION_MULTI = Pattern.compile("^version:\\s*[|>]\\s*\\n((?:  .*\\n?)++)", Pattern.MULTILINE);
     private static final Pattern TOOLS_INLINE_LIST = Pattern.compile("^tools:\\s*\\[(.*?)\\]\\s*$", Pattern.MULTILINE);
-    private static final Pattern TOOLS_BLOCK_LIST = Pattern.compile("^tools:\\s*\\n((?:\\s*-\\s*.*\\n?)+)", Pattern.MULTILINE);
+    private static final Pattern TOOLS_BLOCK_LIST = Pattern.compile("^tools:\\s*\\n((?:\\s*-\\s*.*\\n?)++)", Pattern.MULTILINE);
 
     public static SkillInfo parseSkillFile(Path path) {
         try {
@@ -426,7 +428,7 @@ public class SkillLoader {
             if (items.isEmpty()) return List.of();
             var result = new ArrayList<String>();
             for (var part : items.split(",")) {
-                var cleaned = part.strip().replaceAll("^[\"']|[\"']$", "");
+                var cleaned = part.strip().replaceAll("(?:^[\"'])|(?:[\"']$)", "");
                 if (!cleaned.isEmpty()) result.add(cleaned);
             }
             return result;
@@ -442,7 +444,7 @@ public class SkillLoader {
             for (var line : body.split("\\n")) {
                 var trimmed = line.strip();
                 if (trimmed.startsWith("-")) {
-                    var item = trimmed.substring(1).strip().replaceAll("^[\"']|[\"']$", "");
+                    var item = trimmed.substring(1).strip().replaceAll("(?:^[\"'])|(?:[\"']$)", "");
                     if (!item.isEmpty()) result.add(item);
                 }
             }

@@ -19,7 +19,7 @@ public class EventLogCleanupJob extends Job<Void> {
         var cutoff = Instant.now().minus(retentionDays, ChronoUnit.DAYS);
         var deleted = EventLog.deleteOlderThan(cutoff);
         if (deleted > 0) {
-            EventLogger.info("system", "Cleaned up %d event log entries older than %d days"
+            EventLogger.info("system", "Cleaned up %s event log entries older than %s days"
                     .formatted(deleted, retentionDays));
         }
     }

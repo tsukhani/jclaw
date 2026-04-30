@@ -155,8 +155,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
                     throw new RuntimeException("HTTP %d fetching %s".formatted(code, current));
                 }
 
-                var body = response.body();
-                return body != null ? body.string() : "";
+                return response.body().string();
             }
         }
         throw new RuntimeException("Too many redirects (>%d) fetching %s"
@@ -213,7 +212,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
 
         // Get text with whitespace structure preserved
         doc.outputSettings().prettyPrint(false);
-        var text = doc.body() != null ? doc.body().wholeText() : doc.text();
+        var text = doc.body().wholeText();
 
         // Clean up excessive whitespace while preserving paragraph breaks
         text = text.replaceAll("[ \\t]+", " ")           // Collapse horizontal whitespace

@@ -65,8 +65,8 @@ public class ApiOnboardingController extends Controller {
         if (newMax != existing) {
             ConfigService.set(CONFIG_KEY, String.valueOf(newMax));
             EventLogger.info("onboarding",
-                    "Tour progressed to step %d".formatted(newMax),
-                    "previous=%d".formatted(existing));
+                    "Tour progressed to step %s".formatted(newMax),
+                    "previous=%s".formatted(existing));
         }
         renderJSON(gson.toJson(Map.of("maxStepReached", newMax)));
     }
