@@ -312,23 +312,6 @@ To start an existing deployment (without re-packaging):
 
 The simplest way to run JClaw in production is with Docker Compose. The shipped `docker-compose.yml` pulls the prebuilt image from GHCR, publishes the app on **:9000**, and persists `data/`, `logs/`, `workspace/`, and `skills/` to the host so config and conversations survive restarts.
 
-#### One-time bootstrap
-
-Before the first `docker compose up`, generate a `.env` containing `PLAY_SECRET` (used to sign session cookies — JClaw refuses to start without it). The bundled `bootstrap` profile runs `play secret` inside the published image, so no local Play install is needed:
-
-```bash
-# Create the file first (Docker materializes a missing bind-mount source
-# as a directory, which would break the file write).
-touch .env
-
-# Generate PLAY_SECRET into ./.env via the canonical `play secret` command.
-docker compose --profile bootstrap run --rm bootstrap
-```
-
-Run this once per deployment. To rotate the secret later, re-run the same command — `play secret` overwrites the existing `PLAY_SECRET` line in place and preserves any other variables in `.env`.
-
-#### Running the service
-
 ```bash
 # Start in the background
 docker compose up -d
@@ -342,6 +325,10 @@ docker compose down
 # Run on a custom port (default: 9000)
 JCLAW_PORT=8080 docker compose up -d
 ```
+
+That's it — no `.env` setup needed. On first boot the container's entrypoint generates a 64-character `PLAY_SECRET` (used to sign session cookies) and persists it to `./data/.play-secret`. Subsequent restarts read the same file, so existing user sessions survive across `docker compose down` / `up` cycles. To rotate the secret, delete `./data/.play-secret` and restart the container — all existing `PLAY_SESSION` cookies become invalid, which is the point.
+
+If you'd rather pin the secret yourself (e.g. for multi-host deployments that need a shared cookie key, or rotation managed by your secret-store), drop a `.env` file alongside `docker-compose.yml` with `PLAY_SECRET=<value>` — Compose will forward it into the container and the entrypoint will defer to it instead of generating one.
 
 You can also set `JCLAW_PORT` in `.env` alongside `docker-compose.yml` instead of passing it inline — Compose reads the same file for variable interpolation in the YAML and for the runtime environment of the `jclaw` service.
 

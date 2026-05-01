@@ -99,6 +99,14 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 COPY --from=backend-build /opt /opt
 COPY --from=backend-build /app /app
 
+# Entrypoint resolves PLAY_SECRET on boot — generates and persists one to
+# /app/data/.play-secret on first run, reads it on subsequent runs, or
+# defers to a pre-set $PLAY_SECRET if the operator provided one. See the
+# script header for the full resolution order.
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+
 WORKDIR /app
 
 EXPOSE 9000
