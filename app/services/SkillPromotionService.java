@@ -109,7 +109,14 @@ public class SkillPromotionService {
                             Files.copy(source, staged, StandardCopyOption.REPLACE_EXISTING);
                         }
                     } catch (IOException ex) {
-                        throw new RuntimeException("Failed to copy " + source, ex);
+                        // Append the cause's message so the eventual log/banner
+                        // shows the actual reason (Permission denied, file not
+                        // found, target read-only filesystem, etc.) rather than
+                        // just the source path. The cause itself is preserved
+                        // for stack-trace diagnostics.
+                        throw new RuntimeException(
+                                "Failed to copy " + source.toAbsolutePath() + ": " + ex,
+                                ex);
                     }
                 });
             }
