@@ -267,7 +267,11 @@ public class ApiSkillsController extends Controller {
                     "replaced", replacing
             )));
         } catch (IOException e) {
-            error(500, "Failed to copy skill: " + e.getMessage());
+            // renderText (not error()) so the frontend's drag-and-drop banner
+            // can surface the actual cause — Play's error() returns an HTML
+            // error page that the JSON-fetch caller can't parse for messaging.
+            response.status = 500;
+            renderText("Failed to copy skill: " + e.getMessage());
         }
     }
 

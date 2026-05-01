@@ -243,10 +243,6 @@ function asFetchErrorMessage(err: unknown, fallback: string): string {
   return typeof msg === 'string' ? msg : fallback
 }
 
-function fetchErrorStatus(err: unknown): number | undefined {
-  return (err as { response?: { status?: number } } | undefined)?.response?.status
-}
-
 async function updateAgentSkillFromGlobal(agentId: number, skill: AgentSkill) {
   const skillName = (skill.folderName as string) || skill.name
   try {
@@ -255,13 +251,8 @@ async function updateAgentSkillFromGlobal(agentId: number, skill: AgentSkill) {
     showInfo(`Updated '${skillName}' for this agent`)
   }
   catch (err: unknown) {
-    if (fetchErrorStatus(err) === 400) {
-      showDragError(asFetchErrorMessage(err, 'Update failed'))
-    }
-    else {
-      console.error('Failed to update skill from global:', err)
-      showDragError('Failed to update skill from global')
-    }
+    console.error('Failed to update skill from global:', err)
+    showDragError(asFetchErrorMessage(err, 'Failed to update skill from global'))
   }
 }
 
@@ -355,14 +346,11 @@ async function onAgentDrop(e: DragEvent, agent: Agent) {
     if (existing) showInfo(`Updated '${skillName}' on agent '${agent.name}' to version ${globalVersion}`)
   }
   catch (err: unknown) {
-    if (fetchErrorStatus(err) === 400) {
-      // Missing tools — surface the server's error message to the user
-      showDragError(asFetchErrorMessage(err, 'Cannot add skill to this agent.'))
-    }
-    else {
-      console.error('Failed to copy skill:', err)
-      showDragError('Failed to add skill to agent.')
-    }
+    // Surface the server's plain-text error message regardless of status code.
+    // The backend uses renderText for both 400 (validation/scan failures) and
+    // 500 (IOException during copy), so the body is always parseable here.
+    console.error('Failed to copy skill:', err)
+    showDragError(asFetchErrorMessage(err, 'Failed to add skill to agent.'))
   }
   dragging.value = null
 }
