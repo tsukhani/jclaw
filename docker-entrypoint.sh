@@ -31,12 +31,20 @@ if [ -z "${PLAY_SECRET:-}" ]; then
         PLAY_SECRET=$(cat "$SECRET_FILE")
     else
         mkdir -p "$(dirname "$SECRET_FILE")"
-        # umask 177 → file created with mode 600 from inception; defends
-        # against a race where another process opens the file between
-        # creation and the chmod below.
-        umask 177
         PLAY_SECRET=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 64)
-        printf '%s' "$PLAY_SECRET" > "$SECRET_FILE"
+        # Run the file-write inside a subshell so the restrictive umask
+        # (0177 → mode 0600 on creation) stays scoped to that subshell and
+        # does NOT leak to the JVM exec'd below. A leaked umask of 0177
+        # was the cause of v0.10.74-v0.10.76's "AccessDeniedException on
+        # workspace skill copy" bug: with that umask in effect, every
+        # `Files.createDirectories(...)` the JVM made produced a directory
+        # of mode 0600 — no `x`-bit, hence no traversal — and the next
+        # nested file write would fail with EACCES even though root owned
+        # the dir. Subshell scoping is the load-bearing fix.
+        (
+            umask 177
+            printf '%s' "$PLAY_SECRET" > "$SECRET_FILE"
+        )
         chmod 600 "$SECRET_FILE"
     fi
 fi

@@ -2816,15 +2816,15 @@ function exportConversation() {
 }
 
 .prose-chat table {
-  /* Fixed layout + a common first-column width is what makes separate tables
-     align across the page. When the agent emits one table per category (tools
-     catalog) or a skills table next to a tools table, readers expect the
-     identifier columns to line up; with `auto` layout each table auto-sizes
-     independently, so short rows ("exec") collapse their column tight while
-     wider rows ("filesystem") get wider — the columns visually drift between
-     tables. Fixed layout lets us pin the first column to a consistent width
-     across every table in this bubble. */
-  table-layout: fixed;
+  /* Auto layout — each table sizes its columns from its own content. The
+     prior approach pinned the first column to 14em + nowrap so a tools
+     table and a skills table side-by-side would have aligned identifier
+     columns; that worked for short snake_case identifiers but rendered
+     long-content first columns (e.g. news headlines from daily-briefing)
+     as horizontal overflow that visually overlapped the second column.
+     Cross-table alignment was a niche optimization; correct rendering for
+     any first-column content is the better default. */
+  table-layout: auto;
   border-collapse: collapse;
   margin: 0.5em 0;
   width: 100%;
@@ -2835,17 +2835,6 @@ function exportConversation() {
   padding: 0.4em 0.75em;
   text-align: left;
   vertical-align: top;
-}
-
-/* First column (identifier — tool name, skill name, etc.) pinned to a common
-   width across every prose-chat table. Tool/skill names are snake_case and
-   ≤ ~20 chars by convention, so 14em comfortably fits the longest observed
-   name ("restaurant-recommender") without wrapping while keeping consistent
-   horizontal rhythm across categories. nowrap guards against mid-word wraps
-   if a future identifier pushes past the budget. */
-.prose-chat th:first-child, .prose-chat td:first-child {
-  width: 14em;
-  white-space: nowrap;
 }
 
 /* Light-mode palette (default) */
