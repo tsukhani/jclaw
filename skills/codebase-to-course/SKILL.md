@@ -5,6 +5,7 @@ version: 1.0.0
 author: main
 tools: [filesystem, exec, web_fetch, documents]
 commands: []
+icon: 🎓
 ---
 # Codebase-to-Course
 

@@ -4,6 +4,7 @@ description: Use wacli (WhatsApp CLI) to sync, search, send messages, manage con
 version: 1.2.0
 tools: [exec]
 commands: [wacli]
+icon: 🍎
 ---
 # Commands
 

@@ -7,6 +7,7 @@ import {
   DocumentTextIcon,
   EyeIcon,
   FolderIcon,
+  MagnifyingGlassIcon,
   TrashIcon,
 } from '@heroicons/vue/24/outline'
 import { marked } from 'marked'
@@ -52,6 +53,61 @@ async function loadAllAgentSkills() {
 }
 
 watch(agents, () => loadAllAgentSkills(), { immediate: true })
+
+// Panel filters — case-insensitive substring match against the displayed name.
+// Skills filter on the canonical folderName (falling back to name); agents on
+// `agent.name`. Both lists are alphabetized by display name first so that newly
+// added items land in their correct slot rather than at the end.
+const globalFilter = ref('')
+const agentFilter = ref('')
+
+// Locale-aware, case-insensitive comparator — matches user expectations across
+// mixed-case names without surprising ASCII-order placements (e.g. "Z" before "a").
+const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' })
+
+// `skill-creator` is the seed skill — every other global skill arrives via
+// promotion from an agent that ran skill-creator. Pinning it to the top
+// mirrors the main-agent rule on the right panel: "the structural one is
+// special, the rest are alphabetical." Single source of truth for the check
+// so the sort and the divider's v-if can't drift apart.
+const isSkillCreator = (s?: Skill) => !!s && (s.folderName || s.name) === 'skill-creator'
+
+const filteredSkills = computed(() => {
+  const q = globalFilter.value.trim().toLowerCase()
+  const matched = q
+    ? (skills.value ?? []).filter(s => (s.folderName || s.name).toLowerCase().includes(q))
+    : (skills.value ?? [])
+  return [...matched].sort((a, b) => {
+    if (isSkillCreator(a) !== isSkillCreator(b)) return isSkillCreator(a) ? -1 : 1
+    return byName(a.folderName || a.name, b.folderName || b.name)
+  })
+})
+
+// Agents listing: main agent always first (when it survives the filter), then
+// the remaining agents alphabetically. The main-first rule is structural — it
+// reflects "this is the agent the user converses with by default" — so it sits
+// outside the alphabetical ordering rather than being a special case for
+// names starting with 'm'.
+const filteredAgents = computed(() => {
+  const q = agentFilter.value.trim().toLowerCase()
+  const matched = q
+    ? (agents.value ?? []).filter(a => a.name.toLowerCase().includes(q))
+    : (agents.value ?? [])
+  return [...matched].sort((a, b) => {
+    if (a.isMain !== b.isMain) return a.isMain ? -1 : 1
+    return byName(a.name, b.name)
+  })
+})
+
+// Per-agent skill list, alphabetized by skill name. Memoized via computed so
+// the sort doesn't run on every render — only when the underlying map changes.
+const sortedAgentSkillsMap = computed<Record<number, AgentSkill[]>>(() => {
+  const out: Record<number, AgentSkill[]> = {}
+  for (const [agentId, list] of Object.entries(agentSkillsMap.value)) {
+    out[Number(agentId)] = [...list].sort((a, b) => byName(a.name, b.name))
+  }
+  return out
+})
 
 // Confirm dialog (replaces native window.confirm for destructive actions)
 const { confirm } = useConfirm()
@@ -365,20 +421,6 @@ async function onGlobalSectionDrop(e: DragEvent) {
   })
 }
 
-// --- Agent skill toggle ---
-
-async function toggleAgentSkill(agentId: number, skillName: string, enabled: boolean) {
-  try {
-    await $fetch(`/api/agents/${agentId}/skills/${skillName}`, {
-      method: 'PUT', body: { enabled },
-    })
-    agentSkillsMap.value[agentId] = await $fetch<AgentSkill[]>(`/api/agents/${agentId}/skills`)
-  }
-  catch (e) {
-    console.error('Failed to toggle skill:', e)
-  }
-}
-
 // --- Global skill inline rename ---
 
 const renamingSkill = ref<string | null>(null)
@@ -633,8 +675,8 @@ function totalSkillCount(agentId: number) {
 </script>
 
 <template>
-  <div>
-    <div class="flex items-center justify-between mb-6">
+  <div class="h-full flex flex-col">
+    <div class="flex items-center justify-between mb-6 shrink-0">
       <h1 class="text-lg font-semibold text-fg-strong">
         Skills
       </h1>
@@ -642,7 +684,7 @@ function totalSkillCount(agentId: number) {
 
     <div
       v-if="dragError"
-      class="mb-4 px-3 py-2 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-700 dark:text-red-300 text-xs flex items-start justify-between gap-3"
+      class="mb-4 px-3 py-2 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-red-700 dark:text-red-300 text-xs flex items-start justify-between gap-3 shrink-0"
     >
       <span>{{ dragError }}</span>
       <button
@@ -656,7 +698,7 @@ function totalSkillCount(agentId: number) {
 
     <div
       v-if="infoBanner"
-      class="mb-4 px-3 py-2 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 text-blue-700 dark:text-blue-300 text-xs flex items-start justify-between gap-3"
+      class="mb-4 px-3 py-2 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 text-blue-700 dark:text-blue-300 text-xs flex items-start justify-between gap-3 shrink-0"
     >
       <span>{{ infoBanner }}</span>
       <button
@@ -669,80 +711,154 @@ function totalSkillCount(agentId: number) {
     </div>
 
     <template v-if="!editing">
-      <!-- Agent cards with skills -->
-      <div class="mb-8">
-        <div class="text-xs text-fg-muted uppercase tracking-wider mb-3">
-          Agents
-        </div>
-        <div
-          v-if="!agents?.length"
-          class="bg-surface-elevated border border-border px-4 py-6 text-center text-sm text-fg-muted"
+      <!--
+        Two-column layout: Global Skills (left) | Agents (right).
+        Both columns are flex-1 within a min-h-0 grid so each panel grows to
+        consume the layout's available height; their inner bodies own the
+        vertical scroll, keeping the page header and column headers fixed.
+        Drag-and-drop directions are unchanged from the prior grid layout — a
+        global skill drops onto an agent (assign), an agent skill drops onto
+        the left panel (promote).
+      -->
+      <div class="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- LEFT: Global Skills (draggable + drop target for promotion) -->
+        <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drop target for drag-to-promote; HTML5 drag events have no keyboard equivalent -->
+        <section
+          data-tour="global-skills"
+          :class="[
+            'flex flex-col bg-surface-elevated border min-h-0 transition-all duration-150',
+            dropTargetGlobal ? 'border-emerald-600 dark:border-emerald-500/60 bg-emerald-500/5 ring-1 ring-emerald-500/20' : 'border-border',
+          ]"
+          @dragover="onGlobalSectionDragOver"
+          @dragleave="onGlobalSectionDragLeave"
+          @drop="onGlobalSectionDrop"
         >
-          No agents configured
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drop target for drag-to-promote; HTML5 drag events have no keyboard equivalent -->
-          <div
-            v-for="agent in agents"
-            :key="agent.id"
-            :class="[
-              'bg-surface-elevated border p-4 transition-all duration-150',
-              dropTarget === agent.id
-                ? 'border-emerald-600 dark:border-emerald-500/60 bg-emerald-500/5 ring-1 ring-emerald-500/20'
-                : 'border-border',
-            ]"
-            @dragover="onAgentDragOver($event, agent.id)"
-            @dragleave="onAgentDragLeave(agent.id)"
-            @drop="onAgentDrop($event, agent)"
-          >
-            <!-- Agent header -->
-            <div class="flex items-center justify-between mb-3">
-              <div>
-                <span class="text-sm font-medium text-fg-strong">{{ agent.name }}</span>
-                <span
-                  v-if="agent.isMain"
-                  class="ml-2 text-[10px] text-fg-muted border border-input px-1"
-                >main</span>
+          <!-- Header: title + filter -->
+          <div class="px-3 py-2.5 border-b border-border flex flex-col gap-2 shrink-0">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="text-xs text-fg-muted uppercase tracking-wider">Global Skills</span>
+                <div
+                  v-if="promotingSkills.size"
+                  class="flex items-center gap-1 text-[10px] text-emerald-700 dark:text-emerald-400"
+                >
+                  <ArrowPathIcon
+                    class="w-3 h-3 animate-spin"
+                    aria-hidden="true"
+                  />
+                  Promoting {{ promotingSkills.size }}
+                </div>
               </div>
-              <span class="text-[10px] text-fg-muted">
-                {{ enabledSkillCount(agent.id) }}/{{ totalSkillCount(agent.id) }} skills
+              <span class="text-[10px] text-fg-muted shrink-0 tabular-nums">
+                {{ filteredSkills.length }}{{ globalFilter ? ` / ${skills?.length ?? 0}` : '' }}
               </span>
             </div>
-            <div class="text-xs text-fg-muted mb-3">
-              {{ agent.modelProvider }} / {{ agent.modelId }}
+            <div class="flex items-center gap-2 px-2 py-1 bg-muted border border-input">
+              <MagnifyingGlassIcon
+                class="w-3.5 h-3.5 text-fg-muted shrink-0"
+                aria-hidden="true"
+              />
+              <input
+                v-model="globalFilter"
+                placeholder="Filter skills..."
+                aria-label="Filter global skills by name"
+                class="flex-1 bg-transparent text-xs text-fg-strong placeholder-fg-muted focus:outline-hidden"
+              >
+              <button
+                v-if="globalFilter"
+                class="text-[10px] text-fg-muted hover:text-fg-strong shrink-0"
+                title="Clear filter"
+                @click="globalFilter = ''"
+              >
+                ×
+              </button>
             </div>
+          </div>
 
-            <!-- Agent's skills (draggable for promotion) -->
-            <div
-              v-if="agentSkillsMap[agent.id]?.length"
-              class="space-y-1"
+          <!-- Drop hint when dragging an agent skill over the panel -->
+          <div
+            v-if="dragSource === 'agent' && dropTargetGlobal"
+            class="mx-3 mt-3 border border-dashed border-emerald-600 dark:border-emerald-500/40 py-2 text-center text-[10px] text-emerald-700 dark:text-emerald-400 shrink-0"
+          >
+            Release to promote (secrets will be stripped)
+          </div>
+
+          <!-- Empty state: no globals at all -->
+          <div
+            v-if="!skills?.length && !promotingSkills.size"
+            class="flex-1 flex items-center justify-center px-4 py-6 text-center text-xs text-fg-muted"
+          >
+            No global skills. Create one via the skill-creator skill in an agent workspace, then drag it here to promote.
+          </div>
+
+          <!-- Skills list (compact rows, scrollable) -->
+          <div
+            v-else
+            class="flex-1 overflow-y-auto"
+          >
+            <template
+              v-for="(skill, index) in filteredSkills"
+              :key="skill.folderName || skill.name"
             >
-              <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drag source for skill promotion; HTML5 drag events have no keyboard equivalent -->
+              <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drag source for skill assignment; HTML5 drag events have no keyboard equivalent -->
               <div
-                v-for="skill in agentSkillsMap[agent.id]"
-                :key="skill.name"
                 draggable="true"
-                class="flex items-center justify-between px-2 py-1.5 bg-muted cursor-grab active:cursor-grabbing select-none group"
-                @dragstart="onAgentSkillDragStart($event, skill, agent.id)"
+                :class="[
+                  'group flex items-start gap-2 px-3 py-2 cursor-grab active:cursor-grabbing select-none transition-colors',
+                  index > 0 && !isSkillCreator(filteredSkills[index - 1]) ? 'border-t border-border' : '',
+                  dragging?.name === skill.name && dragSource === 'global' ? 'opacity-50' : 'hover:bg-muted',
+                ]"
+                @dragstart="onGlobalDragStart($event, skill)"
                 @dragend="onDragEnd"
               >
-                <div class="flex items-center gap-2 min-w-0 flex-1">
-                  <span class="text-xs text-fg-strong font-mono truncate">{{ skill.name }}</span>
-                  <button
-                    v-if="updateAvailable(skill)"
-                    class="text-[9px] text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 font-mono hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors shrink-0"
-                    :title="`Update to v${updateAvailable(skill)}`"
-                    @click.stop="updateAgentSkillFromGlobal(agent.id, skill)"
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2">
+                    <span
+                      v-if="skill.icon"
+                      aria-hidden="true"
+                      class="shrink-0 text-xs leading-none"
+                    >{{ skill.icon }}</span>
+                    <template v-if="renamingSkill === (skill.folderName || skill.name)">
+                      <input
+                        ref="renameInput"
+                        v-model="renameValue"
+                        :aria-label="`Rename skill ${skill.folderName || skill.name}`"
+                        class="text-xs text-fg-strong font-mono bg-muted border border-input px-1.5 py-0.5 flex-1 focus:outline-hidden focus:border-emerald-600 dark:focus:border-emerald-500"
+                        @keydown.enter="commitRename(skill)"
+                        @keydown.escape="cancelRename"
+                        @blur="commitRename(skill)"
+                        @click.stop
+                        @mousedown.stop
+                      >
+                    </template>
+                    <template v-else>
+                      <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- double-click to rename is a desktop-style affordance; dblclick has no keyboard equivalent -->
+                      <span
+                        class="text-xs text-fg-strong font-mono truncate min-w-0 flex-1"
+                        @dblclick.stop="startRename(skill)"
+                      >{{ skill.folderName || skill.name }}</span>
+                    </template>
+                    <span class="text-[10px] text-emerald-700 dark:text-emerald-300 font-mono font-semibold shrink-0 bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/50 px-1 py-0.5">v{{ skill.version || '0.0.0' }}</span>
+                  </div>
+                  <div
+                    v-if="skill.description"
+                    class="text-[10px] text-fg-muted truncate mt-0.5"
                   >
-                    update → v{{ updateAvailable(skill) }}
-                  </button>
+                    {{ skill.description }}
+                  </div>
+                  <div
+                    v-if="skill.tools?.length || skill.commands?.length"
+                    class="flex items-center gap-2 mt-1 text-[10px] text-fg-muted"
+                  >
+                    <span v-if="skill.tools?.length">{{ skill.tools.length }} tool{{ skill.tools.length !== 1 ? 's' : '' }}</span>
+                    <span v-if="skill.commands?.length">{{ skill.commands.length }} cmd{{ skill.commands.length !== 1 ? 's' : '' }}</span>
+                  </div>
                 </div>
-                <div class="flex items-center gap-2 shrink-0">
-                  <span class="text-xs text-emerald-700 dark:text-emerald-400 font-mono font-semibold tabular-nums min-w-16 text-right">v{{ skill.version || '0.0.0' }}</span>
+                <div class="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
-                    class="p-1 text-fg-muted hover:text-fg-strong transition-colors opacity-0 group-hover:opacity-100"
+                    class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                     title="View skill"
-                    @click.stop="editAgentSkill(agent.id, skill)"
+                    @click.stop="editSkill(skill)"
                   >
                     <EyeIcon
                       class="w-3.5 h-3.5"
@@ -750,248 +866,244 @@ function totalSkillCount(agentId: number) {
                     />
                   </button>
                   <button
-                    class="p-1 text-fg-muted hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                    v-if="!isSkillCreator(skill)"
+                    class="p-1 text-fg-muted hover:text-red-400 transition-colors"
                     title="Delete skill"
-                    @click.stop="deleteAgentSkill(agent.id, skill)"
+                    @click.stop="deleteSkill(skill)"
                   >
                     <TrashIcon
                       class="w-3.5 h-3.5"
                       aria-hidden="true"
                     />
                   </button>
-                  <label
-                    :for="`skill-toggle-${agent.id}-${skill.name}`"
-                    class="flex items-center"
-                    @click.stop
+                  <!-- Same-geometry spacer when the trash button is suppressed,
+                       so the version-pill column aligns across all rows
+                       regardless of how many actions the skill carries. -->
+                  <span
+                    v-else
+                    aria-hidden="true"
+                    class="p-1 inline-block"
                   >
-                    <span class="sr-only">Enable skill {{ skill.name }}</span>
-                    <input
-                      :id="`skill-toggle-${agent.id}-${skill.name}`"
-                      type="checkbox"
-                      :checked="skill.enabled"
-                      class="accent-emerald-500 scale-90"
-                      @change="(e: Event) => toggleAgentSkill(agent.id, skill.name, (e.target as HTMLInputElement).checked)"
-                    >
-                  </label>
+                    <span class="block w-3.5 h-3.5" />
+                  </span>
                 </div>
               </div>
-            </div>
-            <div
-              v-else
-              class="text-xs text-fg-muted italic"
-            >
-              {{ loadingAgents ? 'Loading...' : 'No skills assigned' }}
-            </div>
 
-            <!-- Drop hint (global → agent) -->
+              <!-- Section divider after skill-creator: same labeled-rule
+                   pattern as the agents panel ("CUSTOM AGENTS"), here naming
+                   the alphabetical group below "CUSTOM SKILLS". Decorative
+                   only — `aria-hidden` keeps it out of the accessibility
+                   tree since the order is already conveyed by the rendered
+                   list. -->
+              <div
+                v-if="isSkillCreator(skill) && index < filteredSkills.length - 1"
+                class="flex items-center gap-3 px-3 py-2.5 select-none"
+                aria-hidden="true"
+              >
+                <span class="h-px flex-1 bg-input" />
+                <span class="text-[10px] font-mono uppercase tracking-[0.15em] text-fg-muted">CUSTOM SKILLS</span>
+                <span class="h-px flex-1 bg-input" />
+              </div>
+            </template>
+
+            <!-- Empty filter result -->
             <div
-              v-if="dragging && dragSource === 'global' && dropTarget !== agent.id"
-              class="mt-3 border border-dashed border-input py-2 text-center text-[10px] text-fg-muted"
+              v-if="!filteredSkills.length && skills?.length"
+              class="px-4 py-6 text-center text-xs text-fg-muted italic"
             >
-              Drop skill here
-            </div>
-            <div
-              v-if="dropTarget === agent.id"
-              class="mt-3 border border-dashed border-emerald-600 dark:border-emerald-500/40 py-2 text-center text-[10px] text-emerald-700 dark:text-emerald-400"
-            >
-              Release to assign
+              No skills match "{{ globalFilter }}"
             </div>
           </div>
-        </div>
-      </div>
+        </section>
 
-      <!-- Global skills (draggable + drop target for promotion) -->
-      <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drop target for drag-to-promote; HTML5 drag events have no keyboard equivalent -->
-      <div
-        data-tour="global-skills"
-        :class="[
-          'transition-all duration-150 p-4 -m-4',
-          dropTargetGlobal ? 'bg-emerald-500/5 ring-1 ring-emerald-500/20 rounded' : '',
-        ]"
-        @dragover="onGlobalSectionDragOver"
-        @dragleave="onGlobalSectionDragLeave"
-        @drop="onGlobalSectionDrop"
-      >
-        <div class="flex items-center gap-3 mb-3">
-          <div class="text-xs text-fg-muted uppercase tracking-wider">
-            Global Skills
+        <!-- RIGHT: Agents (drop targets for skill assignment) -->
+        <section class="flex flex-col bg-surface-elevated border border-border min-h-0">
+          <!-- Header: title + filter -->
+          <div class="px-3 py-2.5 border-b border-border flex flex-col gap-2 shrink-0">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs text-fg-muted uppercase tracking-wider">Agent Skills</span>
+              <span class="text-[10px] text-fg-muted shrink-0 tabular-nums">
+                {{ filteredAgents.length }}{{ agentFilter ? ` / ${agents?.length ?? 0}` : '' }}
+              </span>
+            </div>
+            <div class="flex items-center gap-2 px-2 py-1 bg-muted border border-input">
+              <MagnifyingGlassIcon
+                class="w-3.5 h-3.5 text-fg-muted shrink-0"
+                aria-hidden="true"
+              />
+              <input
+                v-model="agentFilter"
+                placeholder="Filter agents..."
+                aria-label="Filter agents by name"
+                class="flex-1 bg-transparent text-xs text-fg-strong placeholder-fg-muted focus:outline-hidden"
+              >
+              <button
+                v-if="agentFilter"
+                class="text-[10px] text-fg-muted hover:text-fg-strong shrink-0"
+                title="Clear filter"
+                @click="agentFilter = ''"
+              >
+                ×
+              </button>
+            </div>
           </div>
+
+          <!-- Empty state -->
           <div
-            v-if="promotingSkills.size"
-            class="flex items-center gap-1.5 text-[10px] text-emerald-700 dark:text-emerald-400"
+            v-if="!agents?.length"
+            class="flex-1 flex items-center justify-center px-4 py-6 text-sm text-fg-muted"
           >
-            <ArrowPathIcon
-              class="w-3 h-3 animate-spin"
-              aria-hidden="true"
-            />
-            Promoting {{ promotingSkills.size }} skill{{ promotingSkills.size > 1 ? 's' : '' }}...
+            No agents configured
           </div>
-        </div>
-        <div class="text-[10px] text-fg-muted mb-3">
-          Drag a skill onto an agent above to assign it. Drag an agent skill here to promote it.
-        </div>
 
-        <!-- Drop hint when dragging agent skill over global section -->
-        <div
-          v-if="dragSource === 'agent' && dropTargetGlobal"
-          class="mb-3 border border-dashed border-emerald-600 dark:border-emerald-500/40 py-3 text-center text-xs text-emerald-700 dark:text-emerald-400"
-        >
-          Release to promote to global registry (secrets will be stripped)
-        </div>
-
-        <div
-          v-if="!skills?.length && !promotingSkills.size"
-          class="bg-surface-elevated border border-border px-4 py-6 text-center text-sm text-fg-muted"
-        >
-          No global skills. Create one via the skill-creator skill in an agent workspace, then drag it here to promote.
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          <!--
-            Card layout: three explicitly bordered segments stacked top-to-bottom
-            (HEADER → TOOLS → COMMANDS) followed by a flex-grow spacer and the
-            action row. Each segment has a consistent `min-h` so that TOOLS and
-            COMMANDS align across cards in a row regardless of description
-            length or how many pills each skill carries. The capabilities
-            segments always render (even for zero tools / zero commands) so the
-            alignment holds uniformly across the whole grid — empty state is a
-            dimmed em-dash, not a hidden block.
-          -->
-          <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drag source for skill promotion; HTML5 drag events have no keyboard equivalent -->
+          <!-- Agent list (each agent stacked vertically, scrollable). The main
+               agent is followed by a labeled section divider — a small
+               monospaced "CUSTOM AGENTS" caption flanked by thin rules — that reads as
+               a typographic section break rather than yet another row
+               separator. The row immediately after the divider skips its own
+               top border so the divider's right-hand rule isn't doubled. -->
           <div
-            v-for="skill in skills"
-            :key="skill.folderName || skill.name"
-            draggable="true"
-            :class="[
-              'bg-surface-elevated border border-border flex flex-col cursor-grab active:cursor-grabbing transition-all duration-150 select-none overflow-hidden',
-              dragging?.name === skill.name && dragSource === 'global' ? 'opacity-50 scale-95' : 'hover:border-input',
-            ]"
-            @dragstart="onGlobalDragStart($event, skill)"
-            @dragend="onDragEnd"
+            v-else
+            class="flex-1 overflow-y-auto"
           >
-            <!-- HEADER segment: identity + description.
-                 Description is line-clamped so header heights match across cards;
-                 full description is visible on the detail page (eye icon). -->
-            <div class="p-4">
-              <div class="flex items-start justify-between gap-2 mb-1">
-                <template v-if="renamingSkill === (skill.folderName || skill.name)">
-                  <input
-                    ref="renameInput"
-                    v-model="renameValue"
-                    :aria-label="`Rename skill ${skill.folderName || skill.name}`"
-                    class="text-sm text-fg-strong font-mono bg-muted border border-input px-1.5 py-0.5 w-full mr-2 focus:outline-hidden focus:border-emerald-600 dark:focus:border-emerald-500"
-                    @keydown.enter="commitRename(skill)"
-                    @keydown.escape="cancelRename"
-                    @blur="commitRename(skill)"
-                    @click.stop
-                    @mousedown.stop
+            <template
+              v-for="(agent, index) in filteredAgents"
+              :key="agent.id"
+            >
+              <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drop target for skill assignment; HTML5 drag events have no keyboard equivalent -->
+              <div
+                :class="[
+                  'p-3 transition-all duration-150',
+                  index > 0 && !filteredAgents[index - 1]?.isMain ? 'border-t border-border' : '',
+                  dropTarget === agent.id ? 'bg-emerald-500/5 ring-1 ring-emerald-500/20 ring-inset' : '',
+                ]"
+                @dragover="onAgentDragOver($event, agent.id)"
+                @dragleave="onAgentDragLeave(agent.id)"
+                @drop="onAgentDrop($event, agent)"
+              >
+                <!-- Agent header -->
+                <div class="flex items-center justify-between gap-2 mb-1">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="text-sm font-medium text-fg-strong truncate">{{ agent.name }}</span>
+                    <span
+                      v-if="agent.isMain"
+                      class="text-[10px] text-fg-muted border border-input px-1 shrink-0"
+                    >main</span>
+                  </div>
+                  <span class="text-[10px] text-fg-muted shrink-0 tabular-nums">
+                    {{ enabledSkillCount(agent.id) }}/{{ totalSkillCount(agent.id) }}
+                  </span>
+                </div>
+                <div class="text-[10px] text-fg-muted mb-2 truncate">
+                  {{ agent.modelProvider }} / {{ agent.modelId }}
+                </div>
+
+                <!-- Agent's skills (draggable for promotion). Enable/disable
+                   toggling lives on the Agents page; this panel is read-only
+                   for the enabled state. -->
+                <div
+                  v-if="sortedAgentSkillsMap[agent.id]?.length"
+                  class="space-y-1"
+                >
+                  <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drag source for skill promotion; HTML5 drag events have no keyboard equivalent -->
+                  <div
+                    v-for="skill in sortedAgentSkillsMap[agent.id]"
+                    :key="skill.name"
+                    draggable="true"
+                    class="flex items-center justify-between px-2 py-1 bg-muted cursor-grab active:cursor-grabbing select-none group/skill"
+                    @dragstart="onAgentSkillDragStart($event, skill, agent.id)"
+                    @dragend="onDragEnd"
                   >
-                </template>
-                <template v-else>
-                  <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- double-click to rename is a desktop-style affordance; dblclick has no keyboard equivalent -->
-                  <span
-                    class="text-sm text-fg-strong font-mono cursor-text min-w-0 break-all"
-                    @dblclick.stop="startRename(skill)"
-                  >{{ skill.folderName || skill.name }}</span>
-                </template>
-                <span class="text-xs text-emerald-700 dark:text-emerald-300 font-mono font-semibold shrink-0 bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/50 px-1.5 py-0.5">v{{ skill.version || '0.0.0' }}</span>
-              </div>
-              <div
-                v-if="skill.name !== (skill.folderName || skill.name)"
-                class="text-[10px] text-fg-muted"
-              >
-                name: {{ skill.name }}
-              </div>
-              <div
-                v-if="skill.author"
-                class="text-[10px] text-fg-muted"
-              >
-                by <span class="font-mono text-fg-muted">{{ skill.author }}</span>
-              </div>
-              <div class="text-xs text-fg-muted mt-2 line-clamp-4">
-                {{ skill.description || '(no description)' }}
-              </div>
-            </div>
-
-            <!-- TOOLS segment -->
-            <div class="px-4 py-3 border-t border-border">
-              <div class="text-[10px] font-medium text-fg-muted uppercase tracking-wider mb-1.5">
-                Tools
-              </div>
-              <div
-                v-if="skill.tools?.length"
-                class="flex flex-wrap gap-1"
-              >
-                <span
-                  v-for="tool in skill.tools"
-                  :key="'t:' + tool"
-                  class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm"
-                  :class="getPillClass(tool)"
+                    <div class="flex items-center gap-2 min-w-0 flex-1">
+                      <span
+                        v-if="skill.icon"
+                        aria-hidden="true"
+                        class="shrink-0 text-xs leading-none"
+                      >{{ skill.icon }}</span>
+                      <span class="text-xs text-fg-strong font-mono truncate">{{ skill.name }}</span>
+                      <button
+                        v-if="updateAvailable(skill)"
+                        class="text-[9px] text-amber-700 dark:text-amber-400 border border-amber-300 dark:border-amber-700/40 bg-amber-50 dark:bg-amber-900/20 px-1.5 py-0.5 font-mono hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors shrink-0"
+                        :title="`Update to v${updateAvailable(skill)}`"
+                        @click.stop="updateAgentSkillFromGlobal(agent.id, skill)"
+                      >
+                        → v{{ updateAvailable(skill) }}
+                      </button>
+                    </div>
+                    <div class="flex items-center gap-1 shrink-0">
+                      <span class="text-[10px] text-emerald-700 dark:text-emerald-300 font-mono font-semibold shrink-0 bg-emerald-100 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-800/50 px-1 py-0.5">v{{ skill.version || '0.0.0' }}</span>
+                      <button
+                        class="p-1 text-fg-muted hover:text-fg-strong transition-colors opacity-0 group-hover/skill:opacity-100"
+                        title="View skill"
+                        @click.stop="editAgentSkill(agent.id, skill)"
+                      >
+                        <EyeIcon
+                          class="w-3.5 h-3.5"
+                          aria-hidden="true"
+                        />
+                      </button>
+                      <button
+                        class="p-1 text-fg-muted hover:text-red-400 transition-colors opacity-0 group-hover/skill:opacity-100"
+                        title="Delete skill"
+                        @click.stop="deleteAgentSkill(agent.id, skill)"
+                      >
+                        <TrashIcon
+                          class="w-3.5 h-3.5"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div
+                  v-else
+                  class="text-[10px] text-fg-muted italic"
                 >
-                  {{ tool }}
-                </span>
-              </div>
-              <div
-                v-else
-                class="text-[10px] text-fg-muted"
-              >
-                —
-              </div>
-            </div>
+                  {{ loadingAgents ? 'Loading...' : 'No skills assigned' }}
+                </div>
 
-            <!-- COMMANDS segment -->
-            <div class="px-4 py-3 border-t border-border">
-              <div class="text-[10px] font-medium text-fg-muted uppercase tracking-wider mb-1.5">
-                Commands
-              </div>
-              <div
-                v-if="skill.commands?.length"
-                class="flex flex-wrap gap-1"
-              >
-                <span
-                  v-for="cmd in skill.commands"
-                  :key="'c:' + cmd"
-                  class="text-[10px] font-mono px-1.5 py-0.5 bg-cyan-50 dark:bg-cyan-900/20 border border-cyan-200 dark:border-cyan-800/40 rounded-sm text-cyan-700 dark:text-cyan-300"
+                <!-- Drop hint (global → agent). Only shown while a global skill is
+                   being dragged AND this agent isn't already the active drop target. -->
+                <div
+                  v-if="dragging && dragSource === 'global' && dropTarget !== agent.id"
+                  class="mt-2 border border-dashed border-input py-1.5 text-center text-[10px] text-fg-muted"
                 >
-                  {{ cmd }}
-                </span>
+                  Drop skill here
+                </div>
+                <div
+                  v-if="dropTarget === agent.id"
+                  class="mt-2 border border-dashed border-emerald-600 dark:border-emerald-500/40 py-1.5 text-center text-[10px] text-emerald-700 dark:text-emerald-400"
+                >
+                  Release to assign
+                </div>
               </div>
+
+              <!-- Section divider after the main agent: a small monospaced
+                   "CUSTOM AGENTS" label flanked by 1px rules in the same neutral
+                   `bg-input` shade as the badge borders elsewhere on the
+                   page. Decorative-only (`aria-hidden`) — the screen-reader
+                   experience already conveys ordering through the rendered
+                   list itself. -->
               <div
-                v-else
-                class="text-[10px] text-fg-muted"
+                v-if="agent.isMain && index < filteredAgents.length - 1"
+                class="flex items-center gap-3 px-3 py-2.5 select-none"
+                aria-hidden="true"
               >
-                —
+                <span class="h-px flex-1 bg-input" />
+                <span class="text-[10px] font-mono uppercase tracking-[0.15em] text-fg-muted">CUSTOM AGENTS</span>
+                <span class="h-px flex-1 bg-input" />
               </div>
-            </div>
+            </template>
 
-            <!-- Flex spacer pushes action row to the bottom of the card -->
-            <div class="flex-1" />
-
-            <!-- ACTIONS, bottom-aligned -->
-            <div class="px-4 py-2 border-t border-border flex items-center justify-end gap-2">
-              <button
-                class="p-1.5 text-fg-muted hover:text-fg-strong transition-colors"
-                title="View skill"
-                @click.stop="editSkill(skill)"
-              >
-                <EyeIcon
-                  class="w-4 h-4"
-                  aria-hidden="true"
-                />
-              </button>
-              <button
-                v-if="(skill.folderName || skill.name) !== 'skill-creator'"
-                class="p-1.5 text-fg-muted hover:text-red-400 transition-colors"
-                title="Delete skill"
-                @click.stop="deleteSkill(skill)"
-              >
-                <TrashIcon
-                  class="w-4 h-4"
-                  aria-hidden="true"
-                />
-              </button>
+            <!-- Empty filter result -->
+            <div
+              v-if="!filteredAgents.length && agents?.length"
+              class="px-4 py-6 text-center text-xs text-fg-muted italic"
+            >
+              No agents match "{{ agentFilter }}"
             </div>
           </div>
-        </div>
+        </section>
       </div>
     </template>
 

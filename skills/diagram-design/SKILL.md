@@ -5,6 +5,7 @@ version: 1.0.1
 author: main
 tools: [filesystem, web_fetch, documents]
 commands: []
+icon: 📐
 ---
 # Diagram Design
 

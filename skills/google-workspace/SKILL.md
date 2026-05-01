@@ -3,6 +3,7 @@ name: google-workspace
 description: Interact with Google Workspace services (Drive, Gmail, Sheets, Docs, Calendar, etc.) using the Google Workspace CLI
 version: 1.0.0
 tools: [exec]
+icon: 🗂️
 ---
 
 # Google Workspace

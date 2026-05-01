@@ -3,6 +3,7 @@ name: mcp
 description: Connect JClaw to Model Context Protocol (MCP) servers for structured tool access and cross-platform integrations
 version: 1.0.0
 tools: [exec, filesystem]
+icon: 🔌
 ---
 
 # MCP - Model Context Protocol Integration

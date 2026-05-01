@@ -3,6 +3,7 @@ name: restaurant-recommender
 description: Search the web for highest-rated restaurants in a specified city and provide findings directly in chat with names, ratings, reviews, and contact information.
 version: 1.0.2
 tools: [web_search, web_fetch]
+icon: 🍽️
 ---
 # Restaurant Recommender
 

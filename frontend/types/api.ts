@@ -196,6 +196,8 @@ export interface Skill {
   tools?: string[]
   /** Shell commands this skill contributes to an installing agent's allowlist. */
   commands?: string[]
+  /** Optional emoji or symbol from the SKILL.md `icon:` frontmatter; empty string when not declared. */
+  icon?: string
   [key: string]: unknown
 }
 
@@ -269,6 +271,8 @@ export interface AgentSkill {
   tools?: string[]
   /** Shell commands this skill contributes to the effective allowlist. */
   commands?: string[]
+  /** Optional emoji or symbol from the SKILL.md `icon:` frontmatter; empty string when not declared. */
+  icon?: string
   [key: string]: unknown
 }
 

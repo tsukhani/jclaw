@@ -5,6 +5,7 @@ version: 1.0.1
 author: main
 tools: [filesystem, exec, documents]
 commands: []
+icon: 🖼️
 ---
 
 # Visual Explainer

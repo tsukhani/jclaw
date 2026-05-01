@@ -475,6 +475,7 @@ public class ApiSkillsController extends Controller {
         map.put("tools", s.tools() != null ? s.tools() : List.of());
         map.put("commands", s.commands() != null ? s.commands() : List.of());
         map.put("author", s.author() != null ? s.author() : "");
+        map.put("icon", s.icon() != null ? s.icon() : "");
         map.put("version", s.version() != null ? s.version() : "0.0.0");
         // Folder name = parent directory name of the SKILL.md file
         if (s.location() != null && s.location().getParent() != null) {

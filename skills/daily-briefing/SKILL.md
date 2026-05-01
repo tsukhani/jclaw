@@ -3,6 +3,7 @@ name: daily-briefing
 description: Generate a daily briefing with tech news, business news, world news, local weather, and upcoming events based on user's city, including the generation time
 version: 1.1.3
 tools: [datetime, web_search, web_fetch]
+icon: 📰
 ---
 # Daily Briefing
 

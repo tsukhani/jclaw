@@ -3,6 +3,7 @@ name: whatsapp-wacli-linux
 description: Use wacli (WhatsApp CLI) to sync, search, send messages, manage contacts/groups, and backfill chat history. REQUIRES AUTHENTICATION FIRST. Linux x86_64 binary.
 version: 1.0.0
 tools: [exec]
+icon: 🐧
 ---
 
 # WhatsApp wacli Skill
