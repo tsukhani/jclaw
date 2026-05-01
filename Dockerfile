@@ -66,9 +66,14 @@ FROM azul/zulu-openjdk:25-jre-headless-latest AS runtime
 
 LABEL org.opencontainers.image.source=https://github.com/tsukhani/jclaw
 
-# Playwright/Chromium shared libs + python3 for Play's CLI wrapper.
+# Playwright/Chromium shared libs, python3 for Play's CLI wrapper, and
+# tesseract-ocr for DocumentsTool's OCR path (image-only PDFs, scanned
+# documents). apt resolves the right arch under buildx's per-platform
+# build, so multi-arch images get matching binaries automatically; non-
+# English language packs install separately as tesseract-ocr-<lang>.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 \
+        tesseract-ocr \
         libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 \
         libcairo2 libcups2 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0 \
         libnspr4 libnss3 libpango-1.0-0 libwayland-client0 libx11-6 \

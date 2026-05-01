@@ -2835,6 +2835,15 @@ function exportConversation() {
   padding: 0.4em 0.75em;
   text-align: left;
   vertical-align: top;
+
+  /* Override the `.prose-chat { overflow-wrap: anywhere }` inherited from
+     the wrapper. `anywhere` lets the table-layout algorithm shrink columns
+     to a 1ch min-content size, which on auto-layout was breaking short
+     identifiers ("exec", "filesystem") character-by-character. `break-word`
+     keeps the long-URL behavior — content still wraps when it would
+     overflow — but pins the min-content size to the longest word, so
+     auto-layout sizes each column to fit its widest cell. */
+  overflow-wrap: break-word;
 }
 
 /* Light-mode palette (default) */
