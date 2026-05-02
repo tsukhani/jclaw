@@ -68,7 +68,7 @@ const steps: TourStep[] = [
     path: '/skills',
     selector: '[data-tour="global-skills"]',
     title: 'Add skills (optional)',
-    description: 'The <strong>Global Skills</strong> registry holds reusable capabilities you can attach to any agent — drag a skill onto an agent card above to assign it.',
+    description: 'The <strong>Global Skills</strong> registry holds reusable capabilities you can attach to any agent — drag a skill onto an agent card in the Agents panel to assign it.',
   },
   {
     path: '/channels',
