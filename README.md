@@ -336,10 +336,31 @@ The container runs in production mode — the Nuxt SPA is already built into the
 
 #### Browser-trusted HTTPS
 
-The container also exposes HTTPS on **:9443** (with HTTP/3 over the same UDP port) using a self-signed TLS cert generated at `certs/host.cert` on first boot. HTTPS works as-is but browsers show a cert-warning interstitial, and Chrome refuses HTTP/3 entirely — QUIC requires the cert to be in the system trust store. To get browser-trusted HTTPS plus working HTTP/3, sign the cert with [mkcert](https://github.com/FiloSottile/mkcert)'s local CA from your host:
+The container also exposes HTTPS on **:9443** (with HTTP/3 over the same UDP port) using a self-signed TLS cert generated at `certs/host.cert` on first boot. HTTPS works as-is but browsers show a cert-warning interstitial, and Chrome refuses HTTP/3 entirely — QUIC requires the cert to be in the system trust store. To get browser-trusted HTTPS plus working HTTP/3, sign the cert with [mkcert](https://github.com/FiloSottile/mkcert)'s local CA from your host. Install mkcert via your platform's package manager:
 
 ```bash
-brew install mkcert              # macOS; Linux/Windows: see mkcert docs
+# macOS
+brew install mkcert
+
+# Debian / Ubuntu (22.04+)
+sudo apt install mkcert libnss3-tools
+
+# Fedora / RHEL
+sudo dnf install mkcert nss-tools
+
+# Arch
+sudo pacman -S mkcert nss
+
+# Windows
+choco install mkcert
+# or: scoop bucket add extras && scoop install mkcert
+```
+
+For older distros that don't package mkcert, grab the prebuilt binary from [the mkcert releases page](https://github.com/FiloSottile/mkcert/releases) and install `libnss3-tools` (Debian/Ubuntu) or `nss-tools` (Fedora) separately so mkcert can register with Firefox.
+
+Then trust the local CA, regenerate the cert, and restart the container:
+
+```bash
 sudo mkcert -install             # adds mkcert's CA to the system trust store (and Firefox NSS if installed)
 ./jclaw.sh cert                  # regenerates certs/host.cert + host.key, signed by the CA
 docker compose restart jclaw     # JVM reloads the new cert at boot
