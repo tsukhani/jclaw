@@ -1,0 +1,64 @@
+name: CodeQL
+
+# GitHub Advanced Security CodeQL scan for both languages this repo ships.
+# build-mode: none on Java avoids having to wire up the play1 fork on the
+# analysis runner — CodeQL extracts source directly without a build, which
+# is enough to flag the security and quality patterns we care about. JS/TS
+# uses build-mode: none by default.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly Monday 06:00 UTC — picks up newly published rules without
+    # waiting for the next push. Off-peak so it does not compete with the
+    # weekday push/PR runs for runner minutes.
+    - cron: '0 6 * * 1'
+
+# Single run per ref; a newer push supersedes any in-flight scan.
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      # CodeQL uploads SARIF results to GitHub's security tab.
+      security-events: write
+      # Required by actions/checkout for private repos and to read the
+      # commit metadata CodeQL stamps onto its results.
+      contents: read
+      # PR scans annotate the PR with results — needs read on actions to
+      # correlate the scan to the triggering workflow run.
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: java-kotlin
+            build-mode: none
+          - language: javascript-typescript
+            build-mode: none
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # security-and-quality bundles the security-extended pack with
+          # the additional quality queries — broader than the default
+          # security pack but still tuned for actionable findings.
+          queries: security-and-quality
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}

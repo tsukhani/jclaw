@@ -1,0 +1,73 @@
+name: Check
+
+# Frontend-only green-build gate. Runs the same scripts the local pre-commit
+# and pre-push hooks gate on, plus pnpm audit. Backend (play autotest) is
+# intentionally NOT in CI here: it depends on the custom play1 fork at
+# github.com/tsukhani/play1, which would have to be cloned and built on
+# every runner. The pre-push hook already runs play autotest locally on
+# every push to either remote, so the backend safety net stays — just
+# off the GitHub-side critical path.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel an in-flight run when a newer commit lands on the same ref.
+# Keeps the actions queue tidy and never blocks a fresh push behind a
+# stale rebased branch.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend (lint, typecheck, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      # corepack reads the packageManager field in frontend/package.json
+      # (pnpm@<version>+sha512-...) and downloads the exact pinned version
+      # the first time it's invoked, verifying the integrity hash on every
+      # subsequent run. Mirrors the local ./jclaw.sh start flow described
+      # in CLAUDE.md so CI uses the same pnpm the maintainer's machine does.
+      - name: Enable corepack and pin pnpm
+        run: |
+          corepack enable
+          corepack install
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Stylelint
+        run: pnpm stylelint
+
+      - name: Unit tests
+        run: pnpm test
+
+      # pnpm audit runs against the npm advisory DB at job time, so a new
+      # advisory landing on a transitive dep can fail an unrelated PR. Keep
+      # it informational with continue-on-error so it surfaces in the run
+      # summary without gating merges. Tighten to a hard gate by removing
+      # the continue-on-error line if the team prefers.
+      - name: Audit (informational)
+        run: pnpm audit
+        continue-on-error: true
