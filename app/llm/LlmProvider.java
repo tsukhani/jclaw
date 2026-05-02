@@ -590,11 +590,19 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
          * Accumulated reasoning text across all streamed deltas. Populated even
          * when the provider doesn't report {@code reasoning_tokens} in the usage
          * block, so callers can estimate a token count from the text length when
-         * needed (see {@code AgentRunner.emitUsageAndComplete}). Appending is
-         * synchronized because the streaming callback fires on a virtual thread
-         * distinct from the consumer reading {@link #reasoningChars()}.
+         * needed (see {@code AgentRunner.emitUsageAndComplete}).
+         *
+         * <p>Guarded by {@link #reasoningLock} (a {@link java.util.concurrent.locks.ReentrantLock}
+         * rather than {@code synchronized}). The streaming callback fires on
+         * an OkHttp virtual thread; under JEP-444 a {@code synchronized} block
+         * pins the carrier for the duration of the lock — directly contradicting
+         * the architecture rationale ("zero Thread is pinned events"). A
+         * {@code ReentrantLock} parks the virtual thread instead, allowing
+         * the carrier to be reused for other work.
          */
         private final StringBuilder reasoningTextBuffer = new StringBuilder();
+        private final java.util.concurrent.locks.ReentrantLock reasoningLock =
+                new java.util.concurrent.locks.ReentrantLock();
         public volatile Usage usage;
         // Wall-clock nanoTime at first and latest reasoning chunk. Both remain 0
         // when the model emitted no reasoning. reasoningEndNanos is updated on
@@ -616,12 +624,17 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         public volatile long firstContentNanos = 0L;
         private final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
 
-        public synchronized void appendReasoningText(String text) {
+        public void appendReasoningText(String text) {
             if (text == null) return;
-            reasoningTextBuffer.append(text);
-            var now = System.nanoTime();
-            if (reasoningStartNanos == 0L) reasoningStartNanos = now;
-            reasoningEndNanos = now;
+            reasoningLock.lock();
+            try {
+                reasoningTextBuffer.append(text);
+                var now = System.nanoTime();
+                if (reasoningStartNanos == 0L) reasoningStartNanos = now;
+                reasoningEndNanos = now;
+            } finally {
+                reasoningLock.unlock();
+            }
         }
 
         /**
@@ -637,16 +650,28 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
          * Multi-chunk reasoning is unaffected (reasoningEndNanos was already
          * advanced past reasoningStartNanos via prior appends).
          */
-        public synchronized void noteFirstContentChunk() {
-            if (firstContentNanos != 0L) return;
-            firstContentNanos = System.nanoTime();
-            if (reasoningStartNanos != 0L && reasoningEndNanos == reasoningStartNanos) {
-                reasoningEndNanos = firstContentNanos;
+        public void noteFirstContentChunk() {
+            reasoningLock.lock();
+            try {
+                if (firstContentNanos != 0L) return;
+                firstContentNanos = System.nanoTime();
+                if (reasoningStartNanos != 0L && reasoningEndNanos == reasoningStartNanos) {
+                    reasoningEndNanos = firstContentNanos;
+                }
+            } finally {
+                reasoningLock.unlock();
             }
         }
 
         /** Character count of accumulated reasoning text. Used for token estimation. */
-        public synchronized int reasoningChars() { return reasoningTextBuffer.length(); }
+        public int reasoningChars() {
+            reasoningLock.lock();
+            try {
+                return reasoningTextBuffer.length();
+            } finally {
+                reasoningLock.unlock();
+            }
+        }
 
         /**
          * Full streamed reasoning text for this round. Returned as a plain
@@ -654,7 +679,14 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
          * downstream consumers without racing against concurrent appends on
          * the streaming thread.
          */
-        public synchronized String reasoningText() { return reasoningTextBuffer.toString(); }
+        public String reasoningText() {
+            reasoningLock.lock();
+            try {
+                return reasoningTextBuffer.toString();
+            } finally {
+                reasoningLock.unlock();
+            }
+        }
 
         /**
          * Milliseconds spent in the reasoning phase, or 0 when no reasoning was
