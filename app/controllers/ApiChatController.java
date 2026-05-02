@@ -35,6 +35,38 @@ public class ApiChatController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    /**
+     * Pre-built SSE-frame fragments for the per-chunk callbacks fired by
+     * the streaming pipeline. The token + reasoning frames fire 50-200
+     * times per second per active stream; at modest concurrency the prior
+     * {@code sse.send(Map.of(...))} path was the dominant allocator on
+     * the hot path (one HashMap per chunk, plus Gson's StringBuilder /
+     * JsonWriter / intermediate strings, plus a fresh byte[] for the
+     * formatted frame). The bytes here are immutable shared prefixes;
+     * the only per-frame allocation is the JSON-escaped content string
+     * and the final concatenated byte array.
+     *
+     * <p>Newlines in the token content are NOT a framing hazard:
+     * {@code gson.toJson(String)} escapes {@code \n} to {@code \\n}, so
+     * the resulting JSON is a single line and the only literal newlines
+     * in the frame are the spec-mandated {@code \n\n} terminator.
+     */
+    private static final byte[] SSE_TOKEN_PREFIX =
+            "data: {\"type\":\"token\",\"content\":".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    private static final byte[] SSE_REASONING_PREFIX =
+            "data: {\"type\":\"reasoning\",\"content\":".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    private static final byte[] SSE_FRAME_SUFFIX =
+            "}\n\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+    private static void sendChunkFrame(play.mvc.SseStream sse, byte[] prefix, String content) {
+        var contentBytes = gson.toJson(content).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var frame = new byte[prefix.length + contentBytes.length + SSE_FRAME_SUFFIX.length];
+        System.arraycopy(prefix, 0, frame, 0, prefix.length);
+        System.arraycopy(contentBytes, 0, frame, prefix.length, contentBytes.length);
+        System.arraycopy(SSE_FRAME_SUFFIX, 0, frame, prefix.length + contentBytes.length, SSE_FRAME_SUFFIX.length);
+        sse.sendRaw(frame);
+    }
+
     /** Validated prologue shared by send() and streamChat(). */
     private record ChatContext(Agent agent, String message, Long conversationId, String username,
                                 java.util.List<services.AttachmentService.Input> attachments) {}
@@ -412,13 +444,17 @@ public class ApiChatController extends Controller {
                 },
                 token -> {
                     if (firstToken.compareAndSet(true, false)) {
+                        // First-token path keeps the timestamp field for TTFT
+                        // visualization. Fires once per turn, so the extra
+                        // HashMap allocation isn't worth the pre-built-frame
+                        // dance the steady-state path uses.
                         sse.send(Map.of("type", "token", "content", token,
                                 "timestamp", java.time.Instant.now().toString()));
                     } else {
-                        sse.send(Map.of("type", "token", "content", token));
+                        sendChunkFrame(sse, SSE_TOKEN_PREFIX, token);
                     }
                 },
-                reasoning -> sse.send(Map.of("type", "reasoning", "content", reasoning)),
+                reasoning -> sendChunkFrame(sse, SSE_REASONING_PREFIX, reasoning),
                 status -> sse.send(Map.of("type", "status", "content", status)),
                 // JCLAW-170: tool-call frame. structuredJson rides as a raw
                 // JsonElement (not a nested string) so the frontend can parse

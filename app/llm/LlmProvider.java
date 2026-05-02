@@ -158,11 +158,16 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      * {@code prompt_tokens_details.cached_tokens}), so re-scan the raw chunk JSON
      * via the template methods and replace Usage if we found more. Cheap — only
      * runs on the final chunk that carries the usage block.
+     *
+     * <p>Takes the already-parsed {@link JsonObject} instead of the raw string so
+     * we don't pay {@link JsonParser#parseString} twice per chunk (once
+     * implicitly inside {@code gson.fromJson} and once here). Caller in
+     * {@link #chatStream} parses the SSE data field once and reuses the tree
+     * for both the field-mapping and the usage augmentation pass.
      */
-    private ChatCompletionChunk augmentChunkUsage(ChatCompletionChunk chunk, String rawData) {
+    private ChatCompletionChunk augmentChunkUsage(ChatCompletionChunk chunk, JsonObject root) {
         if (chunk.usage() == null) return chunk;
         try {
-            var root = JsonParser.parseString(rawData).getAsJsonObject();
             if (!root.has("usage") || root.get("usage").isJsonNull()) return chunk;
             var usageObj = root.getAsJsonObject("usage");
             int reasoning = Math.max(chunk.usage().reasoningTokens(), extractReasoningTokens(usageObj));
@@ -221,10 +226,16 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                             // The server closes the stream right after the [DONE]
                             // sentinel, so we skip parsing it here.
                             if ("[DONE]".equals(data)) return;
+                            // Parse once, reuse for both deserialization and usage
+                            // augmentation. The previous implementation parsed
+                            // twice on every final-usage chunk: once implicitly
+                            // inside gson.fromJson(String, Class), once explicitly
+                            // inside augmentChunkUsage via JsonParser.parseString.
                             try {
-                                var chunk = gson.fromJson(data, ChatCompletionChunk.class);
-                                if (chunk != null) onChunk.accept(augmentChunkUsage(chunk, data));
-                            } catch (JsonSyntaxException _) {
+                                var root = JsonParser.parseString(data).getAsJsonObject();
+                                var chunk = gson.fromJson(root, ChatCompletionChunk.class);
+                                if (chunk != null) onChunk.accept(augmentChunkUsage(chunk, root));
+                            } catch (Exception _) {
                                 // Skip malformed chunks
                             }
                         },
