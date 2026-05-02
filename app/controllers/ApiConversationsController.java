@@ -7,14 +7,12 @@ import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ConversationService;
-import utils.BoundedPatternCache;
 import utils.JpqlFilter;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -28,16 +26,17 @@ public class ApiConversationsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
-    private static final BoundedPatternCache patternCache = new BoundedPatternCache(64);
-
-    private static Pattern wordBoundaryPattern(String name) {
-        var key = name.strip().toLowerCase();
-        return patternCache.computeIfAbsent(key, k ->
-                Pattern.compile("\\b" + Pattern.quote(name.strip()) + "\\b", Pattern.CASE_INSENSITIVE));
-    }
-
     /**
      * GET /api/conversations — List conversations with optional filters.
+     *
+     * <p>The {@code name} filter does a case-insensitive substring match on
+     * the conversation's preview text directly at the DB level. The previous
+     * implementation pulled every LIKE-matching row into Hibernate's identity
+     * map and then refined with a Java word-boundary regex — at 50k+ rows
+     * with a common search term that materialized the whole match set on
+     * every keystroke. Substring is the standard chat-search semantic
+     * (Slack, Discord, etc); the upside of word-boundary refinement was
+     * not worth the unbounded fetch cost.
      */
     public static void listConversations(String channel, Long agentId, String name, String peer, Integer limit, Integer offset) {
         boolean hasNameFilter = name != null && !name.isBlank();
@@ -61,34 +60,16 @@ public class ApiConversationsController extends Controller {
             q.setParameter(i + 1, params.get(i));
         }
 
-        List<Conversation> convos;
-        long total;
-
-        if (hasNameFilter) {
-            List<Conversation> candidates = q.getResultList();
-            var pattern = wordBoundaryPattern(name);
-            List<Conversation> refined = new ArrayList<>();
-            for (var c : candidates) {
-                if (c.preview != null && pattern.matcher(c.preview).find()) {
-                    refined.add(c);
-                }
-            }
-            total = refined.size();
-            int from = Math.min(effectiveOffset, refined.size());
-            int to = Math.min(from + effectiveLimit, refined.size());
-            convos = refined.subList(from, to);
-        } else {
-            String countJpql = where.isEmpty()
-                    ? "SELECT COUNT(c) FROM Conversation c"
-                    : "SELECT COUNT(c) FROM Conversation c WHERE " + where;
-            var countQ = JPA.em().createQuery(countJpql, Long.class);
-            for (int i = 0; i < params.size(); i++) {
-                countQ.setParameter(i + 1, params.get(i));
-            }
-            total = countQ.getSingleResult();
-            convos = q.setFirstResult(effectiveOffset)
-                    .setMaxResults(effectiveLimit).getResultList();
+        String countJpql = where.isEmpty()
+                ? "SELECT COUNT(c) FROM Conversation c"
+                : "SELECT COUNT(c) FROM Conversation c WHERE " + where;
+        var countQ = JPA.em().createQuery(countJpql, Long.class);
+        for (int i = 0; i < params.size(); i++) {
+            countQ.setParameter(i + 1, params.get(i));
         }
+        long total = countQ.getSingleResult();
+        List<Conversation> convos = q.setFirstResult(effectiveOffset)
+                .setMaxResults(effectiveLimit).getResultList();
 
         setPaginationHeaders(total);
 

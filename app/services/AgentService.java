@@ -54,23 +54,43 @@ public class AgentService {
     }
 
     private static final int FILE_CACHE_MAX_SIZE = 500;
-    private static final java.util.concurrent.ConcurrentHashMap<String, CachedFile> fileCache =
-            new java.util.concurrent.ConcurrentHashMap<>();
     private static final long FILE_CACHE_TTL_MS = 30_000;
+
+    /**
+     * Workspace-file LRU. {@link java.util.LinkedHashMap} with {@code accessOrder=true}
+     * gives true insertion/access ordering, and {@link java.util.LinkedHashMap#removeEldestEntry}
+     * enforces the size bound atomically on every put. The previous implementation
+     * used a {@link java.util.concurrent.ConcurrentHashMap} and an iterator-based
+     * trim, but {@code ConcurrentHashMap} iteration order is bucket-based — not
+     * insertion-based — so the trim removed an arbitrary entry and concurrent
+     * puts could race the size check, allowing the cache to overshoot the bound
+     * unboundedly. Workspace files are large (system prompts), so the unbounded
+     * overshoot was a heap-leak risk.
+     *
+     * <p>Guarded by {@link #fileCacheLock} (a {@link java.util.concurrent.locks.ReentrantLock}
+     * rather than {@code synchronized}). Workspace reads happen on agent
+     * virtual threads; under JEP-444 a {@code synchronized} block pins the
+     * carrier. The same reasoning applies here as in {@link llm.LlmProvider}'s
+     * {@code StreamAccumulator}.
+     *
+     * <p>TTL is enforced lazily on read — expired entries return null and the
+     * fresh fetch overwrites them. There is no separate TTL sweep: the LRU
+     * bound caps memory regardless of expiry, and expired-but-unread entries
+     * are bounded in count (worst case, the whole cache is expired but still
+     * caps at MAX_SIZE).
+     */
+    private static final java.util.LinkedHashMap<String, CachedFile> fileCache =
+            new java.util.LinkedHashMap<>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(java.util.Map.Entry<String, CachedFile> eldest) {
+                    return size() > FILE_CACHE_MAX_SIZE;
+                }
+            };
+    private static final java.util.concurrent.locks.ReentrantLock fileCacheLock =
+            new java.util.concurrent.locks.ReentrantLock();
 
     private record CachedFile(String content, long expiresAt) {
         boolean isExpired() { return System.currentTimeMillis() > expiresAt; }
-    }
-
-    /** Evict expired entries and trim to max size. Called opportunistically on put. */
-    private static void evictFileCache() {
-        fileCache.entrySet().removeIf(e -> e.getValue().isExpired());
-        while (fileCache.size() > FILE_CACHE_MAX_SIZE) {
-            var oldest = fileCache.entrySet().iterator();
-            if (oldest.hasNext()) oldest.next(); // skip first
-            if (oldest.hasNext()) oldest.remove(); // remove second-oldest
-            else break;
-        }
     }
 
     public static Agent create(String name, String modelProvider, String modelId) {
@@ -187,6 +207,26 @@ public class AgentService {
         var provider = ProviderRegistry.get(providerName);
         return provider != null
                 && provider.config().models().stream().anyMatch(m -> m.id().equals(modelId));
+    }
+
+    /**
+     * Snapshot of every currently-configured {@code providerName:modelId} pair.
+     * Bulk-check helper for endpoints that need to mark many agents at once
+     * (e.g. {@code GET /api/agents}). Each call to
+     * {@link #isProviderConfigured} on a single agent is O(M) in the
+     * provider's model list; with N agents that is O(N*M) per request, and
+     * the registry is a static cache so the cost is pure CPU. Building this
+     * set once and doing O(1) hash lookups per agent collapses the overall
+     * cost back to O(N+M).
+     */
+    public static java.util.Set<String> configuredModelKeys() {
+        var keys = new java.util.HashSet<String>();
+        for (var p : ProviderRegistry.listAll()) {
+            for (var m : p.config().models()) {
+                keys.add(p.config().name() + ":" + m.id());
+            }
+        }
+        return keys;
     }
 
     /**
@@ -561,16 +601,28 @@ public class AgentService {
 
     public static String readWorkspaceFile(String agentName, String filename) {
         var cacheKey = agentName + "/" + filename;
-        var cached = fileCache.get(cacheKey);
-        if (cached != null && !cached.isExpired()) {
-            return cached.content();
+        fileCacheLock.lock();
+        try {
+            var cached = fileCache.get(cacheKey);
+            if (cached != null && !cached.isExpired()) {
+                return cached.content();
+            }
+        } finally {
+            fileCacheLock.unlock();
         }
+        // Read I/O outside the lock — Files.readString can take milliseconds
+        // on large prompts and we don't want it serializing every other
+        // workspace read across all agents.
         try {
             var path = acquireWorkspacePath(agentName, filename);
             if (Files.exists(path)) {
                 var content = Files.readString(path);
-                fileCache.put(cacheKey, new CachedFile(content, System.currentTimeMillis() + FILE_CACHE_TTL_MS));
-                if (fileCache.size() > FILE_CACHE_MAX_SIZE) evictFileCache();
+                fileCacheLock.lock();
+                try {
+                    fileCache.put(cacheKey, new CachedFile(content, System.currentTimeMillis() + FILE_CACHE_TTL_MS));
+                } finally {
+                    fileCacheLock.unlock();
+                }
                 return content;
             }
         } catch (SecurityException e) {
@@ -588,7 +640,12 @@ public class AgentService {
             var path = acquireWorkspacePath(agentName, filename);
             Files.createDirectories(path.getParent());
             Files.writeString(path, content);
-            fileCache.remove(agentName + "/" + filename);
+            fileCacheLock.lock();
+            try {
+                fileCache.remove(agentName + "/" + filename);
+            } finally {
+                fileCacheLock.unlock();
+            }
         } catch (SecurityException e) {
             EventLogger.warn("agent", "Path traversal blocked for %s/%s: %s"
                     .formatted(agentName, filename, e.getMessage()));

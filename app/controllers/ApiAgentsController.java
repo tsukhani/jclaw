@@ -65,7 +65,21 @@ public class ApiAgentsController extends Controller {
                              Boolean visionEnabled, Boolean audioEnabled,
                              String createdAt, String updatedAt, boolean providerConfigured) {
         static AgentView of(Agent a) {
-            var configured = AgentService.isProviderConfigured(a.modelProvider, a.modelId);
+            return of(a, AgentService.isProviderConfigured(a.modelProvider, a.modelId));
+        }
+
+        /**
+         * Bulk path: callers that map many agents pre-build a set of
+         * configured keys via {@link AgentService#configuredModelKeys} and
+         * pass per-agent O(1) lookups in here. Avoids the per-agent
+         * {@code Stream.anyMatch} over the provider's full model list,
+         * which was O(N*M) on the {@code GET /api/agents} hot path.
+         */
+        static AgentView of(Agent a, java.util.Set<String> configuredKeys) {
+            return of(a, configuredKeys.contains(a.modelProvider + ":" + a.modelId));
+        }
+
+        private static AgentView of(Agent a, boolean configured) {
             return new AgentView(a.id, a.name, a.description, a.modelProvider, a.modelId,
                     a.enabled, a.isMain(), a.thinkingMode,
                     a.visionEnabled, a.audioEnabled,
@@ -75,9 +89,10 @@ public class ApiAgentsController extends Controller {
 
     public static void list() {
         var agents = AgentService.listAll();
+        var configuredKeys = AgentService.configuredModelKeys();
         var result = agents.stream()
                 .filter(a -> !isReservedName(a.name))
-                .map(AgentView::of)
+                .map(a -> AgentView.of(a, configuredKeys))
                 .toList();
         renderJSON(gson.toJson(result));
     }
