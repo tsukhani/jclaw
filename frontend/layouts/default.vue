@@ -170,8 +170,8 @@ const navGroups: NavGroup[] = [
     label: 'Chat',
     items: [
       { label: 'Chat', to: '/chat', icon: ChatBubbleOvalLeftEllipsisIcon },
-      { label: 'Conversations', to: '/conversations', icon: ChatBubbleLeftRightIcon },
       { label: 'Channels', to: '/channels', icon: LinkIcon },
+      { label: 'Conversations', to: '/conversations', icon: ChatBubbleLeftRightIcon },
     ],
   },
   {
