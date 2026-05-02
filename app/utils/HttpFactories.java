@@ -1,10 +1,15 @@
 package utils;
 
+import okhttp3.Call;
+import okhttp3.Connection;
 import okhttp3.ConnectionPool;
 import okhttp3.Dispatcher;
+import okhttp3.EventListener;
 import okhttp3.OkHttpClient;
 
 import java.time.Duration;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -101,6 +106,28 @@ public final class HttpFactories {
         GEN_DISPATCHER.setMaxRequestsPerHost(64);
     }
 
+    /**
+     * Logs the negotiated wire protocol (e.g. {@code h2}, {@code http/1.1})
+     * the first time we see each {@code host:port}. Hooks {@link
+     * EventListener#connectionAcquired}, which fires once per call when it
+     * binds to a connection — never per frame, so SSE streams pay zero
+     * per-byte cost. The seen-hosts set is a lock-free
+     * {@link ConcurrentHashMap}-backed set; the hot path on subsequent
+     * calls is one {@code add()} returning {@code false}.
+     */
+    private static final Set<String> SEEN_HOSTS = ConcurrentHashMap.newKeySet();
+    private static final EventListener PROTOCOL_LOGGER = new EventListener() {
+        @Override
+        public void connectionAcquired(Call call, Connection connection) {
+            var url = call.request().url();
+            String key = url.host() + ":" + url.port();
+            if (SEEN_HOSTS.add(key)) {
+                play.Logger.info("OkHttp negotiated %s with %s",
+                        connection.protocol(), key);
+            }
+        }
+    };
+
     private static final OkHttpClient LLM_STREAMING_CLIENT = new OkHttpClient.Builder()
             .connectTimeout(Duration.ofSeconds(10))
             .readTimeout(Duration.ofSeconds(180))
@@ -108,6 +135,7 @@ public final class HttpFactories {
             .callTimeout(Duration.ZERO)
             .connectionPool(LLM_POOL)
             .dispatcher(LLM_DISPATCHER)
+            .eventListener(PROTOCOL_LOGGER)
             .build();
 
     private static final OkHttpClient LLM_SINGLE_SHOT_CLIENT = new OkHttpClient.Builder()
@@ -117,6 +145,7 @@ public final class HttpFactories {
             .callTimeout(Duration.ofSeconds(180))
             .connectionPool(LLM_POOL)
             .dispatcher(LLM_DISPATCHER)
+            .eventListener(PROTOCOL_LOGGER)
             .build();
 
     private static final OkHttpClient GENERAL_CLIENT = new OkHttpClient.Builder()
@@ -126,6 +155,7 @@ public final class HttpFactories {
             .callTimeout(Duration.ofSeconds(60))
             .connectionPool(GEN_POOL)
             .dispatcher(GEN_DISPATCHER)
+            .eventListener(PROTOCOL_LOGGER)
             .build();
 
     private HttpFactories() { }
