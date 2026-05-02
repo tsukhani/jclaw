@@ -4,11 +4,20 @@
 
 .mcp.json
 
-# Per-clone secrets sourced by jclaw.sh into the JVM environment before
-# `play start` / `play run`. Holds APPLICATION_SECRET (and any other
-# operator-set env vars). NEVER commit — the secret signs PLAY_SESSION
-# cookies and a leak is an admin-session-forgery primitive. Rotate with
-# `./jclaw.sh secret`.
+# Per-clone runtime security material — application secret (PLAY_SECRET)
+# and TLS cert+key. Lives under certs/ (write paths: `./jclaw.sh secret`,
+# `./jclaw.sh cert`, `play secret`, `play enable-https`, the Docker
+# entrypoint). NEVER commit — the secret is an admin-session-forgery
+# primitive and the TLS private key binds to a per-machine CA root.
+# certs/.env.example is the tracked template that keeps the directory
+# in the repo and dist tarball; everything else under certs/ is
+# generated and per-machine.
+certs/*
+!certs/.env.example
+
+# Defense-in-depth: catch a project-root .env if anything accidentally
+# creates one (legacy convention, copy-paste from older docs, etc.).
+# The canonical PLAY_SECRET store is certs/.env above.
 .env
 
 # Play Framework runtime files
@@ -95,11 +104,14 @@ public/spa/
 .env.local
 .env.*.local
 
-# SSL certificates/keys
-certs/
+# SSL certificates/keys (defense-in-depth wildcards — the certs/ directory
+# itself is handled above with a !certs/.gitkeep negation). `.cert` is
+# jclaw's chosen extension via `./jclaw.sh cert` and `play enable-https`;
+# `.crt` is the more common convention elsewhere — we list both.
 *.key
 *.pem
 *.crt
+*.cert
 *.p12
 *.jks
 

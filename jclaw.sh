@@ -18,19 +18,24 @@ is_developer_clone() {
 usage() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh [options] <secret|setup|reset|start|stop|restart|status|logs|loadtest|test|help>
+Usage: jclaw.sh [options] <cert|secret|setup|reset|start|stop|restart|status|logs|loadtest|test|help>
 
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
             installs frontend dependencies (so pre-commit's lint-staged works),
-            generates .env (with a fresh application secret) if missing, and
-            verifies both 'origin' and 'github' remotes exist. Run once after
-            every fresh clone. Idempotent — safe to re-run.
-  secret    Generate (or rotate) the application secret in .env (delegates
+            generates certs/.env (with a fresh application secret) if missing,
+            and verifies both 'origin' and 'github' remotes exist. Run once
+            after every fresh clone. Idempotent — safe to re-run.
+  secret    Generate (or rotate) the application secret in certs/.env (delegates
             to 'play secret', which writes the variable named in
             application.conf's \${...} placeholder). Run after a suspected
             leak or as routine hygiene. Restart the app to pick up the new
             value.
+  cert      Generate a TLS PEM cert+key at ./certs/host.cert and
+            ./certs/host.key for the bundled Docker compose stack.
+            Uses mkcert when available (browser-trusted; Chrome accepts
+            HTTP/3); falls back to a self-signed openssl pair otherwise.
+            Run before 'docker compose restart' to swap in a fresh cert.
   reset     Clear the admin password hash from the Config DB so the next
             launch routes through the in-app /setup-password flow. Use
             when the operator has forgotten the password and is locked
@@ -110,9 +115,14 @@ EOF
         # running prod backend, but it's an operator/dev tool and not
         # part of the "I just want to run JClaw" contract.
         cat <<EOF
-Usage: jclaw.sh [options] <reset|start|stop|restart|status|logs|help>
+Usage: jclaw.sh [options] <cert|reset|start|stop|restart|status|logs|help>
 
 Commands:
+  cert      Generate a TLS PEM cert+key at ./certs/host.cert and
+            ./certs/host.key for the bundled Docker compose stack.
+            Uses mkcert when available (browser-trusted; Chrome accepts
+            HTTP/3); falls back to a self-signed openssl pair otherwise.
+            Run before 'docker compose restart' to swap in a fresh cert.
   reset     Clear the admin password hash from the Config DB so the next
             launch routes through the in-app /setup-password flow. Use
             when you've forgotten the password and are locked out of
@@ -157,7 +167,7 @@ EOF
 # distinguish the per-command help path from the bare-help path.
 is_known_command() {
     case "$1" in
-        secret|setup|reset|start|stop|restart|status|logs|loadtest|test)
+        cert|secret|setup|reset|start|stop|restart|status|logs|loadtest|test)
             return 0
             ;;
         *)
@@ -171,6 +181,7 @@ is_known_command() {
 # only reachable through programmer error and hands back the full banner.
 usage_for() {
     case "$1" in
+        cert)     usage_cert     ;;
         secret)   usage_secret   ;;
         setup)    usage_setup    ;;
         reset)    usage_reset    ;;
@@ -185,14 +196,38 @@ usage_for() {
     esac
 }
 
+usage_cert() {
+    cat <<EOF
+Usage: jclaw.sh cert
+
+Generate a TLS PEM cert+key at ./certs/host.cert and ./certs/host.key,
+overwriting any existing pair. Used by the bundled docker-compose.yml —
+the JClaw container picks the new cert up from the ./certs bind-mount
+on its next start. Run before 'docker compose restart' when you want
+HTTP/2 and HTTP/3 to negotiate cleanly in a real browser without the
+self-signed-certificate interstitial.
+
+Cert source preference:
+  1. mkcert if installed. Produces a cert signed by the local CA that
+     'mkcert -install' added to the system trust store, so Chrome's
+     QUIC stack will negotiate HTTP/3 in the browser without warnings.
+     Install once with: brew install mkcert && mkcert -install.
+  2. openssl as a fallback. Produces a self-signed cert; serves
+     correctly but browsers warn and Chrome refuses to upgrade to
+     HTTP/3 (its QUIC stack only honors trusted certs).
+
+Errors out if neither tool is on PATH.
+EOF
+}
+
 usage_secret() {
     cat <<EOF
 Usage: jclaw.sh secret
 
 Generate or rotate the application secret. Delegates to 'play secret',
 which writes the variable named in conf/application.conf's \${...}
-placeholder (default: PLAY_SECRET) into a per-clone .env file. The .env
-is created with mode 600 on first run and preserved across rotations
+placeholder (default: PLAY_SECRET) into a per-clone certs/.env file. The
+file is created with mode 600 on first run and preserved across rotations
 (only the secret line is rewritten).
 
 Restart the app to pick up the new value.
@@ -210,9 +245,10 @@ Usage: jclaw.sh setup
 
 One-time per-clone bootstrap (developer flow). Wires git hooks
 (.githooks/), installs frontend dependencies so pre-commit's
-lint-staged is available, generates .env with a fresh application
-secret if missing, and verifies both 'origin' and 'github' remotes
-are configured. Idempotent — safe to re-run after every fresh clone.
+lint-staged is available, generates certs/.env with a fresh
+application secret if missing, and verifies both 'origin' and
+'github' remotes are configured. Idempotent — safe to re-run after
+every fresh clone.
 
 Example:
   ./jclaw.sh setup
@@ -261,7 +297,7 @@ Usage: jclaw.sh [options] start
 
 Start JClaw in production mode (Play backend serving the bundled SPA),
 or with --dev start the Play dev backend plus the Nuxt frontend on
-separate ports. First run on a fresh checkout auto-generates .env
+separate ports. First run on a fresh checkout auto-generates certs/.env
 with a random application secret if one isn't already present.
 
 Options:
@@ -290,8 +326,8 @@ EOF
 Usage: jclaw.sh [options] start
 
 Start JClaw on the bundled Play backend (which serves the SPA from
-this distribution package). First run auto-generates .env with a
-random application secret if one isn't already present.
+this distribution package). First run auto-generates certs/.env with
+a random application secret if one isn't already present.
 
 Options:
   --backend-port <port>   Backend HTTP port (default: 9000)
@@ -673,7 +709,7 @@ while [[ $# -gt 0 ]]; do
             LT_MODEL="$2"
             shift 2
             ;;
-        secret|reset|start|stop|restart|status|logs)
+        cert|secret|reset|start|stop|restart|status|logs)
             COMMAND="$1"
             shift
             ;;
@@ -689,7 +725,7 @@ while [[ $# -gt 0 ]]; do
             # check_prereqs / git mid-execution.
             if ! is_developer_clone; then
                 echo "Error: '$1' is a developer-only command, not available in this distribution."
-                echo "       This install supports: secret, reset, start, stop, restart, status, logs, help."
+                echo "       This install supports: cert, secret, reset, start, stop, restart, status, logs, help."
                 exit 1
             fi
             COMMAND="$1"
@@ -873,12 +909,12 @@ secret_var_name() {
     echo "${name:-PLAY_SECRET}"
 }
 
-# Source $JCLAW_DIR/.env into the current shell with auto-export so the
-# JVM started by `play` inherits the variables. Called from start paths
-# (dev + prod). Silent no-op when .env is absent — that path is reserved
-# for failure handling at the validate step, not here.
+# Source $JCLAW_DIR/certs/.env into the current shell with auto-export so
+# the JVM started by `play` inherits the variables. Called from start
+# paths (dev + prod). Silent no-op when certs/.env is absent — that path
+# is reserved for failure handling at the validate step, not here.
 load_env_file() {
-    local env_file="$JCLAW_DIR/.env"
+    local env_file="$JCLAW_DIR/certs/.env"
     if [[ -f "$env_file" ]]; then
         set -a
         # shellcheck disable=SC1090
@@ -887,7 +923,7 @@ load_env_file() {
     fi
 }
 
-# First-run helper for the start paths: if .env is absent AND the
+# First-run helper for the start paths: if certs/.env is absent AND the
 # conf-named secret variable is unset in the parent shell, generate one.
 # This is what makes `./jclaw.sh start` work on a fresh jclaw.zip install
 # with no developer setup step. We DON'T auto-create when the operator
@@ -895,14 +931,14 @@ load_env_file() {
 # intent with a stored random value they didn't ask for. We DON'T
 # auto-create from setup either; setup has its own explicit gate.
 ensure_env_for_start() {
-    local env_file="$JCLAW_DIR/.env"
+    local env_file="$JCLAW_DIR/certs/.env"
     local var_name
     var_name=$(secret_var_name)
     # Bash indirect expansion: `${!var_name:-}` reads the variable whose
     # NAME is held in $var_name. Equivalent to `${APP_SECRET:-}` when
     # var_name="APP_SECRET", but follows whatever the conf line dictates.
     if [[ ! -f "$env_file" && -z "${!var_name:-}" ]]; then
-        echo "==> First run detected — no .env and no $var_name in env."
+        echo "==> First run detected — no certs/.env and no $var_name in env."
         do_secret
     fi
 }
@@ -917,32 +953,80 @@ require_application_secret() {
     local var_name
     var_name=$(secret_var_name)
     if [[ -z "${!var_name:-}" ]]; then
-        # Reachable only when .env exists but lacks (or empties) the key,
-        # OR when the launcher set the env var to an empty string. The
-        # ensure_env_for_start guard upstream creates .env on first run,
-        # so this is operator-misconfiguration territory.
-        echo "Error: $var_name resolved to empty after sourcing .env."
-        echo "       Check that .env contains a non-empty value:"
+        # Reachable only when certs/.env exists but lacks (or empties) the
+        # key, OR when the launcher set the env var to an empty string.
+        # The ensure_env_for_start guard upstream creates certs/.env on
+        # first run, so this is operator-misconfiguration territory.
+        echo "Error: $var_name resolved to empty after sourcing certs/.env."
+        echo "       Check that certs/.env contains a non-empty value:"
         echo "         $var_name=<some-64-char-string>"
         echo "       Rotate or regenerate with: $0 secret"
         exit 1
     fi
 }
 
-# Generate or rotate the application secret in $JCLAW_DIR/.env. Delegates
-# the actual generation + .env write to `play secret`, which auto-detects
-# the env-var name from conf/application.conf's ${VARNAME} placeholder —
-# so renaming the variable in conf flows through here without touching
-# this script. The framework's writer preserves any other lines in .env;
+# Generate or rotate the application secret in $JCLAW_DIR/certs/.env.
+# Delegates the actual generation + write to `play secret`, which since
+# PF-71 defaults to certs/.env and auto-detects the env-var name from
+# conf/application.conf's ${VARNAME} placeholder — so renaming the
+# variable in conf flows through here without touching this script.
+# The framework's writer preserves any other lines in the file;
 # rotation rewrites only the secret line.
-do_secret() {
-    local env_file="$JCLAW_DIR/.env"
+do_cert() {
+    # Writes to $JCLAW_DIR/certs/, NOT conf/. The Docker compose stack
+    # bind-mounts ./certs into the container; the dev-mode `play
+    # enable-https` flow handles conf/host.cert separately. Two
+    # destinations, two tools, no shared state — keeps the cert
+    # provenance unambiguous in each context.
+    local certs_dir="$JCLAW_DIR/certs"
+    local cert_file="$certs_dir/host.cert"
+    local key_file="$certs_dir/host.key"
 
-    # Seed a brand-new .env with our self-documenting header BEFORE invoking
-    # `play secret`. The framework writer preserves existing lines and only
-    # appends/replaces the secret variable, so dropping a header here keeps
-    # those comments intact across future rotations. umask 077 ensures the
-    # file is owner-only readable from creation, before the secret lands.
+    mkdir -p "$certs_dir"
+
+    if command -v mkcert >/dev/null 2>&1; then
+        mkcert -cert-file "$cert_file" -key-file "$key_file" \
+               localhost 127.0.0.1 ::1 >/dev/null
+        echo "Generated mkcert-signed PEM cert+key at $certs_dir."
+        echo "(Trusted by the system store after 'mkcert -install' — Chrome will accept HTTP/3.)"
+    elif command -v openssl >/dev/null 2>&1; then
+        # 3650 days mirrors the play1 fork's enable-https default. CN=localhost
+        # plus SANs for IPv4 + IPv6 loopback covers what browsers actually
+        # validate; modern Chrome rejects certs that lack a SAN even when CN
+        # matches, so the SAN is non-optional.
+        openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "$key_file" -out "$cert_file" \
+            -days 3650 -subj "/CN=localhost" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:0:0:0:0:0:0:0:1" \
+            >/dev/null 2>&1
+        echo "Generated self-signed PEM cert+key at $certs_dir (openssl fallback)."
+        echo "Hint: install mkcert (https://github.com/FiloSottile/mkcert) for browser-trusted local-dev TLS."
+    else
+        echo "ERROR: neither mkcert nor openssl found on PATH. Install one and re-run." >&2
+        return 1
+    fi
+
+    chmod 600 "$key_file"
+    chmod 644 "$cert_file"
+
+    cat <<EOF
+
+If a JClaw Docker container is running, apply the new cert with:
+  docker compose restart
+EOF
+}
+
+do_secret() {
+    local env_file="$JCLAW_DIR/certs/.env"
+
+    mkdir -p "$JCLAW_DIR/certs"
+
+    # Seed a brand-new certs/.env with our self-documenting header BEFORE
+    # invoking `play secret`. The framework writer preserves existing
+    # lines and only appends/replaces the secret variable, so dropping a
+    # header here keeps those comments intact across future rotations.
+    # umask 077 ensures the file is owner-only readable from creation,
+    # before the secret lands.
     if [[ ! -f "$env_file" ]]; then
         (
             umask 077
@@ -955,13 +1039,13 @@ do_secret() {
 
     # `play secret` reads ${VARNAME} from application.conf's
     # `application.secret=${VARNAME}` line, generates a fresh 64-char
-    # alphanumeric value, and writes <VARNAME>=<value> to .env. Run from
-    # $JCLAW_DIR so it locates the right conf.
+    # alphanumeric value, and writes <VARNAME>=<value> to certs/.env
+    # (PF-71 default). Run from $JCLAW_DIR so it locates the right conf.
     (cd "$JCLAW_DIR" && play secret)
 
     # `play secret` doesn't tighten perms, so re-apply chmod 600 — the
-    # secret is the admin-session-forgery primitive; non-owner reads would
-    # defeat the point of having it in .env at all.
+    # secret is the admin-session-forgery primitive; non-owner reads
+    # would defeat the point of having it in certs/.env at all.
     chmod 600 "$env_file"
 
     # DEV_MODE is "true"/"false" string — `${VAR:+...}` would print on
@@ -1237,11 +1321,11 @@ do_setup() {
     echo "    core.hooksPath = $(/usr/bin/git config --local core.hooksPath)"
 
     echo ""
-    echo "==> Generating .env (per-clone secret store)..."
-    # Skip if .env already exists — the operator may have populated it
-    # with prod-tuned values. Rotate explicitly via `$0 secret` instead.
-    if [[ -f "$JCLAW_DIR/.env" ]]; then
-        echo "    .env already exists — leaving it untouched."
+    echo "==> Generating certs/.env (per-clone secret store)..."
+    # Skip if certs/.env already exists — the operator may have populated
+    # it with prod-tuned values. Rotate explicitly via `$0 secret` instead.
+    if [[ -f "$JCLAW_DIR/certs/.env" ]]; then
+        echo "    certs/.env already exists — leaving it untouched."
         echo "    Rotate with: $0 secret"
     else
         do_secret
@@ -1389,11 +1473,11 @@ do_start_prod() {
         exit 1
     fi
 
-    # First-run guard for jclaw.zip distributions: if no .env and the
-    # conf-named secret variable isn't already set in the parent shell,
-    # generate one on the fly so end-users who skip the developer-only
-    # `setup` command don't get blocked. Then source .env into the JVM
-    # env and validate.
+    # First-run guard for jclaw.zip distributions: if no certs/.env and
+    # the conf-named secret variable isn't already set in the parent
+    # shell, generate one on the fly so end-users who skip the developer-
+    # only `setup` command don't get blocked. Then source certs/.env into
+    # the JVM env and validate.
     ensure_env_for_start
     load_env_file
     require_application_secret
@@ -1614,8 +1698,9 @@ do_start_dev() {
         exit 1
     fi
 
-    # Source .env (the conf-named secret variable, plus any other overrides)
-    # into the JVM environment. See the prod-mode counterpart for the rationale.
+    # Source certs/.env (the conf-named secret variable, plus any other
+    # overrides) into the JVM environment. See the prod-mode counterpart
+    # for the rationale.
     ensure_env_for_start
     load_env_file
     require_application_secret
@@ -1849,7 +1934,7 @@ do_logs() {
 # Auth: sends the application secret in the X-Loadtest-Auth header; the
 # matching server-side guard on /api/metrics/loadtest checks both the header
 # AND that the request comes from a loopback address. The secret lives in
-# .env (gitignored) under whatever variable name application.conf's
+# certs/.env (gitignored) under whatever variable name application.conf's
 # `application.secret=${VARNAME}` declares, and is the same value Play uses
 # to sign session cookies — reusing it here avoids introducing a separate
 # operator-managed credential. JCLAW-181: the previous flow read
@@ -1864,8 +1949,9 @@ do_loadtest() {
         exit 1
     fi
 
-    # Source .env so the secret variable is available, then resolve its name
-    # the same way the start paths do (read from conf — operator-renameable).
+    # Source certs/.env so the secret variable is available, then resolve
+    # its name the same way the start paths do (read from conf — operator-
+    # renameable).
     load_env_file
     local var_name secret
     var_name=$(secret_var_name)
@@ -1875,7 +1961,7 @@ do_loadtest() {
         echo "       Loadtest auth uses $var_name (the same secret"
         echo "       Play signs session cookies with), sent in the"
         echo "       X-Loadtest-Auth header. It must be present in"
-        echo "       $JCLAW_DIR/.env or exported in the parent shell."
+        echo "       $JCLAW_DIR/certs/.env or exported in the parent shell."
         echo "       Generate or rotate via: $0 secret"
         exit 1
     fi
@@ -2037,6 +2123,9 @@ do_test() {
 # ─── Execute ───
 
 case "$COMMAND" in
+    cert)
+        do_cert
+        ;;
     secret)
         do_secret
         ;;

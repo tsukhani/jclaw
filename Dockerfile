@@ -66,13 +66,15 @@ FROM azul/zulu-openjdk:25-jre-headless-latest AS runtime
 
 LABEL org.opencontainers.image.source=https://github.com/tsukhani/jclaw
 
-# Playwright/Chromium shared libs, python3 for Play's CLI wrapper, and
+# Playwright/Chromium shared libs, python3 for Play's CLI wrapper,
 # tesseract-ocr for DocumentsTool's OCR path (image-only PDFs, scanned
-# documents). apt resolves the right arch under buildx's per-platform
-# build, so multi-arch images get matching binaries automatically; non-
-# English language packs install separately as tesseract-ocr-<lang>.
+# documents), and openssl so the entrypoint can self-sign a PEM cert
+# when the operator hasn't supplied one in /app/certs. apt resolves the
+# right arch under buildx's per-platform build; non-English language
+# packs install separately as tesseract-ocr-<lang>.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 \
+        openssl \
         tesseract-ocr \
         libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 \
         libcairo2 libcups2 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0 \
@@ -98,7 +100,12 @@ ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 WORKDIR /app
 
+# 9000: HTTP/1.1. 9443: HTTP/2 over TLS (TCP) and HTTP/3 over QUIC (UDP).
+# Both 9443 entries are required — Compose must publish UDP separately for
+# QUIC packets to reach the JVM's UDP listener.
 EXPOSE 9000
+EXPOSE 9443/tcp
+EXPOSE 9443/udp
 
 # Heap: asymmetric Xms 512m / Xmx 2g so an idle deploy doesn't commit 2 GB at
 # boot. Override per-flag with `-e JCLAW_JVM_XMS` / `-e JCLAW_JVM_XMX`, or pin

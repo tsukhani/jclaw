@@ -1,52 +1,72 @@
 #!/bin/sh
 # JClaw container entrypoint.
 #
-# Resolves $PLAY_SECRET (Play's session-cookie signing key) at boot, in this
-# order:
+# Manages two pieces of runtime security material, both stored under
+# /app/certs (bind-mounted to ./certs on the host):
 #
-#   1. If PLAY_SECRET is already set in the env (e.g. operator put it in
-#      docker-compose env_file, or wrote PLAY_SECRET=... in the compose
-#      project's .env), trust it and continue.
-#   2. Else, if /app/data/.play-secret exists and is non-empty, load it.
-#      This is the path written by step 3 on a prior boot — what makes the
-#      secret survive container restarts.
-#   3. Else, generate a fresh 64-char alphanumeric secret, persist it to
-#      /app/data/.play-secret with mode 600, and use it.
+#   1. PLAY_SECRET — Play's session-cookie signing key. Resolution order:
+#      env first (operator override), then ./certs/.env, then auto-generate
+#      a fresh 64-char secret and persist it to ./certs/.env.
 #
-# /app/data is bind-mounted to ./data on the host (per docker-compose.yml),
-# so the persisted secret rides along with the rest of the app's runtime
-# state. To rotate, delete ./data/.play-secret and restart the container —
-# the next boot will regenerate it. Existing PLAY_SESSION cookies become
-# invalid after a rotation, which is the point.
+#   2. TLS PEM cert + key — used by Play's HTTPS listener for h2/h3.
+#      Resolution: if ./certs/host.cert and ./certs/host.key both exist,
+#      use them; else self-sign a fresh pair via openssl. Operators wanting
+#      browser-trusted local TLS replace the self-signed pair with mkcert-
+#      signed PEMs (Chrome's QUIC stack only negotiates h3 against a cert
+#      whose chain validates against the system trust store).
 #
-# This script replaces the prior "one-time bootstrap" Compose profile —
-# docker compose up -d now Just Works on a fresh extract.
+# application.conf points certificate.file and certificate.key.file at
+# certs/host.cert and certs/host.key, so the JVM reads directly from the
+# bind-mounted directory — no symlink indirection needed.
+#
+# Rotation: delete ./certs/.env (or ./certs/host.cert + key) and restart;
+# the next boot regenerates whichever is missing.
 
 set -eu
 
-SECRET_FILE=/app/data/.play-secret
+CERTS_DIR=/app/certs
+ENV_FILE="$CERTS_DIR/.env"
+CERT_FILE="$CERTS_DIR/host.cert"
+KEY_FILE="$CERTS_DIR/host.key"
 
+mkdir -p "$CERTS_DIR"
+
+# ── PLAY_SECRET resolution ──────────────────────────────────────────────────
 if [ -z "${PLAY_SECRET:-}" ]; then
-    if [ -s "$SECRET_FILE" ]; then
-        PLAY_SECRET=$(cat "$SECRET_FILE")
-    else
-        mkdir -p "$(dirname "$SECRET_FILE")"
+    if [ -s "$ENV_FILE" ]; then
+        # Source the .env in a subshell to read PLAY_SECRET without leaking
+        # any other variables it may contain into the parent shell. The
+        # subshell pipes only PLAY_SECRET back through stdout.
+        PLAY_SECRET=$(set -a; . "$ENV_FILE"; set +a; printf '%s' "${PLAY_SECRET:-}")
+    fi
+    if [ -z "${PLAY_SECRET:-}" ]; then
         PLAY_SECRET=$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 64)
-        # Run the file-write inside a subshell so the restrictive umask
-        # (0177 → mode 0600 on creation) stays scoped to that subshell and
-        # does NOT leak to the JVM exec'd below. A leaked umask of 0177
-        # was the cause of v0.10.74-v0.10.76's "AccessDeniedException on
-        # workspace skill copy" bug: with that umask in effect, every
-        # `Files.createDirectories(...)` the JVM made produced a directory
-        # of mode 0600 — no `x`-bit, hence no traversal — and the next
-        # nested file write would fail with EACCES even though root owned
-        # the dir. Subshell scoping is the load-bearing fix.
+        # umask 177 inside a subshell so the restrictive mode applies to
+        # the file write but does NOT leak to the JVM exec'd below — a
+        # leaked umask of 0177 was the cause of v0.10.74-v0.10.76's
+        # AccessDeniedException-on-skill-copy bug.
         (
             umask 177
-            printf '%s' "$PLAY_SECRET" > "$SECRET_FILE"
+            printf 'PLAY_SECRET=%s\n' "$PLAY_SECRET" > "$ENV_FILE"
         )
-        chmod 600 "$SECRET_FILE"
+        chmod 600 "$ENV_FILE"
     fi
+fi
+
+# ── TLS PEM cert + key resolution ───────────────────────────────────────────
+if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
+    # openssl writes both files; the same subshell-umask trick keeps the
+    # private key 0600 from inception.
+    (
+        umask 177
+        openssl req -x509 -newkey rsa:2048 -nodes \
+            -keyout "$KEY_FILE" -out "$CERT_FILE" \
+            -days 3650 -subj "/CN=localhost" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:0:0:0:0:0:0:0:1" \
+            >/dev/null 2>&1
+    )
+    chmod 600 "$KEY_FILE"
+    chmod 644 "$CERT_FILE"
 fi
 
 export PLAY_SECRET
