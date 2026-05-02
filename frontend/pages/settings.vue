@@ -922,6 +922,7 @@ const providerEntries = computed(() => {
 const PROVIDER_GROUPS: Record<string, 'remote' | 'local'> = {
   'ollama-cloud': 'remote',
   'openrouter': 'remote',
+  'openai': 'remote',
   'ollama-local': 'local',
   'lm-studio': 'local',
 }
@@ -929,6 +930,7 @@ const PROVIDER_GROUPS: Record<string, 'remote' | 'local'> = {
 const PROVIDER_LABELS: Record<string, string> = {
   'ollama-cloud': 'Ollama Cloud',
   'openrouter': 'OpenRouter',
+  'openai': 'OpenAI',
   'ollama-local': 'Ollama Local',
   'lm-studio': 'LM Studio',
 }
