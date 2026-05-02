@@ -37,14 +37,25 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
     /**
      * Declarative mapping from provider-name substring to constructor.
-     * Adding a new provider is a single-line entry here instead of
-     * modifying a conditional chain in {@code ProviderRegistry}.
+     * Adding a new provider is a single-line entry in {@link FactoryHolder}.
+     *
+     * <p>Held in a nested class (initialization-on-demand idiom) so the
+     * subclass-constructor references don't fire during {@link LlmProvider}'s
+     * own class initialization — which Sonar flags as S2390 ("Classes should
+     * not access their own subclasses during class initialization") and the
+     * JVM is technically free to order in ways that produce surprising NPEs.
+     * {@code FactoryHolder} only loads when {@link #forConfig} first reads
+     * its {@code MAP}, by which time {@link LlmProvider} is fully initialized.
      */
-    private static final Map<String, Function<ProviderConfig, LlmProvider>> PROVIDER_FACTORIES = Map.of(
-            "openrouter", OpenRouterProvider::new,
-            "ollama", OllamaProvider::new,
-            "openai", OpenAiProvider::new
-    );
+    private static final class FactoryHolder {
+        static final Map<String, Function<ProviderConfig, LlmProvider>> MAP = Map.of(
+                "openrouter", OpenRouterProvider::new,
+                "ollama", OllamaProvider::new,
+                "openai", OpenAiProvider::new
+        );
+
+        private FactoryHolder() {}
+    }
 
     protected LlmProvider(ProviderConfig config) {
         this.config = config;
@@ -55,12 +66,12 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
     /**
      * Factory method: creates the right {@link LlmProvider} subclass based on
      * the provider name in the config. Matches against known substrings
-     * declaratively via {@link #PROVIDER_FACTORIES}; falls back to
+     * declaratively via {@link FactoryHolder}; falls back to
      * {@link OpenAiProvider} for unknown/standard OpenAI-compatible providers.
      */
     public static LlmProvider forConfig(ProviderConfig config) {
         var lowerName = config.name().toLowerCase();
-        for (var entry : PROVIDER_FACTORIES.entrySet()) {
+        for (var entry : FactoryHolder.MAP.entrySet()) {
             if (lowerName.contains(entry.getKey())) {
                 return entry.getValue().apply(config);
             }
