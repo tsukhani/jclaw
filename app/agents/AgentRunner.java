@@ -1072,9 +1072,9 @@ public class AgentRunner {
      *
      * <p>The fallback is also pushed via {@link StreamingCallbacks#onToken} for
      * symmetry with {@link #handleToolCallsStreaming}'s empty-retry diagnostic.
-     * If the SSE channel is already dead the underlying {@code writeSse} call
-     * is a no-op (it catches the write exception); on Telegram the sink's
-     * {@code update} is similarly tolerant.
+     * If the SSE channel is already dead the underlying {@code sse.send} call
+     * is a no-op (SseStream catches the write exception and auto-closes); on
+     * Telegram the sink's {@code update} is similarly tolerant.
      */
     private static String cancelledReturn(String priorContent, List<String> collectedImages,
                                            String channelType, StreamingCallbacks cb,

@@ -176,10 +176,10 @@ public class ApiChatControllerTest extends FunctionalTest {
     public void streamSlashCommandEmitsSseFrames() {
         // Slash commands short-circuit before runStreaming is invoked, so this
         // path is independent of LLM provider state. The completed-future
-        // handoff to await() unblocks immediately because writeSse(terminal=true)
-        // completes streamDone before await is reached. The response body
-        // should carry both the init frame (with the new conversationId) and
-        // the complete frame.
+        // handoff to await() unblocks immediately because sse.close() resolves
+        // sse.completion() before await is reached. The response body should
+        // carry both the init frame (with the new conversationId) and the
+        // complete frame.
         login();
         var id = createAgent("stream-slash");
         var body = """

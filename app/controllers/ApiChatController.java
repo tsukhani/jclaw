@@ -7,29 +7,21 @@ import models.Agent;
 import models.Conversation;
 import org.apache.tika.Tika;
 import play.mvc.Controller;
-import play.mvc.Http;
-import play.mvc.Util;
+import play.mvc.SseStream;
 import play.mvc.With;
 import services.AgentService;
 import services.ConversationService;
 import services.EventLogger;
 import utils.LatencyTrace;
 
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Consumer;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -42,51 +34,6 @@ import static utils.GsonHolder.INSTANCE;
 public class ApiChatController extends Controller {
 
     private static final Gson gson = INSTANCE;
-
-    /**
-     * Shared scheduler for SSE heartbeats and safety timeouts across every streaming
-     * request. Previously each {@link #streamChat} call spun up its own
-     * {@link ScheduledExecutorService} and shut it down on stream completion — that
-     * churned a thread (virtual or not) and a task queue per request under load.
-     * One static scheduler with a small virtual-thread-backed pool is enough: the
-     * heartbeat task is ~1 byte write every 30 s and the timeout task is a single
-     * fire-once. Per-stream cancellation is tracked via {@link ScheduledFuture}
-     * references held by the request and cancelled in the stream's whenComplete.
-     *
-     * <p>Pool sizing: {@code max(2, availableProcessors / 2)}. Floor of 2 covers
-     * single-core test containers. The {@code / 2} ratio leaves CPU headroom for
-     * the agent loop itself (LLM streaming, tool dispatch) — these scheduler
-     * threads are I/O-bound and infrequent, but having one per core would starve
-     * the request-path carriers under load. Virtual threads mean the "pool size"
-     * is really the number of carrier threads that service scheduled dispatches;
-     * the actual heartbeat/timeout tasks run on ephemeral virtual threads.
-     */
-    private static final AtomicReference<ScheduledExecutorService> STREAM_SCHEDULER_REF = new AtomicReference<>();
-
-    private static ScheduledExecutorService streamScheduler() {
-        var s = STREAM_SCHEDULER_REF.get();
-        if (s != null && !s.isShutdown()) return s;
-        var fresh = Executors.newScheduledThreadPool(
-                Math.max(2, Runtime.getRuntime().availableProcessors() / 2),
-                r -> Thread.ofVirtual().name("sse-scheduler-", 0).unstarted(r));
-        if (STREAM_SCHEDULER_REF.compareAndSet(s, fresh)) return fresh;
-        fresh.shutdown();
-        return STREAM_SCHEDULER_REF.get();
-    }
-
-    /**
-     * Time-bounded drain of the SSE scheduler. Called from
-     * {@link jobs.ShutdownJob} at application stop. In-flight streams are
-     * allowed 5 s to wind down (heartbeat cancels, timeout fires, final
-     * flush); anything still scheduled is dropped. Re-init on next access
-     * ensures later code paths still work (e.g. {@code JobLifecycleTest}
-     * calls {@code ShutdownJob.doJob()} in the middle of the suite).
-     */
-    @Util
-    public static void shutdown() {
-        var s = STREAM_SCHEDULER_REF.getAndSet(null);
-        if (s != null) utils.VirtualThreads.gracefulShutdown(s, "sse-scheduler");
-    }
 
     /** Validated prologue shared by send() and streamChat(). */
     private record ChatContext(Agent agent, String message, Long conversationId, String username,
@@ -378,6 +325,11 @@ public class ApiChatController extends Controller {
 
     /**
      * POST /api/chat/stream — Send a message and stream the response as SSE.
+     * SSE plumbing — chunked headers, framing, heartbeats, and disconnect
+     * detection — lives in the play1 fork's {@link SseStream} (PF-16). The
+     * {@code cancelled} flag is bridged from {@code sse.onClose} so SSE
+     * disconnect and {@code /stop} (which flips the same flag via
+     * {@link services.ConversationQueue}) reach AgentRunner through one signal.
      */
     public static void streamChat() {
         // Grab the Netty-set queue-accept stamp on the invocation thread so we can
@@ -391,28 +343,16 @@ public class ApiChatController extends Controller {
         var conversationId = ctx.conversationId();
         var username = ctx.username();
 
-        var res = Http.Response.current();
-        res.contentType = "text/event-stream";
-        res.setHeader("Cache-Control", "no-cache");
-        res.setHeader("Connection", "keep-alive");
-        res.setHeader("X-Accel-Buffering", "no");
+        SseStream sse = openSSE()
+                .heartbeat(Duration.ofSeconds(30))
+                .timeout(Duration.ofMinutes(10));
 
-        // streamDone completes when the SSE stream reaches a terminal frame
-        // (onComplete/onError), a heartbeat write fails (client disconnected),
-        // or the 600s safety timeout fires. We hand it to Play's await() below
-        // so the invocation thread returns to the pool rather than blocking.
-        var streamDone = new CompletableFuture<Void>();
+        // Bridge SSE close (heartbeat-write fail, explicit close, or 10-min
+        // timeout) into the AgentRunner cancellation flag. /stop also flips
+        // this flag via ConversationQueue, so AgentRunner sees one unified
+        // signal regardless of source.
         var cancelled = new AtomicBoolean(false);
-
-        ScheduledFuture<?> heartbeatFuture = streamScheduler().scheduleAtFixedRate(() -> {
-            if (cancelled.get() || streamDone.isDone()) return;
-            try {
-                res.writeChunk(": keep-alive\n\n".getBytes(StandardCharsets.UTF_8));
-            } catch (Exception _) {
-                cancelled.set(true);
-                streamDone.complete(null);
-            }
-        }, 30, 30, TimeUnit.SECONDS);
+        sse.onClose(() -> cancelled.set(true));
 
         // JCLAW-26: slash-command intercept. /new creates a fresh conversation
         // (init frame carries the new id so the frontend switches); /reset +
@@ -435,21 +375,19 @@ public class ApiChatController extends Controller {
                     slashCmd.get(), agent, "web", username, slashConv,
                     slash.Commands.extractArgs(messageText));
             if (slashResult.conversation() != null) {
-                writeSse(res, cancelled, streamDone,
-                        Map.of("type", "init", "conversationId", slashResult.conversation().id), false);
+                sse.send(Map.of("type", "init", "conversationId", slashResult.conversation().id));
             }
-            writeSse(res, cancelled, streamDone,
-                    Map.of("type", "complete", "content", slashResult.responseText()), true);
+            sse.send(Map.of("type", "complete", "content", slashResult.responseText()));
+            sse.close();
             // Slash commands are synthetic turns — no LLM, no prologue → intentionally
             // not instrumented so they don't skew the Chat Performance histograms.
-            streamDone.whenComplete((_, _) -> heartbeatFuture.cancel(false));
-            await(streamDone, _ -> { });
+            await(sse.completion());
             return;
         }
 
         // Switch SSE payload shape on the first token only (includes a timestamp
         // field the frontend uses for TTFT visualization). Subsequent tokens take
-        // the hot path. This is purely a wire-format decision — trace-side
+        // a leaner shape. This is purely a wire-format decision — trace-side
         // FIRST_TOKEN marking is handled inside AgentRunner now.
         var firstToken = new AtomicBoolean(true);
         var callbacks = new AgentRunner.StreamingCallbacks(
@@ -470,23 +408,18 @@ public class ApiChatController extends Controller {
                             if (valid) initData.put("thinkingMode", agent.thinkingMode);
                         }
                     }
-                    writeSse(res, cancelled, streamDone, initData, false);
+                    sse.send(initData);
                 },
                 token -> {
                     if (firstToken.compareAndSet(true, false)) {
-                        // First token includes timestamp — use Gson path
-                        writeSse(res, cancelled, streamDone,
-                                Map.of("type", "token", "content", token,
-                                       "timestamp", java.time.Instant.now().toString()), false);
+                        sse.send(Map.of("type", "token", "content", token,
+                                "timestamp", java.time.Instant.now().toString()));
                     } else {
-                        // Hot path — skip Gson, use pre-built template
-                        writeSseToken(res, cancelled, streamDone, token);
+                        sse.send(Map.of("type", "token", "content", token));
                     }
                 },
-                reasoning -> writeSse(res, cancelled, streamDone,
-                        Map.of("type", "reasoning", "content", reasoning), false),
-                status -> writeSse(res, cancelled, streamDone,
-                        Map.of("type", "status", "content", status), false),
+                reasoning -> sse.send(Map.of("type", "reasoning", "content", reasoning)),
+                status -> sse.send(Map.of("type", "status", "content", status)),
                 // JCLAW-170: tool-call frame. structuredJson rides as a raw
                 // JsonElement (not a nested string) so the frontend can parse
                 // it as an object tree — search-style tools embed a
@@ -504,13 +437,15 @@ public class ApiChatController extends Controller {
                         payload.put("resultStructured",
                                 com.google.gson.JsonParser.parseString(ev.resultStructuredJson()));
                     }
-                    writeSse(res, cancelled, streamDone, payload, false);
+                    sse.send(payload);
                 },
-                content -> writeSse(res, cancelled, streamDone,
-                        Map.of("type", "complete", "content", content), true),
+                content -> {
+                    sse.send(Map.of("type", "complete", "content", content));
+                    sse.close();
+                },
                 error -> {
-                    writeSse(res, cancelled, streamDone,
-                            Map.of("type", "error", "content", "An error occurred: " + error.getMessage()), true);
+                    sse.send(Map.of("type", "error", "content", "An error occurred: " + error.getMessage()));
+                    sse.close();
                     EventLogger.error("channel", agent.name, "web",
                             "SSE stream error: %s".formatted(error.getMessage()));
                 },
@@ -524,70 +459,10 @@ public class ApiChatController extends Controller {
         AgentRunner.runStreaming(agent, conversationId, "web", username, messageText,
                 cancelled, callbacks, acceptedAtNs, ctx.attachments());
 
-        // Safety timeout: emit one error frame and complete normally if no
-        // terminal frame arrives within 600s. Scheduled on the shared scheduler;
-        // we hold its ScheduledFuture so we can cancel it (along with the heartbeat)
-        // when the stream finishes. Using a manual watcher instead of
-        // CompletableFuture.orTimeout avoids a race where the future completes
-        // exceptionally before we write the timeout SSE frame.
-        ScheduledFuture<?> timeoutFuture = streamScheduler().schedule(() -> {
-            if (!streamDone.isDone()) {
-                cancelled.set(true);
-                writeSse(res, cancelled, streamDone,
-                        Map.of("type", "error", "content", "Request timed out"), true);
-            }
-        }, 600, TimeUnit.SECONDS);
-
-        // Cleanup runs regardless of how the future completes — success,
-        // exception, or cancellation. Cancelling both ScheduledFutures ensures
-        // no stray heartbeat or timeout task fires after the stream is done;
-        // the shared scheduler itself is long-lived and never shut down here.
-        streamDone.whenComplete((_, _) -> {
-            heartbeatFuture.cancel(false);
-            timeoutFuture.cancel(false);
-        });
-
-        // Suspend this invocation until streamDone completes. The Play worker
-        // thread returns to the pool immediately — no more blocking on a latch.
-        // The no-op callback satisfies the framework contract; all real work
-        // has already happened on the virtual thread via SSE chunk writes.
-        await(streamDone, _ -> { });
-    }
-
-    /**
-     * Write a single SSE frame to the response. On write failure, marks the
-     * stream as cancelled. If {@code terminal} is true, always completes the
-     * stream-done future (signalling the invocation can resume).
-     */
-    private static void writeSse(Http.Response res, AtomicBoolean cancelled,
-                                 CompletableFuture<Void> done, Map<String, ?> data, boolean terminal) {
-        try {
-            res.writeChunk("data: %s\n\n".formatted(gson.toJson(data)).getBytes(StandardCharsets.UTF_8));
-        } catch (Exception _) {
-            cancelled.set(true);
-            if (!terminal) {
-                done.complete(null);
-                return;
-            }
-        }
-        if (terminal) done.complete(null);
-    }
-
-    /**
-     * Fast-path SSE write for token events. Avoids Gson serialization on the
-     * hot path by using a pre-built JSON string template. Only the content
-     * value needs escaping.
-     */
-    private static void writeSseToken(Http.Response res, AtomicBoolean cancelled,
-                                      CompletableFuture<Void> done, String content) {
-        try {
-            var escaped = content.replace("\\", "\\\\").replace("\"", "\\\"")
-                    .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
-            res.writeChunk(("data: {\"type\":\"token\",\"content\":\"" + escaped + "\"}\n\n")
-                    .getBytes(StandardCharsets.UTF_8));
-        } catch (Exception _) {
-            cancelled.set(true);
-            done.complete(null);
-        }
+        // Suspend this invocation until the SSE stream closes (terminal frame,
+        // disconnect, or 10-min timeout). The Play worker thread returns to
+        // the pool immediately; all real work happens on the agent's virtual
+        // thread via sse.send() / sse.close() calls.
+        await(sse.completion());
     }
 }
