@@ -316,7 +316,12 @@ public class ModelDiscoveryService {
         }
 
         var id = getString(obj, "id", "").toLowerCase();
+        // JCLAW-160: "audio-preview" is OpenAI's stable suffix for audio-capable
+        // models on /v1/models. Match generically so future variants
+        // (gpt-4o-mini-audio-preview, gpt-5-audio-preview, …) are flagged
+        // without per-version updates.
         if (id.contains("gpt-4o-audio") || id.contains("gpt-5-audio")
+                || id.contains("audio-preview")
                 || id.contains("gemini-2.5-flash-audio") || id.contains("whisper")
                 || id.contains("qwen2-audio") || id.contains("voxtral")) {
             return new CapabilityDetection(true, false);

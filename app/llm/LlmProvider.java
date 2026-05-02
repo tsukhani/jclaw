@@ -42,7 +42,8 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      */
     private static final Map<String, Function<ProviderConfig, LlmProvider>> PROVIDER_FACTORIES = Map.of(
             "openrouter", OpenRouterProvider::new,
-            "ollama", OllamaProvider::new
+            "ollama", OllamaProvider::new,
+            "openai", OpenAiProvider::new
     );
 
     protected LlmProvider(ProviderConfig config) {

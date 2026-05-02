@@ -221,6 +221,23 @@ public class ModelDiscoveryServiceTest extends UnitTest {
         assertFalse(result.fromProvider());
     }
 
+    @Test
+    public void detectAudioFallbackAudioPreviewSuffix() {
+        // JCLAW-160: OpenAI's /v1/models endpoint returns plain entries
+        // without modality metadata, so the id heuristic is the only
+        // signal. The "audio-preview" suffix is OpenAI's stable naming
+        // convention for audio-capable models — match it generically so
+        // future variants (gpt-4o-mini-audio-preview, gpt-5-audio-preview)
+        // are flagged without per-version updates.
+        var obj = JsonParser.parseString("""
+                {"id": "gpt-4o-mini-audio-preview"}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectAudioSupport(obj);
+        assertTrue(result.confirmed(),
+                "audio-preview suffix must be detected even with -mini- in the middle");
+        assertFalse(result.fromProvider());
+    }
+
     // --- inferPrice ---
 
     @Test

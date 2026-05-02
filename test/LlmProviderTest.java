@@ -71,6 +71,16 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
+    public void forConfigRoutesOpenaiNameToOpenAiProvider() {
+        // JCLAW-160 AC #1: openai is now an explicit factory entry rather
+        // than relying on the unknown-name fallback. Pin so a future map
+        // reshuffle can't accidentally route the canonical name elsewhere.
+        var p = LlmProvider.forConfig(new ProviderConfig(
+                "openai", "https://api.openai.com/v1", "sk-test", List.of()));
+        assertInstanceOf(OpenAiProvider.class, p);
+    }
+
+    @Test
     public void forConfigRoutesLmStudioToOpenAiProviderViaFallback() {
         // JCLAW-182 AC #2: lm-studio doesn't match either Ollama or OpenRouter
         // substrings, so the factory falls through to OpenAiProvider — perfect

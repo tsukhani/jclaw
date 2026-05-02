@@ -327,6 +327,30 @@ public class AgentSystemTest extends UnitTest {
         assertEquals("msg-5", messages.get(2).content);
     }
 
+    // --- DefaultConfigJob OpenAI seeding (JCLAW-160) ---
+
+    @Test
+    public void seedProvidersWritesOpenAiDefaultsAndIsIdempotent() throws Exception {
+        // JCLAW-160 AC #2: seedProviders must write provider.openai.{baseUrl,apiKey}
+        // on a fresh install with the documented defaults. Re-running mustn't
+        // clobber operator-set values — the seedIfAbsent guard is what protects
+        // a real apiKey across upgrades and dev-server reloads.
+        var job = new DefaultConfigJob();
+        var seed = DefaultConfigJob.class.getDeclaredMethod("seedProviders");
+        seed.setAccessible(true);
+        seed.invoke(job);
+
+        assertEquals("https://api.openai.com/v1",
+                ConfigService.get("provider.openai.baseUrl"));
+        assertEquals("", ConfigService.get("provider.openai.apiKey"));
+
+        // Operator pastes a real key, then a re-seed must preserve it.
+        ConfigService.set("provider.openai.apiKey", "sk-operator");
+        seed.invoke(job);
+        assertEquals("sk-operator", ConfigService.get("provider.openai.apiKey"),
+                "seedIfAbsent must not overwrite an operator-supplied value");
+    }
+
     // --- DefaultConfigJob rename migration ---
 
     @Test

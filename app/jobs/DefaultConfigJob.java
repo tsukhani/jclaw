@@ -131,6 +131,16 @@ public class DefaultConfigJob extends Job<Void> {
                 {"id":"anthropic/claude-sonnet-4-6","name":"Claude Sonnet 4.6","contextWindow":200000,"maxTokens":131072},\
                 {"id":"google/gemini-3-flash-preview","name":"Gemini 3 Flash","contextWindow":1000000,"maxTokens":65536},\
                 {"id":"deepseek/deepseek-v3.2","name":"DeepSeek V3.2","contextWindow":128000,"maxTokens":32768}]""");
+
+        // JCLAW-160: OpenAI as a first-class provider, on equal footing with
+        // OpenRouter. apiKey is seeded blank so ProviderRegistry.refreshInner
+        // skips the row until an operator pastes a key in Settings; once
+        // keyed the row enables direct-OpenAI chat plus the OpenAI Whisper
+        // transcription backend (JCLAW-162) without proxying through
+        // OpenRouter. No leaderboard or curated model list — the Settings
+        // UI's discovery flow against /v1/models populates the catalog.
+        seedIfAbsent("provider.openai.baseUrl", "https://api.openai.com/v1");
+        seedIfAbsent("provider.openai.apiKey", "");
     }
 
     private void seedToolConfig() {

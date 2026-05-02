@@ -107,6 +107,35 @@ public class ProviderRegistryAtomicTest extends UnitTest {
     }
 
     @Test
+    public void getOpenaiReturnsNullWhenApiKeyBlank() {
+        // JCLAW-160 AC #3: a baseUrl-only row (apiKey blank) must not
+        // register, so `get("openai")` returns null until the operator
+        // pastes a key in Settings.
+        ConfigService.set("provider.openai.baseUrl", "https://api.openai.com/v1");
+        ConfigService.set("provider.openai.apiKey", "");
+        ProviderRegistry.refresh();
+
+        assertNull(ProviderRegistry.get("openai"),
+                "openai with blank apiKey must not be in the registry");
+    }
+
+    @Test
+    public void getOpenaiReturnsOpenAiProviderWhenKeyed() {
+        // JCLAW-160 AC #3: with both keys populated the registry produces
+        // an OpenAiProvider via the factory's openai entry (not the
+        // fallback path).
+        ConfigService.set("provider.openai.baseUrl", "https://api.openai.com/v1");
+        ConfigService.set("provider.openai.apiKey", "sk-real");
+        ProviderRegistry.refresh();
+
+        var provider = ProviderRegistry.get("openai");
+        assertNotNull(provider, "openai must register when both keys are non-blank");
+        assertInstanceOf(llm.OpenAiProvider.class, provider,
+                "openai must route to OpenAiProvider");
+        assertEquals("https://api.openai.com/v1", provider.config().baseUrl());
+    }
+
+    @Test
     public void refreshAfterProviderRemoved() {
         ConfigService.set("provider.removable.baseUrl", "https://test.ai/v1");
         ConfigService.set("provider.removable.apiKey", "sk-test");
