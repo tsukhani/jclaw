@@ -103,10 +103,21 @@ function normalizeMarkdownLinks(text: string): string {
 }
 
 // Memoized markdown rendering — avoids re-parsing unchanged messages on re-render.
-// Cache is keyed by (text + agentId); entries for the streaming message are skipped
-// since its content changes every token.
+// Cache is keyed by (text + agentId); the streaming message renders through
+// renderMarkdownStreaming() which bypasses the cache entirely (its content
+// changes every token, so caching every intermediate state would thrash both
+// the cache and the LRU bound).
 const markdownCache = new Map<string, string>()
 const MARKDOWN_CACHE_MAX = 200
+
+function renderMarkdownInner(text: string, agentId: number | null): string {
+  const html = marked.parse(normalizeMarkdownLinks(text)) as string
+  const sanitized = DOMPurify.sanitize(html, {
+    ADD_TAGS: ['img', 'audio', 'video', 'source'],
+    ADD_ATTR: ['src', 'controls', 'autoplay', 'download', 'target'],
+  })
+  return agentId != null ? rewriteWorkspaceLinks(sanitized, agentId) : sanitized
+}
 
 function renderMarkdown(text: string, agentId: number | null = null): string {
   if (!text) return ''
@@ -114,18 +125,20 @@ function renderMarkdown(text: string, agentId: number | null = null): string {
   const cached = markdownCache.get(cacheKey)
   if (cached) return cached
 
-  const html = marked.parse(normalizeMarkdownLinks(text)) as string
-  const sanitized = DOMPurify.sanitize(html, {
-    ADD_TAGS: ['img', 'audio', 'video', 'source'],
-    ADD_ATTR: ['src', 'controls', 'autoplay', 'download', 'target'],
-  })
-  const result = agentId != null ? rewriteWorkspaceLinks(sanitized, agentId) : sanitized
-
+  const result = renderMarkdownInner(text, agentId)
   // Only cache if under limit (prevents unbounded growth during long sessions)
   if (markdownCache.size < MARKDOWN_CACHE_MAX) {
     markdownCache.set(cacheKey, result)
   }
   return result
+}
+
+// Cache-bypassing variant for the in-flight streaming bubble. The content
+// changes every token; caching every intermediate string would saturate the
+// 200-entry LRU before the cache helped any historical message.
+function renderMarkdownStreaming(text: string, agentId: number | null = null): string {
+  if (!text) return ''
+  return renderMarkdownInner(text, agentId)
 }
 
 const { data: agents, refresh: refreshAgents } = await useFetch<Agent[]>('/api/agents')
@@ -508,28 +521,23 @@ const latestAssistantUsage = computed<MessageUsage | null>(() => {
 /**
  * Running cost summary for the currently open conversation. Honors each turn's
  * own embedded pricing so mixed-model conversations (e.g. Kimi → Flash) total
- * correctly. Returns null when the conversation has no assistant turns.
+ * correctly. Null when the conversation has no assistant turns.
+ *
+ * The watch that populates this lives near {@link displayMessages} since it
+ * depends on that computed; declared up here so template bindings resolve.
  */
-const conversationCostSummary = computed(() => {
-  const usages = (displayMessages.value ?? [])
-    .filter(m => m.role === 'assistant' && m.usage)
-    .map(m => m.usage as MessageUsage)
-  if (usages.length === 0) return null
-  const breakdown = computeConversationCost(usages)
-  const label = formatConversationCost(breakdown)
-  if (label === null) return null
-  return {
-    label,
-    tooltip: formatConversationCostTooltip(breakdown),
-    turnCount: breakdown.turnCount,
-  }
-})
+const conversationCostSummary = ref<{ label: string, tooltip: string, turnCount: number } | null>(null)
 
 // Per-bubble collapse toggle handler. Header label + default-collapse rules
 // live in ~/utils/thinking.ts (thinkingHeaderLabel, initCollapsedState) so
 // they are unit-testable without mounting the page.
+//
+// triggerRef is required because messages is a shallowRef — mutating a
+// property on a Message object inside the array does not trigger reactivity
+// on its own. The same applies to the tool-call toggles below.
 function toggleThinking(msg: Message) {
   msg.thinkingCollapsed = !msg.thinkingCollapsed
+  triggerRef(messages)
 }
 
 // JCLAW-170: tool-calls block collapse toggle. Mirrors the thinking card's
@@ -537,6 +545,7 @@ function toggleThinking(msg: Message) {
 function toggleToolCalls(msg: Message) {
   (msg as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed
     = !(msg as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed
+  triggerRef(messages)
 }
 
 // JCLAW-170: per-call expand toggle. Each tool call inside the outer block
@@ -544,6 +553,7 @@ function toggleToolCalls(msg: Message) {
 // the surrounding "N tool calls" accordion.
 function toggleToolCallExpansion(tc: ToolCall) {
   tc._expanded = !tc._expanded
+  triggerRef(messages)
 }
 
 /**
@@ -656,10 +666,29 @@ const { data: conversations, refresh: refreshConversations } = await useFetch<Co
   () => `/api/conversations?channel=web&agentId=${selectedAgentId.value}&limit=50`,
 )
 const selectedConvoId = ref<number | null>(null)
-const messages = ref<Message[]>([])
+// shallowRef so per-token property mutations (m.content = ..., m.reasoning = ...)
+// don't cascade through every computed that walks the messages array. Structural
+// changes (push, splice, replace, property writes that should propagate) MUST be
+// followed by triggerRef(messages). The streaming bubble reads its live text from
+// streamContentHtml / streamReasoningHtml instead of msg.content / msg.reasoning,
+// so suppressing per-token reactivity does not affect what the user sees.
+const messages = shallowRef<Message[]>([])
 const input = ref('')
 const streaming = ref(false)
 const streamStatus = ref('')
+// _key of the assistant message currently being streamed. Set when we push the
+// placeholder in sendMessage, cleared when the stream ends. Used by the
+// template to route the in-flight bubble to streamContentHtml /
+// streamReasoningHtml (throttled markdown render) instead of running the full
+// renderMarkdown pipeline on every token mutation.
+const streamingMessageKey = ref<string | null>(null)
+// Throttled markdown HTML for the streaming bubble. Updated at most once per
+// STREAM_RENDER_INTERVAL_MS so a 200 tok/s reasoning burst does not run
+// marked.parse + DOMPurify on a growing string at full throttle. Final state
+// gets a forced flush in onComplete so the bubble lands on the exact final
+// text before we hand off to renderMarkdown's cached path.
+const streamContentHtml = ref('')
+const streamReasoningHtml = ref('')
 const chatInput = ref<HTMLTextAreaElement | null>(null)
 
 /**
@@ -833,13 +862,18 @@ async function reconcileMessageIds() {
     const fresh = await $fetch<Message[]>(`/api/conversations/${convoId}/messages`)
     if (!fresh?.length) return
     const local = messages.value
+    let mutated = false
     for (let li = local.length - 1, ri = fresh.length - 1; li >= 0 && ri >= 0; li--, ri--) {
       const L = local[li]
       const R = fresh[ri]
       if (!L || !R) continue
       if (L.role !== R.role) break
-      if (!L.id && R.id) L.id = R.id
+      if (!L.id && R.id) {
+        L.id = R.id
+        mutated = true
+      }
     }
+    if (mutated) triggerRef(messages)
   }
   catch (e) {
     console.error('Failed to reconcile message ids:', e)
@@ -858,7 +892,10 @@ async function deleteMessage(msg: Message) {
     // keeps the remaining messages' thinkingCollapsed / _thinkingDurationMs
     // bubble state intact (they're client-only refs that a refetch would lose).
     const idx = messages.value.findIndex(m => m.id === msg.id)
-    if (idx >= 0) messages.value.splice(idx, 1)
+    if (idx >= 0) {
+      messages.value.splice(idx, 1)
+      triggerRef(messages)
+    }
   }
   catch (e) {
     console.error('Failed to delete message:', e)
@@ -890,6 +927,47 @@ function scrollToBottom() {
   })
 }
 
+// Throttle interval for the streaming bubble's markdown render. ~80 ms gives
+// roughly 12.5 fps, which the eye reads as live for streaming text while
+// capping marked.parse + DOMPurify on a growing string. Streaming providers
+// often fire 50-200 events per second; without this cap the main thread
+// saturates by token ~1000 of a long reasoning response.
+const STREAM_RENDER_INTERVAL_MS = 80
+let streamRenderTimer: ReturnType<typeof setTimeout> | null = null
+let streamReasoningTimer: ReturnType<typeof setTimeout> | null = null
+
+function scheduleStreamContentRender() {
+  if (streamRenderTimer != null) return
+  streamRenderTimer = setTimeout(() => {
+    streamRenderTimer = null
+    streamContentHtml.value = renderMarkdownStreaming(streamContent.value, selectedAgentId.value)
+  }, STREAM_RENDER_INTERVAL_MS)
+}
+
+function scheduleStreamReasoningRender() {
+  if (streamReasoningTimer != null) return
+  streamReasoningTimer = setTimeout(() => {
+    streamReasoningTimer = null
+    streamReasoningHtml.value = renderMarkdownStreaming(streamReasoning.value, selectedAgentId.value)
+  }, STREAM_RENDER_INTERVAL_MS)
+}
+
+// Force an immediate render and clear any pending throttle timer. Called at
+// stream start (reset) and stream end (flush the last delta into the bubble
+// before we hand off to renderMarkdown's cached path).
+function flushStreamRender() {
+  if (streamRenderTimer != null) {
+    clearTimeout(streamRenderTimer)
+    streamRenderTimer = null
+  }
+  if (streamReasoningTimer != null) {
+    clearTimeout(streamReasoningTimer)
+    streamReasoningTimer = null
+  }
+  streamContentHtml.value = renderMarkdownStreaming(streamContent.value, selectedAgentId.value)
+  streamReasoningHtml.value = renderMarkdownStreaming(streamReasoning.value, selectedAgentId.value)
+}
+
 /**
  * Reasoning bubble is a fixed-height scroll region (see the h-80 data-
  * reasoning-body div in the template). As reasoning tokens stream in, pin
@@ -897,18 +975,28 @@ function scrollToBottom() {
  * the user having to chase the scroll themselves. Only the in-flight
  * message's bubble is updated — historical messages keep whatever scroll
  * position the user set.
+ *
+ * RAF-coalesced so a 200 tok/s reasoning burst doesn't force a synchronous
+ * layout reflow per chunk (scrollHeight read + scrollTop write is a layout-
+ * thrash pattern when fired at chunk rate). Mirrors scrollToBottom's pattern.
  */
-watch(streamReasoning, async () => {
-  if (!streaming.value) return
-  await nextTick()
-  const bodies = messagesEl.value?.querySelectorAll<HTMLElement>('[data-reasoning-body]')
-  const last = bodies?.[bodies.length - 1]
-  if (last) last.scrollTop = last.scrollHeight
+let reasoningScrollRaf: number | null = null
+watch(streamReasoning, () => {
+  if (!streaming.value || reasoningScrollRaf != null) return
+  reasoningScrollRaf = requestAnimationFrame(() => {
+    reasoningScrollRaf = null
+    const bodies = messagesEl.value?.querySelectorAll<HTMLElement>('[data-reasoning-body]')
+    const last = bodies?.[bodies.length - 1]
+    if (last) last.scrollTop = last.scrollHeight
+  })
 })
 
 onUnmounted(() => {
   abortController.value?.abort()
   if (scrollRaf) cancelAnimationFrame(scrollRaf)
+  if (reasoningScrollRaf) cancelAnimationFrame(reasoningScrollRaf)
+  if (streamRenderTimer != null) clearTimeout(streamRenderTimer)
+  if (streamReasoningTimer != null) clearTimeout(streamReasoningTimer)
 })
 
 function stopStreaming() {
@@ -920,6 +1008,34 @@ function stopStreaming() {
 const displayMessages = computed(() =>
   messages.value.filter(m => shouldDisplayMessage(m, streaming.value)),
 )
+
+// Recompute the cost meter only when streaming is idle — usage lands at
+// end-of-turn, so any recompute mid-stream would walk every message and call
+// computeConversationCost for an unchanged value. The shallowRef migration
+// on messages already prevents per-token cascades; this watch keeps the
+// recompute off the displayMessages tracking path entirely so the meter
+// stays stable through the streaming → idle transition.
+watch(() => [displayMessages.value, streaming.value] as const, ([msgs, isStreaming]) => {
+  if (isStreaming) return
+  const usages = (msgs ?? [])
+    .filter(m => m.role === 'assistant' && m.usage)
+    .map(m => m.usage as MessageUsage)
+  if (usages.length === 0) {
+    conversationCostSummary.value = null
+    return
+  }
+  const breakdown = computeConversationCost(usages)
+  const label = formatConversationCost(breakdown)
+  if (label === null) {
+    conversationCostSummary.value = null
+    return
+  }
+  conversationCostSummary.value = {
+    label,
+    tooltip: formatConversationCostTooltip(breakdown),
+    turnCount: breakdown.turnCount,
+  }
+}, { immediate: true })
 
 // Deep-link: if ?conversation=ID is present, load that conversation and switch
 // to its agent on mount.
@@ -1097,12 +1213,15 @@ async function sendMessage() {
   attachedFiles.value = []
   if (chatInput.value) chatInput.value.style.height = 'auto'
   messages.value.push({ _key: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString() })
+  triggerRef(messages)
   scrollToBottom()
 
   streaming.value = true
   streamContent.value = ''
   streamReasoning.value = ''
   streamStatus.value = ''
+  streamContentHtml.value = ''
+  streamReasoningHtml.value = ''
 
   // Capture the conversation id we're sending — if the server returns a
   // DIFFERENT id in the init frame, the backend minted a new conversation
@@ -1113,7 +1232,10 @@ async function sendMessage() {
 
   // Add placeholder for streaming response
   let assistantIdx = messages.value.length
-  messages.value.push({ _key: crypto.randomUUID(), role: 'assistant', content: '', createdAt: new Date().toISOString() })
+  const assistantKey = crypto.randomUUID()
+  messages.value.push({ _key: assistantKey, role: 'assistant', content: '', createdAt: new Date().toISOString() })
+  streamingMessageKey.value = assistantKey
+  triggerRef(messages)
 
   abortController.value?.abort() // cancel any orphaned previous stream
   abortController.value = new AbortController()
@@ -1160,6 +1282,7 @@ async function sendMessage() {
               if (placeholder) {
                 messages.value = [placeholder]
                 assistantIdx = 0
+                triggerRef(messages)
               }
             }
             selectedConvoId.value = event.conversationId
@@ -1174,6 +1297,7 @@ async function sendMessage() {
                 const parsed = JSON.parse(event.content)
                 if (parsed.usage) {
                   messages.value[assistantIdx]!.usage = parsed.usage
+                  triggerRef(messages)
                   // The metrics pill renders below the bubble the moment
                   // usage lands. Without this scroll the per-token scroller
                   // leaves the viewport pinned to the pre-metrics bottom
@@ -1196,14 +1320,23 @@ async function sendMessage() {
             // and over"). The protective _thinkingInProgress=true flag is
             // enough to pin the "Thinking" label for the duration of the
             // reasoning phase; no need to re-pin it per chunk.
-            if (!m._thinkingStartedAt) {
+            const stateChanged = !m._thinkingStartedAt
+            if (stateChanged) {
               m._thinkingStartedAt = Date.now()
               m._thinkingInProgress = true
               m._thinkingDurationMs = null
               m.thinkingCollapsed = false
             }
             streamReasoning.value += event.content
+            // Property mutation on a shallowRef-held object does not trigger
+            // reactivity. The streaming bubble reads streamReasoningHtml.value
+            // (throttled markdown render below) instead of msg.reasoning, so
+            // the user still sees the live update. msg.reasoning is kept in
+            // sync so the post-stream renderMarkdown(msg.reasoning) path
+            // displays the final text after the finally{} triggerRef.
             m.reasoning = streamReasoning.value
+            scheduleStreamReasoningRender()
+            if (stateChanged) triggerRef(messages)
             if (!streamContent.value) {
               streamStatus.value = 'thinking...'
             }
@@ -1226,7 +1359,8 @@ async function sendMessage() {
             // auto-collapse. Guarded by _thinkingInProgress so the stamp
             // fires exactly once at the transition — subsequent content
             // tokens are no-ops on this branch.
-            if (m._thinkingInProgress) {
+            const transitioned = m._thinkingInProgress === true
+            if (transitioned) {
               m._thinkingDurationMs = Date.now() - (m._thinkingStartedAt ?? Date.now())
               m._thinkingInProgress = false
               m.thinkingCollapsed = true
@@ -1235,6 +1369,13 @@ async function sendMessage() {
             if (event.timestamp) m.createdAt = event.timestamp
             streamContent.value += event.content
             m.content = streamContent.value
+            scheduleStreamContentRender()
+            // Trigger a single re-render at the reasoning→content transition
+            // so the thinking card collapses and the content bubble appears.
+            // Subsequent content tokens flow through streamContentHtml without
+            // touching the messages-array reactivity, which is the whole point
+            // of the shallowRef migration.
+            if (transitioned) triggerRef(messages)
             scrollToBottom()
           }
           else if (event.type === 'tool_call') {
@@ -1262,6 +1403,7 @@ async function sendMessage() {
               resultStructured: event.resultStructured ?? null,
               _expanded: true,
             })
+            triggerRef(messages)
             scrollToBottom()
           }
           else if (event.type === 'complete') {
@@ -1282,9 +1424,11 @@ async function sendMessage() {
           }
           else if (event.type === 'error') {
             messages.value[assistantIdx]!.content = event.content
+            triggerRef(messages)
           }
           else if (event.type === 'queued') {
             messages.value[assistantIdx]!.content = 'Your message has been queued (position: ' + (event.position || '?') + '). Processing shortly...'
+            triggerRef(messages)
           }
         }
         catch {
@@ -1310,6 +1454,8 @@ async function sendMessage() {
   }
   finally {
     streaming.value = false
+    streamingMessageKey.value = null
+    flushStreamRender()
     triggerRef(messages) // re-render with final content + markdown
     // triggerRef can add height (markdown codeblocks expand, metrics pill
     // appears if usage arrived after complete). Wait a tick so the DOM
@@ -2130,20 +2276,37 @@ function exportConversation() {
                         </button>
                       </div>
                       <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify (see renderMarkdown above) before returning. -->
+                      <!--
+                        For the in-flight assistant bubble, render from
+                        streamReasoningHtml (throttled markdown render of
+                        streamReasoning). For historical messages, render via
+                        the cached renderMarkdown(msg.reasoning) path. This
+                        is what closes the "main thread runs marked.parse on
+                        every reasoning chunk" finding from the perf audit.
+                      -->
                       <div
                         v-if="!msg.thinkingCollapsed"
                         data-reasoning-body
                         class="prose-chat px-4 pb-4 pt-3 text-sm text-fg-primary break-words max-h-80 overflow-y-auto border-t border-neutral-200 dark:border-neutral-700"
-                        v-html="renderMarkdown(msg.reasoning, selectedAgentId)"
+                        v-html="msg._key === streamingMessageKey ? streamReasoningHtml : renderMarkdown(msg.reasoning, selectedAgentId)"
                       />
                       <!-- eslint-enable vue/no-v-html -->
                     </div>
                     <!-- Response content — plain rendered markdown, no bubble. -->
                     <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify (see renderMarkdown above) before returning. -->
+                    <!--
+                      Streaming bubble: bind to streamContentHtml so the
+                      template re-renders at the throttled cadence (~12.5 fps)
+                      driven by scheduleStreamContentRender. Historical
+                      messages still go through renderMarkdown's cached path.
+                      streamingMessageKey is the _key of the in-flight
+                      assistant message (set when the placeholder is pushed
+                      in sendMessage, cleared on stream end).
+                    -->
                     <div
-                      v-if="msg.content"
+                      v-if="msg._key === streamingMessageKey ? !!streamContent : !!msg.content"
                       class="prose-chat text-fg-primary text-base overflow-x-auto break-words"
-                      v-html="renderMarkdown(msg.content, selectedAgentId)"
+                      v-html="msg._key === streamingMessageKey ? streamContentHtml : renderMarkdown(msg.content ?? '', selectedAgentId)"
                     />
                     <!-- eslint-enable vue/no-v-html -->
                     <div
