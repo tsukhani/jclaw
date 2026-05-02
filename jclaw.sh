@@ -1088,18 +1088,76 @@ locate_h2_jar() {
     return 1
 }
 
+# Detect whether the dist's docker-compose.yml has a running `jclaw` service
+# in the current $JCLAW_DIR. Returns 0 when a running container exists, 1
+# otherwise (no docker, no compose file, daemon down, parse error — all
+# silent). Best-effort dispatcher hint for `do_reset`, not a hard gate; the
+# caller falls through to direct-mode behavior on any failure path.
+docker_jclaw_running() {
+    command -v docker >/dev/null 2>&1 || return 1
+    [[ -f "$JCLAW_DIR/docker-compose.yml" ]] || return 1
+    local services
+    services=$(cd "$JCLAW_DIR" && docker compose ps --status running --services 2>/dev/null) || return 1
+    grep -q '^jclaw$' <<< "$services"
+}
+
+# Confirmation gate for do_reset. The reset wipes the credentials that gate
+# access to the running instance — anyone who reaches the post-reset
+# /setup-password page can claim the admin role. The operator must
+# acknowledge that surface before we touch the DB. JCLAW_RESET_YES=1 in
+# the environment skips the prompt for scripted use, and is also how the
+# host-side reset propagates the operator's confirmation when it delegates
+# into `docker compose exec` — the in-container script sees JCLAW_RESET_YES=1
+# and skips its own prompt instead of blocking on a stdin nobody owns.
+prompt_reset_confirmation() {
+    local target_desc="$1"
+    if [[ "${JCLAW_RESET_YES:-}" == "1" ]]; then
+        return 0
+    fi
+    echo "About to clear the admin password hash from $target_desc."
+    echo "After this, the next visit to the app will land on the"
+    echo "/setup-password page and the first arriver claims the"
+    echo "admin role."
+    read -r -p "Proceed? [y/N] " reply
+    case "$reply" in
+        y|Y|yes|YES) return 0 ;;
+        *) echo "Aborted."; exit 0 ;;
+    esac
+}
+
 # Clear the admin password hash from the Config DB so the next launch
 # routes through the in-app /setup-password flow. The recovery path for
 # an operator who's locked themselves out — the in-app
 # POST /api/auth/reset-password endpoint requires being signed in, which
 # is impossible when you've forgotten the password.
 #
-# Safe to run while the app is up because db.url is configured with
-# AUTO_SERVER=TRUE — H2 promotes the file lock to a TCP server on first
-# connect, so a second process (this one) can join the same database
-# without contention. Idempotent: re-running on a fresh install where
-# no password has ever been set succeeds with 0 rows deleted.
+# Two dispatch paths:
+#
+# 1. Docker mode — when the dist's docker-compose stack has a running
+#    `jclaw` service, delegate via `docker compose exec`. The container's
+#    H2 holds the database file lock and registers an AUTO_SERVER socket
+#    on the container's internal IP (e.g. 172.18.0.2), which Docker
+#    Desktop on macOS does not route from host → container; a host-side
+#    H2 Shell would time out on connect. The host-side prompt runs first,
+#    then JCLAW_RESET_YES=1 propagates into the exec environment so the
+#    in-container call doesn't re-prompt.
+#
+# 2. Direct mode — host-side H2 Shell against data/jclaw.mv.db. Safe to
+#    run while a host-side `play run` is up because db.url is configured
+#    with AUTO_SERVER=TRUE — H2 promotes the file lock to a TCP server
+#    on first connect, so a second process (this one) can join the same
+#    database without contention.
+#
+# Idempotent in both modes: re-running on a fresh install where no
+# password has ever been set succeeds with 0 rows deleted.
 do_reset() {
+    if docker_jclaw_running; then
+        prompt_reset_confirmation "the running jclaw container's database"
+        echo "==> Detected jclaw container running; running reset inside the container..."
+        cd "$JCLAW_DIR"
+        exec docker compose exec -T -e JCLAW_RESET_YES=1 jclaw ./jclaw.sh reset
+    fi
+
     local data_file="$JCLAW_DIR/data/jclaw.mv.db"
     if [[ ! -f "$data_file" ]]; then
         echo "Error: No database found at $data_file."
@@ -1120,22 +1178,7 @@ do_reset() {
         exit 1
     }
 
-    # Confirmation gate. The reset wipes the credentials that gate
-    # access to the running instance — anyone who reaches the post-reset
-    # /setup-password page can claim the admin role. Make the operator
-    # acknowledge that surface before we touch the DB. JCLAW_RESET_YES=1
-    # in the environment skips the prompt for scripted use.
-    if [[ "${JCLAW_RESET_YES:-}" != "1" ]]; then
-        echo "About to clear the admin password hash from $data_file."
-        echo "After this, the next visit to the app will land on the"
-        echo "/setup-password page and the first arriver claims the"
-        echo "admin role."
-        read -r -p "Proceed? [y/N] " reply
-        case "$reply" in
-            y|Y|yes|YES) ;;
-            *) echo "Aborted."; exit 0 ;;
-        esac
-    fi
+    prompt_reset_confirmation "$data_file"
 
     # AUTO_SERVER=TRUE matches application.conf's db.url so a running
     # app's file lock doesn't block us. MODE=MYSQL is irrelevant for a
