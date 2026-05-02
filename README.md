@@ -334,6 +334,19 @@ You can also set `JCLAW_PORT` in `.env` alongside `docker-compose.yml` instead o
 
 The container runs in production mode — the Nuxt SPA is already built into the image, so no local Node.js, pnpm, or Play toolchain is required on the host. Open `http://localhost:9000` (or your custom port) once the container is healthy.
 
+#### Browser-trusted HTTPS
+
+The container also exposes HTTPS on **:9443** (with HTTP/3 over the same UDP port) using a self-signed TLS cert generated at `certs/host.cert` on first boot. HTTPS works as-is but browsers show a cert-warning interstitial, and Chrome refuses HTTP/3 entirely — QUIC requires the cert to be in the system trust store. To get browser-trusted HTTPS plus working HTTP/3, sign the cert with [mkcert](https://github.com/FiloSottile/mkcert)'s local CA from your host:
+
+```bash
+brew install mkcert              # macOS; Linux/Windows: see mkcert docs
+sudo mkcert -install             # adds mkcert's CA to the system trust store (and Firefox NSS if installed)
+./jclaw.sh cert                  # regenerates certs/host.cert + host.key, signed by the CA
+docker compose restart jclaw     # JVM reloads the new cert at boot
+```
+
+Subsequent `docker compose up -d` calls reuse the existing cert — you only need to re-run `./jclaw.sh cert` after rotating mkcert's CA or deleting the `certs/` directory.
+
 ### Custom Ports
 
 Use `--backend-port` and `--frontend-port` with any `jclaw.sh` mode. The frontend reads the backend port via the `JCLAW_BACKEND_PORT` environment variable at startup — no files are modified.
