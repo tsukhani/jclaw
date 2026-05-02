@@ -1473,6 +1473,69 @@ do_deploy() {
 
 # ─── Production start/stop ───
 
+# Probe whether host:port accepts a TCP connection within ~2s. Returns 0
+# when reachable, non-zero otherwise. Bash /dev/tcp + a watchdog kill is
+# the most portable choice on the platforms we support — `timeout(1)` is
+# missing from macOS base, and the `nc` flag set differs between BSD
+# (macOS) and GNU (Linux).
+probe_tcp_reachable() {
+    local ip="$1" port="$2"
+    ( exec 3<>"/dev/tcp/$ip/$port" ) 2>/dev/null &
+    local pid=$!
+    ( sleep 2 && kill -9 "$pid" 2>/dev/null ) >/dev/null 2>&1 &
+    local watchdog=$!
+    wait "$pid" 2>/dev/null
+    local rc=$?
+    kill "$watchdog" 2>/dev/null
+    wait "$watchdog" 2>/dev/null
+    return $rc
+}
+
+# Detect a stale H2 lock file from a prior crashed/abandoned run. H2's
+# AUTO_SERVER=TRUE mode (set in db.url in conf/application.conf) writes
+# the auto-server's IP and port into data/jclaw.lock.db. When the holder
+# dies ungracefully (Docker container removed without a clean shutdown,
+# host crash, JVM kill -9, OOM), the file persists with an unreachable
+# address. Without this check, the next start hangs on the JDBC connect
+# until OS-level timeout (often 60s+) before bailing without a useful
+# diagnostic.
+#
+# Behavior:
+#   - No lock file                 → no-op (fresh start)
+#   - File-mode lock (no server=)  → no-op (no AUTO_SERVER hint to verify)
+#   - Server-mode, reachable       → abort: a live holder owns the DB
+#   - Server-mode, unreachable     → remove stale lock; continue starting
+check_stale_h2_lock_or_exit() {
+    local lock_file="$JCLAW_DIR/data/jclaw.lock.db"
+    [[ -f "$lock_file" ]] || return 0
+
+    local method
+    method=$(grep -iE "^method=" "$lock_file" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '\r')
+    case "$method" in
+        Server|SERVER|server) ;;
+        *) return 0 ;;
+    esac
+
+    local server
+    server=$(grep -iE "^server=" "$lock_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '\r')
+    server="${server#tcp://}"
+    if [[ -z "$server" || "$server" != *:* ]]; then
+        return 0
+    fi
+    local ip="${server%:*}"
+    local port="${server##*:}"
+
+    if probe_tcp_reachable "$ip" "$port"; then
+        echo "Error: another instance is already using this database at $ip:$port."
+        echo "       Stop it before starting again ('$0 stop' or 'docker compose down')."
+        echo "       (If you're sure no other instance exists, remove $lock_file manually.)"
+        exit 1
+    fi
+
+    echo "==> Removed stale H2 lock pointing at $ip:$port"
+    rm -f "$lock_file"
+}
+
 do_start_prod() {
     cd "$JCLAW_DIR"
 
@@ -1515,6 +1578,12 @@ do_start_prod() {
         echo "       Run '$0 ${DEPLOY_DIR:+--deploy $DEPLOY_DIR }stop' first, or kill the holder."
         exit 1
     fi
+
+    # Reap any stale H2 lock from a prior ungraceful shutdown (Docker rm
+    # without compose down, JVM kill -9, host crash). Without this, the
+    # JDBC connect below hangs ~60s following an AUTO_SERVER hint that
+    # points nowhere before bailing.
+    check_stale_h2_lock_or_exit
 
     # First-run guard for jclaw.zip distributions: if no certs/.env and
     # the conf-named secret variable isn't already set in the parent
@@ -1740,6 +1809,10 @@ do_start_dev() {
         echo "       Run '$0 --dev stop' first, or kill the holder."
         exit 1
     fi
+
+    # Reap any stale H2 lock from a prior ungraceful shutdown. See the
+    # prod-path counterpart for the rationale.
+    check_stale_h2_lock_or_exit
 
     # Source certs/.env (the conf-named secret variable, plus any other
     # overrides) into the JVM environment. See the prod-mode counterpart
