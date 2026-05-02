@@ -941,6 +941,14 @@ function scheduleStreamContentRender() {
   streamRenderTimer = setTimeout(() => {
     streamRenderTimer = null
     streamContentHtml.value = renderMarkdownStreaming(streamContent.value, selectedAgentId.value)
+    // Vue's compiled v-for slot tracks the messages shallowRef as its primary
+    // dep — top-level refs read inside the slot's v-html (streamContentHtml)
+    // alone don't always re-run the slot's render under v-for + shallowRef.
+    // Force a re-render at the throttle's cadence so the in-flight bubble's
+    // v-html picks up the latest streamContentHtml string. Cost is at most
+    // STREAM_RENDER_INTERVAL_MS — i.e. the same cap the throttle already
+    // imposes; tokens still stream as fast as they arrive.
+    triggerRef(messages)
   }, STREAM_RENDER_INTERVAL_MS)
 }
 
@@ -949,6 +957,7 @@ function scheduleStreamReasoningRender() {
   streamReasoningTimer = setTimeout(() => {
     streamReasoningTimer = null
     streamReasoningHtml.value = renderMarkdownStreaming(streamReasoning.value, selectedAgentId.value)
+    triggerRef(messages)
   }, STREAM_RENDER_INTERVAL_MS)
 }
 
@@ -966,6 +975,7 @@ function flushStreamRender() {
   }
   streamContentHtml.value = renderMarkdownStreaming(streamContent.value, selectedAgentId.value)
   streamReasoningHtml.value = renderMarkdownStreaming(streamReasoning.value, selectedAgentId.value)
+  triggerRef(messages)
 }
 
 /**
