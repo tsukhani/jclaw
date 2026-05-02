@@ -225,7 +225,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     public void detectAudioFallbackAudioPreviewSuffix() {
         // JCLAW-160: OpenAI's /v1/models endpoint returns plain entries
         // without modality metadata, so the id heuristic is the only
-        // signal. The "audio-preview" suffix is OpenAI's stable naming
+        // signal. The "-audio-preview" suffix is OpenAI's stable naming
         // convention for audio-capable models — match it generically so
         // future variants (gpt-4o-mini-audio-preview, gpt-5-audio-preview)
         // are flagged without per-version updates.
@@ -235,6 +235,23 @@ public class ModelDiscoveryServiceTest extends UnitTest {
         var result = ModelDiscoveryService.detectAudioSupport(obj);
         assertTrue(result.confirmed(),
                 "audio-preview suffix must be detected even with -mini- in the middle");
+        assertFalse(result.fromProvider());
+    }
+
+    @Test
+    public void detectAudioPreviewMatchRequiresLeadingDash() {
+        // JCLAW-160 review follow-up: the audio-preview match must be
+        // anchored on a leading dash. A hypothetical model whose id
+        // begins with "audio-preview" (no preceding dash) — e.g. an
+        // unrelated vendor naming a classifier with that prefix — must
+        // not false-positive. Pin the contract so a future maintainer
+        // can't quietly drop the dash and re-broaden the match.
+        var obj = JsonParser.parseString("""
+                {"id": "audio-preview-classifier"}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectAudioSupport(obj);
+        assertFalse(result.confirmed(),
+                "non-dash-prefixed audio-preview substring must not trip the detector");
         assertFalse(result.fromProvider());
     }
 

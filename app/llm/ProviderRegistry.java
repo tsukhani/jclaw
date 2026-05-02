@@ -20,10 +20,11 @@ import java.util.Map;
  *   provider.{name}.apiKey
  *   provider.{name}.models  (JSON array)
  *
- * Provider type is resolved by name:
+ * Provider type is resolved by name (substring match, case-insensitive):
  *   "openrouter" → {@link OpenRouterProvider}
- *   "ollama*"    → {@link OllamaProvider}
- *   default      → {@link OpenAiProvider}
+ *   "ollama"     → {@link OllamaProvider}  (covers ollama-cloud, ollama-local)
+ *   "openai"     → {@link OpenAiProvider}
+ *   anything else → {@link OpenAiProvider}  (lm-studio, groq, azure, …)
  */
 public class ProviderRegistry {
 
