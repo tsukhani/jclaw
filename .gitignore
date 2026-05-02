@@ -4,11 +4,6 @@
 
 .mcp.json
 
-# claude-flow swarm orchestrator runtime state — agent registry,
-# metrics, task graph. Per-machine, regenerated on every invocation;
-# nothing here is shared between clones.
-.claude-flow/
-
 # Per-clone runtime security material — application secret (PLAY_SECRET)
 # and TLS cert+key. Lives under certs/ (write paths: `./jclaw.sh secret`,
 # `./jclaw.sh cert`, `play secret`, `play enable-https`, the Docker
