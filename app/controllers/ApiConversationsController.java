@@ -176,22 +176,62 @@ public class ApiConversationsController extends Controller {
     }
 
     /**
-     * DELETE /api/conversations — Bulk delete by IDs.
+     * DELETE /api/conversations — Bulk delete.
+     *
+     * <p>Two body shapes:
+     * <ul>
+     *   <li>{@code {"ids": [1, 2, 3]}} — delete the listed ids.</li>
+     *   <li>{@code {"filter": {"channel": "...", "agentId": ..., "name": "...", "peer": "..."}}}
+     *       — delete every row matching the filter, using the same predicates
+     *       as the listing endpoint. Each filter field is optional; an empty
+     *       filter object matches every conversation, mirroring the no-filter
+     *       semantic of GET /api/conversations.</li>
+     * </ul>
+     *
+     * <p>Rejects with 400 when neither shape is present — guards against an
+     * accidental empty-body DELETE wiping the entire table without an
+     * explicit "filter" intent from the caller.
      */
     public static void deleteConversations() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has("ids")) badRequest();
+        if (body == null) badRequest();
 
-        var ids = body.getAsJsonArray("ids");
-        var idList = new ArrayList<Long>();
-        for (var elem : ids) idList.add(elem.getAsLong());
-        if (idList.isEmpty()) {
-            renderJSON(gson.toJson(Map.of("deleted", 0)));
+        if (body.has("ids")) {
+            var ids = body.getAsJsonArray("ids");
+            var idList = new ArrayList<Long>();
+            for (var elem : ids) idList.add(elem.getAsLong());
+            if (idList.isEmpty()) {
+                renderJSON(gson.toJson(Map.of("deleted", 0)));
+                return;
+            }
+            int deleted = ConversationService.deleteByIds(idList);
+            renderJSON(gson.toJson(Map.of("deleted", deleted)));
             return;
         }
 
-        int deleted = ConversationService.deleteByIds(idList);
-        renderJSON(gson.toJson(Map.of("deleted", deleted)));
+        if (body.has("filter")) {
+            var f = body.getAsJsonObject("filter");
+            String channel = stringField(f, "channel");
+            Long agentId = longField(f, "agentId");
+            String name = stringField(f, "name");
+            String peer = stringField(f, "peer");
+            int deleted = ConversationService.deleteByFilter(channel, agentId, name, peer);
+            renderJSON(gson.toJson(Map.of("deleted", deleted)));
+            return;
+        }
+
+        badRequest();
+    }
+
+    private static String stringField(com.google.gson.JsonObject obj, String key) {
+        if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
+        var s = obj.get(key).getAsString();
+        return (s == null || s.isBlank()) ? null : s;
+    }
+
+    private static Long longField(com.google.gson.JsonObject obj, String key) {
+        if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
+        return obj.get(key).getAsLong();
     }
 
     /**

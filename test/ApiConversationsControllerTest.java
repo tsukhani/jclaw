@@ -323,6 +323,132 @@ public class ApiConversationsControllerTest extends FunctionalTest {
         return ref.get();
     }
 
+    /**
+     * JCLAW-198: DELETE /api/conversations with a {@code filter} body deletes
+     * every row matching the filter. Filter shape mirrors the listing endpoint
+     * (channel, agentId, name, peer); each field optional. Seeds two agents'
+     * conversations and verifies the agentId filter scopes the wipe.
+     */
+    @Test
+    public void deleteByFilterScopedToAgentDeletesOnlyMatchingRows() {
+        login();
+        long[] ids = commitInFreshTx(() -> {
+            var keep = new Agent();
+            keep.name = "keep-agent";
+            keep.modelProvider = "openrouter";
+            keep.modelId = "gpt-4.1";
+            keep.save();
+            var purge = new Agent();
+            purge.name = "purge-agent";
+            purge.modelProvider = "openrouter";
+            purge.modelId = "gpt-4.1";
+            purge.save();
+            // Two purge-agent conversations, one keep-agent conversation.
+            var p1 = ConversationService.create(purge, "web", "user1");
+            ConversationService.appendUserMessage(p1, "purge me 1");
+            var p2 = ConversationService.create(purge, "web", "user2");
+            ConversationService.appendUserMessage(p2, "purge me 2");
+            var k1 = ConversationService.create(keep, "web", "user3");
+            ConversationService.appendUserMessage(k1, "keep me");
+            return new long[]{purge.id, keep.id, p1.id, p2.id, k1.id};
+        });
+        long purgeAgentId = ids[0];
+        long keepAgentId = ids[1];
+
+        var resp = deleteWithJsonBody("/api/conversations",
+                "{\"filter\":{\"agentId\":" + purgeAgentId + "}}");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"deleted\":2"),
+                "filter delete must report two purge-agent rows removed, got: " + getContent(resp));
+
+        // Keep-agent's conversation must still be in the table; purge-agent's must be gone.
+        commitInFreshTx(() -> {
+            assertEquals(0L, Conversation.count("agent.id = ?1", purgeAgentId),
+                    "purge-agent rows must be deleted");
+            assertEquals(1L, Conversation.count("agent.id = ?1", keepAgentId),
+                    "keep-agent row must survive");
+            return null;
+        });
+    }
+
+    /**
+     * Empty filter object means "match everything", consistent with the
+     * no-filter semantic of GET /api/conversations.
+     */
+    @Test
+    public void deleteByEmptyFilterDeletesAllConversations() {
+        login();
+        commitInFreshTx(() -> {
+            var agent = new Agent();
+            agent.name = "wipe-test";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+            ConversationService.create(agent, "web", "u1");
+            ConversationService.create(agent, "telegram", "u2");
+            ConversationService.create(agent, "slack", "u3");
+            return null;
+        });
+
+        var resp = deleteWithJsonBody("/api/conversations", "{\"filter\":{}}");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"deleted\":3"),
+                "empty-filter delete must report all three rows removed, got: " + getContent(resp));
+
+        commitInFreshTx(() -> {
+            assertEquals(0L, Conversation.count(), "table must be empty after wipe");
+            return null;
+        });
+    }
+
+    /**
+     * Guard against an accidental DELETE wiping the table when neither
+     * shape is present — the controller must reject with 400 rather than
+     * fall through to either delete branch.
+     */
+    @Test
+    public void deleteWithNeitherIdsNorFilterReturns400() {
+        login();
+        var resp = deleteWithJsonBody("/api/conversations", "{}");
+        assertEquals(400, resp.status.intValue());
+    }
+
+    /**
+     * Play 1.x's {@link play.test.FunctionalTest#DELETE(play.mvc.Http.Request, Object) DELETE}
+     * helper unconditionally overwrites {@code request.body} with an empty stream,
+     * so DELETE-with-body has to drive the request through {@code makeRequest}
+     * directly. JCLAW-198's filter-body shape is the only DELETE that needs a
+     * payload, so this helper lives here rather than in a shared base class.
+     */
+    private static play.mvc.Http.Response deleteWithJsonBody(String url, String json) {
+        var req = newRequest();
+        req.method = "DELETE";
+        req.contentType = "application/json";
+        var qIdx = url.indexOf('?');
+        req.url = url;
+        req.path = qIdx >= 0 ? url.substring(0, qIdx) : url;
+        req.querystring = qIdx >= 0 ? url.substring(qIdx + 1) : "";
+        req.body = new java.io.ByteArrayInputStream(
+                json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        // The framework helpers attach savedCookies after a login() call;
+        // newRequest() doesn't, so we reach for them via reflection — the
+        // field is package-private static on FunctionalTest and there's no
+        // public accessor. Without this, every test login is silently
+        // discarded and the controller returns 401.
+        try {
+            var f = play.test.FunctionalTest.class.getDeclaredField("savedCookies");
+            f.setAccessible(true);
+            @SuppressWarnings("unchecked")
+            var cookies = (java.util.Map<String, play.mvc.Http.Cookie>) f.get(null);
+            if (cookies != null) req.cookies = cookies;
+        } catch (Exception _) {
+            // savedCookies field may shift across play versions; an
+            // unauthenticated DELETE will surface as 401, which is what
+            // the affected tests already assert against.
+        }
+        return makeRequest(req);
+    }
+
     @Test
     public void getQueueStatusForNonExistentConversation() {
         login();

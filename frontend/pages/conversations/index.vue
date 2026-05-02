@@ -144,6 +144,70 @@ async function deleteSelected() {
   }
 }
 
+const deletingAll = ref(false)
+
+/**
+ * Build the filter object the server understands. Mirrors the param-set logic
+ * in {@link load} but emits a JSON object suitable for the
+ * {@code DELETE /api/conversations} body. Returns the resolved agentId
+ * (number or undefined) so the description can echo a human-readable name
+ * separately.
+ */
+function activeFilterPayload(): { channel?: string, agentId?: number, name?: string, peer?: string } {
+  const out: { channel?: string, agentId?: number, name?: string, peer?: string } = {}
+  const name = getFilterValue('name')
+  const channel = getFilterValue('channel')
+  const agent = getFilterValue('agent')
+  const peer = getFilterValue('peer')
+  if (name) out.name = name
+  if (channel) out.channel = channel
+  if (peer) out.peer = peer
+  if (agent) {
+    const a = agentList.value?.find((ag: Agent) => ag.name.toLowerCase() === agent.toLowerCase())
+    if (a) out.agentId = a.id
+  }
+  return out
+}
+
+/** Human-readable echo of the active filters for the confirm message. */
+function activeFilterDescription(): string {
+  const parts: string[] = []
+  for (const f of activeFilters.value) {
+    if (f.value) parts.push(`${f.key}:${f.value}`)
+  }
+  return parts.join(' ')
+}
+
+async function deleteAll() {
+  if (deletingAll.value || total.value <= 0) return
+  const filterDesc = activeFilterDescription()
+  const scope = filterDesc ? ` matching ${filterDesc}` : ''
+  const ok = await confirm({
+    title: 'Delete all conversations',
+    message: `Delete all ${total.value} conversation${total.value === 1 ? '' : 's'}${scope}? This cannot be undone.`,
+    confirmText: `Delete ${total.value}`,
+    variant: 'danger',
+    requireText: 'delete',
+  })
+  if (!ok) return
+  deletingAll.value = true
+  try {
+    await $fetch('/api/conversations', {
+      method: 'DELETE',
+      body: { filter: activeFilterPayload() },
+    })
+    selectedIds.value = new Set()
+    page.value = 1
+    await load()
+  }
+  catch (e) {
+    console.error('Failed to delete all conversations:', e)
+  }
+  finally {
+    deletingAll.value = false
+  }
+}
+
 const peekOpen = ref(false)
 
 async function selectConversation(convo: Conversation) {
@@ -283,13 +347,32 @@ const columns: ColumnDef<Conversation, unknown>[] = [
       <h1 class="text-lg font-semibold text-fg-strong">
         Conversations
       </h1>
-      <button
-        :disabled="!selectedIds.size || deletingBulk"
-        class="px-3 py-1.5 bg-red-700 text-white text-xs font-medium hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-        @click="deleteSelected"
-      >
-        {{ deletingBulk ? 'Deleting...' : `Delete${selectedIds.size ? ' ' + selectedIds.size : ''}` }}
-      </button>
+      <div class="flex items-center gap-2">
+        <button
+          :disabled="!selectedIds.size || deletingBulk"
+          class="px-3 py-1.5 bg-red-700 text-white text-xs font-medium hover:bg-red-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          @click="deleteSelected"
+        >
+          {{ deletingBulk ? 'Deleting...' : `Delete${selectedIds.size ? ' ' + selectedIds.size : ''}` }}
+        </button>
+        <!--
+          "Delete all" is a separate destructive surface from "Delete N"
+          (selection-driven). It only appears when the matching count is
+          greater than zero — there is nothing to delete in an empty list,
+          and showing a disabled button there would be visual noise. When
+          a filter is active, the button wipes only the matching subset;
+          the confirm dialog echoes the filter so the user knows the scope
+          before typing 'delete' to commit.
+        -->
+        <button
+          v-if="total > 0"
+          :disabled="deletingAll"
+          class="px-3 py-1.5 border border-red-700 text-red-600 dark:text-red-400 text-xs font-medium hover:bg-red-700 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          @click="deleteAll"
+        >
+          {{ deletingAll ? 'Deleting...' : `Delete all${activeFilters.length ? ' matching' : ''}` }}
+        </button>
+      </div>
     </div>
 
     <!-- Filter bar -->

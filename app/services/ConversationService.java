@@ -213,4 +213,42 @@ public class ConversationService {
                 .setParameter("ids", ids).executeUpdate();
     }
 
+    /**
+     * Resolve every conversation id matching the given filter (same predicates
+     * the listing endpoint accepts), then delegate to {@link #deleteByIds} so
+     * the cascade ordering and FK handling stay in one place. Any of
+     * {@code channel}, {@code agentId}, {@code name}, {@code peer} may be
+     * {@code null}/blank to mean "no constraint on this field"; passing all
+     * four as null/blank deletes every conversation in the table.
+     *
+     * <p>Two-step (resolve ids, then delete) rather than a single
+     * filtered-DELETE because the cascade has to delete attachments and
+     * messages first, and JPQL DELETE statements don't support sub-selects
+     * across the conversation/message join in every dialect we run on.
+     * Building the id list once and reusing {@link #deleteByIds} keeps the
+     * exact ordering this service has shipped with since launch.
+     *
+     * @return the number of conversations deleted
+     */
+    public static int deleteByFilter(String channel, Long agentId, String name, String peer) {
+        boolean hasNameFilter = name != null && !name.isBlank();
+        var filter = new utils.JpqlFilter()
+                .eq("channelType", channel)
+                .eq("agent.id", agentId)
+                .like("LOWER(preview)", hasNameFilter ? "%" + name.toLowerCase() + "%" : null)
+                .like("LOWER(peerId)", peer != null && !peer.isBlank() ? "%" + peer.toLowerCase() + "%" : null);
+
+        var where = filter.toWhereClause();
+        String jpql = where.isEmpty()
+                ? "SELECT c.id FROM Conversation c"
+                : "SELECT c.id FROM Conversation c WHERE " + where;
+        var q = JPA.em().createQuery(jpql, Long.class);
+        var params = filter.paramList();
+        for (int i = 0; i < params.size(); i++) {
+            q.setParameter(i + 1, params.get(i));
+        }
+        List<Long> ids = q.getResultList();
+        return deleteByIds(ids);
+    }
+
 }

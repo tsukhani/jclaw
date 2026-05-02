@@ -1,15 +1,31 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const { _state: state, _resolve } = useConfirm()
 
 const confirmBtn = ref<HTMLButtonElement | null>(null)
+const requireInput = ref<HTMLInputElement | null>(null)
 const lastFocus = ref<HTMLElement | null>(null)
+
+// Typed text the user has entered for the requireText gate. Reset on each
+// open so a previous dialog's input doesn't leak forward.
+const requireValue = ref('')
+
+// A11y: bind <label for=> to <input id=> so the label-has-for /
+// form-control-has-label rules pass and assistive tech announces the
+// "Type 'delete' to confirm" prompt as part of the input.
+const requireInputId = useId()
+
+const requireSatisfied = computed(() => {
+  if (!state.requireText) return true
+  return requireValue.value.trim() === state.requireText
+})
 
 function onCancel() {
   _resolve(false)
 }
 function onConfirm() {
+  if (!requireSatisfied.value) return
   _resolve(true)
 }
 
@@ -29,8 +45,15 @@ function onKeydown(e: KeyboardEvent) {
 watch(() => state.open, async (open) => {
   if (open) {
     lastFocus.value = (document.activeElement as HTMLElement) ?? null
+    requireValue.value = ''
     await nextTick()
-    confirmBtn.value?.focus()
+    // When a typed-text gate is active, focus the input instead of the
+    // confirm button — the button is disabled until the user types, so
+    // landing focus on it produces a confusing "I can't tab into the gate"
+    // moment. The input keeps Enter routing to onConfirm via the global
+    // keydown listener.
+    if (state.requireText) requireInput.value?.focus()
+    else confirmBtn.value?.focus()
   }
   else if (lastFocus.value) {
     lastFocus.value.focus()
@@ -80,6 +103,23 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
             <p class="text-xs text-fg-primary leading-relaxed whitespace-pre-line">
               {{ state.message }}
             </p>
+            <label
+              v-if="state.requireText"
+              :for="requireInputId"
+              class="block mt-3"
+            >
+              <span class="block text-[11px] text-fg-muted mb-1">
+                Type <code class="font-mono text-fg-strong">{{ state.requireText }}</code> to confirm
+              </span>
+              <input
+                :id="requireInputId"
+                ref="requireInput"
+                v-model="requireValue"
+                type="text"
+                autocomplete="off"
+                class="w-full px-2 py-1.5 text-xs font-mono bg-surface border border-border focus:border-ring focus:outline-none text-fg-primary"
+              >
+            </label>
           </div>
 
           <div class="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
@@ -93,8 +133,9 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
             <button
               ref="confirmBtn"
               type="button"
+              :disabled="!requireSatisfied"
               :class="[
-                'px-3 py-1.5 text-xs border transition-colors',
+                'px-3 py-1.5 text-xs border transition-colors disabled:opacity-40 disabled:cursor-not-allowed',
                 state.variant === 'danger'
                   ? 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-900/60 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/40 hover:text-red-800 dark:hover:text-red-200'
                   : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-900/60 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 hover:text-emerald-800 dark:hover:text-emerald-200',
