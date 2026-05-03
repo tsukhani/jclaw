@@ -61,28 +61,55 @@ COPY --from=frontend-build /app/frontend/.output/public public/spa/
 
 RUN play precompile && mkdir -p data logs
 
-# ── Stage 3: Runtime on JRE headless ─────────────────────────────────────────
-FROM azul/zulu-openjdk:25-jre-headless-latest AS runtime
+# ── Stage 3: Runtime on Ubuntu 26.04 + Zulu JRE 25 ───────────────────────────
+# Build atop ubuntu:26.04 rather than azul/zulu-openjdk:25-jre-headless-latest
+# (which is pinned to Ubuntu 22.04 / jammy) so apt-shipped tesseract-ocr is
+# 5.5.x rather than jammy's frozen 4.1.1. Smaller too: ubuntu:26.04 is ~160 MB
+# vs the Zulu image's ~500 MB. Zulu's JRE comes from Azul's apt repo at the
+# same 25.0.3 the build stage uses; it lands at /usr/lib/jvm/zulu25-ca-amd64
+# with a /usr/lib/jvm/zulu25 symlink, matching the upstream image's layout.
+FROM ubuntu:26.04 AS runtime
 
 LABEL org.opencontainers.image.source=https://github.com/tsukhani/jclaw
 
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Single RUN so apt lists are dropped in the same layer the packages were
+# resolved from. Two apt-get update calls because the Azul sources file
+# doesn't exist until midway through.
+#
+# Ubuntu 24.04+ ran the time_t 64-bit ABI transition — the t64 suffix on
+# libasound2, libatk*, libatspi*, libcups2, libglib2 below is load-bearing;
+# the un-suffixed jammy-era names no longer resolve. Other Playwright libs
+# kept their original names through the transition.
+#
 # Playwright/Chromium shared libs, python3 for Play's CLI wrapper,
 # tesseract-ocr for DocumentsTool's OCR path (image-only PDFs, scanned
 # documents), and openssl so the entrypoint can self-sign a PEM cert
 # when the operator hasn't supplied one in /app/certs. apt resolves the
 # right arch under buildx's per-platform build; non-English language
 # packs install separately as tesseract-ocr-<lang>.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates curl gnupg && \
+    curl -fsSL https://repos.azul.com/azul-repo.key \
+        | gpg --dearmor -o /usr/share/keyrings/azul.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/azul.gpg] https://repos.azul.com/zulu/deb stable main" \
+        > /etc/apt/sources.list.d/zulu.list && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        zulu25-jre-headless \
         python3 \
         openssl \
         tesseract-ocr \
-        libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 \
-        libcairo2 libcups2 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0 \
+        libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 \
+        libcairo2 libcups2t64 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0t64 \
         libnspr4 libnss3 libpango-1.0-0 libwayland-client0 libx11-6 \
         libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
         libxkbcommon0 libxrandr2 && \
     rm -rf /var/lib/apt/lists/*
 
+ENV JAVA_HOME=/usr/lib/jvm/zulu25
 ENV PLAY_HOME=/opt/play
 ENV PATH="${PLAY_HOME}:${PATH}"
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
