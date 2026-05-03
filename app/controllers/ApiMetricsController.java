@@ -99,6 +99,9 @@ public class ApiMetricsController extends Controller {
         boolean real = readBool(body, "real", false);
         String provider = readString(body, "provider", null);
         String model = readString(body, "model", null);
+        // Optional per-run user message override. Default lives in
+        // LoadTestRunner so the constant has one home.
+        String userMessage = readString(body, "userMessage", null);
 
         int maxConcurrency = ConfigService.getInt("provider.loadtest-mock.maxConcurrency", 100);
         int maxIterations = ConfigService.getInt("provider.loadtest-mock.maxIterations", 50);
@@ -133,7 +136,7 @@ public class ApiMetricsController extends Controller {
                     concurrency, iterations, compress,
                     new LoadTestHarness.Scenario(ttftMs, tokensPerSecond, responseTokens,
                             simulatedToolCalls, toolSleepMs),
-                    real, provider, model));
+                    real, provider, model, userMessage));
 
             if (!real) {
                 LoadTestHarness.stop();

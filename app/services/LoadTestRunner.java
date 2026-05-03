@@ -57,10 +57,28 @@ public final class LoadTestRunner {
      * in the registry — {@code ollama-local} for loopback runs,
      * {@code ollama-cloud} or {@code openrouter} for cloud runs.
      */
+    /**
+     * Default user message when {@link Request#userMessage} is not provided.
+     * Length-constrained, factual, and well-known across every model so
+     * cross-provider tokens-per-second comparisons measure speed instead of
+     * "model A volunteered 500 tokens, model B volunteered 50 tokens".
+     */
+    public static final String DEFAULT_USER_MESSAGE =
+            "Why is the sky blue? Answer in exactly 50 words.";
+
     public record Request(int concurrency, int iterations, boolean compress,
                           LoadTestHarness.Scenario scenario,
                           boolean realProvider,
-                          String provider, String model) {}
+                          String provider, String model,
+                          String userMessage) {
+
+        /** Backwards-compat constructor — defaults userMessage to {@link #DEFAULT_USER_MESSAGE}. */
+        public Request(int concurrency, int iterations, boolean compress,
+                       LoadTestHarness.Scenario scenario,
+                       boolean realProvider, String provider, String model) {
+            this(concurrency, iterations, compress, scenario, realProvider, provider, model, null);
+        }
+    }
 
     /**
      * @param avgTtftMs         Mean time-to-first-token across this run's requests, in ms.
@@ -111,7 +129,15 @@ public final class LoadTestRunner {
         var sessionCookie = mintAdminSessionCookie();
 
         var baseUrl = "http://127.0.0.1:" + play.Play.configuration.getProperty("http.port", "9000");
-        var body = "{\"agentId\":" + agentId + ",\"message\":\"Load test message\"}";
+        // Build the body via JsonObject so the user message is correctly
+        // escaped — operators can pass quotes, backslashes, or non-ASCII
+        // through the new --message override without breaking the wire format.
+        var userMessage = (req.userMessage() == null || req.userMessage().isBlank())
+                ? DEFAULT_USER_MESSAGE : req.userMessage();
+        var bodyObj = new com.google.gson.JsonObject();
+        bodyObj.addProperty("agentId", agentId);
+        bodyObj.addProperty("message", userMessage);
+        var body = bodyObj.toString();
         // Drive the loadtest through the same OkHttp client tuning that the
         // production LLM stack uses — virtual-thread dispatcher, 64-slot
         // ConnectionPool — so concurrent loadtest workers exercise the

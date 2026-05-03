@@ -91,6 +91,9 @@ Load-test options (only used with the 'loadtest' command):
                           The provider must already be configured (apiKey/baseUrl set).
   --model <name>          Model to drive when --real is set (default: gemma4:latest).
                           Must be pullable/serveable by the chosen provider.
+  --message <text>        User message every iteration sends. Defaults to a
+                          length-constrained factual prompt so cross-model
+                          tokens/sec comparisons are apples-to-apples.
 
 Examples:
   ./jclaw.sh setup                                    # One-time setup after fresh clone
@@ -504,6 +507,13 @@ Options:
                           configured (apiKey/baseUrl set in Settings).
   --model <name>          Model when --real is set (default: gemma4:latest).
                           Must be pullable/serveable by the chosen provider.
+  --message <text>        User message sent on every iteration. Default is a
+                          length-constrained factual prompt
+                          ("Why is the sky blue? Answer in exactly 50 words.")
+                          so cross-model tokens/sec comparisons measure speed
+                          rather than how verbose each model chose to be.
+                          Override when you want to A/B a different prompt
+                          shape (e.g. tool-using requests, very long output).
 
 Examples:
   ./jclaw.sh loadtest                                                              # mock harness
@@ -653,6 +663,10 @@ LT_COMPRESS=false
 LT_REAL=false
 LT_PROVIDER=""
 LT_MODEL="gemma4:latest"
+# Empty = let the backend apply LoadTestRunner.DEFAULT_USER_MESSAGE (a length-
+# constrained factual prompt that is fair across providers). Operators who
+# want to A/B a different prompt shape pass --message.
+LT_MESSAGE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -713,6 +727,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --model)
             LT_MODEL="$2"
+            shift 2
+            ;;
+        --message)
+            LT_MESSAGE="$2"
             shift 2
             ;;
         cert|secret|reset|start|stop|restart|status|logs)
@@ -2134,6 +2152,14 @@ do_loadtest() {
     else
         echo "    compress=$LT_COMPRESS"
     fi
+    # Show whichever message will actually be sent. Empty LT_MESSAGE means the
+    # backend will fill in LoadTestRunner.DEFAULT_USER_MESSAGE — surface that
+    # default explicitly so operators can see what every iteration ships with.
+    local lt_msg_display="${LT_MESSAGE:-Why is the sky blue? Answer in exactly 50 words.}"
+    if [[ ${#lt_msg_display} -gt 100 ]]; then
+        lt_msg_display="${lt_msg_display:0:97}..."
+    fi
+    echo "    message=\"$lt_msg_display\""
     echo ""
 
     # Build the JSON body. Include real / provider / model only when set so
@@ -2148,6 +2174,13 @@ do_loadtest() {
         if [[ -n "$LT_PROVIDER" ]]; then
             body="$body,\"provider\":\"$LT_PROVIDER\""
         fi
+    fi
+    if [[ -n "$LT_MESSAGE" ]]; then
+        # JSON-escape via python3 so the operator can pass quotes/backslashes/
+        # non-ASCII through --message without breaking the wire format.
+        local msg_json
+        msg_json=$(MSG="$LT_MESSAGE" python3 -c 'import json, os; print(json.dumps(os.environ["MSG"]))')
+        body="$body,\"userMessage\":$msg_json"
     fi
     body="$body}"
 
