@@ -1,23 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
-
-// Mirror the chat.vue renderMarkdown function
-marked.setOptions({ breaks: true, gfm: true })
-
-function normalizeMarkdownLinks(text: string): string {
-  return text.replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (match, label, dest) => {
-    const trimmed = dest.trim()
-    if (trimmed.startsWith('<') && trimmed.endsWith('>')) return match
-    if (!/\s/.test(trimmed)) return match
-    return `[${label}](<${trimmed}>)`
-  })
-}
-
-function renderMarkdown(text: string): string {
-  if (!text) return ''
-  return DOMPurify.sanitize(marked.parse(normalizeMarkdownLinks(text)) as string)
-}
+// Exercise the real production renderer rather than a hand-rolled mirror —
+// the previous version of this file inlined its own marked + DOMPurify
+// pipeline which silently drifted from chat.vue's implementation. Now both
+// chat.vue and conversations/[id].vue import this same function, and the
+// test contract is the same code that ships.
+import { renderMarkdown } from '~/utils/markdown'
 
 describe('renderMarkdown', () => {
   it('returns empty string for empty input', () => {

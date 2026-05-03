@@ -5,6 +5,7 @@ import {
 } from '@heroicons/vue/24/outline'
 import type { Conversation, Message } from '~/types/api'
 import { computeUsageCostBreakdown } from '~/utils/usage-cost'
+import { renderMarkdown } from '~/utils/markdown'
 
 const route = useRoute()
 const router = useRouter()
@@ -355,8 +356,25 @@ function exportConversation() {
                 · {{ formatModelLabel(msg) }}
               </span>
             </div>
-            <div class="bg-muted border border-border px-3 py-2 text-sm text-fg-primary whitespace-pre-wrap">
-              {{ msg.content || '(tool call)' }}
+            <!-- Render markdown to HTML so the historical transcript matches
+                 what the user saw live in the chat page. The download/export
+                 path (exportConversation) still emits the raw markdown
+                 unchanged — only this in-page view is HTML. Tool messages and
+                 empty assistant rows (tool-call placeholders) keep the
+                 plain-text fallback so the "(tool call)" sentinel renders
+                 verbatim instead of being parsed as markdown. -->
+            <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify (see ~/utils/markdown). -->
+            <div
+              v-if="msg.content"
+              class="prose-chat bg-muted border border-border px-3 py-2 text-sm text-fg-primary"
+              v-html="renderMarkdown(msg.content, conversation?.agentId ?? null)"
+            />
+            <!-- eslint-enable vue/no-v-html -->
+            <div
+              v-else
+              class="bg-muted border border-border px-3 py-2 text-sm text-fg-primary whitespace-pre-wrap"
+            >
+              (tool call)
             </div>
           </div>
         </template>

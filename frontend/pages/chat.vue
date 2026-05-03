@@ -31,14 +31,12 @@ import {
   MicrophoneIcon as MicrophoneIconSolid,
   StopIcon as StopIconSolid,
 } from '@heroicons/vue/24/solid'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
 import { computeConversationCost, formatConversationCost, formatConversationCostTooltip, formatUsageCost, formatUsageCostTooltip, type MessageUsage } from '~/utils/usage-cost'
 import { formatSize } from '~/utils/format'
 import { thinkingHeaderLabel, initCollapsedState } from '~/utils/thinking'
 import { hydrateToolCalls } from '~/utils/tool-calls'
 import { resolveThinkingLock } from '~/utils/thinking-lock'
-import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
+import { renderMarkdown, renderMarkdownUncached } from '~/utils/markdown'
 // Filter out tool messages and empty assistant messages (tool call records) from display.
 // The predicate lives in ~/utils/display-message-filter for unit-testability; see
 // JCLAW-75 for the specific reasoning-stream regression the reasoning-aware
@@ -65,81 +63,16 @@ interface ConversationQueueStatus {
   [key: string]: unknown
 }
 
-// Configure marked for safe rendering
-marked.setOptions({
-  breaks: true,
-  gfm: true,
-})
-
 function formatTokensPerSec(usage: MessageUsage): string | null {
   if (!usage.durationMs || usage.durationMs <= 0 || !usage.completion) return null
   const tps = (usage.completion / usage.durationMs) * 1000
   return tps.toFixed(1) + ' tok/s'
 }
 
-// Configure DOMPurify to allow images, audio, video, and download links
-DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
-  // Allow src attributes on img/audio/video/source that point to our API
-  if (data.attrName === 'src' && data.attrValue?.startsWith('/api/')) {
-    data.forceKeepAttr = true
-  }
-  // Allow href for download links to our API
-  if (data.attrName === 'href' && data.attrValue?.startsWith('/api/')) {
-    data.forceKeepAttr = true
-  }
-})
-
-// Marked (CommonMark) only allows whitespace in link destinations when they
-// are wrapped in angle brackets. LLMs routinely emit bare filenames with
-// spaces like `[file.docx](file.docx)`, which silently fall through as plain
-// text. Wrap such destinations in <...> so they parse into real anchors.
-function normalizeMarkdownLinks(text: string): string {
-  return text.replace(/\[([^\]\n]+)\]\(([^)\n]+)\)/g, (match, label, dest) => {
-    const trimmed = dest.trim()
-    if (trimmed.startsWith('<') && trimmed.endsWith('>')) return match
-    if (!/\s/.test(trimmed)) return match
-    return `[${label}](<${trimmed}>)`
-  })
-}
-
-// Memoized markdown rendering — avoids re-parsing unchanged messages on re-render.
-// Cache is keyed by (text + agentId); the streaming message renders through
-// renderMarkdownStreaming() which bypasses the cache entirely (its content
-// changes every token, so caching every intermediate state would thrash both
-// the cache and the LRU bound).
-const markdownCache = new Map<string, string>()
-const MARKDOWN_CACHE_MAX = 200
-
-function renderMarkdownInner(text: string, agentId: number | null): string {
-  const html = marked.parse(normalizeMarkdownLinks(text)) as string
-  const sanitized = DOMPurify.sanitize(html, {
-    ADD_TAGS: ['img', 'audio', 'video', 'source'],
-    ADD_ATTR: ['src', 'controls', 'autoplay', 'download', 'target'],
-  })
-  return agentId != null ? rewriteWorkspaceLinks(sanitized, agentId) : sanitized
-}
-
-function renderMarkdown(text: string, agentId: number | null = null): string {
-  if (!text) return ''
-  const cacheKey = `${agentId}:${text}`
-  const cached = markdownCache.get(cacheKey)
-  if (cached) return cached
-
-  const result = renderMarkdownInner(text, agentId)
-  // Only cache if under limit (prevents unbounded growth during long sessions)
-  if (markdownCache.size < MARKDOWN_CACHE_MAX) {
-    markdownCache.set(cacheKey, result)
-  }
-  return result
-}
-
-// Cache-bypassing variant for the in-flight streaming bubble. The content
-// changes every token; caching every intermediate string would saturate the
-// 200-entry LRU before the cache helped any historical message.
-function renderMarkdownStreaming(text: string, agentId: number | null = null): string {
-  if (!text) return ''
-  return renderMarkdownInner(text, agentId)
-}
+// renderMarkdown / renderMarkdownUncached are imported from ~/utils/markdown
+// (shared with conversations/[id].vue). The streaming bubble path uses
+// renderMarkdownUncached to avoid thrashing the LRU cache on per-token
+// rerenders; settled historical messages go through the cached renderMarkdown.
 
 const { data: agents, refresh: refreshAgents } = await useFetch<Agent[]>('/api/agents')
 const { data: configData } = await useFetch<ConfigResponse>('/api/config')
@@ -940,7 +873,7 @@ function scheduleStreamContentRender() {
   if (streamRenderTimer != null) return
   streamRenderTimer = setTimeout(() => {
     streamRenderTimer = null
-    streamContentHtml.value = renderMarkdownStreaming(streamContent.value, selectedAgentId.value)
+    streamContentHtml.value = renderMarkdownUncached(streamContent.value, selectedAgentId.value)
     // Vue's compiled v-for slot tracks the messages shallowRef as its primary
     // dep — top-level refs read inside the slot's v-html (streamContentHtml)
     // alone don't always re-run the slot's render under v-for + shallowRef.
@@ -956,7 +889,7 @@ function scheduleStreamReasoningRender() {
   if (streamReasoningTimer != null) return
   streamReasoningTimer = setTimeout(() => {
     streamReasoningTimer = null
-    streamReasoningHtml.value = renderMarkdownStreaming(streamReasoning.value, selectedAgentId.value)
+    streamReasoningHtml.value = renderMarkdownUncached(streamReasoning.value, selectedAgentId.value)
     triggerRef(messages)
   }, STREAM_RENDER_INTERVAL_MS)
 }
@@ -973,8 +906,8 @@ function flushStreamRender() {
     clearTimeout(streamReasoningTimer)
     streamReasoningTimer = null
   }
-  streamContentHtml.value = renderMarkdownStreaming(streamContent.value, selectedAgentId.value)
-  streamReasoningHtml.value = renderMarkdownStreaming(streamReasoning.value, selectedAgentId.value)
+  streamContentHtml.value = renderMarkdownUncached(streamContent.value, selectedAgentId.value)
+  streamReasoningHtml.value = renderMarkdownUncached(streamReasoning.value, selectedAgentId.value)
   triggerRef(messages)
 }
 
@@ -2923,152 +2856,3 @@ function exportConversation() {
     </div>
   </div>
 </template>
-
-<style>
-/* Markdown rendering styles for chat messages.
- * Structural rules first, then light-mode palette as the default, with
- * `html.dark .prose-chat …` overrides mirroring the original dark palette.
- * The outer `.prose-chat` wrapper already uses Tailwind `dark:` utilities for
- * the surface bg/border/text — these rules only target nested markdown output
- * that the Vue template can't reach directly. */
-.prose-chat { overflow-wrap: anywhere; }
-.prose-chat p { margin: 0.5em 0; }
-.prose-chat p:first-child { margin-top: 0; }
-.prose-chat p:last-child { margin-bottom: 0; }
-
-.prose-chat ul, .prose-chat ol {
-  margin: 0.5em 0;
-  padding-left: 1.5em;
-}
-.prose-chat li { margin: 0.25em 0; }
-.prose-chat h1, .prose-chat h2, .prose-chat h3 { font-weight: 600; margin: 0.75em 0 0.25em; }
-.prose-chat h1 { font-size: 1.1em; }
-.prose-chat h2 { font-size: 1em; }
-.prose-chat h3 { font-size: 0.95em; }
-.prose-chat pre { padding: 0.75em 1em; margin: 0.5em 0; overflow-x: auto; }
-.prose-chat pre code { background: none; padding: 0; }
-
-.prose-chat code {
-  padding: 0.15em 0.35em;
-  font-size: 0.875em;
-  font-family: ui-monospace, monospace;
-}
-.prose-chat a { text-decoration: underline; }
-
-.prose-chat a.workspace-file {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4em;
-  padding: 0.25em 0.6em;
-  margin: 0.15em 0.15em 0.15em 0;
-  border-radius: 0.4em;
-  text-decoration: none;
-  font-size: 0.9em;
-  transition: background 0.15s, border-color 0.15s;
-}
-.prose-chat a.workspace-file::before { content: "⬇"; font-size: 0.85em; opacity: 0.75; }
-
-.prose-chat blockquote {
-  padding-left: 0.75em;
-  margin: 0.5em 0;
-}
-.prose-chat hr { border: none; margin: 0.75em 0; }
-
-.prose-chat img {
-  max-width: 100%;
-  height: auto;
-  border-radius: 0.5em;
-  margin: 0.5em 0;
-  cursor: pointer;
-}
-
-.prose-chat audio, .prose-chat video {
-  max-width: 100%;
-  margin: 0.5em 0;
-  border-radius: 0.5em;
-}
-
-.prose-chat table {
-  /* Auto layout — each table sizes its columns from its own content. The
-     prior approach pinned the first column to 14em + nowrap so a tools
-     table and a skills table side-by-side would have aligned identifier
-     columns; that worked for short snake_case identifiers but rendered
-     long-content first columns (e.g. news headlines from daily-briefing)
-     as horizontal overflow that visually overlapped the second column.
-     Cross-table alignment was a niche optimization; correct rendering for
-     any first-column content is the better default. */
-  table-layout: auto;
-  border-collapse: collapse;
-  margin: 0.5em 0;
-  width: 100%;
-  font-size: 0.95em;
-}
-
-.prose-chat th, .prose-chat td {
-  padding: 0.4em 0.75em;
-  text-align: left;
-  vertical-align: top;
-
-  /* Override the `.prose-chat { overflow-wrap: anywhere }` inherited from
-     the wrapper. `anywhere` lets the table-layout algorithm shrink columns
-     to a 1ch min-content size, which on auto-layout was breaking short
-     identifiers ("exec", "filesystem") character-by-character. `break-word`
-     keeps the long-URL behavior — content still wraps when it would
-     overflow — but pins the min-content size to the longest word, so
-     auto-layout sizes each column to fit its widest cell. */
-  overflow-wrap: break-word;
-}
-
-/* Light-mode palette (default) */
-.prose-chat strong { color: #171717; font-weight: 600; }
-.prose-chat em { color: #404040; }
-.prose-chat h1, .prose-chat h2, .prose-chat h3 { color: #171717; }
-.prose-chat code { background: rgb(0,0,0,6%); color: #171717; }
-.prose-chat pre { background: rgb(0,0,0,4%); border: 1px solid rgb(0,0,0,8%); }
-.prose-chat a { color: #525252; }
-
-.prose-chat a.workspace-file {
-  background: rgb(16, 185, 129, 8%);
-  border: 1px solid rgb(16, 185, 129, 35%);
-  color: #047857;
-}
-
-.prose-chat a.workspace-file:hover {
-  background: rgb(16, 185, 129, 18%);
-  border-color: rgb(16, 185, 129, 60%);
-}
-.prose-chat blockquote { border-left: 2px solid rgb(0,0,0,12%); color: #525252; }
-.prose-chat hr { border-top: 1px solid rgb(0,0,0,10%); }
-.prose-chat img { border: 1px solid rgb(0,0,0,8%); }
-.prose-chat img:hover { border-color: rgb(0,0,0,20%); }
-.prose-chat th { color: #171717; border-bottom: 1px solid rgb(0,0,0,15%); font-weight: 600; }
-.prose-chat td { border-bottom: 1px solid rgb(0,0,0,6%); }
-
-/* Dark-mode overrides */
-html.dark .prose-chat strong { color: #e5e5e5; }
-html.dark .prose-chat em { color: #d4d4d4; }
-
-html.dark .prose-chat h1,
-html.dark .prose-chat h2,
-html.dark .prose-chat h3 { color: #e5e5e5; }
-html.dark .prose-chat code { background: rgb(255,255,255,6%); color: inherit; }
-html.dark .prose-chat pre { background: rgb(255,255,255,4%); border-color: rgb(255,255,255,8%); }
-html.dark .prose-chat a { color: #a3a3a3; }
-
-html.dark .prose-chat a.workspace-file {
-  background: rgb(16, 185, 129, 10%);
-  border-color: rgb(16, 185, 129, 30%);
-  color: #6ee7b7;
-}
-
-html.dark .prose-chat a.workspace-file:hover {
-  background: rgb(16, 185, 129, 18%);
-  border-color: rgb(16, 185, 129, 55%);
-}
-html.dark .prose-chat blockquote { border-left-color: rgb(255,255,255,10%); color: #a3a3a3; }
-html.dark .prose-chat hr { border-top-color: rgb(255,255,255,8%); }
-html.dark .prose-chat img { border-color: rgb(255,255,255,8%); }
-html.dark .prose-chat img:hover { border-color: rgb(255,255,255,20%); }
-html.dark .prose-chat th { color: #e5e5e5; border-bottom-color: rgb(255,255,255,15%); }
-html.dark .prose-chat td { border-bottom-color: rgb(255,255,255,6%); }
-</style>
