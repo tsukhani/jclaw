@@ -2111,7 +2111,15 @@ do_loadtest() {
         lt_extra=" real=$lt_real_provider model=$LT_MODEL"
     fi
     echo "==> Running load test: concurrency=$LT_CONCURRENCY iterations=$LT_ITERATIONS$lt_extra"
-    echo "    ttft=${LT_TTFT_MS}ms tokens/s=$LT_TOKENS_PER_SECOND response=${LT_RESPONSE_TOKENS} tokens compress=$LT_COMPRESS"
+    # Mock-only knobs: ttft / tokens-per-second / response-tokens drive the
+    # in-process LoadTestHarness scenario and have no effect when --real
+    # routes through an external provider. Hide them in --real mode so the
+    # banner doesn't misleadingly imply they shape the run.
+    if [[ "$LT_REAL" != true ]]; then
+        echo "    ttft=${LT_TTFT_MS}ms tokens/s=$LT_TOKENS_PER_SECOND response=${LT_RESPONSE_TOKENS} tokens compress=$LT_COMPRESS"
+    else
+        echo "    compress=$LT_COMPRESS"
+    fi
     echo ""
 
     # Build the JSON body. Include real / provider / model only when set so
