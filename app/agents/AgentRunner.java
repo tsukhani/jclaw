@@ -697,24 +697,29 @@ public class AgentRunner {
             // before returning, because the outer runStreaming finally →
             // processQueueDrain needs the conversation committed so the next
             // queued turn loads fresh history.
+            // Persist BEFORE the terminal frame so the assistant message is
+            // committed by the time the SSE closes / HTTP response completes.
+            // The previous parallel-vthread arrangement (JCLAW-100) raced on
+            // web: cb.onComplete fires sse.close, the controller's await
+            // unblocks, and the HTTP response went out before persist had a
+            // chance to run — letting downstream cleanup observe a "done"
+            // request whose message wasn't actually saved. The defensive
+            // null-check stays as belt-and-suspenders against any future
+            // re-introduction of an out-of-order delete.
             long truncPersistStartNs = System.nanoTime();
-            var truncPersistFuture = Thread.ofVirtual().name("agent-trunc-persist").start(() -> {
-                services.Tx.run(() -> {
-                    var conv = ConversationService.findById(conversation.id);
-                    if (conv == null) {
-                        EventLogger.warn("agent", agent.name, channelType,
-                                "Trunc persist skipped: conversation %d was deleted before persist completed"
-                                        .formatted(conversation.id));
-                        return;
-                    }
-                    ConversationService.appendAssistantMessage(conv, finalContent, null);
-                });
-                utils.LatencyStats.record(channelType, "persist",
-                        (System.nanoTime() - truncPersistStartNs) / 1_000_000L);
+            services.Tx.run(() -> {
+                var conv = ConversationService.findById(conversation.id);
+                if (conv == null) {
+                    EventLogger.warn("agent", agent.name, channelType,
+                            "Trunc persist skipped: conversation %d was deleted before persist completed"
+                                    .formatted(conversation.id));
+                    return;
+                }
+                ConversationService.appendAssistantMessage(conv, finalContent, null);
             });
+            utils.LatencyStats.record(channelType, "persist",
+                    (System.nanoTime() - truncPersistStartNs) / 1_000_000L);
             cb.onComplete().accept(finalContent);
-            try { truncPersistFuture.join(); }
-            catch (InterruptedException _) { Thread.currentThread().interrupt(); }
             return;
         }
 
@@ -743,44 +748,42 @@ public class AgentRunner {
         var usageJson = buildUsageJson(turnUsage, modelInfo, streamStartMs, agent, conversation,
                 trace.streamBodyMs());
 
-        // JCLAW-100: persist the assistant message concurrently with the
-        // terminal delivery. No data dependency between them, and the
-        // terminal emit blocks on a Telegram Bot API round-trip (~500 ms
-        // p99) for Telegram turns — so running persist in parallel hides
-        // its ~8 ms entirely from the user-visible path. The join below
-        // ensures the outer runStreaming finally → processQueueDrain still
-        // observes a committed conversation before any queued follow-up
-        // turn runs.
+        // Persist BEFORE the terminal frame so the assistant message is
+        // committed by the time emitUsageAndComplete fires cb.onComplete
+        // (which closes the SSE on web and triggers the Telegram bot-API
+        // call on telegram). Either path can have an external observer —
+        // a loadtest cleanup, a UI poll, a queued follow-up turn — that
+        // checks DB state right after the user-visible "done" signal;
+        // putting persist before that signal makes the contract honest.
+        //
+        // Pre-fix: JCLAW-100 spawned persist on a parallel virtual thread
+        // and joined AFTER emitUsageAndComplete, hiding the ~8 ms persist
+        // behind telegram's ~500 ms bot-API call. On web, cb.onComplete
+        // is sub-millisecond (sse.send + sse.close), so the parallel
+        // arrangement saved nothing AND let the HTTP response complete
+        // before persist finished — observable as FK-violation log noise
+        // when any concurrent endpoint deleted the conversation in that
+        // window. The 8 ms regression on telegram is a tiny price to pay
+        // for a correct happens-before contract on every channel.
+        //
+        // The defensive null-check stays as belt-and-suspenders against
+        // any future re-introduction of an out-of-order delete.
         var finalContent = content;
         var finalReasoning = turnUsage.reasoningText();
         long persistStartNs = System.nanoTime();
-        var persistFuture = Thread.ofVirtual().name("agent-persist").start(() -> {
-            services.Tx.run(() -> {
-                var conv = ConversationService.findById(conversation.id);
-                if (conv == null) {
-                    // The persist runs on a virtual thread that is started
-                    // before emitUsageAndComplete fires the terminal SSE frame.
-                    // The controller's await(sse.completion()) unblocks as
-                    // soon as that frame closes the stream, so the HTTP
-                    // response can complete before persist finishes. If
-                    // anything deletes the conversation in that window
-                    // (loadtest cleanup, manual UI delete, agent retire),
-                    // findById returns null and a Message insert with a
-                    // null FK would fail with a constraint violation — log
-                    // the lost message and skip the insert.
-                    EventLogger.warn("agent", agent.name, channelType,
-                            "Persist skipped: conversation %d was deleted before persist completed"
-                                    .formatted(conversation.id));
-                    return;
-                }
-                ConversationService.appendAssistantMessage(conv, finalContent, null, usageJson, finalReasoning);
-            });
-            utils.LatencyStats.record(channelType, "persist",
-                    (System.nanoTime() - persistStartNs) / 1_000_000L);
+        services.Tx.run(() -> {
+            var conv = ConversationService.findById(conversation.id);
+            if (conv == null) {
+                EventLogger.warn("agent", agent.name, channelType,
+                        "Persist skipped: conversation %d was deleted before persist completed"
+                                .formatted(conversation.id));
+                return;
+            }
+            ConversationService.appendAssistantMessage(conv, finalContent, null, usageJson, finalReasoning);
         });
+        utils.LatencyStats.record(channelType, "persist",
+                (System.nanoTime() - persistStartNs) / 1_000_000L);
         emitUsageAndComplete(agent, channelType, content, turnUsage, streamStartMs, usageJson, cb);
-        try { persistFuture.join(); }
-        catch (InterruptedException _) { Thread.currentThread().interrupt(); }
     }
 
     /**
