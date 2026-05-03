@@ -291,31 +291,36 @@ public final class LoadTestRunner {
      */
     private record TokenStats(long avgVisibleTokens, long avgReasoningTokens, double avgRate) {}
 
+    /** Same chars-per-token heuristic used by SystemPromptAssembler.approxTokens. */
+    private static long approxTokens(int chars) {
+        return Math.round(chars / 4.0);
+    }
+
     /**
      * Average per-row token counts AND per-request tokens-per-second across
      * the assistant messages this run persisted under the loadtest agent.
-     * Reads {@code completion}, {@code reasoning}, and {@code streamBodyMs}
-     * (with {@code durationMs} as fallback) out of each message's
-     * {@code usage_json} payload set by {@link agents.AgentRunner#buildUsageJson}.
      *
-     * <p>For reasoning models (gemini-flash-preview, anthropic thinking,
-     * o-series, etc.) the provider-reported {@code completion} field bundles
-     * BOTH visible content AND internal reasoning tokens. {@code streamBodyMs}
-     * only covers the visible-content streaming window — reasoning happens
-     * during the TTFT wait, before the first visible token. So
-     * {@code completion / streamBodyMs} would be wildly inflated (3000
-     * reasoning tokens divided by ~700 ms of visible streaming = 4000+ tok/s,
-     * physically impossible).
+     * <p>The "visible token count" used for the rate is derived from the
+     * stored {@code Message.content} length (chars/4), NOT from the
+     * provider-reported {@code completion} field. Provider accounting is
+     * unreliable across reasoning models: gemini-3-flash-preview through
+     * ollama-cloud, for instance, reports ~6900 completion tokens with
+     * ~1500 reasoning tokens for a 50-word visible answer (288 chars,
+     * ~70 visible tokens). The remaining ~5300 tokens are internal
+     * "verbose thinking" the provider bills for but doesn't tag as
+     * reasoning. Trusting completion would inflate the visible-token
+     * rate by 50-100x; trusting (completion - reasoning) is still off by
+     * ~70x. Char count IS the truth for "what the user sees".
      *
-     * <p>Fix: subtract reasoning from completion to get visible-only tokens,
-     * use that as both the rate numerator and the {@code avgVisibleTokens}
-     * field. Surface {@code avgReasoningTokens} separately so operators
-     * comparing across models can see "model A used 3000 reasoning tokens
-     * for a 70-token answer; model B used 0".
+     * <p>Reasoning is computed as {@code completion - visible_chars_estimate}
+     * — a more honest estimate of internal model work than the provider's
+     * partial {@code reasoning_tokens} field. Operators comparing models
+     * see "model A: 70 visible / 6800 internal" which captures the actual
+     * compute spent, not just the slice the provider chose to label.
      *
-     * <p>Per-request rate is averaged arithmetically across rows — this is
-     * "average generation speed observed across requests", not aggregate
-     * throughput.
+     * <p>Rate is per-request {@code visible_chars_estimate / streamBodyMs * 1000},
+     * arithmetically averaged across rows — "average generation speed
+     * observed across requests".
      *
      * <p>Off the per-request hot path; the JPA round-trip happens once,
      * after the workers have already reported their wall-clock times.
@@ -324,8 +329,8 @@ public final class LoadTestRunner {
         try {
             return JPA.withTransaction("default", true, () -> {
                 @SuppressWarnings("unchecked")
-                var rows = (java.util.List<String>) JPA.em().createQuery(
-                        "SELECT m.usageJson FROM Message m "
+                var rows = (java.util.List<Object[]>) JPA.em().createQuery(
+                        "SELECT m.content, m.usageJson FROM Message m "
                         + "WHERE m.conversation.agent.id = :aid "
                         + "AND m.role = 'assistant' "
                         + "AND m.usageJson IS NOT NULL "
@@ -338,21 +343,22 @@ public final class LoadTestRunner {
                 long tokCount = 0;
                 double rateSum = 0.0;
                 long rateCount = 0;
-                for (var json : rows) {
+                for (var row : rows) {
                     try {
+                        var content = (String) row[0];
+                        var json = (String) row[1];
                         var obj = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
-                        if (!obj.has("completion")) continue;
-                        long completion = obj.get("completion").getAsLong();
-                        long reasoning = obj.has("reasoning") ? obj.get("reasoning").getAsLong() : 0L;
-                        long visible = Math.max(0L, completion - reasoning);
+                        long visible = approxTokens(content == null ? 0 : content.length());
+                        // completion - visible = "everything else the provider
+                        // billed for but didn't show the user" (true internal
+                        // work). More accurate than the provider's reasoning
+                        // field for models that under-report it.
+                        long completion = obj.has("completion") ? obj.get("completion").getAsLong() : 0L;
+                        long internal = Math.max(0L, completion - visible);
                         visSum += visible;
-                        reasonSum += reasoning;
+                        reasonSum += internal;
                         tokCount++;
                         if (visible > 0) {
-                            // streamBodyMs is the visible-content streaming
-                            // window. Reasoning tokens are excluded from the
-                            // numerator (visible only), keeping the rate
-                            // dimensionally consistent.
                             long denomMs = obj.has("streamBodyMs") ? obj.get("streamBodyMs").getAsLong()
                                           : obj.has("durationMs")  ? obj.get("durationMs").getAsLong()
                                           : 0L;
