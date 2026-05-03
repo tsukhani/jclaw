@@ -150,6 +150,14 @@ public class ApiMetricsController extends Controller {
             out.addProperty("maxPerRequestMs", result.maxPerRequestMs());
             out.addProperty("mockPort", result.mockPort());
             out.addProperty("agentId", result.agentId());
+            // Per-run averages — useful in both modes. For mock runs they
+            // confirm the harness honored the requested scenario; for --real
+            // runs they're the only reliable view of provider performance
+            // (the mock-shape ttftMs / tokensPerSecond inputs are ignored
+            // by the runner once it routes to a real provider).
+            out.addProperty("avgTtftMs", result.avgTtftMs());
+            out.addProperty("avgResponseTokens", result.avgResponseTokens());
+            out.addProperty("avgTokensPerSec", round1(result.avgTokensPerSec()));
             out.addProperty("realProvider", real);
             if (real) {
                 out.addProperty("provider",
@@ -210,5 +218,10 @@ public class ApiMetricsController extends Controller {
             error(400, "Invalid string for '" + key + "'");
             return defaultValue; // unreachable
         }
+    }
+
+    /** Round to one decimal so tokens-per-second prints as 47.3 instead of 47.27272727. */
+    private static double round1(double v) {
+        return Math.round(v * 10.0) / 10.0;
     }
 }

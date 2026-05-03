@@ -62,6 +62,16 @@ public final class LoadTestRunner {
                           boolean realProvider,
                           String provider, String model) {}
 
+    /**
+     * @param avgTtftMs         Mean time-to-first-token across this run's requests, in ms.
+     *                          Computed from the {@code web} channel {@code ttft} histogram delta.
+     * @param avgResponseTokens Mean completion-tokens per assistant message persisted by the
+     *                          loadtest agent during this run. 0 when no usage data was found
+     *                          (e.g. all requests errored before the LLM responded).
+     * @param avgTokensPerSec   Throughput inside the streaming body, computed as
+     *                          {@code avgResponseTokens / (avgStreamBodyMs / 1000)}.
+     *                          0 when stream_body data is unavailable.
+     */
     public record Result(
             int totalRequests,
             int successCount,
@@ -71,7 +81,10 @@ public final class LoadTestRunner {
             long minPerRequestMs,
             long maxPerRequestMs,
             int mockPort,
-            long agentId) {}
+            long agentId,
+            long avgTtftMs,
+            long avgResponseTokens,
+            double avgTokensPerSec) {}
 
     private LoadTestRunner() {}
 
@@ -127,6 +140,14 @@ public final class LoadTestRunner {
         var minDur = new AtomicLong(Long.MAX_VALUE);
         var maxDur = new AtomicLong(Long.MIN_VALUE);
 
+        // Snapshot ttft + stream_body counters BEFORE the workers fire so we
+        // can subtract them at the end and get this-run-only means. The reset
+        // point above only drops the warmup contribution; histograms still
+        // carry whatever was there from prior runs / real chat traffic.
+        var ttftBefore = readSegmentSnapshot("web", "ttft");
+        var streamBefore = readSegmentSnapshot("web", "stream_body");
+        long persistMarker = System.currentTimeMillis();
+
         var latch = new CountDownLatch(req.concurrency());
         long startNs = System.nanoTime();
         try (ExecutorService exec = Executors.newVirtualThreadPerTaskExecutor()) {
@@ -169,6 +190,27 @@ public final class LoadTestRunner {
         }
         long wall = (System.nanoTime() - startNs) / 1_000_000L;
         int total = req.concurrency() * req.iterations();
+
+        // Compute this-run mean TTFT and stream-body durations from the
+        // post-run histograms minus the pre-run snapshot.
+        var ttftAfter = readSegmentSnapshot("web", "ttft");
+        var streamAfter = readSegmentSnapshot("web", "stream_body");
+        long ttftCount = ttftAfter[0] - ttftBefore[0];
+        long ttftSum = ttftAfter[1] - ttftBefore[1];
+        long streamCount = streamAfter[0] - streamBefore[0];
+        long streamSum = streamAfter[1] - streamBefore[1];
+        long avgTtftMs = ttftCount > 0 ? ttftSum / ttftCount : 0;
+        long avgStreamMs = streamCount > 0 ? streamSum / streamCount : 0;
+
+        // Pull avg completion tokens from the assistant messages this run
+        // persisted under the loadtest agent. Off the per-request hot path
+        // so a slow query doesn't widen the wall-clock measurement.
+        long[] tokenStats = avgCompletionTokens(agentId, persistMarker);
+        long avgResponseTokens = tokenStats[0];
+        double avgTokensPerSec = (avgResponseTokens > 0 && avgStreamMs > 0)
+                ? (avgResponseTokens * 1000.0) / avgStreamMs
+                : 0.0;
+
         return new Result(
                 total,
                 success.get(),
@@ -178,7 +220,73 @@ public final class LoadTestRunner {
                 minDur.get() == Long.MAX_VALUE ? 0 : minDur.get(),
                 maxDur.get() == Long.MIN_VALUE ? 0 : maxDur.get(),
                 mockPort,
-                agentId);
+                agentId,
+                avgTtftMs,
+                avgResponseTokens,
+                avgTokensPerSec);
+    }
+
+    /**
+     * Read the {@code count} and {@code sum_ms} for one channel/segment cell
+     * from {@link utils.LatencyStats#snapshot()}. Returned as a 2-element
+     * {@code long[]} so callers can compute deltas without allocating a
+     * record. Returns {@code {0, 0}} when the cell is absent — the loadtest
+     * may snapshot a freshly-reset stats surface that has not yet seen
+     * the segment.
+     */
+    private static long[] readSegmentSnapshot(String channel, String segment) {
+        try {
+            var snap = utils.LatencyStats.snapshot();
+            var ch = snap.getAsJsonObject(channel);
+            if (ch == null) return new long[]{0L, 0L};
+            var seg = ch.getAsJsonObject(segment);
+            if (seg == null) return new long[]{0L, 0L};
+            return new long[]{seg.get("count").getAsLong(), seg.get("sum_ms").getAsLong()};
+        } catch (Exception _) {
+            return new long[]{0L, 0L};
+        }
+    }
+
+    /**
+     * Average completion-tokens across the assistant messages this run
+     * persisted under the loadtest agent. Reads {@code completion} out of
+     * each message's {@code usage_json} payload (set by
+     * {@link agents.AgentRunner#emitUsageAndComplete}). Returns
+     * {@code {avgTokens, sampleCount}} with both zero when no usage data
+     * was found — typically because every request errored before the LLM
+     * responded, or because the agent never reached the persist step.
+     *
+     * <p>Off the per-request hot path; the JPA round-trip happens once,
+     * after the workers have already reported their wall-clock times.
+     */
+    private static long[] avgCompletionTokens(long agentId, long sinceMillis) {
+        try {
+            return JPA.withTransaction("default", true, () -> {
+                @SuppressWarnings("unchecked")
+                var rows = (java.util.List<String>) JPA.em().createQuery(
+                        "SELECT m.usageJson FROM Message m "
+                        + "WHERE m.conversation.agent.id = :aid "
+                        + "AND m.role = 'assistant' "
+                        + "AND m.usageJson IS NOT NULL "
+                        + "AND m.createdAt >= :since")
+                    .setParameter("aid", agentId)
+                    .setParameter("since", java.time.Instant.ofEpochMilli(sinceMillis))
+                    .getResultList();
+                long sum = 0;
+                long count = 0;
+                for (var json : rows) {
+                    try {
+                        var obj = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
+                        if (!obj.has("completion")) continue;
+                        sum += obj.get("completion").getAsLong();
+                        count++;
+                    } catch (Exception _) { /* skip malformed entries */ }
+                }
+                return new long[]{count > 0 ? sum / count : 0L, count};
+            });
+        } catch (Throwable _) {
+            return new long[]{0L, 0L};
+        }
     }
 
     private static void warmupRequest(okhttp3.OkHttpClient client, String baseUrl,
