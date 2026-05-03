@@ -71,7 +71,7 @@ importers:
         version: 2.4.8(@vue/compiler-dom@3.5.33)(@vue/server-renderer@3.5.33(vue@3.5.33(typescript@6.0.3)))(vue@3.5.33(typescript@6.0.3))
       axe-core:
         specifier: ^4.11.3
-        version: 4.11.3
+        version: 4.11.4
       eslint:
         specifier: ^10.2.1
         version: 10.2.1(jiti@2.6.1)
@@ -107,7 +107,7 @@ importers:
         version: 4.1.5(@types/node@25.6.0)(@vitest/coverage-v8@4.1.5)(happy-dom@20.9.0)(vite@7.3.2(@types/node@25.6.0)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.46.2)(yaml@2.8.3))
       vue-axe:
         specifier: ^3.1.2
-        version: 3.1.2(axe-core@4.11.3)(vue@3.5.33(typescript@6.0.3))
+        version: 3.1.2(axe-core@4.11.4)(vue@3.5.33(typescript@6.0.3))
       vue-tsc:
         specifier: ^3.2.6
         version: 3.2.7(typescript@6.0.3)
@@ -2441,8 +2441,8 @@ packages:
     peerDependencies:
       postcss: ^8.1.0
 
-  axe-core@4.11.3:
-    resolution: {integrity: sha512-zBQouZixDTbo3jMGqHKyePxYxr1e5W8UdTmBQ7sNtaA9M2bE32daxxPLS/jojhKOHxQ7LWwPjfiwf/fhaJWzlg==}
+  axe-core@4.11.4:
+    resolution: {integrity: sha512-KunSNx+TVpkAw/6ULfhnx+HWRecjqZGTOyquAoWHYLRSdK1tB5Ihce1ZW+UY3fj33bYAFWPu7W/GRSmmrCGuxA==}
     engines: {node: '>=4'}
 
   b4a@1.8.1:
@@ -7669,7 +7669,7 @@ snapshots:
       postcss: 8.5.12
       postcss-value-parser: 4.2.0
 
-  axe-core@4.11.3: {}
+  axe-core@4.11.4: {}
 
   b4a@1.8.1: {}
 
@@ -10749,9 +10749,9 @@ snapshots:
 
   vscode-uri@3.1.0: {}
 
-  vue-axe@3.1.2(axe-core@4.11.3)(vue@3.5.33(typescript@6.0.3)):
+  vue-axe@3.1.2(axe-core@4.11.4)(vue@3.5.33(typescript@6.0.3)):
     dependencies:
-      axe-core: 4.11.3
+      axe-core: 4.11.4
       prismjs: 1.30.0
       vue: 3.5.33(typescript@6.0.3)
 
