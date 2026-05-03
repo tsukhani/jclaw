@@ -148,8 +148,6 @@ public class ApiMetricsController extends Controller {
             out.addProperty("avgPerRequestMs", result.avgPerRequestMs());
             out.addProperty("minPerRequestMs", result.minPerRequestMs());
             out.addProperty("maxPerRequestMs", result.maxPerRequestMs());
-            out.addProperty("mockPort", result.mockPort());
-            out.addProperty("agentId", result.agentId());
             // Per-run averages — useful in both modes. For mock runs they
             // confirm the harness honored the requested scenario; for --real
             // runs they're the only reliable view of provider performance

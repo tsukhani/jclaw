@@ -80,8 +80,6 @@ public final class LoadTestRunner {
             long avgPerRequestMs,
             long minPerRequestMs,
             long maxPerRequestMs,
-            int mockPort,
-            long agentId,
             long avgTtftMs,
             long avgResponseTokens,
             double avgTokensPerSec) {}
@@ -219,8 +217,6 @@ public final class LoadTestRunner {
                 total > 0 ? totalDuration.get() / total : 0,
                 minDur.get() == Long.MAX_VALUE ? 0 : minDur.get(),
                 maxDur.get() == Long.MIN_VALUE ? 0 : maxDur.get(),
-                mockPort,
-                agentId,
                 avgTtftMs,
                 avgResponseTokens,
                 avgTokensPerSec);
