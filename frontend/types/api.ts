@@ -49,10 +49,6 @@ export interface TelegramBindingSummary {
 /** A conversation between a user and an agent. */
 export interface Conversation {
   id: number
-  /** Owning agent's primary key. Backend has always emitted this; declared
-   *  here so the conversation detail page can scope workspace-file-link
-   *  rewriting to the right agent's downloads. */
-  agentId: number
   preview: string | null
   channelType: string
   agentName: string

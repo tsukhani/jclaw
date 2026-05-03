@@ -35,7 +35,6 @@ export default defineNuxtConfig({
     '~/assets/css/tailwind.css',
     'driver.js/dist/driver.css',
     '~/assets/css/driver-theme.css',
-    '~/assets/css/prose-chat.css',
   ],
 
   // Proxy API requests in production (SSR mode)
