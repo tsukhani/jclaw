@@ -75,6 +75,23 @@ public final class LatencyTrace {
         marks.putIfAbsent(name, System.nanoTime());
     }
 
+    /**
+     * JCLAW-200 / loadtest: time the LLM spent emitting tokens, in ms — i.e.
+     * {@link #STREAM_BODY_END} minus {@link #FIRST_TOKEN}. Returns 0 when
+     * either mark is missing (e.g. on an early-exit error path), so callers
+     * can treat 0 as "data unavailable" without a null check.
+     *
+     * <p>This is the denominator for "tokens-per-second emitted by the LLM",
+     * which excludes the time-to-first-token wait. Pair with the message's
+     * completion-token count to compute realized generation rate.
+     */
+    public long streamBodyMs() {
+        Long firstToken = marks.get(FIRST_TOKEN);
+        Long streamEnd = marks.get(STREAM_BODY_END);
+        if (firstToken == null || streamEnd == null) return 0L;
+        return Math.max(0L, nsToMs(streamEnd - firstToken));
+    }
+
     /** Record the wall-clock cost of a single tool-execution round. */
     public void addToolRound(long elapsedMs) {
         toolExecMs.addAndGet(elapsedMs);

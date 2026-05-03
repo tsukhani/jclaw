@@ -247,21 +247,19 @@ public final class LoadTestRunner {
     /**
      * Average completion-tokens AND average per-request tokens-per-second
      * across the assistant messages this run persisted under the loadtest
-     * agent. Reads {@code completion} and {@code durationMs} out of each
-     * message's {@code usage_json} payload (set by {@link agents.AgentRunner#buildUsageJson}).
+     * agent. Reads {@code completion} and {@code streamBodyMs} (with
+     * {@code durationMs} as fallback for older runs) out of each message's
+     * {@code usage_json} payload set by {@link agents.AgentRunner#buildUsageJson}.
      *
-     * <p>The rate is computed PER ROW as {@code completion / (durationMs / 1000)}
-     * and then arithmetically averaged across rows. This is the "average
-     * generation speed observed across requests" metric — the natural
-     * answer to "how fast did each model response come back". Differs from
-     * {@code mean(tokens) / mean(durationMs)} (system throughput) when
-     * response sizes vary.
+     * <p>The rate is computed PER ROW as {@code completion / (streamBodyMs / 1000)}
+     * and then arithmetically averaged across rows. This is the "tokens per
+     * second of LLM emit time" metric — the model's pure generation speed,
+     * excluding the TTFT wait. Falls back to {@code durationMs} (= TTFT +
+     * stream body) when {@code streamBodyMs} is missing, which underestimates
+     * generation rate but is better than reporting nothing.
      *
-     * <p>Note that {@code durationMs} in the persisted usage is the wall
-     * time from {@code streamStartMs} (LLM call kicked off) to the moment
-     * the usage event was emitted — i.e. it includes TTFT plus body
-     * streaming. So the rate is "tokens per second across the whole
-     * response", which is the metric LLM benchmarks typically publish.
+     * <p>Differs from {@code mean(tokens) / mean(timeMs)} (system throughput)
+     * when response sizes vary.
      *
      * <p>Off the per-request hot path; the JPA round-trip happens once,
      * after the workers have already reported their wall-clock times.
@@ -290,10 +288,18 @@ public final class LoadTestRunner {
                         long tokens = obj.get("completion").getAsLong();
                         tokSum += tokens;
                         tokCount++;
-                        if (tokens > 0 && obj.has("durationMs")) {
-                            long durMs = obj.get("durationMs").getAsLong();
-                            if (durMs > 0) {
-                                rateSum += (tokens * 1000.0) / durMs;
+                        if (tokens > 0) {
+                            // Prefer streamBodyMs (LLM emit time only) — that's
+                            // the right denominator for "model generation rate".
+                            // Fall back to durationMs (whole stream incl. TTFT)
+                            // for compatibility with messages persisted before
+                            // streamBodyMs was added; reported rate will be
+                            // lower in that case.
+                            long denomMs = obj.has("streamBodyMs") ? obj.get("streamBodyMs").getAsLong()
+                                          : obj.has("durationMs")  ? obj.get("durationMs").getAsLong()
+                                          : 0L;
+                            if (denomMs > 0) {
+                                rateSum += (tokens * 1000.0) / denomMs;
                                 rateCount++;
                             }
                         }

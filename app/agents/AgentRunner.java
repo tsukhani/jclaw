@@ -719,7 +719,10 @@ public class AgentRunner {
         // Build usage JSON before persisting so it can be stored alongside the message.
         // JCLAW-108: pass the conversation so resolved (override-aware) model identity
         // goes into usageJson rather than the agent's underlying fields.
-        var usageJson = buildUsageJson(turnUsage, modelInfo, streamStartMs, agent, conversation);
+        // streamBodyMs (FIRST_TOKEN → STREAM_BODY_END) is the denominator for
+        // realized generation rate — see the buildUsageJson 6-arg overload doc.
+        var usageJson = buildUsageJson(turnUsage, modelInfo, streamStartMs, agent, conversation,
+                trace.streamBodyMs());
 
         // JCLAW-100: persist the assistant message concurrently with the
         // terminal delivery. No data dependency between them, and the
@@ -799,12 +802,31 @@ public class AgentRunner {
     public static String buildUsageJson(LlmProvider.TurnUsage turnUsage,
                                         ModelInfo modelInfo, long streamStartMs, Agent agent,
                                         Conversation conversation) {
+        return buildUsageJson(turnUsage, modelInfo, streamStartMs, agent, conversation, 0L);
+    }
+
+    /**
+     * Six-arg overload that also records the time the LLM spent emitting tokens
+     * ({@code STREAM_BODY_END} minus {@code FIRST_TOKEN}, in ms) as
+     * {@code streamBodyMs} on the usage payload, when {@code streamBodyMs > 0}.
+     * The loadtest analyzer uses this to compute pure generation rate
+     * (tokens per second of emit time, excluding TTFT). 0 is treated as
+     * "unavailable" by readers and the field is simply omitted.
+     */
+    public static String buildUsageJson(LlmProvider.TurnUsage turnUsage,
+                                        ModelInfo modelInfo, long streamStartMs, Agent agent,
+                                        Conversation conversation, long streamBodyMs) {
         var durationMs = System.currentTimeMillis() - streamStartMs;
         var reasoningMs = turnUsage.reasoningDurationMs(System.nanoTime());
         if (!turnUsage.hasProviderUsage) {
-            return reasoningMs > 0L
-                    ? "{\"durationMs\":%s,\"reasoningDurationMs\":%s}".formatted(durationMs, reasoningMs)
-                    : "{\"durationMs\":%s}".formatted(durationMs);
+            // Tail fragment optionally carries reasoning + streamBody durations
+            // when known. Built here rather than via JsonObject because the
+            // no-provider-usage path historically returns a hand-formatted
+            // string for the smaller payload size.
+            var tail = new StringBuilder();
+            if (reasoningMs > 0L) tail.append(",\"reasoningDurationMs\":").append(reasoningMs);
+            if (streamBodyMs > 0L) tail.append(",\"streamBodyMs\":").append(streamBodyMs);
+            return "{\"durationMs\":%s%s}".formatted(durationMs, tail);
         }
 
         var reasoningCount = effectiveReasoningTokens(turnUsage);
@@ -817,6 +839,7 @@ public class AgentRunner {
         usageMap.addProperty("cacheCreation", turnUsage.cacheCreationTokens);
         usageMap.addProperty("durationMs", durationMs);
         if (reasoningMs > 0L) usageMap.addProperty("reasoningDurationMs", reasoningMs);
+        if (streamBodyMs > 0L) usageMap.addProperty("streamBodyMs", streamBodyMs);
 
         if (modelInfo != null) {
             if (modelInfo.promptPrice() >= 0) usageMap.addProperty("promptPrice", modelInfo.promptPrice());
