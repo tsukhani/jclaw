@@ -224,6 +224,15 @@ public class ToolRegistry {
 
     /** Get tool definitions filtered by agent's tool configuration. */
     public static List<ToolDef> getToolDefsForAgent(Agent agent) {
+        // Loadtest agent: ship zero tools so cross-provider tokens-per-second
+        // benchmarks measure pure model speed. Sending a populated tools
+        // array adds ~2-3 KB of prefill on every request AND tempts the
+        // model to invoke a tool instead of answering the benchmark prompt,
+        // either of which derails the comparison.
+        if (agent != null
+                && services.LoadTestRunner.LOADTEST_AGENT_NAME.equals(agent.name)) {
+            return List.of();
+        }
         return getToolDefsForAgent(loadDisabledTools(agent));
     }
 

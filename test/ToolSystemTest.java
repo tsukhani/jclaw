@@ -1302,4 +1302,24 @@ public class ToolSystemTest extends UnitTest {
             });
         } catch (IOException _) {}
     }
+
+    @Test
+    public void getToolDefsForLoadtestAgentReturnsEmpty() {
+        // Sanity: a normal agent gets the full registered tool set.
+        assertEquals(4, ToolRegistry.getToolDefsForAgent(agent).size(),
+                "non-loadtest agent should see every published tool");
+
+        // Loadtest agent: zero tools, regardless of what's registered. This
+        // keeps cross-provider tokens-per-second benchmarks clean — no
+        // 2-3 KB tools array prefill, no risk of the model invoking a tool
+        // instead of answering the benchmark prompt.
+        var loadtestAgent = AgentService.create(
+                services.LoadTestRunner.LOADTEST_AGENT_NAME, "openrouter", "gpt-4.1");
+        try {
+            assertTrue(ToolRegistry.getToolDefsForAgent(loadtestAgent).isEmpty(),
+                    "loadtest agent must see zero tools so the benchmark stays apples-to-apples");
+        } finally {
+            try { loadtestAgent.delete(); } catch (Exception _) { /* best-effort */ }
+        }
+    }
 }

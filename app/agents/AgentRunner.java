@@ -595,7 +595,11 @@ public class AgentRunner {
             // JCLAW-38: re-inject latest compaction summary (if any)
             var sysPrompt = services.SessionCompactor.appendSummaryToPrompt(assembled0.systemPrompt(), convo);
             var msgs = buildMessages(sysPrompt, convo);
-            var toolDefs = ToolRegistry.getToolDefsForAgent(disabledTools);
+            // Use the Agent overload so the loadtest-agent zero-tools
+            // short-circuit applies. loadDisabledTools is ConcurrentHashMap-
+            // cached, so the redundant lookup inside that overload is a
+            // single map.get and not worth optimizing around.
+            var toolDefs = ToolRegistry.getToolDefsForAgent(agent);
             return new PreparedPrologue(assembled0, msgs, toolDefs, disabledTools);
         });
 
