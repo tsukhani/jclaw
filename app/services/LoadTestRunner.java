@@ -81,14 +81,23 @@ public final class LoadTestRunner {
     }
 
     /**
-     * @param avgTtftMs         Mean time-to-first-token across this run's requests, in ms.
-     *                          Computed from the {@code web} channel {@code ttft} histogram delta.
-     * @param avgResponseTokens Mean completion-tokens per assistant message persisted by the
-     *                          loadtest agent during this run. 0 when no usage data was found
-     *                          (e.g. all requests errored before the LLM responded).
-     * @param avgTokensPerSec   Throughput inside the streaming body, computed as
-     *                          {@code avgResponseTokens / (avgStreamBodyMs / 1000)}.
-     *                          0 when stream_body data is unavailable.
+     * @param avgTtftMs          Mean time-to-first-token across this run's requests, in ms.
+     *                           Computed from the {@code web} channel {@code ttft}
+     *                           histogram delta. For reasoning models, TTFT includes
+     *                           the time the model spent thinking before emitting
+     *                           the first visible token.
+     * @param avgResponseTokens  Mean visible response tokens (provider-reported
+     *                           {@code completion} minus {@code reasoning}) per
+     *                           assistant message persisted by the loadtest
+     *                           agent. 0 when no usage data was found.
+     * @param avgReasoningTokens Mean internal reasoning tokens — visible
+     *                           separately so reasoning-model overhead doesn't
+     *                           silently inflate the visible-token count.
+     *                           0 for non-reasoning models.
+     * @param avgTokensPerSec    Per-request mean of
+     *                           {@code visibleTokens / streamBodyMs * 1000} —
+     *                           visible-content emission rate while streaming.
+     *                           0 when stream timing data is unavailable.
      */
     public record Result(
             int totalRequests,
@@ -100,6 +109,7 @@ public final class LoadTestRunner {
             long maxPerRequestMs,
             long avgTtftMs,
             long avgResponseTokens,
+            long avgReasoningTokens,
             double avgTokensPerSec) {}
 
     private LoadTestRunner() {}
@@ -230,7 +240,8 @@ public final class LoadTestRunner {
         // speed observed" metric, not the aggregate-throughput ratio
         // (which biases toward longer responses).
         var tokenStats = perRequestTokenStats(agentId, persistMarker);
-        long avgResponseTokens = tokenStats.avgTokens();
+        long avgResponseTokens = tokenStats.avgVisibleTokens();
+        long avgReasoningTokens = tokenStats.avgReasoningTokens();
         double avgTokensPerSec = tokenStats.avgRate();
 
         return new Result(
@@ -243,6 +254,7 @@ public final class LoadTestRunner {
                 maxDur.get() == Long.MIN_VALUE ? 0 : maxDur.get(),
                 avgTtftMs,
                 avgResponseTokens,
+                avgReasoningTokens,
                 avgTokensPerSec);
     }
 
@@ -267,25 +279,43 @@ public final class LoadTestRunner {
         }
     }
 
-    /** {@link #perRequestTokenStats} return shape. */
-    private record TokenStats(long avgTokens, double avgRate) {}
+    /**
+     * {@link #perRequestTokenStats} return shape.
+     *
+     * <p>{@code avgVisibleTokens} = mean of visible response tokens
+     * (completion minus reasoning, clamped to ≥ 0). {@code avgReasoningTokens}
+     * = mean of model-reported reasoning tokens, surfaced so operators can
+     * see "the model burned 3000 reasoning tokens to write 70 visible
+     * tokens" rather than that being silently rolled into the rate.
+     * {@code avgRate} = mean of per-request {@code visibleTokens / streamBodyMs * 1000}.
+     */
+    private record TokenStats(long avgVisibleTokens, long avgReasoningTokens, double avgRate) {}
 
     /**
-     * Average completion-tokens AND average per-request tokens-per-second
-     * across the assistant messages this run persisted under the loadtest
-     * agent. Reads {@code completion} and {@code streamBodyMs} (with
-     * {@code durationMs} as fallback for older runs) out of each message's
+     * Average per-row token counts AND per-request tokens-per-second across
+     * the assistant messages this run persisted under the loadtest agent.
+     * Reads {@code completion}, {@code reasoning}, and {@code streamBodyMs}
+     * (with {@code durationMs} as fallback) out of each message's
      * {@code usage_json} payload set by {@link agents.AgentRunner#buildUsageJson}.
      *
-     * <p>The rate is computed PER ROW as {@code completion / (streamBodyMs / 1000)}
-     * and then arithmetically averaged across rows. This is the "tokens per
-     * second of LLM emit time" metric — the model's pure generation speed,
-     * excluding the TTFT wait. Falls back to {@code durationMs} (= TTFT +
-     * stream body) when {@code streamBodyMs} is missing, which underestimates
-     * generation rate but is better than reporting nothing.
+     * <p>For reasoning models (gemini-flash-preview, anthropic thinking,
+     * o-series, etc.) the provider-reported {@code completion} field bundles
+     * BOTH visible content AND internal reasoning tokens. {@code streamBodyMs}
+     * only covers the visible-content streaming window — reasoning happens
+     * during the TTFT wait, before the first visible token. So
+     * {@code completion / streamBodyMs} would be wildly inflated (3000
+     * reasoning tokens divided by ~700 ms of visible streaming = 4000+ tok/s,
+     * physically impossible).
      *
-     * <p>Differs from {@code mean(tokens) / mean(timeMs)} (system throughput)
-     * when response sizes vary.
+     * <p>Fix: subtract reasoning from completion to get visible-only tokens,
+     * use that as both the rate numerator and the {@code avgVisibleTokens}
+     * field. Surface {@code avgReasoningTokens} separately so operators
+     * comparing across models can see "model A used 3000 reasoning tokens
+     * for a 70-token answer; model B used 0".
+     *
+     * <p>Per-request rate is averaged arithmetically across rows — this is
+     * "average generation speed observed across requests", not aggregate
+     * throughput.
      *
      * <p>Off the per-request hot path; the JPA round-trip happens once,
      * after the workers have already reported their wall-clock times.
@@ -303,7 +333,8 @@ public final class LoadTestRunner {
                     .setParameter("aid", agentId)
                     .setParameter("since", java.time.Instant.ofEpochMilli(sinceMillis))
                     .getResultList();
-                long tokSum = 0;
+                long visSum = 0;
+                long reasonSum = 0;
                 long tokCount = 0;
                 double rateSum = 0.0;
                 long rateCount = 0;
@@ -311,32 +342,34 @@ public final class LoadTestRunner {
                     try {
                         var obj = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
                         if (!obj.has("completion")) continue;
-                        long tokens = obj.get("completion").getAsLong();
-                        tokSum += tokens;
+                        long completion = obj.get("completion").getAsLong();
+                        long reasoning = obj.has("reasoning") ? obj.get("reasoning").getAsLong() : 0L;
+                        long visible = Math.max(0L, completion - reasoning);
+                        visSum += visible;
+                        reasonSum += reasoning;
                         tokCount++;
-                        if (tokens > 0) {
-                            // Prefer streamBodyMs (LLM emit time only) — that's
-                            // the right denominator for "model generation rate".
-                            // Fall back to durationMs (whole stream incl. TTFT)
-                            // for compatibility with messages persisted before
-                            // streamBodyMs was added; reported rate will be
-                            // lower in that case.
+                        if (visible > 0) {
+                            // streamBodyMs is the visible-content streaming
+                            // window. Reasoning tokens are excluded from the
+                            // numerator (visible only), keeping the rate
+                            // dimensionally consistent.
                             long denomMs = obj.has("streamBodyMs") ? obj.get("streamBodyMs").getAsLong()
                                           : obj.has("durationMs")  ? obj.get("durationMs").getAsLong()
                                           : 0L;
                             if (denomMs > 0) {
-                                rateSum += (tokens * 1000.0) / denomMs;
+                                rateSum += (visible * 1000.0) / denomMs;
                                 rateCount++;
                             }
                         }
                     } catch (Exception _) { /* skip malformed entries */ }
                 }
                 return new TokenStats(
-                        tokCount > 0 ? tokSum / tokCount : 0L,
+                        tokCount > 0 ? visSum / tokCount : 0L,
+                        tokCount > 0 ? reasonSum / tokCount : 0L,
                         rateCount > 0 ? rateSum / rateCount : 0.0);
             });
         } catch (Throwable _) {
-            return new TokenStats(0L, 0.0);
+            return new TokenStats(0L, 0L, 0.0);
         }
     }
 

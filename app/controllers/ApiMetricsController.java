@@ -158,6 +158,11 @@ public class ApiMetricsController extends Controller {
             // by the runner once it routes to a real provider).
             out.addProperty("avgTtftMs", result.avgTtftMs());
             out.addProperty("avgResponseTokens", result.avgResponseTokens());
+            // Reasoning tokens are surfaced separately so cross-model
+            // comparisons see the full picture: a "70 visible / 3000 reasoning"
+            // model is doing very different work from a "70 visible / 0
+            // reasoning" model even when their visible-token rates match.
+            out.addProperty("avgReasoningTokens", result.avgReasoningTokens());
             out.addProperty("avgTokensPerSec", round1(result.avgTokensPerSec()));
             out.addProperty("realProvider", real);
             if (real) {
