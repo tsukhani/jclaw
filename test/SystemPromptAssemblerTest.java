@@ -286,6 +286,13 @@ public class SystemPromptAssemblerTest extends UnitTest {
         var assembled = SystemPromptAssembler.assemble(agent, "anything", null, "web");
         var prompt = assembled.systemPrompt();
 
+        // Dump to /tmp for empirical inspection — operators can cat the file
+        // after `play autotest` to see exactly what bytes ship for the
+        // loadtest agent. Best-effort; failures here don't break the test.
+        try {
+            Files.writeString(Path.of("/tmp/jclaw-loadtest-prompt.txt"), prompt);
+        } catch (Exception _) { /* ok */ }
+
         assertTrue(prompt.contains("## Safety"),
                 "Safety section must appear in the loadtest prompt");
         assertTrue(prompt.contains("Execution Bias") || prompt.contains("Execution") || prompt.contains("execution"),
