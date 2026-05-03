@@ -443,6 +443,18 @@ public class ApiChatController extends Controller {
         // a leaner shape. This is purely a wire-format decision — trace-side
         // FIRST_TOKEN marking is handled inside AgentRunner now.
         var firstToken = new AtomicBoolean(true);
+
+        // JCLAW-200: optional steady-state token coalescer. Each SSE write
+        // triggers a Netty resumeChunkedTransfer + flush (~25 ms/chunk on
+        // loopback), so chat.stream.token_coalesce_chars > 0 buffers tokens
+        // and emits one frame per ~N chars of accumulated content. Default
+        // 0 = current per-token behavior. First token always emits
+        // immediately; only steady-state tokens batch.
+        final int coalesceChars = Math.max(0, services.ConfigService.getInt("chat.stream.token_coalesce_chars", 0));
+        var tokenCoalescer = new utils.TokenCoalescer(coalesceChars,
+                s -> sendChunkFrame(sse, SSE_TOKEN_PREFIX, s));
+        var reasoningCoalescer = new utils.TokenCoalescer(coalesceChars,
+                s -> sendChunkFrame(sse, SSE_REASONING_PREFIX, s));
         var callbacks = new AgentRunner.StreamingCallbacks(
                 conversation -> {
                     var initData = new java.util.HashMap<>(Map.of("type", "init", "conversationId", conversation.id));
@@ -472,10 +484,10 @@ public class ApiChatController extends Controller {
                         sse.send(Map.of("type", "token", "content", token,
                                 "timestamp", java.time.Instant.now().toString()));
                     } else {
-                        sendChunkFrame(sse, SSE_TOKEN_PREFIX, token);
+                        tokenCoalescer.accept(token);
                     }
                 },
-                reasoning -> sendChunkFrame(sse, SSE_REASONING_PREFIX, reasoning),
+                reasoning -> reasoningCoalescer.accept(reasoning),
                 status -> sse.send(Map.of("type", "status", "content", status)),
                 // JCLAW-170: tool-call frame. structuredJson rides as a raw
                 // JsonElement (not a nested string) so the frontend can parse
@@ -497,10 +509,17 @@ public class ApiChatController extends Controller {
                     sse.send(payload);
                 },
                 content -> {
+                    // JCLAW-200: drain coalescer buffers before the terminal
+                    // frame so any tail tokens reach the client. No-op when
+                    // coalescing is disabled (buffers stay empty).
+                    tokenCoalescer.drain();
+                    reasoningCoalescer.drain();
                     sse.send(Map.of("type", "complete", "content", content));
                     sse.close();
                 },
                 error -> {
+                    tokenCoalescer.drain();
+                    reasoningCoalescer.drain();
                     sse.send(Map.of("type", "error", "content", "An error occurred: " + error.getMessage()));
                     sse.close();
                     EventLogger.error("channel", agent.name, "web",
