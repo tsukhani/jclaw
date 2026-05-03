@@ -384,9 +384,18 @@ public class AgentRunner {
                     prepared.messages(), prepared.tools(), prepared.primary(), prepared.secondary());
             trace.mark(LatencyTrace.STREAM_BODY_END);
 
-            // Short persistence transaction: final assistant message
+            // Short persistence transaction: final assistant message.
+            // Conversation may have been deleted between LLM call and persist
+            // (loadtest cleanup, manual UI delete, etc.) — log + skip rather
+            // than insert a Message with a null FK.
             services.Tx.run(() -> {
                 var conv = ConversationService.findById(conversationId);
+                if (conv == null) {
+                    EventLogger.warn("agent", agent.name, conversation.channelType,
+                            "Persist skipped: conversation %d was deleted before persist completed"
+                                    .formatted(conversationId));
+                    return;
+                }
                 ConversationService.appendAssistantMessage(conv, response, null);
             });
 
@@ -692,6 +701,12 @@ public class AgentRunner {
             var truncPersistFuture = Thread.ofVirtual().name("agent-trunc-persist").start(() -> {
                 services.Tx.run(() -> {
                     var conv = ConversationService.findById(conversation.id);
+                    if (conv == null) {
+                        EventLogger.warn("agent", agent.name, channelType,
+                                "Trunc persist skipped: conversation %d was deleted before persist completed"
+                                        .formatted(conversation.id));
+                        return;
+                    }
                     ConversationService.appendAssistantMessage(conv, finalContent, null);
                 });
                 utils.LatencyStats.record(channelType, "persist",
@@ -742,6 +757,22 @@ public class AgentRunner {
         var persistFuture = Thread.ofVirtual().name("agent-persist").start(() -> {
             services.Tx.run(() -> {
                 var conv = ConversationService.findById(conversation.id);
+                if (conv == null) {
+                    // The persist runs on a virtual thread that is started
+                    // before emitUsageAndComplete fires the terminal SSE frame.
+                    // The controller's await(sse.completion()) unblocks as
+                    // soon as that frame closes the stream, so the HTTP
+                    // response can complete before persist finishes. If
+                    // anything deletes the conversation in that window
+                    // (loadtest cleanup, manual UI delete, agent retire),
+                    // findById returns null and a Message insert with a
+                    // null FK would fail with a constraint violation — log
+                    // the lost message and skip the insert.
+                    EventLogger.warn("agent", agent.name, channelType,
+                            "Persist skipped: conversation %d was deleted before persist completed"
+                                    .formatted(conversation.id));
+                    return;
+                }
                 ConversationService.appendAssistantMessage(conv, finalContent, null, usageJson, finalReasoning);
             });
             utils.LatencyStats.record(channelType, "persist",
