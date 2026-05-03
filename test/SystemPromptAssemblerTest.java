@@ -270,4 +270,53 @@ public class SystemPromptAssemblerTest extends UnitTest {
             // best-effort
         }
     }
+
+    // =====================
+    // Loadtest agent: minimal prompt for fair cross-provider benchmarks
+    // =====================
+
+    @Test
+    public void loadtestAgentEmitsOnlySafetyExecutionBiasAndChannelGuidance() throws Exception {
+        var agent = newAgent(services.LoadTestRunner.LOADTEST_AGENT_NAME);
+        // Add a workspace file the loadtest path should IGNORE — proves the
+        // slim path is genuinely skipping content rather than the test
+        // happening to land on an empty workspace.
+        writeWorkspaceFile(agent.name, "AGENT.md", "MARKER_AGENT_LOADTEST_SHOULD_NOT_APPEAR");
+
+        var assembled = SystemPromptAssembler.assemble(agent, "anything", null, "web");
+        var prompt = assembled.systemPrompt();
+
+        assertTrue(prompt.contains("## Safety"),
+                "Safety section must appear in the loadtest prompt");
+        assertTrue(prompt.contains("Execution Bias") || prompt.contains("Execution") || prompt.contains("execution"),
+                "Execution Bias section must appear in the loadtest prompt");
+        assertTrue(prompt.toLowerCase().contains("channel guidance"),
+                "Channel Guidance section must appear when channelType is 'web'");
+
+        // Negative assertions — every other section must be absent.
+        assertFalse(prompt.contains("MARKER_AGENT_LOADTEST_SHOULD_NOT_APPEAR"),
+                "Loadtest path must NOT include workspace file content");
+        assertFalse(prompt.contains("Workspace File Delivery"),
+                "Loadtest path must NOT include the workspace-file-delivery convention section");
+        assertFalse(prompt.contains("Environment"),
+                "Loadtest path must NOT include the environment-info section");
+        assertFalse(prompt.contains("Tool Catalog"),
+                "Loadtest path must NOT include the tool-catalog section");
+        assertFalse(prompt.contains("Relevant Memories") || prompt.contains("memories"),
+                "Loadtest path must NOT include the recalled-memories section");
+
+        assertTrue(assembled.skills().isEmpty(),
+                "Loadtest path must return zero skills (regardless of whether disk has any)");
+    }
+
+    @Test
+    public void loadtestAgentSkipsChannelGuidanceWhenChannelHasNone() throws Exception {
+        var agent = newAgent(services.LoadTestRunner.LOADTEST_AGENT_NAME);
+        // Slack has no registered channel guidance → section silently absent.
+        var assembled = SystemPromptAssembler.assemble(agent, "x", null, "slack");
+        assertFalse(assembled.systemPrompt().toLowerCase().contains("channel guidance"),
+                "Channel Guidance section must be absent for channels without registered guidance");
+        assertTrue(assembled.systemPrompt().contains("## Safety"),
+                "Safety still appears regardless of channel");
+    }
 }

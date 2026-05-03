@@ -171,6 +171,26 @@ public class SystemPromptAssembler {
      */
     private static List<SkillLoader.SkillInfo> buildPrompt(Agent agent, String userMessage, SectionedBuilder b,
                                                            Set<String> disabledTools, String channelType) {
+        // Loadtest agent: emit only the static behavioral sections (safety,
+        // execution bias, channel guidance) so cross-provider tokens-per-sec
+        // measurements aren't dragged down by prompt-prefill costs that
+        // depend on the operator's other agents' workspace state. Skips
+        // workspace files, skills, tool catalog, workspace-file-delivery
+        // convention, environment info, and memories. The breakdown path
+        // (settings UI introspection) sees the same minimal output, since
+        // it shares this method.
+        if (services.LoadTestRunner.LOADTEST_AGENT_NAME.equals(agent.name)) {
+            b.startSection("Safety");
+            appendSafetySection(b.sb);
+            b.startSection("Execution Bias");
+            appendExecutionBiasSection(b.sb);
+            var loadtestGuidance = channelGuidanceFor(channelType);
+            if (loadtestGuidance != null) {
+                b.startSection("Channel Guidance (" + channelType.toLowerCase() + ")");
+                appendChannelGuidanceSection(b.sb, channelType, loadtestGuidance);
+            }
+            return List.of();
+        }
         // Workspace files are emitted in a deliberate narrative order: SOUL (psyche) →
         // IDENTITY (who) → USER (for whom) → BOOTSTRAP (init/priming) → AGENT (what to do).
         // Each section is skipped silently when the file is missing or blank, so an
