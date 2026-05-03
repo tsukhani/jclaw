@@ -138,12 +138,11 @@ public final class LoadTestRunner {
         var minDur = new AtomicLong(Long.MAX_VALUE);
         var maxDur = new AtomicLong(Long.MIN_VALUE);
 
-        // Snapshot ttft + stream_body counters BEFORE the workers fire so we
-        // can subtract them at the end and get this-run-only means. The reset
-        // point above only drops the warmup contribution; histograms still
-        // carry whatever was there from prior runs / real chat traffic.
+        // Snapshot ttft counter BEFORE the workers fire so we can subtract
+        // at the end and get this-run-only mean. The reset point above only
+        // drops the warmup contribution; histograms still carry whatever was
+        // there from prior runs / real chat traffic.
         var ttftBefore = readSegmentSnapshot("web", "ttft");
-        var streamBefore = readSegmentSnapshot("web", "stream_body");
         long persistMarker = System.currentTimeMillis();
 
         var latch = new CountDownLatch(req.concurrency());
@@ -189,25 +188,24 @@ public final class LoadTestRunner {
         long wall = (System.nanoTime() - startNs) / 1_000_000L;
         int total = req.concurrency() * req.iterations();
 
-        // Compute this-run mean TTFT and stream-body durations from the
-        // post-run histograms minus the pre-run snapshot.
+        // Compute this-run mean TTFT from the post-run ttft histogram minus
+        // the pre-run snapshot. The histogram already aggregates per-request
+        // values, so sum_ms / count IS the arithmetic mean of per-request
+        // ttfts — what we want.
         var ttftAfter = readSegmentSnapshot("web", "ttft");
-        var streamAfter = readSegmentSnapshot("web", "stream_body");
         long ttftCount = ttftAfter[0] - ttftBefore[0];
         long ttftSum = ttftAfter[1] - ttftBefore[1];
-        long streamCount = streamAfter[0] - streamBefore[0];
-        long streamSum = streamAfter[1] - streamBefore[1];
         long avgTtftMs = ttftCount > 0 ? ttftSum / ttftCount : 0;
-        long avgStreamMs = streamCount > 0 ? streamSum / streamCount : 0;
 
-        // Pull avg completion tokens from the assistant messages this run
-        // persisted under the loadtest agent. Off the per-request hot path
-        // so a slow query doesn't widen the wall-clock measurement.
-        long[] tokenStats = avgCompletionTokens(agentId, persistMarker);
-        long avgResponseTokens = tokenStats[0];
-        double avgTokensPerSec = (avgResponseTokens > 0 && avgStreamMs > 0)
-                ? (avgResponseTokens * 1000.0) / avgStreamMs
-                : 0.0;
+        // Pull avg completion tokens AND avg per-request tokens-per-second
+        // from the assistant messages this run persisted under the loadtest
+        // agent. Per-row tokens/s = completion / (durationMs/1000), then
+        // arithmetic mean across rows — this is the "average generation
+        // speed observed" metric, not the aggregate-throughput ratio
+        // (which biases toward longer responses).
+        var tokenStats = perRequestTokenStats(agentId, persistMarker);
+        long avgResponseTokens = tokenStats.avgTokens();
+        double avgTokensPerSec = tokenStats.avgRate();
 
         return new Result(
                 total,
@@ -243,19 +241,32 @@ public final class LoadTestRunner {
         }
     }
 
+    /** {@link #perRequestTokenStats} return shape. */
+    private record TokenStats(long avgTokens, double avgRate) {}
+
     /**
-     * Average completion-tokens across the assistant messages this run
-     * persisted under the loadtest agent. Reads {@code completion} out of
-     * each message's {@code usage_json} payload (set by
-     * {@link agents.AgentRunner#emitUsageAndComplete}). Returns
-     * {@code {avgTokens, sampleCount}} with both zero when no usage data
-     * was found — typically because every request errored before the LLM
-     * responded, or because the agent never reached the persist step.
+     * Average completion-tokens AND average per-request tokens-per-second
+     * across the assistant messages this run persisted under the loadtest
+     * agent. Reads {@code completion} and {@code durationMs} out of each
+     * message's {@code usage_json} payload (set by {@link agents.AgentRunner#buildUsageJson}).
+     *
+     * <p>The rate is computed PER ROW as {@code completion / (durationMs / 1000)}
+     * and then arithmetically averaged across rows. This is the "average
+     * generation speed observed across requests" metric — the natural
+     * answer to "how fast did each model response come back". Differs from
+     * {@code mean(tokens) / mean(durationMs)} (system throughput) when
+     * response sizes vary.
+     *
+     * <p>Note that {@code durationMs} in the persisted usage is the wall
+     * time from {@code streamStartMs} (LLM call kicked off) to the moment
+     * the usage event was emitted — i.e. it includes TTFT plus body
+     * streaming. So the rate is "tokens per second across the whole
+     * response", which is the metric LLM benchmarks typically publish.
      *
      * <p>Off the per-request hot path; the JPA round-trip happens once,
      * after the workers have already reported their wall-clock times.
      */
-    private static long[] avgCompletionTokens(long agentId, long sinceMillis) {
+    private static TokenStats perRequestTokenStats(long agentId, long sinceMillis) {
         try {
             return JPA.withTransaction("default", true, () -> {
                 @SuppressWarnings("unchecked")
@@ -268,20 +279,32 @@ public final class LoadTestRunner {
                     .setParameter("aid", agentId)
                     .setParameter("since", java.time.Instant.ofEpochMilli(sinceMillis))
                     .getResultList();
-                long sum = 0;
-                long count = 0;
+                long tokSum = 0;
+                long tokCount = 0;
+                double rateSum = 0.0;
+                long rateCount = 0;
                 for (var json : rows) {
                     try {
                         var obj = com.google.gson.JsonParser.parseString(json).getAsJsonObject();
                         if (!obj.has("completion")) continue;
-                        sum += obj.get("completion").getAsLong();
-                        count++;
+                        long tokens = obj.get("completion").getAsLong();
+                        tokSum += tokens;
+                        tokCount++;
+                        if (tokens > 0 && obj.has("durationMs")) {
+                            long durMs = obj.get("durationMs").getAsLong();
+                            if (durMs > 0) {
+                                rateSum += (tokens * 1000.0) / durMs;
+                                rateCount++;
+                            }
+                        }
                     } catch (Exception _) { /* skip malformed entries */ }
                 }
-                return new long[]{count > 0 ? sum / count : 0L, count};
+                return new TokenStats(
+                        tokCount > 0 ? tokSum / tokCount : 0L,
+                        rateCount > 0 ? rateSum / rateCount : 0.0);
             });
         } catch (Throwable _) {
-            return new long[]{0L, 0L};
+            return new TokenStats(0L, 0.0);
         }
     }
 
