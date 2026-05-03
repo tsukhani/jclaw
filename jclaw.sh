@@ -645,6 +645,9 @@ LT_ITERATIONS="5"
 LT_TTFT_MS="100"
 LT_TOKENS_PER_SECOND="50"
 LT_RESPONSE_TOKENS="40"
+# Track mock-only knobs that were explicitly passed; warn if combined
+# with --real (where they're silently ignored by the harness).
+LT_MOCK_FLAGS_SET=()
 LT_CLEAN=false
 LT_COMPRESS=false
 LT_REAL=false
@@ -679,14 +682,17 @@ while [[ $# -gt 0 ]]; do
             ;;
         --ttft-ms)
             LT_TTFT_MS="$2"
+            LT_MOCK_FLAGS_SET+=("--ttft-ms")
             shift 2
             ;;
         --tokens-per-second)
             LT_TOKENS_PER_SECOND="$2"
+            LT_MOCK_FLAGS_SET+=("--tokens-per-second")
             shift 2
             ;;
         --response-tokens)
             LT_RESPONSE_TOKENS="$2"
+            LT_MOCK_FLAGS_SET+=("--response-tokens")
             shift 2
             ;;
         --clean)
@@ -2109,6 +2115,14 @@ do_loadtest() {
     if [[ "$LT_REAL" == true ]]; then
         local lt_real_provider="${LT_PROVIDER:-ollama-local}"
         lt_extra=" real=$lt_real_provider model=$LT_MODEL"
+        # Warn when mock-shape knobs were passed alongside --real. They'd be
+        # accepted by the JSON body silently and then ignored by LoadTestRunner
+        # which routes through the real provider; print the warning here so
+        # operators don't waste time tweaking a knob that has no effect.
+        if [[ ${#LT_MOCK_FLAGS_SET[@]} -gt 0 ]]; then
+            echo "Warning: ${LT_MOCK_FLAGS_SET[*]} ignored when --real is set" \
+                 "(only the in-process mock harness reads them)."
+        fi
     fi
     echo "==> Running load test: concurrency=$LT_CONCURRENCY iterations=$LT_ITERATIONS$lt_extra"
     # Mock-only knobs: ttft / tokens-per-second / response-tokens drive the
