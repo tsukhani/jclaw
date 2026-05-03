@@ -405,4 +405,24 @@ public class ApiChatControllerTest extends FunctionalTest {
             f.delete();
         }
     }
+
+    @Test
+    void streamChat_isAnnotatedWithNoTransaction_jclaw199() throws Exception {
+        // The annotation tells Play 1.x's JPAPlugin to skip wrapping the
+        // controller invocation in a transaction. Without it the framework
+        // holds a HikariCP connection for the entire SSE duration (typically
+        // 2-30s for a real LLM) and the pool exhausts at modest concurrency.
+        // AgentRunner does its own short Tx.run scoping internally, so the
+        // outer Play tx is pure overhead.
+        var streamChat = controllers.ApiChatController.class.getDeclaredMethod("streamChat");
+        assertNotNull(streamChat.getAnnotation(play.db.jpa.NoTransaction.class),
+                "ApiChatController.streamChat must keep @NoTransaction (JCLAW-199) — "
+                + "removing it re-introduces the HikariCP pool-exhaustion ceiling.");
+
+        // Same fix applies to the long-lived events SSE (24h timeout); covered
+        // here for proximity since both annotations exist for the same reason.
+        var eventsStream = controllers.ApiEventsController.class.getDeclaredMethod("stream");
+        assertNotNull(eventsStream.getAnnotation(play.db.jpa.NoTransaction.class),
+                "ApiEventsController.stream must keep @NoTransaction (JCLAW-199).");
+    }
 }

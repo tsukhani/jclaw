@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import models.Agent;
 import models.Conversation;
 import org.apache.tika.Tika;
+import play.db.jpa.NoTransaction;
 import play.mvc.Controller;
 import play.mvc.SseStream;
 import play.mvc.With;
@@ -89,7 +90,11 @@ public class ApiChatController extends Controller {
         }
 
         var agentId = body.get("agentId").getAsLong();
-        Agent agent = Agent.findById(agentId);
+        // JCLAW-199: streamChat is @NoTransaction so Play does not wrap the
+        // request in a JPA tx; explicit short Tx.run for the lookup. Agent has
+        // no lazy fields used downstream, so reading String columns on the
+        // detached entity after the tx closes is safe.
+        Agent agent = services.Tx.run(() -> Agent.findById(agentId));
         if (agent == null) notFound();
 
         var messageText = body.get("message").getAsString();
@@ -362,7 +367,19 @@ public class ApiChatController extends Controller {
      * {@code cancelled} flag is bridged from {@code sse.onClose} so SSE
      * disconnect and {@code /stop} (which flips the same flag via
      * {@link services.ConversationQueue}) reach AgentRunner through one signal.
+     *
+     * <p>JCLAW-199: {@code @NoTransaction} opts out of Play 1.x's per-request
+     * JPA transaction wrapper. Without this, the framework's TransactionalFilter
+     * holds a HikariCP connection for the entire SSE duration (typically 2–30 s
+     * for a real LLM), capping concurrent chats at the pool size (38% errors at
+     * c=50 against the default 30-connection pool, profiled 2026-05-03). Every
+     * DB touch on the chat path already goes through {@link services.Tx#run},
+     * which opens its own short transaction when none is in scope, so the outer
+     * Play tx was pure overhead. {@link AuthCheck} reads {@link services.ConfigService},
+     * which also wraps its DB hit in {@code Tx.run}, so the auth interceptor
+     * still works without an outer tx.
      */
+    @NoTransaction
     public static void streamChat() {
         // Grab the Netty-set queue-accept stamp on the invocation thread so we can
         // forward it across the virtual-thread hop inside AgentRunner. The trace
@@ -397,10 +414,14 @@ public class ApiChatController extends Controller {
             if (slashCmd.get() == slash.Commands.Command.NEW) {
                 slashConv = null;
             } else if (conversationId != null) {
-                slashConv = ConversationService.findById(conversationId);
+                // JCLAW-199: streamChat is @NoTransaction; explicit Tx.run for
+                // the lookup since ConversationService.findById assumes its
+                // caller owns the tx.
+                final Long capturedConvId = conversationId;
+                slashConv = services.Tx.run(() -> ConversationService.findById(capturedConvId));
                 if (slashConv == null) notFound();
             } else {
-                slashConv = ConversationService.findOrCreate(agent, "web", username);
+                slashConv = services.Tx.run(() -> ConversationService.findOrCreate(agent, "web", username));
             }
             // JCLAW-111: args-aware execute so /model status etc. work via SSE.
             var slashResult = slash.Commands.execute(
