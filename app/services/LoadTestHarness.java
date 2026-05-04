@@ -71,7 +71,16 @@ public final class LoadTestHarness {
     private static int bindAndStart(int requestedPort) throws IOException {
         var s = HttpServer.create(new InetSocketAddress("127.0.0.1", requestedPort), 0);
         s.createContext("/v1/chat/completions", LoadTestHarness::handle);
-        s.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
+        // JCLAW-201 follow-up: use a platform-thread cached pool, NOT the VT
+        // executor. JDK-8373224 (still open in JDK 25) causes Thread.sleep on
+        // many concurrent virtual threads to suffer work-queue starvation —
+        // tail sleeps stretch to ~5 s when the FJP work-queue count exceeds
+        // 2× parallelism. Every concurrent SSE handler in this mock loops on
+        // Thread.sleep(6.67 ms), which is exactly the trigger pattern. Platform
+        // threads sidestep the VT/FJP scheduler entirely, so Thread.sleep
+        // becomes a plain kernel timer wait. ~50 concurrent platform threads
+        // is well within OS limits for a loadtest harness.
+        s.setExecutor(Executors.newCachedThreadPool());
         s.start();
         server = s;
         port = s.getAddress().getPort();
