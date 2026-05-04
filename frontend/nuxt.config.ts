@@ -42,19 +42,17 @@ export default defineNuxtConfig({
     '/api/**': { proxy: `${backendUrl}/api/**` },
   },
 
-  // Silence "Payload extraction is recommended for full-static output". The
-  // SPA build (ssr: false) produces a full-static bundle, and Nuxt 4 wants
-  // an explicit choice for how it delivers payload data on client-side
-  // navigation. 'client' is the modern recommended setting (and the default
-  // when compatibilityVersion: 5 lands): payload is inlined into the HTML
-  // for the initial render (no extra round-trip on first paint) and
-  // extracted to _payload.json files for subsequent client-side
-  // navigations. For our pure-SPA setup the initial-render half is moot
-  // (no SSR data to inline) but the client-nav extraction is pure upside
-  // when we add useAsyncData/useFetch consumers.
-  experimental: {
-    payloadExtraction: 'client',
-  },
+  // NOTE: do NOT add `experimental.payloadExtraction: 'client'` here even
+  // though `nuxi generate` keeps emitting "Payload extraction is recommended
+  // for full-static output" on every prod start. The warning is unfixable
+  // from user config in Nuxt 4.4.2 SPA mode: @nuxt/schema's resolver
+  // (see node_modules/.pnpm/@nuxt+schema@4.4.2/.../dist/index.mjs,
+  // `payloadExtraction.$resolve`) hardcodes `return false` whenever
+  // `ssr === false`, overwriting any user value before nitro-server's
+  // warning check runs. Setting it to 'client' or true compiles into
+  // nuxt.config but the schema strips it, the warning fires regardless,
+  // and the dev server / build behavior is identical either way. Cosmetic
+  // noise only — leave alone until upstream resolves the contradiction.
 
   compatibilityDate: '2026-04-16',
 
