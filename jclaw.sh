@@ -1626,6 +1626,21 @@ do_deploy() {
         exit 1
     fi
 
+    # Append build artifacts that play dist's git-based inventory drops.
+    # play1's dist command shells out to `git ls-files --cached --others
+    # --exclude-standard` to enumerate files (see /opt/play1/framework/pym/
+    # play/commands/dist.py:_zip_with_git), which honours .gitignore — and
+    # both precompiled/ and public/spa/ are gitignored as build artifacts
+    # that change every run. Without this append the zip ships without
+    # them and do_start_prod refuses to start ("dist install is missing
+    # precompiled/java"). cd to the SCRIPT_DIR parent so zip's relative
+    # arcnames land at the same `jclaw/...` prefix play dist used.
+    echo "==> Appending build artifacts (precompiled/, public/spa/) to dist zip..."
+    local app_name parent
+    app_name=$(basename "$SCRIPT_DIR")
+    parent=$(dirname "$SCRIPT_DIR")
+    ( cd "$parent" && zip -qr "$zip_file" "$app_name/precompiled" "$app_name/public/spa" )
+
     echo "==> Deploying to $DEPLOY_DIR..."
     mkdir -p "$DEPLOY_DIR"
 
