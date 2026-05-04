@@ -27,6 +27,15 @@ import llm.LlmTypes.*;
  */
 public final class TogetherAiProvider extends LlmProvider {
 
+    // JSON usage-object field names for reasoning-token extraction. Constants
+    // rather than inline string literals (Sonar S1192) so the wire-format
+    // contract has a single source of truth — a future provider rename or
+    // deserializer change updates one definition rather than 6+ scattered
+    // literals. Names mirror the OpenAI / OpenRouter shape; if Together ever
+    // diverges, override only the constant that drifted.
+    private static final String FIELD_REASONING_TOKENS = "reasoning_tokens";
+    private static final String FIELD_COMPLETION_TOKENS_DETAILS = "completion_tokens_details";
+
     public TogetherAiProvider(ProviderConfig config) {
         super(config);
     }
@@ -59,14 +68,14 @@ public final class TogetherAiProvider extends LlmProvider {
         // object, matching OpenRouter's shape. Fall back to OpenAI's
         // nested completion_tokens_details path defensively in case
         // Together begins proxying OpenAI-style usage for some models.
-        if (usageObj.has("reasoning_tokens") && !usageObj.get("reasoning_tokens").isJsonNull()) {
-            return usageObj.get("reasoning_tokens").getAsInt();
+        if (usageObj.has(FIELD_REASONING_TOKENS) && !usageObj.get(FIELD_REASONING_TOKENS).isJsonNull()) {
+            return usageObj.get(FIELD_REASONING_TOKENS).getAsInt();
         }
-        if (usageObj.has("completion_tokens_details")
-                && !usageObj.get("completion_tokens_details").isJsonNull()) {
-            var details = usageObj.getAsJsonObject("completion_tokens_details");
-            if (details.has("reasoning_tokens") && !details.get("reasoning_tokens").isJsonNull()) {
-                return details.get("reasoning_tokens").getAsInt();
+        if (usageObj.has(FIELD_COMPLETION_TOKENS_DETAILS)
+                && !usageObj.get(FIELD_COMPLETION_TOKENS_DETAILS).isJsonNull()) {
+            var details = usageObj.getAsJsonObject(FIELD_COMPLETION_TOKENS_DETAILS);
+            if (details.has(FIELD_REASONING_TOKENS) && !details.get(FIELD_REASONING_TOKENS).isJsonNull()) {
+                return details.get(FIELD_REASONING_TOKENS).getAsInt();
             }
         }
         return 0;

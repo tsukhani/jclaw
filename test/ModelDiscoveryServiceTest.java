@@ -345,6 +345,13 @@ public class ModelDiscoveryServiceTest extends UnitTest {
         assertTrue(models.isEmpty());
     }
 
+    // Suppressed S125 (commented-out code) — the doc comment below is real
+    // documentation, but Sonar's heuristic misreads it as code because the
+    // prose contains method-call syntax (.getAsJsonObject()) and type names
+    // (JsonElement). Reword and you lose the explanation; suppress and keep
+    // the explanation. Localized to this method so other commented-out
+    // code in this file would still get flagged.
+    @SuppressWarnings("java:S125")
     @Test
     public void parseModelsHandlesBareJsonArray() {
         // Together AI returns /v1/models as a bare array (no {data: ...}
