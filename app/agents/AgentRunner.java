@@ -496,7 +496,11 @@ public class AgentRunner {
                     if (firstTokenSeen.compareAndSet(false, true)) {
                         trace.mark(LatencyTrace.FIRST_TOKEN);
                     }
-                    cb.onToken().accept(token);
+                    // JCLAW-201 follow-up: bookend the downstream emit so the
+                    // trace can split stream_body into emit vs upstream/lambda.
+                    long t0 = System.nanoTime();
+                    try { cb.onToken().accept(token); }
+                    finally { trace.addStreamEmit(System.nanoTime() - t0); }
                 },
                 cb.onReasoning(),
                 cb.onStatus(),
@@ -655,6 +659,14 @@ public class AgentRunner {
                 effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode);
 
         if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return;
+        // JCLAW-201 follow-up: forward the in-lambda time accumulated inside
+        // chatStreamAccumulate's chunk callback to the latency trace, so
+        // /api/metrics/latency exposes stream_lambda alongside stream_body
+        // and we can bisect upstream-read vs in-lambda processing.
+        trace.setStreamLambdaNs(accumulator.streamLambdaNs.get());
+        trace.setStreamMaxGapNs(accumulator.streamMaxGapNs.get());
+        trace.setStreamMinGapNs(accumulator.streamMinGapNs.get());
+        trace.setStreamBigGaps(accumulator.streamBigGaps.get());
 
         // Retry once on transient 5xx errors
         if (accumulator.error != null && accumulator.error.getMessage() != null

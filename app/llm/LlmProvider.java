@@ -272,6 +272,16 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
         chatStream(model, messages, tools,
                 chunk -> {
+                    long t0 = System.nanoTime();
+                    long prev = accumulator.streamLastChunkNs;
+                    if (prev != 0L) {
+                        long gap = t0 - prev;
+                        accumulator.streamMaxGapNs.accumulateAndGet(gap, Math::max);
+                        accumulator.streamMinGapNs.accumulateAndGet(gap, Math::min);
+                        if (gap > 100_000_000L) accumulator.streamBigGaps.incrementAndGet();
+                    }
+                    accumulator.streamLastChunkNs = t0;
+                    try {
                     if (chunk.usage() != null) {
                         accumulator.usage = chunk.usage();
                         if (chunk.usage().reasoningTokens() > 0) {
@@ -315,6 +325,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                             accumulator.finishReason = choice.finishReason();
                         }
                     }
+                    } finally { accumulator.streamLambdaNs.addAndGet(System.nanoTime() - t0); }
                 },
                 () -> {
                     accumulator.content = contentBuilder.toString();
@@ -627,6 +638,23 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         private final java.util.concurrent.locks.ReentrantLock reasoningLock =
                 new java.util.concurrent.locks.ReentrantLock();
         public volatile Usage usage;
+        // JCLAW-201 follow-up: total wall-clock ns spent inside the inner
+        // chunk-processing lambda (per-chunk delta dispatch + property
+        // accessor + onToken). Compared against stream_body to bisect
+        // upstream-read wait vs in-lambda processing.
+        public final java.util.concurrent.atomic.AtomicLong streamLambdaNs =
+                new java.util.concurrent.atomic.AtomicLong();
+        // JCLAW-201 follow-up: max wall-clock ns between consecutive chunk
+        // arrivals at the inner lambda. If chunks arrive evenly at the mock
+        // cadence, this is near 6.67ms × delay. If OkHttp stalls, this jumps.
+        public final java.util.concurrent.atomic.AtomicLong streamMaxGapNs =
+                new java.util.concurrent.atomic.AtomicLong();
+        public final java.util.concurrent.atomic.AtomicLong streamMinGapNs =
+                new java.util.concurrent.atomic.AtomicLong(Long.MAX_VALUE);
+        // Count gaps over 100ms — distinguishes "one outlier" from "everything is slow".
+        public final java.util.concurrent.atomic.AtomicInteger streamBigGaps =
+                new java.util.concurrent.atomic.AtomicInteger();
+        public volatile long streamLastChunkNs = 0L;
         // Wall-clock nanoTime at first and latest reasoning chunk. Both remain 0
         // when the model emitted no reasoning. reasoningEndNanos is updated on
         // every append so it naturally captures "end of reasoning phase" — the

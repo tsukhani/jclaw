@@ -97,6 +97,10 @@ public final class HttpFactories {
         LLM_DISPATCHER = new Dispatcher(LLM_VT_EXEC);
         LLM_DISPATCHER.setMaxRequests(128);
         LLM_DISPATCHER.setMaxRequestsPerHost(64);
+        // JCLAW-201 follow-up: log runtime dispatcher state so we can
+        // confirm overrides took effect (no static-init order surprises).
+        play.Logger.info("HttpFactories LLM_DISPATCHER: maxRequests=%d maxRequestsPerHost=%d",
+                LLM_DISPATCHER.getMaxRequests(), LLM_DISPATCHER.getMaxRequestsPerHost());
     }
 
     private static final Dispatcher GEN_DISPATCHER;

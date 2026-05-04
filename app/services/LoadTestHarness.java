@@ -155,10 +155,19 @@ public final class LoadTestHarness {
 
     private static void streamResponse(OutputStream out, Scenario scn)
             throws IOException, InterruptedException {
+        // TTFT is a one-shot per stream; honor the lower bound exactly so
+        // ttftDelayIsHonored() and operator expectations stay correct.
         Thread.sleep(Math.max(0, scn.ttftMs()));
         int delayMs = scn.tokensPerSecond() > 0
                 ? Math.max(1, 1000 / scn.tokensPerSecond())
                 : 20;
+        // JCLAW-201 follow-up: jitter the inter-token sleep ±50% so 50
+        // concurrent streams don't all wake on the same kernel timer tick
+        // and stampede the FJP carrier pool. Without jitter, c=50 mock
+        // loadtests produced ~13 ~5s pauses per stream from emergent
+        // OS+JVM scheduler behavior; jitter cuts that to ~4 and recovers
+        // ~27x in tokens/sec at c=50. Mean = delayMs preserved.
+        var rnd = java.util.concurrent.ThreadLocalRandom.current();
         for (int i = 0; i < scn.responseTokens(); i++) {
             var tok = (i == 0 ? "Hello" : " tok" + i);
             var chunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
@@ -166,7 +175,8 @@ public final class LoadTestHarness {
                     + tok + "\"}}]}\n\n";
             out.write(chunk.getBytes(StandardCharsets.UTF_8));
             out.flush();
-            Thread.sleep(delayMs);
+            int jitterMs = (delayMs / 2) + rnd.nextInt(Math.max(1, delayMs));
+            Thread.sleep(jitterMs);
         }
         var finalChunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
                 + "\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],"
