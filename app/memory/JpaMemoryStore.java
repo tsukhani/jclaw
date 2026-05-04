@@ -2,9 +2,12 @@ package memory;
 
 import models.Memory;
 import play.Play;
+import play.cache.CacheConfig;
+import play.cache.Caches;
 import play.db.jpa.JPA;
 import services.EventLogger;
 
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -179,15 +182,41 @@ public class JpaMemoryStore implements MemoryStore {
         }
     }
 
+    /**
+     * Cache for {@link #generateEmbedding} results (JCLAW-206). Embeddings are
+     * deterministic — the same {@code (model, text)} input always produces the
+     * same {@code float[]} output — so the cache is safe with no TTL needed for
+     * correctness. The 24-hour {@code expireAfterWrite} is purely defensive: if
+     * a provider silently version-bumps a model behind the same name, bounding
+     * cache age caps the staleness window. {@code maximumSize=10_000} bounds
+     * heap (around 60 MB worst case for 1536-dim float vectors).
+     */
+    private static final play.cache.Cache<EmbeddingKey, float[]> embeddingCache = Caches.named(
+            "llm-embeddings",
+            CacheConfig.newBuilder()
+                    .expireAfterWrite(Duration.ofHours(24))
+                    .maximumSize(10_000)
+                    .recordStats(true)
+                    .build());
+
+    /**
+     * Cache key for {@link #embeddingCache}. The {@code (model, text)} tuple
+     * prevents cross-model collision — switching the configured model
+     * implicitly invalidates because keys no longer match.
+     */
+    private record EmbeddingKey(String model, String text) {}
+
     private float[] generateEmbedding(String text) {
-        try {
-            var provider = llm.ProviderRegistry.getPrimary();
-            if (provider == null) return null;
-            return provider.embeddings(vectorModel, text);
-        } catch (Exception e) {
-            EventLogger.warn("memory", "Embedding generation failed: %s".formatted(e.getMessage()));
-            return null;
-        }
+        return embeddingCache.get(new EmbeddingKey(vectorModel, text), k -> {
+            try {
+                var provider = llm.ProviderRegistry.getPrimary();
+                if (provider == null) return null;
+                return provider.embeddings(k.model(), k.text());
+            } catch (Exception e) {
+                EventLogger.warn("memory", "Embedding generation failed: %s".formatted(e.getMessage()));
+                return null;
+            }
+        });
     }
 
     private String toVectorLiteral(float[] embedding) {
