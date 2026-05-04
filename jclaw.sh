@@ -1104,6 +1104,32 @@ ensure_env_for_start() {
     fi
 }
 
+# Auto-generate the TLS PEM cert+key if missing on a fresh install. Mirrors
+# the docker-entrypoint.sh behavior so bare-metal and Docker installs share
+# one rule: missing security material → auto-generate, log a notice, keep
+# starting. application.conf ships with https.port=9443 + paths pointing
+# at certs/host.cert and certs/host.key, so a missing cert hard-fails Play
+# boot — much worse failure mode than a self-signed cert + browser warning.
+# Idempotent: no-op when both files already exist; only fires on first
+# start (or after a deliberate `rm certs/host.*` for rotation).
+#
+# Public CA certs (Let's Encrypt etc.) require a publicly-resolvable domain
+# the ACME server can reach to verify ownership — they can't issue for
+# localhost or raw IP addresses. The auto-gen here is for local-trust use
+# (mkcert when available, openssl self-signed otherwise); operators
+# deploying behind a real domain replace certs/host.* with a real cert as
+# a separate runbook step (see deployment.textile § HTTPS configuration).
+ensure_certs_for_start() {
+    local certs_dir="$SCRIPT_DIR/certs"
+    local cert_file="$certs_dir/host.cert"
+    local key_file="$certs_dir/host.key"
+    if [[ ! -f "$cert_file" || ! -f "$key_file" ]]; then
+        echo "==> First run detected — no TLS PEM cert at certs/host.cert + host.key."
+        do_cert
+        echo "    (For production behind a real domain, replace certs/host.* with a CA-issued cert; Let's Encrypt won't sign for localhost.)"
+    fi
+}
+
 # Hard-fail if the conf-named secret variable ends up unset by the time
 # we're about to launch the JVM. application.conf has no dev fallback
 # (intentional — the previous in-repo secret was an admin-session-forgery
@@ -1859,6 +1885,7 @@ do_start_prod() {
     # only `setup` command don't get blocked. Then source certs/.env into
     # the JVM env and validate.
     ensure_env_for_start
+    ensure_certs_for_start
     load_env_file
     require_application_secret
 
@@ -2129,6 +2156,7 @@ do_start_dev() {
     # overrides) into the JVM environment. See the prod-mode counterpart
     # for the rationale.
     ensure_env_for_start
+    ensure_certs_for_start
     load_env_file
     require_application_secret
 
