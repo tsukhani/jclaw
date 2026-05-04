@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import {
-  ArrowPathIcon,
   Bars3Icon,
   PresentationChartLineIcon,
   TrashIcon,
@@ -110,40 +109,13 @@ async function resetLatency() {
   await refreshLatency()
 }
 
-// --- Recent Activity (manual refresh) ---
-// Auto-refresh is intentionally off here: event rows reorder on every new
-// entry, and an agent turn can emit 5-10 events in a couple of seconds —
-// the jitter makes the list hard to read. The Logs page is the live-stream
-// view; this widget is a snapshot with an explicit refresh action.
-const logsLastUpdated = ref<Date | null>(null)
-const now = ref(new Date())
-
-function formatAge(then: Date | null, nowRef: Date): string {
-  if (!then) return ''
-  const s = Math.max(0, Math.floor((nowRef.getTime() - then.getTime()) / 1000))
-  if (s < 5) return 'just now'
-  if (s < 60) return `${s}s ago`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ago`
-  return `${Math.floor(m / 60)}h ago`
-}
-
-const logsAgeLabel = computed(() => formatAge(logsLastUpdated.value, now.value))
-
-async function refreshRecentActivity() {
-  await refreshLogs()
-  logsLastUpdated.value = new Date()
-}
-
-// Latency panel continues to poll (numbers don't visually shift rows).
-// The same tick updates `now` so the "X ago" caption on Recent Activity
-// stays current without a second interval.
+// Both panels poll on the same 5s tick — Recent Activity refreshes silently
+// alongside the latency histograms, no age caption or manual refresh button.
 let pollTimer: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
-  logsLastUpdated.value = new Date()
   pollTimer = setInterval(() => {
     refreshLatency()
-    now.value = new Date()
+    refreshLogs()
   }, 5000)
 })
 onBeforeUnmount(() => {
@@ -401,27 +373,10 @@ onBeforeUnmount(() => {
 
     <!-- Recent Events -->
     <div class="bg-surface-elevated border border-border">
-      <div class="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
+      <div class="px-4 py-3 border-b border-border">
         <h2 class="text-sm font-medium text-fg-primary">
           Recent Activity
         </h2>
-        <div class="flex items-center gap-3 text-xs shrink-0">
-          <span
-            v-if="logsAgeLabel"
-            class="text-fg-muted"
-          >{{ logsAgeLabel }}</span>
-          <button
-            type="button"
-            class="text-fg-muted hover:text-fg-strong transition-colors p-1"
-            title="Refresh"
-            @click="refreshRecentActivity"
-          >
-            <ArrowPathIcon
-              class="w-3.5 h-3.5"
-              aria-hidden="true"
-            />
-          </button>
-        </div>
       </div>
       <div
         v-if="logs?.events?.length"
