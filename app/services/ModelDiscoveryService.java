@@ -96,6 +96,8 @@ public class ModelDiscoveryService {
             }
 
             if (statusCode != 200) {
+                play.Logger.warn("[discover/%s] upstream returned HTTP %d: %s",
+                        providerName, statusCode, Strings.truncate(responseBody, 500));
                 return new DiscoveryResult.Error(502, "Provider returned HTTP %d: %s".formatted(
                         statusCode, Strings.truncate(responseBody, 200)));
             }
@@ -132,8 +134,10 @@ public class ModelDiscoveryService {
             return new DiscoveryResult.Ok(models);
 
         } catch (JsonSyntaxException e) {
+            play.Logger.warn("[discover/%s] invalid JSON: %s", providerName, e.getMessage());
             return new DiscoveryResult.Error(502, "Invalid JSON response from provider");
         } catch (Exception e) {
+            play.Logger.warn("[discover/%s] connect/parse failed: %s", providerName, e.getMessage());
             return new DiscoveryResult.Error(502, "Failed to connect to provider: %s".formatted(e.getMessage()));
         }
     }
