@@ -9,8 +9,8 @@
     "context": ".."
   },
 
-  "//postCreateCommand": "Runs the same setup script a human would invoke after a fresh clone, AFTER the image build finishes and the workspace is bind-mounted. Wires git hooks, runs corepack install + pnpm install, validates prereqs (which all pass thanks to the Dockerfile), and adds the github remote. Setup is idempotent, so re-running on container rebuild is harmless.",
-  "postCreateCommand": "./jclaw.sh setup",
+  "//postCreateCommand": "Runs the same setup script a human would invoke after a fresh clone, AFTER the image build finishes and the workspace is bind-mounted. Wires git hooks, runs corepack install + pnpm install, validates prereqs (which all pass thanks to the Dockerfile), and adds the github remote. Setup is idempotent, so re-running on container rebuild is harmless. The trailing `play deps --sync` + Playwright chromium install populate the JVM-side artifacts the Dockerfile couldn't pre-fetch (lib/ depends on conf/dependencies.yml which isn't in the image, and the Playwright JARs need to land before chromium can be installed). One-time cost on first container open; subsequent reopens find lib/ + ~/.cache/ms-playwright/ already populated and skip both steps fast (play deps --sync no-ops on a clean tree; playwright CLI no-ops when chromium is already at the expected version).",
+  "postCreateCommand": "./jclaw.sh setup && play deps --sync && java -cp \"$(echo lib/playwright-*.jar lib/driver-*.jar | tr ' ' ':')\" com.microsoft.playwright.CLI install chromium",
 
   "//forwardPorts": "Backend on 9000, Nuxt dev server on 3000 — match the defaults in jclaw.sh's BACKEND_PORT / FRONTEND_PORT.",
   "forwardPorts": [9000, 3000],

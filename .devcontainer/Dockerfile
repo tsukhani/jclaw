@@ -15,6 +15,17 @@ ENV DEBIAN_FRONTEND=noninteractive
 # default to skip that failure mode entirely. tesseract-ocr backs
 # DocumentsTool's OCR path; language packs install separately
 # (tesseract-ocr-fra, tesseract-ocr-jpn, etc.).
+#
+# openssl is invoked by ./jclaw.sh start's first-run cert auto-gen path
+# (ensure_certs_for_start → do_cert) when no PEM exists at certs/host.cert
+# and mkcert isn't installed.
+#
+# The lib*-dev packages are Playwright/Chromium runtime shared libs —
+# parity with the production Dockerfile so dev `play autotest` runs
+# (PlaywrightToolTest, WebFetchToolTest) and `./jclaw.sh --dev start`
+# can drive a real browser when the WebFetchTool fires. The t64 suffix
+# is load-bearing: Ubuntu 24.04+ ran the time_t 64-bit ABI transition
+# and the un-suffixed jammy-era names no longer resolve.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         git \
@@ -26,7 +37,13 @@ RUN apt-get update && \
         build-essential \
         python3 \
         python3-pip \
+        openssl \
         tesseract-ocr \
+        libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 \
+        libcairo2 libcups2t64 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0t64 \
+        libnspr4 libnss3 libpango-1.0-0 libwayland-client0 libx11-6 \
+        libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
+        libxkbcommon0 libxrandr2 \
     && rm -rf /var/lib/apt/lists/*
 
 # JDK 25 via Azul's apt repo. Ubuntu's defaults lag behind JDK releases and
