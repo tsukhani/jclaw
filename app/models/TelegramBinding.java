@@ -2,6 +2,8 @@ package models;
 
 import channels.ChannelTransport;
 import jakarta.persistence.*;
+import org.hibernate.annotations.Cache;
+import org.hibernate.annotations.CacheConcurrencyStrategy;
 import play.db.jpa.Model;
 
 import java.time.Instant;
@@ -23,6 +25,13 @@ import java.util.List;
 @Table(name = "telegram_binding", indexes = {
         @Index(name = "idx_telegram_binding_user", columnList = "telegram_user_id")
 })
+// JCLAW-204: Hibernate L2 cache via Caffeine. The polling-runner hot path
+// calls findById per inbound message; annotating here gives the same
+// transparent caching that Agent enjoys (JCLAW-205). findByBotToken is
+// admin-only (uniqueness check on create/edit) so it does NOT warrant a
+// secondary-key Caches.named layer — re-scoped per the JCLAW-204 comment
+// thread, the only meaningful win is L2 here.
+@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 public class TelegramBinding extends Model {
 
     /**
