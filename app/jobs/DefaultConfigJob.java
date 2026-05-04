@@ -141,6 +141,19 @@ public class DefaultConfigJob extends Job<Void> {
         // UI's discovery flow against /v1/models populates the catalog.
         seedIfAbsent("provider.openai.baseUrl", "https://api.openai.com/v1");
         seedIfAbsent("provider.openai.apiKey", "");
+
+        // Together AI: OpenAI-shape /v1/chat/completions plus Together's
+        // own {reasoning: {enabled: bool}} thinking knob. Routes through
+        // TogetherAiProvider via the "together" substring match in
+        // LlmProvider.forConfig. apiKey blank → row stays inactive until
+        // an operator pastes a key in Settings. No leaderboard URL
+        // (Together has no public ranking endpoint); empty model list
+        // so operators populate via the Settings UI's /v1/models
+        // discovery flow against their own enabled models.
+        seedIfAbsent("provider.together.baseUrl", "https://api.together.xyz/v1");
+        seedIfAbsent("provider.together.apiKey", "");
+        seedIfAbsent("provider.together.leaderboardUrl", "");
+        seedIfAbsent("provider.together.models", "[]");
     }
 
     private void seedToolConfig() {

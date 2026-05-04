@@ -24,7 +24,7 @@ import java.util.function.Function;
  * across 7 cloud runs, 0.85x local with NUM_PARALLEL=8). Validation for
  * the streaming SSE path lives in {@code test/ChatStreamSseTest}.
  */
-public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider, OpenRouterProvider {
+public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider, OpenRouterProvider, TogetherAiProvider {
 
     protected static final Gson gson = new GsonBuilder()
             .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
@@ -51,6 +51,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         static final Map<String, Function<ProviderConfig, LlmProvider>> MAP = Map.of(
                 "openrouter", OpenRouterProvider::new,
                 "ollama", OllamaProvider::new,
+                "together", TogetherAiProvider::new,
                 "openai", OpenAiProvider::new
         );
 
