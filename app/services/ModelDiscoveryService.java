@@ -100,7 +100,10 @@ public class ModelDiscoveryService {
                         statusCode, Strings.truncate(responseBody, 200)));
             }
 
-            var body = JsonParser.parseString(responseBody).getAsJsonObject();
+            // Together returns a bare JSON array `[{id, ...}, ...]` here,
+            // not OpenAI's wrapped `{data: [...]}` shape; parseModels
+            // accepts either via JsonElement detection.
+            var body = JsonParser.parseString(responseBody);
             var models = parseModels(body);
 
             // JCLAW-183 Tier 3: drop entries whose id matches a non-chat
@@ -137,14 +140,26 @@ public class ModelDiscoveryService {
 
     // --- Model parsing ---
 
-    public static List<Map<String, Object>> parseModels(JsonObject body) {
+    public static List<Map<String, Object>> parseModels(com.google.gson.JsonElement body) {
         var result = new ArrayList<Map<String, Object>>();
         JsonArray dataArray = null;
 
-        if (body.has("data") && body.get("data").isJsonArray()) {
-            dataArray = body.getAsJsonArray("data");
-        } else if (body.has("models") && body.get("models").isJsonArray()) {
-            dataArray = body.getAsJsonArray("models");
+        // Three response shapes seen in the wild:
+        //   1. Bare array `[{id, ...}, ...]` — Together AI
+        //   2. {data: [...]}                — OpenAI, OpenRouter, most OpenAI-compats
+        //   3. {models: [...]}              — Ollama-shaped responses
+        // Anything else returns an empty list (graceful degradation: caller
+        // sees "0 models" rather than a 502).
+        if (body == null || body.isJsonNull()) return result;
+        if (body.isJsonArray()) {
+            dataArray = body.getAsJsonArray();
+        } else if (body.isJsonObject()) {
+            var obj = body.getAsJsonObject();
+            if (obj.has("data") && obj.get("data").isJsonArray()) {
+                dataArray = obj.getAsJsonArray("data");
+            } else if (obj.has("models") && obj.get("models").isJsonArray()) {
+                dataArray = obj.getAsJsonArray("models");
+            }
         }
 
         if (dataArray == null) return result;

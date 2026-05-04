@@ -346,6 +346,33 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
+    public void parseModelsHandlesBareJsonArray() {
+        // Together AI returns /v1/models as a bare array (no {data: ...}
+        // wrapper). The OpenAI-compat discovery path used to throw
+        // IllegalStateException on .getAsJsonObject() and surface as a
+        // 502; parseModels now accepts JsonElement and routes both shapes.
+        var json = JsonParser.parseString("""
+                [
+                    {"id": "moonshotai/Kimi-K2.5", "context_length": 262144},
+                    {"id": "meta-llama/Llama-3.3-70B-Instruct-Turbo", "context_length": 131072}
+                ]
+                """);
+        var models = ModelDiscoveryService.parseModels(json);
+        assertEquals(2, models.size());
+        assertEquals("moonshotai/Kimi-K2.5", models.get(0).get("id"));
+        assertEquals(262144, models.get(0).get("contextWindow"));
+        assertEquals("meta-llama/Llama-3.3-70B-Instruct-Turbo", models.get(1).get("id"));
+    }
+
+    @Test
+    public void parseModelsHandlesNullInput() {
+        // Defensive: parseModels never throws on null/JsonNull, just returns
+        // empty so callers see "0 models" rather than crashing through a NPE.
+        assertTrue(ModelDiscoveryService.parseModels(null).isEmpty());
+        assertTrue(ModelDiscoveryService.parseModels(com.google.gson.JsonNull.INSTANCE).isEmpty());
+    }
+
+    @Test
     public void parseModelsHandlesMissingDataAndModels() {
         var json = JsonParser.parseString("""
                 {"status": "ok"}
