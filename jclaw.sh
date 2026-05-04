@@ -72,8 +72,17 @@ Environment:
                           Example: JCLAW_JVM_OPTS='-XX:MaxDirectMemorySize=512m'
 
 Load-test options (only used with the 'loadtest' command):
-  --concurrency <n>       Parallel workers (default: 10)
-  --iterations <n>        Requests per worker (default: 5)
+  --concurrency <n>       Parallel workers (default: 10). Each worker drives
+                          a single conversation across <turns> sequential
+                          chat requests, so total requests = concurrency * turns.
+  --turns <n>             Sequential chat requests per worker, all within the
+                          same conversation (default: 5). Turn 1 starts a
+                          fresh conversation; turns 2..N reuse the
+                          conversationId, so growing-history behavior
+                          (system-prompt assembly cost, provider prompt-cache
+                          hits, model recall) gets exercised under load. To
+                          simulate N independent fresh-conversation starts
+                          instead, set --turns 1 and crank --concurrency.
   --ttft-ms <n>           Simulated time-to-first-token in ms (default: 100)
   --tokens-per-second <n> Simulated token throughput (default: 50)
   --response-tokens <n>   Tokens per simulated response (default: 40)
@@ -91,9 +100,13 @@ Load-test options (only used with the 'loadtest' command):
                           The provider must already be configured (apiKey/baseUrl set).
   --model <name>          Model to drive when --real is set (default: gemma4:latest).
                           Must be pullable/serveable by the chosen provider.
-  --message <text>        User message every iteration sends. Defaults to a
+  --message <text>        User message every turn sends. Defaults to a
                           length-constrained factual prompt so cross-model
-                          tokens/sec comparisons are apples-to-apples.
+                          tokens/sec comparisons are apples-to-apples. The
+                          same message is replayed every turn within a
+                          conversation, exercising the model's in-context
+                          recall behavior (does it parrot, get terse, or
+                          reference earlier turns?).
 
 Examples:
   ./jclaw.sh setup                                    # One-time setup after fresh clone
@@ -105,8 +118,9 @@ Examples:
   ./jclaw.sh --dev stop                               # Stop dev mode services
   ./jclaw.sh --deploy /tmp stop                       # Stop services in /tmp/jclaw
   ./jclaw.sh stop                                     # Stop production in current directory
-  ./jclaw.sh loadtest                                 # Drive default 10×5 load test against :9000
-  ./jclaw.sh --concurrency 50 --iterations 20 loadtest
+  ./jclaw.sh loadtest                                 # Drive default 10 workers x 5-turn conversations against :9000
+  ./jclaw.sh --concurrency 50 --turns 1 loadtest      # 50 fresh single-turn conversations (cold-start at scale)
+  ./jclaw.sh --concurrency 5 --turns 50 loadtest      # 5 deep conversations of 50 turns each (history growth)
 EOF
     else
         # User-facing reference: trimmed to the runtime commands and
@@ -483,8 +497,13 @@ so you can measure serving overhead, queueing, and latency percentiles
 without spinning up a real upstream.
 
 Options:
-  --concurrency <n>       Parallel workers (default: 10)
-  --iterations <n>        Requests per worker (default: 5)
+  --concurrency <n>       Parallel workers (default: 10). Each worker drives
+                          one conversation across <turns> sequential requests.
+  --turns <n>             Sequential chat requests per worker, all within the
+                          same conversation (default: 5). Turn 1 starts a
+                          fresh conversation; turns 2..N reuse the assigned
+                          conversationId. Use --turns 1 with high --concurrency
+                          to simulate cold-start at scale.
   --ttft-ms <n>           Simulated time-to-first-token in ms (default: 100)
   --tokens-per-second <n> Simulated token throughput (default: 50)
   --response-tokens <n>   Tokens per simulated response (default: 40)
@@ -507,17 +526,20 @@ Options:
                           configured (apiKey/baseUrl set in Settings).
   --model <name>          Model when --real is set (default: gemma4:latest).
                           Must be pullable/serveable by the chosen provider.
-  --message <text>        User message sent on every iteration. Default is a
+  --message <text>        User message sent on every turn. Default is a
                           length-constrained factual prompt
                           ("Why is the sky blue? Answer in exactly 50 words.")
                           so cross-model tokens/sec comparisons measure speed
                           rather than how verbose each model chose to be.
-                          Override when you want to A/B a different prompt
-                          shape (e.g. tool-using requests, very long output).
+                          The same message is replayed each turn within a
+                          conversation, which surfaces in-context recall
+                          behavior (parroting, terseness, "as I mentioned
+                          above") and provider prompt-cache hits.
 
 Examples:
-  ./jclaw.sh loadtest                                                              # mock harness
-  ./jclaw.sh --concurrency 50 --iterations 20 loadtest                             # heavier mock run
+  ./jclaw.sh loadtest                                                              # 10 workers x 5-turn conversations, mock
+  ./jclaw.sh --concurrency 50 --turns 1 loadtest                                   # 50 cold starts in parallel
+  ./jclaw.sh --concurrency 5 --turns 50 loadtest                                   # 5 deep conversations
   ./jclaw.sh --real loadtest                                                       # ollama-local
   ./jclaw.sh --real --provider ollama-cloud --model kimi-k2.5 loadtest             # cloud
   ./jclaw.sh --real --provider openrouter --model google/gemini-3-flash-preview loadtest  # alt cloud
@@ -651,7 +673,7 @@ BACKEND_PORT="9000"
 FRONTEND_PORT="3000"
 COMMAND=""
 LT_CONCURRENCY="10"
-LT_ITERATIONS="5"
+LT_TURNS="5"
 LT_TTFT_MS="100"
 LT_TOKENS_PER_SECOND="50"
 LT_RESPONSE_TOKENS="40"
@@ -690,8 +712,8 @@ while [[ $# -gt 0 ]]; do
             LT_CONCURRENCY="$2"
             shift 2
             ;;
-        --iterations)
-            LT_ITERATIONS="$2"
+        --turns)
+            LT_TURNS="$2"
             shift 2
             ;;
         --ttft-ms)
@@ -2142,7 +2164,7 @@ do_loadtest() {
                  "(only the in-process mock harness reads them)."
         fi
     fi
-    echo "==> Running load test: concurrency=$LT_CONCURRENCY iterations=$LT_ITERATIONS$lt_extra"
+    echo "==> Running load test: concurrency=$LT_CONCURRENCY turns=$LT_TURNS$lt_extra"
     # Mock-only knobs: ttft / tokens-per-second / response-tokens drive the
     # in-process LoadTestHarness scenario and have no effect when --real
     # routes through an external provider. Hide them in --real mode so the
@@ -2154,7 +2176,7 @@ do_loadtest() {
     fi
     # Show whichever message will actually be sent. Empty LT_MESSAGE means the
     # backend will fill in LoadTestRunner.DEFAULT_USER_MESSAGE — surface that
-    # default explicitly so operators can see what every iteration ships with.
+    # default explicitly so operators can see what every turn ships with.
     local lt_msg_display="${LT_MESSAGE:-Why is the sky blue? Answer in exactly 50 words.}"
     if [[ ${#lt_msg_display} -gt 100 ]]; then
         lt_msg_display="${lt_msg_display:0:97}..."
@@ -2167,8 +2189,8 @@ do_loadtest() {
     # wire format. JSON-quote $LT_MODEL because Ollama tags carry a colon
     # (`gemma4:latest`) which would otherwise look like a JSON struct.
     local body
-    body=$(printf '{"concurrency":%s,"iterations":%s,"ttftMs":%s,"tokensPerSecond":%s,"responseTokens":%s,"compress":%s' \
-        "$LT_CONCURRENCY" "$LT_ITERATIONS" "$LT_TTFT_MS" "$LT_TOKENS_PER_SECOND" "$LT_RESPONSE_TOKENS" "$LT_COMPRESS")
+    body=$(printf '{"concurrency":%s,"turns":%s,"ttftMs":%s,"tokensPerSecond":%s,"responseTokens":%s,"compress":%s' \
+        "$LT_CONCURRENCY" "$LT_TURNS" "$LT_TTFT_MS" "$LT_TOKENS_PER_SECOND" "$LT_RESPONSE_TOKENS" "$LT_COMPRESS")
     if [[ "$LT_REAL" == true ]]; then
         body="$body,\"real\":true,\"model\":\"$LT_MODEL\""
         if [[ -n "$LT_PROVIDER" ]]; then
@@ -2208,9 +2230,32 @@ do_loadtest() {
         exit 1
     fi
 
-    # Pretty-print with python if available, otherwise raw JSON
+    # Pretty-print with python if available, otherwise raw JSON. When the
+    # response carries a turnBuckets array (turns > 1), render an additional
+    # tabular per-turn breakdown below the JSON — TTFT and duration mean/p50/
+    # p95 per turn position. Reveals provider prompt-cache cliffs (turn 1 ttft
+    # dropping sharply at turn 2) and growing-history TTFT creep that flat
+    # aggregates hide.
     if command -v python3 >/dev/null 2>&1; then
-        echo "$json" | python3 -m json.tool
+        echo "$json" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)
+print(json.dumps(data, indent=2))
+buckets = data.get("turnBuckets") or []
+if buckets:
+    print()
+    print("Per-turn breakdown (TTFT and duration are client-measured, ms):")
+    headers = ("Turn", "N", "TTFT mean", "TTFT p50", "TTFT p95",
+               "Dur mean", "Dur p50", "Dur p95")
+    fmt = "  {:>4}  {:>3}  {:>9}  {:>8}  {:>8}  {:>8}  {:>7}  {:>7}"
+    print(fmt.format(*headers))
+    print(fmt.format(*("-" * len(h) for h in headers)))
+    for b in buckets:
+        print(fmt.format(
+            b["turn"], b["count"],
+            b["ttftMeanMs"], b["ttftP50Ms"], b["ttftP95Ms"],
+            b["durationMeanMs"], b["durationP50Ms"], b["durationP95Ms"]))
+'
     else
         echo "$json"
     fi

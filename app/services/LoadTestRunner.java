@@ -66,17 +66,17 @@ public final class LoadTestRunner {
     public static final String DEFAULT_USER_MESSAGE =
             "Why is the sky blue? Answer in exactly 50 words.";
 
-    public record Request(int concurrency, int iterations, boolean compress,
+    public record Request(int concurrency, int turns, boolean compress,
                           LoadTestHarness.Scenario scenario,
                           boolean realProvider,
                           String provider, String model,
                           String userMessage) {
 
         /** Backwards-compat constructor — defaults userMessage to {@link #DEFAULT_USER_MESSAGE}. */
-        public Request(int concurrency, int iterations, boolean compress,
+        public Request(int concurrency, int turns, boolean compress,
                        LoadTestHarness.Scenario scenario,
                        boolean realProvider, String provider, String model) {
-            this(concurrency, iterations, compress, scenario, realProvider, provider, model, null);
+            this(concurrency, turns, compress, scenario, realProvider, provider, model, null);
         }
     }
 
@@ -98,6 +98,12 @@ public final class LoadTestRunner {
      *                           {@code visibleTokens / streamBodyMs * 1000} —
      *                           visible-content emission rate while streaming.
      *                           0 when stream timing data is unavailable.
+     * @param turnBuckets        Per-turn-position breakdown of TTFT and
+     *                           duration distributions. {@code null} when
+     *                           {@code turns == 1} (nothing to distribute).
+     *                           Reveals provider prompt-cache cliffs, growing-
+     *                           history TTFT creep, and per-turn variance that
+     *                           a flat aggregate hides.
      */
     public record Result(
             int totalRequests,
@@ -110,13 +116,25 @@ public final class LoadTestRunner {
             long avgTtftMs,
             long avgResponseTokens,
             long avgReasoningTokens,
-            double avgTokensPerSec) {}
+            double avgTokensPerSec,
+            java.util.List<TurnBucket> turnBuckets) {}
+
+    /**
+     * Per-turn-position aggregate across all workers in a run. TTFT is
+     * client-measured (request-send → first {@code type:"token"} SSE frame),
+     * so it includes loopback round-trip — close to but not identical to the
+     * server-side {@code web/ttft} histogram. {@code count} is the number of
+     * successful turns at this position (excludes errors / timeouts).
+     */
+    public record TurnBucket(int turn, int count,
+                             long ttftMeanMs, long ttftP50Ms, long ttftP95Ms,
+                             long durationMeanMs, long durationP50Ms, long durationP95Ms) {}
 
     private LoadTestRunner() {}
 
     public static Result run(Request req) throws Exception {
-        if (req.concurrency() < 1 || req.iterations() < 1) {
-            throw new IllegalArgumentException("concurrency and iterations must be ≥ 1");
+        if (req.concurrency() < 1 || req.turns() < 1) {
+            throw new IllegalArgumentException("concurrency and turns must be ≥ 1");
         }
 
         var mockPort = req.realProvider() ? -1 : ensureHarnessStarted();
@@ -144,10 +162,13 @@ public final class LoadTestRunner {
         // through the new --message override without breaking the wire format.
         var userMessage = (req.userMessage() == null || req.userMessage().isBlank())
                 ? DEFAULT_USER_MESSAGE : req.userMessage();
-        var bodyObj = new com.google.gson.JsonObject();
-        bodyObj.addProperty("agentId", agentId);
-        bodyObj.addProperty("message", userMessage);
-        var body = bodyObj.toString();
+        // First-turn body: no conversationId, server creates a fresh one
+        // and returns its id in the SSE init event. Subsequent turns build
+        // their own body inline with conversationId set.
+        var firstTurnBodyObj = new com.google.gson.JsonObject();
+        firstTurnBodyObj.addProperty("agentId", agentId);
+        firstTurnBodyObj.addProperty("message", userMessage);
+        var firstTurnBody = firstTurnBodyObj.toString();
         // Drive the loadtest through the same OkHttp client tuning that the
         // production LLM stack uses — virtual-thread dispatcher, 64-slot
         // ConnectionPool — so concurrent loadtest workers exercise the
@@ -158,14 +179,14 @@ public final class LoadTestRunner {
 
         // Warmup: a single sequential request ensures agent lookup, provider
         // cache, session affinity, and JIT are stable before concurrent workers
-        // start. Without this, the first few requests of a cold run can error
+        // start. Without this, the first few turns of a cold run can error
         // in a pattern that's indistinguishable from a real performance problem.
         //
         // Snapshot before warmup and restore after, so we drop only the warmup
         // sample without losing data accumulated by prior runs (or by real
         // chat traffic the operator cares about).
         var resetPoint = utils.LatencyStats.captureResetPoint();
-        warmupRequest(client, baseUrl, sessionCookie, body, req.compress());
+        warmupRequest(client, baseUrl, sessionCookie, firstTurnBody, req.compress());
         resetPoint.run();
 
         var success = new AtomicInteger();
@@ -173,6 +194,17 @@ public final class LoadTestRunner {
         var totalDuration = new AtomicLong();
         var minDur = new AtomicLong(Long.MAX_VALUE);
         var maxDur = new AtomicLong(Long.MIN_VALUE);
+
+        // Per-worker, per-turn metric arrays. Heap is trivial: at the
+        // configured ceiling (c=100, t=50) this is 100*50*8*2 = 80 KB.
+        // Pre-fill with -1 so error/timeout slots are distinguishable from
+        // real 0-ms readings during aggregation.
+        long[][] turnTtftMs = new long[req.concurrency()][req.turns()];
+        long[][] turnDurationMs = new long[req.concurrency()][req.turns()];
+        for (int w = 0; w < req.concurrency(); w++) {
+            java.util.Arrays.fill(turnTtftMs[w], -1L);
+            java.util.Arrays.fill(turnDurationMs[w], -1L);
+        }
 
         // Snapshot ttft counter BEFORE the workers fire so we can subtract
         // at the end and get this-run-only mean. The reset point above only
@@ -185,26 +217,52 @@ public final class LoadTestRunner {
         long startNs = System.nanoTime();
         try (ExecutorService exec = Executors.newVirtualThreadPerTaskExecutor()) {
             for (int w = 0; w < req.concurrency(); w++) {
+                final int workerIdx = w;
                 exec.submit(() -> {
+                    // Captured from turn 1's SSE init event; subsequent turns
+                    // POST it back so the server resumes the same conversation
+                    // (loading prior messages, growing the assembled prompt,
+                    // hitting any provider-side prompt cache).
+                    Long conversationId = null;
                     try {
-                        for (int i = 0; i < req.iterations(); i++) {
+                        for (int t = 0; t < req.turns(); t++) {
+                            String turnBody;
+                            if (conversationId == null) {
+                                turnBody = firstTurnBody;
+                            } else {
+                                var turnBodyObj = new com.google.gson.JsonObject();
+                                turnBodyObj.addProperty("agentId", agentId);
+                                turnBodyObj.addProperty("message", userMessage);
+                                turnBodyObj.addProperty("conversationId", conversationId);
+                                turnBody = turnBodyObj.toString();
+                            }
                             long t0 = System.nanoTime();
                             try {
                                 var builder = new okhttp3.Request.Builder()
                                         .url(baseUrl + "/api/chat/stream")
                                         .header("Cookie", sessionCookie)
-                                        .post(okhttp3.RequestBody.create(body, JSON_MEDIA_TYPE));
+                                        .post(okhttp3.RequestBody.create(turnBody, JSON_MEDIA_TYPE));
                                 if (req.compress()) builder.header("Accept-Encoding", "br, gzip");
                                 var call = client.newCall(builder.build());
                                 call.timeout().timeout(120, java.util.concurrent.TimeUnit.SECONDS);
                                 try (var resp = call.execute()) {
-                                    // Drain the SSE body so the timing covers the full
-                                    // round-trip — matches the JDK
-                                    // BodyHandlers.discarding() semantics where bytes
-                                    // are consumed-and-discarded as they arrive.
-                                    if (resp.body() != null) resp.body().bytes();
-                                    if (resp.code() == 200) success.incrementAndGet();
-                                    else error.incrementAndGet();
+                                    if (resp.code() == 200 && resp.body() != null) {
+                                        // Stream-parse the SSE body to capture the
+                                        // server-assigned conversationId (init event)
+                                        // and client-side TTFT (first token frame).
+                                        // Drain to end so timing covers full round-trip.
+                                        var sse = consumeSseStream(resp.body(), t0);
+                                        if (conversationId == null && sse.conversationId() != null) {
+                                            conversationId = sse.conversationId();
+                                        }
+                                        if (sse.ttftMs() >= 0) {
+                                            turnTtftMs[workerIdx][t] = sse.ttftMs();
+                                        }
+                                        success.incrementAndGet();
+                                    } else {
+                                        if (resp.body() != null) resp.body().bytes();
+                                        error.incrementAndGet();
+                                    }
                                 }
                             } catch (Exception _) {
                                 error.incrementAndGet();
@@ -212,6 +270,7 @@ public final class LoadTestRunner {
                                 long d = (System.nanoTime() - t0) / 1_000_000L;
                                 totalDuration.addAndGet(d);
                                 updateMinMax(minDur, maxDur, d);
+                                turnDurationMs[workerIdx][t] = d;
                             }
                         }
                     } finally {
@@ -222,7 +281,7 @@ public final class LoadTestRunner {
             latch.await();
         }
         long wall = (System.nanoTime() - startNs) / 1_000_000L;
-        int total = req.concurrency() * req.iterations();
+        int total = req.concurrency() * req.turns();
 
         // Compute this-run mean TTFT from the post-run ttft histogram minus
         // the pre-run snapshot. The histogram already aggregates per-request
@@ -244,6 +303,12 @@ public final class LoadTestRunner {
         long avgReasoningTokens = tokenStats.avgReasoningTokens();
         double avgTokensPerSec = tokenStats.avgRate();
 
+        // Per-turn breakdown only when there's something to distribute over.
+        // Single-turn runs collapse to a 1-row table that adds noise, not signal.
+        var turnBuckets = req.turns() > 1
+                ? buildTurnBuckets(turnTtftMs, turnDurationMs)
+                : null;
+
         return new Result(
                 total,
                 success.get(),
@@ -255,7 +320,104 @@ public final class LoadTestRunner {
                 avgTtftMs,
                 avgResponseTokens,
                 avgReasoningTokens,
-                avgTokensPerSec);
+                avgTokensPerSec,
+                turnBuckets);
+    }
+
+    /**
+     * Result of streaming-parsing one SSE response body.
+     *
+     * <p>{@code conversationId} is captured from the {@code type:"init"} frame
+     * the server emits at the start of every chat-stream response (see
+     * {@code ApiChatController.streamChat}); {@code null} means the frame was
+     * absent or malformed (server error / non-streaming response).
+     *
+     * <p>{@code ttftMs} is the client-side wall-clock from request-send to the
+     * first {@code type:"token"} frame. {@code -1} means no token frame was
+     * observed (the stream ended without any visible content — e.g. an
+     * error response, or an empty completion). Distinct from the server-side
+     * {@code web/ttft} histogram, which excludes the network round-trip.
+     */
+    private record SseConsumeResult(Long conversationId, long ttftMs) {}
+
+    /**
+     * Read the SSE response body line-by-line, capturing the conversationId
+     * from the init frame and timestamping the first token frame for TTFT.
+     * Drains to EOF so the request timing covers the full round-trip.
+     *
+     * <p>Uses substring matching on the raw {@code data:} line as a cheap
+     * pre-filter before parsing JSON — token frames fire 50-200/sec per
+     * stream and parsing every one with Gson is wasted work when we only
+     * need the first one.
+     */
+    private static SseConsumeResult consumeSseStream(okhttp3.ResponseBody body, long t0Nanos)
+            throws java.io.IOException {
+        Long conversationId = null;
+        long ttftMs = -1L;
+        try (var source = body.source()) {
+            String line;
+            while ((line = source.readUtf8Line()) != null) {
+                if (line.length() < 7 || !line.startsWith("data: ")) continue;
+                var jsonStr = line.substring(6);
+                if (ttftMs < 0 && jsonStr.contains("\"type\":\"token\"")) {
+                    ttftMs = (System.nanoTime() - t0Nanos) / 1_000_000L;
+                }
+                if (conversationId == null && jsonStr.contains("\"type\":\"init\"")) {
+                    try {
+                        var json = com.google.gson.JsonParser.parseString(jsonStr).getAsJsonObject();
+                        if (json.has("conversationId")) {
+                            conversationId = json.get("conversationId").getAsLong();
+                        }
+                    } catch (Exception _) { /* malformed init — skip, keep draining */ }
+                }
+            }
+        }
+        return new SseConsumeResult(conversationId, ttftMs);
+    }
+
+    /**
+     * Aggregate per-turn metrics across all workers into one
+     * {@link TurnBucket} per turn position. {@code count} reflects only the
+     * turns that succeeded at this position — error/timeout slots (recorded as
+     * {@code -1} in the input arrays) are excluded so percentiles aren't
+     * polluted by sentinel values.
+     */
+    private static java.util.List<TurnBucket> buildTurnBuckets(
+            long[][] turnTtftMs, long[][] turnDurationMs) {
+        int turns = turnDurationMs[0].length;
+        int workers = turnDurationMs.length;
+        var buckets = new java.util.ArrayList<TurnBucket>(turns);
+        for (int t = 0; t < turns; t++) {
+            var ttfts = new java.util.ArrayList<Long>(workers);
+            var durations = new java.util.ArrayList<Long>(workers);
+            for (int w = 0; w < workers; w++) {
+                if (turnDurationMs[w][t] >= 0) durations.add(turnDurationMs[w][t]);
+                if (turnTtftMs[w][t] >= 0) ttfts.add(turnTtftMs[w][t]);
+            }
+            var ttftStats = computeStats(ttfts);
+            var durStats = computeStats(durations);
+            buckets.add(new TurnBucket(
+                    t + 1, durations.size(),
+                    ttftStats[0], ttftStats[1], ttftStats[2],
+                    durStats[0], durStats[1], durStats[2]));
+        }
+        return buckets;
+    }
+
+    /**
+     * Compute {@code [mean, p50, p95]} for a list of millisecond values.
+     * Returns zeros for an empty input. Percentile uses nearest-rank with a
+     * clamped index, so c=5 workers correctly maps p95 to the worst sample
+     * (rank 5 → index 4) without an out-of-bounds for small samples.
+     */
+    private static long[] computeStats(java.util.List<Long> values) {
+        if (values.isEmpty()) return new long[]{0L, 0L, 0L};
+        var sorted = values.stream().sorted().toList();
+        long mean = (long) sorted.stream().mapToLong(Long::longValue).average().orElse(0);
+        long p50 = sorted.get(Math.min(sorted.size() - 1, sorted.size() / 2));
+        int p95Idx = Math.min(sorted.size() - 1, (int) Math.ceil(sorted.size() * 0.95) - 1);
+        long p95 = sorted.get(Math.max(0, p95Idx));
+        return new long[]{mean, p50, p95};
     }
 
     /**

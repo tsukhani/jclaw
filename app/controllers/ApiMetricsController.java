@@ -63,12 +63,20 @@ public class ApiMetricsController extends Controller {
      * <p>Request body (all fields optional, shown with defaults):
      * <pre>{
      *   "concurrency": 10,
-     *   "iterations": 5,
+     *   "turns": 5,
      *   "ttftMs": 100,
      *   "tokensPerSecond": 50,
      *   "responseTokens": 40,
      *   "compress": false
      * }</pre>
+     *
+     * <p>{@code turns} is the number of sequential chat requests each worker
+     * sends *within the same conversation* — turn 1 starts a fresh conversation,
+     * turn 2..N reuse the {@code conversationId} the server returned for turn
+     * 1. This shape exercises growing-history behavior (system-prompt
+     * assembly cost, provider prompt-cache hits, model recall on repeated
+     * questions) under load. To simulate N independent fresh-conversation
+     * starts instead, set {@code turns=1} and crank {@code concurrency}.
      *
      * <p>{@code compress=true} adds {@code Accept-Encoding: br, gzip} to each
      * harness request so the pipeline's {@link io.netty.handler.codec.http.HttpContentCompressor}
@@ -83,7 +91,7 @@ public class ApiMetricsController extends Controller {
     public static void loadtest() {
         var body = JsonBodyReader.readJsonBody();
         int concurrency = readInt(body, "concurrency", 10);
-        int iterations = readInt(body, "iterations", 5);
+        int turns = readInt(body, "turns", 5);
         int ttftMs = readInt(body, "ttftMs", 100);
         int tokensPerSecond = readInt(body, "tokensPerSecond", 50);
         int responseTokens = readInt(body, "responseTokens", 40);
@@ -104,12 +112,12 @@ public class ApiMetricsController extends Controller {
         String userMessage = readString(body, "userMessage", null);
 
         int maxConcurrency = ConfigService.getInt("provider.loadtest-mock.maxConcurrency", 100);
-        int maxIterations = ConfigService.getInt("provider.loadtest-mock.maxIterations", 50);
+        int maxTurns = ConfigService.getInt("provider.loadtest-mock.maxTurns", 50);
         if (concurrency < 1 || concurrency > maxConcurrency) {
             error(400, "concurrency must be between 1 and " + maxConcurrency);
         }
-        if (iterations < 1 || iterations > maxIterations) {
-            error(400, "iterations must be between 1 and " + maxIterations);
+        if (turns < 1 || turns > maxTurns) {
+            error(400, "turns must be between 1 and " + maxTurns);
         }
         if (real && (model == null || model.isBlank())) {
             error(400, "model is required when real=true");
@@ -133,7 +141,7 @@ public class ApiMetricsController extends Controller {
 
         try {
             var result = LoadTestRunner.run(new LoadTestRunner.Request(
-                    concurrency, iterations, compress,
+                    concurrency, turns, compress,
                     new LoadTestHarness.Scenario(ttftMs, tokensPerSecond, responseTokens,
                             simulatedToolCalls, toolSleepMs),
                     real, provider, model, userMessage));
@@ -171,6 +179,12 @@ public class ApiMetricsController extends Controller {
                                 ? LoadTestRunner.DEFAULT_REAL_PROVIDER
                                 : provider);
                 out.addProperty("model", model);
+            }
+            // Per-turn breakdown only when turns > 1 (LoadTestRunner returns
+            // null otherwise). Renders as an array of {turn, count, ttftMeanMs,
+            // ttftP50Ms, ...} objects, ordered by turn position.
+            if (result.turnBuckets() != null) {
+                out.add("turnBuckets", INSTANCE.toJsonTree(result.turnBuckets()));
             }
             renderJSON(INSTANCE.toJson(out));
         } catch (play.mvc.results.Result r) {

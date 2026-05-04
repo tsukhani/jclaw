@@ -320,15 +320,15 @@ public class ApiMetricsControllerTest extends FunctionalTest {
         // guard wrongly rejected, we'd see 403 not 400.
         var response = POST(authedLoadtestRequest(),
                 "/api/metrics/loadtest", "application/json",
-                "{\"concurrency\":0,\"iterations\":1}");
+                "{\"concurrency\":0,\"turns\":1}");
         assertEquals(400, response.status.intValue());
     }
 
     @Test
-    public void loadtestRejectsInvalidIterations() {
+    public void loadtestRejectsInvalidTurns() {
         var response = POST(authedLoadtestRequest(),
                 "/api/metrics/loadtest", "application/json",
-                "{\"concurrency\":1,\"iterations\":9999}");
+                "{\"concurrency\":1,\"turns\":9999}");
         assertEquals(400, response.status.intValue());
     }
 
