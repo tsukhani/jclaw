@@ -18,7 +18,7 @@ is_developer_clone() {
 usage() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh [options] <cert|secret|setup|reset|start|stop|restart|status|logs|loadtest|test|help>
+Usage: jclaw.sh [options] <cert|secret|setup|reset|start|stop|restart|status|logs|loadtest|test|dist|help>
 
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
@@ -49,14 +49,13 @@ Commands:
   loadtest  Drive the in-process load-test harness against /api/chat/stream
   test      Run backend (play auto-test) + frontend (pnpm test) and report a
             consolidated pass/fail summary. Exits non-zero on any failure.
-  dist      Build a self-contained dist artifact at dist/jclaw.zip without
-            deploying it. Runs the same precompile + frontend build + zip
-            pipeline as --deploy, then exits.
+  dist      Build a self-contained dist artifact at dist/jclaw.zip and
+            exit. Runs precompile + frontend build + zip; operators
+            unzip the result wherever they want to install it.
   help      Print this usage reference and exit. Equivalent to --help / -h.
 
 Options:
   --dev                   Run in development mode (play run + pnpm dev)
-  --deploy <dir>          Package with play dist, copy to <dir>, and run in production
   --backend-port <port>   Play backend port (default: 9000)
   --frontend-port <port>  Nuxt dev server port, dev mode only (default: 3000)
 
@@ -123,10 +122,8 @@ Examples:
   ./jclaw.sh --dev start                              # Start in dev mode
   ./jclaw.sh --dev --backend-port 8080 start          # Dev mode with custom backend port
   ./jclaw.sh start                                    # Start production in current directory
-  ./jclaw.sh --deploy /tmp start                      # Build, deploy to /tmp/jclaw, and start
-  ./jclaw.sh --deploy /tmp --backend-port 8080 start  # Deploy with custom port
+  ./jclaw.sh dist                                     # Build dist/jclaw.zip (then unzip wherever)
   ./jclaw.sh --dev stop                               # Stop dev mode services
-  ./jclaw.sh --deploy /tmp stop                       # Stop services in /tmp/jclaw
   ./jclaw.sh stop                                     # Stop production in current directory
   ./jclaw.sh loadtest                                 # Drive default 10 workers x 5-turn conversations against :9000
   ./jclaw.sh --concurrency 50 --turns 1 loadtest      # 50 fresh single-turn conversations (cold-start at scale)
@@ -137,7 +134,7 @@ EOF
     else
         # User-facing reference: trimmed to the runtime commands and
         # operator knobs that actually apply to a dist install. Setup,
-        # test, --dev, --deploy, --frontend-port, and the loadtest
+        # test, --dev, --frontend-port, and the loadtest
         # options are all developer-only and would either fail or
         # silently no-op against an unzipped distribution, so they're
         # omitted entirely. loadtest itself technically works against a
@@ -332,7 +329,6 @@ with a random application secret if one isn't already present.
 
 Options:
   --dev                   Run in development mode (play run + pnpm dev)
-  --deploy <dir>          Package with play dist, copy to <dir>, and run prod from there
   --backend-port <port>   Play backend port (default: 9000)
   --frontend-port <port>  Nuxt dev server port, dev mode only (default: 3000)
 
@@ -348,7 +344,6 @@ Examples:
   ./jclaw.sh start                              # Production in current directory
   ./jclaw.sh --dev start                        # Dev mode
   ./jclaw.sh --dev --backend-port 8080 start    # Dev with custom backend port
-  ./jclaw.sh --deploy /tmp start                # Build, copy to /tmp/jclaw, run
   JCLAW_JVM_HEAP=4g ./jclaw.sh start            # 4 GB heap
 EOF
     else
@@ -387,12 +382,10 @@ start path wrote; in --dev mode also stops the Nuxt frontend.
 
 Options:
   --dev                   Stop dev-mode services
-  --deploy <dir>          Stop services running from <dir>
 
 Examples:
   ./jclaw.sh stop                # Stop production in current directory
   ./jclaw.sh --dev stop          # Stop dev mode
-  ./jclaw.sh --deploy /tmp stop  # Stop services in /tmp/jclaw
 EOF
     else
         cat <<EOF
@@ -416,7 +409,6 @@ Stop and start as one operation. Accepts the same flags as 'start'.
 
 Options:
   --dev                   Restart in dev mode
-  --deploy <dir>          Re-deploy from <dir> and restart
   --backend-port <port>   Play backend port (default: 9000)
   --frontend-port <port>  Nuxt dev server port, dev mode only (default: 3000)
 
@@ -611,20 +603,22 @@ usage_dist() {
         cat <<EOF
 Usage: jclaw.sh dist
 
-Build a self-contained dist artifact at dist/jclaw.zip without
-deploying it. Runs the same precompile + frontend build + zip pipeline
-that --deploy would, then exits — leaving the zip ready to copy
-anywhere (a release upload, a Docker COPY context, an scp target).
+Build a self-contained dist artifact at dist/jclaw.zip and exit.
+Runs precompile + frontend build + zip; the resulting zip is ready
+to copy anywhere (a release upload, a Docker COPY context, an scp
+target). Operators unzip it wherever they want to install JClaw, then
+run ./jclaw.sh start inside the unzipped tree.
 
 The resulting tarball is JDK-only: no javac, no Node/pnpm, no source
 trees on the install host. Per Play 1.x's deployment.textile, the
 runtime expects precompiled/, conf/, lib/, public/ and starts via
-\`play start -Dprecompiled=true\` — all wired into the unzipped
+\`play run --%prod -Dprecompiled=true\` — all wired into the unzipped
 \`./jclaw.sh start\` automatically.
 
 Example:
   ./jclaw.sh dist
-  cp dist/jclaw.zip /path/to/release/area/
+  unzip -o dist/jclaw.zip -d /opt
+  cd /opt/jclaw && ./jclaw.sh start
 EOF
     else
         cat <<EOF
@@ -721,7 +715,6 @@ EOF
 }
 
 # Parse arguments
-DEPLOY_DIR=""
 DEV_MODE=false
 BACKEND_PORT="9000"
 FRONTEND_PORT="3000"
@@ -760,10 +753,6 @@ while [[ $# -gt 0 ]]; do
         --dev)
             DEV_MODE=true
             shift
-            ;;
-        --deploy)
-            DEPLOY_DIR="$2"
-            shift 2
             ;;
         --backend-port)
             BACKEND_PORT="$2"
@@ -890,10 +879,6 @@ if [[ -z "$COMMAND" ]]; then
 fi
 
 # Validate flag combinations
-if [[ "$DEV_MODE" == true && -n "$DEPLOY_DIR" ]]; then
-    echo "Error: --dev and --deploy cannot be used together."
-    exit 1
-fi
 
 # Hard-reject --dev on dist installs. A dist tarball ships precompiled
 # bytecode + the built SPA only — no app/, no frontend/ — so the dev
@@ -974,7 +959,7 @@ pnpm() {
 # field or file is absent. Used by both the setup-time pin migration and
 # the start-time validation guard.
 read_pnpm_pin() {
-    local frontend_dir="$JCLAW_DIR/frontend"
+    local frontend_dir="$SCRIPT_DIR/frontend"
     [[ -f "$frontend_dir/package.json" ]] || return 0
     sed -n 's/.*"packageManager": *"\([^"]*\)".*/\1/p' \
         "$frontend_dir/package.json" | head -1
@@ -986,7 +971,7 @@ read_pnpm_pin() {
 # package.json mutation is scoped to an explicit "I'm setting up this
 # clone" action rather than appearing as a surprise during start.
 setup_corepack_pnpm_pin() {
-    local frontend_dir="$JCLAW_DIR/frontend"
+    local frontend_dir="$SCRIPT_DIR/frontend"
     [[ -d "$frontend_dir" && -f "$frontend_dir/package.json" ]] || return 0
 
     local current_pin
@@ -1024,7 +1009,7 @@ setup_corepack_pnpm_pin() {
 # so the security gate doesn't silently degrade to no-op when someone
 # hand-edits the pin and drops the hash.
 validate_corepack_pnpm() {
-    local frontend_dir="$JCLAW_DIR/frontend"
+    local frontend_dir="$SCRIPT_DIR/frontend"
     [[ -d "$frontend_dir" && -f "$frontend_dir/package.json" ]] || return 0
 
     local current_pin
@@ -1069,7 +1054,7 @@ validate_corepack_pnpm() {
 # DEFAULT_SECRET_VAR ("PLAY_SECRET") when conf is missing or the line
 # uses an unparseable form, matching the framework's behaviour.
 secret_var_name() {
-    local conf="$JCLAW_DIR/conf/application.conf"
+    local conf="$SCRIPT_DIR/conf/application.conf"
     if [[ ! -f "$conf" ]]; then
         echo "PLAY_SECRET"
         return
@@ -1085,12 +1070,12 @@ secret_var_name() {
     echo "${name:-PLAY_SECRET}"
 }
 
-# Source $JCLAW_DIR/certs/.env into the current shell with auto-export so
+# Source $SCRIPT_DIR/certs/.env into the current shell with auto-export so
 # the JVM started by `play` inherits the variables. Called from start
 # paths (dev + prod). Silent no-op when certs/.env is absent — that path
 # is reserved for failure handling at the validate step, not here.
 load_env_file() {
-    local env_file="$JCLAW_DIR/certs/.env"
+    local env_file="$SCRIPT_DIR/certs/.env"
     if [[ -f "$env_file" ]]; then
         set -a
         # shellcheck disable=SC1090
@@ -1107,7 +1092,7 @@ load_env_file() {
 # intent with a stored random value they didn't ask for. We DON'T
 # auto-create from setup either; setup has its own explicit gate.
 ensure_env_for_start() {
-    local env_file="$JCLAW_DIR/certs/.env"
+    local env_file="$SCRIPT_DIR/certs/.env"
     local var_name
     var_name=$(secret_var_name)
     # Bash indirect expansion: `${!var_name:-}` reads the variable whose
@@ -1141,7 +1126,7 @@ require_application_secret() {
     fi
 }
 
-# Generate or rotate the application secret in $JCLAW_DIR/certs/.env.
+# Generate or rotate the application secret in $SCRIPT_DIR/certs/.env.
 # Delegates the actual generation + write to `play secret`, which since
 # PF-71 defaults to certs/.env and auto-detects the env-var name from
 # conf/application.conf's ${VARNAME} placeholder — so renaming the
@@ -1149,12 +1134,12 @@ require_application_secret() {
 # The framework's writer preserves any other lines in the file;
 # rotation rewrites only the secret line.
 do_cert() {
-    # Writes to $JCLAW_DIR/certs/, NOT conf/. The Docker compose stack
+    # Writes to $SCRIPT_DIR/certs/, NOT conf/. The Docker compose stack
     # bind-mounts ./certs into the container; the dev-mode `play
     # enable-https` flow handles conf/host.cert separately. Two
     # destinations, two tools, no shared state — keeps the cert
     # provenance unambiguous in each context.
-    local certs_dir="$JCLAW_DIR/certs"
+    local certs_dir="$SCRIPT_DIR/certs"
     local cert_file="$certs_dir/host.cert"
     local key_file="$certs_dir/host.key"
 
@@ -1193,9 +1178,9 @@ EOF
 }
 
 do_secret() {
-    local env_file="$JCLAW_DIR/certs/.env"
+    local env_file="$SCRIPT_DIR/certs/.env"
 
-    mkdir -p "$JCLAW_DIR/certs"
+    mkdir -p "$SCRIPT_DIR/certs"
 
     # Seed a brand-new certs/.env with our self-documenting header BEFORE
     # invoking `play secret`. The framework writer preserves existing
@@ -1216,8 +1201,8 @@ do_secret() {
     # `play secret` reads ${VARNAME} from application.conf's
     # `application.secret=${VARNAME}` line, generates a fresh 64-char
     # alphanumeric value, and writes <VARNAME>=<value> to certs/.env
-    # (PF-71 default). Run from $JCLAW_DIR so it locates the right conf.
-    (cd "$JCLAW_DIR" && play secret)
+    # (PF-71 default). Run from $SCRIPT_DIR so it locates the right conf.
+    (cd "$SCRIPT_DIR" && play secret)
 
     # `play secret` doesn't tighten perms, so re-apply chmod 600 — the
     # secret is the admin-session-forgery primitive; non-owner reads
@@ -1226,13 +1211,11 @@ do_secret() {
 
     # DEV_MODE is "true"/"false" string — `${VAR:+...}` would print on
     # both because the string is always non-empty. Compare to "true"
-    # explicitly to get the intended boolean behavior. DEPLOY_DIR is
-    # empty by default so the existing `${VAR:+...}` form does the right
-    # thing for that flag.
+    # explicitly to get the intended boolean behavior.
     local dev_flag=""
     [[ "$DEV_MODE" == true ]] && dev_flag="--dev "
     echo "    Restart the app to pick up the new value:"
-    echo "      $0 ${dev_flag}${DEPLOY_DIR:+--deploy $DEPLOY_DIR }restart"
+    echo "      $0 ${dev_flag}restart"
 }
 
 # Locate the H2 jar shipped with the Play framework, falling back to a
@@ -1241,7 +1224,7 @@ do_secret() {
 locate_h2_jar() {
     local jar
     # Dist tarball layout: every dependency including h2 sits in lib/.
-    jar=$(ls "$JCLAW_DIR"/lib/h2-*.jar 2>/dev/null | head -1)
+    jar=$(ls "$SCRIPT_DIR"/lib/h2-*.jar 2>/dev/null | head -1)
     if [[ -n "$jar" ]]; then
         echo "$jar"
         return 0
@@ -1265,15 +1248,15 @@ locate_h2_jar() {
 }
 
 # Detect whether the dist's docker-compose.yml has a running `jclaw` service
-# in the current $JCLAW_DIR. Returns 0 when a running container exists, 1
+# in the current $SCRIPT_DIR. Returns 0 when a running container exists, 1
 # otherwise (no docker, no compose file, daemon down, parse error — all
 # silent). Best-effort dispatcher hint for `do_reset`, not a hard gate; the
 # caller falls through to direct-mode behavior on any failure path.
 docker_jclaw_running() {
     command -v docker >/dev/null 2>&1 || return 1
-    [[ -f "$JCLAW_DIR/docker-compose.yml" ]] || return 1
+    [[ -f "$SCRIPT_DIR/docker-compose.yml" ]] || return 1
     local services
-    services=$(cd "$JCLAW_DIR" && docker compose ps --status running --services 2>/dev/null) || return 1
+    services=$(cd "$SCRIPT_DIR" && docker compose ps --status running --services 2>/dev/null) || return 1
     grep -q '^jclaw$' <<< "$services"
 }
 
@@ -1330,11 +1313,11 @@ do_reset() {
     if docker_jclaw_running; then
         prompt_reset_confirmation "the running jclaw container's database"
         echo "==> Detected jclaw container running; running reset inside the container..."
-        cd "$JCLAW_DIR"
+        cd "$SCRIPT_DIR"
         exec docker compose exec -T -e JCLAW_RESET_YES=1 jclaw ./jclaw.sh reset
     fi
 
-    local data_file="$JCLAW_DIR/data/jclaw.mv.db"
+    local data_file="$SCRIPT_DIR/data/jclaw.mv.db"
     if [[ ! -f "$data_file" ]]; then
         echo "Error: No database found at $data_file."
         echo "       Nothing to reset — the app hasn't been started yet,"
@@ -1348,7 +1331,7 @@ do_reset() {
     local h2_jar
     h2_jar=$(locate_h2_jar) || {
         echo "Error: Could not locate H2 jar. Looked in:"
-        echo "  - $JCLAW_DIR/lib/h2-*.jar  (dist layout)"
+        echo "  - $SCRIPT_DIR/lib/h2-*.jar  (dist layout)"
         echo "  - <play-home>/framework/lib/h2-*.jar  (developer layout)"
         echo "       Without the H2 driver this script can't talk to the DB."
         exit 1
@@ -1367,7 +1350,7 @@ do_reset() {
     # null credentials. Subsequent connects MUST use the same null
     # pattern — passing -user sa -password "" lands a 28000 invalid-
     # auth error against the very database we created.
-    local jdbc_url="jdbc:h2:file:$JCLAW_DIR/data/jclaw;MODE=MYSQL;AUTO_SERVER=TRUE"
+    local jdbc_url="jdbc:h2:file:$SCRIPT_DIR/data/jclaw;MODE=MYSQL;AUTO_SERVER=TRUE"
     local sql="DELETE FROM config WHERE config_key='auth.admin.passwordHash';"
 
     echo "==> Clearing auth.admin.passwordHash..."
@@ -1526,26 +1509,20 @@ check_prereqs() {
     check_play       # Python wrapper script; check_python must pass first
 
     # Node + corepack are only needed when there's frontend source to
-    # build, which means we're in a developer clone (or --deploy from
-    # one). A dist install ships the prebuilt SPA in public/spa/ and
-    # never invokes node/pnpm at runtime — requiring them there would
-    # be a needless regression. Test on SCRIPT_DIR (not JCLAW_DIR) so
-    # --deploy from a dev clone correctly demands node even before
-    # the deploy target directory exists.
+    # build, which means we're in a developer clone. A dist install
+    # ships the prebuilt SPA in public/spa/ and never invokes
+    # node/pnpm at runtime — requiring them there would be a needless
+    # regression.
     if [[ -d "$SCRIPT_DIR/frontend" ]]; then
         check_node
         check_corepack
     fi
 }
 
-# Determine the working directory
-if [[ -n "$DEPLOY_DIR" ]]; then
-    JCLAW_DIR="$DEPLOY_DIR/jclaw"
-elif [[ "$DEV_MODE" == true ]]; then
-    JCLAW_DIR="$SCRIPT_DIR"
-else
-    JCLAW_DIR="$(pwd)"
-fi
+# SCRIPT_DIR is the canonical working directory — set at the top of the
+# script via realpath of $0, it points at wherever this jclaw.sh lives,
+# which is also where the install (or developer clone) sits. The
+# working directory is always this script's own location.
 
 # ─── First-time setup ───
 
@@ -1556,7 +1533,7 @@ fi
 # (gitignored). Running this once after a fresh clone restores the wiring
 # the rest of the workflow assumes.
 do_setup() {
-    cd "$JCLAW_DIR"
+    cd "$SCRIPT_DIR"
 
     if [[ ! -f "conf/application.conf" ]]; then
         echo "Error: Not a JClaw directory (conf/application.conf not found)"
@@ -1587,7 +1564,7 @@ do_setup() {
     echo "==> Generating certs/.env (per-clone secret store)..."
     # Skip if certs/.env already exists — the operator may have populated
     # it with prod-tuned values. Rotate explicitly via `$0 secret` instead.
-    if [[ -f "$JCLAW_DIR/certs/.env" ]]; then
+    if [[ -f "$SCRIPT_DIR/certs/.env" ]]; then
         echo "    certs/.env already exists — leaving it untouched."
         echo "    Rotate with: $0 secret"
     else
@@ -1624,7 +1601,7 @@ do_setup() {
         echo "             Then re-run: ./jclaw.sh setup"
     else
         npx bmad-method install \
-            --directory "$JCLAW_DIR" \
+            --directory "$SCRIPT_DIR" \
             --action quick-update \
             --tools claude-code \
             -y 2>&1 | tail -5
@@ -1673,8 +1650,9 @@ do_setup() {
 # prod mode and skips both compile passes (and refuses to start if
 # precompiled/ is missing).
 #
-# Pure builder: produces $SCRIPT_DIR/dist/jclaw.zip and exits. Callers
-# that need to deploy/unzip the artifact (do_deploy) chain on top.
+# Pure builder: produces $SCRIPT_DIR/dist/jclaw.zip and exits. Operators
+# unzip the resulting tarball wherever they want to install JClaw —
+# `unzip -o dist/jclaw.zip -d /opt && cd /opt/jclaw && ./jclaw.sh start`.
 do_dist() {
     cd "$SCRIPT_DIR"
 
@@ -1710,8 +1688,8 @@ do_dist() {
     # that's "jclaw.zip"; in a Jenkins workspace it might be
     # "jclaw-pipeline.zip" or whatever the job is named. Force the
     # filename to a stable jclaw.zip so downstream consumers
-    # (Dockerfile COPY, GitHub Release upload, do_deploy) don't have
-    # to know the workspace basename.
+    # (Dockerfile COPY, GitHub Release upload, operator's own scp /
+    # unzip flow) don't have to know the workspace basename.
     local app_name produced zip_file
     app_name=$(basename "$SCRIPT_DIR")
     produced="$SCRIPT_DIR/dist/${app_name}.zip"
@@ -1761,27 +1739,6 @@ do_dist() {
     echo "==> Distribution ready at $zip_file"
 }
 
-do_deploy() {
-    do_dist
-
-    local zip_file="$SCRIPT_DIR/dist/jclaw.zip"
-    echo "==> Deploying to $DEPLOY_DIR..."
-    mkdir -p "$DEPLOY_DIR"
-
-    # Clean previous deployment
-    if [[ -d "$JCLAW_DIR" ]]; then
-        echo "    Removing previous deployment at $JCLAW_DIR"
-        rm -rf "$JCLAW_DIR"
-    fi
-
-    cp "$zip_file" "$DEPLOY_DIR/"
-    cd "$DEPLOY_DIR"
-    unzip -q jclaw.zip
-    rm -f jclaw.zip
-
-    echo "==> Deployment ready at $JCLAW_DIR (precompiled, ready to run)"
-}
-
 # ─── Production start/stop ───
 
 # Probe whether host:port accepts a TCP connection within ~2s. Returns 0
@@ -1817,7 +1774,7 @@ probe_tcp_reachable() {
 #   - Server-mode, reachable       → abort: a live holder owns the DB
 #   - Server-mode, unreachable     → remove stale lock; continue starting
 check_stale_h2_lock_or_exit() {
-    local lock_file="$JCLAW_DIR/data/jclaw.lock.db"
+    local lock_file="$SCRIPT_DIR/data/jclaw.lock.db"
     [[ -f "$lock_file" ]] || return 0
 
     local method
@@ -1848,11 +1805,11 @@ check_stale_h2_lock_or_exit() {
 }
 
 do_start_prod() {
-    cd "$JCLAW_DIR"
+    cd "$SCRIPT_DIR"
 
     if [[ ! -f "conf/application.conf" ]]; then
         echo "Error: Not a JClaw directory (conf/application.conf not found)"
-        echo "       Run from the jclaw directory or use --deploy <dir>"
+        echo "       Run from the unzipped dist or developer clone root."
         exit 1
     fi
 
@@ -1864,8 +1821,8 @@ do_start_prod() {
     # cleanly and point at stop/restart, leaving the choice deliberate.
     if [[ -f "server.pid" ]] && kill -0 "$(cat server.pid)" 2>/dev/null; then
         echo "Error: JClaw is already running (pid: $(cat server.pid))."
-        echo "       Run '$0 ${DEPLOY_DIR:+--deploy $DEPLOY_DIR }stop' to stop it,"
-        echo "       or '$0 ${DEPLOY_DIR:+--deploy $DEPLOY_DIR }restart' to restart in place."
+        echo "       Run '$0 stop' to stop it,"
+        echo "       or '$0 restart' to restart in place."
         exit 1
     fi
 
@@ -1886,7 +1843,7 @@ do_start_prod() {
         local holder
         holder=$(lsof -ti :"$BACKEND_PORT" 2>/dev/null | tr '\n' ' ')
         echo "Error: Port $BACKEND_PORT is already in use (pid: ${holder% })."
-        echo "       Run '$0 ${DEPLOY_DIR:+--deploy $DEPLOY_DIR }stop' first, or kill the holder."
+        echo "       Run '$0 stop' first, or kill the holder."
         exit 1
     fi
 
@@ -1924,16 +1881,13 @@ do_start_prod() {
     # sources are unchanged.
     rm -rf tmp
 
-    # Branch on whether the runtime tree carries sources. A developer-clone
-    # start (or a `play dist` install on a developer's own machine after
-    # running the dev workflow in-place) has app/ + frontend/ and rebuilds
-    # those on every start to honour code changes. A dist install (the
-    # tarball produced by do_deploy + .distignore stripping) has neither —
-    # just precompiled/ and public/spa/ — so the rebuild steps are
-    # impossible AND unnecessary. The presence of app/ is the source-of-
-    # truth signal for which side of that fence we're on; checking it on
-    # JCLAW_DIR (not SCRIPT_DIR) handles --deploy correctly because
-    # do_deploy then runs do_start_prod against the dist install path.
+    # Branch on whether the runtime tree carries sources. A developer-
+    # clone start has app/ + frontend/ and rebuilds those on every start
+    # to honour code changes. A dist install (the unzipped tarball
+    # produced by do_dist + .distignore stripping) has neither — just
+    # precompiled/ and public/spa/ — so the rebuild steps are
+    # impossible AND unnecessary. The presence of app/ is the source-
+    # of-truth signal for which side of that fence we're on.
     if [[ -d app ]]; then
         # Auto-precompile when the existing precompiled/ classes are stale
         # or missing. Play 1.x's `play start --%prod` loads precompiled/
@@ -1948,7 +1902,7 @@ do_start_prod() {
             || [[ -n "$(find app -name '*.java' -newer precompiled/java -print -quit 2>/dev/null)" ]]; then
             echo "==> Precompiling backend (source newer than precompiled classes)..."
             play precompile
-            strip_test_bytecode_from_precompiled "$JCLAW_DIR"
+            strip_test_bytecode_from_precompiled "$SCRIPT_DIR"
         else
             echo "==> Skipping precompile (precompiled classes are up to date)"
         fi
@@ -1956,37 +1910,37 @@ do_start_prod() {
         validate_corepack_pnpm
 
         echo "==> Installing frontend dependencies..."
-        cd "$JCLAW_DIR/frontend"
+        cd "$SCRIPT_DIR/frontend"
         pnpm install --frozen-lockfile 2>/dev/null || pnpm install
 
         echo "==> Generating static SPA..."
         npx nuxi generate
 
         echo "==> Copying SPA build to public/spa/..."
-        rm -rf "$JCLAW_DIR/public/spa"
-        cp -r .output/public "$JCLAW_DIR/public/spa"
+        rm -rf "$SCRIPT_DIR/public/spa"
+        cp -r .output/public "$SCRIPT_DIR/public/spa"
 
-        cd "$JCLAW_DIR"
+        cd "$SCRIPT_DIR"
     else
         # Dist install: precompiled/ and public/spa/ are baked into the
-        # tarball by do_deploy. Refuse to start if either is missing —
-        # that means the dist was assembled wrong (or someone hand-edited
-        # it). The matching `play start -Dprecompiled=true` below would
-        # otherwise produce Play's terse "Precompiled classes are
-        # missing!!" with no hint at the operator-side cause.
+        # tarball by do_dist. Refuse to start if either is missing —
+        # that means the dist was assembled wrong (or someone hand-
+        # edited it). The matching `play run -Dprecompiled=true` below
+        # would otherwise produce Play's terse "Precompiled classes
+        # are missing!!" with no hint at the operator-side cause.
         if [[ ! -d precompiled/java ]]; then
             echo "Error: dist install is missing precompiled/java."
-            echo "       The tarball was built without a precompile pass — re-run \`./jclaw.sh --deploy <dir> start\` from a developer clone to rebuild."
+            echo "       The tarball was built without a precompile pass — re-run \`./jclaw.sh dist\` from a developer clone and re-unzip the resulting dist/jclaw.zip."
             exit 1
         fi
         if [[ ! -d public/spa ]]; then
             echo "Error: dist install is missing public/spa."
-            echo "       The tarball was built without a frontend build — re-run \`./jclaw.sh --deploy <dir> start\` from a developer clone to rebuild."
+            echo "       The tarball was built without a frontend build — re-run \`./jclaw.sh dist\` from a developer clone and re-unzip the resulting dist/jclaw.zip."
             exit 1
         fi
         echo "==> Dist install detected (no app/, no frontend/) — skipping precompile + SPA build"
     fi
-    mkdir -p "$JCLAW_DIR/logs"
+    mkdir -p "$SCRIPT_DIR/logs"
 
     # JVM tuning for production. Rationale for each flag:
     #   - ZGC: sub-millisecond pause collector. Matters because SSE streams
@@ -2031,12 +1985,12 @@ do_start_prod() {
         "-Xmx${xmx}"
         "-XX:+UseZGC"
         "-XX:+HeapDumpOnOutOfMemoryError"
-        "-XX:HeapDumpPath=$JCLAW_DIR/logs/heap-oom.hprof"
+        "-XX:HeapDumpPath=$SCRIPT_DIR/logs/heap-oom.hprof"
         "-XX:+ExitOnOutOfMemoryError"
         "-XX:MaxDirectMemorySize=256m"
         "-Dnetworkaddress.cache.ttl=30"
         "-Dnetworkaddress.cache.negative.ttl=0"
-        "-Xlog:gc*:file=$JCLAW_DIR/logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M"
+        "-Xlog:gc*:file=$SCRIPT_DIR/logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M"
     )
 
     # User-supplied extras go last so last-wins semantics let them override
@@ -2073,17 +2027,17 @@ do_start_prod() {
 
     echo ""
     echo "JClaw is running (production):"
-    echo "  App: http://localhost:$BACKEND_PORT  (pid: $(cat "$JCLAW_DIR/server.pid"))"
+    echo "  App: http://localhost:$BACKEND_PORT  (pid: $(cat "$SCRIPT_DIR/server.pid"))"
     echo ""
-    echo "Tail logs with: $0 ${DEPLOY_DIR:+--deploy $DEPLOY_DIR }logs"
-    echo "Stop with:      $0 ${DEPLOY_DIR:+--deploy $DEPLOY_DIR }stop"
+    echo "Tail logs with: $0 logs"
+    echo "Stop with:      $0 stop"
 }
 
 do_stop_prod() {
-    cd "$JCLAW_DIR"
+    cd "$SCRIPT_DIR"
 
     if [[ ! -f "server.pid" ]]; then
-        echo "Nothing to stop — JClaw does not appear to be running in $JCLAW_DIR"
+        echo "Nothing to stop — JClaw does not appear to be running in $SCRIPT_DIR"
         return
     fi
 
@@ -2137,7 +2091,7 @@ do_stop_prod() {
 # ─── Dev mode start/stop ───
 
 do_start_dev() {
-    cd "$JCLAW_DIR"
+    cd "$SCRIPT_DIR"
 
     if [[ ! -f "conf/application.conf" ]]; then
         echo "Error: Not a JClaw directory (conf/application.conf not found)"
@@ -2182,9 +2136,9 @@ do_start_dev() {
     validate_corepack_pnpm
 
     echo "==> Checking frontend dependencies..."
-    cd "$JCLAW_DIR/frontend"
+    cd "$SCRIPT_DIR/frontend"
     pnpm install --frozen-lockfile 2>/dev/null || pnpm install
-    cd "$JCLAW_DIR"
+    cd "$SCRIPT_DIR"
 
     echo "==> Resolving backend dependencies..."
     play deps --sync
@@ -2197,10 +2151,10 @@ do_start_dev() {
     rm -rf tmp
 
     echo "==> Starting Play backend on port $BACKEND_PORT (dev)..."
-    nohup play run --http.port="$BACKEND_PORT" > "$JCLAW_DIR/logs/backend-dev.out" 2>&1 &
+    nohup play run --http.port="$BACKEND_PORT" > "$SCRIPT_DIR/logs/backend-dev.out" 2>&1 &
     local play_pid=$!
     # play run doesn't create server.pid — store the wrapper pid ourselves
-    echo "$play_pid" > "$JCLAW_DIR/server.pid"
+    echo "$play_pid" > "$SCRIPT_DIR/server.pid"
 
     # Wait for backend to be ready. Three exit conditions, in priority
     # order: (1) wrapper died → fail with log tail; (2) port responds →
@@ -2213,8 +2167,8 @@ do_start_dev() {
         if ! kill -0 "$play_pid" 2>/dev/null; then
             echo "Error: Play backend exited during startup (pid $play_pid no longer alive)."
             echo "       Last lines of logs/backend-dev.out:"
-            tail -20 "$JCLAW_DIR/logs/backend-dev.out" 2>/dev/null | sed 's/^/         /'
-            rm -f "$JCLAW_DIR/server.pid"
+            tail -20 "$SCRIPT_DIR/logs/backend-dev.out" 2>/dev/null | sed 's/^/         /'
+            rm -f "$SCRIPT_DIR/server.pid"
             exit 1
         fi
         if curl -s -o /dev/null "http://localhost:$BACKEND_PORT" 2>/dev/null; then
@@ -2226,20 +2180,20 @@ do_start_dev() {
             echo "Error: Backend did not start within 60 seconds."
             echo "       Check logs/backend-dev.out for details."
             kill_tree "$play_pid"
-            rm -f "$JCLAW_DIR/server.pid"
+            rm -f "$SCRIPT_DIR/server.pid"
             exit 1
         fi
     done
 
     echo "==> Starting Nuxt dev server on port $FRONTEND_PORT..."
-    cd "$JCLAW_DIR/frontend"
-    PORT="$FRONTEND_PORT" JCLAW_BACKEND_PORT="$BACKEND_PORT" nohup pnpm dev > "$JCLAW_DIR/logs/frontend-dev.out" 2>&1 &
-    echo $! > "$JCLAW_DIR/$FRONTEND_PID_FILE"
+    cd "$SCRIPT_DIR/frontend"
+    PORT="$FRONTEND_PORT" JCLAW_BACKEND_PORT="$BACKEND_PORT" nohup pnpm dev > "$SCRIPT_DIR/logs/frontend-dev.out" 2>&1 &
+    echo $! > "$SCRIPT_DIR/$FRONTEND_PID_FILE"
 
     echo ""
     echo "JClaw is running (dev):"
     echo "  Backend:  http://localhost:$BACKEND_PORT  (pid: $play_pid)"
-    echo "  Frontend: http://localhost:$FRONTEND_PORT  (pid: $(cat "$JCLAW_DIR/$FRONTEND_PID_FILE"))"
+    echo "  Frontend: http://localhost:$FRONTEND_PORT  (pid: $(cat "$SCRIPT_DIR/$FRONTEND_PID_FILE"))"
     echo "  Logs:     logs/backend-dev.out, logs/frontend-dev.out"
     echo ""
     echo "Tail logs with: $0 --dev logs"
@@ -2274,7 +2228,7 @@ wait_for_port_free() {
 }
 
 do_stop_dev() {
-    cd "$JCLAW_DIR"
+    cd "$SCRIPT_DIR"
 
     local stopped=0
 
@@ -2340,19 +2294,19 @@ do_stop_dev() {
         echo "JClaw stopped."
     else
         echo ""
-        echo "Nothing to stop — JClaw does not appear to be running in $JCLAW_DIR"
+        echo "Nothing to stop — JClaw does not appear to be running in $SCRIPT_DIR"
     fi
 }
 
 # ─── Status ───
 
 do_status() {
-    cd "$JCLAW_DIR"
+    cd "$SCRIPT_DIR"
 
     local mode="production"
     [[ "$DEV_MODE" == true ]] && mode="dev"
 
-    echo "JClaw status ($JCLAW_DIR, $mode):"
+    echo "JClaw status ($SCRIPT_DIR, $mode):"
     echo ""
 
     # Backend
@@ -2370,10 +2324,10 @@ do_status() {
             echo "  Frontend: stopped"
         fi
     else
-        if [[ -f "$JCLAW_DIR/public/spa/index.html" ]]; then
+        if [[ -f "$SCRIPT_DIR/public/spa/index.html" ]]; then
             echo "  Frontend: built (served from public/spa/)"
         else
-            echo "  Frontend: not built (run --deploy or nuxi generate)"
+            echo "  Frontend: not built (run ./jclaw.sh dist or nuxi generate)"
         fi
     fi
 }
@@ -2381,20 +2335,20 @@ do_status() {
 # ─── Logs ───
 
 do_logs() {
-    cd "$JCLAW_DIR"
+    cd "$SCRIPT_DIR"
 
     if [[ "$DEV_MODE" == true ]]; then
         local files=()
         [[ -f "logs/backend-dev.out" ]]  && files+=("logs/backend-dev.out")
         [[ -f "logs/frontend-dev.out" ]] && files+=("logs/frontend-dev.out")
         if [[ ${#files[@]} -eq 0 ]]; then
-            echo "No dev log files found in $JCLAW_DIR/logs/"
+            echo "No dev log files found in $SCRIPT_DIR/logs/"
             exit 1
         fi
         tail -f "${files[@]}"
     else
         if [[ ! -f "logs/application.log" ]]; then
-            echo "No log file found at $JCLAW_DIR/logs/application.log"
+            echo "No log file found at $SCRIPT_DIR/logs/application.log"
             exit 1
         fi
         tail -f "logs/application.log"
@@ -2415,7 +2369,7 @@ do_logs() {
 # but commit caf9422 moved the admin password to a PBKDF2 hash in the
 # Config DB, leaving the script with no plaintext to log in with.
 do_loadtest() {
-    cd "$JCLAW_DIR"
+    cd "$SCRIPT_DIR"
 
     if [[ ! -f "conf/application.conf" ]]; then
         echo "Error: Not a JClaw directory (conf/application.conf not found)"
@@ -2434,7 +2388,7 @@ do_loadtest() {
         echo "       Loadtest auth uses $var_name (the same secret"
         echo "       Play signs session cookies with), sent in the"
         echo "       X-Loadtest-Auth header. It must be present in"
-        echo "       $JCLAW_DIR/certs/.env or exported in the parent shell."
+        echo "       $SCRIPT_DIR/certs/.env or exported in the parent shell."
         echo "       Generate or rotate via: $0 secret"
         exit 1
     fi
@@ -2442,7 +2396,7 @@ do_loadtest() {
     # Verify the backend is reachable before doing anything else
     if ! curl -s -o /dev/null -w '%{http_code}' "http://localhost:$BACKEND_PORT/" | grep -q '^[23]'; then
         echo "Error: Backend is not responding on port $BACKEND_PORT."
-        echo "       Start it first: $0 ${DEV_MODE:+--dev }${DEPLOY_DIR:+--deploy $DEPLOY_DIR }start"
+        echo "       Start it first: $0 ${DEV_MODE:+--dev }start"
         exit 1
     fi
 
@@ -2686,11 +2640,10 @@ case "$COMMAND" in
     start)
         check_prereqs
         if [[ "$DEV_MODE" == true ]]; then
-            mkdir -p "$JCLAW_DIR/logs"
+            mkdir -p "$SCRIPT_DIR/logs"
             do_start_dev
         else
-            [[ -n "$DEPLOY_DIR" ]] && do_deploy
-            mkdir -p "$JCLAW_DIR/logs"
+            mkdir -p "$SCRIPT_DIR/logs"
             do_start_prod
         fi
         ;;
@@ -2706,15 +2659,14 @@ case "$COMMAND" in
         if [[ "$DEV_MODE" == true ]]; then
             do_stop_dev
             sleep 1
-            mkdir -p "$JCLAW_DIR/logs"
+            mkdir -p "$SCRIPT_DIR/logs"
             do_start_dev
         else
             # JCLAW-190: do_stop_prod now waits for server.pid removal
             # before returning, so we don't need a separate sleep here.
             # The new JVM only boots once the old one has fully exited.
             do_stop_prod
-            [[ -n "$DEPLOY_DIR" ]] && do_deploy
-            mkdir -p "$JCLAW_DIR/logs"
+            mkdir -p "$SCRIPT_DIR/logs"
             do_start_prod
         fi
         ;;
