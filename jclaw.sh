@@ -857,6 +857,21 @@ if [[ "$DEV_MODE" == true && -n "$DEPLOY_DIR" ]]; then
     exit 1
 fi
 
+# Hard-reject --dev on dist installs. A dist tarball ships precompiled
+# bytecode + the built SPA only — no app/, no frontend/ — so the dev
+# workflow physically can't run (no Java sources to recompile on save,
+# no Nuxt source to dev-serve). Without this guard the user would hit
+# a confusing failure further down (npx nuxi dev: ENOENT on
+# frontend/package.json) rather than a clear "this command isn't
+# available in your install" message. is_developer_clone returns true
+# inside any git checkout (the source-of-truth for whether we're on a
+# developer machine with the full source tree).
+if [[ "$DEV_MODE" == true ]] && ! is_developer_clone; then
+    echo "Error: --dev is a developer-only flag, not available in this distribution."
+    echo "       This install supports the production commands: start, stop, restart, status, logs, cert, secret."
+    exit 1
+fi
+
 # Loadtest provider/model pairing: real-mode is implied by both being set.
 # Reject the half-set state up front so operators don't get a surprising
 # fall-through to mock mode (silent) or a server-side 400 (delayed).
@@ -1434,11 +1449,21 @@ check_prereqs() {
     # Foundational — no dependencies on other checks
     check_java
     check_python
-    check_node
 
-    # Derived — each depends on a foundational check above
+    # Derived — depends on the foundational checks above
     check_play       # Python wrapper script; check_python must pass first
-    check_corepack   # Ships with Node; check_node must pass first
+
+    # Node + corepack are only needed when there's frontend source to
+    # build, which means we're in a developer clone (or --deploy from
+    # one). A dist install ships the prebuilt SPA in public/spa/ and
+    # never invokes node/pnpm at runtime — requiring them there would
+    # be a needless regression. Test on SCRIPT_DIR (not JCLAW_DIR) so
+    # --deploy from a dev clone correctly demands node even before
+    # the deploy target directory exists.
+    if [[ -d "$SCRIPT_DIR/frontend" ]]; then
+        check_node
+        check_corepack
+    fi
 }
 
 # Determine the working directory
@@ -1567,8 +1592,32 @@ do_setup() {
 # ─── Production deploy ───
 
 do_deploy() {
-    echo "==> Packaging application..."
     cd "$SCRIPT_DIR"
+
+    # Build a self-contained dist artifact that runs on a JDK-only host:
+    # precompiled bytecode replaces the Java source tree, the built static
+    # SPA replaces the Nuxt source tree. Per Play 1.x's
+    # deployment.textile § "Deploying without source code", the runtime
+    # only needs precompiled/, conf/, lib/, public/ — app/ and frontend/
+    # are excluded by .distignore on this side. The matching runtime
+    # invocation in do_start_prod uses `play start -Dprecompiled=true`
+    # which forces prod mode and skips both compile passes (and refuses
+    # to start if precompiled/ is missing).
+    echo "==> Precompiling backend (play precompile)..."
+    play precompile
+
+    validate_corepack_pnpm
+    echo "==> Installing frontend dependencies..."
+    cd "$SCRIPT_DIR/frontend"
+    pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+    echo "==> Building static SPA (nuxi generate)..."
+    npx nuxi generate
+    echo "==> Copying SPA build to public/spa/..."
+    rm -rf "$SCRIPT_DIR/public/spa"
+    cp -r .output/public "$SCRIPT_DIR/public/spa"
+    cd "$SCRIPT_DIR"
+
+    echo "==> Packaging application (play dist)..."
     play dist
 
     local zip_file="$SCRIPT_DIR/dist/jclaw.zip"
@@ -1591,7 +1640,7 @@ do_deploy() {
     unzip -q jclaw.zip
     rm -f jclaw.zip
 
-    echo "==> Deployment ready at $JCLAW_DIR"
+    echo "==> Deployment ready at $JCLAW_DIR (precompiled, ready to run)"
 }
 
 # ─── Production start/stop ───
@@ -1736,36 +1785,67 @@ do_start_prod() {
     # sources are unchanged.
     rm -rf tmp
 
-    # Auto-precompile when the existing precompiled/ classes are stale or
-    # missing. Play 1.x's `play start --%prod` loads precompiled/ as-is
-    # and does NOT recompile when sources have changed — without this
-    # check, restarts silently boot the prior binary and code changes
-    # don't take effect. The -newer test uses the precompiled/java
-    # directory's mtime as the staleness threshold (Play refreshes it on
-    # each successful precompile), and -print -quit stops the walk at
-    # the first match so a clean tree costs milliseconds.
-    if [[ ! -d precompiled/java ]] \
-        || [[ -n "$(find app -name '*.java' -newer precompiled/java -print -quit 2>/dev/null)" ]]; then
-        echo "==> Precompiling backend (source newer than precompiled classes)..."
-        play precompile
+    # Branch on whether the runtime tree carries sources. A developer-clone
+    # start (or a `play dist` install on a developer's own machine after
+    # running the dev workflow in-place) has app/ + frontend/ and rebuilds
+    # those on every start to honour code changes. A dist install (the
+    # tarball produced by do_deploy + .distignore stripping) has neither —
+    # just precompiled/ and public/spa/ — so the rebuild steps are
+    # impossible AND unnecessary. The presence of app/ is the source-of-
+    # truth signal for which side of that fence we're on; checking it on
+    # JCLAW_DIR (not SCRIPT_DIR) handles --deploy correctly because
+    # do_deploy then runs do_start_prod against the dist install path.
+    if [[ -d app ]]; then
+        # Auto-precompile when the existing precompiled/ classes are stale
+        # or missing. Play 1.x's `play start --%prod` loads precompiled/
+        # as-is and does NOT recompile when sources have changed — without
+        # this check, restarts silently boot the prior binary and code
+        # changes don't take effect. The -newer test uses the
+        # precompiled/java directory's mtime as the staleness threshold
+        # (Play refreshes it on each successful precompile), and
+        # -print -quit stops the walk at the first match so a clean tree
+        # costs milliseconds.
+        if [[ ! -d precompiled/java ]] \
+            || [[ -n "$(find app -name '*.java' -newer precompiled/java -print -quit 2>/dev/null)" ]]; then
+            echo "==> Precompiling backend (source newer than precompiled classes)..."
+            play precompile
+        else
+            echo "==> Skipping precompile (precompiled classes are up to date)"
+        fi
+
+        validate_corepack_pnpm
+
+        echo "==> Installing frontend dependencies..."
+        cd "$JCLAW_DIR/frontend"
+        pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+
+        echo "==> Generating static SPA..."
+        npx nuxi generate
+
+        echo "==> Copying SPA build to public/spa/..."
+        rm -rf "$JCLAW_DIR/public/spa"
+        cp -r .output/public "$JCLAW_DIR/public/spa"
+
+        cd "$JCLAW_DIR"
     else
-        echo "==> Skipping precompile (precompiled classes are up to date)"
+        # Dist install: precompiled/ and public/spa/ are baked into the
+        # tarball by do_deploy. Refuse to start if either is missing —
+        # that means the dist was assembled wrong (or someone hand-edited
+        # it). The matching `play start -Dprecompiled=true` below would
+        # otherwise produce Play's terse "Precompiled classes are
+        # missing!!" with no hint at the operator-side cause.
+        if [[ ! -d precompiled/java ]]; then
+            echo "Error: dist install is missing precompiled/java."
+            echo "       The tarball was built without a precompile pass — re-run \`./jclaw.sh --deploy <dir> start\` from a developer clone to rebuild."
+            exit 1
+        fi
+        if [[ ! -d public/spa ]]; then
+            echo "Error: dist install is missing public/spa."
+            echo "       The tarball was built without a frontend build — re-run \`./jclaw.sh --deploy <dir> start\` from a developer clone to rebuild."
+            exit 1
+        fi
+        echo "==> Dist install detected (no app/, no frontend/) — skipping precompile + SPA build"
     fi
-
-    validate_corepack_pnpm
-
-    echo "==> Installing frontend dependencies..."
-    cd "$JCLAW_DIR/frontend"
-    pnpm install --frozen-lockfile 2>/dev/null || pnpm install
-
-    echo "==> Generating static SPA..."
-    npx nuxi generate
-
-    echo "==> Copying SPA build to public/spa/..."
-    rm -rf "$JCLAW_DIR/public/spa"
-    cp -r .output/public "$JCLAW_DIR/public/spa"
-
-    cd "$JCLAW_DIR"
     mkdir -p "$JCLAW_DIR/logs"
 
     # JVM tuning for production. Rationale for each flag:
@@ -1828,7 +1908,21 @@ do_start_prod() {
         jvm_opts+=( "${extra_opts[@]}" )
     fi
 
-    echo "==> Starting Play backend on port $BACKEND_PORT (prod)..."
+    # Dist installs have no sources — pass -Dprecompiled=true so Play
+    # short-circuits the Java + template compile passes and loads
+    # precompiled/ verbatim. Per Play 1.x's deployment.textile § "Step 3
+    # — start in precompiled mode": "The system property forces prod mode
+    # and skips both the Java and template compile passes. If precompiled/
+    # is missing, the framework logs 'Precompiled classes are missing!!'
+    # and refuses to start." We keep --%prod alongside as defense-in-depth
+    # in case a future Play release decouples the implication.
+    local mode_label="prod"
+    if [[ ! -d app ]]; then
+        jvm_opts+=( "-Dprecompiled=true" )
+        mode_label="prod, precompiled"
+    fi
+
+    echo "==> Starting Play backend on port $BACKEND_PORT ($mode_label)..."
     if [[ "$xms" == "$xmx" ]]; then
         echo "    JVM: ${xms} heap (fixed), ZGC, GC log → logs/gc.log"
     else

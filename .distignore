@@ -5,6 +5,16 @@ openspec/
 docs/
 test/
 loadtest/
+# Source trees that are replaced by their built artifacts in the dist:
+#   app/      → compiled bytecode in precompiled/ (do_deploy runs `play precompile`
+#                before `play dist`; runtime starts with -Dprecompiled=true,
+#                which per Play 1.x's deployment.textile skips the compile pass).
+#   frontend/ → built static SPA in public/spa/ (do_deploy runs `nuxi generate`
+#                + copies .output/public to public/spa/ before `play dist`).
+# An end-user dist install therefore needs only a JDK to run; no javac, no
+# Node/pnpm, no source trees.
+app/
+frontend/
 AGENTS.md
 CLAUDE.md
 Dockerfile
