@@ -1,5 +1,6 @@
 # Build artifacts
-dist/
+dist/*
+!dist/jclaw.zip
 tmp/
 logs/
 data/
