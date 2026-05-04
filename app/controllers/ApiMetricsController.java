@@ -186,6 +186,12 @@ public class ApiMetricsController extends Controller {
             if (result.turnBuckets() != null) {
                 out.add("turnBuckets", INSTANCE.toJsonTree(result.turnBuckets()));
             }
+            // Server-side segment breakdown for this run only — see
+            // LoadTestRunner.SegmentBreakdown. Always present (single-turn
+            // runs still benefit from the segment view).
+            if (result.serverSegments() != null && !result.serverSegments().isEmpty()) {
+                out.add("serverSegments", INSTANCE.toJsonTree(result.serverSegments()));
+            }
             renderJSON(INSTANCE.toJson(out));
         } catch (play.mvc.results.Result r) {
             throw r;

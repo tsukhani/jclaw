@@ -2255,6 +2255,17 @@ if buckets:
             b["turn"], b["count"],
             b["ttftMeanMs"], b["ttftP50Ms"], b["ttftP95Ms"],
             b["durationMeanMs"], b["durationP50Ms"], b["durationP95Ms"]))
+segs = data.get("serverSegments") or []
+segs = [s for s in segs if s["count"] > 0]
+if segs:
+    print()
+    print("Server-side latency segments (this run only, mean across all requests):")
+    headers = ("Segment", "N", "Mean (ms)", "Sum (ms)")
+    fmt = "  {:>16}  {:>5}  {:>10}  {:>10}"
+    print(fmt.format(*headers))
+    print(fmt.format(*("-" * len(h) for h in headers)))
+    for s in segs:
+        print(fmt.format(s["segment"], s["count"], s["meanMs"], s["sumMs"]))
 '
     else
         echo "$json"

@@ -104,6 +104,18 @@ public final class LoadTestRunner {
      *                           Reveals provider prompt-cache cliffs, growing-
      *                           history TTFT creep, and per-turn variance that
      *                           a flat aggregate hides.
+     * @param serverSegments     Server-side {@link utils.LatencyTrace} segment
+     *                           means for the just-completed run only (snapshot
+     *                           delta from before workers fire to after they
+     *                           complete). Splits client-measured turn duration
+     *                           into where it was actually spent inside JClaw —
+     *                           {@code prologue_conv} (DB conversation create/
+     *                           lookup), {@code prologue_prompt} (system-prompt
+     *                           assembly), {@code ttft} (provider-side wait),
+     *                           {@code stream_body} (token generation), etc.
+     *                           Combined with {@code turnBuckets}, lets you
+     *                           attribute the cold-start cliff to the dominant
+     *                           server-side segment.
      */
     public record Result(
             int totalRequests,
@@ -117,7 +129,8 @@ public final class LoadTestRunner {
             long avgResponseTokens,
             long avgReasoningTokens,
             double avgTokensPerSec,
-            java.util.List<TurnBucket> turnBuckets) {}
+            java.util.List<TurnBucket> turnBuckets,
+            java.util.List<SegmentBreakdown> serverSegments) {}
 
     /**
      * Per-turn-position aggregate across all workers in a run. TTFT is
@@ -129,6 +142,31 @@ public final class LoadTestRunner {
     public record TurnBucket(int turn, int count,
                              long ttftMeanMs, long ttftP50Ms, long ttftP95Ms,
                              long durationMeanMs, long durationP50Ms, long durationP95Ms) {}
+
+    /**
+     * Per-segment server-side latency for one loadtest run. {@code count} is
+     * the number of recordings in the segment's histogram during this run
+     * (post-warmup → post-workers). {@code meanMs = sumMs / count}, or 0 when
+     * {@code count == 0}. Percentiles aren't included because deltas of
+     * HdrHistograms are not directly subtractable; mean is sufficient for
+     * dominant-segment diagnosis.
+     */
+    public record SegmentBreakdown(String segment, long count, long sumMs, long meanMs) {}
+
+    /**
+     * Server-side trace segments captured for the loadtest result. Subset
+     * chosen for cold-start diagnosis: queue_wait reveals JClaw-internal
+     * queueing before AgentRunner; prologue_* split server-side prep into
+     * parse → conversation resolve/create → prompt assembly → tool config;
+     * ttft isolates the wait for the provider's first byte; stream_body and
+     * persist cover the streaming and post-stream paths.
+     */
+    private static final String[] TRACKED_SEGMENTS = {
+            "queue_wait",
+            "prologue", "prologue_parse", "prologue_conv",
+            "prologue_prompt", "prologue_tools",
+            "ttft", "stream_body", "persist", "terminal_tail"
+    };
 
     private LoadTestRunner() {}
 
@@ -206,11 +244,14 @@ public final class LoadTestRunner {
             java.util.Arrays.fill(turnDurationMs[w], -1L);
         }
 
-        // Snapshot ttft counter BEFORE the workers fire so we can subtract
-        // at the end and get this-run-only mean. The reset point above only
-        // drops the warmup contribution; histograms still carry whatever was
-        // there from prior runs / real chat traffic.
-        var ttftBefore = readSegmentSnapshot("web", "ttft");
+        // Snapshot all tracked segments BEFORE workers fire so we can
+        // subtract at the end and get this-run-only deltas. The reset point
+        // above only drops the warmup contribution; histograms still carry
+        // whatever was there from prior runs / real chat traffic.
+        var segmentsBefore = new java.util.LinkedHashMap<String, long[]>();
+        for (var seg : TRACKED_SEGMENTS) {
+            segmentsBefore.put(seg, readSegmentSnapshot("web", seg));
+        }
         long persistMarker = System.currentTimeMillis();
 
         var latch = new CountDownLatch(req.concurrency());
@@ -283,14 +324,23 @@ public final class LoadTestRunner {
         long wall = (System.nanoTime() - startNs) / 1_000_000L;
         int total = req.concurrency() * req.turns();
 
-        // Compute this-run mean TTFT from the post-run ttft histogram minus
-        // the pre-run snapshot. The histogram already aggregates per-request
-        // values, so sum_ms / count IS the arithmetic mean of per-request
-        // ttfts — what we want.
-        var ttftAfter = readSegmentSnapshot("web", "ttft");
-        long ttftCount = ttftAfter[0] - ttftBefore[0];
-        long ttftSum = ttftAfter[1] - ttftBefore[1];
-        long avgTtftMs = ttftCount > 0 ? ttftSum / ttftCount : 0;
+        // Compute this-run deltas across all tracked segments. The histograms
+        // already aggregate per-request values, so sum_ms / count IS the
+        // arithmetic mean of per-request samples — what we want for dominant-
+        // segment diagnosis. Order is preserved (LinkedHashMap) so the
+        // breakdown renders in pipeline order rather than alphabetical.
+        var serverSegments = new java.util.ArrayList<SegmentBreakdown>(TRACKED_SEGMENTS.length);
+        for (var seg : TRACKED_SEGMENTS) {
+            var before = segmentsBefore.get(seg);
+            var after = readSegmentSnapshot("web", seg);
+            long countDelta = after[0] - before[0];
+            long sumDelta = after[1] - before[1];
+            long meanMs = countDelta > 0 ? sumDelta / countDelta : 0;
+            serverSegments.add(new SegmentBreakdown(seg, countDelta, sumDelta, meanMs));
+        }
+        var ttftSeg = serverSegments.stream()
+                .filter(s -> "ttft".equals(s.segment())).findFirst().orElse(null);
+        long avgTtftMs = ttftSeg != null ? ttftSeg.meanMs() : 0;
 
         // Pull avg completion tokens AND avg per-request tokens-per-second
         // from the assistant messages this run persisted under the loadtest
@@ -321,7 +371,8 @@ public final class LoadTestRunner {
                 avgResponseTokens,
                 avgReasoningTokens,
                 avgTokensPerSec,
-                turnBuckets);
+                turnBuckets,
+                serverSegments);
     }
 
     /**
