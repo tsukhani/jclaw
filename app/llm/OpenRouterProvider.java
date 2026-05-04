@@ -55,19 +55,10 @@ public final class OpenRouterProvider extends LlmProvider {
 
     @Override
     protected int extractReasoningTokens(JsonObject usageObj) {
-        // OpenRouter puts reasoning_tokens at the top level of usage
-        if (usageObj.has("reasoning_tokens") && !usageObj.get("reasoning_tokens").isJsonNull()) {
-            return usageObj.get("reasoning_tokens").getAsInt();
-        }
-        // Fallback to OpenAI nested format (for models proxied from OpenAI)
-        if (usageObj.has("completion_tokens_details")
-                && !usageObj.get("completion_tokens_details").isJsonNull()) {
-            var details = usageObj.getAsJsonObject("completion_tokens_details");
-            if (details.has("reasoning_tokens") && !details.get("reasoning_tokens").isJsonNull()) {
-                return details.get("reasoning_tokens").getAsInt();
-            }
-        }
-        return 0;
+        // OpenRouter puts reasoning_tokens at the top level of usage. Fallback
+        // to OpenAI nested format (for models proxied from OpenAI).
+        int top = readUsageInt(usageObj, "reasoning_tokens");
+        return top > 0 ? top : readUsageInt(usageObj, "completion_tokens_details", "reasoning_tokens");
     }
 
     @Override

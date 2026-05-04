@@ -52,10 +52,7 @@ public final class OllamaProvider extends LlmProvider {
     @Override
     protected int extractReasoningTokens(JsonObject usageObj) {
         // Ollama may report reasoning_tokens at the top level
-        if (usageObj.has("reasoning_tokens") && !usageObj.get("reasoning_tokens").isJsonNull()) {
-            return usageObj.get("reasoning_tokens").getAsInt();
-        }
-        return 0;
+        return readUsageInt(usageObj, "reasoning_tokens");
     }
 
     @Override

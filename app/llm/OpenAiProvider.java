@@ -24,13 +24,6 @@ public final class OpenAiProvider extends LlmProvider {
     @Override
     protected int extractReasoningTokens(JsonObject usageObj) {
         // OpenAI nests reasoning tokens under completion_tokens_details
-        if (usageObj.has("completion_tokens_details")
-                && !usageObj.get("completion_tokens_details").isJsonNull()) {
-            var details = usageObj.getAsJsonObject("completion_tokens_details");
-            if (details.has("reasoning_tokens") && !details.get("reasoning_tokens").isJsonNull()) {
-                return details.get("reasoning_tokens").getAsInt();
-            }
-        }
-        return 0;
+        return readUsageInt(usageObj, "completion_tokens_details", "reasoning_tokens");
     }
 }

@@ -101,6 +101,35 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
     }
 
     /**
+     * Read an integer field from a usage JSON object, returning 0 when the
+     * field is missing or JSON null. Top-level form — {@code usage.field}.
+     *
+     * <p>Companion to the nested overload below; together they collapse the
+     * "{@code if (obj.has(f) && !obj.get(f).isJsonNull()) return obj.get(f).getAsInt();}"
+     * idiom that every provider's usage-extraction methods used to open-code.
+     * Callers that need a fallback chain (top-level, then nested) can compose
+     * the two: {@code int top = readUsageInt(usage, "x"); return top > 0 ? top : readUsageInt(usage, "details", "x");}.
+     *
+     * <p>The "missing-or-null returns 0" semantic is correct for token-count
+     * fields specifically — providers either omit the field or report 0 when
+     * a category didn't apply, and both should be treated equivalently by
+     * downstream cost/usage aggregation.
+     */
+    protected static int readUsageInt(JsonObject usageObj, String field) {
+        if (usageObj == null || !usageObj.has(field) || usageObj.get(field).isJsonNull()) return 0;
+        return usageObj.get(field).getAsInt();
+    }
+
+    /**
+     * Read an integer field nested under one wrapping object — {@code usage.nestedObj.field}.
+     * Returns 0 when any path component is missing or null.
+     */
+    protected static int readUsageInt(JsonObject usageObj, String nestedObj, String field) {
+        if (usageObj == null || !usageObj.has(nestedObj) || usageObj.get(nestedObj).isJsonNull()) return 0;
+        return readUsageInt(usageObj.getAsJsonObject(nestedObj), field);
+    }
+
+    /**
      * Extract reasoning token count from a usage JSON object.
      * Called when parsing the usage block in responses.
      */
@@ -116,14 +145,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      * report differently — or not at all — override this.
      */
     protected int extractCachedTokens(JsonObject usageObj) {
-        if (usageObj.has("prompt_tokens_details")
-                && !usageObj.get("prompt_tokens_details").isJsonNull()) {
-            var details = usageObj.getAsJsonObject("prompt_tokens_details");
-            if (details.has("cached_tokens") && !details.get("cached_tokens").isJsonNull()) {
-                return details.get("cached_tokens").getAsInt();
-            }
-        }
-        return 0;
+        return readUsageInt(usageObj, "prompt_tokens_details", "cached_tokens");
     }
 
     /**
@@ -138,19 +160,9 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      */
     protected int extractCacheCreationTokens(JsonObject usageObj) {
         // Anthropic/OpenRouter: top-level cache_creation_input_tokens.
-        if (usageObj.has("cache_creation_input_tokens")
-                && !usageObj.get("cache_creation_input_tokens").isJsonNull()) {
-            return usageObj.get("cache_creation_input_tokens").getAsInt();
-        }
-        // Some normalizations nest it under prompt_tokens_details.
-        if (usageObj.has("prompt_tokens_details")
-                && !usageObj.get("prompt_tokens_details").isJsonNull()) {
-            var details = usageObj.getAsJsonObject("prompt_tokens_details");
-            if (details.has("cache_creation_tokens") && !details.get("cache_creation_tokens").isJsonNull()) {
-                return details.get("cache_creation_tokens").getAsInt();
-            }
-        }
-        return 0;
+        // Some normalizations nest it under prompt_tokens_details.cache_creation_tokens.
+        int top = readUsageInt(usageObj, "cache_creation_input_tokens");
+        return top > 0 ? top : readUsageInt(usageObj, "prompt_tokens_details", "cache_creation_tokens");
     }
 
     /**
