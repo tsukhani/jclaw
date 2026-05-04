@@ -36,12 +36,27 @@ services:
       # (or otherwise CA-trusted) cert here.
       - ./certs:/app/certs
     restart: unless-stopped
-    # Liveness probe via bash's /dev/tcp — avoids pulling curl/wget back into
-    # the runtime image just for a healthcheck. start_period gives Play time
-    # to precompile, seed the DB, and bind :9000 on a cold boot.
+    # Readiness probe via curl against ApiController.status. curl is already
+    # in the runtime image (the Dockerfile's RUN block installs it for the
+    # Play CLI download from GitHub), so this adds nothing to the image
+    # surface. Hitting /api/status — not just :9000's TCP bind — closes the
+    # false-positive window where the JVM has bound the port but Play hasn't
+    # finished registering routes yet, so a "healthy" container is one that
+    # actually serves requests rather than one that merely accepts sockets.
+    #
+    # start_period (60s) suppresses failure-counting during cold boot so a
+    # slow precompile/DB-seed doesn't trip `retries` and force a restart.
+    # start_interval (2s) tightens the probe cadence during start_period
+    # only — without it, the first probe wouldn't fire until t=30s
+    # (interval), so even an instant-ready app would show "starting" for
+    # 30s. After start_period ends the engine reverts to interval=30s for
+    # steady-state polling. start_interval requires Docker engine 25.0+ /
+    # Compose Spec 2.20+; older hosts will silently ignore it (the only
+    # cost is a slower first-healthy transition there).
     healthcheck:
-      test: ["CMD-SHELL", "bash -c ': >/dev/tcp/127.0.0.1/9000' || exit 1"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/api/status"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 60s
+      start_interval: 2s
