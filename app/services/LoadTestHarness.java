@@ -235,7 +235,12 @@ public final class LoadTestHarness {
         // Schedule each chunk at an absolute deadline. TTFT is honored exactly
         // for the first chunk (so ttftDelayIsHonored() stays correct).
         // Subsequent chunks are spaced by jittered cadence (±50% around delayMs)
-        // — preserves mean rate while modeling real-LLM network jitter.
+        // — preserves mean rate while modeling real-LLM network jitter. The
+        // +1 floor ensures consecutive deadlines are always strictly increasing
+        // even when delayMs=1 (tps=1000+), without which two chunks could be
+        // scheduled at the same instant and race each other on different
+        // scheduler threads. (Per-stream serialize via synchronized(out) below
+        // also guards against the race; the floor is belt-and-suspenders.)
         var rnd = ThreadLocalRandom.current();
         long cumDelayMs = Math.max(0, scn.ttftMs());
         for (int i = 0; i < n; i++) {
@@ -247,24 +252,37 @@ public final class LoadTestHarness {
                     var chunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
                             + "\"choices\":[{\"index\":0,\"delta\":{\"content\":\""
                             + tok + "\"}}]}\n\n";
-                    out.write(chunk.getBytes(StandardCharsets.UTF_8));
-                    out.flush();
-                    if (isLast) {
-                        var finalChunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
-                                + "\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],"
-                                + "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":"
-                                + n + ",\"total_tokens\":"
-                                + (n + 10) + "}}\n\n"
-                                + "data: [DONE]\n\n";
-                        out.write(finalChunk.getBytes(StandardCharsets.UTF_8));
+                    // Serialize per-stream writes — out is the per-request
+                    // ChunkedOutputStream from HttpServer, and a write+flush
+                    // pair is the unit of HTTP chunk encoding. Without this
+                    // sync, two concurrently-firing scheduled tasks for the
+                    // same stream interleave bytes inside chunk-size headers
+                    // and the receiver throws "Illegal character in chunk
+                    // size: N". synchronized on `out` is per-stream, so
+                    // different streams' writes still proceed in parallel.
+                    synchronized (out) {
+                        out.write(chunk.getBytes(StandardCharsets.UTF_8));
                         out.flush();
-                        done.complete(null);
+                        if (isLast) {
+                            var finalChunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
+                                    + "\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],"
+                                    + "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":"
+                                    + n + ",\"total_tokens\":"
+                                    + (n + 10) + "}}\n\n"
+                                    + "data: [DONE]\n\n";
+                            out.write(finalChunk.getBytes(StandardCharsets.UTF_8));
+                            out.flush();
+                            done.complete(null);
+                        }
                     }
                 } catch (IOException e) {
                     done.completeExceptionally(e);
                 }
             }, cumDelayMs, TimeUnit.MILLISECONDS);
-            int jitterMs = (delayMs / 2) + rnd.nextInt(Math.max(1, delayMs));
+            // 1-ms floor: even when delayMs=1 (tps=1000), consecutive deadlines
+            // strictly increase. Without the floor, integer division gives
+            // jitter=0 for delayMs=1 and every chunk lands at the same instant.
+            int jitterMs = Math.max(1, (delayMs / 2) + rnd.nextInt(Math.max(1, delayMs)));
             cumDelayMs += jitterMs;
         }
         awaitDone(done);
