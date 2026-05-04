@@ -2,42 +2,36 @@ package services;
 
 import models.Agent;
 import models.Config;
+import play.cache.CacheConfig;
+import play.cache.Caches;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class ConfigService {
 
-    private static final long CACHE_TTL_MS = 60_000;
-
-    private record CachedValue(String value, long expiresAt) {
-        boolean isExpired() {
-            return System.currentTimeMillis() > expiresAt;
-        }
-    }
-
-    private static final ConcurrentHashMap<String, CachedValue> cache = new ConcurrentHashMap<>();
+    // The cache stores Optional<String> rather than String so we can distinguish
+    // "key absent in DB" (empty Optional, cached) from "key not yet fetched"
+    // (cache miss, triggers a DB lookup). The previous hand-rolled cache
+    // achieved the same by storing String|null in CachedValue, but the typed
+    // Caches.get(key, loader) returns null for a null loader result instead
+    // of caching the absence — wrapping in Optional preserves negative caching.
+    private static final play.cache.Cache<String, Optional<String>> cache = Caches.named(
+            "config",
+            CacheConfig.newBuilder()
+                    .expireAfterWrite(Duration.ofSeconds(60))
+                    .build());
 
     public static String get(String key) {
-        // Fast path: read without any lock.
-        var cached = cache.get(key);
-        if (cached != null && !cached.isExpired()) {
-            return cached.value();
-        }
-        // Slow path: do the DB call outside any CHM lock to avoid holding a
-        // per-bucket lock during I/O (which serializes unrelated keys in the
-        // same bucket and can cascade into thread starvation under load).
-        // Two threads may both execute the query for the same key — that is
-        // acceptable (idempotent read) and far cheaper than the contention.
-        var config = Tx.run(() -> Config.findByKey(key));
-        var value = config != null ? config.value : null;
-        var fresh = new CachedValue(value, System.currentTimeMillis() + CACHE_TTL_MS);
-        // Install only if no other thread refreshed with a newer value while
-        // we were querying. merge() holds the bucket lock briefly (no I/O).
-        var entry = cache.merge(key, fresh, (existing, candidate) ->
-                existing.isExpired() ? candidate : existing);
-        return entry.value();
+        // get(key, loader) provides single-flight semantics — concurrent misses
+        // for the same key invoke the loader at most once, replacing the prior
+        // hand-rolled merge()-based reconciliation.
+        return cache.get(key, k -> {
+            var config = Tx.run(() -> Config.findByKey(k));
+            return Optional.ofNullable(config != null ? config.value : null);
+        }).orElse(null);
     }
 
     public static String get(String key, String defaultValue) {
@@ -57,7 +51,7 @@ public class ConfigService {
 
     public static void set(String key, String value) {
         Tx.run(() -> Config.upsert(key, value));
-        cache.put(key, new CachedValue(value, System.currentTimeMillis() + CACHE_TTL_MS));
+        cache.put(key, Optional.ofNullable(value));
     }
 
     /**
@@ -122,7 +116,7 @@ public class ConfigService {
                 config.delete();
             }
         });
-        cache.remove(key);
+        cache.invalidate(key);
     }
 
     /**
@@ -146,7 +140,7 @@ public class ConfigService {
     }
 
     public static void clearCache() {
-        cache.clear();
+        cache.invalidateAll();
     }
 
     private static final Set<String> SENSITIVE_PATTERNS = Set.of(

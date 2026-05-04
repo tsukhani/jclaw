@@ -11,11 +11,14 @@ import models.Conversation;
 import models.Message;
 import models.Task;
 import play.Play;
+import play.cache.CacheConfig;
+import play.cache.Caches;
 import play.db.jpa.JPA;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.Comparator;
@@ -53,45 +56,21 @@ public class AgentService {
                 .orElse(false);
     }
 
-    private static final int FILE_CACHE_MAX_SIZE = 500;
-    private static final long FILE_CACHE_TTL_MS = 30_000;
-
     /**
-     * Workspace-file LRU. {@link java.util.LinkedHashMap} with {@code accessOrder=true}
-     * gives true insertion/access ordering, and {@link java.util.LinkedHashMap#removeEldestEntry}
-     * enforces the size bound atomically on every put. The previous implementation
-     * used a {@link java.util.concurrent.ConcurrentHashMap} and an iterator-based
-     * trim, but {@code ConcurrentHashMap} iteration order is bucket-based — not
-     * insertion-based — so the trim removed an arbitrary entry and concurrent
-     * puts could race the size check, allowing the cache to overshoot the bound
-     * unboundedly. Workspace files are large (system prompts), so the unbounded
-     * overshoot was a heap-leak risk.
-     *
-     * <p>Guarded by {@link #fileCacheLock} (a {@link java.util.concurrent.locks.ReentrantLock}
-     * rather than {@code synchronized}). Workspace reads happen on agent
-     * virtual threads; under JEP-444 a {@code synchronized} block pins the
-     * carrier. The same reasoning applies here as in {@link llm.LlmProvider}'s
-     * {@code StreamAccumulator}.
-     *
-     * <p>TTL is enforced lazily on read — expired entries return null and the
-     * fresh fetch overwrites them. There is no separate TTL sweep: the LRU
-     * bound caps memory regardless of expiry, and expired-but-unread entries
-     * are bounded in count (worst case, the whole cache is expired but still
-     * caps at MAX_SIZE).
+     * Workspace-file cache (JCLAW-202). Caffeine handles concurrent access
+     * and size-bound eviction under the hood; no manual LRU bookkeeping or
+     * lock acquire/release needed. The previous hand-rolled {@code LinkedHashMap}
+     * + {@code ReentrantLock} variant guarded against a {@code ConcurrentHashMap}
+     * size-check race that would let workspace files overshoot the cap and
+     * leak heap; Caffeine's atomic eviction makes both the lock and the
+     * race moot.
      */
-    private static final java.util.LinkedHashMap<String, CachedFile> fileCache =
-            new java.util.LinkedHashMap<>(16, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(java.util.Map.Entry<String, CachedFile> eldest) {
-                    return size() > FILE_CACHE_MAX_SIZE;
-                }
-            };
-    private static final java.util.concurrent.locks.ReentrantLock fileCacheLock =
-            new java.util.concurrent.locks.ReentrantLock();
-
-    private record CachedFile(String content, long expiresAt) {
-        boolean isExpired() { return System.currentTimeMillis() > expiresAt; }
-    }
+    private static final play.cache.Cache<String, String> fileCache = Caches.named(
+            "agent-files",
+            CacheConfig.newBuilder()
+                    .expireAfterWrite(Duration.ofSeconds(30))
+                    .maximumSize(500)
+                    .build());
 
     public static Agent create(String name, String modelProvider, String modelId) {
         return create(name, modelProvider, modelId, null, null);
@@ -601,28 +580,18 @@ public class AgentService {
 
     public static String readWorkspaceFile(String agentName, String filename) {
         var cacheKey = agentName + "/" + filename;
-        fileCacheLock.lock();
-        try {
-            var cached = fileCache.get(cacheKey);
-            if (cached != null && !cached.isExpired()) {
-                return cached.content();
-            }
-        } finally {
-            fileCacheLock.unlock();
-        }
-        // Read I/O outside the lock — Files.readString can take milliseconds
-        // on large prompts and we don't want it serializing every other
-        // workspace read across all agents.
+        var cached = fileCache.getIfPresent(cacheKey);
+        if (cached != null) return cached;
+        // Cache miss: read from disk. Use getIfPresent + put rather than
+        // get(key, loader) so the loader's null-on-error path doesn't get
+        // memoized (Cache.get(loader) treats null as "skip caching" but a
+        // raised IOException would propagate; we want to swallow + log
+        // I/O failures and just return null).
         try {
             var path = acquireWorkspacePath(agentName, filename);
             if (Files.exists(path)) {
                 var content = Files.readString(path);
-                fileCacheLock.lock();
-                try {
-                    fileCache.put(cacheKey, new CachedFile(content, System.currentTimeMillis() + FILE_CACHE_TTL_MS));
-                } finally {
-                    fileCacheLock.unlock();
-                }
+                fileCache.put(cacheKey, content);
                 return content;
             }
         } catch (SecurityException e) {
@@ -640,12 +609,7 @@ public class AgentService {
             var path = acquireWorkspacePath(agentName, filename);
             Files.createDirectories(path.getParent());
             Files.writeString(path, content);
-            fileCacheLock.lock();
-            try {
-                fileCache.remove(agentName + "/" + filename);
-            } finally {
-                fileCacheLock.unlock();
-            }
+            fileCache.invalidate(agentName + "/" + filename);
         } catch (SecurityException e) {
             EventLogger.warn("agent", "Path traversal blocked for %s/%s: %s"
                     .formatted(agentName, filename, e.getMessage()));

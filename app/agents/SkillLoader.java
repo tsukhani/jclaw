@@ -3,12 +3,15 @@ package agents;
 import models.Agent;
 import models.AgentSkillConfig;
 import play.Play;
+import play.cache.CacheConfig;
+import play.cache.Caches;
 import services.AgentService;
 import services.EventLogger;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -84,24 +87,12 @@ public class SkillLoader {
         return SkillVersionManager.bumpPatch(v);
     }
 
-    private static final int SKILL_CACHE_MAX_SIZE = 100;
-    private static final java.util.concurrent.ConcurrentHashMap<String, CachedSkills> skillCache =
-            new java.util.concurrent.ConcurrentHashMap<>();
-    private static final long CACHE_TTL_MS = 30_000;
-
-    private record CachedSkills(List<SkillInfo> skills, long expiresAt) {
-        boolean isExpired() { return System.currentTimeMillis() > expiresAt; }
-    }
-
-    /** Evict expired entries and trim to max size. */
-    private static void evictSkillCache() {
-        skillCache.entrySet().removeIf(e -> e.getValue().isExpired());
-        while (skillCache.size() > SKILL_CACHE_MAX_SIZE) {
-            var it = skillCache.entrySet().iterator();
-            if (it.hasNext()) { it.next(); it.remove(); }
-            else break;
-        }
-    }
+    private static final play.cache.Cache<String, List<SkillInfo>> skillCache = Caches.named(
+            "skills",
+            CacheConfig.newBuilder()
+                    .expireAfterWrite(Duration.ofSeconds(30))
+                    .maximumSize(100)
+                    .build());
 
     private static final int MAX_SKILLS = 150;
     private static final int MAX_SKILLS_CHARS = 30_000;
@@ -109,7 +100,7 @@ public class SkillLoader {
             "^---\\s*\\n(.*?)\\n---", Pattern.DOTALL);
 
     public static void clearCache() {
-        skillCache.clear();
+        skillCache.invalidateAll();
     }
 
     /**
@@ -179,14 +170,7 @@ public class SkillLoader {
     }
 
     public static List<SkillInfo> loadSkills(String agentName) {
-        var cached = skillCache.get(agentName);
-        if (cached != null && !cached.isExpired()) {
-            return cached.skills();
-        }
-        var skills = loadSkillsFromDisk(agentName);
-        skillCache.put(agentName, new CachedSkills(skills, System.currentTimeMillis() + CACHE_TTL_MS));
-        if (skillCache.size() > SKILL_CACHE_MAX_SIZE) evictSkillCache();
-        return skills;
+        return skillCache.get(agentName, SkillLoader::loadSkillsFromDisk);
     }
 
     private static List<SkillInfo> loadSkillsFromDisk(String agentName) {
