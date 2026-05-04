@@ -10,6 +10,7 @@ CLAUDE.md
 Dockerfile
 docker-entrypoint.sh
 Jenkinsfile
+Jenkinsfile.renovate
 .distignore
 .dockerignore
 .gitignore
