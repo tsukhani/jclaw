@@ -98,13 +98,22 @@ Load-test options (only used with the 'loadtest' command):
                           falls back to the in-process mock harness.
   --model <name>          Model to drive on the chosen --provider. Must be
                           pullable/serveable by it. Pairs with --provider.
-  --message <text>        User message every turn sends. Defaults to a
-                          length-constrained factual prompt so cross-model
-                          tokens/sec comparisons are apples-to-apples. The
-                          same message is replayed every turn within a
-                          conversation, exercising the model's in-context
-                          recall behavior (does it parrot, get terse, or
-                          reference earlier turns?).
+  --message <text>        Single user message replayed every turn within a
+                          conversation. Defaults to a length-constrained
+                          factual prompt so cross-model tokens/sec comparisons
+                          are apples-to-apples. The same message every turn
+                          surfaces in-context recall behavior (does the model
+                          parrot, get terse, reference earlier turns?) and
+                          provider prompt-cache hits. Mutually exclusive with
+                          --prompts.
+  --prompts <path>        Path to a UTF-8 file with one user prompt per line.
+                          Activates varied-prompts mode: turn t sends line t
+                          instead of replaying --message. The file must have
+                          at least --turns non-blank lines. Use to drive a
+                          topic flow (different question every turn) inside a
+                          growing conversation. Mutually exclusive with
+                          --message. The repo ships loadtest/prompts.txt with
+                          50 fair-comparison prompts for convenience.
 
 Examples:
   ./jclaw.sh setup                                    # One-time setup after fresh clone
@@ -119,7 +128,8 @@ Examples:
   ./jclaw.sh loadtest                                 # Drive default 10 workers x 5-turn conversations against :9000
   ./jclaw.sh --concurrency 50 --turns 1 loadtest      # 50 fresh single-turn conversations (cold-start at scale)
   ./jclaw.sh --concurrency 5 --turns 50 loadtest      # 5 deep conversations of 50 turns each (history growth)
-  ./jclaw.sh --provider openrouter --model amazon/nova-micro-v1 loadtest  # real provider
+  ./jclaw.sh --turns 10 --prompts loadtest/prompts.txt loadtest             # varied prompt per turn (mock)
+  ./jclaw.sh --provider openrouter --model amazon/nova-micro-v1 loadtest    # real provider
 EOF
     else
         # User-facing reference: trimmed to the runtime commands and
@@ -522,15 +532,23 @@ Options:
                           end-to-end latency comparisons aren't meaningful.
   --model <name>          Model to drive on the chosen --provider. Must be
                           pullable/serveable by it. Pairs with --provider.
-  --message <text>        User message sent on every turn. Default is a
-                          length-constrained factual prompt
-                          ("Why is the sky blue? Answer in exactly 50 words.")
-                          so cross-model tokens/sec comparisons measure speed
-                          rather than how verbose each model chose to be.
-                          The same message is replayed each turn within a
-                          conversation, which surfaces in-context recall
-                          behavior (parroting, terseness, "as I mentioned
-                          above") and provider prompt-cache hits.
+  --message <text>        Single user message replayed every turn within a
+                          conversation. Default is a length-constrained
+                          factual prompt ("Why is the sky blue? Answer in
+                          exactly 50 words.") so cross-model tokens/sec
+                          comparisons measure speed rather than how verbose
+                          each model chose to be. Replaying the same message
+                          surfaces in-context recall behavior (parroting,
+                          terseness, "as I mentioned above") and provider
+                          prompt-cache hits. Mutually exclusive with --prompts.
+  --prompts <path>        Path to a UTF-8 file with one user prompt per line
+                          (blank lines ignored). Activates varied-prompts
+                          mode: turn t sends line t instead of replaying
+                          --message. The file must have at least --turns
+                          non-blank lines. Use to drive a topic flow rather
+                          than a recall test. Mutually exclusive with
+                          --message. The repo ships loadtest/prompts.txt
+                          with 50 fair-comparison prompts.
 
 Examples:
   ./jclaw.sh loadtest                                                                                # 10 workers x 5-turn conversations, mock
@@ -539,6 +557,8 @@ Examples:
   ./jclaw.sh --provider ollama-local --model gemma4:latest loadtest                                  # local real provider
   ./jclaw.sh --provider ollama-cloud --model kimi-k2.5 loadtest                                      # cloud
   ./jclaw.sh --provider openrouter --model google/gemini-3-flash-preview loadtest                    # alt cloud
+  ./jclaw.sh --turns 10 --prompts loadtest/prompts.txt loadtest                                      # varied prompts (mock)
+  ./jclaw.sh --turns 10 --prompts loadtest/prompts.txt --provider openrouter --model amazon/nova-micro-v1 loadtest  # varied prompts (real)
   ./jclaw.sh --clean loadtest                                                                        # cleanup only
 EOF
     else
@@ -688,6 +708,14 @@ LT_MODEL=""
 # constrained factual prompt that is fair across providers). Operators who
 # want to A/B a different prompt shape pass --message.
 LT_MESSAGE=""
+# Path to a UTF-8 text file with one prompt per line. When set, each turn
+# sends a different prompt (turn t uses line t+1) instead of replaying
+# --message. Mutually exclusive with --message. Validated below: file must
+# exist and contain at least LT_TURNS non-blank lines.
+LT_PROMPTS_FILE=""
+# JSON-encoded prompts array, populated from LT_PROMPTS_FILE in the
+# validation block. Embedded in the loadtest body when non-empty.
+LT_PROMPTS_JSON=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -748,6 +776,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --message)
             LT_MESSAGE="$2"
+            shift 2
+            ;;
+        --prompts)
+            LT_PROMPTS_FILE="$2"
             shift 2
             ;;
         cert|secret|reset|start|stop|restart|status|logs)
@@ -841,6 +873,38 @@ fi
 LT_REAL=false
 if [[ -n "$LT_PROVIDER" && -n "$LT_MODEL" ]]; then
     LT_REAL=true
+fi
+
+# --prompts validation. Resolve and read the file once here, so a missing
+# file or short file fails fast before do_loadtest does anything (no
+# backend round-trip wasted on a bad input). The resulting JSON array is
+# stashed in LT_PROMPTS_JSON for the body builder; downstream code
+# checks LT_PROMPTS_JSON, not the file path.
+if [[ -n "$LT_PROMPTS_FILE" && -n "$LT_MESSAGE" ]]; then
+    echo "Error: --prompts and --message are mutually exclusive (both set per-turn message strategy)."
+    exit 1
+fi
+if [[ -n "$LT_PROMPTS_FILE" ]]; then
+    if [[ ! -f "$LT_PROMPTS_FILE" ]]; then
+        echo "Error: --prompts file not found: $LT_PROMPTS_FILE"
+        exit 1
+    fi
+    # python3 handles JSON escaping (quotes, backslashes, non-ASCII) and
+    # blank-line stripping in one pass. Pass the path via env var so spaces
+    # / unusual chars in the path don't need shell-side escaping.
+    LT_PROMPTS_JSON=$(LT_PROMPTS_FILE="$LT_PROMPTS_FILE" python3 -c "
+import json, os
+with open(os.environ['LT_PROMPTS_FILE'], encoding='utf-8') as f:
+    lines = [line.rstrip('\n').rstrip('\r') for line in f]
+    prompts = [line for line in lines if line.strip()]
+print(json.dumps(prompts))
+") || { echo "Error: failed to parse --prompts file"; exit 1; }
+    prompt_count=$(echo "$LT_PROMPTS_JSON" | python3 -c "import json, sys; print(len(json.load(sys.stdin)))")
+    if [[ "$prompt_count" -lt "$LT_TURNS" ]]; then
+        echo "Error: --prompts file has $prompt_count non-blank line(s) but --turns is $LT_TURNS;" \
+             "provide at least one prompt per turn."
+        exit 1
+    fi
 fi
 
 # Route every `pnpm` invocation through corepack so the version pinned
@@ -2187,14 +2251,20 @@ do_loadtest() {
     else
         echo "    compress=$LT_COMPRESS"
     fi
-    # Show whichever message will actually be sent. Empty LT_MESSAGE means the
-    # backend will fill in LoadTestRunner.DEFAULT_USER_MESSAGE — surface that
-    # default explicitly so operators can see what every turn ships with.
-    local lt_msg_display="${LT_MESSAGE:-Why is the sky blue? Answer in exactly 50 words.}"
-    if [[ ${#lt_msg_display} -gt 100 ]]; then
-        lt_msg_display="${lt_msg_display:0:97}..."
+    # Show what the workers will actually send. Three modes:
+    #  --prompts    → show file path + prompt count (varied prompt per turn)
+    #  --message    → show the operator-supplied single message
+    #  (neither)    → show the backend default DEFAULT_USER_MESSAGE explicitly
+    if [[ -n "$LT_PROMPTS_FILE" ]]; then
+        local lt_prompt_count=$(echo "$LT_PROMPTS_JSON" | python3 -c "import json, sys; print(len(json.load(sys.stdin)))")
+        echo "    prompts=$LT_PROMPTS_FILE ($lt_prompt_count available, first $LT_TURNS will be used)"
+    else
+        local lt_msg_display="${LT_MESSAGE:-Why is the sky blue? Answer in exactly 50 words.}"
+        if [[ ${#lt_msg_display} -gt 100 ]]; then
+            lt_msg_display="${lt_msg_display:0:97}..."
+        fi
+        echo "    message=\"$lt_msg_display\""
     fi
-    echo "    message=\"$lt_msg_display\""
     echo ""
 
     # Build the JSON body. Include provider / model only when both are set
@@ -2214,6 +2284,12 @@ do_loadtest() {
         local msg_json
         msg_json=$(MSG="$LT_MESSAGE" python3 -c 'import json, os; print(json.dumps(os.environ["MSG"]))')
         body="$body,\"userMessage\":$msg_json"
+    fi
+    # --prompts mode: embed the pre-built JSON array. LT_PROMPTS_JSON was
+    # produced by the global validation block above, so it's guaranteed
+    # well-formed and long enough by the time we get here.
+    if [[ -n "$LT_PROMPTS_JSON" ]]; then
+        body="$body,\"prompts\":$LT_PROMPTS_JSON"
     fi
     body="$body}"
 

@@ -78,6 +78,14 @@ public class ApiMetricsController extends Controller {
      * questions) under load. To simulate N independent fresh-conversation
      * starts instead, set {@code turns=1} and crank {@code concurrency}.
      *
+     * <p>{@code prompts} (optional) is an array of per-turn user messages.
+     * When provided, turn t sends {@code prompts[t]} instead of replaying
+     * {@code userMessage}; the array must contain at least {@code turns}
+     * entries. Mutually exclusive with a non-blank {@code userMessage}. Use
+     * to drive a varied question sequence inside a growing conversation —
+     * separates "model recall on repeated questions" (single-message mode)
+     * from "model behavior across a topic flow" (varied mode).
+     *
      * <p>{@code compress=true} adds {@code Accept-Encoding: br, gzip} to each
      * harness request so the pipeline's {@link io.netty.handler.codec.http.HttpContentCompressor}
      * (when wired) actually engages on the response. Without it, Java's
@@ -116,6 +124,26 @@ public class ApiMetricsController extends Controller {
         // LoadTestRunner so the constant has one home.
         String userMessage = readString(body, "userMessage", null);
 
+        // Optional varied-prompts mode: an array of per-turn user messages.
+        // When present, turn t sends prompts[t] instead of replaying
+        // userMessage. Mutually exclusive with a non-blank userMessage so the
+        // wire format never carries two conflicting per-turn message
+        // strategies. Validated against `turns` below so workers can index
+        // the array directly without bounds-checking.
+        java.util.List<String> prompts = null;
+        if (body != null && body.has("prompts") && !body.get("prompts").isJsonNull()) {
+            try {
+                var arr = body.getAsJsonArray("prompts");
+                prompts = new java.util.ArrayList<>(arr.size());
+                for (var el : arr) prompts.add(el.getAsString());
+            } catch (Exception _) {
+                error(400, "Invalid 'prompts' — must be an array of strings");
+            }
+            if (userMessage != null && !userMessage.isBlank()) {
+                error(400, "userMessage and prompts are mutually exclusive");
+            }
+        }
+
         int maxConcurrency = ConfigService.getInt("provider.loadtest-mock.maxConcurrency", 100);
         int maxTurns = ConfigService.getInt("provider.loadtest-mock.maxTurns", 50);
         if (concurrency < 1 || concurrency > maxConcurrency) {
@@ -123,6 +151,10 @@ public class ApiMetricsController extends Controller {
         }
         if (turns < 1 || turns > maxTurns) {
             error(400, "turns must be between 1 and " + maxTurns);
+        }
+        if (prompts != null && prompts.size() < turns) {
+            error(400, "prompts array has " + prompts.size() + " entries but turns=" + turns
+                    + "; provide at least one prompt per turn");
         }
 
         // Enable the mock provider in its own transaction so it's committed
@@ -146,7 +178,7 @@ public class ApiMetricsController extends Controller {
                     concurrency, turns, compress,
                     new LoadTestHarness.Scenario(ttftMs, tokensPerSecond, responseTokens,
                             simulatedToolCalls, toolSleepMs),
-                    real, provider, model, userMessage));
+                    real, provider, model, userMessage, prompts));
 
             if (!real) {
                 LoadTestHarness.stop();

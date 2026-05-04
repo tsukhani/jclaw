@@ -333,6 +333,26 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
+    public void loadtestRejectsPromptsShorterThanTurns() {
+        // Three turns requested but only two prompts supplied — workers would
+        // index out of bounds on turn 3 if this slipped through validation.
+        var response = POST(authedLoadtestRequest(),
+                "/api/metrics/loadtest", "application/json",
+                "{\"concurrency\":1,\"turns\":3,\"prompts\":[\"q1\",\"q2\"]}");
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    public void loadtestRejectsPromptsAndUserMessageTogether() {
+        // The two carry conflicting per-turn message strategies; allowing both
+        // would silently let one win and confuse operators about which fired.
+        var response = POST(authedLoadtestRequest(),
+                "/api/metrics/loadtest", "application/json",
+                "{\"concurrency\":1,\"turns\":1,\"prompts\":[\"q\"],\"userMessage\":\"hi\"}");
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
     public void stopLoadtestEndpointAlwaysSucceeds() {
         var response = DELETE(authedLoadtestRequest(), "/api/metrics/loadtest");
         assertIsOk(response);

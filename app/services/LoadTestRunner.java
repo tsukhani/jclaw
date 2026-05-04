@@ -66,17 +66,38 @@ public final class LoadTestRunner {
     public static final String DEFAULT_USER_MESSAGE =
             "Why is the sky blue? Answer in exactly 50 words.";
 
+    /**
+     * Loadtest run shape.
+     *
+     * <p>{@code userMessage} is the single message replayed every turn within
+     * a conversation — useful for measuring in-context recall and provider
+     * prompt-cache hits on a stable prefix. {@code prompts}, when non-null
+     * and non-empty, OVERRIDES {@code userMessage}: each turn {@code t} sends
+     * {@code prompts.get(t)}, exercising the model with a varied question
+     * sequence inside the same growing conversation. The list must contain
+     * at least {@link #turns()} entries; the controller validates this before
+     * dispatch. The two are mutually exclusive on the wire.
+     */
     public record Request(int concurrency, int turns, boolean compress,
                           LoadTestHarness.Scenario scenario,
                           boolean realProvider,
                           String provider, String model,
-                          String userMessage) {
+                          String userMessage,
+                          java.util.List<String> prompts) {
 
-        /** Backwards-compat constructor — defaults userMessage to {@link #DEFAULT_USER_MESSAGE}. */
+        /** Backwards-compat constructor — defaults userMessage to {@link #DEFAULT_USER_MESSAGE} and prompts to {@code null}. */
         public Request(int concurrency, int turns, boolean compress,
                        LoadTestHarness.Scenario scenario,
                        boolean realProvider, String provider, String model) {
-            this(concurrency, turns, compress, scenario, realProvider, provider, model, null);
+            this(concurrency, turns, compress, scenario, realProvider, provider, model, null, null);
+        }
+
+        /** Backwards-compat constructor — defaults prompts to {@code null} (single-message mode). */
+        public Request(int concurrency, int turns, boolean compress,
+                       LoadTestHarness.Scenario scenario,
+                       boolean realProvider, String provider, String model,
+                       String userMessage) {
+            this(concurrency, turns, compress, scenario, realProvider, provider, model, userMessage, null);
         }
     }
 
@@ -195,18 +216,27 @@ public final class LoadTestRunner {
         var sessionCookie = mintAdminSessionCookie();
 
         var baseUrl = "http://127.0.0.1:" + play.Play.configuration.getProperty("http.port", "9000");
-        // Build the body via JsonObject so the user message is correctly
-        // escaped — operators can pass quotes, backslashes, or non-ASCII
-        // through the new --message override without breaking the wire format.
+        // Resolve per-turn message strategy. {@code prompts} (when present)
+        // overrides {@code userMessage}: turn t sends prompts.get(t), exposing
+        // the model to a varied question sequence inside the same growing
+        // conversation. Falling back to userMessage replays the same single
+        // prompt every turn — useful for in-context recall and prompt-cache
+        // diagnostics. JsonObject + addProperty handles escaping for both
+        // paths so quotes, backslashes, or non-ASCII flow through the wire
+        // format unchanged.
         var userMessage = (req.userMessage() == null || req.userMessage().isBlank())
                 ? DEFAULT_USER_MESSAGE : req.userMessage();
-        // First-turn body: no conversationId, server creates a fresh one
-        // and returns its id in the SSE init event. Subsequent turns build
-        // their own body inline with conversationId set.
-        var firstTurnBodyObj = new com.google.gson.JsonObject();
-        firstTurnBodyObj.addProperty("agentId", agentId);
-        firstTurnBodyObj.addProperty("message", userMessage);
-        var firstTurnBody = firstTurnBodyObj.toString();
+        boolean variedPrompts = req.prompts() != null && !req.prompts().isEmpty();
+        java.util.function.IntFunction<String> messageFor = variedPrompts
+                ? idx -> req.prompts().get(idx)
+                : idx -> userMessage;
+        // Warmup body uses the first prompt (or the single message). Any
+        // valid request shape works for warmup since its purpose is JIT/cache
+        // warming, not measurement; the result is discarded by resetPoint.
+        var warmupBodyObj = new com.google.gson.JsonObject();
+        warmupBodyObj.addProperty("agentId", agentId);
+        warmupBodyObj.addProperty("message", messageFor.apply(0));
+        var warmupBody = warmupBodyObj.toString();
         // Drive the loadtest through the same OkHttp client tuning that the
         // production LLM stack uses — virtual-thread dispatcher, 64-slot
         // ConnectionPool — so concurrent loadtest workers exercise the
@@ -224,7 +254,7 @@ public final class LoadTestRunner {
         // sample without losing data accumulated by prior runs (or by real
         // chat traffic the operator cares about).
         var resetPoint = utils.LatencyStats.captureResetPoint();
-        warmupRequest(client, baseUrl, sessionCookie, firstTurnBody, req.compress());
+        warmupRequest(client, baseUrl, sessionCookie, warmupBody, req.compress());
         resetPoint.run();
 
         var success = new AtomicInteger();
@@ -267,16 +297,17 @@ public final class LoadTestRunner {
                     Long conversationId = null;
                     try {
                         for (int t = 0; t < req.turns(); t++) {
-                            String turnBody;
-                            if (conversationId == null) {
-                                turnBody = firstTurnBody;
-                            } else {
-                                var turnBodyObj = new com.google.gson.JsonObject();
-                                turnBodyObj.addProperty("agentId", agentId);
-                                turnBodyObj.addProperty("message", userMessage);
+                            // Build per-turn body: pull message from prompts[t]
+                            // when in varied-prompts mode, replay userMessage
+                            // otherwise. conversationId is set from turn 2
+                            // onward so the server resumes the same row.
+                            var turnBodyObj = new com.google.gson.JsonObject();
+                            turnBodyObj.addProperty("agentId", agentId);
+                            turnBodyObj.addProperty("message", messageFor.apply(t));
+                            if (conversationId != null) {
                                 turnBodyObj.addProperty("conversationId", conversationId);
-                                turnBody = turnBodyObj.toString();
                             }
+                            String turnBody = turnBodyObj.toString();
                             long t0 = System.nanoTime();
                             try {
                                 var builder = new okhttp3.Request.Builder()
