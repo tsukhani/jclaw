@@ -5,6 +5,8 @@ import com.google.gson.JsonSyntaxException;
 import llm.LlmTypes.*;
 import models.Agent;
 import models.AgentToolConfig;
+import play.cache.CacheConfig;
+import play.cache.Caches;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -13,7 +15,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Registry of available tools. Tools are registered at startup and made available
@@ -251,9 +252,17 @@ public class ToolRegistry {
      * {@link #invalidateDisabledToolsCache} after every toggle. Every other caller
      * is a read, and each streaming turn reads once, so caching here eliminates a
      * DB round-trip per turn. Keyed by agent ID; values are unmodifiable to guard
-     * against callers accidentally mutating the cached set.
+     * against callers accidentally mutating the cached set. JCLAW-203 moved from
+     * a hand-rolled ConcurrentHashMap to Caches.named — Hibernate L2 doesn't
+     * cover this path because the value is a derived projection (Set of disabled
+     * tool names) computed across multiple AgentToolConfig rows, not a single
+     * entity by ID.
      */
-    private static final ConcurrentHashMap<Long, Set<String>> DISABLED_TOOLS_CACHE = new ConcurrentHashMap<>();
+    private static final play.cache.Cache<Long, Set<String>> DISABLED_TOOLS_CACHE = Caches.named(
+            "agent-disabled-tools",
+            CacheConfig.newBuilder()
+                    .maximumSize(1000)
+                    .build());
 
     /**
      * Load the set of disabled tool names for an agent. Cached per agent; the cache
@@ -265,7 +274,7 @@ public class ToolRegistry {
             // Unsaved agents have no configs; treat as "nothing disabled."
             return Set.of();
         }
-        return DISABLED_TOOLS_CACHE.computeIfAbsent(agent.id, _ -> {
+        return DISABLED_TOOLS_CACHE.get(agent.id, _ -> {
             var configs = AgentToolConfig.findByAgent(agent);
             var disabled = new HashSet<String>();
             for (var c : configs) {
@@ -278,13 +287,13 @@ public class ToolRegistry {
     /** Invalidate the cached disabled-tools set for a specific agent. */
     public static void invalidateDisabledToolsCache(Agent agent) {
         if (agent != null && agent.id != null) {
-            DISABLED_TOOLS_CACHE.remove(agent.id);
+            DISABLED_TOOLS_CACHE.invalidate(agent.id);
         }
     }
 
     /** Clear the entire disabled-tools cache. Used by tests and admin tooling. */
     public static void clearDisabledToolsCache() {
-        DISABLED_TOOLS_CACHE.clear();
+        DISABLED_TOOLS_CACHE.invalidateAll();
     }
 
     public static List<Tool> listTools() {

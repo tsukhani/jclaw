@@ -3,17 +3,22 @@ package models;
 import jakarta.persistence.*;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
+import play.cache.CacheConfig;
+import play.cache.Caches;
 import play.db.jpa.Model;
 
+import java.time.Duration;
 import java.time.Instant;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Optional;
 
 @Entity
 @Table(name = "channel_config")
-// JCLAW-205: Hibernate L2 cache via Caffeine. Channel configs are tiny
-// (~5 rows) and read on every inbound webhook message. The hand-rolled
-// CachedSnapshot cache below predates L2; once JCLAW-203 lands the
-// hand-rolled layer can be removed entirely since L2 covers it.
+// JCLAW-205: Hibernate L2 cache via Caffeine. Catches direct entity-by-ID
+// reads. The findByType lookup below is a separate Caches.named layer
+// because L2 caches by primary key, not by secondary unique fields like
+// channelType — the JPQL query still runs without it. The two layers are
+// complementary: L2 cuts the field re-fetch on hit, the named cache cuts
+// the SQL altogether.
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 public class ChannelConfig extends Model {
 
@@ -46,7 +51,7 @@ public class ChannelConfig extends Model {
 
     // Keep the TTL cache coherent with JPA lifecycle. Without this hook a test
     // (or background job) that reads "telegram" before a row exists poisons the
-    // cache with a null snapshot for 60 s — subsequent writes inside that
+    // cache with an empty Optional for 60 s — subsequent writes inside that
     // window are invisible to the next read.
     @PostPersist
     @PostUpdate
@@ -55,58 +60,34 @@ public class ChannelConfig extends Model {
         evictCache(channelType);
     }
 
-    // ── TTL cache for channel configs (avoids DB hit on every message send) ──
-    // Returns a transient (non-managed) copy to avoid detached-entity errors.
-    // Callers only read configJson/enabled — they never persist the result.
-
-    private static final long CACHE_TTL_MS = 60_000; // 60 seconds
-    private record CachedSnapshot(Long id, String channelType, String configJson, boolean enabled,
-                                   Instant createdAt, Instant updatedAt, long expiresAt) {
-        boolean isExpired() { return System.currentTimeMillis() > expiresAt; }
-        ChannelConfig toTransient() {
-            var cc = new ChannelConfig();
-            cc.id = id;
-            cc.channelType = channelType;
-            cc.configJson = configJson;
-            cc.enabled = enabled;
-            cc.createdAt = createdAt;
-            cc.updatedAt = updatedAt;
-            return cc;
-        }
-    }
-    private static final ConcurrentHashMap<String, CachedSnapshot> cache = new ConcurrentHashMap<>();
+    // JCLAW-203: secondary-key lookup cache. Stores Optional<ChannelConfig>
+    // so a missing row is memoized as Optional.empty rather than re-queried
+    // on every miss (negative caching). Caller reads scalar fields only
+    // (configJson, enabled) so the entity can safely outlive its tx.
+    private static final play.cache.Cache<String, Optional<ChannelConfig>> cache = Caches.named(
+            "channel-configs",
+            CacheConfig.newBuilder()
+                    .expireAfterWrite(Duration.ofSeconds(60))
+                    .build());
 
     public static ChannelConfig findByType(String channelType) {
-        var cached = cache.get(channelType);
-        if (cached != null && !cached.isExpired()) {
-            return cached.configJson() != null ? cached.toTransient() : null;
-        }
         // Callers on SDK threads (Telegram long-polling executor) and virtual
         // threads spawned from webhook controllers have no JPA transaction
         // bound. Wrap the cache-miss DB read in Tx.run — it short-circuits
         // when the caller is already inside a transaction (the admin save
         // path), so managed-entity semantics are preserved there.
-        return services.Tx.run(() -> {
-            ChannelConfig config = ChannelConfig.find("channelType", channelType).first();
-            cache.put(channelType, new CachedSnapshot(
-                    config != null ? config.id : null,
-                    channelType,
-                    config != null ? config.configJson : null,
-                    config != null && config.enabled,
-                    config != null ? config.createdAt : null,
-                    config != null ? config.updatedAt : null,
-                    System.currentTimeMillis() + CACHE_TTL_MS));
-            return config;
-        });
+        return cache.get(channelType, k -> services.Tx.run(() ->
+                Optional.ofNullable((ChannelConfig) ChannelConfig.find("channelType", k).first())))
+                .orElse(null);
     }
 
     /** Evict the cache for a specific channel type (call after admin updates). */
     public static void evictCache(String channelType) {
-        cache.remove(channelType);
+        cache.invalidate(channelType);
     }
 
     /** Evict all cached channel configs. */
     public static void evictAllCache() {
-        cache.clear();
+        cache.invalidateAll();
     }
 }
