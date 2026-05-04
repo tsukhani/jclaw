@@ -137,17 +137,17 @@ pipeline {
 
         stage('Package') {
             steps {
-                sh 'play dist'
-
-                // play dist names the zip after the workspace directory;
-                // rename it to jclaw.zip for a stable artifact name.
-                sh '''
-                    cd dist
-                    ZIP_FILE=$(ls *.zip | head -1)
-                    if [ "$ZIP_FILE" != "jclaw.zip" ]; then
-                        mv "$ZIP_FILE" jclaw.zip
-                    fi
-                '''
+                // ./jclaw.sh dist runs the full self-contained-artifact
+                // pipeline: play deps --sync, play precompile, strip test
+                // bytecode, frontend pnpm install + nuxi generate, play
+                // dist, append precompiled/+public/spa/+lib/ to the zip
+                // (those are gitignored so play dist's git ls-files
+                // inventory drops them otherwise), normalize the zip
+                // filename to dist/jclaw.zip and the inner prefix to
+                // jclaw/ regardless of workspace basename. Single
+                // command instead of the prior `play dist` + post-rename
+                // shim — see app/jclaw.sh:do_dist for the full sequence.
+                sh './jclaw.sh dist'
 
                 archiveArtifacts artifacts: 'dist/jclaw.zip', fingerprint: true
             }
