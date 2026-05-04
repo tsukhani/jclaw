@@ -4,6 +4,7 @@ _bmad-output/
 openspec/
 docs/
 test/
+loadtest/
 AGENTS.md
 CLAUDE.md
 Dockerfile
