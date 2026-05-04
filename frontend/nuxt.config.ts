@@ -42,6 +42,20 @@ export default defineNuxtConfig({
     '/api/**': { proxy: `${backendUrl}/api/**` },
   },
 
+  // Silence "Payload extraction is recommended for full-static output". The
+  // SPA build (ssr: false) produces a full-static bundle, and Nuxt 4 wants
+  // an explicit choice for how it delivers payload data on client-side
+  // navigation. 'client' is the modern recommended setting (and the default
+  // when compatibilityVersion: 5 lands): payload is inlined into the HTML
+  // for the initial render (no extra round-trip on first paint) and
+  // extracted to _payload.json files for subsequent client-side
+  // navigations. For our pure-SPA setup the initial-render half is moot
+  // (no SSR data to inline) but the client-nav extraction is pure upside
+  // when we add useAsyncData/useFetch consumers.
+  experimental: {
+    payloadExtraction: 'client',
+  },
+
   compatibilityDate: '2026-04-16',
 
   // Proxy API requests to the Play backend during development
