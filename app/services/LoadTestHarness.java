@@ -7,7 +7,12 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Embedded OpenAI-compatible SSE server for load testing. Serves
@@ -17,6 +22,19 @@ import java.util.concurrent.Executors;
  * <p>Binds to loopback only (127.0.0.1) on a configured port. Started
  * on demand by {@link LoadTestRunner}; safe to leave running (no auth,
  * but not reachable off-host). Started and stopped by the loadtest endpoint.
+ *
+ * <p><b>Architecture (JCLAW-201 follow-up):</b> request handlers run on
+ * virtual threads, matching the production chat-stream path end-to-end so
+ * any future regression that's NOT in the LLM provider itself surfaces
+ * here too. Inter-chunk cadence comes from a small shared
+ * {@link ScheduledExecutorService} on platform threads — each chunk write
+ * is scheduled at an absolute deadline, the handler VT blocks on a
+ * {@link CompletableFuture}'s untimed park (which JDK-8373224 doesn't
+ * affect), and the scheduler thread fires the write when the deadline
+ * arrives. Net effect: no {@code Thread.sleep} loops on VTs (the trigger
+ * pattern for JDK-8373224, which can stretch tail sleeps to ~5 s when
+ * many concurrent VTs are in the FJP timer queue) and the test harness
+ * exercises the same VT scheduling JClaw uses for real provider calls.
  */
 public final class LoadTestHarness {
 
@@ -41,6 +59,7 @@ public final class LoadTestHarness {
 
     private static final Object lock = new Object();
     private static volatile HttpServer server;
+    private static volatile ScheduledExecutorService scheduler;
     private static volatile int port;
     private static volatile Scenario scenario = Scenario.defaults();
 
@@ -71,16 +90,27 @@ public final class LoadTestHarness {
     private static int bindAndStart(int requestedPort) throws IOException {
         var s = HttpServer.create(new InetSocketAddress("127.0.0.1", requestedPort), 0);
         s.createContext("/v1/chat/completions", LoadTestHarness::handle);
-        // JCLAW-201 follow-up: use a platform-thread cached pool, NOT the VT
-        // executor. JDK-8373224 (still open in JDK 25) causes Thread.sleep on
-        // many concurrent virtual threads to suffer work-queue starvation —
-        // tail sleeps stretch to ~5 s when the FJP work-queue count exceeds
-        // 2× parallelism. Every concurrent SSE handler in this mock loops on
-        // Thread.sleep(6.67 ms), which is exactly the trigger pattern. Platform
-        // threads sidestep the VT/FJP scheduler entirely, so Thread.sleep
-        // becomes a plain kernel timer wait. ~50 concurrent platform threads
-        // is well within OS limits for a loadtest harness.
-        s.setExecutor(Executors.newCachedThreadPool());
+        // Handlers run on VTs to mirror the production agent-stream path —
+        // this lets a future codebase-side regression that affects VT
+        // scheduling surface in mock loadtests as well, instead of being
+        // hidden by a platform-thread mock harness. Per-chunk timing comes
+        // from the shared scheduler below, NOT from Thread.sleep on the VT.
+        s.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
+        // Tiny platform-thread pool whose only job is to fire scheduled
+        // chunk writes at their absolute deadlines. 2 threads is plenty
+        // even at c=50 × 150 tps = 7500 writes/sec because each write is
+        // a few µs of socket work; the chunked-write order across streams
+        // is independent so two scheduler threads can serve them in
+        // parallel without any cross-stream ordering risk (within a stream
+        // consecutive chunk deadlines are always ≥ ~3 ms apart thanks to
+        // the inter-token jitter, so even if two scheduler threads picked
+        // them up, the earlier write has long completed before the later
+        // one fires).
+        scheduler = Executors.newScheduledThreadPool(2, r -> {
+            var t = new Thread(r, "loadtest-mock-scheduler");
+            t.setDaemon(true);
+            return t;
+        });
         s.start();
         server = s;
         port = s.getAddress().getPort();
@@ -93,6 +123,10 @@ public final class LoadTestHarness {
                 server.stop(0);
                 server = null;
                 port = 0;
+            }
+            if (scheduler != null) {
+                scheduler.shutdownNow();
+                scheduler = null;
             }
         }
     }
@@ -138,62 +172,101 @@ public final class LoadTestHarness {
         }
     }
 
+    /**
+     * Wait for the scheduled stream to complete. Uses {@code get()} (untimed),
+     * which parks on a {@link java.util.concurrent.locks.LockSupport#park}
+     * — NOT the {@code parkNanos} timer-queue path that JDK-8373224 affects.
+     * Unwraps any {@link IOException} that the scheduled write produced.
+     */
+    private static void awaitDone(CompletableFuture<Void> done)
+            throws IOException, InterruptedException {
+        try {
+            done.get();
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof IOException io) throw io;
+            throw new IOException(e.getCause() != null ? e.getCause() : e);
+        }
+    }
+
     private static void streamToolCalls(OutputStream out, Scenario scn)
             throws IOException, InterruptedException {
-        Thread.sleep(Math.max(0, scn.ttftMs()));
-        for (int i = 0; i < scn.simulatedToolCalls(); i++) {
-            var callId = "call-mock-" + i;
-            // Arguments string is a JSON document embedded *inside* the outer
-            // JSON chunk, so its quotes need double-escaping.
-            var argsJson = "{\\\"ms\\\":" + scn.toolSleepMs() + "}";
-            var chunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
-                    + "\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":"
-                    + "[{\"index\":" + i + ",\"id\":\"" + callId + "\","
-                    + "\"type\":\"function\",\"function\":{\"name\":\"loadtest_sleep\","
-                    + "\"arguments\":\"" + argsJson + "\"}}]}}]}\n\n";
-            out.write(chunk.getBytes(StandardCharsets.UTF_8));
-            out.flush();
-        }
-        var finalChunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
-                + "\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],"
-                + "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\n"
-                + "data: [DONE]\n\n";
-        out.write(finalChunk.getBytes(StandardCharsets.UTF_8));
-        out.flush();
+        // tool_calls path is one-shot: at TTFT, write all simulated tool calls
+        // back-to-back and the terminator. No per-chunk cadence because the
+        // agent doesn't see "streaming" tool calls — it gets them as one
+        // round. The scheduler still drives the wait so the handler VT
+        // stays off Thread.sleep.
+        var done = new CompletableFuture<Void>();
+        scheduler.schedule(() -> {
+            try {
+                for (int i = 0; i < scn.simulatedToolCalls(); i++) {
+                    var callId = "call-mock-" + i;
+                    // Arguments string is a JSON document embedded *inside* the outer
+                    // JSON chunk, so its quotes need double-escaping.
+                    var argsJson = "{\\\"ms\\\":" + scn.toolSleepMs() + "}";
+                    var chunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
+                            + "\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":"
+                            + "[{\"index\":" + i + ",\"id\":\"" + callId + "\","
+                            + "\"type\":\"function\",\"function\":{\"name\":\"loadtest_sleep\","
+                            + "\"arguments\":\"" + argsJson + "\"}}]}}]}\n\n";
+                    out.write(chunk.getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+                }
+                var finalChunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
+                        + "\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],"
+                        + "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\n"
+                        + "data: [DONE]\n\n";
+                out.write(finalChunk.getBytes(StandardCharsets.UTF_8));
+                out.flush();
+                done.complete(null);
+            } catch (IOException e) {
+                done.completeExceptionally(e);
+            }
+        }, Math.max(0, scn.ttftMs()), TimeUnit.MILLISECONDS);
+        awaitDone(done);
     }
 
     private static void streamResponse(OutputStream out, Scenario scn)
             throws IOException, InterruptedException {
-        // TTFT is a one-shot per stream; honor the lower bound exactly so
-        // ttftDelayIsHonored() and operator expectations stay correct.
-        Thread.sleep(Math.max(0, scn.ttftMs()));
         int delayMs = scn.tokensPerSecond() > 0
                 ? Math.max(1, 1000 / scn.tokensPerSecond())
                 : 20;
-        // JCLAW-201 follow-up: jitter the inter-token sleep ±50% so 50
-        // concurrent streams don't all wake on the same kernel timer tick
-        // and stampede the FJP carrier pool. Without jitter, c=50 mock
-        // loadtests produced ~13 ~5s pauses per stream from emergent
-        // OS+JVM scheduler behavior; jitter cuts that to ~4 and recovers
-        // ~27x in tokens/sec at c=50. Mean = delayMs preserved.
-        var rnd = java.util.concurrent.ThreadLocalRandom.current();
-        for (int i = 0; i < scn.responseTokens(); i++) {
-            var tok = (i == 0 ? "Hello" : " tok" + i);
-            var chunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
-                    + "\"choices\":[{\"index\":0,\"delta\":{\"content\":\""
-                    + tok + "\"}}]}\n\n";
-            out.write(chunk.getBytes(StandardCharsets.UTF_8));
-            out.flush();
+        int n = scn.responseTokens();
+        var done = new CompletableFuture<Void>();
+        // Schedule each chunk at an absolute deadline. TTFT is honored exactly
+        // for the first chunk (so ttftDelayIsHonored() stays correct).
+        // Subsequent chunks are spaced by jittered cadence (±50% around delayMs)
+        // — preserves mean rate while modeling real-LLM network jitter.
+        var rnd = ThreadLocalRandom.current();
+        long cumDelayMs = Math.max(0, scn.ttftMs());
+        for (int i = 0; i < n; i++) {
+            int idx = i;
+            boolean isLast = (i == n - 1);
+            scheduler.schedule(() -> {
+                try {
+                    var tok = (idx == 0 ? "Hello" : " tok" + idx);
+                    var chunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
+                            + "\"choices\":[{\"index\":0,\"delta\":{\"content\":\""
+                            + tok + "\"}}]}\n\n";
+                    out.write(chunk.getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+                    if (isLast) {
+                        var finalChunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
+                                + "\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],"
+                                + "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":"
+                                + n + ",\"total_tokens\":"
+                                + (n + 10) + "}}\n\n"
+                                + "data: [DONE]\n\n";
+                        out.write(finalChunk.getBytes(StandardCharsets.UTF_8));
+                        out.flush();
+                        done.complete(null);
+                    }
+                } catch (IOException e) {
+                    done.completeExceptionally(e);
+                }
+            }, cumDelayMs, TimeUnit.MILLISECONDS);
             int jitterMs = (delayMs / 2) + rnd.nextInt(Math.max(1, delayMs));
-            Thread.sleep(jitterMs);
+            cumDelayMs += jitterMs;
         }
-        var finalChunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
-                + "\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],"
-                + "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":"
-                + scn.responseTokens() + ",\"total_tokens\":"
-                + (scn.responseTokens() + 10) + "}}\n\n"
-                + "data: [DONE]\n\n";
-        out.write(finalChunk.getBytes(StandardCharsets.UTF_8));
-        out.flush();
+        awaitDone(done);
     }
 }
