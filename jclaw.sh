@@ -49,6 +49,9 @@ Commands:
   loadtest  Drive the in-process load-test harness against /api/chat/stream
   test      Run backend (play auto-test) + frontend (pnpm test) and report a
             consolidated pass/fail summary. Exits non-zero on any failure.
+  dist      Build a self-contained dist artifact at dist/jclaw.zip without
+            deploying it. Runs the same precompile + frontend build + zip
+            pipeline as --deploy, then exits.
   help      Print this usage reference and exit. Equivalent to --help / -h.
 
 Options:
@@ -193,7 +196,7 @@ EOF
 # distinguish the per-command help path from the bare-help path.
 is_known_command() {
     case "$1" in
-        cert|secret|setup|reset|start|stop|restart|status|logs|loadtest|test)
+        cert|secret|setup|reset|start|stop|restart|status|logs|loadtest|test|dist)
             return 0
             ;;
         *)
@@ -218,6 +221,7 @@ usage_for() {
         logs)     usage_logs     ;;
         loadtest) usage_loadtest ;;
         test)     usage_test     ;;
+        dist)     usage_dist     ;;
         *)        usage          ;;
     esac
 }
@@ -602,6 +606,40 @@ EOF
     fi
 }
 
+usage_dist() {
+    if is_developer_clone; then
+        cat <<EOF
+Usage: jclaw.sh dist
+
+Build a self-contained dist artifact at dist/jclaw.zip without
+deploying it. Runs the same precompile + frontend build + zip pipeline
+that --deploy would, then exits — leaving the zip ready to copy
+anywhere (a release upload, a Docker COPY context, an scp target).
+
+The resulting tarball is JDK-only: no javac, no Node/pnpm, no source
+trees on the install host. Per Play 1.x's deployment.textile, the
+runtime expects precompiled/, conf/, lib/, public/ and starts via
+\`play start -Dprecompiled=true\` — all wired into the unzipped
+\`./jclaw.sh start\` automatically.
+
+Example:
+  ./jclaw.sh dist
+  cp dist/jclaw.zip /path/to/release/area/
+EOF
+    else
+        cat <<EOF
+Usage: jclaw.sh dist
+
+Not available in this distribution. The 'dist' command builds a
+distribution artifact from a developer checkout — needs app/ sources
+and frontend/ to (re)build, neither of which ship with 'play dist'
+tarballs.
+
+For the full list of commands in this distribution: ./jclaw.sh help
+EOF
+    fi
+}
+
 # Render the JClaw landing screen on bare invocation: ASCII-art logo in
 # emerald, one-line product blurb, and pointers at the two commands every
 # new contributor needs (setup for first-time wiring, --help for the full
@@ -786,7 +824,7 @@ while [[ $# -gt 0 ]]; do
             COMMAND="$1"
             shift
             ;;
-        setup|loadtest|test)
+        setup|loadtest|test|dist)
             # Developer-only commands. Available on a `git clone` because
             # they touch repo state (hooks, fixtures, frontend deps); not
             # available on a `play dist` install where there's no .git
@@ -1625,18 +1663,21 @@ do_setup() {
 
 # ─── Production deploy ───
 
-do_deploy() {
+# Build a self-contained dist artifact that runs on a JDK-only host:
+# precompiled bytecode replaces the Java source tree, the built static
+# SPA replaces the Nuxt source tree. Per Play 1.x's
+# deployment.textile § "Deploying without source code", the runtime only
+# needs precompiled/, conf/, lib/, public/ — app/ and frontend/ are
+# excluded by .distignore on this side. The matching runtime invocation
+# in do_start_prod uses `play start -Dprecompiled=true` which forces
+# prod mode and skips both compile passes (and refuses to start if
+# precompiled/ is missing).
+#
+# Pure builder: produces $SCRIPT_DIR/dist/jclaw.zip and exits. Callers
+# that need to deploy/unzip the artifact (do_deploy) chain on top.
+do_dist() {
     cd "$SCRIPT_DIR"
 
-    # Build a self-contained dist artifact that runs on a JDK-only host:
-    # precompiled bytecode replaces the Java source tree, the built static
-    # SPA replaces the Nuxt source tree. Per Play 1.x's
-    # deployment.textile § "Deploying without source code", the runtime
-    # only needs precompiled/, conf/, lib/, public/ — app/ and frontend/
-    # are excluded by .distignore on this side. The matching runtime
-    # invocation in do_start_prod uses `play start -Dprecompiled=true`
-    # which forces prod mode and skips both compile passes (and refuses
-    # to start if precompiled/ is missing).
     echo "==> Precompiling backend (play precompile)..."
     play precompile
     strip_test_bytecode_from_precompiled "$SCRIPT_DIR"
@@ -1676,6 +1717,13 @@ do_deploy() {
     parent=$(dirname "$SCRIPT_DIR")
     ( cd "$parent" && zip -qr "$zip_file" "$app_name/precompiled" "$app_name/public/spa" )
 
+    echo "==> Distribution ready at $zip_file"
+}
+
+do_deploy() {
+    do_dist
+
+    local zip_file="$SCRIPT_DIR/dist/jclaw.zip"
     echo "==> Deploying to $DEPLOY_DIR..."
     mkdir -p "$DEPLOY_DIR"
 
@@ -2641,5 +2689,9 @@ case "$COMMAND" in
     test)
         check_prereqs
         do_test
+        ;;
+    dist)
+        check_prereqs
+        do_dist
         ;;
 esac
