@@ -1445,6 +1445,40 @@ check_python() {
 #   node     — standalone (corepack ships inside it)
 #   play     — depends on python
 #   corepack — depends on node
+# Remove test bytecode from precompiled/java/. `play precompile` walks
+# both app/ AND test/, so the prod precompiled tree carries test classes
+# (AgentRouterTest.class, MockTelegramServer$CannedResponse.class, etc.)
+# that have no role at runtime — they reference test-only deps (JUnit,
+# play.test.UnitTest) that don't ship in lib/, so the JVM can't actually
+# load them, but they bloat the dist by ~26% and clutter classpath
+# diagnostics. Glob-by-name (`*Test*.class`) is unreliable: AuthFixture
+# and MockTelegramServer don't carry the suffix. Source-driven mapping
+# is robust — enumerate test/*.java, delete each one's top-level + inner
+# class files (Outer$Inner.class) at the precompiled/java root.
+#
+# Test files have no `package` declaration in this codebase so they all
+# land flat at precompiled/java/<Name>.class — -maxdepth 1 keeps the
+# search bounded; if a future test file ever gets a package, it would
+# survive (which is fine — at most a small leak, not a correctness bug).
+strip_test_bytecode_from_precompiled() {
+    local target_dir="${1:-$SCRIPT_DIR}"
+    local precompiled="$target_dir/precompiled/java"
+    [[ -d "$precompiled" ]] || return 0
+    [[ -d "$target_dir/test" ]] || return 0
+    local stripped=0 name f count
+    for f in "$target_dir/test"/*.java; do
+        [[ -f "$f" ]] || continue
+        name=$(basename "$f" .java)
+        count=$(find "$precompiled" -maxdepth 1 \
+                  \( -name "$name.class" -o -name "$name\$*.class" \) \
+                  -type f -print -delete 2>/dev/null | wc -l)
+        stripped=$((stripped + count))
+    done
+    if (( stripped > 0 )); then
+        echo "    Stripped $stripped test class file(s) from precompiled/java/"
+    fi
+}
+
 check_prereqs() {
     # Foundational — no dependencies on other checks
     check_java
@@ -1605,6 +1639,7 @@ do_deploy() {
     # to start if precompiled/ is missing).
     echo "==> Precompiling backend (play precompile)..."
     play precompile
+    strip_test_bytecode_from_precompiled "$SCRIPT_DIR"
 
     validate_corepack_pnpm
     echo "==> Installing frontend dependencies..."
@@ -1824,6 +1859,7 @@ do_start_prod() {
             || [[ -n "$(find app -name '*.java' -newer precompiled/java -print -quit 2>/dev/null)" ]]; then
             echo "==> Precompiling backend (source newer than precompiled classes)..."
             play precompile
+            strip_test_bytecode_from_precompiled "$JCLAW_DIR"
         else
             echo "==> Skipping precompile (precompiled classes are up to date)"
         fi
