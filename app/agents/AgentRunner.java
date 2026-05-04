@@ -448,9 +448,17 @@ public class AgentRunner {
                                     java.util.List<services.AttachmentService.Input> attachments) {
         Thread.ofVirtual().name("agent-stream").start(() -> {
             final Long[] conversationIdRef = {null};
+            // queueReleased is shared between the wrapper's terminal
+            // callbacks (which do the early release before cb.onComplete
+            // flushes the SSE terminal) and this finally block (which does
+            // a defense-in-depth release for exception paths that didn't
+            // reach a terminal callback). The CAS inside releaseQueueOnce
+            // guarantees exactly one drain per turn regardless of which
+            // path fires first.
+            final var queueReleased = new AtomicBoolean(false);
             var trace = LatencyTrace.forTurn(channelType, acceptedAtNs);
             trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
-            var tracedCb = wrapCallbacksWithTrace(cb, trace);
+            var tracedCb = wrapCallbacksWithTrace(cb, trace, conversationIdRef, queueReleased);
             try {
                 // Phase 1: Resolve conversation, acquire queue, persist user message
                 var conversation = resolveConversationAndAcquireQueue(
@@ -472,9 +480,13 @@ public class AgentRunner {
                 tracedCb.onError().accept(e);
             } finally {
                 EventLogger.flush();
-                if (conversationIdRef[0] != null) {
-                    processQueueDrain(conversationIdRef[0]);
-                }
+                // Defense-in-depth: if a terminal callback already drained
+                // the queue (the normal happy / error / cancel paths via
+                // the wrapper's releaseQueueOnce), the CAS inside
+                // releaseQueueOnce no-ops here. The block only fires for
+                // exception paths that returned without invoking any
+                // terminal callback.
+                releaseQueueOnce(conversationIdRef, queueReleased);
             }
         });
     }
@@ -487,8 +499,29 @@ public class AgentRunner {
      * returns (i.e. after the final SSE frame, Telegram edit, etc. is delivered).
      * Invoking the caller's handler first ensures the mark captures the
      * post-delivery timestamp, matching the pre-refactor web behavior.
+     *
+     * <p>Also handles the conversation-queue early release. The terminal
+     * callbacks (onComplete / onError / onCancel) call
+     * {@link #processQueueDrain} BEFORE invoking the wrapped caller's handler,
+     * so the queue lock is freed before the SSE terminal frame flushes to
+     * the wire. Without this, a fast client (e.g. the loadtest worker firing
+     * back-to-back turns inside the same conversation) would observe the
+     * SSE close, immediately fire the next request, and race the post-
+     * onComplete finally block — the next {@code tryAcquire} would see
+     * {@code processing=true} and short-circuit with the canned "queued"
+     * response. The queueReleased CAS makes the release single-shot so the
+     * outer finally block is a defense-in-depth path for exception cases.
+     *
+     * <p>{@code conversationIdRef} is captured as a 1-element array so the
+     * caller can populate it AFTER the wrapper is constructed (during
+     * {@link #resolveConversationAndAcquireQueue}). The terminal callbacks
+     * read {@code conversationIdRef[0]} lazily — null means the queue
+     * acquire never succeeded (e.g. the canned-queued response path),
+     * so there's nothing to release.
      */
-    private static StreamingCallbacks wrapCallbacksWithTrace(StreamingCallbacks cb, LatencyTrace trace) {
+    private static StreamingCallbacks wrapCallbacksWithTrace(StreamingCallbacks cb, LatencyTrace trace,
+                                                              Long[] conversationIdRef,
+                                                              AtomicBoolean queueReleased) {
         var firstTokenSeen = new AtomicBoolean(false);
         return new StreamingCallbacks(
                 cb.onInit(),
@@ -502,18 +535,37 @@ public class AgentRunner {
                 cb.onStatus(),
                 cb.onToolCall(),
                 content -> {
+                    releaseQueueOnce(conversationIdRef, queueReleased);
                     try { cb.onComplete().accept(content); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
                 },
                 error -> {
+                    releaseQueueOnce(conversationIdRef, queueReleased);
                     try { cb.onError().accept(error); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
                 },
                 () -> {
+                    releaseQueueOnce(conversationIdRef, queueReleased);
                     try { cb.onCancel().run(); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
                 }
         );
+    }
+
+    /**
+     * Idempotent queue release helper used by {@link #wrapCallbacksWithTrace}'s
+     * terminal callbacks. The {@link AtomicBoolean#compareAndSet} ensures
+     * exactly one drain fires per turn even if multiple terminal callbacks
+     * race (which shouldn't happen in normal flow, but the CAS makes the
+     * invariant local to this method rather than relying on caller
+     * discipline). When {@code conversationIdRef[0]} is null the queue was
+     * never acquired (e.g. the queued-canned-response short-circuit), so
+     * the no-op skip is correct.
+     */
+    private static void releaseQueueOnce(Long[] conversationIdRef, AtomicBoolean queueReleased) {
+        if (conversationIdRef[0] == null) return;
+        if (!queueReleased.compareAndSet(false, true)) return;
+        processQueueDrain(conversationIdRef[0]);
     }
 
     /**
