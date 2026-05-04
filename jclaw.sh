@@ -91,15 +91,13 @@ Load-test options (only used with the 'loadtest' command):
                           server's HttpContentCompressor engages — measures the cost of the
                           encoding path. Default off (Java HttpClient sends no Accept-Encoding,
                           so compression doesn't engage even when wired into the pipeline).
-  --real                  Bind the loadtest agent to a real provider instead of the
-                          in-process mock harness. Required to capture real-network/SSE
-                          timing (mock latency is deterministic stubs). Default
-                          provider is ollama-local; override with --provider.
-  --provider <name>       Real-provider name when --real is set (default: ollama-local).
-                          Any registered provider works: ollama-cloud, openrouter, openai, etc.
-                          The provider must already be configured (apiKey/baseUrl set).
-  --model <name>          Model to drive when --real is set (default: gemma4:latest).
-                          Must be pullable/serveable by the chosen provider.
+  --provider <name>       Registered provider name to drive (e.g. ollama-local,
+                          ollama-cloud, openrouter, openai). Must be configured
+                          (apiKey/baseUrl set). Pairs with --model: providing
+                          one without the other is an error. Omitting both
+                          falls back to the in-process mock harness.
+  --model <name>          Model to drive on the chosen --provider. Must be
+                          pullable/serveable by it. Pairs with --provider.
   --message <text>        User message every turn sends. Defaults to a
                           length-constrained factual prompt so cross-model
                           tokens/sec comparisons are apples-to-apples. The
@@ -121,6 +119,7 @@ Examples:
   ./jclaw.sh loadtest                                 # Drive default 10 workers x 5-turn conversations against :9000
   ./jclaw.sh --concurrency 50 --turns 1 loadtest      # 50 fresh single-turn conversations (cold-start at scale)
   ./jclaw.sh --concurrency 5 --turns 50 loadtest      # 5 deep conversations of 50 turns each (history growth)
+  ./jclaw.sh --provider openrouter --model amazon/nova-micro-v1 loadtest  # real provider
 EOF
     else
         # User-facing reference: trimmed to the runtime commands and
@@ -513,19 +512,16 @@ Options:
   --compress              Send 'Accept-Encoding: br, gzip' so the server's
                           HttpContentCompressor engages — measures the cost
                           of the encoding path.
-  --real                  Drive a real provider with --model instead of the
-                          mock harness. Lets the run capture real network
-                          and SSE timing. The mock path is fine for pipeline
-                          checks but its latency is stubbed, so latency
-                          comparisons on the mock aren't meaningful. Default
-                          provider is ollama-local.
-  --provider <name>       Real-provider name when --real is set
-                          (default: ollama-local). Any registered provider:
+  --provider <name>       Registered provider to drive (e.g. ollama-local,
                           ollama-cloud, openrouter, openai, anthropic-via-
-                          openrouter, etc. The provider must already be
-                          configured (apiKey/baseUrl set in Settings).
-  --model <name>          Model when --real is set (default: gemma4:latest).
-                          Must be pullable/serveable by the chosen provider.
+                          openrouter, …). Must be configured (apiKey/baseUrl
+                          set in Settings). Pairs with --model: providing one
+                          without the other is an error. Omitting both falls
+                          back to the in-process mock harness — fine for
+                          pipeline checks, but mock latency is stubbed so
+                          end-to-end latency comparisons aren't meaningful.
+  --model <name>          Model to drive on the chosen --provider. Must be
+                          pullable/serveable by it. Pairs with --provider.
   --message <text>        User message sent on every turn. Default is a
                           length-constrained factual prompt
                           ("Why is the sky blue? Answer in exactly 50 words.")
@@ -537,13 +533,13 @@ Options:
                           above") and provider prompt-cache hits.
 
 Examples:
-  ./jclaw.sh loadtest                                                              # 10 workers x 5-turn conversations, mock
-  ./jclaw.sh --concurrency 50 --turns 1 loadtest                                   # 50 cold starts in parallel
-  ./jclaw.sh --concurrency 5 --turns 50 loadtest                                   # 5 deep conversations
-  ./jclaw.sh --real loadtest                                                       # ollama-local
-  ./jclaw.sh --real --provider ollama-cloud --model kimi-k2.5 loadtest             # cloud
-  ./jclaw.sh --real --provider openrouter --model google/gemini-3-flash-preview loadtest  # alt cloud
-  ./jclaw.sh --clean loadtest                                                      # cleanup only
+  ./jclaw.sh loadtest                                                                                # 10 workers x 5-turn conversations, mock
+  ./jclaw.sh --concurrency 50 --turns 1 loadtest                                                     # 50 cold starts in parallel, mock
+  ./jclaw.sh --concurrency 5 --turns 50 loadtest                                                     # 5 deep conversations, mock
+  ./jclaw.sh --provider ollama-local --model gemma4:latest loadtest                                  # local real provider
+  ./jclaw.sh --provider ollama-cloud --model kimi-k2.5 loadtest                                      # cloud
+  ./jclaw.sh --provider openrouter --model google/gemini-3-flash-preview loadtest                    # alt cloud
+  ./jclaw.sh --clean loadtest                                                                        # cleanup only
 EOF
     else
         cat <<EOF
@@ -678,13 +674,16 @@ LT_TTFT_MS="100"
 LT_TOKENS_PER_SECOND="50"
 LT_RESPONSE_TOKENS="40"
 # Track mock-only knobs that were explicitly passed; warn if combined
-# with --real (where they're silently ignored by the harness).
+# with a real-provider run (where they're silently ignored by the harness).
 LT_MOCK_FLAGS_SET=()
 LT_CLEAN=false
 LT_COMPRESS=false
-LT_REAL=false
+# Real-provider mode is implied by --provider AND --model both being set.
+# Defaults are blank so the absence of either flag means mock mode; the
+# pair is validated together after argument parsing (one without the
+# other is rejected).
 LT_PROVIDER=""
-LT_MODEL="gemma4:latest"
+LT_MODEL=""
 # Empty = let the backend apply LoadTestRunner.DEFAULT_USER_MESSAGE (a length-
 # constrained factual prompt that is fair across providers). Operators who
 # want to A/B a different prompt shape pass --message.
@@ -737,10 +736,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --compress)
             LT_COMPRESS=true
-            shift
-            ;;
-        --real)
-            LT_REAL=true
             shift
             ;;
         --provider)
@@ -828,6 +823,24 @@ fi
 if [[ "$DEV_MODE" == true && -n "$DEPLOY_DIR" ]]; then
     echo "Error: --dev and --deploy cannot be used together."
     exit 1
+fi
+
+# Loadtest provider/model pairing: real-mode is implied by both being set.
+# Reject the half-set state up front so operators don't get a surprising
+# fall-through to mock mode (silent) or a server-side 400 (delayed).
+if [[ -n "$LT_PROVIDER" && -z "$LT_MODEL" ]]; then
+    echo "Error: --provider given without --model. Both are required to drive a real provider; omit both for the mock harness."
+    exit 1
+fi
+if [[ -n "$LT_MODEL" && -z "$LT_PROVIDER" ]]; then
+    echo "Error: --model given without --provider. Both are required to drive a real provider; omit both for the mock harness."
+    exit 1
+fi
+# Derived: real-provider mode iff both are set. Used by the loadtest dispatch
+# below to choose banner text, request shape, and curl timeout.
+LT_REAL=false
+if [[ -n "$LT_PROVIDER" && -n "$LT_MODEL" ]]; then
+    LT_REAL=true
 fi
 
 # Route every `pnpm` invocation through corepack so the version pinned
@@ -2153,21 +2166,21 @@ do_loadtest() {
 
     local lt_extra=""
     if [[ "$LT_REAL" == true ]]; then
-        local lt_real_provider="${LT_PROVIDER:-ollama-local}"
-        lt_extra=" real=$lt_real_provider model=$LT_MODEL"
-        # Warn when mock-shape knobs were passed alongside --real. They'd be
-        # accepted by the JSON body silently and then ignored by LoadTestRunner
-        # which routes through the real provider; print the warning here so
-        # operators don't waste time tweaking a knob that has no effect.
+        lt_extra=" provider=$LT_PROVIDER model=$LT_MODEL"
+        # Warn when mock-shape knobs were passed alongside a real-provider
+        # run. They'd be accepted by the JSON body silently and then ignored
+        # by LoadTestRunner which routes through the real provider; print
+        # the warning here so operators don't waste time tweaking a knob
+        # that has no effect.
         if [[ ${#LT_MOCK_FLAGS_SET[@]} -gt 0 ]]; then
-            echo "Warning: ${LT_MOCK_FLAGS_SET[*]} ignored when --real is set" \
+            echo "Warning: ${LT_MOCK_FLAGS_SET[*]} ignored when --provider/--model are set" \
                  "(only the in-process mock harness reads them)."
         fi
     fi
     echo "==> Running load test: concurrency=$LT_CONCURRENCY turns=$LT_TURNS$lt_extra"
     # Mock-only knobs: ttft / tokens-per-second / response-tokens drive the
-    # in-process LoadTestHarness scenario and have no effect when --real
-    # routes through an external provider. Hide them in --real mode so the
+    # in-process LoadTestHarness scenario and have no effect when routing
+    # through an external provider. Hide them in real-provider mode so the
     # banner doesn't misleadingly imply they shape the run.
     if [[ "$LT_REAL" != true ]]; then
         echo "    ttft=${LT_TTFT_MS}ms tokens/s=$LT_TOKENS_PER_SECOND response=${LT_RESPONSE_TOKENS} tokens compress=$LT_COMPRESS"
@@ -2184,18 +2197,16 @@ do_loadtest() {
     echo "    message=\"$lt_msg_display\""
     echo ""
 
-    # Build the JSON body. Include real / provider / model only when set so
-    # the default mock-provider path stays bit-identical to the pre-JCLAW-186
-    # wire format. JSON-quote $LT_MODEL because Ollama tags carry a colon
-    # (`gemma4:latest`) which would otherwise look like a JSON struct.
+    # Build the JSON body. Include provider / model only when both are set
+    # — their joint presence is the wire-side signal for real-provider mode
+    # (the controller derives it the same way the CLI did above). JSON-quote
+    # $LT_MODEL because Ollama tags carry a colon (`gemma4:latest`) which
+    # would otherwise look like a JSON struct.
     local body
     body=$(printf '{"concurrency":%s,"turns":%s,"ttftMs":%s,"tokensPerSecond":%s,"responseTokens":%s,"compress":%s' \
         "$LT_CONCURRENCY" "$LT_TURNS" "$LT_TTFT_MS" "$LT_TOKENS_PER_SECOND" "$LT_RESPONSE_TOKENS" "$LT_COMPRESS")
     if [[ "$LT_REAL" == true ]]; then
-        body="$body,\"real\":true,\"model\":\"$LT_MODEL\""
-        if [[ -n "$LT_PROVIDER" ]]; then
-            body="$body,\"provider\":\"$LT_PROVIDER\""
-        fi
+        body="$body,\"provider\":\"$LT_PROVIDER\",\"model\":\"$LT_MODEL\""
     fi
     if [[ -n "$LT_MESSAGE" ]]; then
         # JSON-escape via python3 so the operator can pass quotes/backslashes/

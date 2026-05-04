@@ -99,14 +99,19 @@ public class ApiMetricsController extends Controller {
         int toolSleepMs = readInt(body, "toolSleepMs", 200);
         boolean compress = readBool(body, "compress", false);
 
-        // real=true swaps the mock harness for a registered provider plus the
-        // supplied model. provider defaults to ollama-local; pass
-        // ollama-cloud, openrouter, openai, etc. to drive cloud baselines.
-        // The AC3 perf baseline needs real network and real SSE timing,
-        // which the mock can't reproduce.
-        boolean real = readBool(body, "real", false);
+        // Real-provider mode is implied by both `provider` and `model` being
+        // set (non-blank). Operators don't pass a separate `real` flag — its
+        // joint presence is the signal. Mismatched half-set state is rejected
+        // below so callers can't accidentally fall through to mock mode by
+        // forgetting one of the two fields.
         String provider = readString(body, "provider", null);
         String model = readString(body, "model", null);
+        boolean providerSet = provider != null && !provider.isBlank();
+        boolean modelSet = model != null && !model.isBlank();
+        if (providerSet != modelSet) {
+            error(400, "provider and model must be set together (or both omitted for mock mode)");
+        }
+        boolean real = providerSet;  // both set ⇔ real-provider run
         // Optional per-run user message override. Default lives in
         // LoadTestRunner so the constant has one home.
         String userMessage = readString(body, "userMessage", null);
@@ -119,14 +124,11 @@ public class ApiMetricsController extends Controller {
         if (turns < 1 || turns > maxTurns) {
             error(400, "turns must be between 1 and " + maxTurns);
         }
-        if (real && (model == null || model.isBlank())) {
-            error(400, "model is required when real=true");
-        }
 
         // Enable the mock provider in its own transaction so it's committed
         // before the loadtest requests fire (they use separate connections).
-        // Skip when real=true — that path uses ollama-local, which the
-        // DefaultConfigJob already seeded at boot.
+        // Skip in real-provider mode — that path uses an existing registered
+        // provider seeded by DefaultConfigJob or the operator at boot.
         if (!real) {
             try {
                 JPA.withTransaction("default", false,
@@ -160,10 +162,10 @@ public class ApiMetricsController extends Controller {
             out.addProperty("minPerRequestMs", result.minPerRequestMs());
             out.addProperty("maxPerRequestMs", result.maxPerRequestMs());
             // Per-run averages — useful in both modes. For mock runs they
-            // confirm the harness honored the requested scenario; for --real
-            // runs they're the only reliable view of provider performance
-            // (the mock-shape ttftMs / tokensPerSecond inputs are ignored
-            // by the runner once it routes to a real provider).
+            // confirm the harness honored the requested scenario; for real-
+            // provider runs they're the only reliable view of provider
+            // performance (the mock-shape ttftMs / tokensPerSecond inputs are
+            // ignored by the runner once it routes to a real provider).
             out.addProperty("avgTtftMs", result.avgTtftMs());
             out.addProperty("avgResponseTokens", result.avgResponseTokens());
             // Reasoning tokens are surfaced separately so cross-model
@@ -172,12 +174,11 @@ public class ApiMetricsController extends Controller {
             // reasoning" model even when their visible-token rates match.
             out.addProperty("avgReasoningTokens", result.avgReasoningTokens());
             out.addProperty("avgTokensPerSec", round1(result.avgTokensPerSec()));
-            out.addProperty("realProvider", real);
+            // Provider/model are echoed only in real-provider mode. Their
+            // presence (vs absence) IS the run-mode signal — no separate
+            // `realProvider` field needed.
             if (real) {
-                out.addProperty("provider",
-                        provider == null || provider.isBlank()
-                                ? LoadTestRunner.DEFAULT_REAL_PROVIDER
-                                : provider);
+                out.addProperty("provider", provider);
                 out.addProperty("model", model);
             }
             // Per-turn breakdown only when turns > 1 (LoadTestRunner returns
