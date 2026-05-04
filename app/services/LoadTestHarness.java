@@ -58,21 +58,32 @@ public final class LoadTestHarness {
     }
 
     private static final Object lock = new Object();
-    private static volatile HttpServer server;
-    private static volatile ScheduledExecutorService scheduler;
+    // AtomicReference rather than `volatile HttpServer` so the type signature
+    // unambiguously says "atomic reference, not atomic state" — Sonar's
+    // S3077 fires on volatile non-primitive fields because volatile only
+    // protects the reference read/write, not operations on the object
+    // itself, and a future maintainer reading `volatile HttpServer` could
+    // plausibly assume thread-safe access to the server's internal state.
+    // All writes still happen inside synchronized(lock); the atomic wrapper
+    // is the fast-path for unsynchronized readers (isRunning(), port(),
+    // and the scheduler.get().schedule() call inside handle()).
+    private static final java.util.concurrent.atomic.AtomicReference<HttpServer> server =
+            new java.util.concurrent.atomic.AtomicReference<>();
+    private static final java.util.concurrent.atomic.AtomicReference<ScheduledExecutorService> scheduler =
+            new java.util.concurrent.atomic.AtomicReference<>();
     private static volatile int port;
     private static volatile Scenario scenario = Scenario.defaults();
 
     private LoadTestHarness() {}
 
     public static int port() { return port; }
-    public static boolean isRunning() { return server != null; }
+    public static boolean isRunning() { return server.get() != null; }
     public static void setScenario(Scenario s) { scenario = s; }
     public static Scenario scenario() { return scenario; }
 
     public static int start(int requestedPort) throws IOException {
         synchronized (lock) {
-            if (server != null) return port;
+            if (server.get() != null) return port;
             try {
                 return bindAndStart(requestedPort);
             } catch (java.net.BindException e) {
@@ -106,27 +117,27 @@ public final class LoadTestHarness {
         // the inter-token jitter, so even if two scheduler threads picked
         // them up, the earlier write has long completed before the later
         // one fires).
-        scheduler = Executors.newScheduledThreadPool(2, r -> {
+        scheduler.set(Executors.newScheduledThreadPool(2, r -> {
             var t = new Thread(r, "loadtest-mock-scheduler");
             t.setDaemon(true);
             return t;
-        });
+        }));
         s.start();
-        server = s;
+        server.set(s);
         port = s.getAddress().getPort();
         return port;
     }
 
     public static void stop() {
         synchronized (lock) {
-            if (server != null) {
-                server.stop(0);
-                server = null;
+            var s = server.getAndSet(null);
+            if (s != null) {
+                s.stop(0);
                 port = 0;
             }
-            if (scheduler != null) {
-                scheduler.shutdownNow();
-                scheduler = null;
+            var sch = scheduler.getAndSet(null);
+            if (sch != null) {
+                sch.shutdownNow();
             }
         }
     }
@@ -196,7 +207,7 @@ public final class LoadTestHarness {
         // round. The scheduler still drives the wait so the handler VT
         // stays off Thread.sleep.
         var done = new CompletableFuture<Void>();
-        scheduler.schedule(() -> {
+        scheduler.get().schedule(() -> {
             try {
                 for (int i = 0; i < scn.simulatedToolCalls(); i++) {
                     var callId = "call-mock-" + i;
@@ -232,6 +243,17 @@ public final class LoadTestHarness {
                 : 20;
         int n = scn.responseTokens();
         var done = new CompletableFuture<Void>();
+        // Per-call dedicated lock for serializing the per-stream write+flush
+        // pairs below. Replaces the prior `synchronized(out)` which Sonar
+        // flags as S2445 (synchronizing on a method parameter is a frequent
+        // source of bugs — caller could share the object, reentry could
+        // surprise, parameter could be null). Allocating a fresh Object per
+        // streamResponse call gives us per-stream serialization (the
+        // closure captures writeLock so all scheduled tasks for THIS
+        // stream share one mutex) without depending on the parameter's
+        // identity. Different streams get different writeLock instances
+        // and continue to write in parallel.
+        final var writeLock = new Object();
         // Schedule each chunk at an absolute deadline. TTFT is honored exactly
         // for the first chunk (so ttftDelayIsHonored() stays correct).
         // Subsequent chunks are spaced by jittered cadence (±50% around delayMs)
@@ -239,14 +261,14 @@ public final class LoadTestHarness {
         // +1 floor ensures consecutive deadlines are always strictly increasing
         // even when delayMs=1 (tps=1000+), without which two chunks could be
         // scheduled at the same instant and race each other on different
-        // scheduler threads. (Per-stream serialize via synchronized(out) below
-        // also guards against the race; the floor is belt-and-suspenders.)
+        // scheduler threads. (Per-stream serialize via synchronized(writeLock)
+        // below also guards against the race; the floor is belt-and-suspenders.)
         var rnd = ThreadLocalRandom.current();
         long cumDelayMs = Math.max(0, scn.ttftMs());
         for (int i = 0; i < n; i++) {
             int idx = i;
             boolean isLast = (i == n - 1);
-            scheduler.schedule(() -> {
+            scheduler.get().schedule(() -> {
                 try {
                     var tok = (idx == 0 ? "Hello" : " tok" + idx);
                     var chunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
@@ -258,9 +280,9 @@ public final class LoadTestHarness {
                     // sync, two concurrently-firing scheduled tasks for the
                     // same stream interleave bytes inside chunk-size headers
                     // and the receiver throws "Illegal character in chunk
-                    // size: N". synchronized on `out` is per-stream, so
+                    // size: N". writeLock is per-call (allocated above), so
                     // different streams' writes still proceed in parallel.
-                    synchronized (out) {
+                    synchronized (writeLock) {
                         out.write(chunk.getBytes(StandardCharsets.UTF_8));
                         out.flush();
                         if (isLast) {
