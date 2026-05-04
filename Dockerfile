@@ -29,7 +29,36 @@ WORKDIR /staging
 COPY dist/jclaw.zip /staging/jclaw.zip
 RUN unzip -q jclaw.zip && rm jclaw.zip
 
-# ── Stage 2: Runtime on Ubuntu 26.04 + Zulu JRE 25 ──────────────────────────
+# ── Stage 2: Pre-install Chromium on a Playwright-supported base ────────────
+# Playwright's CLI fingerprints the OS via /etc/os-release + uname and matches
+# against an internal allowlist. Ubuntu 26.04 (resolute) is a development
+# release Microsoft hasn't published browser builds for on arm64 yet, so an
+# `install chromium` invocation on that base aborts with "Playwright does not
+# support chromium on ubuntu26.04-arm64". The pre-3aba910 multi-stage build
+# avoided this by accident — its `backend-build` stage was on
+# azul/zulu-openjdk:25 (noble = 24.04, fully supported) and the runtime stage
+# just COPY'd /opt/pw-browsers across. The dist-consumer rewrite collapsed
+# everything onto resolute, lost that platform decoupling, and broke arm64.
+#
+# Restore the decoupling with a dedicated stage on Azul's Zulu image (noble-
+# based). All this stage does is run the Java CLI's `install chromium` against
+# the playwright JARs from the dist tarball; the resulting /opt/pw-browsers
+# tree gets COPY'd into the resolute runtime stage below. `install chromium`
+# without `--with-deps` only downloads the browser tarball — no launch, no
+# shared-lib check — so this stage doesn't need the runtime's libnss3/libcups2
+# stack. The runtime stage still installs those for actual browser launches.
+FROM azul/zulu-openjdk:25.0.3 AS chromium-stage
+
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+
+# Only the Playwright JARs are needed; rest of the dist tree is dead weight in
+# this stage. Classpath shape matches the pre-3aba910 build's invocation.
+COPY --from=dist-stage /staging/jclaw/lib/ /tmp/lib/
+
+RUN java -cp "$(echo /tmp/lib/playwright-*.jar /tmp/lib/driver-*.jar | tr ' ' ':')" \
+        com.microsoft.playwright.CLI install chromium
+
+# ── Stage 3: Runtime on Ubuntu 26.04 + Zulu JRE 25 ──────────────────────────
 # Build atop ubuntu:26.04 rather than azul/zulu-openjdk:25-jre-headless-latest
 # (which is pinned to Ubuntu 22.04 / jammy) so apt-shipped tesseract-ocr is
 # 5.5.x rather than jammy's frozen 4.1.1. Smaller too: ubuntu:26.04 is ~160 MB
@@ -107,12 +136,9 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 # public+skills+workspace tree into place in one layer.
 COPY --from=dist-stage /staging/jclaw/ /app/
 
-# Install Playwright browsers atop the JARs that came with the dist's
-# lib/. Done at runtime-stage build time (not at container start) so the
-# browser binary is baked into the image. Same classpath shape as the
-# pre-zip build used.
-RUN java -cp "$(echo /app/lib/playwright-*.jar /app/lib/driver-*.jar | tr ' ' ':')" \
-        com.microsoft.playwright.CLI install chromium
+# Pull the pre-installed Chromium browser tree from chromium-stage. See the
+# comment block on that stage for why the install can't run here directly.
+COPY --from=chromium-stage /opt/pw-browsers /opt/pw-browsers
 
 # Ensure operator-data dirs exist for first-run; both end up empty in
 # the image and are populated at container start (data/ via H2, logs/
