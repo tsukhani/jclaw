@@ -30,17 +30,6 @@ public final class LatencyTrace {
     private final ConcurrentHashMap<String, Long> marks = new ConcurrentHashMap<>();
     private final AtomicLong toolExecMs = new AtomicLong();
     private final AtomicInteger toolRoundCount = new AtomicInteger();
-    // JCLAW-201 follow-up: bisect stream_body into downstream-emit cost vs
-    // upstream/processing cost. emitNs accumulates wall time spent inside the
-    // controller's onToken callback (i.e. sse.send → Netty writeChunk).
-    // chunkCount is the number of token chunks emitted. The implied
-    // upstream/middleware cost = stream_body_ms − stream_emit_ms.
-    private final AtomicLong streamEmitNs = new AtomicLong();
-    private final AtomicLong streamLambdaNs = new AtomicLong();
-    private final AtomicLong streamMaxGapNs = new AtomicLong();
-    private final AtomicLong streamMinGapNs = new AtomicLong();
-    private final AtomicInteger streamBigGaps = new AtomicInteger();
-    private final AtomicInteger streamChunkCount = new AtomicInteger();
     private volatile boolean ended;
 
     public LatencyTrace() {
@@ -107,41 +96,6 @@ public final class LatencyTrace {
     public void addToolRound(long elapsedMs) {
         toolExecMs.addAndGet(elapsedMs);
         toolRoundCount.incrementAndGet();
-    }
-
-    /**
-     * JCLAW-201 follow-up: record the wall-clock ns spent inside one downstream
-     * onToken callback (sse.send → Netty writeChunk). Caller bookends with
-     * nanoTime around the dispatch. Increments the chunk counter on each call.
-     */
-    public void addStreamEmit(long elapsedNs) {
-        streamEmitNs.addAndGet(elapsedNs);
-        streamChunkCount.incrementAndGet();
-    }
-
-    /**
-     * JCLAW-201 follow-up: record the total wall-clock ns spent inside the
-     * LLM provider's per-chunk lambda body (delta dispatch + property
-     * accessor + onToken). Compared against stream_body to bisect upstream
-     * read wait vs in-lambda processing.
-     */
-    public void setStreamLambdaNs(long totalNs) {
-        streamLambdaNs.set(totalNs);
-    }
-
-    /** JCLAW-201 follow-up: largest gap between two consecutive chunks. */
-    public void setStreamMaxGapNs(long maxNs) {
-        streamMaxGapNs.set(maxNs);
-    }
-
-    /** JCLAW-201 follow-up: smallest gap between two consecutive chunks. */
-    public void setStreamMinGapNs(long minNs) {
-        if (minNs > 0 && minNs != Long.MAX_VALUE) streamMinGapNs.set(minNs);
-    }
-
-    /** JCLAW-201 follow-up: count of inter-chunk gaps that exceed 100ms. */
-    public void setStreamBigGaps(int count) {
-        streamBigGaps.set(count);
     }
 
     /**
@@ -225,33 +179,6 @@ public final class LatencyTrace {
         if (toolRoundCount.get() > 0) {
             LatencyStats.record(channel, "tool_exec", toolExecMs.get());
             LatencyStats.record(channel, "tool_round_count", toolRoundCount.get());
-        }
-
-        // JCLAW-201 follow-up: stream_emit + stream_chunks let us bisect
-        // stream_body. If stream_emit ≈ stream_body, downstream sse.send is
-        // the bottleneck. If stream_emit << stream_body, the gap is on the
-        // upstream OkHttp read or in-lambda processing (PropertiesEnhancer
-        // reflection, JSON parsing, etc.).
-        int chunks = streamChunkCount.get();
-        if (chunks > 0) {
-            LatencyStats.record(channel, "stream_emit", nsToMs(streamEmitNs.get()));
-            LatencyStats.record(channel, "stream_chunks", chunks);
-        }
-        long lambdaNs = streamLambdaNs.get();
-        if (lambdaNs > 0) {
-            LatencyStats.record(channel, "stream_lambda", nsToMs(lambdaNs));
-        }
-        long maxGapNs = streamMaxGapNs.get();
-        if (maxGapNs > 0) {
-            LatencyStats.record(channel, "stream_max_gap", nsToMs(maxGapNs));
-        }
-        long minGapNs = streamMinGapNs.get();
-        if (minGapNs > 0) {
-            LatencyStats.record(channel, "stream_min_gap", nsToMs(minGapNs));
-        }
-        int bigGaps = streamBigGaps.get();
-        if (bigGaps > 0) {
-            LatencyStats.record(channel, "stream_big_gaps", bigGaps);
         }
     }
 
