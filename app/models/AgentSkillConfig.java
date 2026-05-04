@@ -1,6 +1,8 @@
 package models;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.Cache;
+import org.hibernate.annotations.CacheConcurrencyStrategy;
 import play.db.jpa.Model;
 
 import java.util.List;
@@ -14,6 +16,10 @@ import java.util.List;
         @Index(name = "idx_agent_skill_config_agent", columnList = "agent_id"),
         @Index(name = "idx_agent_skill_config_unique", columnList = "agent_id,skill_name", unique = true)
 })
+// JCLAW-205: Hibernate L2 cache via Caffeine. Per-agent skill overrides
+// are read on every chat turn (SkillLoader uses these to filter the
+// on-disk skill scan).
+@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 public class AgentSkillConfig extends Model {
 
     @ManyToOne(optional = false)

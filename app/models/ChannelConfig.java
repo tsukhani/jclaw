@@ -1,6 +1,8 @@
 package models;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.Cache;
+import org.hibernate.annotations.CacheConcurrencyStrategy;
 import play.db.jpa.Model;
 
 import java.time.Instant;
@@ -8,6 +10,11 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Entity
 @Table(name = "channel_config")
+// JCLAW-205: Hibernate L2 cache via Caffeine. Channel configs are tiny
+// (~5 rows) and read on every inbound webhook message. The hand-rolled
+// CachedSnapshot cache below predates L2; once JCLAW-203 lands the
+// hand-rolled layer can be removed entirely since L2 covers it.
+@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 public class ChannelConfig extends Model {
 
     @Column(name = "channel_type", nullable = false, unique = true)

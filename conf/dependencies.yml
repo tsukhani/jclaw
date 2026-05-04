@@ -152,19 +152,30 @@ require:
             # Playwright above.
             - org.slf4j -> slf4j-simple
     - org.hdrhistogram -> HdrHistogram 2.2.2
-    # Pin junit-vintage-engine to match the platform (1.13.4) that the rest of the
-    # JUnit graph resolves to. A transitive dep (pdf-test via flexmark-test) pulls
-    # in vintage 5.9.3, which uses junit-platform-commons 1.9.x — the resulting
-    # ClassFilter NoClassDefFoundError kills the TestRunner before any test runs.
-    #
-    # Vintage drags junit 4.13.2 → hamcrest-core 1.3 onto the runtime classpath.
-    # No jclaw source imports org.hamcrest (Jupiter + Play's UnitTest only), so
-    # hamcrest-core is dead weight. JUnit 4's Assert.assertThat(T, Matcher)
-    # references Matcher reflectively; if play autotest goes red with
-    # NoClassDefFoundError, drop this exclude.
-    - org.junit.vintage -> junit-vintage-engine 5.14.4:
+    # JCLAW-205: Caffeine's JSR-107 (JCache) provider. Required by Hibernate's
+    # JCacheRegionFactory to back the second-level entity cache (see
+    # hibernate.cache.* in application.conf). The fork already ships caffeine
+    # itself (the typed Cache used by play.cache.Caches.named) and
+    # hibernate-jcache (the Hibernate→JCache bridge); this artifact is the
+    # missing piece that registers Caffeine as the JCache CachingProvider via
+    # META-INF/services/javax.cache.spi.CachingProvider. Version pinned to
+    # match the caffeine-3.2.3 the fork ships — the two artifacts share an
+    # internal API surface and must be co-versioned.
+    - com.github.ben-manes.caffeine -> jcache 3.2.3:
         exclude:
-            - org.hamcrest -> hamcrest-core
+            # caffeine-jcache pulls OSGi-DS annotations transitively for its
+            # bundle manifest; runtime classpath doesn't need any of them.
+            - org.osgi -> *
+            - biz.aQute.bnd -> *
+    # JUnit: rely entirely on what the play1 fork ships
+    # (framework/lib/junit-jupiter-{api,engine,params}-6.0.3 plus the matching
+    # junit-platform-* 6.0.3). No vintage-engine pull from jclaw — every test
+    # in /test extends play.test.UnitTest or FunctionalTest and uses Jupiter
+    # API exclusively (verified by `grep -r "import org.junit" test/` —
+    # zero JUnit 4 imports). Pulling vintage-engine here would drag in
+    # junit-jupiter-5.x and junit-4.13.2 jars that conflict with the fork's
+    # JUnit 6 platform classes (same FQNs, different bytecode → undefined
+    # classloader resolution → split-brain test discovery).
     # Telegram Bot API SDK. telegrambots-client ships the OkHttpTelegramClient +
     # typed API models (SendMessage, Update, etc); telegrambots-longpolling is
     # the framework-agnostic runner used when transport=POLLING (no Spring).

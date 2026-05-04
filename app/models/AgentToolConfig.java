@@ -1,6 +1,8 @@
 package models;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.Cache;
+import org.hibernate.annotations.CacheConcurrencyStrategy;
 import play.db.jpa.Model;
 
 /**
@@ -12,6 +14,9 @@ import play.db.jpa.Model;
         @Index(name = "idx_agent_tool_agent", columnList = "agent_id"),
         @Index(name = "idx_agent_tool_unique", columnList = "agent_id,tool_name", unique = true)
 })
+// JCLAW-205: Hibernate L2 cache via Caffeine. Per-agent tool overrides
+// are read on every chat turn to compute the disabled-tool set.
+@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 public class AgentToolConfig extends Model {
 
     @ManyToOne(optional = false)

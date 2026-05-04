@@ -1,6 +1,8 @@
 package models;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.Cache;
+import org.hibernate.annotations.CacheConcurrencyStrategy;
 import play.db.jpa.Model;
 
 import java.time.Instant;
@@ -8,6 +10,13 @@ import java.util.List;
 
 @Entity
 @Table(name = "agent")
+// JCLAW-205: Hibernate L2 cache via Caffeine. Agent is the most-looked-up
+// entity in the chat path (Agent.findById / findByName, ~30 call sites);
+// READ_WRITE strategy keeps strict consistency on save/delete via the
+// SessionFactory's transactional cache invalidation. Hand-rolled service-
+// layer caching of findById is now redundant — JCLAW-204 was downsized
+// accordingly.
+@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 public class Agent extends Model {
 
     public static final String MAIN_AGENT_NAME = "main";
