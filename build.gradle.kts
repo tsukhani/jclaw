@@ -4,7 +4,7 @@ plugins {
 
 play1 {
     frameworkPath.set(file("/opt/play1"))
-    frameworkVersion.set("1.13.0")
+    frameworkVersion.set("1.13.1")
     modules("docviewer")
 }
 

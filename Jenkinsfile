@@ -19,21 +19,20 @@ pipeline {
     }
 
     environment {
-        PLAY_HOME = '/opt/play-1.11.x'
+        PLAY_HOME = '/opt/play1'
         PATH = "${PLAY_HOME}:${env.PATH}"
         PNPM_HOME = "${env.WORKSPACE}/.pnpm-store"
-        // Disable Gradle's VFS file watcher under Jenkins. The file watcher
-        // hits an "Already watching path: <workspace>" race during daemon
-        // startup on this agent's workspace layout, which aborts the daemon
-        // before playPrecompile/playAutotest can run. CI gets nothing from
-        // file watching anyway — every build runs against a fresh checkout.
-        //
-        // -Xmx2g: the gradlew CLIENT (launcher) JVM needs heap too. Without
-        // it the launcher logs "current JVM process isn't compatible with
-        // build requirement... single-use Daemon will be forked" — that
-        // fallback path was returning non-zero to the launcher's parent
-        // even when the forked daemon itself succeeded. (org.gradle.jvmargs
-        // in gradle.properties only sizes the *daemon*, not the launcher.)
+        // GRADLE_OPTS: applied to every Gradle launcher invocation in this
+        // pipeline. Two flags worth carrying:
+        //   -Dorg.gradle.vfs.watch=false — suppresses the "Already watching
+        //     path: <workspace>" warning that Gradle's VFS subsystem emits on
+        //     this agent's workspace layout. CI gets nothing from file
+        //     watching since every build runs against a fresh checkout.
+        //   -Xmx2g — sizes the launcher (gradlew client) JVM. Without it
+        //     Gradle warns "current JVM process isn't compatible with build
+        //     requirement" and forks a single-use daemon. Harmless but
+        //     noisy. (org.gradle.jvmargs in gradle.properties only sizes
+        //     the daemon, not the launcher.)
         GRADLE_OPTS = '-Dorg.gradle.vfs.watch=false -Xmx2g'
     }
 
@@ -56,40 +55,21 @@ pipeline {
         }
 
         stage('Build') {
-            // Backend + Frontend run serially; see prior commit. Wrapping
-            // precompile in a script block so we can dump the agent's
-            // /opt layout and the Gradle daemon log on failure (the daemon
-            // dies silently after settings.gradle.kts evaluation; we need
-            // the daemon-side log to find out why).
-            steps {
-                script {
-                    try {
-                        // Dropped --no-daemon: triggered Gradle's "fallback
-                        // single-use daemon" path which returned non-zero
-                        // to the launcher even when the daemon itself
-                        // exited 0 (visible in the prior daemon log dump).
-                        // Letting Gradle use a normal daemon avoids that
-                        // quirk. --info --stacktrace stay for one more run
-                        // until we see a green build.
-                        sh 'play precompile --no-configuration-cache --info --stacktrace'
-                    } catch (Exception e) {
-                        sh '''
-                            echo "=== /opt directory listing ==="
-                            ls -la /opt/ || true
-                            echo "=== /opt/play1 listing ==="
-                            ls -la /opt/play1 2>&1 | head -30 || true
-                            echo "=== /opt/play-1.11.x listing ==="
-                            ls -la /opt/play-1.11.x 2>&1 | head -30 || true
-                            echo "=== latest gradle daemon log (last 200 lines) ==="
-                            ls -1t /var/lib/jenkins/.gradle/daemon/9.5.0/daemon-*.out.log 2>/dev/null | head -1 | xargs -r tail -200 || echo "no daemon log found"
-                            echo "=== free memory ==="
-                            free -m || true
-                        '''
-                        throw e
+            parallel {
+                stage('Backend') {
+                    steps {
+                        // PF-90: Gradle handles dependency resolution natively;
+                        // no more `play deps --sync` step. `play precompile`
+                        // resolves transitively as needed.
+                        sh 'play precompile'
                     }
                 }
-                dir('frontend') {
-                    sh 'npx nuxi generate'
+                stage('Frontend') {
+                    steps {
+                        dir('frontend') {
+                            sh 'npx nuxi generate'
+                        }
+                    }
                 }
             }
         }
@@ -98,8 +78,7 @@ pipeline {
             parallel {
                 stage('Backend') {
                     steps {
-                        // --no-configuration-cache: see Build/Backend stage above.
-                        sh 'play autotest --no-configuration-cache'
+                        sh 'play autotest'
                         // Convert the JaCoCo binary exec dump that the test
                         // JVM wrote (via %test.javaagent.path=bin/jacocoagent.jar
                         // in conf/application.conf) into the XML format Sonar
