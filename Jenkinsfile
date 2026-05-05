@@ -55,12 +55,17 @@ pipeline {
                         // PF-90: Gradle handles dependency resolution natively;
                         // no more `play deps --sync` step. `play precompile`
                         // resolves transitively as needed.
-                        // --no-configuration-cache: under Jenkins the daemon
-                        // exits silently between config and execution phases
-                        // when config cache is on; bypassing config cache here
-                        // restores task execution. Dev keeps the speedup via
-                        // gradle.properties (org.gradle.configuration-cache=true).
-                        sh 'play precompile --no-configuration-cache'
+                        // --no-configuration-cache: see prior commit; Jenkins
+                        // daemon was exiting silently with config cache on.
+                        // --no-daemon --info --stacktrace: TEMPORARY diagnostic
+                        // flags. precompile still fails silently in this CI
+                        // even with config cache off; --no-daemon runs gradle
+                        // inline so any error reaches stdout instead of
+                        // disappearing with a killed daemon, and --info
+                        // --stacktrace surface root causes. Roll back to plain
+                        // --no-configuration-cache once the failure is
+                        // identified.
+                        sh 'play precompile --no-configuration-cache --no-daemon --info --stacktrace'
                     }
                 }
                 stage('Frontend') {
