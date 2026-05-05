@@ -81,7 +81,7 @@ All webhook inbounds flow: `WebhookXController.webhook` → signature verify →
 
 ## Shared deploy artifact
 
-The Play dist zip is backend-only. Each deploy consumer stages the SPA independently: `jclaw.sh start` runs `nuxi generate` and copies `.output/public` to `public/spa/` on every boot; the Dockerfile does the same at image-build time via a multi-stage `COPY --from=frontend-build`. There is no independent frontend release pipeline, and no SPA bytes travel inside `dist/jclaw.zip`.
+The 1.13.x `playBundle` task writes a self-contained `dist/jclaw-bundle.zip` that includes both the precompiled backend AND the static SPA — `jclaw.sh dist` runs `nuxi generate`, copies `frontend/.output/public` to `public/spa/`, then `playBundle` packs `public/` along with `precompiled/`, `conf/`, `modules/`, framework jar + framework lib, and Gradle-resolved deps under `lib/`. There is no independent frontend release pipeline. The Docker image takes a different path: it stages the SPA at image-build time via a multi-stage `COPY --from=frontend-build` rather than reusing the bundled copy, but the bundle artifact itself does carry the SPA bytes.
 
 ## Failure modes to know about
 

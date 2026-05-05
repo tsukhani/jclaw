@@ -49,7 +49,7 @@ Commands:
   loadtest  Drive the in-process load-test harness against /api/chat/stream
   test      Run backend (play autotest) + frontend (pnpm test) and report a
             consolidated pass/fail summary. Exits non-zero on any failure.
-  dist      Build a self-contained dist artifact at dist/jclaw.zip and
+  dist      Build a self-contained dist artifact at dist/jclaw-bundle.zip and
             exit. Runs precompile + frontend build + zip; operators
             unzip the result wherever they want to install it.
   help      Print this usage reference and exit. Equivalent to --help / -h.
@@ -122,7 +122,7 @@ Examples:
   ./jclaw.sh --dev start                              # Start in dev mode
   ./jclaw.sh --dev --backend-port 8080 start          # Dev mode with custom backend port
   ./jclaw.sh start                                    # Start production in current directory
-  ./jclaw.sh dist                                     # Build dist/jclaw.zip (then unzip wherever)
+  ./jclaw.sh dist                                     # Build dist/jclaw-bundle.zip (then unzip wherever)
   ./jclaw.sh --dev stop                               # Stop dev mode services
   ./jclaw.sh stop                                     # Stop production in current directory
   ./jclaw.sh loadtest                                 # Drive default 10 workers x 5-turn conversations against :9000
@@ -603,7 +603,7 @@ usage_dist() {
         cat <<EOF
 Usage: jclaw.sh dist
 
-Build a self-contained dist artifact at dist/jclaw.zip and exit.
+Build a self-contained dist artifact at dist/jclaw-bundle.zip and exit.
 Runs precompile + frontend build + zip; the resulting zip is ready
 to copy anywhere (a release upload, a Docker COPY context, an scp
 target). Operators unzip it wherever they want to install JClaw, then
@@ -617,7 +617,7 @@ runtime expects precompiled/, conf/, lib/, public/ and starts via
 
 Example:
   ./jclaw.sh dist
-  unzip -o dist/jclaw.zip -d /opt
+  unzip -o dist/jclaw-bundle.zip -d /opt
   cd /opt/jclaw && ./jclaw.sh start
 EOF
     else
@@ -1086,7 +1086,7 @@ load_env_file() {
 
 # First-run helper for the start paths: if certs/.env is absent AND the
 # conf-named secret variable is unset in the parent shell, generate one.
-# This is what makes `./jclaw.sh start` work on a fresh jclaw.zip install
+# This is what makes `./jclaw.sh start` work on a fresh jclaw-bundle.zip install
 # with no developer setup step. We DON'T auto-create when the operator
 # has already exported the variable externally — that'd overwrite their
 # intent with a stored random value they didn't ask for. We DON'T
@@ -1676,9 +1676,9 @@ do_setup() {
 # prod mode and skips both compile passes (and refuses to start if
 # precompiled/ is missing).
 #
-# Pure builder: produces $SCRIPT_DIR/dist/jclaw.zip and exits. Operators
-# unzip the resulting tarball wherever they want to install JClaw —
-# `unzip -o dist/jclaw.zip -d /opt && cd /opt/jclaw && ./jclaw.sh start`.
+# Pure builder: produces $SCRIPT_DIR/dist/jclaw-bundle.zip and exits.
+# Operators unzip the resulting tarball wherever they want to install
+# JClaw — `unzip -o dist/jclaw-bundle.zip -d /opt && cd /opt/jclaw && ./jclaw.sh start`.
 do_dist() {
     cd "$SCRIPT_DIR"
 
@@ -1705,58 +1705,18 @@ do_dist() {
     echo "==> Packaging application (play dist)..."
     play dist
 
-    # play dist names its output after the workspace basename
-    # (os.path.basename(app.path) — see /opt/play1/framework/pym/play/
-    # commands/dist.py). In a dev clone where SCRIPT_DIR is .../jclaw
-    # that's "jclaw.zip"; in a Jenkins workspace it might be
-    # "jclaw-pipeline.zip" or whatever the job is named. Force the
-    # filename to a stable jclaw.zip so downstream consumers
-    # (Dockerfile COPY, GitHub Release upload, operator's own scp /
-    # unzip flow) don't have to know the workspace basename.
-    local app_name produced zip_file
-    app_name=$(basename "$SCRIPT_DIR")
-    produced="$SCRIPT_DIR/dist/${app_name}.zip"
-    zip_file="$SCRIPT_DIR/dist/jclaw.zip"
-    if [[ -f "$produced" && "$produced" != "$zip_file" ]]; then
-        mv "$produced" "$zip_file"
-    fi
+    # 1.13.x's playBundle (PF-90) writes a self-contained zip directly to
+    # dist/jclaw-bundle.zip — stable name (driven by rootProject.name in
+    # settings.gradle.kts), stable inner prefix "jclaw/", and includes
+    # everything the runtime needs: precompiled bytecode, public/ (with
+    # the staged SPA), modules/, conf/, framework jar + framework lib,
+    # and Gradle-resolved deps under lib/. No filename rename, no manual
+    # append for gitignored build artifacts, no inner-prefix normalization
+    # — all three were 1.12 workarounds and playBundle obviates them.
+    local zip_file="$SCRIPT_DIR/dist/jclaw-bundle.zip"
     if [[ ! -f "$zip_file" ]]; then
         echo "Error: play dist did not create $zip_file"
         exit 1
-    fi
-
-    # Append build artifacts that play dist's git-based inventory drops.
-    # play1's dist command shells out to `git ls-files --cached --others
-    # --exclude-standard` to enumerate files, which honours .gitignore —
-    # and precompiled/, public/spa/, and lib/ are all gitignored as
-    # build artifacts that change every run. Without this append the
-    # zip ships an unrunnable skeleton (Play needs all three). cd to
-    # the SCRIPT_DIR parent so zip's relative arcnames land at the same
-    # `${app_name}/...` prefix play dist used (gets renormalized below
-    # if app_name differs from "jclaw").
-    echo "==> Appending build artifacts (precompiled/, public/spa/, lib/) to dist zip..."
-    local parent
-    parent=$(dirname "$SCRIPT_DIR")
-    ( cd "$parent" && zip -qr "$zip_file" \
-        "$app_name/precompiled" \
-        "$app_name/public/spa" \
-        "$app_name/lib" )
-
-    # Normalize the inner top-level directory to "jclaw/" regardless of
-    # the workspace basename. Same motivation as the filename rename
-    # above: downstream consumers extract with `unzip` (no
-    # --strip-components) and need a predictable path. Skip when the
-    # prefix is already "jclaw" — most dev clones, no-op.
-    if [[ "$app_name" != "jclaw" ]]; then
-        echo "==> Normalizing inner zip prefix '$app_name/' → 'jclaw/'..."
-        local stage="$SCRIPT_DIR/dist/_stage"
-        rm -rf "$stage"
-        mkdir -p "$stage"
-        ( cd "$stage" && unzip -q "$zip_file" )
-        mv "$stage/$app_name" "$stage/jclaw"
-        rm -f "$zip_file"
-        ( cd "$stage" && zip -qr "$zip_file" jclaw )
-        rm -rf "$stage"
     fi
 
     echo "==> Distribution ready at $zip_file"
@@ -1876,7 +1836,7 @@ do_start_prod() {
     # points nowhere before bailing.
     check_stale_h2_lock_or_exit
 
-    # First-run guard for jclaw.zip distributions: if no certs/.env and
+    # First-run guard for jclaw-bundle.zip distributions: if no certs/.env and
     # the conf-named secret variable isn't already set in the parent
     # shell, generate one on the fly so end-users who skip the developer-
     # only `setup` command don't get blocked. Then source certs/.env into
@@ -1955,12 +1915,12 @@ do_start_prod() {
         # are missing!!" with no hint at the operator-side cause.
         if [[ ! -d precompiled/java ]]; then
             echo "Error: dist install is missing precompiled/java."
-            echo "       The tarball was built without a precompile pass — re-run \`./jclaw.sh dist\` from a developer clone and re-unzip the resulting dist/jclaw.zip."
+            echo "       The tarball was built without a precompile pass — re-run \`./jclaw.sh dist\` from a developer clone and re-unzip the resulting dist/jclaw-bundle.zip."
             exit 1
         fi
         if [[ ! -d public/spa ]]; then
             echo "Error: dist install is missing public/spa."
-            echo "       The tarball was built without a frontend build — re-run \`./jclaw.sh dist\` from a developer clone and re-unzip the resulting dist/jclaw.zip."
+            echo "       The tarball was built without a frontend build — re-run \`./jclaw.sh dist\` from a developer clone and re-unzip the resulting dist/jclaw-bundle.zip."
             exit 1
         fi
         echo "==> Dist install detected (no app/, no frontend/) — skipping precompile + SPA build"

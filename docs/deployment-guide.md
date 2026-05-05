@@ -6,7 +6,7 @@ How JClaw is built, packaged, and shipped.
 
 | Artifact | Source | Consumers |
 |---|---|---|
-| `dist/jclaw.zip` | `play dist` (backend only; SPA staged by the consumer at deploy/start time) | Manual `./jclaw.sh --deploy` flow, GitHub Releases. |
+| `dist/jclaw-bundle.zip` | `play dist` → `playBundle` Gradle task (self-contained: precompiled bytecode, framework jar + lib, Gradle-resolved deps under `lib/`, `conf/`, `modules/`, `public/` with the staged SPA) | Manual `./jclaw.sh --deploy` flow, GitHub Releases. |
 | `ghcr.io/tsukhani/jclaw:<tag>` | Multi-stage `Dockerfile` | `docker-compose.yml`, anywhere a container runtime is available. |
 | GitHub Release | Jenkins `Release` stage | End-users downloading the dist zip. |
 
@@ -22,12 +22,12 @@ Setup ──► Build (parallel BE + FE) ──► Test (parallel BE + FE)
 Key steps:
 
 - **Setup** — `play version`, `corepack prepare pnpm@10.33.0 --activate`, `pnpm install --frozen-lockfile`.
-- **Build.Backend** — `play deps --sync && play precompile`.
+- **Build.Backend** — `play precompile` (Gradle resolves deps as a transitive step; PF-90 dropped the legacy `play deps --sync`).
 - **Build.Frontend** — `(cd frontend && npx nuxi generate)`.
 - **Test.Backend** — `play autotest` + JUnit XML publish from `test-result/*.xml`.
 - **Test.Frontend** — `(cd frontend && pnpm test)`.
-- **Package** — `play dist` produces the zip, which is renamed to `dist/jclaw.zip` and archived as a Jenkins artifact. The SPA is **not** injected into the zip; each consumer (bare-metal `jclaw.sh` or Docker build) generates and stages the SPA itself.
-- **Release** (when param `RELEASE=true`): creates git tag `v<application.version>`, deletes any pre-existing GitHub Release at that tag, uploads `dist/jclaw.zip`, then builds and pushes `ghcr.io/tsukhani/jclaw:<tag>` and `:latest`.
+- **Package** — `play dist` (the `playBundle` Gradle task) writes a self-contained `dist/jclaw-bundle.zip` that's archived as a Jenkins artifact. The SPA **is** injected into the zip — `jclaw.sh dist` runs `nuxi generate` and copies `frontend/.output/public` into `public/spa/` before `play dist` packs the bundle, and `playBundle`'s include list covers `public/`. So the artifact is a JDK-only-runs-anywhere zip; no separate SPA build at deploy time.
+- **Release** (when param `RELEASE=true`): creates git tag `v<application.version>`, deletes any pre-existing GitHub Release at that tag, uploads `dist/jclaw-bundle.zip`, then builds and pushes `ghcr.io/tsukhani/jclaw:<tag>` and `:latest`.
 - **Cleanup** — Keeps the 5 most recent GitHub Releases; prunes old GHCR versions while preserving whatever `:latest` currently points to.
 
 ## Shell deploy (no Docker)

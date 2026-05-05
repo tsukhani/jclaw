@@ -116,13 +116,14 @@ pipeline {
         stage('Sonar Analysis') {
             steps {
                 // withSonarQubeEnv('SonarQube') injects SONAR_HOST_URL and
-                // SONAR_AUTH_TOKEN from the server configured in Manage
-                // Jenkins → System → SonarQube servers (label: SonarQube,
-                // pointing at https://sonar.abundent.com). `tool 'Sonar'`
-                // resolves to the SonarQube Scanner installation under
-                // Manage Jenkins → Tools → SonarQube Scanner installations
-                // (label: Sonar, currently auto-installed v3.3.0.1492 from
-                // Maven Central).
+                // SONAR_TOKEN (also SONAR_AUTH_TOKEN on older plugin versions)
+                // from the server configured in Manage Jenkins → System →
+                // SonarQube servers (label: SonarQube, pointing at
+                // https://sonar.abundent.com). The org.sonarqube Gradle plugin
+                // (declared in build.gradle.kts) reads those env vars
+                // automatically — no `tool 'Sonar'` reference needed because
+                // the plugin downloads the scanner engine via Maven on first
+                // use and caches it under ~/.gradle/caches/.
                 //
                 // projectVersion is passed dynamically so each analysis run is
                 // tagged with the actual application.version being analyzed,
@@ -140,9 +141,7 @@ pipeline {
                             returnStdout: true
                         ).trim()
                         withSonarQubeEnv('SonarQube') {
-                            sh "${tool 'Sonar'}/bin/sonar-scanner " +
-                               "-Dproject.settings=conf/sonar.properties " +
-                               "-Dsonar.projectVersion=v${appVersion}"
+                            sh "./gradlew sonar -Dsonar.projectVersion=v${appVersion}"
                         }
                     }
                 }

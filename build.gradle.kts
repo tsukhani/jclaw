@@ -1,11 +1,80 @@
 plugins {
     id("org.playframework.play1")
+    id("org.sonarqube") version "7.3.0.8198"
 }
 
 play1 {
     frameworkPath.set(file("/opt/play1"))
     frameworkVersion.set("1.13.1")
     modules("docviewer")
+}
+
+sonar {
+    properties {
+        property("sonar.projectKey", "abundent:jclaw")
+        property("sonar.projectName", "JClaw")
+        // Overridden by the Jenkinsfile via -Dsonar.projectVersion=v${appVersion}
+        // so each analysis run is tagged with the release it was run against.
+        property("sonar.projectVersion", "v1")
+
+        // Both the Play backend (app/) and the Nuxt frontend (frontend/) are
+        // analyzed; SonarQube routes each file to the appropriate language
+        // analyzer (Java, TypeScript, Vue, CSS) automatically.
+        property("sonar.sources", "app,frontend")
+        property("sonar.tests", "test,frontend/test")
+
+        // Exclude generated artifacts, dependency caches, runtime data, and
+        // vendored/third-party content. Groovy templates (app/views/**/*.html)
+        // stay out because Play renders them at request time rather than
+        // compiling into the precompiled/ tree Sonar analyzes, and Sonar's
+        // HTML analyzer misreads Play directives as invalid markup.
+        // frontend/test/** lives under sonar.sources=frontend AND
+        // sonar.tests=frontend/test, which would double-index each test file
+        // — the explicit exclusion carves the test subtree out of the main-
+        // source scan so the two walkers produce disjoint sets.
+        property(
+            "sonar.exclusions",
+            "**/node_modules/**, **/dist/**, **/.nuxt/**, **/.output/**, " +
+                "**/public/spa/**, **/precompiled/**, **/workspace/**, " +
+                "**/skills/**, app/views/**, frontend/test/**, " +
+                "**/*.md, **/*.txt, **/*.sh, **/*.xml, **/*.yaml, **/*.yml, " +
+                "**/*.properties, **/*.sql",
+        )
+
+        // Override the Gradle plugin's default (build/classes/java/main) to
+        // also include Play's template-derived classes from `play precompile`.
+        property("sonar.java.binaries", "build/classes/java/main,precompiled/java")
+
+        property("sonar.coverage.jacoco.xmlReportPaths", "jacoco.xml")
+        property("sonar.javascript.lcov.reportPaths", "frontend/coverage/lcov.info")
+        property("sonar.junit.reportPaths", "test-result")
+        property("sonar.dependencyCheck.htmlReportPath", "dependency-check-report.html")
+
+        // TypeScript strict-mode + Vue parser picks up the frontend tsconfig
+        // so type-aware analysis matches what vue-tsc does during pnpm typecheck.
+        property("sonar.typescript.tsconfigPath", "frontend/tsconfig.json")
+
+        property("sonar.sourceEncoding", "UTF-8")
+        // sonar.java.jdkHome is deliberately omitted so the scanner picks up
+        // the JDK resolved by the Jenkins `tools { jdk 'JDK25' }` block rather
+        // than a hardcoded path that can drift from the Jenkins tool install.
+        property("sonar.java.source", "25")
+
+        // S1220 (default package): every test/*.java file in this codebase
+        // lives in the default package per Play 1.x's test-runner convention.
+        // Adding a package declaration to a single test creates inconsistency
+        // without benefit; doing it across all 90 tests would touch every file
+        // with no functional change. Suppressed project-wide for the test/
+        // tree only — main-source files (app/) still get flagged correctly.
+        property("sonar.issue.ignore.multicriteria", "e1")
+        property("sonar.issue.ignore.multicriteria.e1.ruleKey", "java:S1220")
+        property("sonar.issue.ignore.multicriteria.e1.resourceKey", "test/*.java")
+
+        // sonar.host.url is deliberately omitted; Jenkins injects it via
+        // withSonarQubeEnv('SonarQube'), which reads from Manage Jenkins →
+        // System → SonarQube servers. Keeping the URL in one place prevents
+        // drift if the Sonar server ever moves to a new domain.
+    }
 }
 
 repositories {
