@@ -1,0 +1,30 @@
+# Line-ending normalization for cross-platform development.
+# https://git-scm.com/docs/gitattributes
+
+# Default: let Git auto-detect text vs binary files.
+* text=auto
+
+# Shell scripts must always have LF endings, even on Windows checkouts.
+gradlew     text eol=lf
+*.sh        text eol=lf
+
+# Windows batch files must always have CRLF endings.
+gradlew.bat text eol=crlf
+*.bat       text eol=crlf
+*.cmd       text eol=crlf
+
+# Binary assets — no diff, no merge as text, no eol normalization.
+*.jar       binary
+*.zip       binary
+*.gz        binary
+*.tar       binary
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.pdf       binary
+*.eot       binary
+*.ttf       binary
+*.woff      binary
+*.woff2     binary
