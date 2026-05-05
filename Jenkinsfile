@@ -49,31 +49,24 @@ pipeline {
         }
 
         stage('Build') {
-            parallel {
-                stage('Backend') {
-                    steps {
-                        // PF-90: Gradle handles dependency resolution natively;
-                        // no more `play deps --sync` step. `play precompile`
-                        // resolves transitively as needed.
-                        // --no-configuration-cache: see prior commit; Jenkins
-                        // daemon was exiting silently with config cache on.
-                        // --no-daemon --info --stacktrace: TEMPORARY diagnostic
-                        // flags. precompile still fails silently in this CI
-                        // even with config cache off; --no-daemon runs gradle
-                        // inline so any error reaches stdout instead of
-                        // disappearing with a killed daemon, and --info
-                        // --stacktrace surface root causes. Roll back to plain
-                        // --no-configuration-cache once the failure is
-                        // identified.
-                        sh 'play precompile --no-configuration-cache --no-daemon --info --stacktrace'
-                    }
-                }
-                stage('Frontend') {
-                    steps {
-                        dir('frontend') {
-                            sh 'npx nuxi generate'
-                        }
-                    }
+            // Run Backend then Frontend serially. The previous parallel layout
+            // had Backend's Gradle daemon (Kotlin-compiling the play1 plugin
+            // via includeBuild during settings evaluation) competing with
+            // Frontend's Vite (transforming 3611 modules) for resident memory
+            // on the agent, and the kernel SIGKILLed the daemon mid-configure
+            // with no visible error. ~9s of wall-clock parallelism lost; flake
+            // class eliminated.
+            steps {
+                // PF-90: Gradle handles dependency resolution natively;
+                // no more `play deps --sync` step. `play precompile`
+                // resolves transitively as needed.
+                // --no-configuration-cache: see prior commit.
+                // --no-daemon --info --stacktrace: TEMPORARY diagnostic flags
+                // remaining in case serial Build still hits a failure; revert
+                // once we see a green run.
+                sh 'play precompile --no-configuration-cache --no-daemon --info --stacktrace'
+                dir('frontend') {
+                    sh 'npx nuxi generate'
                 }
             }
         }
