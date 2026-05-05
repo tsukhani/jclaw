@@ -27,7 +27,14 @@ pipeline {
         // startup on this agent's workspace layout, which aborts the daemon
         // before playPrecompile/playAutotest can run. CI gets nothing from
         // file watching anyway — every build runs against a fresh checkout.
-        GRADLE_OPTS = '-Dorg.gradle.vfs.watch=false'
+        //
+        // -Xmx2g: the gradlew CLIENT (launcher) JVM needs heap too. Without
+        // it the launcher logs "current JVM process isn't compatible with
+        // build requirement... single-use Daemon will be forked" — that
+        // fallback path was returning non-zero to the launcher's parent
+        // even when the forked daemon itself succeeded. (org.gradle.jvmargs
+        // in gradle.properties only sizes the *daemon*, not the launcher.)
+        GRADLE_OPTS = '-Dorg.gradle.vfs.watch=false -Xmx2g'
     }
 
     stages {
@@ -57,7 +64,14 @@ pipeline {
             steps {
                 script {
                     try {
-                        sh 'play precompile --no-configuration-cache --no-daemon --info --stacktrace'
+                        // Dropped --no-daemon: triggered Gradle's "fallback
+                        // single-use daemon" path which returned non-zero
+                        // to the launcher even when the daemon itself
+                        // exited 0 (visible in the prior daemon log dump).
+                        // Letting Gradle use a normal daemon avoids that
+                        // quirk. --info --stacktrace stay for one more run
+                        // until we see a green build.
+                        sh 'play precompile --no-configuration-cache --info --stacktrace'
                     } catch (Exception e) {
                         sh '''
                             echo "=== /opt directory listing ==="
