@@ -29,6 +29,9 @@ logs/
 # Play precompiled files
 precompiled/
 
+# `play javadoc` output
+javadoc/
+
 # Claude Code and OpenAI Codex config.
 # Note: `.claude/*` (contents) instead of `.claude/` (directory) so git can
 # still descend into .claude/ and apply the negations below — git can't

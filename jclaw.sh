@@ -47,7 +47,7 @@ Commands:
   status    Show whether backend and frontend are running
   logs      Tail the production application log
   loadtest  Drive the in-process load-test harness against /api/chat/stream
-  test      Run backend (play auto-test) + frontend (pnpm test) and report a
+  test      Run backend (play autotest) + frontend (pnpm test) and report a
             consolidated pass/fail summary. Exits non-zero on any failure.
   dist      Build a self-contained dist artifact at dist/jclaw.zip and
             exit. Runs precompile + frontend build + zip; operators
@@ -576,7 +576,7 @@ usage_test() {
         cat <<EOF
 Usage: jclaw.sh test
 
-Run the backend (play auto-test) + frontend (pnpm test) suites and
+Run the backend (play autotest) + frontend (pnpm test) suites and
 print a consolidated pass/fail summary. Logs at logs/test-backend.log
 and logs/test-frontend.log. Exits non-zero if either suite fails, so
 it's safe to wire into git hooks or CI.
@@ -2578,13 +2578,13 @@ if segs:
 
 # ─── Consolidated test runner ───
 
-# Runs backend (play auto-test) and frontend (pnpm test) sequentially, streams
+# Runs backend (play autotest) and frontend (pnpm test) sequentially, streams
 # each side's output, and prints a two-line summary at the end. Continues
 # past a backend failure so the user sees frontend results too — the whole
 # point of this subcommand is a single round-trip. Exits non-zero if either
 # suite failed so CI/git hooks can depend on it.
 #
-# play auto-test sometimes returns 0 even when assertions fail, so we also
+# play autotest sometimes returns 0 even when assertions fail, so we also
 # scrape its log for the terminal "All tests passed" banner as a second
 # confirmation before declaring backend green.
 do_test() {
@@ -2596,10 +2596,10 @@ do_test() {
     local t0 backend_elapsed frontend_elapsed
     local backend_passed backend_failed frontend_summary
 
-    echo "==> Running backend tests (play auto-test)..."
+    echo "==> Running backend tests (play autotest)..."
     t0=$SECONDS
     set +e
-    play auto-test 2>&1 | tee "$backend_log"
+    play autotest 2>&1 | tee "$backend_log"
     backend_rc=${PIPESTATUS[0]}
     set -e
     if ! grep -q "^~ All tests passed" "$backend_log" 2>/dev/null; then

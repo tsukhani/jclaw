@@ -66,12 +66,12 @@ pipeline {
             parallel {
                 stage('Backend') {
                     steps {
-                        sh 'play auto-test'
+                        sh 'play autotest'
                         // Convert the JaCoCo binary exec dump that the test
                         // JVM wrote (via %test.javaagent.path=bin/jacocoagent.jar
                         // in conf/application.conf) into the XML format Sonar
                         // expects at sonar.coverage.jacoco.xmlReportPaths.
-                        // Runs after play auto-test so the exec file is flushed
+                        // Runs after play autotest so the exec file is flushed
                         // to disk; --classfiles points at the prod-mode
                         // compile from the Build stage, not tmp/classes, so
                         // the report matches what Sonar's binaries path sees.
