@@ -22,6 +22,12 @@ pipeline {
         PLAY_HOME = '/opt/play-1.11.x'
         PATH = "${PLAY_HOME}:${env.PATH}"
         PNPM_HOME = "${env.WORKSPACE}/.pnpm-store"
+        // Disable Gradle's VFS file watcher under Jenkins. The file watcher
+        // hits an "Already watching path: <workspace>" race during daemon
+        // startup on this agent's workspace layout, which aborts the daemon
+        // before playPrecompile/playAutotest can run. CI gets nothing from
+        // file watching anyway — every build runs against a fresh checkout.
+        GRADLE_OPTS = '-Dorg.gradle.vfs.watch=false'
     }
 
     stages {
