@@ -55,7 +55,12 @@ pipeline {
                         // PF-90: Gradle handles dependency resolution natively;
                         // no more `play deps --sync` step. `play precompile`
                         // resolves transitively as needed.
-                        sh 'play precompile'
+                        // --no-configuration-cache: under Jenkins the daemon
+                        // exits silently between config and execution phases
+                        // when config cache is on; bypassing config cache here
+                        // restores task execution. Dev keeps the speedup via
+                        // gradle.properties (org.gradle.configuration-cache=true).
+                        sh 'play precompile --no-configuration-cache'
                     }
                 }
                 stage('Frontend') {
@@ -72,7 +77,8 @@ pipeline {
             parallel {
                 stage('Backend') {
                     steps {
-                        sh 'play autotest'
+                        // --no-configuration-cache: see Build/Backend stage above.
+                        sh 'play autotest --no-configuration-cache'
                         // Convert the JaCoCo binary exec dump that the test
                         // JVM wrote (via %test.javaagent.path=bin/jacocoagent.jar
                         // in conf/application.conf) into the XML format Sonar
