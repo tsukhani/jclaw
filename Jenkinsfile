@@ -46,7 +46,9 @@ pipeline {
             parallel {
                 stage('Backend') {
                     steps {
-                        sh 'play deps --sync'
+                        // PF-90: Gradle handles dependency resolution natively;
+                        // no more `play deps --sync` step. `play precompile`
+                        // resolves transitively as needed.
                         sh 'play precompile'
                     }
                 }
@@ -64,12 +66,12 @@ pipeline {
             parallel {
                 stage('Backend') {
                     steps {
-                        sh 'play autotest'
+                        sh 'play auto-test'
                         // Convert the JaCoCo binary exec dump that the test
                         // JVM wrote (via %test.javaagent.path=bin/jacocoagent.jar
                         // in conf/application.conf) into the XML format Sonar
                         // expects at sonar.coverage.jacoco.xmlReportPaths.
-                        // Runs after play autotest so the exec file is flushed
+                        // Runs after play auto-test so the exec file is flushed
                         // to disk; --classfiles points at the prod-mode
                         // compile from the Build stage, not tmp/classes, so
                         // the report matches what Sonar's binaries path sees.
@@ -138,18 +140,17 @@ pipeline {
         stage('Package') {
             steps {
                 // ./jclaw.sh dist runs the full self-contained-artifact
-                // pipeline: play deps --sync, play precompile, strip test
-                // bytecode, frontend pnpm install + nuxi generate, play
-                // dist, append precompiled/+public/spa/+lib/ to the zip
-                // (those are gitignored so play dist's git ls-files
-                // inventory drops them otherwise), normalize the zip
-                // filename to dist/jclaw.zip and the inner prefix to
-                // jclaw/ regardless of workspace basename. Single
-                // command instead of the prior `play dist` + post-rename
-                // shim — see app/jclaw.sh:do_dist for the full sequence.
+                // pipeline: play precompile (Gradle resolves deps as a
+                // transitive step), frontend pnpm install + nuxi generate,
+                // then `play dist` which in 1.13.x maps to playBundle —
+                // produces a self-contained zip with framework jar +
+                // framework lib + Gradle-resolved app deps + extracted
+                // modules + precompiled bytecode + bin/play-start.sh
+                // launcher. Output: dist/jclaw-bundle.zip with files
+                // prefixed jclaw/ (project.name from settings.gradle.kts).
                 sh './jclaw.sh dist'
 
-                archiveArtifacts artifacts: 'dist/jclaw.zip', fingerprint: true
+                archiveArtifacts artifacts: 'dist/jclaw-bundle.zip', fingerprint: true
             }
         }
 
@@ -167,7 +168,7 @@ pipeline {
                     withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
                         sh """
                             gh release delete ${version} --repo tsukhani/jclaw --yes || true
-                            gh release create ${version} dist/jclaw.zip \
+                            gh release create ${version} dist/jclaw-bundle.zip \
                                 --repo tsukhani/jclaw \
                                 --title "JClaw ${version}" \
                                 --generate-notes
