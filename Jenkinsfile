@@ -49,22 +49,31 @@ pipeline {
         }
 
         stage('Build') {
-            // Run Backend then Frontend serially. The previous parallel layout
-            // had Backend's Gradle daemon (Kotlin-compiling the play1 plugin
-            // via includeBuild during settings evaluation) competing with
-            // Frontend's Vite (transforming 3611 modules) for resident memory
-            // on the agent, and the kernel SIGKILLed the daemon mid-configure
-            // with no visible error. ~9s of wall-clock parallelism lost; flake
-            // class eliminated.
+            // Backend + Frontend run serially; see prior commit. Wrapping
+            // precompile in a script block so we can dump the agent's
+            // /opt layout and the Gradle daemon log on failure (the daemon
+            // dies silently after settings.gradle.kts evaluation; we need
+            // the daemon-side log to find out why).
             steps {
-                // PF-90: Gradle handles dependency resolution natively;
-                // no more `play deps --sync` step. `play precompile`
-                // resolves transitively as needed.
-                // --no-configuration-cache: see prior commit.
-                // --no-daemon --info --stacktrace: TEMPORARY diagnostic flags
-                // remaining in case serial Build still hits a failure; revert
-                // once we see a green run.
-                sh 'play precompile --no-configuration-cache --no-daemon --info --stacktrace'
+                script {
+                    try {
+                        sh 'play precompile --no-configuration-cache --no-daemon --info --stacktrace'
+                    } catch (Exception e) {
+                        sh '''
+                            echo "=== /opt directory listing ==="
+                            ls -la /opt/ || true
+                            echo "=== /opt/play1 listing ==="
+                            ls -la /opt/play1 2>&1 | head -30 || true
+                            echo "=== /opt/play-1.11.x listing ==="
+                            ls -la /opt/play-1.11.x 2>&1 | head -30 || true
+                            echo "=== latest gradle daemon log (last 200 lines) ==="
+                            ls -1t /var/lib/jenkins/.gradle/daemon/9.5.0/daemon-*.out.log 2>/dev/null | head -1 | xargs -r tail -200 || echo "no daemon log found"
+                            echo "=== free memory ==="
+                            free -m || true
+                        '''
+                        throw e
+                    }
+                }
                 dir('frontend') {
                     sh 'npx nuxi generate'
                 }
