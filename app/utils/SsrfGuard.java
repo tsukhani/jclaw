@@ -23,8 +23,8 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>Scope is intentionally narrow — this is for LLM-emitted URLs only.
  * Fixed admin-configured endpoints (LLM provider base URLs, channel APIs,
- * malware scanners) continue to use {@link HttpClients#GENERAL} /
- * {@link HttpClients#LLM} without SSRF overhead.
+ * malware scanners) continue to use {@link HttpFactories#general()} /
+ * {@link HttpFactories#llmStreaming()} without SSRF overhead.
  *
  * <p><strong>Why OkHttp's {@code Dns} interface is the right pin point:</strong>
  * {@code RouteSelector.resetNextInetSocketAddress} calls
@@ -128,7 +128,7 @@ public final class SsrfGuard {
     /**
      * Validate a URL's scheme and, if the host is a literal IP, validate the
      * IP too. The caller must invoke this <em>before</em> handing the URL to
-     * {@link #buildGuardedClient()}, and again on every redirect target.
+     * {@link #buildGuardedClient(int, int)}, and again on every redirect target.
      *
      * <p>The literal-IP path is belt-and-suspenders: OkHttp's {@link Dns}
      * interface is only consulted for hostnames that need resolving —

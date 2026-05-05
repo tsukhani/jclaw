@@ -66,7 +66,7 @@ import java.util.regex.Pattern;
  * </ul>
  *
  * <p>Concurrency: {@link #update(String)} runs on whichever LLM streaming
- * thread pushes tokens; {@link #flush()} runs on {@link #SCHEDULER}. All
+ * thread pushes tokens; {@link #flush()} runs on {@link #scheduler()}. All
  * mutable state is guarded by {@code this}.
  */
 public final class TelegramStreamingSink {

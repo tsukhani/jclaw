@@ -52,7 +52,7 @@ public class JpqlFilter {
         return this;
     }
 
-    /** Add a <= predicate if the value is non-null. */
+    /** Add a {@code <=} predicate if the value is non-null. */
     public JpqlFilter lte(String field, Object value) {
         if (isPresent(value)) {
             clauses.add("%s <= ?%d".formatted(field, idx++));

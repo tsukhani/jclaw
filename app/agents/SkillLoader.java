@@ -24,6 +24,8 @@ import java.util.regex.Pattern;
 public class SkillLoader {
 
     /**
+     * Metadata describing a discovered skill on disk.
+     *
      * @param toolsDeclared true when the SKILL.md frontmatter contained a {@code tools:} key
      *                      (even if the list was empty). false means the skill predates the
      *                      declaration system and callers should fall back to heuristics.

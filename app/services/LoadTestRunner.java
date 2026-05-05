@@ -102,6 +102,8 @@ public final class LoadTestRunner {
     }
 
     /**
+     * Aggregated outcome of a single load-test run, returned to the API caller.
+     *
      * @param avgTtftMs          Mean time-to-first-token across this run's requests, in ms.
      *                           Computed from the {@code web} channel {@code ttft}
      *                           histogram delta. For reasoning models, TTFT includes

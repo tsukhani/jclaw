@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Three modes:
  * - "queue" (default): FIFO, process one at a time
  * - "collect": Batch pending messages into a single prompt
- * - "interrupt": Cancel in-flight via {@link #isCancelled}, queue new message for drain
+ * - "interrupt": Cancel in-flight via {@link #cancellationFlag(Long)}, queue new message for drain
  */
 public class ConversationQueue {
 
@@ -110,7 +110,7 @@ public class ConversationQueue {
      * Called after processing completes. Returns the next message(s) to process,
      * or empty list if the queue is empty.
      *
-     * <h2>Ownership semantics (JCLAW-117)</h2>
+     * <p><b>Ownership semantics (JCLAW-117)</b>
      * When this method returns non-empty, the {@code processing} flag STAYS
      * {@code true} — the caller inherits ownership of the conversation queue
      * and is responsible for releasing it (via {@link #releaseOwnership},

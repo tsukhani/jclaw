@@ -73,7 +73,7 @@ public class ApiSkillsController extends Controller {
         listSkillFilesFrom(dir);
     }
 
-    /** GET /api/skills/{name}/files/{<path>filePath} — Read a text file from a skill folder. */
+    /** GET /api/skills/{name}/files/{&lt;path&gt;filePath} — Read a text file from a skill folder. */
     public static void readFile(String name, String filePath) {
         var dir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         readSkillFileFrom(dir, filePath);
