@@ -1,27 +1,33 @@
 # JClaw development container.
 #
 # Installs the toolchain ./jclaw.sh setup's check_prereqs expects: Java 25
-# (Azul Zulu), Python 3, Node 24 (NodeSource), corepack, Play 1.x from
+# (Azul Zulu), Node 24 (NodeSource), corepack, the Play 1.13.x fork from
 # tsukhani/play1, and tesseract-ocr for OCR paths. Built and consumed by
 # .devcontainer/devcontainer.json — postCreateCommand runs ./jclaw.sh setup
 # on first open to wire git hooks and pnpm install.
+#
+# In 1.13.x the Python `play` CLI is gone (PF-90) and Gradle drives every
+# build step. The framework is consumed via build.gradle.kts's
+# `frameworkPath.set(...)` + settings.gradle.kts's `includeBuild("/opt/play1")`,
+# so all this Dockerfile needs to do is land the framework tree at /opt/play1.
+# We download the version pinned in build.gradle.kts from a GitHub release.
 
 FROM ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Base toolchain. python3 is Play's CLI-wrapper runtime — too-old Python
-# would surface as a SyntaxError inside `play`, so install the recent
-# default to skip that failure mode entirely. tesseract-ocr backs
-# DocumentsTool's OCR path; language packs install separately
-# (tesseract-ocr-fra, tesseract-ocr-jpn, etc.).
+# Base toolchain. python3 is kept (separate from the now-removed Play CLI
+# requirement) because some app-level scripts and bmad tools still call it;
+# remove if/when those go. tesseract-ocr backs DocumentsTool's OCR path;
+# language packs install separately (tesseract-ocr-fra, tesseract-ocr-jpn,
+# etc.).
 #
 # openssl is invoked by ./jclaw.sh start's first-run cert auto-gen path
 # (ensure_certs_for_start → do_cert) when no PEM exists at certs/host.cert
 # and mkcert isn't installed.
 #
 # The lib*-dev packages are Playwright/Chromium runtime shared libs —
-# parity with the production Dockerfile so dev `play autotest` runs
+# parity with the production Dockerfile so dev `play auto-test` runs
 # (PlaywrightToolTest, WebFetchToolTest) and `./jclaw.sh --dev start`
 # can drive a real browser when the WebFetchTool fires. The t64 suffix
 # is load-bearing: Ubuntu 24.04+ ran the time_t 64-bit ABI transition
@@ -67,18 +73,27 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     rm -rf /var/lib/apt/lists/* && \
     corepack enable
 
-# Play Framework 1.x — Abundent's fork (carries JDK 25 patches upstream Play
-# 1.x is missing). Version pinned via .play-version, the single source of
-# truth shared with the production Dockerfile; Renovate auto-bumps from
-# tsukhani/play1 releases.
-COPY .play-version /tmp/play-version
-RUN PLAY_VERSION=$(tr -d '[:space:]' < /tmp/play-version) && \
-    curl -fsSL "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
+# Play 1.13.x — tsukhani/play1 fork. Version is parsed from the app's
+# build.gradle.kts at image build time (look for the `frameworkVersion.set("...")`
+# line) — no separate pin file. settings.gradle.kts in jclaw does
+# `includeBuild("/opt/play1")`, so we unpack the release zip and symlink
+# `/opt/play-<version>` → `/opt/play1` to match.
+#
+# The release zip ships the framework tree (gradle-plugin/, framework/,
+# modules/, gradlew, build.gradle.kts, etc.) — exactly what `includeBuild`
+# expects. The bundled `play` shell wrapper goes on PATH so devs can run
+# `play run` / `play test` from inside the workspace.
+COPY build.gradle.kts /tmp/build.gradle.kts
+RUN PLAY_VERSION=$(grep -oE 'frameworkVersion\.set\("[^"]+"' /tmp/build.gradle.kts \
+        | sed -E 's/.*"([^"]+)".*/\1/') && \
+    test -n "$PLAY_VERSION" || (echo "Could not parse frameworkVersion from build.gradle.kts" && exit 1) && \
+    curl -fsSL -L "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
         -o /tmp/play.zip && \
     unzip -q /tmp/play.zip -d /opt/ && \
-    rm /tmp/play.zip /tmp/play-version && \
-    test -x "/opt/play-${PLAY_VERSION}/play" && \
-    ln -s "/opt/play-${PLAY_VERSION}/play" /usr/local/bin/play
+    ln -s "/opt/play-${PLAY_VERSION}" /opt/play1 && \
+    test -x "/opt/play1/play" && \
+    ln -s /opt/play1/play /usr/local/bin/play && \
+    rm /tmp/play.zip /tmp/build.gradle.kts
 
 # Drop privileges. Ubuntu ships a default `ubuntu` user at UID 1000 — running
 # as non-root preserves bind-mounted workspace ownership and blocks

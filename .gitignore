@@ -115,7 +115,10 @@ public/spa/
 *.p12
 *.jks
 
-# lib/ managed by play deps --sync (downloaded from Maven Central)
+# lib/ — was the 1.12 dep target (populated by `play deps --sync`); in 1.13.x
+# (PF-90) Gradle resolves deps into ~/.gradle/caches/ and never writes to lib/.
+# Directory may still exist as stale leftover from a previous 1.12 build; in
+# either case never tracked.
 lib/
 
 # Database files
@@ -138,9 +141,10 @@ jacoco.xml
 # report, and scan metadata. Never tracked.
 .scannerwork/
 
-# Play modules (auto-downloaded)
+# Play modules — populated by Gradle's `extractPlayModules` task at build
+# time (copies framework-bundled modules from frameworkPath/modules/<name>
+# to <app>/modules/<name>). Regenerated each build, never tracked.
 modules/*
-!modules/.gitkeep
 
 # OpenSpec archived proposals (completed work, recoverable from git history)
 openspec/archive/

@@ -1,6 +1,8 @@
 # Build artifacts
 dist/*
-!dist/jclaw.zip
+!dist/jclaw-bundle.zip
+build/
+.gradle/
 tmp/
 logs/
 data/
@@ -55,6 +57,7 @@ openspec/
 # OS
 .DS_Store
 
-# Dependencies (resolved inside container)
+# Dependencies — Gradle build outputs / extracted modules. Never sent in
+# build context; the bundle zip already carries everything Docker needs.
 lib/
 modules/
