@@ -11,6 +11,7 @@ import services.EventLogger;
 import utils.SsrfGuard;
 
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -352,6 +353,17 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         if (browserInstalled) return;
         synchronized (PlaywrightBrowserTool.class) {
             if (browserInstalled) return;
+            // Skip the CLI install when an external installer (e.g. the Docker
+            // image's chromium-stage) has already placed Chromium under
+            // PLAYWRIGHT_BROWSERS_PATH. Playwright's CLI runs an OS-allowlist
+            // check *before* its "already installed?" detection, so on hosts
+            // the CLI doesn't recognize (e.g. ubuntu26.04 resolute) the install
+            // call aborts noisily even when the browser is sitting right there.
+            if (chromiumPreinstalled()) {
+                EventLogger.info("tool", "Using pre-installed Chromium under PLAYWRIGHT_BROWSERS_PATH");
+                browserInstalled = true;
+                return;
+            }
             try {
                 EventLogger.info("tool", "Installing Chromium browser (skipping Firefox/WebKit)");
                 // Build classpath from the same JARs the server uses
@@ -373,6 +385,26 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
                 browserInstalled = true; // don't retry on every session
                 EventLogger.warn("tool", "Playwright chromium install failed: %s".formatted(e.getMessage()));
             }
+        }
+    }
+
+    /**
+     * Returns true if Chromium (or its headless-shell variant) is already
+     * installed under {@code $PLAYWRIGHT_BROWSERS_PATH}. The directory layout
+     * Playwright produces is {@code <root>/chromium-<rev>/} and
+     * {@code <root>/chromium_headless_shell-<rev>/}; either is sufficient
+     * for our launchers, so any {@code chromium*} subdirectory counts.
+     */
+    private static boolean chromiumPreinstalled() {
+        var path = System.getenv("PLAYWRIGHT_BROWSERS_PATH");
+        if (path == null || path.isBlank()) return false;
+        var dir = Path.of(path);
+        if (!Files.isDirectory(dir)) return false;
+        try (var entries = Files.list(dir)) {
+            return entries.anyMatch(p ->
+                    p.getFileName().toString().startsWith("chromium") && Files.isDirectory(p));
+        } catch (Exception e) {
+            return false;
         }
     }
 }
