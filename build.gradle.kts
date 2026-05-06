@@ -4,8 +4,41 @@ plugins {
 }
 
 play1 {
-    frameworkPath.set(file("/opt/play1"))
-    frameworkVersion.set("1.13.1")
+    val playRoot = file("/opt/play1")
+    frameworkPath.set(playRoot)
+
+    // Pinned framework version range. Bump when migrating to a new minor
+    // (e.g. "1.14.x"). The mini-DSL: dots are literal, "x" is one or more
+    // digits — so the form is always X.Y.x. The regex below is derived
+    // mechanically; for a different shape (e.g. any 1.x), replace this
+    // pair with an explicit Regex instead.
+    //
+    // The plugin uses frameworkVersion as a path-template input (e.g.
+    // framework/play-$it.jar), so the value handed to .set() must be a
+    // single concrete version string. We read it from the canonical
+    // version file the play1 fork ships at framework/src/play/version
+    // (the same one `play version` returns), then validate it against
+    // this range. Patch bumps (1.13.2, 1.13.3, ...) flow through
+    // automatically; major/minor bumps fail at configure time with a
+    // clear message rather than producing mysterious "play-X.Y.Z.jar
+    // not found" errors deeper in the build.
+    val frameworkVersionRange = "1.13.x"
+    val versionPattern = Regex(
+        "^" + frameworkVersionRange.replace(".", "\\.").replace("x", "\\d+") + "$"
+    )
+
+    val versionFile = playRoot.resolve("framework/src/play/version")
+    require(versionFile.isFile) {
+        "play1 framework not found at $versionFile — is ${playRoot.absolutePath} the right frameworkPath?"
+    }
+    val installed = versionFile.readText().trim()
+    require(versionPattern.matches(installed)) {
+        "play1 framework version $installed is outside the pinned $frameworkVersionRange range. " +
+        "Either update the pin in build.gradle.kts to a range that matches, or check out a " +
+        "$frameworkVersionRange release in $playRoot."
+    }
+    frameworkVersion.set(installed)
+
     modules("docviewer")
 }
 

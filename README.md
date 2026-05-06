@@ -361,11 +361,11 @@ Then trust the local CA, regenerate the cert, and restart the container:
 
 ```bash
 sudo mkcert -install             # adds mkcert's CA to the system trust store (and Firefox NSS if installed)
-./jclaw.sh cert                  # regenerates certs/host.cert + host.key, signed by the CA
+./jclaw.sh https                 # regenerates certs/host.cert + host.key, signed by the CA
 docker compose restart jclaw     # JVM reloads the new cert at boot
 ```
 
-Subsequent `docker compose up -d` calls reuse the existing cert — you only need to re-run `./jclaw.sh cert` after rotating mkcert's CA or deleting the `certs/` directory.
+Subsequent `docker compose up -d` calls reuse the existing cert — you only need to re-run `./jclaw.sh https` after rotating mkcert's CA or deleting the `certs/` directory. Run `./jclaw.sh no-https` to delete the cert+key (the next start boots HTTP/1.1 only). `conf/application.conf` is never modified by either command.
 
 ### Custom Ports
 

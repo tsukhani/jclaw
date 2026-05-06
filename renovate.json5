@@ -22,8 +22,9 @@
 
   // Wait 3 days after a package version is published before opening a PR for
   // it. Catches the 'shipped → breaking bug found → republished' cycle that
-  // hits weekly with active OSS packages.
-  stabilityDays: 3,
+  // hits weekly with active OSS packages. (Renamed from `stabilityDays` in
+  // Renovate v37; the old key still works but emits a deprecation warning.)
+  minimumReleaseAge: "3 days",
 
   // Backpressure caps. prConcurrentLimit caps total open PRs Renovate has
   // authored; prHourlyLimit caps how fast new ones land in a single run.
@@ -38,12 +39,16 @@
   commitMessagePrefix: "deps:",
   commitMessageAction: "bump",
 
-  // config:recommended already enables the 'pep621' / 'npm' / 'dockerfile' /
-  // 'packageManager' managers among others. Listing explicitly here is
-  // documentation, not required configuration — Renovate's defaults already
-  // handle the corepack pin in frontend/package.json's packageManager field,
-  // which is the gap that triggered switching from Dependabot.
+  // enabledManagers is an allowlist — managers not listed don't run, even
+  // ones config:recommended would otherwise enable by default. 'gradle' +
+  // 'gradle-wrapper' cover build.gradle.kts and gradle-wrapper.properties
+  // (the entire Java dependency tree, plus Gradle itself); 'npm' covers
+  // frontend/package.json including the corepack hash in `packageManager`
+  // (the gap that triggered switching from Dependabot); 'dockerfile' +
+  // 'docker-compose' cover the prod + devcontainer images.
   enabledManagers: [
+    "gradle",
+    "gradle-wrapper",
     "npm",
     "dockerfile",
     "docker-compose",
@@ -119,7 +124,7 @@
     // as the replaceString. If a Play 1.x dep ever genuinely needs a
     // groupId/artifactId rename, we do it manually.
     {
-      matchManagers: ["regex"],
+      matchManagers: ["custom.regex"],
       matchUpdateTypes: ["replacement"],
       enabled: false,
     },
@@ -137,6 +142,20 @@
       automerge: true,
       automergeType: "branch",
     },
+
+    // Carve Java/Gradle minors back out of the catch-all above. Tika,
+    // Playwright, and OkHttp minors have historically required exclude-graph
+    // adjustments in build.gradle.kts (the long `exclude(group = ...)` lists
+    // for tika-core / tika-parsers-standard-package / flexmark / telegrambots
+    // exist precisely because each minor reshuffles the transitive set).
+    // Patches still auto-merge — they almost never reshape transitives.
+    // Must sit after the catch-all because Renovate evaluates packageRules
+    // in order, last match wins.
+    {
+      matchManagers: ["gradle", "gradle-wrapper"],
+      matchUpdateTypes: ["minor"],
+      automerge: false,
+    },
   ],
 
   customManagers: [
@@ -149,7 +168,9 @@
     // (1.13.0), matching the file contents.
     {
       customType: "regex",
-      fileMatch: ["^build\\.gradle\\.kts$"],
+      // Renamed from `fileMatch` in Renovate v40; old key still works
+      // but emits a deprecation warning each run.
+      managerFilePatterns: ["^build\\.gradle\\.kts$"],
       matchStrings: [
         "frameworkVersion\\.set\\(\"(?<currentValue>[^\"]+)\"\\)",
       ],
