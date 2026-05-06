@@ -1104,6 +1104,34 @@ validate_corepack_pnpm() {
     echo "==> pnpm validated via corepack ($current_pin)"
 }
 
+# Make `pnpm` resolvable on PATH for grandchild processes — specifically
+# the Gradle daemon spawned by `play dist`, whose PlayDistTask probes the
+# frontend toolchain via execve. The bash pnpm() shadow at the top of this
+# script only catches in-script calls; once we hand off to Gradle, only
+# env vars and PATH cross the process boundary.
+#
+# corepack enable --install-directory writes shims to a path we control
+# (here tmp/corepack-shims/, already gitignored via tmp/), sidestepping
+# the system-write requirement of plain `corepack enable` on installs
+# where node lives in a root-owned tool dir (Debian's nodejs package,
+# Jenkins agents that re-shim per stage, locked-down CI runners).
+# Idempotent — corepack rewrites the same shim on repeat invocations.
+ensure_pnpm_on_path_for_gradle() {
+    local shim_dir="$SCRIPT_DIR/tmp/corepack-shims"
+    mkdir -p "$shim_dir"
+    if ! corepack enable --install-directory "$shim_dir" pnpm >/dev/null 2>&1; then
+        echo "Error: corepack enable failed to write a pnpm shim to $shim_dir."
+        echo "       Gradle's :playDist task probes pnpm directly on PATH; the bash"
+        echo "       pnpm() shadow doesn't reach grandchild processes, so we cannot"
+        echo "       proceed without a real shim."
+        exit 1
+    fi
+    case ":$PATH:" in
+        *":$shim_dir:"*) ;;
+        *) export PATH="$shim_dir:$PATH" ;;
+    esac
+}
+
 # Resolve the env-var name that backs `application.secret` in conf.
 # Mirrors framework/pym/play/utils.py:secretVarName so jclaw.sh and
 # `play secret` always agree on which variable to read/write — the
@@ -1822,6 +1850,7 @@ do_dist() {
     cd "$SCRIPT_DIR"
 
     echo "==> Packaging application (play dist)..."
+    ensure_pnpm_on_path_for_gradle
     play dist
 
     # play dist (PlayDistTask) writes a developer-distribution zip to
