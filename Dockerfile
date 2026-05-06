@@ -38,6 +38,18 @@ FROM azul/zulu-openjdk:25.0.3 AS bundle-stage
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# TARGETARCH is a buildx-provided global ARG (amd64, arm64, …) that has
+# to be redeclared inside each stage that wants to read it; without the
+# ARG line it stays empty in this stage's RUN commands. We use it to
+# scope the node_modules and Gradle cache mounts per-architecture so a
+# multi-arch buildx invocation (linux/amd64,linux/arm64) doesn't share a
+# single mount across platforms — node_modules carries arch-specific
+# native bindings (oxc-parser, @parcel/watcher, esbuild, …) and Gradle's
+# configuration cache encodes absolute paths plus JVM toolchain
+# fingerprints. Sharing causes the second arch through to inherit the
+# first arch's native deps and crash on require().
+ARG TARGETARCH
+
 # Toolchain. unzip extracts the Gradle dist + the play1 release zip + the
 # bundle. curl/git fetch the play1 fork. Node 24 + corepack drive pnpm
 # (whose exact version + integrity hash is pinned in
@@ -88,25 +100,38 @@ COPY . /src/
 # as the plugin expects. user.email/name are unset because we never
 # commit — `git init` itself doesn't need them.
 #
-# BuildKit cache mounts (require Docker 23.0+ / BuildKit on by default):
-#   /root/.gradle              Gradle's user cache — resolved jars, dep
-#                              metadata, configuration cache. ~500 MB
-#                              warm. Survives the COPY-layer invalidation
-#                              that would otherwise reset gradle to cold
-#                              every source-change iteration.
-#   /root/.local/share/pnpm    pnpm's content-addressed store. ~200 MB.
-#                              Shared across packages by hash, so once
-#                              populated additional installs only resolve
-#                              symlinks rather than refetching tarballs.
-#   /root/.cache/node          corepack's pnpm-binary download cache.
-#                              ~50 MB. Avoids redownloading the pnpm
-#                              tarball on every cold pnpm-install.
-#   /src/frontend/node_modules pnpm's project-resolved tree (symlinks
-#                              into the store). ~200 MB. Cached
-#                              specifically so `pnpm install` short-
-#                              circuits on a `pnpm-lock.yaml` match
-#                              instead of re-walking dep graph from
-#                              scratch.
+# BuildKit cache mounts (require Docker 23.0+ / BuildKit on by default).
+# Mounts marked [per-arch] use id=…-${TARGETARCH} so a multi-arch buildx
+# invocation (linux/amd64,linux/arm64) gives each platform its own cache
+# — sharing across arches breaks builds whose contents depend on the
+# target architecture (native bindings, JVM toolchain fingerprint, etc).
+#   /root/.gradle              [per-arch] Gradle's user cache — resolved
+#                              jars, dep metadata, configuration cache.
+#                              ~500 MB warm. The configuration cache
+#                              encodes absolute paths and JVM toolchain
+#                              metadata, both of which are arch-tagged,
+#                              so cross-arch sharing causes spurious
+#                              cache misses and (worse) corrupted
+#                              configuration-cache entries.
+#   /root/.local/share/pnpm    [shared] pnpm's content-addressed store.
+#                              ~200 MB. Each native binding (e.g.
+#                              @oxc-parser/binding-linux-arm64-gnu vs
+#                              -x64-gnu) is a distinct package with its
+#                              own hash, so platforms coexist by hash —
+#                              no cross-arch conflict, and sharing
+#                              avoids re-downloading the same tarballs
+#                              once per arch.
+#   /root/.cache/node          [shared] corepack's pnpm-binary download
+#                              cache. ~50 MB. The pnpm npm package is
+#                              pure JavaScript — arch-independent.
+#   /src/frontend/node_modules [per-arch] pnpm's project-resolved tree
+#                              (symlinks into the store). ~200 MB.
+#                              Carries arch-specific native bindings;
+#                              sharing across arches makes the second
+#                              arch through hit "lockfile up-to-date"
+#                              and inherit the first arch's bindings,
+#                              causing nuxi generate to fail on
+#                              require('@oxc-parser/binding-…').
 # These mounts hold no application state — eviction reverts to clean
 # rebuilds, never to corrupt artifacts. CI that doesn't carry a warm
 # BuildKit cache simply pays the dep-resolution cost once and exits.
@@ -124,10 +149,10 @@ COPY . /src/
 # shared between everyone who pulls the image. The secret is generated
 # fresh per-container at entrypoint time instead — see
 # docker-entrypoint.sh.
-RUN --mount=type=cache,target=/root/.gradle \
+RUN --mount=type=cache,target=/root/.gradle,id=gradle-${TARGETARCH} \
     --mount=type=cache,target=/root/.local/share/pnpm \
     --mount=type=cache,target=/root/.cache/node \
-    --mount=type=cache,target=/src/frontend/node_modules \
+    --mount=type=cache,target=/src/frontend/node_modules,id=node_modules-${TARGETARCH} \
     git init -q && \
     gradle --no-daemon playBundle && \
     mkdir /staging && \

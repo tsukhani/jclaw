@@ -1829,27 +1829,11 @@ do_setup() {
 do_dist() {
     cd "$SCRIPT_DIR"
 
-    # Pre-flight, in this order:
-    #   1. Add a workspace-local pnpm shim to PATH for grandchild processes.
-    #   2. Stop any running Gradle daemon so the next `play` invocation
-    #      forks a fresh daemon that captures the updated PATH.
-    #
-    # Why both, not just (1): Gradle's ExecOperations.exec — used by the
-    # play1 plugin's playDist task to probe `pnpm --version` — defaults to
-    # the JVM's System.getenv("PATH"), i.e. the *daemon's* environment.
-    # The daemon's env is frozen at startup; later shell PATH changes don't
-    # reach an already-running daemon. On Jenkins, an earlier pipeline stage
-    # (Build stage's `play precompile`) starts the daemon before do_dist
-    # runs, so without the daemon stop, our shim sits on bash's PATH but
-    # not on the daemon's, and playDist's pnpm probe fails.
-    #
-    # Done at the *top* of do_dist (not just before `play dist`) because
-    # the very first `play precompile` below is what reuses or starts a
-    # daemon — we want the new daemon to inherit our PATH from the start.
+    # Add a workspace-local pnpm shim to PATH so the play1 plugin's
+    # playDist task (which probes `pnpm --version` via Gradle's
+    # ExecOperations.exec) can find pnpm. The bash pnpm() shadow doesn't
+    # reach grandchild processes, so the shim is what crosses the boundary.
     ensure_pnpm_on_path_for_gradle
-    if [[ -x "$SCRIPT_DIR/gradlew" ]]; then
-        "$SCRIPT_DIR/gradlew" --stop >/dev/null 2>&1 || true
-    fi
 
     # No explicit dep-resolution step here — Gradle handles it natively
     # in 1.13.x (PF-90). `play precompile` (and `play dist` further down)
@@ -1871,8 +1855,29 @@ do_dist() {
     cp -r .output/public "$SCRIPT_DIR/public/spa"
     cd "$SCRIPT_DIR"
 
+    # Disable the Gradle daemon for `play dist` only. The play1 plugin's
+    # playDist task probes pnpm via ExecOperations.exec, which defaults to
+    # the JVM's frozen-at-startup PATH — i.e. the daemon's environment. A
+    # daemon started in an earlier shell (or in another concurrent Jenkins
+    # job on the same agent) wouldn't have our shim on PATH, so its pnpm
+    # probe fails. -Dorg.gradle.daemon=false makes Gradle run in-process for
+    # this single invocation; the in-process JVM inherits the calling shell's
+    # PATH directly, so the shim is visible.
+    #
+    # Why not `gradlew --stop`: --stop is global — it kills every daemon in
+    # the user's daemon registry regardless of project or version, which on
+    # a multi-executor Jenkins agent murders daemons used by concurrent
+    # jobs. --no-daemon is targeted: it only affects this one invocation
+    # and leaves other Gradle work untouched. Cost: ~5-10s extra cold-start
+    # for play dist (acceptable; play dist isn't a hot-loop command).
+    #
+    # Why GRADLE_OPTS rather than `--no-daemon`: the play wrapper invokes
+    # gradlew without forwarding arbitrary CLI flags, but POSIX env-var
+    # inheritance carries GRADLE_OPTS through cleanly. gradlew's launcher
+    # appends GRADLE_OPTS to the JVM args (gradlew:242), so a -D system
+    # property lands on Gradle's own properties parser.
     echo "==> Packaging application (play dist)..."
-    play dist
+    GRADLE_OPTS="${GRADLE_OPTS:-} -Dorg.gradle.daemon=false" play dist
 
     # play dist (PlayDistTask) writes a developer-distribution zip to
     # dist/<rootProject.name>.zip = dist/jclaw.zip — stable name driven
