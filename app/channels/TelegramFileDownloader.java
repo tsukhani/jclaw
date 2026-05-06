@@ -91,7 +91,7 @@ public final class TelegramFileDownloader {
                 if (resp.code() != 200) {
                     return new DownloadFailed("getFile HTTP " + resp.code());
                 }
-                var body = resp.body() != null ? resp.body().string() : "";
+                var body = resp.body().string();
                 getFileResp = JsonParser.parseString(body).getAsJsonObject();
             }
         } catch (Exception e) {
@@ -133,9 +133,6 @@ public final class TelegramFileDownloader {
             try (var resp = call.execute()) {
                 if (resp.code() != 200) {
                     return new DownloadFailed("download HTTP " + resp.code());
-                }
-                if (resp.body() == null) {
-                    return new DownloadFailed("download body absent");
                 }
                 try (InputStream in = resp.body().byteStream()) {
                     Files.copy(in, stagedPath, StandardCopyOption.REPLACE_EXISTING);
