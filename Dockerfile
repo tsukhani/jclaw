@@ -67,7 +67,7 @@ RUN curl -fsSL https://services.gradle.org/distributions/gradle-9.5.0-bin.zip -o
 # enforces a 1.13.x range at configure time, so passing a non-matching
 # version fails the build with a clear message rather than producing
 # mysterious "play-X.Y.Z.jar not found" errors deeper down.
-ARG PLAY_VERSION=1.13.5
+ARG PLAY_VERSION=1.13.6
 RUN curl -fsSL -L "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
         -o /tmp/play.zip && \
     unzip -q /tmp/play.zip -d /opt/ && \

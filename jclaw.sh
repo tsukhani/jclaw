@@ -4,6 +4,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FRONTEND_PID_FILE="frontend.pid"
 
+# Bundle-mode play resolution. Runs unconditionally on every dispatch
+# (including stop, secret, status, logs) so any code path that shells
+# out to `play` finds the bundled launcher next to this script before
+# the system one. Originally lived inside check_prereqs/check_play, but
+# stop didn't call check_prereqs — so `./jclaw.sh stop` from a fresh
+# bundle hit `play: command not found` even though ./play sat right
+# next to jclaw.sh. Hoisting to top-level decouples binary resolution
+# (always needed when any command shells out to play) from prerequisite
+# validation (only needed for build/run paths).
+if [[ -x "$SCRIPT_DIR/play" ]]; then
+    export PATH="$SCRIPT_DIR:$PATH"
+fi
+
 # Audience detection: developers run from a `git clone`, end users run
 # from an unzipped `play dist` tarball with no .git/ in tow. Used by
 # both show_intro (bare invocation banner) and usage (--help / unknown
@@ -18,7 +31,7 @@ is_developer_clone() {
 usage() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh [options] <cert|secret|setup|reset|start|stop|restart|status|logs|loadtest|test|dist|help>
+Usage: jclaw.sh [options] <https|no-https|secret|setup|reset|start|stop|restart|status|logs|loadtest|test|dist|help>
 
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
@@ -31,11 +44,13 @@ Commands:
             application.conf's \${...} placeholder). Run after a suspected
             leak or as routine hygiene. Restart the app to pick up the new
             value.
-  cert      Generate a TLS PEM cert+key at ./certs/host.cert and
-            ./certs/host.key for the bundled Docker compose stack.
-            Uses mkcert when available (browser-trusted; Chrome accepts
-            HTTP/3); falls back to a self-signed openssl pair otherwise.
-            Run before 'docker compose restart' to swap in a fresh cert.
+  https     Generate a TLS PEM cert+key at certs/host.cert and host.key
+            (mkcert preferred, openssl fallback). The next 'start' enables
+            the 9443 HTTPS listener (HTTP/2 + HTTP/3 via ALPN) when those
+            certs pass strict validation. conf/application.conf is never
+            modified — the toggle is purely cert presence + validity.
+  no-https  Disable HTTPS by deleting certs/host.cert and host.key. The
+            next 'start' boots HTTP/1.1 only on port 9000.
   reset     Clear the admin password hash from the Config DB so the next
             launch routes through the in-app /setup-password flow. Use
             when the operator has forgotten the password and is locked
@@ -49,9 +64,11 @@ Commands:
   loadtest  Drive the in-process load-test harness against /api/chat/stream
   test      Run backend (play autotest) + frontend (pnpm test) and report a
             consolidated pass/fail summary. Exits non-zero on any failure.
-  dist      Build a self-contained dist artifact at dist/jclaw-bundle.zip and
-            exit. Runs precompile + frontend build + zip; operators
-            unzip the result wherever they want to install it.
+  dist      Build the developer-distribution zip at dist/jclaw.zip and exit.
+            Runs precompile + frontend build + `play dist`; operators
+            unzipping the result need Java 25 + Gradle + Play 1 fork on
+            their machine to launch it. For a self-contained tarball,
+            see the Dockerfile (uses `play bundle` instead).
   help      Print this usage reference and exit. Equivalent to --help / -h.
 
 Options:
@@ -122,7 +139,7 @@ Examples:
   ./jclaw.sh --dev start                              # Start in dev mode
   ./jclaw.sh --dev --backend-port 8080 start          # Dev mode with custom backend port
   ./jclaw.sh start                                    # Start production in current directory
-  ./jclaw.sh dist                                     # Build dist/jclaw-bundle.zip (then unzip wherever)
+  ./jclaw.sh dist                                     # Build dist/jclaw.zip (then unzip wherever)
   ./jclaw.sh --dev stop                               # Stop dev mode services
   ./jclaw.sh stop                                     # Stop production in current directory
   ./jclaw.sh loadtest                                 # Drive default 10 workers x 5-turn conversations against :9000
@@ -141,14 +158,14 @@ EOF
         # running prod backend, but it's an operator/dev tool and not
         # part of the "I just want to run JClaw" contract.
         cat <<EOF
-Usage: jclaw.sh [options] <cert|reset|start|stop|restart|status|logs|help>
+Usage: jclaw.sh [options] <https|no-https|reset|start|stop|restart|status|logs|help>
 
 Commands:
-  cert      Generate a TLS PEM cert+key at ./certs/host.cert and
-            ./certs/host.key for the bundled Docker compose stack.
-            Uses mkcert when available (browser-trusted; Chrome accepts
-            HTTP/3); falls back to a self-signed openssl pair otherwise.
-            Run before 'docker compose restart' to swap in a fresh cert.
+  https     Generate a TLS PEM cert+key at certs/host.cert and host.key.
+            The next 'start' enables HTTPS (HTTP/2 + HTTP/3 via ALPN) on
+            port 9443 when the cert+key pass strict validation.
+  no-https  Disable HTTPS by deleting certs/host.cert and host.key. The
+            next 'start' boots HTTP/1.1 only on port 9000.
   reset     Clear the admin password hash from the Config DB so the next
             launch routes through the in-app /setup-password flow. Use
             when you've forgotten the password and are locked out of
@@ -193,7 +210,7 @@ EOF
 # distinguish the per-command help path from the bare-help path.
 is_known_command() {
     case "$1" in
-        cert|secret|setup|reset|start|stop|restart|status|logs|loadtest|test|dist)
+        https|no-https|secret|setup|reset|start|stop|restart|status|logs|loadtest|test|dist)
             return 0
             ;;
         *)
@@ -207,7 +224,8 @@ is_known_command() {
 # only reachable through programmer error and hands back the full banner.
 usage_for() {
     case "$1" in
-        cert)     usage_cert     ;;
+        https)    usage_https    ;;
+        no-https) usage_no_https ;;
         secret)   usage_secret   ;;
         setup)    usage_setup    ;;
         reset)    usage_reset    ;;
@@ -223,27 +241,56 @@ usage_for() {
     esac
 }
 
-usage_cert() {
+usage_https() {
     cat <<EOF
-Usage: jclaw.sh cert
+Usage: jclaw.sh https [--install-ca]
 
-Generate a TLS PEM cert+key at ./certs/host.cert and ./certs/host.key,
-overwriting any existing pair. Used by the bundled docker-compose.yml —
-the JClaw container picks the new cert up from the ./certs bind-mount
-on its next start. Run before 'docker compose restart' when you want
-HTTP/2 and HTTP/3 to negotiate cleanly in a real browser without the
-self-signed-certificate interstitial.
+Generate a TLS PEM cert+key at certs/host.cert and certs/host.key,
+overwriting any existing pair. After this completes, the next
+'jclaw.sh start' enables the 9443 HTTPS listener (HTTP/2 + HTTP/3
+via ALPN) at runtime via -Dhttps.port=9443, gated by a strict
+validity check on the cert+key. conf/application.conf is NOT
+modified — the toggle is purely a function of cert presence + validity.
 
 Cert source preference:
   1. mkcert if installed. Produces a cert signed by the local CA that
      'mkcert -install' added to the system trust store, so Chrome's
      QUIC stack will negotiate HTTP/3 in the browser without warnings.
-     Install once with: brew install mkcert && mkcert -install.
+     Install once with: brew install mkcert (then 'mkcert -install',
+     or pass --install-ca on the next https invocation — see below).
   2. openssl as a fallback. Produces a self-signed cert; serves
      correctly but browsers warn and Chrome refuses to upgrade to
      HTTP/3 (its QUIC stack only honors trusted certs).
 
 Errors out if neither tool is on PATH.
+
+Options:
+  --install-ca   Run 'mkcert -install' before issuing the leaf cert,
+                 adding the local CA to the system / NSS (Firefox) /
+                 Java trust stores. Idempotent (mkcert skips stores
+                 that already trust the CA) but may prompt for admin
+                 auth / Touch ID on stores that need updating.
+                 Requires mkcert; errors out with install instructions
+                 when mkcert is absent (no openssl fallback for this
+                 flag — only mkcert can install a reusable local CA).
+
+After this command, restart the app to apply: 'jclaw.sh restart'.
+EOF
+}
+
+usage_no_https() {
+    cat <<EOF
+Usage: jclaw.sh no-https
+
+Disable HTTPS by deleting certs/host.cert and certs/host.key. The
+next 'jclaw.sh start' will see no valid pair (certs_valid → false)
+and skip the -Dhttps.port=9443 override, so Play boots HTTP-1.1 only
+on port 9000. Idempotent — no-op when the files are already absent.
+
+To re-enable, run 'jclaw.sh https' (regenerates a fresh cert+key).
+conf/application.conf is NOT modified by either command.
+
+After this command, restart the app to apply: 'jclaw.sh restart'.
 EOF
 }
 
@@ -603,21 +650,22 @@ usage_dist() {
         cat <<EOF
 Usage: jclaw.sh dist
 
-Build a self-contained dist artifact at dist/jclaw-bundle.zip and exit.
-Runs precompile + frontend build + zip; the resulting zip is ready
-to copy anywhere (a release upload, a Docker COPY context, an scp
-target). Operators unzip it wherever they want to install JClaw, then
-run ./jclaw.sh start inside the unzipped tree.
+Build the developer-distribution zip at dist/jclaw.zip and exit.
+Runs precompile + frontend build + \`play dist\`; the resulting zip
+contains the source tree (filtered by .gitignore + .distignore) plus
+precompiled/ and public/spa/. Operators unzip it wherever they want
+to install JClaw, then run ./jclaw.sh start inside the unzipped tree.
 
-The resulting tarball is JDK-only: no javac, no Node/pnpm, no source
-trees on the install host. Per Play 1.x's deployment.textile, the
-runtime expects precompiled/, conf/, lib/, public/ and starts via
-\`play run --%prod -Dprecompiled=true\` — all wired into the unzipped
-\`./jclaw.sh start\` automatically.
+The resulting tarball is NOT self-contained: framework jar, framework
+lib, and Gradle-resolved app deps are excluded. Operators need a local
+Java 25 + Gradle + Play 1 fork install — the bundled \`./jclaw.sh start\`
+delegates to \`play run\`, which uses the host's Gradle to assemble the
+runtime classpath. For a self-contained tarball that runs with only a
+JRE, see the Dockerfile (\`play bundle\` instead of \`play dist\`).
 
 Example:
   ./jclaw.sh dist
-  unzip -o dist/jclaw-bundle.zip -d /opt
+  unzip -o dist/jclaw.zip -d /opt
   cd /opt/jclaw && ./jclaw.sh start
 EOF
     else
@@ -747,6 +795,12 @@ LT_PROMPTS_FILE=""
 # JSON-encoded prompts array, populated from LT_PROMPTS_FILE in the
 # validation block. Embedded in the loadtest body when non-empty.
 LT_PROMPTS_JSON=""
+# Opt-in: when true, `./jclaw.sh https` runs `mkcert -install` before
+# issuing the leaf cert, adding the local CA to the system / NSS / Java
+# trust stores. Default false because the install step touches stores
+# outside this repo and can prompt for admin auth — running it should
+# be a deliberate operator choice, not a side-effect of cert rotation.
+HTTPS_INSTALL_CA=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -809,7 +863,11 @@ while [[ $# -gt 0 ]]; do
             LT_PROMPTS_FILE="$2"
             shift 2
             ;;
-        cert|secret|reset|start|stop|restart|status|logs)
+        --install-ca)
+            HTTPS_INSTALL_CA=true
+            shift
+            ;;
+        https|no-https|secret|reset|start|stop|restart|status|logs)
             COMMAND="$1"
             shift
             ;;
@@ -825,7 +883,7 @@ while [[ $# -gt 0 ]]; do
             # check_prereqs / git mid-execution.
             if ! is_developer_clone; then
                 echo "Error: '$1' is a developer-only command, not available in this distribution."
-                echo "       This install supports: cert, secret, reset, start, stop, restart, status, logs, help."
+                echo "       This install supports: https, no-https, secret, reset, start, stop, restart, status, logs, help."
                 exit 1
             fi
             COMMAND="$1"
@@ -891,7 +949,7 @@ fi
 # developer machine with the full source tree).
 if [[ "$DEV_MODE" == true ]] && ! is_developer_clone; then
     echo "Error: --dev is a developer-only flag, not available in this distribution."
-    echo "       This install supports the production commands: start, stop, restart, status, logs, cert, secret."
+    echo "       This install supports the production commands: start, stop, restart, status, logs, https, no-https, secret."
     exit 1
 fi
 
@@ -1086,7 +1144,7 @@ load_env_file() {
 
 # First-run helper for the start paths: if certs/.env is absent AND the
 # conf-named secret variable is unset in the parent shell, generate one.
-# This is what makes `./jclaw.sh start` work on a fresh jclaw-bundle.zip install
+# This is what makes `./jclaw.sh start` work on a fresh jclaw.zip install
 # with no developer setup step. We DON'T auto-create when the operator
 # has already exported the variable externally — that'd overwrite their
 # intent with a stored random value they didn't ask for. We DON'T
@@ -1101,32 +1159,6 @@ ensure_env_for_start() {
     if [[ ! -f "$env_file" && -z "${!var_name:-}" ]]; then
         echo "==> First run detected — no certs/.env and no $var_name in env."
         do_secret
-    fi
-}
-
-# Auto-generate the TLS PEM cert+key if missing on a fresh install. Mirrors
-# the docker-entrypoint.sh behavior so bare-metal and Docker installs share
-# one rule: missing security material → auto-generate, log a notice, keep
-# starting. application.conf ships with https.port=9443 + paths pointing
-# at certs/host.cert and certs/host.key, so a missing cert hard-fails Play
-# boot — much worse failure mode than a self-signed cert + browser warning.
-# Idempotent: no-op when both files already exist; only fires on first
-# start (or after a deliberate `rm certs/host.*` for rotation).
-#
-# Public CA certs (Let's Encrypt etc.) require a publicly-resolvable domain
-# the ACME server can reach to verify ownership — they can't issue for
-# localhost or raw IP addresses. The auto-gen here is for local-trust use
-# (mkcert when available, openssl self-signed otherwise); operators
-# deploying behind a real domain replace certs/host.* with a real cert as
-# a separate runbook step (see deployment.textile § HTTPS configuration).
-ensure_certs_for_start() {
-    local certs_dir="$SCRIPT_DIR/certs"
-    local cert_file="$certs_dir/host.cert"
-    local key_file="$certs_dir/host.key"
-    if [[ ! -f "$cert_file" || ! -f "$key_file" ]]; then
-        echo "==> First run detected — no TLS PEM cert at certs/host.cert + host.key."
-        do_cert
-        echo "    (For production behind a real domain, replace certs/host.* with a CA-issued cert; Let's Encrypt won't sign for localhost.)"
     fi
 }
 
@@ -1159,28 +1191,93 @@ require_application_secret() {
 # variable in conf flows through here without touching this script.
 # The framework's writer preserves any other lines in the file;
 # rotation rewrites only the secret line.
-do_cert() {
-    # Writes to $SCRIPT_DIR/certs/, NOT conf/. The Docker compose stack
-    # bind-mounts ./certs into the container; the dev-mode `play
-    # enable-https` flow handles conf/host.cert separately. Two
-    # destinations, two tools, no shared state — keeps the cert
-    # provenance unambiguous in each context.
+# Strict TLS cert+key validity check. Returns 0 only if every gate passes:
+#   1. both certs/host.cert and certs/host.key exist;
+#   2. openssl is on PATH (we fail closed when we can't validate — better
+#      to leave HTTPS off than silently enable it without verification);
+#   3. cert parses as X.509 and is not expired (`-checkend 0`);
+#   4. cert's public key matches the key file's public key — catches a
+#      half-rotated pair (cert regenerated, key stale, or vice versa).
+# Algorithm-agnostic via `openssl pkey -pubout`: works for both mkcert's
+# ECDSA P-256 default and the openssl-fallback RSA pair. Used by start
+# to gate the runtime -Dhttps.port=9443 override; conf has https.port
+# commented out, so a missing override = HTTPS off (HTTP-1.1 only on 9000).
+certs_valid() {
+    local cert_file="$SCRIPT_DIR/certs/host.cert"
+    local key_file="$SCRIPT_DIR/certs/host.key"
+
+    [[ -f "$cert_file" && -f "$key_file" ]] || return 1
+    command -v openssl >/dev/null 2>&1 || return 1
+
+    openssl x509 -in "$cert_file" -checkend 0 -noout >/dev/null 2>&1 || return 1
+
+    local cert_pub key_pub
+    cert_pub=$(openssl x509 -in "$cert_file" -pubkey -noout 2>/dev/null) || return 1
+    key_pub=$(openssl pkey -in "$key_file" -pubout 2>/dev/null) || return 1
+    [[ "$cert_pub" == "$key_pub" ]]
+}
+
+# Generate a TLS PEM cert+key at certs/host.{cert,key}. mkcert (when
+# installed) produces a cert signed by its locally-trusted CA — Chrome's
+# QUIC stack will negotiate HTTP/3 without warnings. openssl is the
+# fallback; browsers warn and HTTP/3 won't upgrade against a self-signed
+# cert. After this completes, the next `./jclaw.sh start` will pass
+# -Dhttps.port=9443 (gated by certs_valid). conf/application.conf is
+# never touched.
+do_https() {
     local certs_dir="$SCRIPT_DIR/certs"
     local cert_file="$certs_dir/host.cert"
     local key_file="$certs_dir/host.key"
 
     mkdir -p "$certs_dir"
 
+    # --install-ca: add the mkcert local CA to the system / NSS / Java
+    # trust stores before issuing the leaf cert. mkcert -install is
+    # itself idempotent (it inspects each store and only modifies the
+    # ones missing the CA), so we don't pre-check — let it be the source
+    # of truth. Hard-fail if mkcert is absent: the flag's intent is
+    # specifically the CA install, which openssl can't do, so silently
+    # falling through to the openssl fallback would be wrong.
+    if [[ "$HTTPS_INSTALL_CA" == true ]]; then
+        if ! command -v mkcert >/dev/null 2>&1; then
+            cat >&2 <<'EOF'
+ERROR: --install-ca requires mkcert, which is not on PATH.
+
+Install it once:
+  macOS:    brew install mkcert
+  Linux:    follow https://github.com/FiloSottile/mkcert#linux
+            (typically: apt install libnss3-tools, then install mkcert via
+             your package manager or the GitHub release binary)
+  Windows:  choco install mkcert  (or scoop install mkcert)
+  Other:    https://github.com/FiloSottile/mkcert#installation
+
+Then re-run: ./jclaw.sh https --install-ca
+EOF
+            return 1
+        fi
+        echo "==> Installing mkcert local CA into system trust stores..."
+        echo "    (idempotent — mkcert skips stores that already trust the CA;"
+        echo "     may prompt for admin / Touch ID on stores that need updating.)"
+        mkcert -install
+    fi
+
     if command -v mkcert >/dev/null 2>&1; then
         mkcert -cert-file "$cert_file" -key-file "$key_file" \
                localhost 127.0.0.1 ::1 >/dev/null
         echo "Generated mkcert-signed PEM cert+key at $certs_dir."
-        echo "(Trusted by the system store after 'mkcert -install' — Chrome will accept HTTP/3.)"
+        if [[ "$HTTPS_INSTALL_CA" == true ]]; then
+            echo "(Local CA installed in system trust store — Chrome will accept HTTP/3.)"
+        else
+            echo "(Trusted by the system store after 'mkcert -install' — Chrome will accept HTTP/3.)"
+            echo "Tip: run './jclaw.sh https --install-ca' once to install the CA automatically."
+        fi
     elif command -v openssl >/dev/null 2>&1; then
-        # 3650 days mirrors the play1 fork's enable-https default. CN=localhost
-        # plus SANs for IPv4 + IPv6 loopback covers what browsers actually
-        # validate; modern Chrome rejects certs that lack a SAN even when CN
-        # matches, so the SAN is non-optional.
+        # 10-year lifetime (3650 days) — local-dev cert that's never reachable
+        # from the public internet, so rotation hygiene matters less than
+        # avoiding mid-development expiry. CN=localhost plus SANs for IPv4 +
+        # IPv6 loopback covers what browsers actually validate; modern Chrome
+        # rejects certs that lack a SAN even when CN matches, so the SAN is
+        # non-optional.
         openssl req -x509 -newkey rsa:2048 -nodes \
             -keyout "$key_file" -out "$cert_file" \
             -days 3650 -subj "/CN=localhost" \
@@ -1196,11 +1293,27 @@ do_cert() {
     chmod 600 "$key_file"
     chmod 644 "$cert_file"
 
-    cat <<EOF
+    echo "Run '$0 restart' (or '$0 start') to apply."
+}
 
-If a JClaw Docker container is running, apply the new cert with:
-  docker compose restart
-EOF
+# Disable HTTPS by deleting the cert+key on disk. certs_valid will then
+# return false on the next start, so the -Dhttps.port=9443 override
+# won't be passed and Play boots HTTP-1.1 only on 9000. Idempotent
+# (no-op when the files are already absent). To re-enable, run
+# `./jclaw.sh https` — the next cert is regenerated fresh.
+do_no_https() {
+    local certs_dir="$SCRIPT_DIR/certs"
+    local cert_file="$certs_dir/host.cert"
+    local key_file="$certs_dir/host.key"
+
+    if [[ ! -f "$cert_file" && ! -f "$key_file" ]]; then
+        echo "HTTPS already disabled — no cert+key at $certs_dir."
+        return 0
+    fi
+
+    rm -f "$cert_file" "$key_file"
+    echo "Deleted $cert_file and $key_file. HTTPS disabled."
+    echo "Run '$0 restart' (or '$0 start') to apply."
 }
 
 do_secret() {
@@ -1434,11 +1547,17 @@ check_corepack() {
 
 # Verify the Play 1.x command is on PATH. Backend builds, dev runs, prod
 # starts, dependency syncs, and the test runner all shell out to play.
+#
+# Verify the play CLI is reachable. Bundle-mode resolution (prepending
+# $SCRIPT_DIR to PATH when ./play sits next to this script) happens at
+# top-level on every dispatch, so by the time we get here a bundled
+# launcher would already be on PATH. This check just enforces "play
+# must be findable somewhere" for the build/run paths that need it.
 check_play() {
     if ! command -v play >/dev/null 2>&1; then
-        echo "Error: play not found. Play Framework 1.x is required."
+        echo "Error: play not found in $SCRIPT_DIR or on PATH."
         echo "       Install Abundent's fork: https://github.com/tsukhani/play1"
-        echo "       Then add the play command to your PATH."
+        echo "       and add play to your PATH, or extract a play bundle into $SCRIPT_DIR."
         exit 1
     fi
 }
@@ -1676,9 +1795,9 @@ do_setup() {
 # prod mode and skips both compile passes (and refuses to start if
 # precompiled/ is missing).
 #
-# Pure builder: produces $SCRIPT_DIR/dist/jclaw-bundle.zip and exits.
+# Pure builder: produces $SCRIPT_DIR/dist/jclaw.zip and exits.
 # Operators unzip the resulting tarball wherever they want to install
-# JClaw — `unzip -o dist/jclaw-bundle.zip -d /opt && cd /opt/jclaw && ./jclaw.sh start`.
+# JClaw — `unzip -o dist/jclaw.zip -d /opt && cd /opt/jclaw && ./jclaw.sh start`.
 do_dist() {
     cd "$SCRIPT_DIR"
 
@@ -1705,15 +1824,18 @@ do_dist() {
     echo "==> Packaging application (play dist)..."
     play dist
 
-    # 1.13.x's playBundle (PF-90) writes a self-contained zip directly to
-    # dist/jclaw-bundle.zip — stable name (driven by rootProject.name in
-    # settings.gradle.kts), stable inner prefix "jclaw/", and includes
-    # everything the runtime needs: precompiled bytecode, public/ (with
-    # the staged SPA), modules/, conf/, framework jar + framework lib,
-    # and Gradle-resolved deps under lib/. No filename rename, no manual
-    # append for gitignored build artifacts, no inner-prefix normalization
-    # — all three were 1.12 workarounds and playBundle obviates them.
-    local zip_file="$SCRIPT_DIR/dist/jclaw-bundle.zip"
+    # play dist (PlayDistTask) writes a developer-distribution zip to
+    # dist/<rootProject.name>.zip = dist/jclaw.zip — stable name driven
+    # by rootProject.name in settings.gradle.kts, inner prefix "jclaw/",
+    # contents are the source tree filtered by .gitignore + .distignore
+    # plus precompiled/ and public/spa/ (force-included even though
+    # gitignored). Notably absent: framework jar, framework lib, Gradle-
+    # resolved app deps, and the runtime `./play` launcher — operators
+    # unzipping this artifact need a local Java 25 + Gradle + Play 1
+    # fork install to assemble the runtime classpath. For self-contained
+    # packaging without those external prereqs see the Dockerfile, which
+    # uses `play bundle` (PlayBundleTask) to produce dist/jclaw-bundle.zip.
+    local zip_file="$SCRIPT_DIR/dist/jclaw.zip"
     if [[ ! -f "$zip_file" ]]; then
         echo "Error: play dist did not create $zip_file"
         exit 1
@@ -1836,13 +1958,13 @@ do_start_prod() {
     # points nowhere before bailing.
     check_stale_h2_lock_or_exit
 
-    # First-run guard for jclaw-bundle.zip distributions: if no certs/.env and
+    # First-run guard for jclaw.zip distributions: if no certs/.env and
     # the conf-named secret variable isn't already set in the parent
     # shell, generate one on the fly so end-users who skip the developer-
     # only `setup` command don't get blocked. Then source certs/.env into
-    # the JVM env and validate.
+    # the JVM env and validate. TLS cert generation is opt-in via
+    # `$0 cert` — start happily on plain HTTP/1.1 (port 9000) without it.
     ensure_env_for_start
-    ensure_certs_for_start
     load_env_file
     require_application_secret
 
@@ -1915,12 +2037,12 @@ do_start_prod() {
         # are missing!!" with no hint at the operator-side cause.
         if [[ ! -d precompiled/java ]]; then
             echo "Error: dist install is missing precompiled/java."
-            echo "       The tarball was built without a precompile pass — re-run \`./jclaw.sh dist\` from a developer clone and re-unzip the resulting dist/jclaw-bundle.zip."
+            echo "       The tarball was built without a precompile pass — re-run \`./jclaw.sh dist\` from a developer clone and re-unzip the resulting dist/jclaw.zip."
             exit 1
         fi
         if [[ ! -d public/spa ]]; then
             echo "Error: dist install is missing public/spa."
-            echo "       The tarball was built without a frontend build — re-run \`./jclaw.sh dist\` from a developer clone and re-unzip the resulting dist/jclaw-bundle.zip."
+            echo "       The tarball was built without a frontend build — re-run \`./jclaw.sh dist\` from a developer clone and re-unzip the resulting dist/jclaw.zip."
             exit 1
         fi
         echo "==> Dist install detected (no app/, no frontend/) — skipping precompile + SPA build"
@@ -1985,6 +2107,20 @@ do_start_prod() {
         # shellcheck disable=SC2206
         local extra_opts=( ${JCLAW_JVM_OPTS} )
         jvm_opts+=( "${extra_opts[@]}" )
+    fi
+
+    # HTTPS toggle: enable the 9443 listener (HTTPS + h2 + h3) only when
+    # certs/host.{cert,key} pass strict validation (certs_valid). The
+    # commented `# https.port=9443` in application.conf means HTTPS is off
+    # without this -D — so absence of the flag = HTTP-1.1 only on 9000.
+    # Placed after JCLAW_JVM_OPTS so an operator can still override the
+    # port (e.g. JCLAW_JVM_OPTS='-Dhttps.port=8443') without losing the
+    # cert-gate — last-wins on value flags.
+    if certs_valid; then
+        jvm_opts+=( "-Dhttps.port=9443" )
+        echo "    HTTPS: enabled on 9443 (certs valid)"
+    else
+        echo "    HTTPS: disabled — run '$0 https' to enable HTTPS/h2/h3"
     fi
 
     # Dist installs have no sources — pass -Dprecompiled=true so Play
@@ -2114,7 +2250,6 @@ do_start_dev() {
     # overrides) into the JVM environment. See the prod-mode counterpart
     # for the rationale.
     ensure_env_for_start
-    ensure_certs_for_start
     load_env_file
     require_application_secret
 
@@ -2136,8 +2271,18 @@ do_start_dev() {
     # of a guaranteed-clean enhancer cache and bytecode store.
     rm -rf tmp
 
+    # HTTPS toggle: same cert-gated rule as prod (see do_start_prod).
+    # Branched invocation rather than an empty-array expansion, since
+    # `set -u` plus older bash (3.2 on macOS default) treats "${arr[@]}"
+    # on an empty array as an unbound expansion error.
     echo "==> Starting Play backend on port $BACKEND_PORT (dev)..."
-    nohup play run --http.port="$BACKEND_PORT" > "$SCRIPT_DIR/logs/backend-dev.out" 2>&1 &
+    if certs_valid; then
+        echo "    HTTPS: enabled on 9443 (certs valid)"
+        nohup play run --http.port="$BACKEND_PORT" -Dhttps.port=9443 > "$SCRIPT_DIR/logs/backend-dev.out" 2>&1 &
+    else
+        echo "    HTTPS: disabled — run '$0 https' to enable HTTPS/h2/h3"
+        nohup play run --http.port="$BACKEND_PORT" > "$SCRIPT_DIR/logs/backend-dev.out" 2>&1 &
+    fi
     local play_pid=$!
     # play run doesn't create server.pid — store the wrapper pid ourselves
     echo "$play_pid" > "$SCRIPT_DIR/server.pid"
@@ -2611,8 +2756,11 @@ do_test() {
 # ─── Execute ───
 
 case "$COMMAND" in
-    cert)
-        do_cert
+    https)
+        do_https
+        ;;
+    no-https)
+        do_no_https
         ;;
     secret)
         do_secret

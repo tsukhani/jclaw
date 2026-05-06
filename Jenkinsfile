@@ -15,7 +15,12 @@ pipeline {
 
     tools {
         jdk 'JDK25'
-        nodejs 'node-22'
+        // node-24 to match Dockerfile (NodeSource setup_24.x) and
+        // .devcontainer/Dockerfile, so the SPA build that ships in the
+        // Release zip is from the same Node major as the SPA inside
+        // the GHCR Docker image. Requires the Jenkins admin to have
+        // node-24 configured in Manage Jenkins → Tools → NodeJS.
+        nodejs 'node-24'
     }
 
     environment {
@@ -150,18 +155,26 @@ pipeline {
 
         stage('Package') {
             steps {
-                // ./jclaw.sh dist runs the full self-contained-artifact
-                // pipeline: play precompile (Gradle resolves deps as a
-                // transitive step), frontend pnpm install + nuxi generate,
-                // then `play dist` which in 1.13.x maps to playBundle —
-                // produces a self-contained zip with framework jar +
-                // framework lib + Gradle-resolved app deps + extracted
-                // modules + precompiled bytecode + bin/play-start.sh
-                // launcher. Output: dist/jclaw-bundle.zip with files
-                // prefixed jclaw/ (project.name from settings.gradle.kts).
+                // ./jclaw.sh dist runs play precompile (Gradle resolves
+                // deps as a transitive step), frontend pnpm install +
+                // nuxi generate, then `play dist` (PlayDistTask). The
+                // resulting zip contains the source tree filtered by
+                // .gitignore + .distignore, plus precompiled/ and
+                // public/spa/ — but NOT the framework jar, framework
+                // lib, Gradle-resolved app deps, or a runtime launcher.
+                // Operators unzipping it need a local Java 25 + Gradle
+                // + Play 1 fork install to assemble the runtime classpath.
+                // Output: dist/jclaw.zip with files prefixed jclaw/
+                // (project.name from settings.gradle.kts).
+                //
+                // The self-contained variant (with framework, deps, and
+                // a `./play` launcher baked in, JRE-only at runtime) is
+                // produced by `play bundle` and only by the Dockerfile —
+                // not by this pipeline. The GitHub Release attaches the
+                // dist zip; the GHCR Docker image carries the bundle.
                 sh './jclaw.sh dist'
 
-                archiveArtifacts artifacts: 'dist/jclaw-bundle.zip', fingerprint: true
+                archiveArtifacts artifacts: 'dist/jclaw.zip', fingerprint: true
             }
         }
 
@@ -179,7 +192,7 @@ pipeline {
                     withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
                         sh """
                             gh release delete ${version} --repo tsukhani/jclaw --yes || true
-                            gh release create ${version} dist/jclaw-bundle.zip \
+                            gh release create ${version} dist/jclaw.zip \
                                 --repo tsukhani/jclaw \
                                 --title "JClaw ${version}" \
                                 --generate-notes
