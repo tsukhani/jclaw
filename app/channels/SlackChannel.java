@@ -68,7 +68,7 @@ public class SlackChannel implements Channel {
                         "Rate-limited; Retry-After=%sms".formatted(retryAfterMs));
                 return SendResult.rateLimited(retryAfterMs);
             }
-            var responseBody = response.body() != null ? response.body().string() : "";
+            var responseBody = response.body().string();
             var result = JsonParser.parseString(responseBody).getAsJsonObject();
 
             if (result.get("ok").getAsBoolean()) {

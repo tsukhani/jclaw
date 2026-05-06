@@ -70,7 +70,7 @@ public class WhatsAppChannel implements Channel {
                 return SendResult.OK;
             }
 
-            var responseBody = response.body() != null ? response.body().string() : "";
+            var responseBody = response.body().string();
             EventLogger.warn("channel", null, "whatsapp",
                     "WhatsApp API error (HTTP %d): %s".formatted(response.code(), responseBody));
             return SendResult.FAILED;
@@ -96,7 +96,7 @@ public class WhatsAppChannel implements Channel {
                 .build();
         try (var resp = utils.HttpFactories.general().newCall(request).execute()) {
             // Drain the body so the connection returns to the pool; result discarded.
-            if (resp.body() != null) resp.body().bytes();
+            resp.body().bytes();
         } catch (Exception _) {
             // Read receipt failure is non-critical
         }
