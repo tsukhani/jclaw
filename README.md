@@ -64,7 +64,6 @@ jclaw/
 ├── conf/                         # Play configuration
 │   ├── application.conf          # Main app config
 │   ├── routes                    # URL routing
-│   ├── dependencies.yml          # Module dependencies
 │   └── initial-data.yml          # Bootstrap data
 ├── frontend/                     # Nuxt 3 SPA (SPA-only; ssr: false)
 │   ├── app.vue                   # Root component

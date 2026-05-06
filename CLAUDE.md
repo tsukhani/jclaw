@@ -26,7 +26,6 @@ Why it's needed: `.git/config` lives inside `.git/` which git refuses to track, 
 ```bash
 play run                  # Start dev server on :9000
 play autotest             # Run all tests (unit + functional)
-play deps --sync          # Resolve and sync dependencies from conf/dependencies.yml
 play dist                 # Build production distribution
 ```
 
@@ -97,7 +96,7 @@ Why this matters: every push to `main` triggers the `pre-push` hook's full backe
 - **Play 1.x** conventions: controllers are static methods in `app/controllers/`, models in `app/models/`, views (Groovy templates) in `app/views/`
 - Routes defined in `conf/routes` — uses Play's `{controller}.{action}` catch-all pattern
 - Configuration in `conf/application.conf` — supports environment prefixes (`%prod.`, `%test.`)
-- Dependencies managed via `conf/dependencies.yml` (Play module system, not Maven/Gradle)
+- Dependencies managed via `build.gradle.kts` using the `org.playframework.play1` plugin from the `/opt/play1` fork (composite build wired in `settings.gradle.kts`)
 - Tests in `test/` — JUnit 5, extending Play's `UnitTest` or `FunctionalTest`
 - Test mode uses H2 in-memory database (`%test.db.url` in application.conf)
 

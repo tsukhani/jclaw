@@ -31,7 +31,7 @@ Current version: **v0.7.18** (status: v0.1.0-alpha / work in progress per CLAUDE
 | Browser automation | Microsoft Playwright for Java 1.52 | Playwright (E2E tests only) |
 | Document handling | Apache Tika 3.2, flexmark, flying-saucer PDF | `marked` + `DOMPurify` for markdown rendering |
 | Styling | Play Groovy templates (auth + error pages only) | Tailwind CSS 3 (`@nuxtjs/tailwindcss`) |
-| Package manager | Play module system (`conf/dependencies.yml`) | pnpm 10.33.0 |
+| Package manager | Gradle (`build.gradle.kts`, `org.playframework.play1` plugin) | pnpm 10.33.0 |
 | Testing | JUnit 5 (platform 1.13.4 pinned), Play `UnitTest`/`FunctionalTest`, `play auto-test` | Vitest 4, `@vue/test-utils`, `happy-dom`, Playwright 1.59 |
 | Build | `play precompile` + `play dist` | `nuxi generate` |
 | CI | Jenkins (`Jenkinsfile`, node `JDK25` + `node-22`) | — |

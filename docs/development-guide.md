@@ -19,11 +19,11 @@ git clone https://bitbucket.abundent.com/scm/jclaw/jclaw.git
 cd jclaw
 ```
 
-The `jclaw.sh` launcher installs Play deps and frontend deps on first run. Manual:
+The `jclaw.sh` launcher installs Play deps (via the gradle `org.playframework.play1` plugin from `/opt/play1`) and frontend deps on first run. Manual:
 
 ```bash
-# Backend deps (reads conf/dependencies.yml)
-play deps --sync
+# Backend deps (reads build.gradle.kts)
+./gradlew classes
 
 # Frontend deps
 cd frontend && pnpm install --frozen-lockfile && cd ..
@@ -113,7 +113,6 @@ Active changes live under `openspec/changes/` (currently `v020-backlog`). Ratifi
 
 ## Gotchas
 
-- `conf/dependencies.yml` pins `junit-vintage-engine` to `5.13.4` because a transitive `pdf-test` dep pulled `5.9.3` and broke `junit-platform-commons` loading. Don't loosen.
 - H2 file DB is configured `AUTO_SERVER=TRUE`, so you can attach with a GUI client while Play is running.
 - Logs written to `./logs/` (dev) and `/app/logs` (container).
 - Dev-mode hot-reload works for Java classes, but adding new `@Entity` classes requires a JVM restart.

@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * client whose {@link Interceptor} returns pre-enqueued responses without
  * ever opening a socket. This avoids MockWebServer entirely — which is fine
  * because {@code mockwebserver 4.x} is excluded from this build's classpath
- * (see conf/dependencies.yml, and the JCLAW-143 follow-on that documents why).
+ * (see build.gradle.kts, and the JCLAW-143 follow-on that documents why).
  *
  * <p>The {@code assertSafeScheme} calls on the real URL still run (scheme +
  * literal-IP checks), which is what the first scenario exercises: the initial

@@ -72,7 +72,6 @@ jclaw/
 │   │                             # values live here under %prod. / %test. prefixes;
 │   │                             # secrets resolve from .env via ${VARNAME} placeholder.
 │   ├── routes                    # URL table — ~70 /api/* endpoints + SPA catch-all.
-│   ├── dependencies.yml          # Play module deps: playwright, tika, flexmark, flying-saucer, etc.
 │   ├── log4j2.xml / log4j2-prod.xml  # Logging.
 │   ├── messages                  # i18n (default locale).
 │   └── nginx.example.conf        # Reverse-proxy template.

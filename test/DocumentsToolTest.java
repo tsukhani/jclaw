@@ -150,7 +150,7 @@ public class DocumentsToolTest extends UnitTest {
         // routes embedded PDF images through Tika's ImageGraphicsEngine, which
         // calls org.apache.pdfbox.tools.imageio.ImageIOUtil. That class lives
         // in the pdfbox-tools artifact; an over-eager exclude in
-        // conf/dependencies.yml previously dropped pdfbox-tools entirely,
+        // build.gradle.kts previously dropped pdfbox-tools entirely,
         // causing NoClassDefFoundError when an agent fed a scanned PDF to
         // the documents tool. Build a synthetic PDF with one embedded image
         // and assert the extraction completes — no exception, real result.

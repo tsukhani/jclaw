@@ -15,7 +15,6 @@ JClaw is an AI-powered automation platform built on **Play Framework 1.x** (Java
 play run                  # Start dev server on :9000
 play test                 # Run all tests (unit + functional)
 play auto-test            # Run tests with auto-reload
-play deps --sync          # Resolve and sync dependencies from conf/dependencies.yml
 play dist                 # Build production distribution
 ```
 
@@ -37,7 +36,7 @@ Start the Play backend (`play run`) and the Nuxt frontend (`cd frontend && pnpm 
 - **Play 1.x** conventions: controllers are static methods in `app/controllers/`, models in `app/models/`, views (Groovy templates) in `app/views/`
 - Routes defined in `conf/routes` — uses Play's `{controller}.{action}` catch-all pattern
 - Configuration in `conf/application.conf` — supports environment prefixes (`%prod.`, `%test.`)
-- Dependencies managed via `conf/dependencies.yml` (Play module system, not Maven/Gradle)
+- Dependencies managed via `build.gradle.kts` using the `org.playframework.play1` plugin from the `/opt/play1` fork (composite build wired in `settings.gradle.kts`)
 - Tests in `test/` — JUnit 5, extending Play's `UnitTest` or `FunctionalTest`
 - Test mode uses H2 in-memory database (`%test.db.url` in application.conf)
 
