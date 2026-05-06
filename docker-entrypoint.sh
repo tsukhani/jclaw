@@ -5,8 +5,19 @@
 # /app/certs (bind-mounted to ./certs on the host):
 #
 #   1. PLAY_SECRET — Play's session-cookie signing key. Resolution order:
-#      env first (operator override), then ./certs/.env, then auto-generate
-#      a fresh 64-char secret and persist it to ./certs/.env.
+#      explicit env var (operator override) → bind-mounted ./certs/.env
+#      → fresh in-shell generation, persisted to ./certs/.env.
+#
+#      Generation matches `play secret` exactly (64-char alphanumeric
+#      written as PLAY_SECRET=<value>) but runs at *container start*, not
+#      at image build. Build-time seeding via `gradle playSecret` was
+#      considered and rejected: a baked-in secret is either reused across
+#      every rebuild that hits a warm Docker cache (turning
+#      session-cookie signing into a shared primitive across pulls of
+#      the same image hash) or recomputed needlessly on every source
+#      change in cold-cache builds. Generating per-container side-steps
+#      both cliffs and keeps the runtime image free of the play1 fork +
+#      Gradle that `gradle playSecret` would otherwise demand.
 #
 #   2. TLS PEM cert + key — used by Play's HTTPS listener for h2/h3.
 #      Resolution: if ./certs/host.cert and ./certs/host.key both exist,
