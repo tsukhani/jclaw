@@ -413,8 +413,14 @@ public class SkillPromotionService {
             // Remove empty subdirectories from staging
             for (var subDir : List.of("credentials", "tools")) {
                 var dir = stagingDir.resolve(subDir);
-                if (Files.isDirectory(dir) && Files.list(dir).findAny().isEmpty()) {
-                    Files.delete(dir);
+                if (Files.isDirectory(dir)) {
+                    boolean empty;
+                    try (var entries = Files.list(dir)) {
+                        empty = entries.findAny().isEmpty();
+                    }
+                    if (empty) {
+                        Files.delete(dir);
+                    }
                 }
             }
 

@@ -40,6 +40,7 @@ public final class TelegramModelSelector {
      * caller so it can fall back to the text-only detail response.
      */
     public static boolean sendSummary(Agent agent, Conversation conversation) {
+        if (conversation == null) return false;
         var botToken = botTokenForAgent(agent);
         if (botToken == null) return false;
         var text = summaryText(agent, conversation);

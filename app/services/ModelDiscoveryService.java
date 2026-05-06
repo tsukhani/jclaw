@@ -679,6 +679,10 @@ public class ModelDiscoveryService {
                     try {
                         var model = futures.get(i).get(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
                         if (model != null) results.add(model);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        play.Logger.warn("Ollama /api/show interrupted for %s",
+                                modelIds.get(i));
                     } catch (Exception e) {
                         play.Logger.warn("Ollama /api/show failed for %s: %s",
                                 modelIds.get(i), e.getMessage());
@@ -714,6 +718,7 @@ public class ModelDiscoveryService {
         } catch (JsonSyntaxException e) {
             return new DiscoveryResult.Error(502, "Invalid JSON response from provider");
         } catch (Exception e) {
+            if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             return new DiscoveryResult.Error(502,
                     "Failed to connect to provider: %s".formatted(e.getMessage()));
         }
