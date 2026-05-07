@@ -46,6 +46,49 @@ if git diff --cached --name-only --diff-filter=ACMR | grep -qx 'frontend/package
     fi
 fi
 
+# Heads-up check for newly-added files that an ignore layer would silently
+# strip from a downstream artifact. Catches the class of bug where a new
+# file at the repo root (e.g. .play-version) is covered by .distignore or
+# .dockerignore but is actually load-bearing for the dist tarball or the
+# Docker image. Informational only — most directory-rule matches (app/,
+# test/, frontend/) are intentional, so a hard block would just train you
+# to reach for --no-verify. .gitignore exclusion isn't checkable here:
+# ignored files never enter the index, so there's nothing for a pre-commit
+# hook to inspect for that layer.
+# bash 3.2-compatible array build — `mapfile` is bash 4+ and macOS ships
+# 3.2 by default, so this hook (which is shared across the team) avoids
+# the 4+ builtin to keep everyone's commits working.
+added_files=()
+while IFS= read -r line; do
+    added_files+=("$line")
+done < <(git diff --cached --name-only --diff-filter=A)
+if (( ${#added_files[@]} > 0 )); then
+    declare -a ignore_matches=()
+    for layer in ".distignore:playBundle" ".dockerignore:docker build"; do
+        ignore_file="${layer%%:*}"
+        artifact="${layer##*:}"
+        [[ -f "$REPO_ROOT/$ignore_file" ]] || continue
+        # git ls-files --cached --exclude-from=FILE --ignored applies
+        # gitignore-syntax patterns from FILE against the index. Restricting
+        # to just-added paths via the trailing pathspec keeps the output
+        # focused on this commit instead of scanning the whole tree.
+        while IFS= read -r match; do
+            [[ -n "$match" ]] && ignore_matches+=("${match}|${ignore_file}|${artifact}")
+        done < <(git ls-files --cached --exclude-from="$REPO_ROOT/$ignore_file" --ignored -- "${added_files[@]}")
+    done
+    if (( ${#ignore_matches[@]} > 0 )); then
+        echo "[jclaw pre-commit] Heads up — these newly-added files match an ignore rule" >&2
+        echo "[jclaw pre-commit] and will NOT ship in the corresponding artifact:" >&2
+        for m in "${ignore_matches[@]}"; do
+            f="${m%%|*}"; rest="${m#*|}"; igf="${rest%%|*}"; art="${rest##*|}"
+            printf '[jclaw pre-commit]   %-40s (%s — excluded from %s)\n' "$f" "$igf" "$art" >&2
+        done
+        echo "[jclaw pre-commit] If any are runtime-required (read by build.gradle.kts," >&2
+        echo "[jclaw pre-commit] application.conf, ./jclaw.sh, etc.), drop the matching" >&2
+        echo "[jclaw pre-commit] line from $igf. Otherwise this is intentional — proceed." >&2
+    fi
+fi
+
 # Skip when lint-staged isn't installed (e.g. a fresh clone before
 # `pnpm install` runs in frontend/). Fail open rather than blocking commits.
 if [[ ! -x "$FRONTEND_DIR/node_modules/.bin/lint-staged" ]]; then
