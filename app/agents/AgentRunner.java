@@ -704,7 +704,8 @@ public class AgentRunner {
         // and tool-loop continuations (line 781) use the same effective id.
         var effectiveModelIdForCall = effectiveModelId(agent, conversation);
         var accumulator = primary.chatStreamAccumulate(
-                effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode);
+                effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(),
+                maxTokens, thinkingMode, channelType);
 
         if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return;
 
@@ -713,7 +714,8 @@ public class AgentRunner {
                 && accumulator.error.getMessage().contains("HTTP 5")) {
             EventLogger.warn("llm", agent.name, null, "Retrying streaming after transient error");
             accumulator = primary.chatStreamAccumulate(
-                    effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode);
+                    effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(),
+                    maxTokens, thinkingMode, channelType);
             if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return;
         }
 
@@ -990,8 +992,8 @@ public class AgentRunner {
             ChatResponse response;
             try {
                 response = (secondary != null)
-                        ? LlmProvider.chatWithFailover(primary, secondary, effectiveModelId, currentMessages, tools, maxTokens, thinkingMode)
-                        : primary.chat(effectiveModelId, currentMessages, tools, maxTokens, thinkingMode);
+                        ? LlmProvider.chatWithFailover(primary, secondary, effectiveModelId, currentMessages, tools, maxTokens, thinkingMode, conversation.channelType)
+                        : primary.chat(effectiveModelId, currentMessages, tools, maxTokens, thinkingMode, conversation.channelType);
             } catch (Exception e) {
                 EventLogger.error("llm", agent.name, null, "LLM call failed: %s".formatted(e.getMessage()));
                 return "I'm sorry, I encountered an error communicating with the AI provider. Please try again.";
@@ -1070,7 +1072,8 @@ public class AgentRunner {
         // tightens as the tool loop accumulates history.
         var maxTokens = effectiveMaxTokens(agent, conversation, provider, currentMessages, tools);
         var accumulator = provider.chatStreamAccumulate(
-                effectiveModelIdForCall, currentMessages, tools, cb.onToken(), cb.onReasoning(), maxTokens, thinkingMode);
+                effectiveModelIdForCall, currentMessages, tools, cb.onToken(), cb.onReasoning(),
+                maxTokens, thinkingMode, channelType);
 
         try {
             if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, null, cb))
@@ -1131,7 +1134,8 @@ public class AgentRunner {
 
             var retryMaxTokens = effectiveMaxTokens(agent, conversation, provider, retryMessages, tools);
             var retry = provider.chatStreamAccumulate(
-                    effectiveModelIdForCall, retryMessages, tools, cb.onToken(), cb.onReasoning(), retryMaxTokens, thinkingMode);
+                    effectiveModelIdForCall, retryMessages, tools, cb.onToken(), cb.onReasoning(),
+                    retryMaxTokens, thinkingMode, channelType);
             try {
                 if (!awaitAccumulatorOrCancel(retry, isCancelled, agent, null, cb))
                     return cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
@@ -1561,11 +1565,12 @@ public class AgentRunner {
         if (!services.SessionCompactor.shouldCompact(estimateTokens(current), snapshot.modelInfo())) return current;
 
         final var modelId = snapshot.modelId();
+        final var compactionChannel = snapshot.channelType();
         final var maxOutput = services.ConfigService.getInt("chat.compactionMaxTokens", 8192);
         final var modelLabel = primary.config().name() + "/" + modelId;
 
         services.SessionCompactor.Summarizer summarizer = sumMsgs -> {
-            var resp = primary.chat(modelId, sumMsgs, List.of(), maxOutput, null);
+            var resp = primary.chat(modelId, sumMsgs, List.of(), maxOutput, null, compactionChannel);
             return services.SessionCompactor.firstChoiceText(resp);
         };
 

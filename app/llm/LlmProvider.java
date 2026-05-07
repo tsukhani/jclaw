@@ -233,19 +233,27 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
     // ─── Synchronous chat ────────────────────────────────────────────────
 
     public ChatResponse chat(String model, List<ChatMessage> messages, List<ToolDef> tools,
-                             Integer maxTokens, String thinkingMode) {
-        return chat(model, messages, tools, maxTokens, thinkingMode, null);
+                             Integer maxTokens, String thinkingMode, String channel) {
+        return chat(model, messages, tools, maxTokens, thinkingMode, null, channel);
     }
 
     /**
      * Synchronous chat with an optional custom timeout (seconds).
      * Pass null for the default 180s timeout.
+     *
+     * <p>{@code channel} is the inbound chat channel (web, telegram, slack, …)
+     * that originated the call; the OkHttp dispatcher_wait metric
+     * (recorded by {@link utils.LlmCallEventListener}) is partitioned by it
+     * so each channel's dashboard view shows the dispatcher cost its chats
+     * actually paid. Pass {@code null} for callers without a chat-channel
+     * context (skill promotion, slash commands, scheduled summarization).
      */
     public ChatResponse chat(String model, List<ChatMessage> messages, List<ToolDef> tools,
-                             Integer maxTokens, String thinkingMode, Integer timeoutSeconds) {
+                             Integer maxTokens, String thinkingMode, Integer timeoutSeconds,
+                             String channel) {
         var request = new ChatRequest(model, messages, tools, false, maxTokens, thinkingMode);
         var json = serializeRequest(request);
-        var responseBody = executeWithRetry("/chat/completions", json, timeoutSeconds);
+        var responseBody = executeWithRetry("/chat/completions", json, timeoutSeconds, channel);
         return deserializeResponse(responseBody);
     }
 
@@ -254,7 +262,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
     public void chatStream(String model, List<ChatMessage> messages, List<ToolDef> tools,
                            Consumer<ChatCompletionChunk> onChunk,
                            Runnable onComplete, Consumer<Exception> onError,
-                           Integer maxTokens, String thinkingMode) {
+                           Integer maxTokens, String thinkingMode, String channel) {
         Thread.ofVirtual().name("llm-stream").start(() -> {
             try {
                 var request = new ChatRequest(model, messages, tools, true, maxTokens, thinkingMode);
@@ -280,7 +288,8 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                         },
                         onComplete,
                         t -> onError.accept(t instanceof Exception ex
-                                ? ex : new LlmException("Stream error", t)));
+                                ? ex : new LlmException("Stream error", t)),
+                        channel);
             } catch (Exception e) {
                 onError.accept(e);
             }
@@ -292,7 +301,8 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
     public StreamAccumulator chatStreamAccumulate(String model, List<ChatMessage> messages,
                                                    List<ToolDef> tools, Consumer<String> onToken,
                                                    Consumer<String> onReasoning,
-                                                   Integer maxTokens, String thinkingMode) {
+                                                   Integer maxTokens, String thinkingMode,
+                                                   String channel) {
         var accumulator = new StreamAccumulator();
         var contentBuilder = new StringBuilder();
         var toolCallAccumulator = new java.util.HashMap<Integer, ToolCallBuilder>();
@@ -353,17 +363,17 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                     accumulator.error = e;
                     accumulator.markComplete();
                 },
-                maxTokens, thinkingMode);
+                maxTokens, thinkingMode, channel);
 
         return accumulator;
     }
 
     // ─── Embeddings ──────────────────────────────────────────────────────
 
-    public float[] embeddings(String model, String input) {
+    public float[] embeddings(String model, String input, String channel) {
         var request = new EmbeddingRequest(model, input);
         var json = gson.toJson(request);
-        var responseBody = executeWithRetry("/embeddings", json);
+        var responseBody = executeWithRetry("/embeddings", json, null, channel);
         var response = gson.fromJson(responseBody, EmbeddingResponse.class);
         if (response.data() == null || response.data().isEmpty()) {
             throw new LlmException("Empty embedding response");
@@ -376,14 +386,14 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
     public static ChatResponse chatWithFailover(LlmProvider primary, LlmProvider secondary,
                                                  String model, List<ChatMessage> messages,
                                                  List<ToolDef> tools, Integer maxTokens,
-                                                 String thinkingMode) {
+                                                 String thinkingMode, String channel) {
         try {
-            return primary.chat(model, messages, tools, maxTokens, thinkingMode);
+            return primary.chat(model, messages, tools, maxTokens, thinkingMode, channel);
         } catch (LlmException e) {
             if (secondary != null) {
                 EventLogger.warn("llm", "Failing over from %s to %s: %s"
                         .formatted(primary.config().name(), secondary.config().name(), e.getMessage()));
-                return secondary.chat(model, messages, tools, maxTokens, thinkingMode);
+                return secondary.chat(model, messages, tools, maxTokens, thinkingMode, channel);
             }
             throw e;
         }
@@ -507,11 +517,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         return URI.create(url);
     }
 
-    protected String executeWithRetry(String path, String json) {
-        return executeWithRetry(path, json, null);
-    }
-
-    protected String executeWithRetry(String path, String json, Integer timeoutSeconds) {
+    protected String executeWithRetry(String path, String json, Integer timeoutSeconds, String channel) {
         var uri = buildUri(path);
         var auth = "Bearer " + config.apiKey();
         var timeout = Duration.ofSeconds(timeoutSeconds != null ? timeoutSeconds : 180);
@@ -519,7 +525,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
         for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
             try {
-                var reply = OkHttpLlmHttpDriver.send(uri, auth, json, timeout);
+                var reply = OkHttpLlmHttpDriver.send(uri, auth, json, timeout, channel);
 
                 if (reply.statusCode() == 200) return reply.body();
 

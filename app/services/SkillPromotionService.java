@@ -662,7 +662,9 @@ public class SkillPromotionService {
 
         try {
             // No reasoning (null thinkingMode) — sanitization is classification, not reasoning.
-            var response = provider.chat(modelId, messages, null, null, null, timeoutSeconds);
+            // Skill promotion is a programmatic operation with no chat-channel
+            // context; dispatcher_wait records under "unknown".
+            var response = provider.chat(modelId, messages, null, null, null, timeoutSeconds, null);
             var text = response.choices().getFirst().message().content().toString().strip();
 
             EventLogger.info("skills",

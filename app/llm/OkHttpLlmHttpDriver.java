@@ -42,13 +42,14 @@ final class OkHttpLlmHttpDriver {
      * (connection refused, timeout, malformed URL); HTTP errors are reflected
      * as non-200 status codes in the result, not thrown.
      */
-    static HttpReply send(URI uri, String authHeader, String jsonBody, Duration timeout)
+    static HttpReply send(URI uri, String authHeader, String jsonBody, Duration timeout, String channel)
             throws IOException, InterruptedException {
-        var req = new Request.Builder()
+        var builder = new Request.Builder()
                 .url(uri.toString())
                 .header("Authorization", authHeader)
-                .post(RequestBody.create(jsonBody, JSON))
-                .build();
+                .post(RequestBody.create(jsonBody, JSON));
+        if (channel != null) builder.tag(String.class, channel);
+        var req = builder.build();
         var call = utils.HttpFactories.llmSingleShot().newCall(req);
         // Per-call timeout via Call.timeout() — no per-call client allocation.
         call.timeout().timeout(timeout.toMillis(), TimeUnit.MILLISECONDS);
@@ -70,13 +71,15 @@ final class OkHttpLlmHttpDriver {
      * {@link LlmProvider#chatStream} skips it before parsing.
      */
     static void streamSse(URI uri, String authHeader, String jsonBody, Duration timeout,
-                          Consumer<String> onEvent, Runnable onComplete, Consumer<Throwable> onError) {
-        var req = new Request.Builder()
+                          Consumer<String> onEvent, Runnable onComplete, Consumer<Throwable> onError,
+                          String channel) {
+        var builder = new Request.Builder()
                 .url(uri.toString())
                 .header("Authorization", authHeader)
                 .header("Accept", "text/event-stream")
-                .post(RequestBody.create(jsonBody, JSON))
-                .build();
+                .post(RequestBody.create(jsonBody, JSON));
+        if (channel != null) builder.tag(String.class, channel);
+        var req = builder.build();
 
         var done = new CountDownLatch(1);
         var listener = new EventSourceListener() {

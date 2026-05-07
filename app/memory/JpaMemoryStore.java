@@ -211,7 +211,12 @@ public class JpaMemoryStore implements MemoryStore {
             try {
                 var provider = llm.ProviderRegistry.getPrimary();
                 if (provider == null) return null;
-                return provider.embeddings(k.model(), k.text());
+                // Embeddings are computed lazily inside a Caffeine cache load —
+                // the chat-channel context that triggered the lookup isn't
+                // available here, so the call records under "unknown" channel
+                // for dispatcher_wait. Acceptable: embeddings hit a different
+                // provider endpoint than chat and are typically cheap.
+                return provider.embeddings(k.model(), k.text(), null);
             } catch (Exception e) {
                 EventLogger.warn("memory", "Embedding generation failed: %s".formatted(e.getMessage()));
                 return null;

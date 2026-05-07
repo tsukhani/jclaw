@@ -89,7 +89,7 @@ public class ChatStreamSseTest extends UnitTest {
                 chunk -> collected.chunks.add(chunk),
                 () -> { collected.completed.set(true); latch.countDown(); },
                 e -> { collected.error.set(e); latch.countDown(); },
-                null, null);
+                null, null, null);
         assertTrue(latch.await(5, TimeUnit.SECONDS),
                 "stream should complete within 5s");
         return collected;

@@ -47,7 +47,13 @@ public final class LlmCallEventListener extends EventListener {
     public void connectionAcquired(Call call, Connection connection) {
         if (callStartNs > 0L) {
             long deltaNs = System.nanoTime() - callStartNs;
-            LatencyStats.record("llm", "dispatcher_wait", Math.max(0L, deltaNs / 1_000_000L));
+            // Read the originating chat channel from the request tag (set by
+            // OkHttpLlmHttpDriver when the LLM call was issued). Falls back
+            // to the LatencyStats UNKNOWN_CHANNEL bucket when the caller had
+            // no chat-channel context (skill promotion, slash compaction,
+            // memory-store embedding lookups).
+            var channel = call.request().tag(String.class);
+            LatencyStats.record(channel, "dispatcher_wait", Math.max(0L, deltaNs / 1_000_000L));
         }
         var url = call.request().url();
         var key = url.host() + ":" + url.port();

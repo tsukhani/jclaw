@@ -322,7 +322,10 @@ public final class Commands {
         final var capturedPrimary = primary;
         final var capturedModelId = modelId;
         services.SessionCompactor.Summarizer summarizer = sumMsgs -> {
-            var resp = capturedPrimary.chat(capturedModelId, sumMsgs, java.util.List.of(), maxOutput, null);
+            // Slash-command-triggered compaction has no inbound chat-channel
+            // context (it runs on a programmatic invocation), so dispatcher_wait
+            // for this call records under "unknown".
+            var resp = capturedPrimary.chat(capturedModelId, sumMsgs, java.util.List.of(), maxOutput, null, null);
             return services.SessionCompactor.firstChoiceText(resp);
         };
 
