@@ -18,15 +18,15 @@ Jenkinsfile.renovate
 .gitignore
 .gitattributes
 # Developer-only tooling — git hooks, dev container config, AI assistant
-# state, the Renovate bot's dependency-update config, and the Play fork
-# version pin (consumed only at Docker build time, irrelevant at
-# runtime) all belong to the source repo, not to a `play dist` tarball
-# an end user unzips.
+# state, and the Renovate bot's dependency-update config all belong to
+# the source repo, not to a `play dist` tarball an end user unzips.
+# Note: .play-version is NOT excluded — build.gradle.kts reads it at
+# Gradle configure time (every `playStart` / `playRun` evaluation), so
+# it must ship in the dist alongside build.gradle.kts itself.
 .githooks/
 .devcontainer/
 .claude/
 renovate.json5
-.play-version
 # Build-time coverage artifacts (Jenkins only; not for the prod zip).
 # bin/ + conf/jacoco-agent.properties ship in the source repo so the
 # `%test.javaagent.path` line in conf/application.conf still resolves
