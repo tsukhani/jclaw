@@ -102,10 +102,10 @@ public class ApiChatController extends Controller {
                 ? body.get("conversationId").getAsLong() : null;
 
         var attachments = parseAttachments(body);
-        if (services.AttachmentService.anyImage(attachments) && !agentSupportsVision(agent)) {
+        if (services.AttachmentService.anyImage(attachments) && !AgentService.supportsVision(agent)) {
             error(400, "This model does not support images");
         }
-        if (services.AttachmentService.anyAudio(attachments) && !agentSupportsAudio(agent)) {
+        if (services.AttachmentService.anyAudio(attachments) && !AgentService.supportsAudio(agent)) {
             error(400, "This model does not support audio");
         }
 
@@ -131,35 +131,6 @@ public class ApiChatController extends Controller {
             out.add(new services.AttachmentService.Input(id, originalFilename, mimeType, sizeBytes, kind));
         }
         return out;
-    }
-
-    /**
-     * Resolve whether the agent's active model advertises {@code supportsVision}.
-     * Mirrors the capability lookup {@link agents.AgentRunner} performs for
-     * thinking-mode validation: provider registry lookup, model-id match,
-     * boolean flag. Returns {@code false} when the provider or model can't
-     * be resolved — better to reject an image attachment than accept it
-     * against an unknown model.
-     */
-    private static boolean agentSupportsVision(Agent agent) {
-        var provider = llm.ProviderRegistry.get(agent.modelProvider);
-        if (provider == null) return false;
-        return provider.config().models().stream()
-                .filter(m -> m.id().equals(agent.modelId))
-                .findFirst()
-                .map(llm.LlmTypes.ModelInfo::supportsVision)
-                .orElse(false);
-    }
-
-    /** Mirror of {@link #agentSupportsVision} for the JCLAW-131 audio gate. */
-    private static boolean agentSupportsAudio(Agent agent) {
-        var provider = llm.ProviderRegistry.get(agent.modelProvider);
-        if (provider == null) return false;
-        return provider.config().models().stream()
-                .filter(m -> m.id().equals(agent.modelId))
-                .findFirst()
-                .map(llm.LlmTypes.ModelInfo::supportsAudio)
-                .orElse(false);
     }
 
     /**
