@@ -1386,12 +1386,17 @@ do_secret() {
 }
 
 # Locate the H2 jar shipped with the Play framework, falling back to a
-# bundled copy in the dist's lib/. Used by do_reset to invoke the H2
-# Shell tool standalone — no JVM-side classpath assembly needed.
+# bundled copy in the dist's framework/lib/. Used by do_reset to invoke
+# the H2 Shell tool standalone — no JVM-side classpath assembly needed.
 locate_h2_jar() {
     local jar
-    # Dist tarball layout: every dependency including h2 sits in lib/.
-    jar=$(ls "$SCRIPT_DIR"/lib/h2-*.jar 2>/dev/null | head -1)
+    # Dist/bundle layout: PlayBundleTask emits a two-tree lib hierarchy —
+    # jclaw/lib/ for app deps (Gradle-resolved) and jclaw/framework/lib/
+    # for framework deps (copied wholesale from the play install). H2 is
+    # declared by Play (framework/dependencies.yml), not by jclaw, so it
+    # lands under framework/lib/ — same path the developer-layout branch
+    # below resolves to via the `play` CLI.
+    jar=$(ls "$SCRIPT_DIR"/framework/lib/h2-*.jar 2>/dev/null | head -1)
     if [[ -n "$jar" ]]; then
         echo "$jar"
         return 0
@@ -1498,7 +1503,7 @@ do_reset() {
     local h2_jar
     h2_jar=$(locate_h2_jar) || {
         echo "Error: Could not locate H2 jar. Looked in:"
-        echo "  - $SCRIPT_DIR/lib/h2-*.jar  (dist layout)"
+        echo "  - $SCRIPT_DIR/framework/lib/h2-*.jar  (dist layout)"
         echo "  - <play-home>/framework/lib/h2-*.jar  (developer layout)"
         echo "       Without the H2 driver this script can't talk to the DB."
         exit 1
