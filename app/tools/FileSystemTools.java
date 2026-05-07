@@ -820,9 +820,13 @@ public class FileSystemTools implements ToolRegistry.Tool {
             if (guardError != null) return guardError;
 
             Path moveTarget = null;
-            if (op instanceof FileOp.Update u && u.newPath().isPresent()) {
+            // Capture the Optional once so the isPresent check and the get share
+            // a single reference — addresses SonarQube S3655, which can't prove
+            // u.newPath() is referentially transparent across two calls.
+            var newPathOpt = (op instanceof FileOp.Update u) ? u.newPath() : java.util.Optional.<String>empty();
+            if (newPathOpt.isPresent()) {
                 try {
-                    moveTarget = AgentService.acquireWorkspacePath(agent.name, u.newPath().get());
+                    moveTarget = AgentService.acquireWorkspacePath(agent.name, newPathOpt.get());
                 } catch (SecurityException e) {
                     return "Error: " + e.getMessage();
                 }
@@ -843,16 +847,25 @@ public class FileSystemTools implements ToolRegistry.Tool {
         var sortedKeys = new ArrayList<>(lockKeys);
         Collections.sort(sortedKeys);
 
-        var locks = new ArrayList<ReentrantLock>();
+        // Resolve all locks first (allocation only, nothing acquired yet) so a
+        // late OOM during ArrayList growth can't leave a held lock outside the
+        // finally's reach. Then acquire in order, tracking how many we grabbed.
+        // The finally only releases the prefix we actually own — addresses
+        // SonarQube S2222 (lock-not-unlocked-on-all-paths) by removing the
+        // window between lock() and locks.add() the previous shape had.
+        var locks = new ArrayList<ReentrantLock>(sortedKeys.size());
+        for (var key : sortedKeys) {
+            locks.add(FILE_LOCKS.computeIfAbsent(key, k -> new ReentrantLock()));
+        }
+        int acquired = 0;
         try {
-            for (var key : sortedKeys) {
-                var lock = FILE_LOCKS.computeIfAbsent(key, k -> new ReentrantLock());
-                lock.lock();
-                locks.add(lock);
+            while (acquired < locks.size()) {
+                locks.get(acquired).lock();
+                acquired++;
             }
             return applyPatchLocked(resolved);
         } finally {
-            for (int i = locks.size() - 1; i >= 0; i--) {
+            for (int i = acquired - 1; i >= 0; i--) {
                 locks.get(i).unlock();
             }
         }

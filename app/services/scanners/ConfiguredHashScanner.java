@@ -63,7 +63,7 @@ abstract class ConfiguredHashScanner implements Scanner {
                         .formatted(scannerName, status, hashPrefix(sha256)));
                 return Verdict.clean();
             }
-            var body = response.body() != null ? response.body().string() : "";
+            var body = response.body().string();
             return parser.parse(JsonParser.parseString(body).getAsJsonObject());
         } catch (java.io.InterruptedIOException e) {
             // OkHttp throws InterruptedIOException when a Call is interrupted

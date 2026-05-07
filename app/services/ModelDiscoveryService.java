@@ -92,7 +92,7 @@ public class ModelDiscoveryService {
             String responseBody;
             try (var response = call.execute()) {
                 statusCode = response.code();
-                responseBody = response.body() != null ? response.body().string() : "";
+                responseBody = response.body().string();
             }
 
             if (statusCode != 200) {
@@ -423,7 +423,7 @@ public class ModelDiscoveryService {
             String body;
             try (var response = call.execute()) {
                 if (response.code() != 200) return List.of();
-                body = response.body() != null ? response.body().string() : "";
+                body = response.body().string();
             }
 
             try {
@@ -548,7 +548,7 @@ public class ModelDiscoveryService {
             String responseBody;
             try (var resp = call.execute()) {
                 statusCode = resp.code();
-                responseBody = resp.body() != null ? resp.body().string() : "";
+                responseBody = resp.body().string();
             }
             if (statusCode != 200) return null;
 
@@ -773,7 +773,7 @@ public class ModelDiscoveryService {
             String responseBody;
             try (var resp = call.execute()) {
                 statusCode = resp.code();
-                responseBody = resp.body() != null ? resp.body().string() : "";
+                responseBody = resp.body().string();
             }
             if (statusCode != 200) return null;
             return parseOllamaShow(id, JsonParser.parseString(responseBody).getAsJsonObject());

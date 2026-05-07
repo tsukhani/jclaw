@@ -38,7 +38,7 @@ final class LocalProviderProbeSupport {
                         "GET %s/models returned HTTP %d".formatted(baseUrl, resp.code()),
                         false);
             }
-            var bodyStr = resp.body() != null ? resp.body().string() : "";
+            var bodyStr = resp.body().string();
             var json = JsonParser.parseString(bodyStr).getAsJsonObject();
             var data = json.has("data") ? json.getAsJsonArray("data") : null;
             return new Result(true, data == null ? 0 : data.size(), null, false);

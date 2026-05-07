@@ -40,6 +40,13 @@ public class BoundedPatternCacheTest extends UnitTest {
         var latch = new CountDownLatch(1);
         var done = new CountDownLatch(workers);
         var errors = new AtomicInteger();
+        // Record the largest size each worker observes after an insert so the
+        // bound check happens outside the worker's try/catch. The previous
+        // shape called assertTrue inside catch (Throwable) — AssertionError is
+        // a Throwable, so a real over-cap observation got swallowed into the
+        // errors counter and the diagnostic message ("size exceeded cap: N")
+        // never reached the test report. SonarQube S5779.
+        var maxObservedSize = new AtomicInteger(0);
 
         try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
             for (int w = 0; w < workers; w++) {
@@ -50,8 +57,8 @@ public class BoundedPatternCacheTest extends UnitTest {
                         for (int i = 0; i < keysPerWorker; i++) {
                             cache.computeIfAbsent("w" + workerId + "-" + i,
                                     k -> Pattern.compile(Pattern.quote(k)));
-                            assertTrue(cache.size() <= cap,
-                                    "size exceeded cap: " + cache.size());
+                            int observed = cache.size();
+                            maxObservedSize.accumulateAndGet(observed, Math::max);
                         }
                     } catch (Throwable t) {
                         errors.incrementAndGet();
@@ -64,7 +71,9 @@ public class BoundedPatternCacheTest extends UnitTest {
             assertTrue(done.await(30, TimeUnit.SECONDS), "workers timed out");
         }
 
-        assertEquals(0, errors.get(), "no worker should have seen an over-cap snapshot");
+        assertEquals(0, errors.get(), "no worker threw unexpectedly");
+        assertTrue(maxObservedSize.get() <= cap,
+                "size exceeded cap during concurrent insert: peak=" + maxObservedSize.get());
         assertEquals(cap, cache.size(), "final size must equal cap after overfill");
     }
 

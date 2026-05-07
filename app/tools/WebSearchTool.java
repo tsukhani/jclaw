@@ -195,7 +195,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
             String responseBody;
             try (var response = call.execute()) {
                 statusCode = response.code();
-                responseBody = response.body() != null ? response.body().string() : "";
+                responseBody = response.body().string();
             }
 
             if (statusCode != 200) {
