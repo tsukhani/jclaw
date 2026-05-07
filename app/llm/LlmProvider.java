@@ -9,6 +9,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -32,6 +36,16 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
     private static final int MAX_RETRIES = 3;
     private static final long[] BACKOFF_MS = {1000, 2000, 4000};
+
+    // Why: park retry waits on a platform-thread scheduler so a burst of 429s doesn't
+    // wedge the LLM virtual-thread dispatcher under JDK-8373224 (Thread.sleep on many
+    // concurrent VTs starves the FJP work queue and inflates tail latency).
+    private static final ScheduledExecutorService RETRY_SCHEDULER =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                var t = new Thread(r, "llm-retry-scheduler");
+                t.setDaemon(true);
+                return t;
+            });
 
     protected final ProviderConfig config;
 
@@ -513,7 +527,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                     var defaultBackoff = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)] / 1000;
                     var retryAfter = reply.retryAfterSeconds().orElse(defaultBackoff);
                     EventLogger.warn("llm", "Rate limited by %s, retrying after %ds".formatted(config.name(), retryAfter));
-                    Thread.sleep(retryAfter * 1000);
+                    parkForMillis(retryAfter * 1000);
                     continue;
                 }
 
@@ -539,7 +553,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                     var backoff = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)];
                     EventLogger.warn("llm", "Retry %d/%d for %s after %dms"
                             .formatted(attempt + 1, MAX_RETRIES, config.name(), backoff));
-                    Thread.sleep(backoff);
+                    parkForMillis(backoff);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     throw new LlmException("Interrupted during retry", ie);
@@ -548,6 +562,14 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         }
 
         throw new LlmException("All retries exhausted for " + config.name(), lastException);
+    }
+
+    private static void parkForMillis(long delayMs) throws InterruptedException {
+        try {
+            RETRY_SCHEDULER.schedule(() -> null, delayMs, TimeUnit.MILLISECONDS).get();
+        } catch (ExecutionException e) {
+            throw new LlmException("Retry scheduler failed", e.getCause() != null ? e.getCause() : e);
+        }
     }
 
     // ─── Usage parsing ────────────────────────────────────────────────────
