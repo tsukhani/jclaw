@@ -191,6 +191,19 @@ public final class LoadTestRunner {
             "ttft", "stream_body", "persist", "terminal_tail"
     };
 
+    /**
+     * Outbound LLM-tier segments recorded under the {@code llm} channel by
+     * {@link utils.LlmCallEventListener}. Listed separately from
+     * {@link #TRACKED_SEGMENTS} because they live on a different channel —
+     * the chat-channel partitioning ("web", "telegram", …) covers inbound
+     * traffic; "llm" covers the OkHttp outbound tier. {@code dispatcher_wait}
+     * makes outbound dispatcher saturation (hitting the per-host cap)
+     * visible without bisecting the load against the cap by hand.
+     */
+    private static final String[] TRACKED_LLM_SEGMENTS = {
+            "dispatcher_wait"
+    };
+
     private LoadTestRunner() {}
 
     public static Result run(Request req) throws Exception {
@@ -284,6 +297,9 @@ public final class LoadTestRunner {
         for (var seg : TRACKED_SEGMENTS) {
             segmentsBefore.put(seg, readSegmentSnapshot("web", seg));
         }
+        for (var seg : TRACKED_LLM_SEGMENTS) {
+            segmentsBefore.put(seg, readSegmentSnapshot("llm", seg));
+        }
         long persistMarker = System.currentTimeMillis();
 
         var latch = new CountDownLatch(req.concurrency());
@@ -362,10 +378,19 @@ public final class LoadTestRunner {
         // arithmetic mean of per-request samples — what we want for dominant-
         // segment diagnosis. Order is preserved (LinkedHashMap) so the
         // breakdown renders in pipeline order rather than alphabetical.
-        var serverSegments = new java.util.ArrayList<SegmentBreakdown>(TRACKED_SEGMENTS.length);
+        var serverSegments = new java.util.ArrayList<SegmentBreakdown>(
+                TRACKED_SEGMENTS.length + TRACKED_LLM_SEGMENTS.length);
         for (var seg : TRACKED_SEGMENTS) {
             var before = segmentsBefore.get(seg);
             var after = readSegmentSnapshot("web", seg);
+            long countDelta = after[0] - before[0];
+            long sumDelta = after[1] - before[1];
+            long meanMs = countDelta > 0 ? sumDelta / countDelta : 0;
+            serverSegments.add(new SegmentBreakdown(seg, countDelta, sumDelta, meanMs));
+        }
+        for (var seg : TRACKED_LLM_SEGMENTS) {
+            var before = segmentsBefore.get(seg);
+            var after = readSegmentSnapshot("llm", seg);
             long countDelta = after[0] - before[0];
             long sumDelta = after[1] - before[1];
             long meanMs = countDelta > 0 ? sumDelta / countDelta : 0;

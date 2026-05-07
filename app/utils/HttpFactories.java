@@ -139,7 +139,7 @@ public final class HttpFactories {
             .callTimeout(Duration.ZERO)
             .connectionPool(LLM_POOL)
             .dispatcher(LLM_DISPATCHER)
-            .eventListener(PROTOCOL_LOGGER)
+            .eventListenerFactory(LlmCallEventListener.factory())
             .build();
 
     private static final OkHttpClient LLM_SINGLE_SHOT_CLIENT = new OkHttpClient.Builder()
@@ -149,7 +149,7 @@ public final class HttpFactories {
             .callTimeout(Duration.ofSeconds(180))
             .connectionPool(LLM_POOL)
             .dispatcher(LLM_DISPATCHER)
-            .eventListener(PROTOCOL_LOGGER)
+            .eventListenerFactory(LlmCallEventListener.factory())
             .build();
 
     private static final OkHttpClient GENERAL_CLIENT = new OkHttpClient.Builder()
