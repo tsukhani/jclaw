@@ -493,32 +493,20 @@ public class PlaywrightToolTest extends UnitTest {
         // This exercises the forEach + computeIfPresent + tryLock + destroy
         // sequence, including the "return null" branch that triggers entry
         // removal from the ConcurrentHashMap.
-        var sessionsField = PlaywrightBrowserTool.class.getDeclaredField("sessions");
-        sessionsField.setAccessible(true);
-        @SuppressWarnings("unchecked")
-        var sessions = (java.util.concurrent.ConcurrentHashMap<String, Object>)
-                sessionsField.get(null);
-
-        var sessionClass = Class.forName("tools.PlaywrightBrowserTool$BrowserSession");
-        var ctor = sessionClass.getDeclaredConstructors()[0];
-        ctor.setAccessible(true);
-        var staleSession = ctor.newInstance(null, null, null,
-                new java.util.concurrent.locks.ReentrantLock(), 0L);
-
+        var sessions = sessionsMap();
+        var staleSession = newBrowserSession(0L);
         var key = "stale-cleanup-" + System.nanoTime();
-        @SuppressWarnings("unchecked")
-        var typedSessions = (java.util.concurrent.ConcurrentHashMap<String, Object>) sessions;
-        typedSessions.put(key, staleSession);
-        assertTrue(typedSessions.containsKey(key), "precondition: stale entry seeded");
+        sessions.put(key, staleSession);
+        assertTrue(sessions.containsKey(key), "precondition: stale entry seeded");
 
         try {
             PlaywrightBrowserTool.cleanupIdleSessions();
-            assertFalse(typedSessions.containsKey(key),
+            assertFalse(sessions.containsKey(key),
                     "cleanupIdleSessions must drop entries older than IDLE_TIMEOUT_MS");
         } finally {
             // Defensive: in case cleanup didn't run as expected, don't leak
             // the synthetic entry into other tests in the same JVM.
-            typedSessions.remove(key);
+            sessions.remove(key);
         }
     }
 
@@ -527,19 +515,8 @@ public class PlaywrightToolTest extends UnitTest {
         // Counterpart to the removal test: an entry whose lastUsed is "now"
         // must survive a cleanup tick. This pins the timeout boundary so a
         // refactor that flips the comparison sign (>/<=) breaks loudly.
-        var sessionsField = PlaywrightBrowserTool.class.getDeclaredField("sessions");
-        sessionsField.setAccessible(true);
-        @SuppressWarnings("unchecked")
-        var sessions = (java.util.concurrent.ConcurrentHashMap<String, Object>)
-                sessionsField.get(null);
-
-        var sessionClass = Class.forName("tools.PlaywrightBrowserTool$BrowserSession");
-        var ctor = sessionClass.getDeclaredConstructors()[0];
-        ctor.setAccessible(true);
-        var freshSession = ctor.newInstance(null, null, null,
-                new java.util.concurrent.locks.ReentrantLock(),
-                System.currentTimeMillis());
-
+        var sessions = sessionsMap();
+        var freshSession = newBrowserSession(System.currentTimeMillis());
         var key = "fresh-cleanup-" + System.nanoTime();
         sessions.put(key, freshSession);
         try {
@@ -549,6 +526,36 @@ public class PlaywrightToolTest extends UnitTest {
         } finally {
             sessions.remove(key);
         }
+    }
+
+    /** Reflective accessor for the private {@code sessions} ConcurrentHashMap. */
+    @SuppressWarnings("unchecked")
+    private static java.util.concurrent.ConcurrentHashMap<String, Object> sessionsMap()
+            throws Exception {
+        var f = PlaywrightBrowserTool.class.getDeclaredField("sessions");
+        f.setAccessible(true);
+        return (java.util.concurrent.ConcurrentHashMap<String, Object>) f.get(null);
+    }
+
+    /**
+     * Construct a {@code BrowserSession} record with null Playwright/Browser/Page
+     * handles, a fresh lock, and the supplied {@code lastUsed} timestamp. Looks
+     * up the canonical constructor by parameter types rather than by array
+     * index — {@code getDeclaredConstructors()} order is JVM-implementation
+     * defined, and on CI it surfaced a synthetic 0-arg constructor at index 0
+     * that broke the previous {@code [0]} variant.
+     */
+    private static Object newBrowserSession(long lastUsed) throws Exception {
+        var sessionClass = Class.forName("tools.PlaywrightBrowserTool$BrowserSession");
+        var ctor = sessionClass.getDeclaredConstructor(
+                com.microsoft.playwright.Playwright.class,
+                com.microsoft.playwright.Browser.class,
+                com.microsoft.playwright.Page.class,
+                java.util.concurrent.locks.ReentrantLock.class,
+                long.class);
+        ctor.setAccessible(true);
+        return ctor.newInstance(null, null, null,
+                new java.util.concurrent.locks.ReentrantLock(), lastUsed);
     }
 
     /**
