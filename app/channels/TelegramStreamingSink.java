@@ -7,6 +7,7 @@ import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessageDraft;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.DeleteMessage;
 import org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import services.EventLogger;
 import services.Tx;
@@ -20,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.regex.Pattern;
 
 /**
@@ -67,7 +69,7 @@ import java.util.regex.Pattern;
  *
  * <p>Concurrency: {@link #update(String)} runs on whichever LLM streaming
  * thread pushes tokens; {@link #flush()} runs on {@link #scheduler()}. All
- * mutable state is guarded by {@code this}.
+ * mutable state is guarded by {@code stateLock}.
  */
 public final class TelegramStreamingSink {
 
@@ -217,6 +219,11 @@ public final class TelegramStreamingSink {
      */
     private volatile boolean draftWasSent = false;
 
+    // Why: flush()/seal()/update() run on virtual threads (telegram-stream-flush
+    // / telegram-typing); under JEP-444 a synchronized block pins the carrier,
+    // ReentrantLock parks cleanly. Mirrors LlmProvider.StreamAccumulator.reasoningLock.
+    private final ReentrantLock stateLock = new ReentrantLock();
+
     private final StringBuilder pending = new StringBuilder();
     private Integer messageId = null;
     private long lastSentAt = 0;
@@ -237,7 +244,7 @@ public final class TelegramStreamingSink {
      */
     /**
      * Non-null while a flush is in flight; {@code null} when idle. The future
-     * is created under the {@code synchronized (this)} block at the top of
+     * is created under the {@link #stateLock} at the top of
      * {@link #flush()} and completed (to {@code null}) in its {@code finally}
      * after the network call returns, so a concurrent {@link #seal(String)}
      * can wait on it directly instead of polling. Keeps re-entrance guarding
@@ -337,7 +344,8 @@ public final class TelegramStreamingSink {
         // replace the typing indicator anyway — stop the heartbeat so we
         // don't waste API calls. Idempotent; safe to call on every update.
         cancelTypingHeartbeatLocked();
-        synchronized (this) {
+        stateLock.lock();
+        try {
             if (sealed.get() || streamCapReached) return;
             pending.append(chunk);
             if (pending.length() > MAX_LIVE_STREAM_CHARS) {
@@ -346,6 +354,8 @@ public final class TelegramStreamingSink {
                 return;
             }
             scheduleFlushLocked();
+        } finally {
+            stateLock.unlock();
         }
     }
 
@@ -362,8 +372,11 @@ public final class TelegramStreamingSink {
         // replace the typing indicator. Cancel before the await so no
         // stray heartbeat fires between here and message delivery.
         cancelTypingHeartbeatLocked();
-        synchronized (this) {
+        stateLock.lock();
+        try {
             cancelScheduledLocked();
+        } finally {
+            stateLock.unlock();
         }
         // Wait for any in-flight flush to complete so its plain-text edit
         // can't race past our HTML final edit.
@@ -471,8 +484,11 @@ public final class TelegramStreamingSink {
     public void cancel() {
         if (!sealed.compareAndSet(false, true)) return;
         cancelTypingHeartbeatLocked();
-        synchronized (this) {
+        stateLock.lock();
+        try {
             cancelScheduledLocked();
+        } finally {
+            stateLock.unlock();
         }
         // Match the seal/errorFallback ordering — a flush already mid-HTTP
         // could land an edit after we return; awaiting it keeps lifecycle
@@ -489,8 +505,11 @@ public final class TelegramStreamingSink {
     public void errorFallback(Exception e) {
         if (!sealed.compareAndSet(false, true)) return;
         cancelTypingHeartbeatLocked();
-        synchronized (this) {
+        stateLock.lock();
+        try {
             cancelScheduledLocked();
+        } finally {
+            stateLock.unlock();
         }
         // Same race window as seal(): an in-flight flush's edit could land
         // after our delete, resurrecting the placeholder with stale text.
@@ -525,8 +544,11 @@ public final class TelegramStreamingSink {
     public boolean draftWasSentForTest() { return draftWasSent; }
     /** True while the typing-indicator heartbeat (JCLAW-98) is scheduled. */
     public boolean typingHeartbeatActiveForTest() {
-        synchronized (this) {
+        stateLock.lock();
+        try {
             return typingHeartbeat != null && !typingHeartbeat.isDone();
+        } finally {
+            stateLock.unlock();
         }
     }
 
@@ -546,7 +568,8 @@ public final class TelegramStreamingSink {
      */
     public void startTypingHeartbeat() {
         if (sealed.get()) return;
-        synchronized (this) {
+        stateLock.lock();
+        try {
             if (typingHeartbeat != null && !typingHeartbeat.isDone()) return;
             // initialDelay=0 so the indicator shows up on the first tick
             // without a 4s wait, but still lives inside the tracked future
@@ -558,16 +581,21 @@ public final class TelegramStreamingSink {
                     () -> Thread.ofVirtual().name("telegram-typing").start(() ->
                             TelegramChannel.sendTypingAction(botToken, chatId)),
                     0L, TYPING_HEARTBEAT_MS, TimeUnit.MILLISECONDS);
+        } finally {
+            stateLock.unlock();
         }
     }
 
     /** Cancel the typing heartbeat if running. Idempotent. */
     private void cancelTypingHeartbeatLocked() {
-        synchronized (this) {
+        stateLock.lock();
+        try {
             if (typingHeartbeat != null) {
                 typingHeartbeat.cancel(false);
                 typingHeartbeat = null;
             }
+        } finally {
+            stateLock.unlock();
         }
     }
 
@@ -591,7 +619,8 @@ public final class TelegramStreamingSink {
     private void flush() {
         String toShow;
         boolean wasFirstSend;
-        synchronized (this) {
+        stateLock.lock();
+        try {
             if (sealed.get() || streamCapReached) return;
             // Re-entrance guard (JCLAW-95): virtual-thread-per-flush means a
             // newly-scheduled flush could fire while a previous one is still
@@ -603,6 +632,8 @@ public final class TelegramStreamingSink {
             if (toShow.equals(lastSentText)) return;
             wasFirstSend = (messageId == null);
             flushInFlight = new CompletableFuture<>();
+        } finally {
+            stateLock.unlock();
         }
         try {
             if (transport == Transport.DRAFT) {
@@ -624,7 +655,8 @@ public final class TelegramStreamingSink {
             } else {
                 editMessage(toShow, false);
             }
-            synchronized (this) {
+            stateLock.lock();
+            try {
                 lastSentText = toShow;
                 lastSentAt = System.currentTimeMillis();
                 // If more tokens arrived during the call, schedule the next flush
@@ -634,6 +666,8 @@ public final class TelegramStreamingSink {
                             () -> Thread.ofVirtual().name("telegram-stream-flush").start(this::flush),
                             currentThrottleMs, TimeUnit.MILLISECONDS);
                 }
+            } finally {
+                stateLock.unlock();
             }
         } catch (Exception e) {
             // Non-fatal: retry on next flush window. See recordFlushFailure
@@ -641,12 +675,15 @@ public final class TelegramStreamingSink {
             recordFlushFailure(e);
         } finally {
             // Clear the guard under the same lock order the setter used, then
-            // signal waiters outside the synchronized block — completeNow()
+            // signal waiters outside the locked region — completeNow()
             // on a future is lock-free and joiners are on foreign threads.
             CompletableFuture<Void> done;
-            synchronized (this) {
+            stateLock.lock();
+            try {
                 done = flushInFlight;
                 flushInFlight = null;
+            } finally {
+                stateLock.unlock();
             }
             if (done != null) done.complete(null);
         }
@@ -715,7 +752,7 @@ public final class TelegramStreamingSink {
         }
     }
 
-    private Integer sendPlaceholder(String plainText) throws Exception {
+    private Integer sendPlaceholder(String plainText) throws TelegramApiException {
         var client = TelegramChannel.forToken(botToken).client();
         var send = SendMessage.builder()
                 .chatId(chatId)
@@ -737,7 +774,7 @@ public final class TelegramStreamingSink {
      *         fallback (a placeholder was sent instead — caller should
      *         continue normally, but {@code messageId} is now set).
      */
-    private boolean tryDraftFlushWithFallback(String plainText) throws Exception {
+    private boolean tryDraftFlushWithFallback(String plainText) throws TelegramApiException {
         try {
             saveDraft(plainText);
             draftWasSent = true;
@@ -763,7 +800,7 @@ public final class TelegramStreamingSink {
      * separate "edit draft" method is needed. Pass an empty string to
      * clear the draft.
      */
-    private void saveDraft(String text) throws Exception {
+    private void saveDraft(String text) throws TelegramApiException {
         var client = TelegramChannel.forToken(botToken).client();
         client.execute(SendMessageDraft.builder()
                 .chatId(Long.parseLong(chatId))
@@ -882,7 +919,7 @@ public final class TelegramStreamingSink {
                 || DRAFT_CHAT_UNSUPPORTED_RE.matcher(msg).find();
     }
 
-    private void editMessage(String text, boolean html) throws Exception {
+    private void editMessage(String text, boolean html) throws TelegramApiException {
         var client = TelegramChannel.forToken(botToken).client();
         var builder = EditMessageText.builder()
                 .chatId(chatId)
