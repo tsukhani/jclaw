@@ -73,27 +73,27 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     rm -rf /var/lib/apt/lists/* && \
     corepack enable
 
-# Play 1.13.x — tsukhani/play1 fork. Version is parsed from the app's
-# build.gradle.kts at image build time (look for the `frameworkVersion.set("...")`
-# line) — no separate pin file. settings.gradle.kts in jclaw does
-# `includeBuild("/opt/play1")`, so we unpack the release zip and symlink
-# `/opt/play-<version>` → `/opt/play1` to match.
+# Play 1.13.x — tsukhani/play1 fork. Exact version is read from
+# .play-version at the jclaw repo root (single source of truth shared
+# with the production Dockerfile and build.gradle.kts).
+# settings.gradle.kts in jclaw does `includeBuild("/opt/play1")`, so we
+# unpack the release zip and symlink `/opt/play-<version>` → `/opt/play1`
+# to match.
 #
 # The release zip ships the framework tree (gradle-plugin/, framework/,
 # modules/, gradlew, build.gradle.kts, etc.) — exactly what `includeBuild`
 # expects. The bundled `play` shell wrapper goes on PATH so devs can run
 # `play run` / `play test` from inside the workspace.
-COPY build.gradle.kts /tmp/build.gradle.kts
-RUN PLAY_VERSION=$(grep -oE 'frameworkVersion\.set\("[^"]+"' /tmp/build.gradle.kts \
-        | sed -E 's/.*"([^"]+)".*/\1/') && \
-    test -n "$PLAY_VERSION" || (echo "Could not parse frameworkVersion from build.gradle.kts" && exit 1) && \
+COPY .play-version /tmp/.play-version
+RUN PLAY_VERSION=$(tr -d '[:space:]' < /tmp/.play-version) && \
+    test -n "$PLAY_VERSION" || (echo "Could not read .play-version" && exit 1) && \
     curl -fsSL -L "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
         -o /tmp/play.zip && \
     unzip -q /tmp/play.zip -d /opt/ && \
     ln -s "/opt/play-${PLAY_VERSION}" /opt/play1 && \
     test -x "/opt/play1/play" && \
     ln -s /opt/play1/play /usr/local/bin/play && \
-    rm /tmp/play.zip /tmp/build.gradle.kts
+    rm /tmp/play.zip /tmp/.play-version
 
 # Drop privileges. Ubuntu ships a default `ubuntu` user at UID 1000 — running
 # as non-root preserves bind-mounted workspace ownership and blocks

@@ -75,17 +75,21 @@ RUN curl -fsSL https://services.gradle.org/distributions/gradle-9.5.0-bin.zip -o
 
 # Play 1.13.x — tsukhani/play1 fork at /opt/play1, matching the path
 # build.gradle.kts (frameworkPath) and settings.gradle.kts (includeBuild)
-# both point at. The version is pinned via PLAY_VERSION; build.gradle.kts
-# enforces a 1.13.x range at configure time, so passing a non-matching
-# version fails the build with a clear message rather than producing
-# mysterious "play-X.Y.Z.jar not found" errors deeper down.
-ARG PLAY_VERSION=1.13.6
-RUN curl -fsSL -L "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
+# both point at. The exact version is pinned in .play-version at the
+# repo root (single source of truth shared with build.gradle.kts and
+# the .devcontainer Dockerfile). build.gradle.kts also enforces a
+# 1.13.x range at configure time, so a typo in .play-version fails
+# the build with a clear message rather than producing mysterious
+# "play-X.Y.Z.jar not found" errors deeper down.
+COPY .play-version /tmp/.play-version
+RUN PLAY_VERSION=$(tr -d '[:space:]' < /tmp/.play-version) && \
+    test -n "$PLAY_VERSION" || (echo "Could not read .play-version" && exit 1) && \
+    curl -fsSL -L "https://github.com/tsukhani/play1/releases/download/v${PLAY_VERSION}/play-${PLAY_VERSION}.zip" \
         -o /tmp/play.zip && \
     unzip -q /tmp/play.zip -d /opt/ && \
     ln -s "/opt/play-${PLAY_VERSION}" /opt/play1 && \
     ln -s /opt/play1/play /usr/local/bin/play && \
-    rm /tmp/play.zip
+    rm /tmp/play.zip /tmp/.play-version
 
 WORKDIR /src
 COPY . /src/

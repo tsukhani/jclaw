@@ -9,35 +9,40 @@ play1 {
 
     // Pinned framework version range. Bump when migrating to a new minor
     // (e.g. "1.14.x"). The mini-DSL: dots are literal, "x" is one or more
-    // digits — so the form is always X.Y.x. The regex below is derived
-    // mechanically; for a different shape (e.g. any 1.x), replace this
-    // pair with an explicit Regex instead.
-    //
-    // The plugin uses frameworkVersion as a path-template input (e.g.
-    // framework/play-$it.jar), so the value handed to .set() must be a
-    // single concrete version string. We read it from the canonical
-    // version file the play1 fork ships at framework/src/play/version
-    // (the same one `play version` returns), then validate it against
-    // this range. Patch bumps (1.13.2, 1.13.3, ...) flow through
-    // automatically; major/minor bumps fail at configure time with a
-    // clear message rather than producing mysterious "play-X.Y.Z.jar
-    // not found" errors deeper in the build.
+    // digits — so the form is always X.Y.x. Acts as a guard rail: the
+    // declared exact version below must fall inside this range, and the
+    // installed fork's version must equal the declared one.
     val frameworkVersionRange = "1.13.x"
     val versionPattern = Regex(
         "^" + frameworkVersionRange.replace(".", "\\.").replace("x", "\\d+") + "$"
     )
+
+    // Single source of truth for the play1 release jclaw expects. Lives at
+    // the repo root so both Dockerfiles can read it (avoids a stale parse
+    // of this Gradle file from inside Docker, which silently broke when
+    // build.gradle.kts switched to the dynamic `installed` variable). To
+    // bump play1: edit .play-version AND ensure /opt/play1 is on the
+    // matching release.
+    val declaredFile = rootProject.file(".play-version")
+    require(declaredFile.isFile) {
+        "Missing $declaredFile — expected a single line with the pinned play1 version (e.g. 1.13.7)."
+    }
+    val declared = declaredFile.readText().trim()
+    require(versionPattern.matches(declared)) {
+        "Declared play1 version $declared (in .play-version) is outside the pinned $frameworkVersionRange " +
+        "range. Either update the range here, or correct .play-version."
+    }
 
     val versionFile = playRoot.resolve("framework/src/play/version")
     require(versionFile.isFile) {
         "play1 framework not found at $versionFile — is ${playRoot.absolutePath} the right frameworkPath?"
     }
     val installed = versionFile.readText().trim()
-    require(versionPattern.matches(installed)) {
-        "play1 framework version $installed is outside the pinned $frameworkVersionRange range. " +
-        "Either update the pin in build.gradle.kts to a range that matches, or check out a " +
-        "$frameworkVersionRange release in $playRoot."
+    require(installed == declared) {
+        "play1 fork at $playRoot is at $installed but jclaw declares $declared (.play-version). " +
+        "Bump .play-version to match the fork, or check out v$declared in the fork."
     }
-    frameworkVersion.set(installed)
+    frameworkVersion.set(declared)
 
     modules("docviewer")
 }
