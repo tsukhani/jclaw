@@ -1486,7 +1486,28 @@ do_reset() {
         prompt_reset_confirmation "the running jclaw container's database"
         echo "==> Detected jclaw container running; running reset inside the container..."
         cd "$SCRIPT_DIR"
-        exec docker compose exec -T -e JCLAW_RESET_YES=1 jclaw ./jclaw.sh reset
+        if ! docker compose exec -T -e JCLAW_RESET_YES=1 jclaw ./jclaw.sh reset; then
+            echo "Error: in-container reset failed. The DB may or may not have been modified." >&2
+            exit 1
+        fi
+        # The H2 Shell DELETE just modified the DB file directly, behind
+        # the JVM's back. ConfigService caches each config key in-process
+        # for 60s (Caffeine, expireAfterWrite); until the cache entry
+        # TTLs out, /api/auth/status keeps returning passwordSet=true and
+        # the frontend's checkPasswordSet() gate refuses to route to
+        # /setup-password. Restarting the container drops the cache cold,
+        # so the next page load sees the empty config row and surfaces
+        # the setup flow as the operator expects from a "reset" command.
+        echo "==> Restarting jclaw container so the JVM picks up the deletion..."
+        if ! docker compose restart jclaw; then
+            echo "Warning: container restart failed. The DB row is gone, but the JVM" >&2
+            echo "         cache may still hold the stale hash for up to 60s. Either" >&2
+            echo "         wait for the cache TTL or restart manually:" >&2
+            echo "             docker compose restart jclaw" >&2
+            exit 1
+        fi
+        echo "==> Done. Open the app — you'll land on /setup-password."
+        exit 0
     fi
 
     local data_file="$SCRIPT_DIR/data/jclaw.mv.db"
@@ -1531,8 +1552,18 @@ do_reset() {
         exit 1
     fi
 
-    echo "==> Done. Open the app and use /setup-password to set a new password."
-    echo "    (No restart needed — ApiAuthController reads the hash on every login.)"
+    # Suppress the trailing message when reached via host-side docker
+    # compose exec (JCLAW_RESET_YES=1 is the unambiguous signal of that
+    # path), since the host wraps the call with a container restart and
+    # its own "Done" message — emitting both would print contradictory
+    # advice ("no restart" then "restarting") in close succession.
+    if [[ "${JCLAW_RESET_YES:-}" != "1" ]]; then
+        echo "==> Done. Open the app and use /setup-password to set a new password."
+        echo "    Note: ConfigService caches the hash in-process for up to 60s. If a"
+        echo "    'play run' is up, either wait for the TTL or restart the app so the"
+        echo "    /api/auth/status route reports passwordSet=false and the frontend"
+        echo "    redirects to /setup-password."
+    fi
 }
 
 # Verify Java 25+ is available. Required for Play backend (compile, run, test).
