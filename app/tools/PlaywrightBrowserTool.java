@@ -390,15 +390,26 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 
     /**
      * Returns true if Chromium (or its headless-shell variant) is already
-     * installed under {@code $PLAYWRIGHT_BROWSERS_PATH}. The directory layout
-     * Playwright produces is {@code <root>/chromium-<rev>/} and
-     * {@code <root>/chromium_headless_shell-<rev>/}; either is sufficient
-     * for our launchers, so any {@code chromium*} subdirectory counts.
+     * installed under {@code $PLAYWRIGHT_BROWSERS_PATH}. Reads the env var,
+     * then delegates the directory inspection to {@link #chromiumPreinstalledAt(Path)}
+     * so that branch can be unit-tested without per-OS env mocking.
      */
     private static boolean chromiumPreinstalled() {
         var path = System.getenv("PLAYWRIGHT_BROWSERS_PATH");
         if (path == null || path.isBlank()) return false;
-        var dir = Path.of(path);
+        return chromiumPreinstalledAt(Path.of(path));
+    }
+
+    /**
+     * Returns true if {@code dir} contains a {@code chromium*} subdirectory.
+     * Playwright's layout is {@code <root>/chromium-<rev>/} and
+     * {@code <root>/chromium_headless_shell-<rev>/}; either is sufficient
+     * for our launchers, so any {@code chromium*} subdirectory counts.
+     *
+     * <p>Exposed for unit tests; not part of the public tool API. The env-var
+     * lookup lives in {@link #chromiumPreinstalled()} which delegates here.
+     */
+    public static boolean chromiumPreinstalledAt(Path dir) {
         if (!Files.isDirectory(dir)) return false;
         try (var entries = Files.list(dir)) {
             return entries.anyMatch(p ->

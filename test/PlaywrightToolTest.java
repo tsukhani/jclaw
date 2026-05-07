@@ -353,6 +353,204 @@ public class PlaywrightToolTest extends UnitTest {
         PlaywrightBrowserTool.closeSession("agent-that-never-existed");
     }
 
+    // ─── Pure-unit coverage (no Chromium needed) ──────────────────────────
+    //
+    // These tests cover the no-launch surface of the tool — metadata
+    // accessors, the directory-driven half of chromiumPreinstalled, and
+    // the idle-session cleanup path. Together they let CI exercise large
+    // chunks of the file even though JCLAW_PLAYWRIGHT_TEST is unset and
+    // the live action handlers (navigate, click, fill, ...) get skipped.
+
+    @Test
+    public void categoryAndIconAreStableForToolCatalog() {
+        // The tool catalog UI groups tools by category and renders an icon
+        // per row, so a typo here surfaces as a misclassified tool. Pin
+        // the values so a refactor that touches them must update this test
+        // and acknowledge the UI impact.
+        var tool = new PlaywrightBrowserTool();
+        assertEquals("Web", tool.category());
+        assertEquals("browser", tool.icon());
+    }
+
+    @Test
+    public void shortDescriptionMentionsHeadlessAndJavaScript() {
+        // The short description lands in the tool-picker UI; it should give
+        // an LLM (or a human reading the catalog) enough context to choose
+        // browser over web_fetch when JS rendering is needed.
+        var tool = new PlaywrightBrowserTool();
+        var sd = tool.shortDescription();
+        assertNotNull(sd);
+        assertTrue(sd.toLowerCase().contains("headless"),
+                "short description should name 'headless' so it's discoverable: " + sd);
+        assertTrue(sd.toLowerCase().contains("javascript") || sd.toLowerCase().contains("spa"),
+                "short description should hint at the JS-heavy use case: " + sd);
+    }
+
+    @Test
+    public void actionsListExposesAllSevenActionsWithDescriptions() {
+        // The actions() list drives the per-action permission UI in
+        // AgentToolConfig. A missing entry here lets the LLM call an action
+        // the operator can't gate. Pin the count and verify each action has
+        // a non-empty description so the UI never renders blank rows.
+        var tool = new PlaywrightBrowserTool();
+        var actions = tool.actions();
+        assertEquals(7, actions.size(), "expected exactly 7 actions: " + actions);
+
+        var names = actions.stream().map(a -> a.name()).toList();
+        assertTrue(names.contains("navigate"));
+        assertTrue(names.contains("click"));
+        assertTrue(names.contains("fill"));
+        assertTrue(names.contains("getText"));
+        assertTrue(names.contains("screenshot"));
+        assertTrue(names.contains("evaluate"));
+        assertTrue(names.contains("close"));
+
+        for (var action : actions) {
+            assertNotNull(action.description(), "description null for " + action.name());
+            assertFalse(action.description().isBlank(),
+                    "description blank for " + action.name());
+        }
+    }
+
+    // ─── chromiumPreinstalledAt: directory-listing branch ─────────────────
+    //
+    // The env-var lookup is in the private wrapper; this overload is the
+    // pure helper the wrapper delegates to. Four states cover both
+    // branches of the Files.isDirectory check and both arms of the
+    // anyMatch over the directory contents.
+
+    @Test
+    public void chromiumPreinstalledAtReturnsFalseForMissingDir() throws Exception {
+        var tmp = Files.createTempDirectory("playwright-coverage-");
+        try {
+            var nonExistent = tmp.resolve("does-not-exist");
+            assertFalse(PlaywrightBrowserTool.chromiumPreinstalledAt(nonExistent));
+        } finally {
+            deleteDir(tmp);
+        }
+    }
+
+    @Test
+    public void chromiumPreinstalledAtReturnsFalseForEmptyDir() throws Exception {
+        var tmp = Files.createTempDirectory("playwright-coverage-");
+        try {
+            assertFalse(PlaywrightBrowserTool.chromiumPreinstalledAt(tmp));
+        } finally {
+            deleteDir(tmp);
+        }
+    }
+
+    @Test
+    public void chromiumPreinstalledAtReturnsTrueForChromiumSubdir() throws Exception {
+        var tmp = Files.createTempDirectory("playwright-coverage-");
+        try {
+            Files.createDirectory(tmp.resolve("chromium-1234"));
+            assertTrue(PlaywrightBrowserTool.chromiumPreinstalledAt(tmp));
+        } finally {
+            deleteDir(tmp);
+        }
+    }
+
+    @Test
+    public void chromiumPreinstalledAtReturnsTrueForHeadlessShellSubdir() throws Exception {
+        // Per the helper's javadoc, the chromium_headless_shell-<rev> layout
+        // is equally acceptable — the shell variant has the same launcher
+        // contract from our POV.
+        var tmp = Files.createTempDirectory("playwright-coverage-");
+        try {
+            Files.createDirectory(tmp.resolve("chromium_headless_shell-5678"));
+            assertTrue(PlaywrightBrowserTool.chromiumPreinstalledAt(tmp));
+        } finally {
+            deleteDir(tmp);
+        }
+    }
+
+    @Test
+    public void chromiumPreinstalledAtReturnsFalseWhenOnlyOtherBrowsersPresent() throws Exception {
+        // Defensive: if a host has Firefox or WebKit installed but not
+        // Chromium, we must NOT skip the install step — Playwright would
+        // launch with a missing browser. This test pins that invariant.
+        var tmp = Files.createTempDirectory("playwright-coverage-");
+        try {
+            Files.createDirectory(tmp.resolve("firefox-1234"));
+            Files.createDirectory(tmp.resolve("webkit-5678"));
+            assertFalse(PlaywrightBrowserTool.chromiumPreinstalledAt(tmp));
+        } finally {
+            deleteDir(tmp);
+        }
+    }
+
+    // ─── cleanupIdleSessions: stale-entry removal ─────────────────────────
+
+    @Test
+    public void cleanupIdleSessionsRemovesEntriesPastTimeout() throws Exception {
+        // Inject a synthetic BrowserSession with lastUsed = 0L (epoch — far
+        // older than the 5-minute IDLE_TIMEOUT_MS) and null Playwright /
+        // Browser / Page handles. destroySession's three try/catch blocks
+        // swallow the resulting NPEs, so the cleanup path runs end-to-end
+        // and removes the entry without ever touching a live driver.
+        //
+        // This exercises the forEach + computeIfPresent + tryLock + destroy
+        // sequence, including the "return null" branch that triggers entry
+        // removal from the ConcurrentHashMap.
+        var sessionsField = PlaywrightBrowserTool.class.getDeclaredField("sessions");
+        sessionsField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        var sessions = (java.util.concurrent.ConcurrentHashMap<String, Object>)
+                sessionsField.get(null);
+
+        var sessionClass = Class.forName("tools.PlaywrightBrowserTool$BrowserSession");
+        var ctor = sessionClass.getDeclaredConstructors()[0];
+        ctor.setAccessible(true);
+        var staleSession = ctor.newInstance(null, null, null,
+                new java.util.concurrent.locks.ReentrantLock(), 0L);
+
+        var key = "stale-cleanup-" + System.nanoTime();
+        @SuppressWarnings("unchecked")
+        var typedSessions = (java.util.concurrent.ConcurrentHashMap<String, Object>) sessions;
+        typedSessions.put(key, staleSession);
+        assertTrue(typedSessions.containsKey(key), "precondition: stale entry seeded");
+
+        try {
+            PlaywrightBrowserTool.cleanupIdleSessions();
+            assertFalse(typedSessions.containsKey(key),
+                    "cleanupIdleSessions must drop entries older than IDLE_TIMEOUT_MS");
+        } finally {
+            // Defensive: in case cleanup didn't run as expected, don't leak
+            // the synthetic entry into other tests in the same JVM.
+            typedSessions.remove(key);
+        }
+    }
+
+    @Test
+    public void cleanupIdleSessionsKeepsRecentlyUsedEntries() throws Exception {
+        // Counterpart to the removal test: an entry whose lastUsed is "now"
+        // must survive a cleanup tick. This pins the timeout boundary so a
+        // refactor that flips the comparison sign (>/<=) breaks loudly.
+        var sessionsField = PlaywrightBrowserTool.class.getDeclaredField("sessions");
+        sessionsField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        var sessions = (java.util.concurrent.ConcurrentHashMap<String, Object>)
+                sessionsField.get(null);
+
+        var sessionClass = Class.forName("tools.PlaywrightBrowserTool$BrowserSession");
+        var ctor = sessionClass.getDeclaredConstructors()[0];
+        ctor.setAccessible(true);
+        var freshSession = ctor.newInstance(null, null, null,
+                new java.util.concurrent.locks.ReentrantLock(),
+                System.currentTimeMillis());
+
+        var key = "fresh-cleanup-" + System.nanoTime();
+        sessions.put(key, freshSession);
+        try {
+            PlaywrightBrowserTool.cleanupIdleSessions();
+            assertTrue(sessions.containsKey(key),
+                    "cleanupIdleSessions must NOT drop entries newer than IDLE_TIMEOUT_MS");
+        } finally {
+            sessions.remove(key);
+        }
+    }
+
     /**
      * Reflective view into the private static {@code sessions} map. Used by
      * the tab-reuse test to assert the map size doesn't grow across
