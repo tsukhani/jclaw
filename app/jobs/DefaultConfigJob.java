@@ -23,8 +23,30 @@ public class DefaultConfigJob extends Job<Void> {
         seedProviders();
         seedToolConfig();
         seedDefaultAgent();
+        seedDispatcherTuning();
         agents.SkillLoader.syncSkillConfigs();
+        utils.HttpFactories.applyDispatcherConfig();
         EventLogger.info("system", "Default configuration seeded");
+    }
+
+    /**
+     * Auto-tune the OkHttp LLM dispatcher caps based on host CPU. The static
+     * defaults in {@link utils.HttpFactories} (64 per host, 128 total) are
+     * a safe floor for any machine; on bigger hosts we want more headroom.
+     * Formula is {@code clamp(8 * cores, 64, 256)} per host with total set
+     * to twice that — 8 in-flight per core is OkHttp's typical sizing for
+     * I/O-bound work, the floor matches the static default so no host
+     * loses capacity, and the ceiling caps socket/buffer footprint.
+     *
+     * <p>Only seeds if the key is absent so an operator override via
+     * Settings persists across restarts.
+     */
+    private void seedDispatcherTuning() {
+        int cores = Runtime.getRuntime().availableProcessors();
+        int defaultPerHost = Math.max(64, Math.min(256, 8 * cores));
+        int defaultMax = 2 * defaultPerHost;
+        seedIfAbsent("provider.llm.dispatcher.maxRequestsPerHost", String.valueOf(defaultPerHost));
+        seedIfAbsent("provider.llm.dispatcher.maxRequests", String.valueOf(defaultMax));
     }
 
     /**

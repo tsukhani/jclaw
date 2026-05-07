@@ -95,12 +95,56 @@ public final class HttpFactories {
     private static final Dispatcher LLM_DISPATCHER;
     static {
         LLM_DISPATCHER = new Dispatcher(LLM_VT_EXEC);
+        // Bootstrap defaults; DefaultConfigJob seeds the host-tuned values
+        // post-JPA-init and calls applyDispatcherConfig() to swap them in.
+        // Hardcoded here so any HTTP call that happens before the seed job
+        // runs (none today, but defence-in-depth) gets a sane cap.
         LLM_DISPATCHER.setMaxRequests(128);
         LLM_DISPATCHER.setMaxRequestsPerHost(64);
-        // JCLAW-201 follow-up: log runtime dispatcher state so we can
-        // confirm overrides took effect (no static-init order surprises).
-        play.Logger.info("HttpFactories LLM_DISPATCHER: maxRequests=%d maxRequestsPerHost=%d",
+        play.Logger.info("HttpFactories LLM_DISPATCHER bootstrap: maxRequests=%d maxRequestsPerHost=%d",
                 LLM_DISPATCHER.getMaxRequests(), LLM_DISPATCHER.getMaxRequestsPerHost());
+    }
+
+    /**
+     * Apply (or re-apply) {@code provider.llm.dispatcher.maxRequests} and
+     * {@code provider.llm.dispatcher.maxRequestsPerHost} from
+     * {@link services.ConfigService} to the live LLM dispatcher. Called
+     * once at startup by DefaultConfigJob after the host-tuned defaults
+     * are seeded, and again from {@link services.ConfigService#setWithSideEffects}
+     * whenever an operator changes either key via Settings — so the new
+     * values take effect immediately without restart.
+     */
+    public static void applyDispatcherConfig() {
+        int perHost = services.ConfigService.getInt(
+                "provider.llm.dispatcher.maxRequestsPerHost", 64);
+        int max = services.ConfigService.getInt(
+                "provider.llm.dispatcher.maxRequests", 128);
+        LLM_DISPATCHER.setMaxRequestsPerHost(perHost);
+        LLM_DISPATCHER.setMaxRequests(max);
+        play.Logger.info("HttpFactories LLM_DISPATCHER applied: maxRequests=%d maxRequestsPerHost=%d",
+                max, perHost);
+    }
+
+    /** Current dispatcher max-requests-per-host (live value, not Config). */
+    public static int llmDispatcherMaxRequestsPerHost() {
+        return LLM_DISPATCHER.getMaxRequestsPerHost();
+    }
+
+    /** Current dispatcher max-requests total (live value, not Config). */
+    public static int llmDispatcherMaxRequests() {
+        return LLM_DISPATCHER.getMaxRequests();
+    }
+
+    /**
+     * Push transient caps into the live dispatcher WITHOUT touching Config.
+     * Used by the loadtest controller to bump the cap above the static
+     * default for a single test run; restored by the same controller in
+     * a finally block. Bypasses {@link #applyDispatcherConfig} so the
+     * persisted values stay untouched.
+     */
+    public static void setLlmDispatcherCapTransient(int maxRequestsPerHost, int maxRequests) {
+        LLM_DISPATCHER.setMaxRequestsPerHost(maxRequestsPerHost);
+        LLM_DISPATCHER.setMaxRequests(maxRequests);
     }
 
     private static final Dispatcher GEN_DISPATCHER;

@@ -83,6 +83,15 @@ public class ConfigService {
             jobs.ToolRegistrationJob.registerAll();
         }
 
+        // Live-apply LLM dispatcher cap changes from Settings without
+        // requiring a restart. HttpFactories.applyDispatcherConfig reads
+        // both keys and pushes them into the live OkHttp dispatcher, so
+        // the next outbound LLM call uses the new cap.
+        if (key.equals("provider.llm.dispatcher.maxRequestsPerHost")
+                || key.equals("provider.llm.dispatcher.maxRequests")) {
+            utils.HttpFactories.applyDispatcherConfig();
+        }
+
         // Convenience linkage: when the operator first sets the Ollama Cloud
         // LLM apiKey, mirror that value into the Ollama search provider's
         // apiKey AND flip search.ollama.enabled to true — but ONLY if the

@@ -173,6 +173,22 @@ public class ApiMetricsController extends Controller {
             }
         }
 
+        // Auto-bump the LLM dispatcher cap if --concurrency would saturate it.
+        // The default 64-per-host (or auto-tuned 8*cores) is sized for steady
+        // production traffic; loadtest at higher concurrency against one host
+        // (mock or single real provider) would otherwise queue at the
+        // dispatcher and inflate the ttft segment by the queue time. Snapshot
+        // here, restore in finally so the cap returns to its operator-tuned
+        // value after the test.
+        int origPerHost = utils.HttpFactories.llmDispatcherMaxRequestsPerHost();
+        int origMax = utils.HttpFactories.llmDispatcherMaxRequests();
+        boolean dispatcherBumped = concurrency > origPerHost;
+        if (dispatcherBumped) {
+            int newPerHost = concurrency + 16;
+            int newMax = Math.max(origMax, newPerHost * 2);
+            utils.HttpFactories.setLlmDispatcherCapTransient(newPerHost, newMax);
+        }
+
         try {
             var result = LoadTestRunner.run(new LoadTestRunner.Request(
                     concurrency, turns, compress,
@@ -234,6 +250,10 @@ public class ApiMetricsController extends Controller {
                 LoadTestRunner.disable();
             }
             error(500, "Load test failed: " + e.getMessage());
+        } finally {
+            if (dispatcherBumped) {
+                utils.HttpFactories.setLlmDispatcherCapTransient(origPerHost, origMax);
+            }
         }
     }
 
