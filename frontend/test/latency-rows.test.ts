@@ -133,7 +133,7 @@ describe('buildLatencyRows (JCLAW-74 prologue nesting)', () => {
 })
 
 describe('listAvailableChannels (JCLAW-102 dropdown options)', () => {
-  it('orders channels web → telegram → task → webhook, then unknown ones alphabetical', () => {
+  it('orders channels web → telegram → task → webhook, then unknown ones alphabetical, suppressing the LatencyStats unknown bucket', () => {
     const channels = listAvailableChannels({
       slack: { total: h(1, 25) },
       unknown: { total: h(1, 50) },
@@ -141,8 +141,11 @@ describe('listAvailableChannels (JCLAW-102 dropdown options)', () => {
       web: { total: h(1, 10) },
       task: { total: h(1, 75) },
     })
+    // 'unknown' is the LatencyStats fallback for system-internal callers
+    // (embeddings, slash compaction, skill promotion); we don't surface it
+    // in the Chat Performance dropdown.
     expect(channels.map(c => c.key)).toEqual([
-      'web', 'telegram', 'task', 'slack', 'unknown',
+      'web', 'telegram', 'task', 'slack',
     ])
   })
 

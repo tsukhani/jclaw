@@ -59,7 +59,6 @@ const CHANNEL_LABELS: Record<string, string> = {
   telegram: 'Telegram',
   task: 'Scheduled tasks',
   webhook: 'Webhook',
-  unknown: 'Unknown',
 }
 
 /** Order channels render in the dropdown. Unknown channels append alphabetically. */
@@ -78,6 +77,7 @@ function labelForChannel(channel: string): string {
 export const TOP_LEVEL_ORDER = [
   'queue_wait',
   'prologue',
+  'dispatcher_wait',
   'ttft',
   'stream_body',
   'tool_exec',
@@ -90,6 +90,7 @@ export const TOP_LEVEL_ORDER = [
 export const TOP_LEVEL_LABELS: Record<string, string> = {
   queue_wait: 'Queue wait',
   prologue: 'Prologue',
+  dispatcher_wait: 'Dispatcher wait',
   ttft: 'Time to first token',
   stream_body: 'Stream body',
   tool_exec: 'Tool execution',
@@ -208,9 +209,14 @@ export function listAvailableChannels<H extends { count: number } = LatencyHisto
       seen.add(channel)
     }
   }
-  // Any channel not in CHANNEL_ORDER, alphabetically.
+  // Any channel not in CHANNEL_ORDER, alphabetically. The 'unknown' bucket
+  // is the LatencyStats fallback for callers that pass null channel
+  // (embedding cache loads, slash compaction, skill promotion). Those are
+  // system-internal operations, not chats — surfacing them in the Chat
+  // Performance dropdown would muddy the per-channel chat view. Data still
+  // lives in LatencyStats for raw inspection if needed.
   const remaining = Object.keys(payload)
-    .filter(c => !seen.has(c))
+    .filter(c => !seen.has(c) && c !== 'unknown')
     .sort((a, b) => a.localeCompare(b))
   for (const channel of remaining) {
     if (hasAnySample(channel)) {
