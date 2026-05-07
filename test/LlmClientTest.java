@@ -79,7 +79,7 @@ public class LlmClientTest extends UnitTest {
         var usageObj = JsonParser.parseString("""
                 {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
                 """).getAsJsonObject();
-        var usage = LlmProvider.parseUsageBlock(usageObj);
+        var usage = openAiProvider().parseUsage(usageObj);
         assertEquals(100, usage.promptTokens());
         assertEquals(50, usage.completionTokens());
         assertEquals(150, usage.totalTokens());
@@ -96,7 +96,7 @@ public class LlmClientTest extends UnitTest {
                  "prompt_tokens_details": {"cached_tokens": 4670},
                  "completion_tokens_details": {"reasoning_tokens": 76}}
                 """).getAsJsonObject();
-        var usage = LlmProvider.parseUsageBlock(usageObj);
+        var usage = openAiProvider().parseUsage(usageObj);
         assertEquals(4891, usage.promptTokens());
         assertEquals(112, usage.completionTokens());
         assertEquals(4670, usage.cachedTokens(), "cached reads must flow from prompt_tokens_details");
@@ -113,7 +113,7 @@ public class LlmClientTest extends UnitTest {
                  "cache_creation_input_tokens": 4800,
                  "prompt_tokens_details": {"cached_tokens": 0}}
                 """).getAsJsonObject();
-        var usage = LlmProvider.parseUsageBlock(usageObj);
+        var usage = openAiProvider().parseUsage(usageObj);
         assertEquals(5000, usage.promptTokens());
         assertEquals(0, usage.cachedTokens(), "no cache reads on the seeding turn");
         assertEquals(4800, usage.cacheCreationTokens(), "cache writes must flow from top-level field");
@@ -128,7 +128,7 @@ public class LlmClientTest extends UnitTest {
                  "cache_creation_input_tokens": 500,
                  "prompt_tokens_details": {"cached_tokens": 5000}}
                 """).getAsJsonObject();
-        var usage = LlmProvider.parseUsageBlock(usageObj);
+        var usage = openAiProvider().parseUsage(usageObj);
         assertEquals(6000, usage.promptTokens());
         assertEquals(5000, usage.cachedTokens());
         assertEquals(500, usage.cacheCreationTokens());
@@ -140,7 +140,7 @@ public class LlmClientTest extends UnitTest {
     @Test
     public void parseUsageHandlesMissingFields() {
         // Robustness: empty usage object, shouldn't NPE.
-        var usage = LlmProvider.parseUsageBlock(JsonParser.parseString("{}").getAsJsonObject());
+        var usage = openAiProvider().parseUsage(JsonParser.parseString("{}").getAsJsonObject());
         assertEquals(0, usage.promptTokens());
         assertEquals(0, usage.completionTokens());
         assertEquals(0, usage.totalTokens());
@@ -508,6 +508,11 @@ public class LlmClientTest extends UnitTest {
     private static llm.OpenRouterProvider openRouterProvider() {
         return new llm.OpenRouterProvider(new llm.LlmTypes.ProviderConfig(
                 "openrouter", "https://openrouter.ai/api/v1", "sk-test", List.of()));
+    }
+
+    private static llm.OpenAiProvider openAiProvider() {
+        return new llm.OpenAiProvider(new llm.LlmTypes.ProviderConfig(
+                "openai", "https://api.openai.com/v1", "sk-test", List.of()));
     }
 
     private static llm.LlmTypes.ChatRequest chatRequest(String model, List<llm.LlmTypes.ChatMessage> messages) {

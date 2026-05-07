@@ -590,50 +590,6 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                 extractCacheCreationTokens(usageObj));
     }
 
-    /**
-     * Static convenience method for callers that don't have a provider instance
-     * (e.g. tests). Uses the base-class extraction logic — equivalent to
-     * calling {@link #parseUsage} on a vanilla {@link OpenAiProvider}.
-     *
-     * <p>Handles all known provider shapes:
-     * <ul>
-     *   <li>OpenAI: {@code prompt_tokens_details.cached_tokens},
-     *       {@code completion_tokens_details.reasoning_tokens}</li>
-     *   <li>Anthropic/OpenRouter: {@code cache_creation_input_tokens} (top-level),
-     *       {@code prompt_tokens_details.cache_creation_tokens} (nested fallback)</li>
-     * </ul>
-     */
-    public static Usage parseUsageBlock(JsonObject usageObj) {
-        // Base-class extractReasoningTokens returns 0, so replicate the extended
-        // static extraction that also checks completion_tokens_details. This keeps
-        // the static path backward-compatible with tests while the instance path
-        // is the preferred entry point for production code.
-        int reasoningTokens = 0;
-        if (usageObj.has("reasoning_tokens") && !usageObj.get("reasoning_tokens").isJsonNull()) {
-            reasoningTokens = usageObj.get("reasoning_tokens").getAsInt();
-        }
-        if (reasoningTokens == 0 && usageObj.has("completion_tokens_details")
-                && !usageObj.get("completion_tokens_details").isJsonNull()) {
-            var details = usageObj.getAsJsonObject("completion_tokens_details");
-            if (details.has("reasoning_tokens") && !details.get("reasoning_tokens").isJsonNull()) {
-                reasoningTokens = details.get("reasoning_tokens").getAsInt();
-            }
-        }
-
-        // For cached and cache-creation tokens, instantiate a temporary base provider
-        // to reuse the template methods without duplicating their logic.
-        var baseConfig = new ProviderConfig("_static", "", "", List.of());
-        var base = new OpenAiProvider(baseConfig);
-        int cachedTokens = base.extractCachedTokens(usageObj);
-        int cacheCreationTokens = base.extractCacheCreationTokens(usageObj);
-
-        return new Usage(
-                usageObj.has("prompt_tokens") ? usageObj.get("prompt_tokens").getAsInt() : 0,
-                usageObj.has("completion_tokens") ? usageObj.get("completion_tokens").getAsInt() : 0,
-                usageObj.has("total_tokens") ? usageObj.get("total_tokens").getAsInt() : 0,
-                reasoningTokens, cachedTokens, cacheCreationTokens);
-    }
-
     // ─── Shared helper classes ───────────────────────────────────────────
 
     public static class StreamAccumulator {
