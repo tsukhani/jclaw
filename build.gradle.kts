@@ -219,7 +219,7 @@ dependencies {
 
     // JCLAW-205: Caffeine JSR-107 (JCache) provider for Hibernate L2 cache.
     // Co-versioned with the caffeine-3.2.3 the fork ships.
-    implementation("com.github.ben-manes.caffeine:jcache:3.2.3") {
+    implementation("com.github.ben-manes.caffeine:jcache:3.2.4") {
         exclude(group = "org.osgi")
         exclude(group = "biz.aQute.bnd")
     }
