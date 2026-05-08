@@ -50,6 +50,10 @@ public class MessageAttachment extends Model {
     @Column(nullable = false, length = 16)
     public String kind;
 
+    /** Whisper transcript for audio attachments; nullable until JCLAW-165 wires the writer. */
+    @Column(columnDefinition = "TEXT")
+    public String transcript;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 

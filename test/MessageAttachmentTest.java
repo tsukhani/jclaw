@@ -96,6 +96,47 @@ public class MessageAttachmentTest extends UnitTest {
         });
     }
 
+    @Test
+    public void transcriptIsNullByDefault() {
+        var att = persistAudio(null);
+        att.em().flush();
+        att.em().clear();
+
+        var found = MessageAttachment.findByUuid(att.uuid);
+        assertNotNull(found);
+        assertNull(found.transcript);
+    }
+
+    @Test
+    public void persistsAudioAttachmentWithTranscript() {
+        var transcript = "Hello, this is a voice note recorded on Telegram. "
+                + "Whisper produced this transcript at 16 kHz mono PCM. "
+                + "End of message.";
+        var att = persistAudio(transcript);
+        att.em().flush();
+        att.em().clear();
+
+        var found = MessageAttachment.findByUuid(att.uuid);
+        assertNotNull(found);
+        assertEquals(MessageAttachment.KIND_AUDIO, found.kind);
+        assertEquals(transcript, found.transcript);
+    }
+
+    private MessageAttachment persistAudio(String transcript) {
+        var uuid = UUID.randomUUID().toString();
+        var att = new MessageAttachment();
+        att.message = message;
+        att.uuid = uuid;
+        att.originalFilename = "voice-note.ogg";
+        att.storagePath = "vision-agent/attachments/" + conversation.id + "/" + uuid + ".ogg";
+        att.mimeType = "audio/ogg";
+        att.sizeBytes = 9876L;
+        att.kind = MessageAttachment.KIND_AUDIO;
+        att.transcript = transcript;
+        att.save();
+        return att;
+    }
+
     private MessageAttachment persist(String filename, String kind) {
         var uuid = UUID.randomUUID().toString();
         var att = new MessageAttachment();
