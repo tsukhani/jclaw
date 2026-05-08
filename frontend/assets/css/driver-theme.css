@@ -13,6 +13,7 @@
   color: var(--fg-primary);
   border: 0;
   border-radius: 12px;
+
   /* driver.js applies a default box-shadow that would stack on top of
      our filter-based outline+depth. Reset it so only our filter
      renders. */
@@ -31,7 +32,6 @@
     drop-shadow(-1px 0 0 hsl(0 0% 50% / 40%))
     drop-shadow(1px 0 0 hsl(0 0% 50% / 40%))
     drop-shadow(0 12px 32px rgb(0 0 0 / 35%));
-
   padding: 18px 18px 14px;
   max-width: 360px;
 }
@@ -48,6 +48,7 @@
   color: var(--fg-primary);
   font-size: 13.5px;
   line-height: 1.55;
+
   /* Gap to the footer (counter + buttons). Bumped from 14px so the body
      text doesn't crowd the action row — the reference callout spec keeps
      about 1.5 line-heights of air between prose and controls. */
