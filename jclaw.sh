@@ -2799,8 +2799,15 @@ do_test() {
     local t0 backend_elapsed frontend_elapsed stylelint_elapsed lint_elapsed typecheck_elapsed
     local backend_passed backend_failed frontend_summary
 
+    # Sub-second timing. Bash 3.2 (Apple's frozen build) lacks $EPOCHREALTIME,
+    # but BSD `date +%s.%N` gives microsecond resolution on Darwin 25, and awk
+    # handles the float subtraction. Without this, integer $SECONDS arithmetic
+    # collapses sub-2s steps to 0s and drifts ±1s on everything else.
+    _now() { date +%s.%N; }
+    _elapsed() { awk -v a="$1" -v b="$(date +%s.%N)" 'BEGIN { printf "%.1f", b - a }'; }
+
     echo "==> Running backend tests (play autotest)..."
-    t0=$SECONDS
+    t0=$(_now)
     set +e
     play autotest 2>&1 | tee "$backend_log"
     backend_rc=${PIPESTATUS[0]}
@@ -2808,51 +2815,63 @@ do_test() {
     if ! grep -q "^~ All tests passed" "$backend_log" 2>/dev/null; then
         backend_rc=1
     fi
-    backend_elapsed=$((SECONDS - t0))
+    backend_elapsed=$(_elapsed "$t0")
 
     echo ""
     echo "==> Running frontend tests (pnpm test)..."
-    t0=$SECONDS
+    t0=$(_now)
     set +e
     (cd "$SCRIPT_DIR/frontend" && pnpm test) 2>&1 | tee "$frontend_log"
     frontend_rc=${PIPESTATUS[0]}
     set -e
-    frontend_elapsed=$((SECONDS - t0))
+    frontend_elapsed=$(_elapsed "$t0")
 
     echo ""
     echo "==> Running frontend stylelint..."
-    t0=$SECONDS
+    t0=$(_now)
     set +e
     (cd "$SCRIPT_DIR/frontend" && pnpm stylelint) 2>&1 | tee "$stylelint_log"
     stylelint_rc=${PIPESTATUS[0]}
     set -e
-    stylelint_elapsed=$((SECONDS - t0))
+    stylelint_elapsed=$(_elapsed "$t0")
 
     echo ""
     echo "==> Running frontend lint (eslint)..."
-    t0=$SECONDS
+    t0=$(_now)
     set +e
     (cd "$SCRIPT_DIR/frontend" && pnpm lint) 2>&1 | tee "$lint_log"
     lint_rc=${PIPESTATUS[0]}
     set -e
-    lint_elapsed=$((SECONDS - t0))
+    lint_elapsed=$(_elapsed "$t0")
 
     echo ""
     echo "==> Running frontend typecheck (vue-tsc)..."
-    t0=$SECONDS
+    t0=$(_now)
     set +e
     (cd "$SCRIPT_DIR/frontend" && pnpm typecheck) 2>&1 | tee "$typecheck_log"
     typecheck_rc=${PIPESTATUS[0]}
     set -e
-    typecheck_elapsed=$((SECONDS - t0))
+    typecheck_elapsed=$(_elapsed "$t0")
 
     # Extract human-readable counts for the summary. Each grep is shielded
     # with `|| true` so a missing match under `set -e` + `pipefail` doesn't
     # tank the whole function before we get to print the verdict.
     backend_passed=$(grep -cE "PASSED " "$backend_log" 2>/dev/null || true)
     backend_failed=$(grep -cE "FAILED " "$backend_log" 2>/dev/null || true)
-    frontend_summary=$(grep -E "^[[:space:]]+Tests[[:space:]]" "$frontend_log" 2>/dev/null | tail -1 | sed 's/^[[:space:]]*//' || true)
-    [[ -z "$frontend_summary" ]] && frontend_summary="(summary unavailable)"
+    # Vitest emits ANSI color escapes even when teed to a file, so strip them
+    # once before line-anchored matching. Pull files count, tests count, and
+    # Vitest's self-reported Duration so the summary tracks what the user saw
+    # live — the script's own elapsed includes pnpm/node startup (≈2s) which
+    # makes a 3.89s test run look like 6s.
+    frontend_clean=$(sed $'s/\x1b\\[[0-9;]*m//g' "$frontend_log" 2>/dev/null || true)
+    frontend_files=$(printf '%s\n' "$frontend_clean" | grep -E "^[[:space:]]+Test Files[[:space:]]" | tail -1 | grep -oE '\([0-9]+\)$' | tr -d '()' || true)
+    frontend_tests=$(printf '%s\n' "$frontend_clean" | grep -E "^[[:space:]]+Tests[[:space:]]" | tail -1 | grep -oE '\([0-9]+\)$' | tr -d '()' || true)
+    frontend_duration=$(printf '%s\n' "$frontend_clean" | grep -E "^[[:space:]]+Duration[[:space:]]" | tail -1 | sed -E 's/.*Duration[[:space:]]+([0-9.]+s).*/\1/' || true)
+    if [[ -n "$frontend_files" && -n "$frontend_tests" && -n "$frontend_duration" ]]; then
+        frontend_summary="(${frontend_files} files, ${frontend_tests} tests, ${frontend_duration})"
+    else
+        frontend_summary="(summary unavailable, ${frontend_elapsed}s)"
+    fi
 
     echo ""
     echo "────────────────────────────────────────────────────────────"
@@ -2866,9 +2885,9 @@ do_test() {
         echo "            log: $backend_log"
     fi
     if [[ "$frontend_rc" -eq 0 ]]; then
-        printf " frontend : PASSED  %s (%ss)\n" "$frontend_summary" "$frontend_elapsed"
+        printf " frontend : PASSED  %s\n" "$frontend_summary"
     else
-        printf " frontend : FAILED  %s (%ss)\n" "$frontend_summary" "$frontend_elapsed"
+        printf " frontend : FAILED  %s\n" "$frontend_summary"
         echo "            log: $frontend_log"
     fi
     if [[ "$stylelint_rc" -eq 0 ]]; then
