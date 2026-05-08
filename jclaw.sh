@@ -62,8 +62,10 @@ Commands:
   status    Show whether backend and frontend are running
   logs      Tail the production application log
   loadtest  Drive the in-process load-test harness against /api/chat/stream
-  test      Run backend (play autotest) + frontend (pnpm test) and report a
-            consolidated pass/fail summary. Exits non-zero on any failure.
+  test      Run backend tests (play autotest), frontend tests (pnpm test),
+            and frontend quality gates (stylelint, lint, typecheck), and
+            report a consolidated pass/fail summary. Exits non-zero on any
+            failure.
   dist      Build the developer-distribution zip at dist/jclaw.zip and exit.
             Runs precompile + frontend build + `play dist`; operators
             unzipping the result need Java 25 + Gradle + Play 1 fork on
@@ -623,10 +625,11 @@ usage_test() {
         cat <<EOF
 Usage: jclaw.sh test
 
-Run the backend (play autotest) + frontend (pnpm test) suites and
-print a consolidated pass/fail summary. Logs at logs/test-backend.log
-and logs/test-frontend.log. Exits non-zero if either suite fails, so
-it's safe to wire into git hooks or CI.
+Run the full pre-push validation suite — backend tests (play autotest),
+frontend tests (pnpm test), and frontend quality gates (stylelint, lint,
+typecheck) — and print a consolidated pass/fail summary. Logs at
+logs/test-*.log per check. Exits non-zero if any check fails, so it's
+safe to wire into git hooks or CI.
 
 Example:
   ./jclaw.sh test
@@ -2774,11 +2777,12 @@ if segs:
 
 # ─── Consolidated test runner ───
 
-# Runs backend (play autotest) and frontend (pnpm test) sequentially, streams
-# each side's output, and prints a two-line summary at the end. Continues
-# past a backend failure so the user sees frontend results too — the whole
-# point of this subcommand is a single round-trip. Exits non-zero if either
-# suite failed so CI/git hooks can depend on it.
+# Runs the full pre-push validation suite: backend tests (play autotest),
+# frontend tests (pnpm test), and frontend quality gates (stylelint, lint,
+# typecheck). Streams each check's output and prints a consolidated summary
+# at the end. Continues past failures so the user sees every result in one
+# round-trip — the whole point of this subcommand. Exits non-zero if any
+# check failed so CI/git hooks can depend on it.
 #
 # play autotest sometimes returns 0 even when assertions fail, so we also
 # scrape its log for the terminal "All tests passed" banner as a second
@@ -2788,8 +2792,11 @@ do_test() {
     mkdir -p "$SCRIPT_DIR/logs"
     local backend_log="$SCRIPT_DIR/logs/test-backend.log"
     local frontend_log="$SCRIPT_DIR/logs/test-frontend.log"
-    local backend_rc=0 frontend_rc=0
-    local t0 backend_elapsed frontend_elapsed
+    local stylelint_log="$SCRIPT_DIR/logs/test-stylelint.log"
+    local lint_log="$SCRIPT_DIR/logs/test-lint.log"
+    local typecheck_log="$SCRIPT_DIR/logs/test-typecheck.log"
+    local backend_rc=0 frontend_rc=0 stylelint_rc=0 lint_rc=0 typecheck_rc=0
+    local t0 backend_elapsed frontend_elapsed stylelint_elapsed lint_elapsed typecheck_elapsed
     local backend_passed backend_failed frontend_summary
 
     echo "==> Running backend tests (play autotest)..."
@@ -2811,6 +2818,33 @@ do_test() {
     frontend_rc=${PIPESTATUS[0]}
     set -e
     frontend_elapsed=$((SECONDS - t0))
+
+    echo ""
+    echo "==> Running frontend stylelint..."
+    t0=$SECONDS
+    set +e
+    (cd "$SCRIPT_DIR/frontend" && pnpm stylelint) 2>&1 | tee "$stylelint_log"
+    stylelint_rc=${PIPESTATUS[0]}
+    set -e
+    stylelint_elapsed=$((SECONDS - t0))
+
+    echo ""
+    echo "==> Running frontend lint (eslint)..."
+    t0=$SECONDS
+    set +e
+    (cd "$SCRIPT_DIR/frontend" && pnpm lint) 2>&1 | tee "$lint_log"
+    lint_rc=${PIPESTATUS[0]}
+    set -e
+    lint_elapsed=$((SECONDS - t0))
+
+    echo ""
+    echo "==> Running frontend typecheck (vue-tsc)..."
+    t0=$SECONDS
+    set +e
+    (cd "$SCRIPT_DIR/frontend" && pnpm typecheck) 2>&1 | tee "$typecheck_log"
+    typecheck_rc=${PIPESTATUS[0]}
+    set -e
+    typecheck_elapsed=$((SECONDS - t0))
 
     # Extract human-readable counts for the summary. Each grep is shielded
     # with `|| true` so a missing match under `set -e` + `pipefail` doesn't
@@ -2837,9 +2871,27 @@ do_test() {
         printf " frontend : FAILED  %s (%ss)\n" "$frontend_summary" "$frontend_elapsed"
         echo "            log: $frontend_log"
     fi
+    if [[ "$stylelint_rc" -eq 0 ]]; then
+        printf " stylelint: PASSED  (%ss)\n" "$stylelint_elapsed"
+    else
+        printf " stylelint: FAILED  (%ss)\n" "$stylelint_elapsed"
+        echo "            log: $stylelint_log"
+    fi
+    if [[ "$lint_rc" -eq 0 ]]; then
+        printf " lint     : PASSED  (%ss)\n" "$lint_elapsed"
+    else
+        printf " lint     : FAILED  (%ss)\n" "$lint_elapsed"
+        echo "            log: $lint_log"
+    fi
+    if [[ "$typecheck_rc" -eq 0 ]]; then
+        printf " typecheck: PASSED  (%ss)\n" "$typecheck_elapsed"
+    else
+        printf " typecheck: FAILED  (%ss)\n" "$typecheck_elapsed"
+        echo "            log: $typecheck_log"
+    fi
     echo "────────────────────────────────────────────────────────────"
 
-    if [[ "$backend_rc" -ne 0 || "$frontend_rc" -ne 0 ]]; then
+    if [[ "$backend_rc" -ne 0 || "$frontend_rc" -ne 0 || "$stylelint_rc" -ne 0 || "$lint_rc" -ne 0 || "$typecheck_rc" -ne 0 ]]; then
         exit 1
     fi
 }
