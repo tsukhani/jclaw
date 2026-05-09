@@ -83,6 +83,7 @@ const MANAGED_PREFIXES = [
   'upload.', // Per-kind attachment size caps (JCLAW-131) — Settings
   'auth.', // Admin password hash — Settings (Password section, not rendered as a row)
   'onboarding.', // First-login guided tour flag — written by ApiOnboardingController, no UI surface
+  'pricing.', // LiteLLM nightly price-refresh toggle (JCLAW-28 follow-up) — Settings (LLM Providers section)
 ]
 
 function isManagedKey(key: string): boolean {
