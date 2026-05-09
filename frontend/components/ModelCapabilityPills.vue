@@ -2,33 +2,36 @@
 /**
  * Capability indicators for an agent's selected model.
  *
- * Thinking and vision pills are interactive — they render as buttons that
- * toggle the agent's per-capability override. Parents listen for the
- * `toggle` event and persist the new state.
+ * The thinking pill is interactive — it renders as a button that toggles
+ * the agent's reasoning mode. Parents listen for the `toggle` event and
+ * persist the new state. The thinking off-switch is real: the LLM API
+ * carries a {@code reasoning_effort} / {@code thinking_budget} parameter
+ * that the model honours, so the toggle changes wire-level behaviour.
  *
- * The audio pill is purely informational (JCLAW-165): it indicates "this
- * model accepts native audio passthrough" without offering a toggle, since
- * the transcription pipeline gives every model an audio path. Operators
- * can't *disable* native audio — there's nothing to opt-out of when
- * transcription is the universal fallback. Renders as a non-interactive
- * span; click does not emit the `toggle` event.
+ * Vision and audio pills are purely informational. No major LLM API
+ * exposes a "vision off" or "audio off" toggle — both modalities are
+ * implicit (send images / audio = visible to the model; don't = not).
+ * A client-side toggle would just be "don't attach images/audio," which
+ * the operator can do directly by not attaching. So the pills indicate
+ * capability ("this model handles X natively") without claiming to be
+ * controls. Render as non-interactive spans; click does not emit
+ * `toggle`. Audio's transcription pipeline (JCLAW-165) is the
+ * universal-fallback story for non-audio-capable models; vision has no
+ * such fallback today, so the pill is even more strictly informational.
  */
 import type { ProviderModel } from '~/composables/useProviders'
 import { Lightbulb, Eye, Volume2 } from 'lucide-vue-next'
 
-export type Capability = 'thinking' | 'vision'
+export type Capability = 'thinking'
 
 const props = withDefaults(defineProps<{
   model: ProviderModel | null | undefined
   /** Current thinking value — any non-empty string counts as "on". */
   thinkingMode?: string | null
-  /** null or true render as on; only explicit false renders as off. */
-  visionEnabled?: boolean | null
   /** Controls pill height / icon size. Defaults to the compact listing size. */
   size?: 'sm' | 'md'
 }>(), {
   thinkingMode: null,
-  visionEnabled: null,
   size: 'sm',
 })
 
@@ -37,7 +40,7 @@ defineEmits<{
 }>()
 
 interface PillDef {
-  capability: Capability | 'audio'
+  capability: Capability | 'vision' | 'audio'
   label: string
   icon: typeof Lightbulb
   supported: boolean
@@ -45,8 +48,8 @@ interface PillDef {
   /** Tailwind classes for the ON (colored) variant. */
   onCls: string
   /** Whether the pill renders as a clickable button. False renders as a
-   *  non-interactive span — used for the audio capability indicator,
-   *  which has no per-agent override to toggle (JCLAW-165). */
+   *  non-interactive span — used for capability indicators that don't
+   *  have an LLM-API-level toggle the way thinking does. */
   interactive: boolean
 }
 
@@ -68,15 +71,11 @@ const pills = computed<PillDef[]>(() => {
       label: 'vision',
       icon: Eye,
       supported: !!m.supportsVision,
-      enabled: props.visionEnabled !== false,
-      onCls: 'text-sky-400 border-sky-400/40 bg-sky-400/5 hover:bg-sky-400/10',
-      interactive: true,
+      enabled: true,
+      onCls: 'text-sky-400 border-sky-400/40 bg-sky-400/5',
+      interactive: false,
     },
     {
-      // JCLAW-165: capability indicator only — there's no per-agent override
-      // to toggle, since transcription gives every model an audio path. The
-      // pill exists so operators can see at a glance which models accept
-      // native audio passthrough.
       capability: 'audio',
       label: 'audio',
       icon: Volume2,
@@ -100,7 +99,13 @@ const offCls = 'text-neutral-500 border-neutral-600/40 bg-transparent hover:bg-n
 
 function tooltip(p: PillDef): string {
   if (!p.interactive) {
-    return `${p.label} — native passthrough; transcription handles models without it`
+    if (p.capability === 'audio') {
+      return 'audio — native passthrough; transcription handles models without it'
+    }
+    if (p.capability === 'vision') {
+      return 'vision — this model accepts image inputs natively'
+    }
+    return `${p.label} — supported by this model`
   }
   const state = p.enabled ? 'on' : 'off'
   return `${p.label} is ${state} — click to toggle`

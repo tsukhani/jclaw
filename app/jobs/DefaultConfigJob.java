@@ -97,6 +97,14 @@ public class DefaultConfigJob extends Job<Void> {
             // native input_audio passthrough). The gate that read this
             // column is gone; the column itself is now dead weight.
             stmt.execute("ALTER TABLE agent DROP COLUMN IF EXISTS audio_enabled");
+            // The matching vision toggle is also retired: no LLM provider
+            // exposes a vision-off API parameter (vision is implicit in
+            // whether image content parts are sent), and the toggle never
+            // gated anything in the pipeline — it was cosmetic. Operators
+            // can still skip vision by simply not attaching images, and
+            // model-capability gating still keeps non-vision-capable
+            // models from receiving images at all.
+            stmt.execute("ALTER TABLE agent DROP COLUMN IF EXISTS vision_enabled");
             stmt.execute("ALTER TABLE conversation DROP COLUMN IF EXISTS title_generated");
             stmt.execute("ALTER TABLE conversation DROP COLUMN IF EXISTS title_generation_count");
             stmt.execute("ALTER TABLE message ADD COLUMN IF NOT EXISTS reasoning TEXT");

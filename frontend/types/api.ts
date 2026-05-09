@@ -14,8 +14,6 @@ export interface Agent {
   thinkingMode: string | null
   /** True when the selected provider has an API key configured (populated by GET /api/agents). */
   providerConfigured?: boolean
-  /** Whether vision input is enabled for this agent (null when not applicable to the model). */
-  visionEnabled?: boolean | null
 }
 
 /**

@@ -67,21 +67,20 @@ describe('ModelCapabilityPills', () => {
     expect(btn.attributes('title')).toContain('thinking is off')
   })
 
-  it('vision pill treats null as on (inherit) and explicit false as off', async () => {
-    const nullWrapper = await mountSuspended(ModelCapabilityPills, {
-      props: { model: { id: 'm', supportsVision: true }, visionEnabled: null },
+  it('vision pill renders as non-interactive (no toggle event)', async () => {
+    // Capability indicator only — no LLM provider exposes a vision-off
+    // API parameter, so a client-side toggle would just mean "don't attach
+    // images." Same treatment as audio.
+    const wrapper = await mountSuspended(ModelCapabilityPills, {
+      props: { model: { id: 'm', supportsVision: true } },
     })
     await nextTick()
-    expect(nullWrapper.find('button').attributes('aria-pressed')).toBe('true')
-
-    const falseWrapper = await mountSuspended(ModelCapabilityPills, {
-      props: { model: { id: 'm', supportsVision: true }, visionEnabled: false },
-    })
-    await nextTick()
-    expect(falseWrapper.find('button').attributes('aria-pressed')).toBe('false')
+    const buttons = wrapper.findAll('button')
+    expect(buttons.length).toBe(0)
+    expect(wrapper.text()).toContain('vision')
   })
 
-  it('emits toggle event with the capability name on click', async () => {
+  it('emits toggle event only for the thinking pill (the sole interactive one)', async () => {
     const wrapper = await mountSuspended(ModelCapabilityPills, {
       props: {
         model: { id: 'm', supportsThinking: true, supportsVision: true, supportsAudio: true },
@@ -89,10 +88,12 @@ describe('ModelCapabilityPills', () => {
     })
     await nextTick()
     const buttons = wrapper.findAll('button')
-    await buttons[1]!.trigger('click')
+    // Only the thinking pill renders as a button now.
+    expect(buttons.length).toBe(1)
+    await buttons[0]!.trigger('click')
     const emits = wrapper.emitted('toggle') ?? []
     expect(emits).toHaveLength(1)
-    expect(emits[0]).toEqual(['vision'])
+    expect(emits[0]).toEqual(['thinking'])
   })
 
   it('md size pills carry larger padding classes than sm', async () => {

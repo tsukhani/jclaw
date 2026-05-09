@@ -274,12 +274,10 @@ const thinkingActive = computed(() => {
 // fresh from whatever the agent's stored thinkingMode was.
 const lastThinkingLevel = ref<string>('medium')
 
-// Vision pill: active-by-default on a vision-capable model (agent field null).
-// Only an explicit `false` on the agent record pins it off. JCLAW-165 retired
-// the parallel audio pill — every model can consume audio now via the
-// transcription pipeline, so there's nothing meaningful for an audio toggle
-// to gate.
-const visionActive = computed(() => selectedAgent.value?.visionEnabled !== false)
+// Vision and audio are pure capability indicators — no LLM provider exposes
+// an API-level off-switch for either modality, so a client-side toggle would
+// just be "don't attach images/audio." The chat composer renders the pills
+// when the model supports the capability; clicks are no-ops.
 
 function toggleThinkingPill() {
   if (!thinkingSupported.value) return
@@ -390,11 +388,6 @@ onBeforeUnmount(() => {
   }
   detachMenuTrackingListeners()
 })
-
-function toggleVisionPill() {
-  if (!visionSupported.value) return
-  updateAgentSetting({ visionEnabled: !visionActive.value })
-}
 
 // Sync model or thinking mode change back to the agent
 async function updateAgentSetting(updates: Partial<Agent>) {
@@ -2762,22 +2755,25 @@ function exportConversation() {
                   />
                   Think
                 </button>
-                <button
+                <!--
+                  Vision pill: capability indicator only. No LLM provider
+                  exposes a vision-off API parameter, so a client-side
+                  toggle would just mean "don't attach images" — which the
+                  operator can already do by not attaching. Span, not
+                  button. The model-capability gate in addAttachments
+                  still keeps non-vision models from receiving images.
+                -->
+                <span
                   v-if="visionSupported"
-                  type="button"
-                  class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium transition-colors"
-                  :class="visionActive
-                    ? 'bg-sky-500/15 text-sky-400 hover:bg-sky-500/25'
-                    : 'border border-border text-fg-muted hover:text-fg-strong hover:bg-muted'"
-                  :title="visionActive ? 'Vision on — click to turn off' : 'Vision off — click to turn on'"
-                  @click="toggleVisionPill"
+                  class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium bg-sky-500/15 text-sky-400 cursor-default"
+                  title="This model accepts image inputs natively."
                 >
                   <EyeIcon
                     class="w-3.5 h-3.5"
                     aria-hidden="true"
                   />
                   Vision
-                </button>
+                </span>
                 <!--
                   JCLAW-165: capability indicator only. Renders when the
                   active model advertises native audio passthrough; not a

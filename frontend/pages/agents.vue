@@ -71,8 +71,6 @@ interface AgentForm {
   modelId: string
   enabled: boolean
   thinkingMode: string
-  /** null preserves the "inherit capability default" semantic on untouched saves. */
-  visionEnabled: boolean | null
 }
 const form = ref<AgentForm>({
   name: '',
@@ -81,7 +79,6 @@ const form = ref<AgentForm>({
   modelId: '',
   enabled: true,
   thinkingMode: '',
-  visionEnabled: null,
 })
 // Snapshot of the agent form at load time (or after a successful save). See
 // formDirty below — together they gate the Save button so it's only active
@@ -297,7 +294,6 @@ function newAgent() {
     modelId: defaultModel,
     enabled: true,
     thinkingMode: '',
-    visionEnabled: null,
   }
   formBaseline.value = { ...form.value }
   creating.value = true
@@ -312,7 +308,6 @@ function editAgent(agent: Agent) {
     modelId: agent.modelId,
     enabled: agent.enabled,
     thinkingMode: agent.thinkingMode ?? '',
-    visionEnabled: agent.visionEnabled ?? null,
   }
   formBaseline.value = { ...form.value }
   editing.value = agent
@@ -335,32 +330,27 @@ watch(() => [form.value.modelProvider, form.value.modelId], () => {
   }
 })
 
-// Pill toggle from inside the Edit Agent form — purely local state. The
-// form save performs the API call once the operator clicks Save.
-function toggleFormCapability(capability: 'thinking' | 'vision') {
+// Pill toggle from inside the Edit Agent form. Thinking is the only
+// remaining toggleable capability — vision/audio are pure capability
+// indicators (no LLM API exposes an off-switch for either).
+function toggleFormCapability(capability: 'thinking') {
   if (capability === 'thinking') {
     form.value.thinkingMode = form.value.thinkingMode
       ? ''
       : defaultThinkingLevel(selectedModel.value)
-  }
-  else {
-    form.value.visionEnabled = form.value.visionEnabled === false
   }
 }
 
 // Pill toggle from a listing row — persists immediately via a partial PUT
 // so the row stays in sync with the backend. Only the touched field is
 // sent; the update endpoint honours absent-key-leaves-unchanged.
-async function toggleListingCapability(agent: Agent | undefined, capability: 'thinking' | 'vision') {
+async function toggleListingCapability(agent: Agent | undefined, capability: 'thinking') {
   if (!agent) return
   const body: Record<string, unknown> = {}
   if (capability === 'thinking') {
     body.thinkingMode = agent.thinkingMode
       ? null
       : defaultThinkingLevel(modelForAgent(agent))
-  }
-  else {
-    body.visionEnabled = agent.visionEnabled === false
   }
   try {
     await $fetch(`/api/agents/${agent.id}`, { method: 'PUT', body })
@@ -543,10 +533,6 @@ async function saveAgent() {
     const payload = {
       ...form.value,
       thinkingMode: form.value.thinkingMode || null,
-      // visionEnabled is null|true|false in the form; pass through verbatim
-      // so the "null = inherit capability" semantic is preserved on
-      // untouched saves.
-      visionEnabled: form.value.visionEnabled,
       // Blank description clears the column; backend also strips/trims.
       description: form.value.description.trim() || null,
     }
@@ -769,7 +755,6 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             <ModelCapabilityPills
               :model="modelForAgent(mainAgent)"
               :thinking-mode="mainAgent.thinkingMode"
-              :vision-enabled="mainAgent.visionEnabled"
               class="mt-2"
               @toggle="(cap) => toggleListingCapability(mainAgent, cap)"
             />
@@ -829,7 +814,6 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               <ModelCapabilityPills
                 :model="modelForAgent(agent)"
                 :thinking-mode="agent.thinkingMode"
-                :vision-enabled="agent.visionEnabled"
                 class="mt-2"
                 @toggle="(cap) => toggleListingCapability(agent, cap)"
               />
@@ -969,7 +953,6 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         <ModelCapabilityPills
           :model="selectedModel"
           :thinking-mode="form.thinkingMode"
-          :vision-enabled="form.visionEnabled"
           size="md"
           class="mt-5"
           @toggle="toggleFormCapability"
