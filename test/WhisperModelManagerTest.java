@@ -95,6 +95,56 @@ public class WhisperModelManagerTest extends UnitTest {
     }
 
     @Test
+    public void status_dropsStaleAvailableCache_whenFileIsRemoved() throws Exception {
+        // Simulate a successful prior download by seeding the cache and the
+        // file together — same shape doDownload would leave behind.
+        var bytes = "previously-downloaded-model-bytes".getBytes();
+        var path = WhisperModelManager.localPath(MODEL);
+        Files.createDirectories(tempRoot);
+        Files.write(path, bytes);
+
+        var seeded = WhisperModelManager.status(MODEL);
+        assertEquals(WhisperModelManager.State.AVAILABLE, seeded.state(),
+                "baseline: cache reports AVAILABLE while file exists");
+
+        // Operator action: rm the file from the data directory.
+        Files.delete(path);
+
+        var afterDelete = WhisperModelManager.status(MODEL);
+        assertEquals(WhisperModelManager.State.ABSENT, afterDelete.state(),
+                "status() must reconcile against filesystem and report ABSENT");
+
+        // Subsequent polls also see ABSENT — the stale AVAILABLE entry was
+        // evicted, not just shadowed.
+        var followup = WhisperModelManager.status(MODEL);
+        assertEquals(WhisperModelManager.State.ABSENT, followup.state(),
+                "stale cache entry must be evicted, not just shadowed");
+    }
+
+    @Test
+    public void status_promotesToAvailable_whenFileAppearsOutOfBand() throws Exception {
+        // Operator copies a model file from another machine into the data
+        // directory while the JVM is running. No download was ever issued, so
+        // the cache has no entry for this model — but status() should still
+        // pick up the file and report AVAILABLE without needing a restart.
+        var bytes = "manually-placed-model-bytes-of-arbitrary-length".getBytes();
+        var path = WhisperModelManager.localPath(MODEL);
+        Files.createDirectories(tempRoot);
+
+        var beforePlace = WhisperModelManager.status(MODEL);
+        assertEquals(WhisperModelManager.State.ABSENT, beforePlace.state(),
+                "baseline: no file, no cache → ABSENT");
+
+        Files.write(path, bytes);
+
+        var afterPlace = WhisperModelManager.status(MODEL);
+        assertEquals(WhisperModelManager.State.AVAILABLE, afterPlace.state(),
+                "out-of-band file placement must be picked up without a restart");
+        assertEquals(bytes.length, afterPlace.totalBytes(),
+                "totalBytes should reflect the actual file size");
+    }
+
+    @Test
     public void ensureAvailable_coalescesConcurrentCallers_toSingleDownload() throws Exception {
         var body = "single-flight-test-body-bytes-with-enough-mass-to-be-real".getBytes();
         var sha256 = sha256Hex(body);

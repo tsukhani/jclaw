@@ -60,21 +60,48 @@ public final class WhisperModelManager {
     }
 
     /**
-     * Best-effort current status for a model. If a download is in-flight, the
-     * latest progress sample is returned; otherwise the filesystem is the
-     * source of truth.
+     * Best-effort current status for a model. In-flight states
+     * ({@link State#DOWNLOADING}, {@link State#VERIFYING}) trust the in-memory
+     * cache because those are runtime signals the filesystem can't reflect.
+     * Terminal states reconcile against the filesystem so the Settings UI
+     * picks up two scenarios without needing a backend restart:
+     *
+     * <ul>
+     *   <li>An operator deleted a model file from {@code data/whisper-models/}
+     *       — the cache's stale AVAILABLE entry is dropped and the row
+     *       reports ABSENT, re-enabling the Download button.</li>
+     *   <li>An operator dropped a model file in out-of-band (e.g. copied
+     *       from another machine) — the row flips to AVAILABLE without
+     *       requiring a download click.</li>
+     * </ul>
      */
     public static ModelStatus status(WhisperModel model) {
         var live = statuses.get(model.id());
-        if (live != null) return live;
-        if (availableLocally(model)) {
+        if (live != null
+                && (live.state() == State.DOWNLOADING || live.state() == State.VERIFYING)) {
+            return live;
+        }
+
+        boolean fileExists = availableLocally(model);
+        if (fileExists) {
+            if (live != null && live.state() == State.AVAILABLE) return live;
             try {
                 var size = Files.size(localPath(model));
-                return new ModelStatus(State.AVAILABLE, size, size, null);
+                var fresh = new ModelStatus(State.AVAILABLE, size, size, null);
+                statuses.put(model.id(), fresh);
+                return fresh;
             } catch (IOException e) {
                 return new ModelStatus(State.ERROR, 0, 0, e.getMessage());
             }
         }
+
+        // File is absent. A stale AVAILABLE cache entry means the file was
+        // deleted externally — drop it so the row settles on ABSENT and
+        // future polls don't keep returning the lie.
+        if (live != null && live.state() == State.AVAILABLE) {
+            statuses.remove(model.id());
+        }
+        if (live != null && live.state() == State.ERROR) return live;
         return new ModelStatus(State.ABSENT, 0, 0, null);
     }
 
