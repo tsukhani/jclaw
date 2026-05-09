@@ -209,6 +209,13 @@ public final class LlmTypes {
      * {@code ["minimal","low","medium","high","xhigh"]}). A {@code null} or empty
      * list is equivalent to {@link #DEFAULT_THINKING_LEVELS} when
      * {@code supportsThinking} is true, and meaningless otherwise.
+     *
+     * <p>{@code alwaysThinks} marks pure reasoning models (e.g. OpenAI o1/o3,
+     * DeepSeek-R1, Qwen QwQ) whose architecture has no non-thinking mode — the
+     * provider API accepts a "reasoning off" value but the model thinks anyway.
+     * The UI surfaces these as a locked-on pill so the operator isn't misled
+     * into believing their off preference was honored. Implies
+     * {@code supportsThinking == true}; meaningless otherwise.
      */
     public record ModelInfo(
             String id,
@@ -222,11 +229,12 @@ public final class LlmTypes {
             double completionPrice,
             double cachedReadPrice,
             double cacheWritePrice,
-            List<String> thinkingLevels
+            List<String> thinkingLevels,
+            boolean alwaysThinks
     ) {
         /** Backwards-compatible factory for callers that don't have pricing data. */
         public ModelInfo(String id, String name, int contextWindow, int maxTokens, boolean supportsThinking) {
-            this(id, name, contextWindow, maxTokens, supportsThinking, false, false, -1, -1, -1, -1, null);
+            this(id, name, contextWindow, maxTokens, supportsThinking, false, false, -1, -1, -1, -1, null, false);
         }
 
         /** Backwards-compatible factory for callers that have pricing but no explicit thinking levels. */
@@ -234,7 +242,7 @@ public final class LlmTypes {
                          double promptPrice, double completionPrice,
                          double cachedReadPrice, double cacheWritePrice) {
             this(id, name, contextWindow, maxTokens, supportsThinking, false, false,
-                    promptPrice, completionPrice, cachedReadPrice, cacheWritePrice, null);
+                    promptPrice, completionPrice, cachedReadPrice, cacheWritePrice, null, false);
         }
 
         /**

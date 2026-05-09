@@ -180,6 +180,9 @@ public class ModelDiscoveryService {
             var thinking = detectThinkingSupport(obj);
             model.put("supportsThinking", thinking.confirmed());
             model.put("thinkingDetectedFromProvider", thinking.fromProvider());
+            var alwaysThinks = detectAlwaysThinks(obj);
+            model.put("alwaysThinks", alwaysThinks.confirmed());
+            model.put("alwaysThinksDetectedFromProvider", alwaysThinks.fromProvider());
             var vision = detectVisionSupport(obj);
             model.put("supportsVision", vision.confirmed());
             model.put("visionDetectedFromProvider", vision.fromProvider());
@@ -235,6 +238,70 @@ public class ModelDiscoveryService {
             return obj.get("max_tokens").getAsInt();
         }
         return 0;
+    }
+
+    /**
+     * Detect "always thinks" pure reasoning models — those whose architecture
+     * has no non-thinking mode (OpenAI o-series, DeepSeek-R1 family, Qwen QwQ).
+     * The provider API accepts a "reasoning off" value but the model thinks
+     * anyway, so the UI surfaces these with a locked-on toggle.
+     *
+     * <p>No major provider exposes this as a metadata field — neither
+     * {@code supported_parameters} (OpenRouter) nor {@code capabilities}
+     * (Ollama) distinguishes reasoning-required from reasoning-optional.
+     * The single programmatic signal we have is OpenRouter's
+     * {@code architecture.instruct_type: "deepseek-r1"}, which uniquely
+     * identifies the R1 family. Everywhere else we fall back to tight
+     * id-pattern matching against the well-known reasoning-only families.
+     *
+     * <p>Patterns are deliberately tighter than {@link #detectThinkingSupport}'s
+     * fallback (which uses bare {@code id.contains("o1")} and would
+     * false-positive on {@code "claude-opus-4-1"}, etc.). This detector
+     * requires the o-series id-component to start at the beginning of the
+     * id or after a {@code /} provider prefix, and matches only the suffixes
+     * the OpenAI catalog actually ships ({@code -mini}, {@code -pro},
+     * {@code -preview}).
+     */
+    public static CapabilityDetection detectAlwaysThinks(JsonObject obj) {
+        // OpenRouter publishes architecture.instruct_type — the only
+        // provider-surfaced signal we get for "always thinks." For the
+        // R1 family it's exactly "deepseek-r1"; treat as confirmed.
+        if (obj.has("architecture") && obj.get("architecture").isJsonObject()) {
+            var arch = obj.getAsJsonObject("architecture");
+            if (arch.has("instruct_type") && arch.get("instruct_type").isJsonPrimitive()) {
+                var instructType = arch.get("instruct_type").getAsString().toLowerCase();
+                if ("deepseek-r1".equals(instructType)) {
+                    return new CapabilityDetection(true, true);
+                }
+            }
+        }
+
+        var id = getString(obj, "id", "").toLowerCase();
+        if (matchesReasoningOnlyFamily(id)) {
+            return new CapabilityDetection(true, false);
+        }
+
+        return new CapabilityDetection(false, false);
+    }
+
+    /**
+     * Match known reasoning-only model id patterns. Tight on purpose — see
+     * {@link #detectAlwaysThinks} doc for why we don't use the broader
+     * {@link #detectThinkingSupport} fallback patterns. New families ship
+     * roughly twice a year and require an update here.
+     */
+    private static boolean matchesReasoningOnlyFamily(String id) {
+        // OpenAI o-series. Allows optional provider prefix (openai/) and
+        // optional Ollama-style :tag suffix. Suffixes are limited to the
+        // -mini / -pro / -preview variants the catalog actually ships.
+        if (id.matches("^(?:[^/]+/)?o[1-9](?:-(?:mini|pro|preview))?(?::.+)?$")) return true;
+        // DeepSeek-R1 family — explicit hyphen so we don't match bare "r1"
+        // tokens in unrelated names. Covers distill variants too.
+        if (id.contains("deepseek-r1")) return true;
+        // Qwen QwQ (Question with Question). No non-pure-reasoner variant
+        // currently ships under this family name.
+        if (id.contains("qwq")) return true;
+        return false;
     }
 
     public record ThinkingDetection(boolean confirmed, boolean fromProvider) {}
@@ -615,6 +682,13 @@ public class ModelDiscoveryService {
             // without overriding a confirmed answer here.
             model.put("supportsThinking", false);
             model.put("thinkingDetectedFromProvider", false);
+            // alwaysThinks runs the id-pattern detector regardless: locally
+            // run R1 / QwQ models are still pure reasoners.
+            var lmIdOnly = new JsonObject();
+            lmIdOnly.addProperty("id", id);
+            var lmAlwaysThinks = detectAlwaysThinks(lmIdOnly);
+            model.put("alwaysThinks", lmAlwaysThinks.confirmed());
+            model.put("alwaysThinksDetectedFromProvider", lmAlwaysThinks.fromProvider());
             model.put("supportsAudio", false);
             model.put("audioDetectedFromProvider", false);
 
@@ -830,6 +904,9 @@ public class ModelDiscoveryService {
         var thinking = detectThinkingSupport(forDetect);
         model.put("supportsThinking", thinking.confirmed());
         model.put("thinkingDetectedFromProvider", thinking.fromProvider());
+        var alwaysThinks = detectAlwaysThinks(forDetect);
+        model.put("alwaysThinks", alwaysThinks.confirmed());
+        model.put("alwaysThinksDetectedFromProvider", alwaysThinks.fromProvider());
         var vision = detectVisionSupport(forDetect);
         model.put("supportsVision", vision.confirmed());
         model.put("visionDetectedFromProvider", vision.fromProvider());

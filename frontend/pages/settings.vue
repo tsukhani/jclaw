@@ -5,6 +5,7 @@ import {
   ChevronUpIcon,
   Cog6ToothIcon,
   InformationCircleIcon,
+  LockClosedIcon,
   MagnifyingGlassIcon,
   PencilIcon,
   PlusIcon,
@@ -756,7 +757,7 @@ const editingModelIdx = ref<number | null>(null)
 // previously silently wrote 131072 (kimi-k2.5 is actually 256K), which
 // then broke /usage and compaction-budget math. Show 0 honestly instead
 // and let the user enter the real value from the provider's docs.
-const modelForm = ref({ id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, supportsVision: false, supportsAudio: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 })
+const modelForm = ref({ id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, alwaysThinks: false, supportsVision: false, supportsAudio: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 })
 const addingModel = ref(false)
 
 function getProviderModels(providerName: string): ProviderModelDef[] {
@@ -843,6 +844,7 @@ function startEditModel(providerName: string, idx: number) {
     contextWindow: m.contextWindow ?? 0,
     maxTokens: m.maxTokens ?? 0,
     supportsThinking: m.supportsThinking || false,
+    alwaysThinks: m.alwaysThinks || false,
     supportsVision: m.supportsVision || false,
     supportsAudio: m.supportsAudio || false,
     promptPrice: m.promptPrice ?? -1,
@@ -855,7 +857,7 @@ function startEditModel(providerName: string, idx: number) {
 }
 
 function startAddModel() {
-  modelForm.value = { id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, supportsVision: false, supportsAudio: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 }
+  modelForm.value = { id: '', name: '', contextWindow: 0, maxTokens: 0, supportsThinking: false, alwaysThinks: false, supportsVision: false, supportsAudio: false, promptPrice: -1, completionPrice: -1, cachedReadPrice: -1, cacheWritePrice: -1 }
   addingModel.value = true
   editingModelIdx.value = null
 }
@@ -881,6 +883,10 @@ function modelFormToSaved(): ProviderModelDef {
     contextWindow: f.contextWindow,
     maxTokens: f.maxTokens,
     supportsThinking: f.supportsThinking,
+    // Enforce the invariant: alwaysThinks implies supportsThinking. If the
+    // operator unchecked thinking, drop the alwaysThinks flag too — saving
+    // {supportsThinking:false, alwaysThinks:true} would be incoherent.
+    ...(f.supportsThinking && f.alwaysThinks ? { alwaysThinks: true } : {}),
     supportsVision: f.supportsVision,
     supportsAudio: f.supportsAudio,
   }
@@ -1031,6 +1037,11 @@ async function addDiscoveredModels() {
       contextWindow: m.contextWindow,
       maxTokens: m.maxTokens,
       supportsThinking: m.thinkingDetectedFromProvider ? m.supportsThinking : false,
+      // alwaysThinks is saved from either source (provider metadata for R1
+      // via OpenRouter's instruct_type, or id-pattern match for o-series /
+      // QwQ). Patterns are tight enough that a defensive false-by-default
+      // gate isn't warranted; operators can still untick it in the form.
+      ...(m.alwaysThinks ? { alwaysThinks: true } : {}),
       supportsVision: m.visionDetectedFromProvider ? m.supportsVision : false,
       supportsAudio: m.audioDetectedFromProvider ? m.supportsAudio : false,
       ...((m.promptPrice ?? -1) >= 0 ? { promptPrice: m.promptPrice } : {}),
@@ -1494,6 +1505,19 @@ async function handleResetPassword() {
                         > Supports Thinking
                       </label>
                       <label
+                        v-if="modelForm.supportsThinking"
+                        :for="`model-always-thinks-${name}`"
+                        class="flex items-center gap-1.5 text-xs text-fg-muted"
+                        title="Pure reasoning models (o1, o3, DeepSeek-R1, QwQ) that always think regardless of the off toggle"
+                      >
+                        <input
+                          :id="`model-always-thinks-${name}`"
+                          v-model="modelForm.alwaysThinks"
+                          type="checkbox"
+                          class="accent-white"
+                        > Always Thinks
+                      </label>
+                      <label
                         :for="`model-vision-${name}`"
                         class="flex items-center gap-1.5 text-xs text-fg-muted"
                       >
@@ -1569,16 +1593,21 @@ async function handleResetPassword() {
                           class="ml-2 text-xs text-fg-muted"
                         >{{ model.name }}</span>
                         <span
-                          v-if="model.supportsThinking"
-                          class="ml-2 text-[10px] text-blue-400 border border-blue-400/30 px-1"
+                          v-if="model.supportsThinking && !model.alwaysThinks"
+                          class="ml-2 text-[10px] text-emerald-400 border border-emerald-400/30 px-1"
                         >thinking</span>
                         <span
+                          v-else-if="model.alwaysThinks"
+                          class="ml-2 inline-flex items-center gap-0.5 text-[10px] text-emerald-300 border border-emerald-500/60 bg-emerald-500/15 px-1"
+                          title="Pure reasoning model — thinking is always on"
+                        >thinking<LockClosedIcon class="w-2 h-2" aria-hidden="true" /></span>
+                        <span
                           v-if="model.supportsVision"
-                          class="ml-2 text-[10px] text-amber-400 border border-amber-400/30 px-1"
+                          class="ml-2 text-[10px] text-sky-400 border border-sky-400/30 px-1"
                         >vision</span>
                         <span
                           v-if="model.supportsAudio"
-                          class="ml-2 text-[10px] text-violet-400 border border-violet-400/30 px-1"
+                          class="ml-2 text-[10px] text-amber-400 border border-amber-400/30 px-1"
                         >audio</span>
                       </div>
                     </div>
@@ -1731,6 +1760,19 @@ async function handleResetPassword() {
                         type="checkbox"
                         class="accent-white"
                       > Supports Thinking
+                    </label>
+                    <label
+                      v-if="modelForm.supportsThinking"
+                      :for="`addmodel-always-thinks-${name}`"
+                      class="flex items-center gap-1.5 text-xs text-fg-muted"
+                      title="Pure reasoning models (o1, o3, DeepSeek-R1, QwQ) that always think regardless of the off toggle"
+                    >
+                      <input
+                        :id="`addmodel-always-thinks-${name}`"
+                        v-model="modelForm.alwaysThinks"
+                        type="checkbox"
+                        class="accent-white"
+                      > Always Thinks
                     </label>
                     <label
                       :for="`addmodel-vision-${name}`"
@@ -1972,8 +2014,15 @@ async function handleResetPassword() {
                       ${{ (model.promptPrice ?? 0) < 1 ? (model.promptPrice ?? 0).toFixed(2) : (model.promptPrice ?? 0).toFixed(0) }}/M
                     </span>
                     <span
-                      v-if="model.supportsThinking && model.thinkingDetectedFromProvider"
-                      class="text-[10px] text-blue-400 border border-blue-400/30 px-1"
+                      v-if="model.alwaysThinks"
+                      class="inline-flex items-center gap-0.5 text-[10px] text-emerald-300 border border-emerald-500/60 bg-emerald-500/15 px-1"
+                      :title="model.alwaysThinksDetectedFromProvider
+                        ? 'Pure reasoning model (provider-confirmed) — thinking is always on'
+                        : 'Pure reasoning model (id-pattern match) — thinking is always on'"
+                    >thinking<LockClosedIcon class="w-2 h-2" aria-hidden="true" /></span>
+                    <span
+                      v-else-if="model.supportsThinking && model.thinkingDetectedFromProvider"
+                      class="text-[10px] text-emerald-400 border border-emerald-400/30 px-1"
                       title="Thinking support confirmed by provider"
                     >thinking</span>
                     <span
@@ -1983,7 +2032,7 @@ async function handleResetPassword() {
                     >thinking?</span>
                     <span
                       v-if="model.supportsVision && model.visionDetectedFromProvider"
-                      class="text-[10px] text-amber-400 border border-amber-400/30 px-1"
+                      class="text-[10px] text-sky-400 border border-sky-400/30 px-1"
                       title="Vision support confirmed by provider"
                     >vision</span>
                     <span
@@ -1993,7 +2042,7 @@ async function handleResetPassword() {
                     >vision?</span>
                     <span
                       v-if="model.supportsAudio && model.audioDetectedFromProvider"
-                      class="text-[10px] text-violet-400 border border-violet-400/30 px-1"
+                      class="text-[10px] text-amber-400 border border-amber-400/30 px-1"
                       title="Audio support confirmed by provider"
                     >audio</span>
                     <span

@@ -96,6 +96,134 @@ public class ModelDiscoveryServiceTest extends UnitTest {
         assertFalse(result.fromProvider());
     }
 
+    // --- detectAlwaysThinks ---
+    // No provider exposes "thinking is mandatory" in metadata except
+    // OpenRouter's architecture.instruct_type for the R1 family. Everywhere
+    // else we rely on tight id-pattern matching.
+
+    @Test
+    public void detectAlwaysThinksFromOpenRouterInstructType() {
+        // The single provider-surfaced signal we get for "always thinks."
+        var obj = JsonParser.parseString("""
+                {"id": "deepseek/deepseek-r1",
+                 "architecture": {"instruct_type": "deepseek-r1"}}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectAlwaysThinks(obj);
+        assertTrue(result.confirmed());
+        assertTrue(result.fromProvider());
+    }
+
+    @Test
+    public void detectAlwaysThinksInstructTypeIsCaseInsensitive() {
+        var obj = JsonParser.parseString("""
+                {"id": "deepseek/deepseek-r1",
+                 "architecture": {"instruct_type": "DeepSeek-R1"}}
+                """).getAsJsonObject();
+        assertTrue(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed());
+    }
+
+    @Test
+    public void detectAlwaysThinksMatchesO1Family() {
+        for (var id : java.util.List.of(
+                "o1", "o1-mini", "o1-pro", "o1-preview",
+                "openai/o1", "openai/o1-mini", "openai/o1-preview"
+        )) {
+            var obj = JsonParser.parseString("{\"id\": \"" + id + "\"}").getAsJsonObject();
+            var result = ModelDiscoveryService.detectAlwaysThinks(obj);
+            assertTrue(result.confirmed(), id + " should match");
+            assertFalse(result.fromProvider(), id + " is name-pattern, not provider");
+        }
+    }
+
+    @Test
+    public void detectAlwaysThinksMatchesO3Family() {
+        for (var id : java.util.List.of("o3", "o3-mini", "o3-pro", "openai/o3-mini")) {
+            var obj = JsonParser.parseString("{\"id\": \"" + id + "\"}").getAsJsonObject();
+            assertTrue(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed(),
+                    id + " should match");
+        }
+    }
+
+    @Test
+    public void detectAlwaysThinksMatchesO4Mini() {
+        var obj = JsonParser.parseString("{\"id\": \"openai/o4-mini\"}").getAsJsonObject();
+        assertTrue(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed());
+    }
+
+    @Test
+    public void detectAlwaysThinksMatchesDeepseekR1Variants() {
+        for (var id : java.util.List.of(
+                "deepseek-r1", "deepseek-ai/deepseek-r1",
+                "deepseek-r1:latest", "deepseek-r1-distill-llama-70b"
+        )) {
+            var obj = JsonParser.parseString("{\"id\": \"" + id + "\"}").getAsJsonObject();
+            assertTrue(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed(),
+                    id + " should match");
+        }
+    }
+
+    @Test
+    public void detectAlwaysThinksMatchesQwq() {
+        for (var id : java.util.List.of("qwq", "qwen/qwq-32b", "qwq:latest")) {
+            var obj = JsonParser.parseString("{\"id\": \"" + id + "\"}").getAsJsonObject();
+            assertTrue(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed(),
+                    id + " should match");
+        }
+    }
+
+    @Test
+    public void detectAlwaysThinksRejectsClaudeOpus() {
+        // Critical regression guard: "claude-opus-4-1" contains "o" and a
+        // digit, but must NOT match the o-series pattern. The tight regex
+        // requires the o-token to start the id-component.
+        for (var id : java.util.List.of(
+                "claude-opus-4-1", "anthropic/claude-opus-4-1",
+                "claude-opus-4", "claude-haiku-4-1"
+        )) {
+            var obj = JsonParser.parseString("{\"id\": \"" + id + "\"}").getAsJsonObject();
+            assertFalse(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed(),
+                    id + " must not match");
+        }
+    }
+
+    @Test
+    public void detectAlwaysThinksRejectsGpt4o() {
+        // gpt-4o contains "o" but is hybrid (and uses GPT-4o-style audio,
+        // not o-series reasoning architecture).
+        for (var id : java.util.List.of("gpt-4o", "gpt-4o-mini", "openai/gpt-4o")) {
+            var obj = JsonParser.parseString("{\"id\": \"" + id + "\"}").getAsJsonObject();
+            assertFalse(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed(),
+                    id + " must not match");
+        }
+    }
+
+    @Test
+    public void detectAlwaysThinksRejectsHybridReasoners() {
+        // Hybrid models that DO support thinking but can be turned off —
+        // the toggle is real for these, so they must NOT be locked.
+        for (var id : java.util.List.of(
+                "openai/gpt-5", "openai/gpt-5-mini",
+                "anthropic/claude-sonnet-4-7",
+                "google/gemini-2.5-pro", "google/gemini-3-flash-preview",
+                "qwen/qwen3-32b", "deepseek/deepseek-v3",
+                "kimi-k2.5"
+        )) {
+            var obj = JsonParser.parseString("{\"id\": \"" + id + "\"}").getAsJsonObject();
+            assertFalse(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed(),
+                    id + " is hybrid, must not match");
+        }
+    }
+
+    @Test
+    public void detectAlwaysThinksUnknownModel() {
+        var obj = JsonParser.parseString("""
+                {"id": "vendor/some-regular-model"}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectAlwaysThinks(obj);
+        assertFalse(result.confirmed());
+        assertFalse(result.fromProvider());
+    }
+
     // --- detectVisionSupport ---
 
     @Test

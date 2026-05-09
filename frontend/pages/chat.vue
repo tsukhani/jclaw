@@ -234,11 +234,18 @@ const selectedModelKey = computed(() => {
 // Whether the selected model supports thinking
 const thinkingSupported = computed(() => selectedModelInfo.value?.supportsThinking === true)
 
-// JCLAW-127: Provider/model combos where reasoning cannot be disabled even with
-// the toggle off. Shown as a locked-blue pill with an explanatory tooltip so
-// the operator isn't misled into thinking their preference was honored.
+// Provider/model combos where reasoning cannot be disabled even with the
+// toggle off. Two converging causes — model architecture (alwaysThinks pure
+// reasoners like o1/R1) and provider integration limits (JCLAW-127:
+// ollama-cloud + Gemini 2.5 Pro / 3). Both surface as a locked pill with an
+// explanatory tooltip so the operator isn't misled into thinking their
+// preference was honored.
 const thinkingLock = computed(() =>
-  resolveThinkingLock(effectiveModel.value.providerName, effectiveModel.value.modelId),
+  resolveThinkingLock(
+    effectiveModel.value.providerName,
+    effectiveModel.value.modelId,
+    selectedModelInfo.value,
+  ),
 )
 
 // Thinking levels advertised by the currently selected model. Empty for
@@ -2732,10 +2739,11 @@ function exportConversation() {
                   type="button"
                   class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium transition-colors"
                   :class="[
-                    (thinkingActive || thinkingLock.locked)
-                      ? 'bg-emerald-500/15 text-emerald-500 hover:bg-emerald-500/25'
-                      : 'border border-border text-fg-muted hover:text-fg-strong hover:bg-muted',
-                    thinkingLock.locked ? 'cursor-not-allowed opacity-90' : '',
+                    thinkingLock.locked
+                      ? 'bg-emerald-700/30 text-emerald-300 cursor-not-allowed'
+                      : (thinkingActive
+                        ? 'bg-emerald-500/15 text-emerald-500 hover:bg-emerald-500/25'
+                        : 'border border-border text-fg-muted hover:text-fg-strong hover:bg-muted'),
                   ]"
                   :aria-disabled="thinkingLock.locked"
                   :aria-haspopup="thinkingActive && thinkingLevels.length > 1 && !thinkingLock.locked ? 'menu' : undefined"
@@ -2749,7 +2757,8 @@ function exportConversation() {
                   @focus="openThinkingMenu"
                   @blur="scheduleCloseThinkingMenu"
                 >
-                  <LightBulbIcon
+                  <component
+                    :is="thinkingLock.locked ? LightBulbIconSolid : LightBulbIcon"
                     class="w-3.5 h-3.5"
                     aria-hidden="true"
                   />

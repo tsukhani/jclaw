@@ -327,6 +327,12 @@ export interface ProviderModelDef {
   contextWindow?: number
   maxTokens?: number
   supportsThinking?: boolean
+  /**
+   * Pure reasoning models with no non-thinking mode. UI surfaces a locked-on
+   * thinking pill; the API-level off value is sent anyway but the model
+   * ignores it. Implies supportsThinking.
+   */
+  alwaysThinks?: boolean
   supportsVision?: boolean
   supportsAudio?: boolean
   promptPrice?: number | null
@@ -346,6 +352,13 @@ export interface DiscoveredModel extends ProviderModelDef {
   isFree?: boolean
   leaderboardRank?: number | null
   thinkingDetectedFromProvider?: boolean
+  /**
+   * True when alwaysThinks was set from a provider-surfaced field
+   * (currently only OpenRouter's architecture.instruct_type for the R1
+   * family). False when set from the id-pattern fallback for o-series /
+   * QwQ — still saved automatically because the patterns are tight.
+   */
+  alwaysThinksDetectedFromProvider?: boolean
   visionDetectedFromProvider?: boolean
   audioDetectedFromProvider?: boolean
 }

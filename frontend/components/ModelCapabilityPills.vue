@@ -2,11 +2,18 @@
 /**
  * Capability indicators for an agent's selected model.
  *
- * The thinking pill is interactive — it renders as a button that toggles
- * the agent's reasoning mode. Parents listen for the `toggle` event and
- * persist the new state. The thinking off-switch is real: the LLM API
- * carries a {@code reasoning_effort} / {@code thinking_budget} parameter
- * that the model honours, so the toggle changes wire-level behaviour.
+ * The thinking pill is interactive on hybrid reasoning models — it renders
+ * as a button that toggles the agent's reasoning mode. Parents listen for
+ * the `toggle` event and persist the new state. The thinking off-switch is
+ * real on hybrids: the LLM API carries a {@code reasoning_effort} /
+ * {@code thinking_budget} parameter that the model honours, so the toggle
+ * changes wire-level behaviour.
+ *
+ * Pure reasoning models ({@code model.alwaysThinks === true}, e.g. o1/o3,
+ * DeepSeek-R1, Qwen QwQ) render the thinking pill as a non-interactive
+ * on-color span instead. The provider API still accepts a "reasoning off"
+ * value but the model thinks anyway, so a clickable toggle would lie about
+ * the wire-level effect. Tooltip explains why.
  *
  * Vision and audio pills are purely informational. No major LLM API
  * exposes a "vision off" or "audio off" toggle — both modalities are
@@ -51,20 +58,31 @@ interface PillDef {
    *  non-interactive span — used for capability indicators that don't
    *  have an LLM-API-level toggle the way thinking does. */
   interactive: boolean
+  /** True when the pill is in a locked-on state (alwaysThinks pure
+   *  reasoners). Triggers the darker violet shade + filled bulb so the
+   *  user can distinguish "always-on" from a regular "on" at a glance. */
+  locked: boolean
 }
 
 const pills = computed<PillDef[]>(() => {
   const m = props.model
   if (!m) return []
+  // Pure reasoners always think regardless of thinkingMode — render with the
+  // darker locked-on shade and a filled bulb, matching the chat composer's
+  // lock behavior.
+  const thinkingLocked = !!m.alwaysThinks
   const all: PillDef[] = [
     {
       capability: 'thinking',
       label: 'thinking',
       icon: Lightbulb,
       supported: !!m.supportsThinking,
-      enabled: !!props.thinkingMode,
-      onCls: 'text-violet-400 border-violet-400/40 bg-violet-400/5 hover:bg-violet-400/10',
-      interactive: true,
+      enabled: thinkingLocked || !!props.thinkingMode,
+      onCls: thinkingLocked
+        ? 'text-emerald-300 border-emerald-500/60 bg-emerald-500/15'
+        : 'text-emerald-400 border-emerald-400/40 bg-emerald-400/5 hover:bg-emerald-400/10',
+      interactive: !thinkingLocked,
+      locked: thinkingLocked,
     },
     {
       capability: 'vision',
@@ -74,6 +92,7 @@ const pills = computed<PillDef[]>(() => {
       enabled: true,
       onCls: 'text-sky-400 border-sky-400/40 bg-sky-400/5',
       interactive: false,
+      locked: false,
     },
     {
       capability: 'audio',
@@ -83,6 +102,7 @@ const pills = computed<PillDef[]>(() => {
       enabled: true,
       onCls: 'text-amber-400 border-amber-400/40 bg-amber-400/5',
       interactive: false,
+      locked: false,
     },
   ]
   return all.filter(p => p.supported)
@@ -104,6 +124,9 @@ function tooltip(p: PillDef): string {
     }
     if (p.capability === 'vision') {
       return 'vision — this model accepts image inputs natively'
+    }
+    if (p.capability === 'thinking') {
+      return 'thinking — this model always reasons; the toggle is fixed on'
     }
     return `${p.label} — supported by this model`
   }
@@ -148,7 +171,7 @@ function tooltip(p: PillDef): string {
       >
         <component
           :is="p.icon"
-          :class="iconCls"
+          :class="[iconCls, p.locked ? 'fill-current' : '']"
           aria-hidden="true"
         />
         <span>{{ p.label }}</span>

@@ -96,6 +96,38 @@ describe('ModelCapabilityPills', () => {
     expect(emits[0]).toEqual(['thinking'])
   })
 
+  it('alwaysThinks renders the thinking pill as a non-interactive on-color span', async () => {
+    // Pure reasoning models (o1, R1, QwQ) — the toggle is locked-on. The
+    // pill should appear active (aria-pressed semantics not on a button at
+    // all, since it's a span) and not emit toggle on click.
+    const wrapper = await mountSuspended(ModelCapabilityPills, {
+      props: {
+        model: { id: 'o1', supportsThinking: true, alwaysThinks: true },
+        thinkingMode: null,
+      },
+    })
+    await nextTick()
+    const buttons = wrapper.findAll('button')
+    expect(buttons.length).toBe(0)
+    const span = wrapper.find('span[title*="always reasons"]')
+    expect(span.exists()).toBe(true)
+    expect(wrapper.text()).toContain('thinking')
+  })
+
+  it('alwaysThinks pill is on-color even when thinkingMode is null', async () => {
+    // Honesty: the model thinks regardless of thinkingMode, so the pill
+    // must show in the on color (emerald) not the neutral off color.
+    const wrapper = await mountSuspended(ModelCapabilityPills, {
+      props: {
+        model: { id: 'o1', supportsThinking: true, alwaysThinks: true },
+        thinkingMode: null,
+      },
+    })
+    await nextTick()
+    const span = wrapper.find('span[title*="always reasons"]')
+    expect(span.classes().join(' ')).toContain('emerald')
+  })
+
   it('md size pills carry larger padding classes than sm', async () => {
     const md = await mountSuspended(ModelCapabilityPills, {
       props: { model: { id: 'm', supportsThinking: true }, size: 'md' },

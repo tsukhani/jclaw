@@ -71,6 +71,50 @@ describe('resolveThinkingLock', () => {
     })
   })
 
+  describe('alwaysThinks pure reasoners (architecture lock)', () => {
+    // Pure reasoners (o1/o3, DeepSeek-R1, QwQ) accept the "off" value at the
+    // API layer but think anyway. The lock is intrinsic to the model and
+    // applies regardless of how it's routed.
+
+    it('locks any model with alwaysThinks=true regardless of provider', () => {
+      const model = { id: 'o1', alwaysThinks: true, supportsThinking: true }
+      const r = resolveThinkingLock('openai', 'o1', model)
+      expect(r.locked).toBe(true)
+      expect(r.reason).toMatch(/always thinks/i)
+    })
+
+    it('locks alwaysThinks model on openrouter too', () => {
+      const model = { id: 'deepseek/deepseek-r1', alwaysThinks: true, supportsThinking: true }
+      expect(resolveThinkingLock('openrouter', 'deepseek/deepseek-r1', model).locked).toBe(true)
+    })
+
+    it('takes precedence over provider-integration lock', () => {
+      // An alwaysThinks model on a provider that ALSO has a routing lock —
+      // the architecture-level reason wins because it's the more fundamental
+      // explanation.
+      const model = { id: 'gemini-2.5-pro', alwaysThinks: true, supportsThinking: true }
+      const r = resolveThinkingLock('ollama-cloud', 'gemini-2.5-pro', model)
+      expect(r.locked).toBe(true)
+      expect(r.reason).toMatch(/always thinks/i)
+    })
+
+    it('does not lock when alwaysThinks is false', () => {
+      const model = { id: 'kimi-k2.5', alwaysThinks: false, supportsThinking: true }
+      expect(resolveThinkingLock('openrouter', 'kimi-k2.5', model).locked).toBe(false)
+    })
+
+    it('does not lock when alwaysThinks is undefined (default)', () => {
+      const model = { id: 'kimi-k2.5', supportsThinking: true }
+      expect(resolveThinkingLock('openrouter', 'kimi-k2.5', model).locked).toBe(false)
+    })
+
+    it('does not lock when model arg is omitted', () => {
+      // Backwards-compat: callers that don't pass a model fall through to
+      // the provider-integration check only.
+      expect(resolveThinkingLock('openai', 'o1').locked).toBe(false)
+    })
+  })
+
   describe('degenerate inputs', () => {
     it('returns unlocked for null provider', () => {
       expect(resolveThinkingLock(null, 'gemini-3-flash-preview').locked).toBe(false)

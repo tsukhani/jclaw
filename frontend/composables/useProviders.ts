@@ -6,6 +6,13 @@ export interface ProviderModel {
   supportsThinking?: boolean
   /** Reasoning-effort levels this model accepts, e.g. ["low","medium","high"]. */
   thinkingLevels?: string[]
+  /**
+   * Pure reasoning models (OpenAI o1/o3, DeepSeek-R1, Qwen QwQ) that have no
+   * non-thinking mode. The provider API accepts a "reasoning off" value but
+   * the model thinks anyway, so the toggle is rendered locked-on rather than
+   * misleadingly lying to the operator. Implies {@link supportsThinking}.
+   */
+  alwaysThinks?: boolean
   /** True when the model accepts image inputs (vision). */
   supportsVision?: boolean
   /** True when the model accepts audio inputs. */
