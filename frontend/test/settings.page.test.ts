@@ -64,6 +64,42 @@ function setupConfigApi() {
     ],
   }))
   registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
+  registerEndpoint('/api/transcription/state', () => transcriptionStatePayload)
+}
+
+// Mutable so the radio-gating tests below can flip ffmpeg / models around
+// without redefining the whole stub.
+let transcriptionStatePayload: {
+  provider: string | null
+  localModel: string | null
+  ffmpegAvailable: boolean
+  ffmpegReason: string | null
+  models: Array<{
+    id: string
+    displayName: string
+    approxSizeMb: number
+    status: string
+    bytesDownloaded: number
+    totalBytes: number
+    error: string | null
+  }>
+} = {
+  provider: 'whisper-local',
+  localModel: 'small.en',
+  ffmpegAvailable: true,
+  ffmpegReason: 'available',
+  models: [
+    { id: 'base.en', displayName: 'Base (English)', approxSizeMb: 57,
+      status: 'ABSENT', bytesDownloaded: 0, totalBytes: 0, error: null },
+    { id: 'small.en', displayName: 'Small (English)', approxSizeMb: 190,
+      status: 'AVAILABLE', bytesDownloaded: 199229440, totalBytes: 199229440, error: null },
+    { id: 'medium.en', displayName: 'Medium (English)', approxSizeMb: 514,
+      status: 'ABSENT', bytesDownloaded: 0, totalBytes: 0, error: null },
+    { id: 'small', displayName: 'Small (Multilingual)', approxSizeMb: 190,
+      status: 'ABSENT', bytesDownloaded: 0, totalBytes: 0, error: null },
+    { id: 'medium', displayName: 'Medium (Multilingual)', approxSizeMb: 514,
+      status: 'ABSENT', bytesDownloaded: 0, totalBytes: 0, error: null },
+  ],
 }
 
 describe('Settings page — provider section', () => {
@@ -305,5 +341,86 @@ describe('Settings page — discovery surface', () => {
     // settings content rendered without errors — the deeper interaction is
     // covered indirectly when the discovery filter updates the catalog list.
     expect(component.text()).toContain('Settings')
+  })
+})
+
+describe('Settings page — Transcription section (JCLAW-164)', () => {
+  // Like the OCR section above, the transcription section pulls ffmpeg state
+  // through useFetch and gating depends on /api/config payload — clear Nuxt's
+  // useFetch cache between tests so payload swaps actually reach the DOM.
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  /** Override /api/config to control which provider API keys are configured. */
+  function configPayload(extra: Array<{ key: string, value: string }>) {
+    return {
+      entries: [
+        { key: 'transcription.provider', value: 'whisper-local',
+          updatedAt: '2026-04-22T10:00:00Z' },
+        { key: 'transcription.localModel', value: 'small.en',
+          updatedAt: '2026-04-22T10:00:00Z' },
+        ...extra.map(e => ({ ...e, updatedAt: '2026-04-22T10:00:00Z' })),
+      ],
+    }
+  }
+
+  it('disables both cloud-provider radios when neither API key is configured', async () => {
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/config', () => configPayload([]))
+    registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
+    registerEndpoint('/api/transcription/state', () => transcriptionStatePayload)
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    // Self-Hosted Whisper is always enabled — it doesn't depend on a remote key.
+    const whisper = component.find('input[name="transcription-provider"][value="whisper-local"]')
+    expect(whisper.exists()).toBe(true)
+    expect(whisper.attributes('disabled')).toBeUndefined()
+
+    // OpenRouter and OpenAI both gated by their respective provider.*.apiKey row.
+    const openrouter = component.find('input[name="transcription-provider"][value="openrouter"]')
+    const openai = component.find('input[name="transcription-provider"][value="openai"]')
+    expect(openrouter.exists()).toBe(true)
+    expect(openai.exists()).toBe(true)
+    expect(openrouter.attributes('disabled')).toBeDefined()
+    expect(openai.attributes('disabled')).toBeDefined()
+  })
+
+  it('enables a cloud-provider radio once its API key is set', async () => {
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/config', () => configPayload([
+      // Mask suffix mirrors ConfigService.maskValue's "first4chars + ****" shape;
+      // the gate treats any non-blank value as configured, including masked.
+      { key: 'provider.openrouter.apiKey', value: 'sk-o****' },
+    ]))
+    registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
+    registerEndpoint('/api/transcription/state', () => transcriptionStatePayload)
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    const openrouter = component.find('input[name="transcription-provider"][value="openrouter"]')
+    const openai = component.find('input[name="transcription-provider"][value="openai"]')
+    expect(openrouter.attributes('disabled')).toBeUndefined()
+    // OpenAI key still missing — radio stays disabled.
+    expect(openai.attributes('disabled')).toBeDefined()
+  })
+
+  it('shows the ffmpeg banner when the probe reports it missing', async () => {
+    transcriptionStatePayload = {
+      ...transcriptionStatePayload,
+      ffmpegAvailable: false,
+      ffmpegReason: 'ffmpeg not found on PATH',
+    }
+    setupConfigApi()
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    const text = component.text()
+    expect(text).toContain('ffmpeg')
+    expect(text).toContain('not on PATH')
+    expect(text).toContain('ffmpeg not found on PATH')
   })
 })

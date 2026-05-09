@@ -22,6 +22,10 @@ POST    /api/auth/reset-password                ApiAuthController.resetPassword
 GET     /api/onboarding/tour-status             ApiOnboardingController.status
 POST    /api/onboarding/tour-progress           ApiOnboardingController.recordProgress
 
+# Transcription API (JCLAW-164)
+GET     /api/transcription/state                ApiTranscriptionController.state
+POST    /api/transcription/models/{id}/download ApiTranscriptionController.download
+
 # Tasks API
 GET     /api/tasks                              ApiTasksController.list
 POST    /api/tasks/{id}/cancel                  ApiTasksController.cancel

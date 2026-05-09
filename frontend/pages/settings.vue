@@ -67,6 +67,7 @@ function isSensitive(key: string) {
 const MANAGED_PREFIXES = [
   'provider.', // LLM providers — Settings
   'dispatcher.', // OkHttp dispatcher caps — Settings (Performance)
+  'transcription.', // Transcription provider + local model — Settings (Transcription)
   'ocr.', // OCR backends — Settings (Tesseract today; GLM-OCR planned)
   'search.', // Search providers — Settings
   'scanner.', // Malware scanners — Settings
@@ -141,6 +142,112 @@ async function savePerfField(configKey: string, value: string) {
     saving.value = false
   }
 }
+
+// ──────────────────── Transcription (JCLAW-164) ─────────────────────────
+// Runtime state — ffmpeg probe + per-model download status — comes from
+// /api/transcription/state. Persisted selection (provider radio + local
+// model dropdown) reads from configData via the standard managed-key path,
+// and writes go through /api/config like every other section.
+type TranscriptionModelStatus = {
+  id: string
+  displayName: string
+  approxSizeMb: number
+  status: 'ABSENT' | 'DOWNLOADING' | 'VERIFYING' | 'AVAILABLE' | 'ERROR'
+  bytesDownloaded: number
+  totalBytes: number
+  error: string | null
+}
+type TranscriptionState = {
+  provider: string | null
+  localModel: string | null
+  ffmpegAvailable: boolean
+  ffmpegReason: string | null
+  models: TranscriptionModelStatus[]
+}
+const { data: transcriptionState, refresh: refreshTranscriptionState }
+  = await useFetch<TranscriptionState>('/api/transcription/state')
+
+const selectedTranscriptionProvider = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'transcription.provider')?.value ?? 'whisper-local',
+)
+const selectedLocalModel = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'transcription.localModel')?.value ?? 'small.en',
+)
+
+// AC: cloud-provider radios are disabled when their API key is blank. Mask
+// suffix from ConfigService.maskValue ("sk-a****") still counts as configured.
+function apiKeyConfigured(providerName: string): boolean {
+  const v = configData.value?.entries?.find(e => e.key === `provider.${providerName}.apiKey`)?.value
+  return !!v && v.trim().length > 0
+}
+const openrouterApiKeyConfigured = computed(() => apiKeyConfigured('openrouter'))
+const openaiApiKeyConfigured = computed(() => apiKeyConfigured('openai'))
+
+const selectedLocalModelStatus = computed<TranscriptionModelStatus | null>(() => {
+  const id = selectedLocalModel.value
+  return transcriptionState.value?.models?.find(m => m.id === id) ?? null
+})
+const selectedLocalModelDownloadPct = computed(() => {
+  const s = selectedLocalModelStatus.value
+  if (!s || s.totalBytes === 0) return 0
+  return Math.min(100, Math.round((s.bytesDownloaded / s.totalBytes) * 100))
+})
+
+async function setTranscriptionProvider(value: string) {
+  saving.value = true
+  try {
+    await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.provider', value } })
+    refresh()
+  }
+  finally { saving.value = false }
+}
+async function setLocalModel(value: string) {
+  saving.value = true
+  try {
+    await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.localModel', value } })
+    refresh()
+  }
+  finally { saving.value = false }
+}
+async function downloadLocalModel(modelId: string) {
+  saving.value = true
+  try {
+    await $fetch(`/api/transcription/models/${encodeURIComponent(modelId)}/download`,
+      { method: 'POST', body: {} })
+    // Kick off the polling loop so the progress bar starts moving.
+    startTranscriptionPolling()
+  }
+  finally { saving.value = false }
+}
+
+// Poll /api/transcription/state every 1.5s while any model is in flight,
+// stop once everything has settled. Single shared timer — multiple downloads
+// (rare; the UI only lets the user kick off one at a time) all ride one
+// poll. Cleans up on unmount.
+let transcriptionPollTimer: ReturnType<typeof setInterval> | null = null
+function anyDownloadInFlight(): boolean {
+  const ms = transcriptionState.value?.models ?? []
+  return ms.some(m => m.status === 'DOWNLOADING' || m.status === 'VERIFYING')
+}
+function startTranscriptionPolling() {
+  if (transcriptionPollTimer != null) return
+  transcriptionPollTimer = setInterval(async () => {
+    await refreshTranscriptionState()
+    if (!anyDownloadInFlight()) {
+      stopTranscriptionPolling()
+    }
+  }, 1500)
+}
+function stopTranscriptionPolling() {
+  if (transcriptionPollTimer != null) {
+    clearInterval(transcriptionPollTimer)
+    transcriptionPollTimer = null
+  }
+}
+onMounted(() => {
+  if (anyDownloadInFlight()) startTranscriptionPolling()
+})
+onUnmounted(() => stopTranscriptionPolling())
 
 // JCLAW-131: Uploads settings — per-kind attachment size caps. Values are
 // stored in bytes in the DB (matches services/UploadLimits.java) but
@@ -2180,6 +2287,156 @@ async function handleResetPassword() {
               </option>
             </select>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Transcription (JCLAW-164) -->
+    <div class="mb-6 space-y-4">
+      <h2 class="text-sm font-medium text-fg-muted">
+        Transcription
+      </h2>
+      <p class="text-xs text-fg-muted">
+        Audio attachments are transcribed before being sent to the LLM. Pick a backend below.
+        Cloud options reuse the API keys configured in <span class="text-fg-muted">LLM Providers</span> above;
+        the self-hosted option runs <span class="font-mono">whisper.cpp</span> locally and downloads its
+        model from Hugging Face on first use.
+      </p>
+      <div
+        v-if="transcriptionState && !transcriptionState.ffmpegAvailable"
+        class="px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 text-[11px] text-amber-800 dark:text-amber-300"
+      >
+        ⚠ <span class="font-mono">ffmpeg</span> is not on PATH. The self-hosted Whisper backend
+        needs ffmpeg to convert audio attachments to PCM before inference.
+        Install it (e.g. <span class="font-mono">brew install ffmpeg</span>) and reload this page.
+        <span
+          v-if="transcriptionState?.ffmpegReason"
+          class="block opacity-70 mt-0.5"
+        >Probe: {{ transcriptionState.ffmpegReason }}</span>
+      </div>
+      <fieldset class="bg-surface-elevated border border-border">
+        <legend class="sr-only">Transcription backend</legend>
+        <div class="divide-y divide-border">
+          <label
+            class="px-4 py-2.5 flex items-center gap-3"
+            :class="openrouterApiKeyConfigured ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'"
+            :title="openrouterApiKeyConfigured ? '' : 'Add an OpenRouter API key in LLM Providers above to enable.'"
+          >
+            <input
+              type="radio"
+              name="transcription-provider"
+              value="openrouter"
+              :checked="selectedTranscriptionProvider === 'openrouter'"
+              :disabled="!openrouterApiKeyConfigured"
+              class="accent-emerald-600"
+              @change="setTranscriptionProvider('openrouter')"
+            >
+            <span class="flex-1 text-sm text-fg-primary">OpenRouter</span>
+            <span
+              v-if="!openrouterApiKeyConfigured"
+              class="text-[10px] text-fg-muted border border-input px-1"
+            >no API key</span>
+          </label>
+          <label
+            class="px-4 py-2.5 flex items-center gap-3"
+            :class="openaiApiKeyConfigured ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'"
+            :title="openaiApiKeyConfigured ? '' : 'Add an OpenAI API key in LLM Providers above to enable.'"
+          >
+            <input
+              type="radio"
+              name="transcription-provider"
+              value="openai"
+              :checked="selectedTranscriptionProvider === 'openai'"
+              :disabled="!openaiApiKeyConfigured"
+              class="accent-emerald-600"
+              @change="setTranscriptionProvider('openai')"
+            >
+            <span class="flex-1 text-sm text-fg-primary">OpenAI</span>
+            <span
+              v-if="!openaiApiKeyConfigured"
+              class="text-[10px] text-fg-muted border border-input px-1"
+            >no API key</span>
+          </label>
+          <label class="px-4 py-2.5 flex items-center gap-3 cursor-pointer">
+            <input
+              type="radio"
+              name="transcription-provider"
+              value="whisper-local"
+              :checked="selectedTranscriptionProvider === 'whisper-local'"
+              class="accent-emerald-600"
+              @change="setTranscriptionProvider('whisper-local')"
+            >
+            <span class="flex-1 text-sm text-fg-primary">Self-Hosted Whisper</span>
+            <span class="text-[10px] text-fg-muted border border-input px-1">offline</span>
+          </label>
+        </div>
+      </fieldset>
+
+      <div
+        v-if="selectedTranscriptionProvider === 'whisper-local'"
+        class="bg-surface-elevated border border-border"
+      >
+        <div class="px-4 py-2.5 flex items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Model size</span>
+          <select
+            :value="selectedLocalModel"
+            aria-label="Whisper model size"
+            class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+            @change="setLocalModel(($event.target as HTMLSelectElement).value)"
+          >
+            <option
+              v-for="m in (transcriptionState?.models ?? [])"
+              :key="m.id"
+              :value="m.id"
+            >
+              {{ m.displayName }} (~{{ m.approxSizeMb }} MB)
+            </option>
+          </select>
+          <template v-if="selectedLocalModelStatus?.status === 'ABSENT'">
+            <button
+              type="button"
+              class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
+              :disabled="saving"
+              @click="downloadLocalModel(selectedLocalModel)"
+            >
+              Download
+            </button>
+          </template>
+          <template v-else-if="selectedLocalModelStatus?.status === 'DOWNLOADING'">
+            <div class="flex items-center gap-2">
+              <div class="w-32 h-2 bg-muted border border-input overflow-hidden">
+                <div
+                  class="h-full bg-emerald-600 transition-[width] duration-300"
+                  :style="{ width: selectedLocalModelDownloadPct + '%' }"
+                />
+              </div>
+              <span class="text-xs font-mono text-fg-muted tabular-nums w-10 text-right">
+                {{ selectedLocalModelDownloadPct }}%
+              </span>
+            </div>
+          </template>
+          <template v-else-if="selectedLocalModelStatus?.status === 'VERIFYING'">
+            <span class="text-xs text-fg-muted italic">Verifying SHA256…</span>
+          </template>
+          <template v-else-if="selectedLocalModelStatus?.status === 'AVAILABLE'">
+            <span class="text-[10px] text-green-400 border border-green-400/30 px-1">Ready</span>
+          </template>
+          <template v-else-if="selectedLocalModelStatus?.status === 'ERROR'">
+            <button
+              type="button"
+              class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
+              :disabled="saving"
+              @click="downloadLocalModel(selectedLocalModel)"
+            >
+              Retry
+            </button>
+          </template>
+        </div>
+        <div
+          v-if="selectedLocalModelStatus?.status === 'ERROR' && selectedLocalModelStatus?.error"
+          class="px-4 pb-2.5 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
+        >
+          {{ selectedLocalModelStatus.error }}
         </div>
       </div>
     </div>

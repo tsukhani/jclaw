@@ -41,6 +41,11 @@ public class DefaultConfigJob extends Job<Void> {
      * lands.
      */
     private void seedTranscription() {
+        // JCLAW-164: provider radio defaults to whisper-local — the only
+        // shipped engine today (cloud backends arrive in JCLAW-162). Switch
+        // via Settings → Transcription once an OpenRouter / OpenAI API key
+        // is configured.
+        seedIfAbsent("transcription.provider", "whisper-local");
         seedIfAbsent("transcription.localModel",
                 services.transcription.WhisperModel.DEFAULT.id());
     }
