@@ -200,6 +200,9 @@ RUN java -cp "$(echo /tmp/lib/playwright-*.jar /tmp/lib/driver-*.jar | tr ' ' ':
 #   - zulu25-jre-headless         JRE for the Play JVM (the only HARD requirement)
 #   - openssl                     entrypoint self-signs PEM cert + key
 #   - tesseract-ocr               DocumentsTool's OCR path
+#   - ffmpeg                      WhisperJniTranscriber audio→PCM coercion
+#                                 (local Whisper only; cloud transcription
+#                                 clients ship raw bytes to the API)
 #   - lib(asound|atk|...)t64+ etc Playwright/Chromium shared libs
 #   - curl                        docker-compose healthcheck probe
 #   - bash                        ./play launcher (already in base)
@@ -237,6 +240,7 @@ RUN apt-get update && \
         zulu25-jre-headless \
         openssl \
         tesseract-ocr \
+        ffmpeg \
         libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 \
         libcairo2 libcups2t64 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0t64 \
         libnspr4 libnss3 libpango-1.0-0 libwayland-client0 libx11-6 \
