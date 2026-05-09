@@ -75,10 +75,13 @@ public class TelegramModelSelectorTest extends UnitTest {
                 .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
                 .findFirst().orElseThrow().body();
         assertTrue(body.contains("reply_markup"), "keyboard present: " + body);
-        assertTrue(body.contains("Browse providers"), "browse button: " + body);
-        // Show details is a text command now (/model status), not a keyboard button.
-        assertFalse(body.contains("Show details"), "no show-details button: " + body);
-        assertTrue(body.contains("Current:"), "summary text present: " + body);
+        assertTrue(body.contains("Model Configuration"), "header present: " + body);
+        assertTrue(body.contains("Current model:"), "current-model line present: " + body);
+        assertTrue(body.contains("Select a provider"), "provider prompt present: " + body);
+        // The new flow drops the "Browse providers" intermediate step — providers
+        // are buttons in the initial bubble. Cancel sits in its own bottom row.
+        assertFalse(body.contains("Browse providers"), "no browse-providers button: " + body);
+        assertTrue(body.contains("Cancel"), "cancel button present: " + body);
     }
 
     // ── Browse flow ───────────────────────────────────────────────────
@@ -93,11 +96,14 @@ public class TelegramModelSelectorTest extends UnitTest {
         assertEquals(1, server.countRequests("answerCallbackQuery"),
                 "must ack the callback");
         assertEquals(1, server.countRequests("editMessageText"),
-                "must edit the summary message to the providers list");
+                "must edit the message to the providers list");
         var editBody = firstRequestBody("editMessageText");
-        assertTrue(editBody.contains("Select a provider"), "header: " + editBody);
-        assertTrue(editBody.contains("openrouter"), "provider 0 named: " + editBody);
-        assertTrue(editBody.contains("ollama-cloud"), "provider 1 named: " + editBody);
+        assertTrue(editBody.contains("Model Configuration"), "header: " + editBody);
+        assertTrue(editBody.contains("Select a provider"), "prompt: " + editBody);
+        // Display labels — registry IDs ("openrouter", "ollama-cloud") map to
+        // human-readable names ("OpenRouter", "Ollama Cloud") on the buttons.
+        assertTrue(editBody.contains("OpenRouter"), "openrouter labelled: " + editBody);
+        assertTrue(editBody.contains("Ollama Cloud"), "ollama-cloud labelled: " + editBody);
     }
 
     @Test
@@ -110,7 +116,8 @@ public class TelegramModelSelectorTest extends UnitTest {
 
         assertEquals(1, server.countRequests("editMessageText"));
         var body = firstRequestBody("editMessageText");
-        assertTrue(body.contains("openrouter"), "provider header: " + body);
+        assertTrue(body.contains("OpenRouter"), "provider label in header: " + body);
+        assertTrue(body.contains("Select a model"), "model prompt: " + body);
         assertTrue(body.contains("GPT 4.1"), "model label: " + body);
     }
 
@@ -205,15 +212,34 @@ public class TelegramModelSelectorTest extends UnitTest {
     }
 
     @Test
-    public void backCallbackReturnsToSummary() {
+    public void backCallbackReturnsToProvidersList() {
+        // BACK is now an alias for BROWSE — old buttons in chat history
+        // bridge to the new providers-list state instead of the dead
+        // "summary with Browse providers button" UI.
         var payload = TelegramModelCallback.encodeBack(conversation.id);
         var cb = new InboundCallback("cbid-8", CHAT_ID, "private", "tg-user-1", 107, payload);
 
         TelegramCallbackDispatcher.dispatch(BOT_TOKEN, agent, cb);
 
         var body = firstRequestBody("editMessageText");
-        assertTrue(body.contains("Current:"), "summary text restored: " + body);
-        assertTrue(body.contains("Browse providers"), "summary keyboard restored: " + body);
+        assertTrue(body.contains("Model Configuration"), "header restored: " + body);
+        assertTrue(body.contains("Select a provider"), "prompt restored: " + body);
+    }
+
+    @Test
+    public void cancelCallbackClearsKeyboardAndShowsCancelledText() {
+        var payload = TelegramModelCallback.encodeCancel(conversation.id);
+        var cb = new InboundCallback("cbid-9", CHAT_ID, "private", "tg-user-1", 108, payload);
+
+        TelegramCallbackDispatcher.dispatch(BOT_TOKEN, agent, cb);
+
+        assertEquals(1, server.countRequests("answerCallbackQuery"),
+                "must ack the callback");
+        var body = firstRequestBody("editMessageText");
+        assertTrue(body.contains("Cancelled"), "cancellation text: " + body);
+        // No keyboard on the edit — the bubble becomes a plain note.
+        assertFalse(body.contains("reply_markup"),
+                "keyboard should be cleared on cancel: " + body);
     }
 
     // ── Keyboard layout sanity ────────────────────────────────────────
@@ -232,12 +258,13 @@ public class TelegramModelSelectorTest extends UnitTest {
         var rows = keyboard.getKeyboard();
         for (var row : rows) {
             for (var btn : row) {
-                assertNotEquals("loadtest-mock", btn.getText(),
-                        "disabled loadtest-mock provider must not appear in the keyboard");
+                assertFalse(btn.getText().contains("loadtest-mock"),
+                        "disabled loadtest-mock provider must not appear in the keyboard: " + btn.getText());
             }
         }
-        // Two seeded providers (openrouter + ollama-cloud) plus the Back row.
-        assertEquals(3, rows.size(), "2 enabled providers + 1 back row: " + rows.size());
+        // 2-per-row grid: 2 visible providers fit in one grid row, plus the
+        // bottom Cancel row = 2 total rows.
+        assertEquals(2, rows.size(), "1 grid row + 1 cancel row: " + rows.size());
     }
 
     @Test
@@ -252,8 +279,8 @@ public class TelegramModelSelectorTest extends UnitTest {
         var keyboard = TelegramModelKeyboard.providersKeyboard(conversation.id);
         for (var row : keyboard.getKeyboard()) {
             for (var btn : row) {
-                assertNotEquals("openrouter", btn.getText(),
-                        "operator-disabled openrouter must not appear in the keyboard");
+                assertFalse(btn.getText().contains("OpenRouter"),
+                        "operator-disabled openrouter must not appear in the keyboard: " + btn.getText());
             }
         }
     }
@@ -272,16 +299,20 @@ public class TelegramModelSelectorTest extends UnitTest {
         boolean loadtestSeen = false;
         for (var row : keyboard.getKeyboard()) {
             for (var btn : row) {
-                if ("loadtest-mock".equals(btn.getText())) loadtestSeen = true;
+                // Custom provider IDs not in the canonical PROVIDER_LABELS map
+                // fall back to the raw registry name. The button text now
+                // includes a "(N)" model-count suffix, so check for substring.
+                if (btn.getText().contains("loadtest-mock")) loadtestSeen = true;
             }
         }
         assertTrue(loadtestSeen, "explicitly-enabled loadtest-mock must appear");
     }
 
     @Test
-    public void modelsKeyboardPaginatesWhenMoreThanTenModels() {
-        // Make a provider with 15 models — the first page should show 10
-        // models plus a "Next" button.
+    public void modelsKeyboardPaginatesWhenMultiPage() {
+        // 15 models with the new MODELS_PER_PAGE=8, 2-col grid:
+        // page 0 = 8 models in 4 grid rows + 1 pagination row + 1 back/cancel
+        // row = 6 rows total.
         var bigProvider = java.util.stream.IntStream.rangeClosed(1, 15)
                 .mapToObj(i -> "{\"id\":\"m" + i + "\",\"contextWindow\":1000}")
                 .collect(java.util.stream.Collectors.joining(","));
@@ -301,9 +332,9 @@ public class TelegramModelSelectorTest extends UnitTest {
         assertTrue(bigcoIdx >= 0, "bigco should be in the user-visible list");
 
         var keyboard = TelegramModelKeyboard.modelsKeyboard(conversation.id, bigcoIdx, 0);
-        // 10 model rows + 1 nav row = 11 total
-        assertEquals(11, keyboard.getKeyboard().size(),
-                "first page has 10 models + nav: " + keyboard.getKeyboard().size());
+        assertEquals(6, keyboard.getKeyboard().size(),
+                "first page has 4 model rows + pagination + back/cancel: "
+                        + keyboard.getKeyboard().size());
     }
 
     // ── Helpers ───────────────────────────────────────────────────────

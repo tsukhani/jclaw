@@ -9,6 +9,7 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKe
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Inline-keyboard builders for the {@code /model} Telegram selector
@@ -18,10 +19,13 @@ import java.util.List;
  *
  * <p>Layouts:
  * <ul>
- *   <li>Summary keyboard: two rows — "Browse providers" and "Show details".</li>
- *   <li>Providers list: one provider per row.</li>
- *   <li>Models list: one model per row, paginated at {@link #MODELS_PER_PAGE}.
- *       Navigation row (Back / Prev / Next) appears as needed.</li>
+ *   <li>Providers list: 2-per-row grid, each button labelled
+ *       {@code "{label} ({modelCount})"} with a leading {@code ✓} on the
+ *       conversation's current provider. Bottom row is {@code × Cancel}.</li>
+ *   <li>Models list: 2-per-row grid, paginated at {@link #MODELS_PER_PAGE}.
+ *       Pagination row appears only on multi-page providers and adapts to
+ *       first/middle/last position. Final row pairs {@code ◀ Back} (to the
+ *       providers list) with {@code × Cancel}.</li>
  *   <li>Post-switch confirmation: no keyboard (null).</li>
  * </ul>
  */
@@ -29,61 +33,98 @@ public final class TelegramModelKeyboard {
 
     private TelegramModelKeyboard() {}
 
-    /** Page size when listing models. Keeps the keyboard bubble compact on mobile. */
-    public static final int MODELS_PER_PAGE = 10;
+    /** Page size when listing models. 2-col grid × 4 rows = 8 buttons fits the
+     *  mobile bubble without forcing the user to scroll past the pagination row. */
+    public static final int MODELS_PER_PAGE = 8;
 
-    /**
-     * The single-button keyboard attached to the initial {@code /model}
-     * response — invites the user to browse the provider list. Full model
-     * details are reachable via the {@code /model status} text command,
-     * so no redundant "Show details" button is needed here.
-     */
-    public static InlineKeyboardMarkup summaryKeyboard(long conversationId) {
-        var browse = InlineKeyboardButton.builder()
-                .text("Browse providers")
-                .callbackData(TelegramModelCallback.encodeBrowse(conversationId))
-                .build();
-        return InlineKeyboardMarkup.builder()
-                .keyboardRow(new InlineKeyboardRow(browse))
-                .build();
+    /** Display labels for the canonical provider IDs jclaw ships with. Mirrors
+     *  the frontend's PROVIDER_LABELS in {@code frontend/pages/settings.vue}. Any
+     *  provider not in this map falls back to its raw registry name — operators
+     *  who add a custom provider see exactly the name they configured. */
+    private static final Map<String, String> PROVIDER_LABELS = Map.of(
+            "ollama-cloud", "Ollama Cloud",
+            "ollama-local", "Ollama Local",
+            "openrouter", "OpenRouter",
+            "openai", "OpenAI",
+            "together", "TogetherAI",
+            "lm-studio", "LM Studio",
+            "groq", "Groq",
+            "anthropic", "Anthropic"
+    );
+
+    /** Public so {@link TelegramModelSelector} can reuse the same labelling
+     *  in body text (Provider line, switch confirmations, etc.). */
+    public static String providerLabel(String registryName) {
+        if (registryName == null) return "";
+        var label = PROVIDER_LABELS.get(registryName);
+        return label != null ? label : registryName;
     }
 
     /**
-     * Providers list: one button per configured provider, ordered by
-     * {@link ProviderRegistry#listAll()} (deterministic within a JVM —
-     * backed by the registry's LinkedHashMap). Providers with zero
-     * models are still shown so the user can see them; tapping will
-     * open an empty models page (with a "no models" hint).
+     * Providers list: 2-per-row grid keyed off {@link TelegramModelSelector#userVisibleProviders}.
+     * The button matching {@code currentProviderName} gets a leading {@code ✓}
+     * so the user can see at a glance where their conversation is pointing.
+     * Each label includes the configured model count; zero-model providers are
+     * still shown so the user can drill in and discover the empty state.
+     *
+     * <p>{@code × Cancel} sits in its own full-width final row — large
+     * tap-target away from the provider buttons reduces accidental dismiss.
      */
-    public static InlineKeyboardMarkup providersKeyboard(long conversationId) {
-        var builder = InlineKeyboardMarkup.builder();
-        // JCLAW-109: route through the user-visible filter so reserved
-        // providers (loadtest-mock) don't show up in the keyboard.
-        // The callback dispatcher's resolveByIndex uses the same list,
-        // so indices encoded here match what gets looked up on tap.
+    public static InlineKeyboardMarkup providersKeyboard(long conversationId, String currentProviderName) {
         var providers = TelegramModelSelector.userVisibleProviders();
+        var builder = InlineKeyboardMarkup.builder();
+        var row = new ArrayList<InlineKeyboardButton>();
         for (int i = 0; i < providers.size(); i++) {
             var p = providers.get(i);
+            var name = p.config().name();
+            var label = providerLabel(name);
+            var count = p.config().models().size();
+            var prefix = name.equals(currentProviderName) ? "✓ " : "";
+            var text = prefix + label + " (" + count + ")";
             var button = InlineKeyboardButton.builder()
-                    .text(p.config().name())
+                    .text(text)
                     .callbackData(TelegramModelCallback.encodeProviderPage(conversationId, i, 0))
                     .build();
-            builder.keyboardRow(new InlineKeyboardRow(button));
+            row.add(button);
+            if (row.size() == 2) {
+                builder.keyboardRow(new InlineKeyboardRow(row));
+                row = new ArrayList<>();
+            }
         }
-        // Give the user a way back to the summary without starting over.
-        var back = InlineKeyboardButton.builder()
-                .text("⬅ Back")
-                .callbackData(TelegramModelCallback.encodeBack(conversationId))
+        if (!row.isEmpty()) {
+            // Odd-count last row: still a single button; Telegram pads it.
+            builder.keyboardRow(new InlineKeyboardRow(row));
+        }
+        var cancel = InlineKeyboardButton.builder()
+                .text("× Cancel")
+                .callbackData(TelegramModelCallback.encodeCancel(conversationId))
                 .build();
-        builder.keyboardRow(new InlineKeyboardRow(back));
+        builder.keyboardRow(new InlineKeyboardRow(cancel));
         return builder.build();
     }
 
     /**
-     * Models list for a specific provider index, paginated. Each model
-     * button's callback_data selects THAT model when tapped. Navigation
-     * row below includes "Back to providers" and Prev/Next when the
-     * provider has more than one page.
+     * Backwards-compatible variant for callers that don't supply the current
+     * provider — no checkmark is rendered. Stale BROWSE callbacks from old
+     * chat-history buttons land here when the dispatcher can't easily resolve
+     * the live conversation state.
+     */
+    public static InlineKeyboardMarkup providersKeyboard(long conversationId) {
+        return providersKeyboard(conversationId, null);
+    }
+
+    /**
+     * Models list for a specific provider index, paginated. Models render in a
+     * 2-per-row grid; pagination row beneath shows {@code ◀ Prev} / page
+     * indicator / {@code Next ▶}, with Prev hidden on the first page and Next
+     * hidden on the last. The page indicator is itself a no-op button (taps
+     * re-render the same page) — Telegram requires every inline button to
+     * carry a callback_data, so a self-referential page-page payload is the
+     * cleanest "looks like a label" trick.
+     *
+     * <p>Final row pairs {@code ◀ Back} (to the providers list) with
+     * {@code × Cancel} — both navigation actions on the same row keeps them
+     * one thumb-stretch apart and clearly distinct from model selection.
      */
     public static InlineKeyboardMarkup modelsKeyboard(long conversationId, int providerIdx, int page) {
         var providers = TelegramModelSelector.userVisibleProviders();
@@ -100,38 +141,59 @@ public final class TelegramModelKeyboard {
         int end = Math.min(start + MODELS_PER_PAGE, models.size());
 
         var builder = InlineKeyboardMarkup.builder();
+        var row = new ArrayList<InlineKeyboardButton>();
         for (int i = start; i < end; i++) {
             var m = models.get(i);
             var button = InlineKeyboardButton.builder()
                     .text(labelFor(m))
                     .callbackData(TelegramModelCallback.encodeSelect(conversationId, providerIdx, i))
                     .build();
-            builder.keyboardRow(new InlineKeyboardRow(button));
+            row.add(button);
+            if (row.size() == 2) {
+                builder.keyboardRow(new InlineKeyboardRow(row));
+                row = new ArrayList<>();
+            }
+        }
+        if (!row.isEmpty()) {
+            builder.keyboardRow(new InlineKeyboardRow(row));
         }
 
-        // Navigation: back to providers always; prev/next when multi-page.
-        var navButtons = new ArrayList<InlineKeyboardButton>();
-        navButtons.add(InlineKeyboardButton.builder()
-                .text("⬅ Providers")
-                .callbackData(TelegramModelCallback.encodeBrowse(conversationId))
-                .build());
         if (totalPages > 1) {
+            var pagination = new ArrayList<InlineKeyboardButton>();
             if (clampedPage > 0) {
-                navButtons.add(InlineKeyboardButton.builder()
+                pagination.add(InlineKeyboardButton.builder()
                         .text("◀ Prev")
                         .callbackData(TelegramModelCallback.encodeProviderPage(
                                 conversationId, providerIdx, clampedPage - 1))
                         .build());
             }
+            pagination.add(InlineKeyboardButton.builder()
+                    .text((clampedPage + 1) + "/" + totalPages)
+                    // Self-referential: tapping the indicator re-renders the
+                    // same page. Avoids needing a separate NOOP callback kind.
+                    .callbackData(TelegramModelCallback.encodeProviderPage(
+                            conversationId, providerIdx, clampedPage))
+                    .build());
             if (clampedPage < totalPages - 1) {
-                navButtons.add(InlineKeyboardButton.builder()
+                pagination.add(InlineKeyboardButton.builder()
                         .text("Next ▶")
                         .callbackData(TelegramModelCallback.encodeProviderPage(
                                 conversationId, providerIdx, clampedPage + 1))
                         .build());
             }
+            builder.keyboardRow(new InlineKeyboardRow(pagination));
         }
-        builder.keyboardRow(new InlineKeyboardRow(navButtons));
+
+        var nav = new ArrayList<InlineKeyboardButton>();
+        nav.add(InlineKeyboardButton.builder()
+                .text("◀ Back")
+                .callbackData(TelegramModelCallback.encodeBrowse(conversationId))
+                .build());
+        nav.add(InlineKeyboardButton.builder()
+                .text("× Cancel")
+                .callbackData(TelegramModelCallback.encodeCancel(conversationId))
+                .build());
+        builder.keyboardRow(new InlineKeyboardRow(nav));
         return builder.build();
     }
 
@@ -144,4 +206,7 @@ public final class TelegramModelKeyboard {
         if (m.name() != null && !m.name().isBlank()) return m.name();
         return m.id();
     }
+
+    @SuppressWarnings("unused")
+    private static final Class<?> _UNUSED_REGISTRY_HOLDER = ProviderRegistry.class;
 }

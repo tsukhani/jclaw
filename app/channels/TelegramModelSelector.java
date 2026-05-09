@@ -32,9 +32,10 @@ public final class TelegramModelSelector {
     // ── Public entry points ────────────────────────────────────────────
 
     /**
-     * Initial {@code /model} response: short summary text plus a
-     * two-button inline keyboard (Browse providers, Show details).
-     * Persists an assistant-message row with the summary text so the
+     * Initial {@code /model} response: providers-list body text plus the
+     * 2-per-row provider keyboard. The user picks a provider directly from
+     * this first bubble — there's no intermediate "Browse providers"
+     * button. Persists an assistant-message row with the body so the
      * scrollback shows the content on reload. Returns true when both
      * the send and the persistence succeeded; false surfaces to the
      * caller so it can fall back to the text-only detail response.
@@ -44,7 +45,8 @@ public final class TelegramModelSelector {
         var botToken = botTokenForAgent(agent);
         if (botToken == null) return false;
         var text = summaryText(agent, conversation);
-        var keyboard = TelegramModelKeyboard.summaryKeyboard(conversation.id);
+        var keyboard = TelegramModelKeyboard.providersKeyboard(
+                conversation.id, currentProviderName(agent, conversation));
         var messageId = TelegramChannel.sendMessageWithKeyboard(
                 botToken, conversation.peerId, text, keyboard);
         if (messageId == null) return false;
@@ -55,12 +57,15 @@ public final class TelegramModelSelector {
     // ── Text builders ──────────────────────────────────────────────────
 
     /**
-     * Short summary rendered in the initial {@code /model} Telegram
-     * bubble. One "Current:" line followed by a usage hint and two
-     * indented command examples on their own lines — Telegram bubbles
-     * read better with the verbs broken out vertically than crammed
-     * into one wrapped paragraph. Details live behind {@code /model status}
-     * rather than inline.
+     * Body rendered above the providers grid. Header lines name the
+     * conversation's current model + provider so the user has reference
+     * before tapping; the trailing usage hints document the equivalent
+     * text-command path for users who prefer typing.
+     *
+     * <p>HTML parse mode: {@code <b>} for emphasis on the "Current model"
+     * line label, {@code <code>} on the model id and the inline command
+     * examples (Telegram renders {@code <code>} in monospace, which
+     * disambiguates command syntax from prose).
      */
     public static String summaryText(Agent agent, Conversation conversation) {
         var overrideActive = conversation != null
@@ -68,16 +73,38 @@ public final class TelegramModelSelector {
                 && conversation.modelIdOverride != null;
         var provider = overrideActive ? conversation.modelProviderOverride : agent.modelProvider;
         var modelId = overrideActive ? conversation.modelIdOverride : agent.modelId;
+        var providerLabel = TelegramModelKeyboard.providerLabel(provider);
         var sb = new StringBuilder();
-        sb.append("<b>Current:</b> ").append(provider).append('/').append(modelId);
+        sb.append("⚙️ <b>Model Configuration</b>\n\n");
+        sb.append("Current model: <code>").append(escape(modelId)).append("</code>\n");
+        sb.append("Provider: ").append(escape(providerLabel));
         if (overrideActive) {
             sb.append("  <i>(conversation override)</i>");
         }
-        sb.append('\n');
-        sb.append("Tap below to browse models, or use:\n");
+        sb.append("\n\n<b>Select a provider:</b>\n\n");
         sb.append("<code>/model &lt;provider/model&gt;</code> to switch\n");
-        sb.append("<code>/model status</code> for details");
+        sb.append("<code>/model status</code> for current model details");
         return sb.toString();
+    }
+
+    /**
+     * The provider registry name currently driving this conversation —
+     * conversation override when set, otherwise the agent default. Used
+     * by the providers keyboard to render the {@code ✓} checkmark on the
+     * matching row.
+     */
+    public static String currentProviderName(Agent agent, Conversation conversation) {
+        if (conversation != null
+                && conversation.modelProviderOverride != null
+                && !conversation.modelProviderOverride.isBlank()) {
+            return conversation.modelProviderOverride;
+        }
+        return agent != null ? agent.modelProvider : null;
+    }
+
+    private static String escape(String s) {
+        if (s == null) return "";
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
     }
 
     // ── Binding / routing helpers ──────────────────────────────────────

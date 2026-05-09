@@ -66,21 +66,27 @@ public final class TelegramCallbackDispatcher {
         }
 
         switch (payload.kind()) {
-            case BROWSE -> handleBrowse(botToken, cb, conversation);
+            case BROWSE, BACK -> handleBrowse(botToken, agent, cb, conversation);
             case PROVIDER_PAGE -> handleProviderPage(botToken, cb, conversation, payload);
             case SELECT -> handleSelect(botToken, agent, cb, conversation, payload);
-            case BACK -> handleBack(botToken, agent, cb, conversation);
+            case CANCEL -> handleCancel(botToken, cb);
             case DETAILS -> handleDetails(botToken, agent, cb, conversation);
         }
     }
 
     // ── Handlers ───────────────────────────────────────────────────────
 
-    private static void handleBrowse(String botToken, InboundCallback cb, Conversation conv) {
+    /**
+     * Render the providers list — the new initial state after JCLAW redesign.
+     * Both BROWSE (fresh tap) and BACK (legacy stale-button alias) route here
+     * so old chat-history buttons keep working as a bridge to the new flow.
+     */
+    private static void handleBrowse(String botToken, Agent agent, InboundCallback cb, Conversation conv) {
         TelegramChannel.answerCallbackQuery(botToken, cb.callbackId(), null, false);
-        var keyboard = TelegramModelKeyboard.providersKeyboard(conv.id);
-        TelegramChannel.editMessageText(botToken, cb.chatId(), cb.messageId(),
-                "<b>Select a provider</b>", keyboard);
+        var text = TelegramModelSelector.summaryText(agent, conv);
+        var keyboard = TelegramModelKeyboard.providersKeyboard(
+                conv.id, TelegramModelSelector.currentProviderName(agent, conv));
+        TelegramChannel.editMessageText(botToken, cb.chatId(), cb.messageId(), text, keyboard);
     }
 
     private static void handleProviderPage(String botToken, InboundCallback cb,
@@ -93,18 +99,39 @@ public final class TelegramCallbackDispatcher {
         }
         TelegramChannel.answerCallbackQuery(botToken, cb.callbackId(), null, false);
         var provider = providers.get(payload.providerIdx());
+        var providerLabel = TelegramModelKeyboard.providerLabel(provider.config().name());
         var modelCount = provider.config().models().size();
         var header = new StringBuilder();
-        header.append("<b>").append(escape(provider.config().name())).append("</b>");
+        header.append("⚙️ <b>Model Configuration</b>\n\n");
         if (modelCount == 0) {
-            header.append("\n<i>No models configured for this provider.</i>");
+            header.append("Provider: <b>").append(escape(providerLabel)).append("</b>\n");
+            header.append("<i>No models configured for this provider.</i>");
         } else {
-            header.append("\nTap a model to switch this conversation to it.");
+            int totalPages = Math.max(1,
+                    (modelCount + TelegramModelKeyboard.MODELS_PER_PAGE - 1)
+                            / TelegramModelKeyboard.MODELS_PER_PAGE);
+            int clampedPage = Math.max(0, Math.min(payload.page(), totalPages - 1));
+            int start = clampedPage * TelegramModelKeyboard.MODELS_PER_PAGE + 1;
+            int end = Math.min(start + TelegramModelKeyboard.MODELS_PER_PAGE - 1, modelCount);
+            header.append("Provider: <b>").append(escape(providerLabel))
+                    .append("</b> (").append(start).append('–').append(end)
+                    .append(" of ").append(modelCount).append(")\n");
+            header.append("Select a model:");
         }
         var keyboard = TelegramModelKeyboard.modelsKeyboard(
                 conv.id, payload.providerIdx(), payload.page());
         TelegramChannel.editMessageText(botToken, cb.chatId(), cb.messageId(),
                 header.toString(), keyboard);
+    }
+
+    /**
+     * Cancel — clear the keyboard, replace the body with a one-liner so the
+     * bubble doesn't leave a dead provider grid in the user's chat history.
+     */
+    private static void handleCancel(String botToken, InboundCallback cb) {
+        TelegramChannel.answerCallbackQuery(botToken, cb.callbackId(), null, false);
+        TelegramChannel.editMessageText(botToken, cb.chatId(), cb.messageId(),
+                "× Cancelled. Send <code>/model</code> to reopen.", null);
     }
 
     private static void handleSelect(String botToken, Agent agent, InboundCallback cb,
@@ -134,26 +161,19 @@ public final class TelegramCallbackDispatcher {
                         + " to " + target.providerName() + "/" + target.model().id());
     }
 
-    private static void handleBack(String botToken, Agent agent, InboundCallback cb,
-                                    Conversation conv) {
-        TelegramChannel.answerCallbackQuery(botToken, cb.callbackId(), null, false);
-        var summary = TelegramModelSelector.summaryText(agent, conv);
-        var keyboard = TelegramModelKeyboard.summaryKeyboard(conv.id);
-        TelegramChannel.editMessageText(botToken, cb.chatId(), cb.messageId(),
-                summary, keyboard);
-    }
-
     private static void handleDetails(String botToken, Agent agent, InboundCallback cb,
                                        Conversation conv) {
         TelegramChannel.answerCallbackQuery(botToken, cb.callbackId(), null, false);
         var details = Commands.buildModelResponse(agent, conv);
-        // Re-use the summary keyboard minus "Show details" — offer Back
-        // so the user can return to the concise view.
+        // Offer a Back button so the user can return to the providers grid
+        // — uses encodeBrowse since the providers list IS the new "summary"
+        // state. Old encodeBack callbacks resolve through the same path
+        // thanks to the BROWSE/BACK switch alias above.
         var keyboard = org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup.builder()
                 .keyboardRow(new org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow(
                         org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton.builder()
-                                .text("⬅ Back")
-                                .callbackData(TelegramModelCallback.encodeBack(conv.id))
+                                .text("◀ Back")
+                                .callbackData(TelegramModelCallback.encodeBrowse(conv.id))
                                 .build()))
                 .build();
         TelegramChannel.editMessageText(botToken, cb.chatId(), cb.messageId(),

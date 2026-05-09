@@ -13,10 +13,12 @@ import java.util.Optional;
  *
  * <h2>Schema</h2>
  * <ul>
- *   <li>{@code m:b:C} — BROWSE: open the providers list for conversation C</li>
+ *   <li>{@code m:b:C} — BROWSE: open / restore the providers list for conversation C</li>
  *   <li>{@code m:p:C:P:PAGE} — PROVIDER_PAGE: show models for provider index P on PAGE</li>
  *   <li>{@code m:s:C:P:M} — SELECT: write model at (P, M) as the override</li>
- *   <li>{@code m:k:C} — BACK: return to the summary message</li>
+ *   <li>{@code m:c:C} — CANCEL: dismiss the menu, clear the keyboard</li>
+ *   <li>{@code m:k:C} — BACK: legacy alias for BROWSE, kept so stale buttons in
+ *       chat history still resolve to the new providers-list state</li>
  *   <li>{@code m:d:C} — DETAILS: render full model metadata (JCLAW-107 text)</li>
  * </ul>
  *
@@ -31,7 +33,7 @@ public final class TelegramModelCallback {
     private TelegramModelCallback() {}
 
     /** Kind of callback encoded in the payload. */
-    public enum Kind { BROWSE, PROVIDER_PAGE, SELECT, BACK, DETAILS }
+    public enum Kind { BROWSE, PROVIDER_PAGE, SELECT, BACK, DETAILS, CANCEL }
 
     /** Parsed callback payload. Fields not relevant to the kind are -1 / 0. */
     public record Payload(Kind kind, long conversationId, int providerIdx, int modelIdx, int page) {}
@@ -59,6 +61,10 @@ public final class TelegramModelCallback {
         return "m:d:" + conversationId;
     }
 
+    public static String encodeCancel(long conversationId) {
+        return "m:c:" + conversationId;
+    }
+
     /**
      * Parse a callback_data string. Returns empty if the payload doesn't
      * start with the {@code m:} prefix or the field shape doesn't match
@@ -82,6 +88,9 @@ public final class TelegramModelCallback {
                         : Optional.empty();
                 case "d" -> parts.length == 3
                         ? Optional.of(new Payload(Kind.DETAILS, convId, -1, -1, 0))
+                        : Optional.empty();
+                case "c" -> parts.length == 3
+                        ? Optional.of(new Payload(Kind.CANCEL, convId, -1, -1, 0))
                         : Optional.empty();
                 case "p" -> parts.length == 5
                         ? Optional.of(new Payload(Kind.PROVIDER_PAGE, convId,
