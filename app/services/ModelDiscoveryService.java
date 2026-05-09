@@ -578,8 +578,27 @@ public class ModelDiscoveryService {
         return idx >= 0 ? id.substring(0, idx) : id;
     }
 
+    /**
+     * Strip a date or numeric-version suffix from a model id. Handles three
+     * shapes seen in real provider catalogs:
+     * <ul>
+     *   <li>{@code -YYYY-MM-DD} — OpenAI's dated checkpoint format
+     *       ({@code gpt-4o-2024-08-06})</li>
+     *   <li>{@code -YYYYMMDD} or longer — Anthropic's contiguous-date format
+     *       ({@code claude-3-5-sonnet-20241022})</li>
+     *   <li>{@code -NNNN} or {@code -NNN} — short numeric version pins
+     *       ({@code gpt-4-0125})</li>
+     * </ul>
+     *
+     * <p>Order matters: the dash-separated date pattern must run first
+     * because the trailing day component would otherwise match the short
+     * suffix regex and leave the year/month dangling.
+     */
     public static String stripVersionSuffix(String id) {
-        return id.replaceAll("-\\d{6,}$", "").replaceAll("-\\d{3,4}$", "");
+        return id
+                .replaceAll("-\\d{4}-\\d{2}-\\d{2}$", "")
+                .replaceAll("-\\d{6,}$", "")
+                .replaceAll("-\\d{3,4}$", "");
     }
 
     // ─── LM Studio native discovery (JCLAW-183) ──────────────────────

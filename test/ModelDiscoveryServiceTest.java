@@ -44,6 +44,17 @@ public class ModelDiscoveryServiceTest extends UnitTest {
         assertEquals("openai/gpt-4", ModelDiscoveryService.stripVersionSuffix("openai/gpt-4"));
     }
 
+    @Test
+    public void stripVersionSuffixRemovesDashSeparatedDate() {
+        // OpenAI's checkpoint format like gpt-4o-2024-08-06; the prior
+        // regex only handled contiguous dates and 3-4 digit version pins,
+        // missing this shape entirely. Required for LiteLLM id lookups
+        // (JCLAW-28 follow-up: PricingRefreshService).
+        assertEquals("gpt-4o", ModelDiscoveryService.stripVersionSuffix("gpt-4o-2024-08-06"));
+        assertEquals("openai/gpt-4o-mini",
+                ModelDiscoveryService.stripVersionSuffix("openai/gpt-4o-mini-2024-07-18"));
+    }
+
     // --- detectThinkingSupport ---
 
     @Test

@@ -8,6 +8,7 @@ import static utils.GsonHolder.INSTANCE;
 import services.ConfigService;
 import services.ModelDiscoveryService;
 import services.ModelDiscoveryService.DiscoveryResult;
+import services.PricingRefreshService;
 
 import java.util.Map;
 
@@ -42,5 +43,25 @@ public class ApiProvidersController extends Controller {
             case DiscoveryResult.Error err ->
                     error(err.statusCode(), err.message());
         }
+    }
+
+    /**
+     * POST /api/providers/refresh-prices — manual trigger for the LiteLLM
+     * price refresh. Calls {@link PricingRefreshService#refresh()}
+     * synchronously so the operator gets immediate feedback rather than
+     * waiting for the nightly job. Honors the same
+     * {@code pricing.refresh.enabled} toggle as the scheduled job — when
+     * the toggle is off the response indicates skipped status so the
+     * Settings UI can surface "enable the toggle first" rather than
+     * silently appearing to do nothing.
+     */
+    public static void refreshPrices() {
+        var result = PricingRefreshService.refresh();
+        renderJSON(gson.toJson(Map.of(
+                "skipped", result.skipped(),
+                "providersScanned", result.providersScanned(),
+                "modelsUpdated", result.modelsUpdated(),
+                "warnings", result.warnings()
+        )));
     }
 }

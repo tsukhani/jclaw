@@ -79,6 +79,7 @@ GET     /api/events                             ApiEventsController.stream
 
 # Providers API
 POST    /api/providers/{name}/discover-models   ApiProvidersController.discoverModels
+POST    /api/providers/refresh-prices           ApiProvidersController.refreshPrices
 
 # OCR backends — availability + enabled state for the Settings page
 GET     /api/ocr/status                         ApiOcrController.status
