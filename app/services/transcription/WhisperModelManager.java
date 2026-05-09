@@ -127,10 +127,23 @@ public final class WhisperModelManager {
         Files.createDirectories(root);
 
         var client = HttpFactories.general();
+        // HEAD with redirects disabled: HF's resolve endpoint replies 302 and
+        // the X-Linked-Etag / X-Linked-Size headers are set on the 302 itself,
+        // not on the CDN it redirects to. Following the redirect (the OkHttp
+        // default) lands at cas-bridge.xethub.hf.co with a bare 200 that
+        // carries neither header — exactly the symptom that read as "HF
+        // stopped exposing the SHA256."
+        var noFollow = client.newBuilder()
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .build();
         String expectedSha256;
         long expectedSize;
-        try (Response head = client.newCall(new Request.Builder().url(url).head().build()).execute()) {
-            if (!head.isSuccessful()) {
+        try (Response head = noFollow.newCall(new Request.Builder().url(url).head().build()).execute()) {
+            // Accept 200 (small non-LFS files served direct from HF) AND any
+            // 3xx redirect (LFS-managed files that bounce to a CDN); both
+            // shapes carry the X-Linked-* headers we need. Reject only 4xx/5xx.
+            if (head.code() >= 400) {
                 throw new IOException("HEAD %s failed: %d %s".formatted(url, head.code(), head.message()));
             }
             var etag = head.header("X-Linked-Etag");
