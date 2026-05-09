@@ -133,7 +133,7 @@ public class AgentServiceTest extends UnitTest {
 
         // Caller asks to disable; service-level invariant must override.
         var updated = AgentService.update(main, main.name, main.modelProvider,
-                main.modelId, false, null, null, null);
+                main.modelId, false, null, null);
         assertTrue(updated.enabled,
                 "main agent must remain enabled even when the caller passes enabled=false");
     }
