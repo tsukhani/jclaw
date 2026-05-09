@@ -1600,7 +1600,10 @@ async function handleResetPassword() {
                           v-else-if="model.alwaysThinks"
                           class="ml-2 inline-flex items-center gap-0.5 text-[10px] text-emerald-300 border border-emerald-500/60 bg-emerald-500/15 px-1"
                           title="Pure reasoning model — thinking is always on"
-                        >thinking<LockClosedIcon class="w-2 h-2" aria-hidden="true" /></span>
+                        >thinking<LockClosedIcon
+                          class="w-2 h-2"
+                          aria-hidden="true"
+                        /></span>
                         <span
                           v-if="model.supportsVision"
                           class="ml-2 text-[10px] text-sky-400 border border-sky-400/30 px-1"
@@ -2019,7 +2022,10 @@ async function handleResetPassword() {
                       :title="model.alwaysThinksDetectedFromProvider
                         ? 'Pure reasoning model (provider-confirmed) — thinking is always on'
                         : 'Pure reasoning model (id-pattern match) — thinking is always on'"
-                    >thinking<LockClosedIcon class="w-2 h-2" aria-hidden="true" /></span>
+                    >thinking<LockClosedIcon
+                      class="w-2 h-2"
+                      aria-hidden="true"
+                    /></span>
                     <span
                       v-else-if="model.supportsThinking && model.thinkingDetectedFromProvider"
                       class="text-[10px] text-emerald-400 border border-emerald-400/30 px-1"
@@ -2407,7 +2413,9 @@ async function handleResetPassword() {
           >Probe: {{ transcriptionState.ffmpegReason }}</span>
         </div>
         <fieldset class="bg-surface-elevated border border-border">
-          <legend class="sr-only">Transcription backend</legend>
+          <legend class="sr-only">
+            Transcription backend
+          </legend>
           <div class="divide-y divide-border">
             <label
               class="px-4 py-2.5 flex items-center gap-3"
@@ -2482,68 +2490,68 @@ async function handleResetPassword() {
           v-if="selectedTranscriptionProvider === 'whisper-local'"
           class="bg-surface-elevated border border-border"
         >
-        <div class="px-4 py-2.5 flex items-center gap-3">
-          <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Model size</span>
-          <select
-            :value="selectedLocalModel"
-            aria-label="Whisper model size"
-            class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-            @change="setLocalModel(($event.target as HTMLSelectElement).value)"
-          >
-            <option
-              v-for="m in (transcriptionState?.models ?? [])"
-              :key="m.id"
-              :value="m.id"
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Model size</span>
+            <select
+              :value="selectedLocalModel"
+              aria-label="Whisper model size"
+              class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              @change="setLocalModel(($event.target as HTMLSelectElement).value)"
             >
-              {{ m.displayName }} (~{{ m.approxSizeMb }} MB)
-            </option>
-          </select>
-          <template v-if="selectedLocalModelStatus?.status === 'ABSENT'">
-            <button
-              type="button"
-              class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
-              :disabled="saving"
-              @click="downloadLocalModel(selectedLocalModel)"
-            >
-              Download
-            </button>
-          </template>
-          <template v-else-if="selectedLocalModelStatus?.status === 'DOWNLOADING'">
-            <div class="flex items-center gap-2">
-              <div class="w-32 h-2 bg-muted border border-input overflow-hidden">
-                <div
-                  class="h-full bg-emerald-600 transition-[width] duration-300"
-                  :style="{ width: selectedLocalModelDownloadPct + '%' }"
-                />
+              <option
+                v-for="m in (transcriptionState?.models ?? [])"
+                :key="m.id"
+                :value="m.id"
+              >
+                {{ m.displayName }} (~{{ m.approxSizeMb }} MB)
+              </option>
+            </select>
+            <template v-if="selectedLocalModelStatus?.status === 'ABSENT'">
+              <button
+                type="button"
+                class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
+                :disabled="saving"
+                @click="downloadLocalModel(selectedLocalModel)"
+              >
+                Download
+              </button>
+            </template>
+            <template v-else-if="selectedLocalModelStatus?.status === 'DOWNLOADING'">
+              <div class="flex items-center gap-2">
+                <div class="w-32 h-2 bg-muted border border-input overflow-hidden">
+                  <div
+                    class="h-full bg-emerald-600 transition-[width] duration-300"
+                    :style="{ width: selectedLocalModelDownloadPct + '%' }"
+                  />
+                </div>
+                <span class="text-xs font-mono text-fg-muted tabular-nums w-10 text-right">
+                  {{ selectedLocalModelDownloadPct }}%
+                </span>
               </div>
-              <span class="text-xs font-mono text-fg-muted tabular-nums w-10 text-right">
-                {{ selectedLocalModelDownloadPct }}%
-              </span>
-            </div>
-          </template>
-          <template v-else-if="selectedLocalModelStatus?.status === 'VERIFYING'">
-            <span class="text-xs text-fg-muted italic">Verifying SHA256…</span>
-          </template>
-          <template v-else-if="selectedLocalModelStatus?.status === 'AVAILABLE'">
-            <span class="text-[10px] text-green-400 border border-green-400/30 px-1">Ready</span>
-          </template>
-          <template v-else-if="selectedLocalModelStatus?.status === 'ERROR'">
-            <button
-              type="button"
-              class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
-              :disabled="saving"
-              @click="downloadLocalModel(selectedLocalModel)"
-            >
-              Retry
-            </button>
-          </template>
-        </div>
-        <div
-          v-if="selectedLocalModelStatus?.status === 'ERROR' && selectedLocalModelStatus?.error"
-          class="px-4 pb-2.5 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
-        >
-          {{ selectedLocalModelStatus.error }}
-        </div>
+            </template>
+            <template v-else-if="selectedLocalModelStatus?.status === 'VERIFYING'">
+              <span class="text-xs text-fg-muted italic">Verifying SHA256…</span>
+            </template>
+            <template v-else-if="selectedLocalModelStatus?.status === 'AVAILABLE'">
+              <span class="text-[10px] text-green-400 border border-green-400/30 px-1">Ready</span>
+            </template>
+            <template v-else-if="selectedLocalModelStatus?.status === 'ERROR'">
+              <button
+                type="button"
+                class="px-3 py-1 text-xs font-medium border border-input bg-muted hover:bg-surface-elevated text-fg-strong transition-colors"
+                :disabled="saving"
+                @click="downloadLocalModel(selectedLocalModel)"
+              >
+                Retry
+              </button>
+            </template>
+          </div>
+          <div
+            v-if="selectedLocalModelStatus?.status === 'ERROR' && selectedLocalModelStatus?.error"
+            class="px-4 pb-2.5 -mt-1 text-[11px] text-red-700 dark:text-red-400 break-words"
+          >
+            {{ selectedLocalModelStatus.error }}
+          </div>
         </div>
       </template>
     </div>

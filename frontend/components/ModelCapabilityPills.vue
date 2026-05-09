@@ -140,7 +140,10 @@ function tooltip(p: PillDef): string {
     v-if="pills.length"
     class="flex flex-wrap gap-1.5"
   >
-    <template v-for="p in pills" :key="p.capability">
+    <template
+      v-for="p in pills"
+      :key="p.capability"
+    >
       <button
         v-if="p.interactive"
         type="button"
