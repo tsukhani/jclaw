@@ -4,10 +4,14 @@ import models.Agent;
 import models.ChannelType;
 import models.Conversation;
 import models.Message;
+import models.MessageAttachment;
 import models.MessageRole;
 import play.db.jpa.JPA;
+import services.transcription.PendingTranscripts;
+import services.transcription.TranscriptionRouter;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 public class ConversationService {
 
@@ -116,6 +120,12 @@ public class ConversationService {
                             conversation.agent.name, conversation.channelType,
                             "audio=%s (%s, %d bytes)"
                                     .formatted(att.originalFilename, att.mimeType, att.sizeBytes));
+                    // JCLAW-165: dispatch transcription on a virtual thread the
+                    // moment the audio row is persisted. The future is registered
+                    // in PendingTranscripts so AgentRunner's text-only branch
+                    // and the format-rejection retry path can await it on demand
+                    // without blocking the prepared-data transaction.
+                    dispatchTranscription(att);
                 }
             }
         }
@@ -174,6 +184,65 @@ public class ConversationService {
      * conversation, or compaction can fire on a conversation that's
      * already had a reset — so the effective floor is {@code max(..)}.
      */
+    /**
+     * JCLAW-165: kick off transcription for a freshly-finalized audio
+     * attachment on a virtual thread. Registers a {@link CompletableFuture}
+     * in {@link PendingTranscripts} so downstream branches in AgentRunner
+     * can await on demand.
+     *
+     * <p>Failure handling is silent per AC: any throwable resolves the
+     * future with the empty string {@code ""} and leaves
+     * {@code MessageAttachment.transcript} NULL. Callers awaiting the
+     * future treat empty-string as "could not transcribe" and substitute
+     * the standard fallback note.
+     *
+     * <p>Restart resilience: in-flight VTs do not survive a JVM restart.
+     * Per AC, no backfill — the row's transcript stays NULL and any
+     * future read by a non-supportsAudio model on a later turn falls
+     * through to the fallback note.
+     */
+    static void dispatchTranscription(MessageAttachment attachment) {
+        var serviceOpt = TranscriptionRouter.configuredService();
+        if (serviceOpt.isEmpty()) return;
+        var service = serviceOpt.get();
+        var attId = attachment.id;
+        if (attId == null) return; // attachment not yet persisted — shouldn't happen
+        var future = new CompletableFuture<String>();
+        PendingTranscripts.register(attId, future);
+        Thread.ofVirtual().name("transcription-" + attId).start(() -> {
+            String transcript;
+            try {
+                var result = service.transcribe(attachment);
+                transcript = result == null ? "" : result;
+            } catch (Throwable t) {
+                EventLogger.warn("transcription",
+                        "Transcription failed for attachment %d: %s"
+                                .formatted(attId, t.getMessage()));
+                transcript = "";
+            }
+            // Per AC: empty result means failure → leave transcript NULL.
+            // Non-empty result is persisted, even if any branch never
+            // awaited the future (history search + replay invariants).
+            if (!transcript.isEmpty()) {
+                final String finalTranscript = transcript;
+                try {
+                    Tx.run(() -> {
+                        var fresh = (MessageAttachment) MessageAttachment.findById(attId);
+                        if (fresh != null) {
+                            fresh.transcript = finalTranscript;
+                            fresh.save();
+                        }
+                    });
+                } catch (Throwable t) {
+                    EventLogger.warn("transcription",
+                            "Failed to persist transcript for attachment %d: %s"
+                                    .formatted(attId, t.getMessage()));
+                }
+            }
+            future.complete(transcript);
+        });
+    }
+
     public static List<Message> loadRecentMessages(Conversation conversation) {
         var maxMessages = ConfigService.getInt("chat.maxContextMessages", 50);
         var floor = latestOf(conversation.contextSince, conversation.compactionSince);
