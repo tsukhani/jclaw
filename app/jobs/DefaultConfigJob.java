@@ -42,11 +42,13 @@ public class DefaultConfigJob extends Job<Void> {
      * Settings persists across restarts.
      */
     private void seedDispatcherTuning() {
+        renameKeyIfPresent("provider.llm.dispatcher.maxRequestsPerHost", "dispatcher.llm.maxRequestsPerHost");
+        renameKeyIfPresent("provider.llm.dispatcher.maxRequests", "dispatcher.llm.maxRequests");
         int cores = Runtime.getRuntime().availableProcessors();
         int defaultPerHost = Math.max(64, Math.min(256, 8 * cores));
         int defaultMax = 2 * defaultPerHost;
-        seedIfAbsent("provider.llm.dispatcher.maxRequestsPerHost", String.valueOf(defaultPerHost));
-        seedIfAbsent("provider.llm.dispatcher.maxRequests", String.valueOf(defaultMax));
+        seedIfAbsent("dispatcher.llm.maxRequestsPerHost", String.valueOf(defaultPerHost));
+        seedIfAbsent("dispatcher.llm.maxRequests", String.valueOf(defaultMax));
     }
 
     /**

@@ -87,8 +87,8 @@ public class ConfigService {
         // requiring a restart. HttpFactories.applyDispatcherConfig reads
         // both keys and pushes them into the live OkHttp dispatcher, so
         // the next outbound LLM call uses the new cap.
-        if (key.equals("provider.llm.dispatcher.maxRequestsPerHost")
-                || key.equals("provider.llm.dispatcher.maxRequests")) {
+        if (key.equals("dispatcher.llm.maxRequestsPerHost")
+                || key.equals("dispatcher.llm.maxRequests")) {
             utils.HttpFactories.applyDispatcherConfig();
         }
 

@@ -106,8 +106,8 @@ public final class HttpFactories {
     }
 
     /**
-     * Apply (or re-apply) {@code provider.llm.dispatcher.maxRequests} and
-     * {@code provider.llm.dispatcher.maxRequestsPerHost} from
+     * Apply (or re-apply) {@code dispatcher.llm.maxRequests} and
+     * {@code dispatcher.llm.maxRequestsPerHost} from
      * {@link services.ConfigService} to the live LLM dispatcher. Called
      * once at startup by DefaultConfigJob after the host-tuned defaults
      * are seeded, and again from {@link services.ConfigService#setWithSideEffects}
@@ -116,9 +116,9 @@ public final class HttpFactories {
      */
     public static void applyDispatcherConfig() {
         int perHost = services.ConfigService.getInt(
-                "provider.llm.dispatcher.maxRequestsPerHost", 64);
+                "dispatcher.llm.maxRequestsPerHost", 64);
         int max = services.ConfigService.getInt(
-                "provider.llm.dispatcher.maxRequests", 128);
+                "dispatcher.llm.maxRequests", 128);
         LLM_DISPATCHER.setMaxRequestsPerHost(perHost);
         LLM_DISPATCHER.setMaxRequests(max);
         play.Logger.info("HttpFactories LLM_DISPATCHER applied: maxRequests=%d maxRequestsPerHost=%d",

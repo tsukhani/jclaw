@@ -66,6 +66,7 @@ function isSensitive(key: string) {
 // Keeps Settings free of exact-key knowledge about other pages' config.
 const MANAGED_PREFIXES = [
   'provider.', // LLM providers — Settings
+  'dispatcher.', // OkHttp dispatcher caps — Settings (Performance)
   'ocr.', // OCR backends — Settings (Tesseract today; GLM-OCR planned)
   'search.', // Search providers — Settings
   'scanner.', // Malware scanners — Settings
@@ -118,12 +119,12 @@ async function saveChatField(configKey: string, value: string) {
 // transiently during loadtest when --concurrency exceeds the live cap.
 const dispatcherMaxRequestsPerHost = computed(() => {
   const entries = configData.value?.entries ?? []
-  return entries.find(e => e.key === 'provider.llm.dispatcher.maxRequestsPerHost')?.value ?? '64'
+  return entries.find(e => e.key === 'dispatcher.llm.maxRequestsPerHost')?.value ?? '64'
 })
 
 const dispatcherMaxRequests = computed(() => {
   const entries = configData.value?.entries ?? []
-  return entries.find(e => e.key === 'provider.llm.dispatcher.maxRequests')?.value ?? '128'
+  return entries.find(e => e.key === 'dispatcher.llm.maxRequests')?.value ?? '128'
 })
 
 const editingPerfField = ref<string | null>(null)
@@ -2344,7 +2345,7 @@ async function handleResetPassword() {
               <button
                 class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
                 title="Save"
-                @click="savePerfField('provider.llm.dispatcher.maxRequestsPerHost', perfFieldEdit)"
+                @click="savePerfField('dispatcher.llm.maxRequestsPerHost', perfFieldEdit)"
               >
                 <CheckIcon
                   class="w-3.5 h-3.5"
@@ -2392,7 +2393,7 @@ async function handleResetPassword() {
               <button
                 class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
                 title="Save"
-                @click="savePerfField('provider.llm.dispatcher.maxRequests', perfFieldEdit)"
+                @click="savePerfField('dispatcher.llm.maxRequests', perfFieldEdit)"
               >
                 <CheckIcon
                   class="w-3.5 h-3.5"
