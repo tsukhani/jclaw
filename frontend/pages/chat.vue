@@ -1001,6 +1001,10 @@ watch(streamReasoning, () => {
   })
 })
 
+onMounted(() => {
+  focusInput()
+})
+
 onUnmounted(() => {
   abortController.value?.abort()
   if (scrollRaf) cancelAnimationFrame(scrollRaf)
@@ -1014,6 +1018,7 @@ function stopStreaming() {
   abortController.value?.abort()
   streaming.value = false
   streamStatus.value = ''
+  focusInput()
 }
 const displayMessages = computed(() =>
   messages.value.filter(m => shouldDisplayMessage(m, streaming.value)),
@@ -1471,6 +1476,7 @@ async function sendMessage() {
     // appears if usage arrived after complete). Wait a tick so the DOM
     // reflects the final layout, then pin to the bottom.
     nextTick().then(scrollToBottom)
+    focusInput()
     // Check if agent is still processing queued messages
     if (selectedConvoId.value) {
       try {
