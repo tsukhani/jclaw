@@ -51,9 +51,9 @@ describe('Dashboard page', () => {
 
     expect(component.text()).toContain('Dashboard')
     expect(component.text()).toContain('Agents enabled')
+    expect(component.text()).toContain('Conversations had')
     expect(component.text()).toContain('Channels active')
     expect(component.text()).toContain('Tasks pending')
-    expect(component.text()).toContain('Recent events')
   })
 
   it('displays agent count', async () => {
@@ -64,12 +64,19 @@ describe('Dashboard page', () => {
     expect(component.text()).toContain('1/1')
   })
 
-  it('shows recent events', async () => {
+  it('renders cards in left-to-right order: Agents, Conversations, Channels, Tasks', async () => {
     setupMockApi()
     const component = await mountSuspended(Index)
 
-    expect(component.text()).toContain('Test event')
-    expect(component.text()).toContain('system')
+    const text = component.text()
+    const agentsIdx = text.indexOf('Agents enabled')
+    const convosIdx = text.indexOf('Conversations had')
+    const channelsIdx = text.indexOf('Channels active')
+    const tasksIdx = text.indexOf('Tasks pending')
+    expect(agentsIdx).toBeGreaterThanOrEqual(0)
+    expect(convosIdx).toBeGreaterThan(agentsIdx)
+    expect(channelsIdx).toBeGreaterThan(convosIdx)
+    expect(tasksIdx).toBeGreaterThan(channelsIdx)
   })
 })
 

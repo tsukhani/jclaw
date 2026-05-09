@@ -22,17 +22,29 @@ const [
   { data: channels },
   { data: tasks },
   { data: logs, refresh: refreshLogs },
+  { data: conversationCount },
 ] = await Promise.all([
   useFetch<Agent[]>('/api/agents'),
   useFetch<ChannelStatus[]>('/api/channels'),
   useFetch<unknown[]>('/api/tasks?status=PENDING&limit=5'),
   useFetch<{ events: LogEvent[] }>('/api/logs?limit=10'),
+  // Total conversation count: ask the listing endpoint with a tiny limit
+  // and read X-Total-Count from the response headers — same pattern the
+  // conversations page uses (see pages/conversations/index.vue). Falls
+  // back to the body's array length if the header is missing (test stubs
+  // via registerEndpoint don't simulate response headers).
+  useAsyncData<number>('dashboard-conversation-count', async () => {
+    const res = await $fetch.raw<unknown[]>('/api/conversations?limit=1')
+    const headerTotal = res.headers.get('x-total-count')
+    return headerTotal ? parseInt(headerTotal, 10) : (res._data?.length ?? 0)
+  }),
 ])
 
 const agentCount = computed(() => agents.value?.length ?? 0)
 const enabledAgents = computed(() => agents.value?.filter(a => a.enabled).length ?? 0)
 const channelCount = computed(() => channels.value?.filter(c => c.enabled).length ?? 0)
 const pendingTasks = computed(() => tasks.value?.length ?? 0)
+const totalConversations = computed(() => conversationCount.value ?? 0)
 
 const { data: latency, refresh: refreshLatency } = useFetch<LatencyMetrics>(
   '/api/metrics/latency',
@@ -141,6 +153,14 @@ onBeforeUnmount(() => {
       </div>
       <div class="bg-surface-elevated border border-border p-4">
         <div class="text-2xl font-semibold text-fg-strong">
+          {{ totalConversations.toLocaleString() }}
+        </div>
+        <div class="text-xs text-fg-muted mt-1">
+          Conversations had
+        </div>
+      </div>
+      <div class="bg-surface-elevated border border-border p-4">
+        <div class="text-2xl font-semibold text-fg-strong">
           {{ channelCount }}
         </div>
         <div class="text-xs text-fg-muted mt-1">
@@ -153,14 +173,6 @@ onBeforeUnmount(() => {
         </div>
         <div class="text-xs text-fg-muted mt-1">
           Tasks pending
-        </div>
-      </div>
-      <div class="bg-surface-elevated border border-border p-4">
-        <div class="text-2xl font-semibold text-fg-strong">
-          {{ logs?.events?.length ?? 0 }}
-        </div>
-        <div class="text-xs text-fg-muted mt-1">
-          Recent events
         </div>
       </div>
     </div>
