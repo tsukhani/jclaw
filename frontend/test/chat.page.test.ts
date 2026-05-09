@@ -292,11 +292,13 @@ describe('Chat page — JCLAW-25 vision attachment gate', () => {
   })
 })
 
-describe('Chat page — JCLAW-131 per-kind upload caps and audio gate', () => {
-  it('refuses audio attachments when the selected model does not advertise supportsAudio', async () => {
-    // Baseline config pins kimi-k2.5 without supportsAudio; the audio gate
-    // must mirror the vision gate, rejecting at attach time with the
-    // parallel phrasing.
+describe('Chat page — JCLAW-131 per-kind upload caps + JCLAW-165 audio universally accepted', () => {
+  it('accepts audio attachments regardless of model supportsAudio flag', async () => {
+    // Pre-JCLAW-165 the addAttachments path rejected audio when the
+    // active model lacked supportsAudio. With the transcription pipeline
+    // in place every model can consume audio (text-only models receive
+    // the transcript as a text part; audio-capable models receive native
+    // input_audio), so the attach-time audio gate is gone.
     setupBaseChatApi()
     const component = await mountSuspended(Chat)
     await flushPromises()
@@ -310,8 +312,9 @@ describe('Chat page — JCLAW-131 per-kind upload caps and audio gate', () => {
     vm.addAttachments([wav])
     await flushPromises()
 
-    expect(vm.attachError).toBe('This model does not support audio')
-    expect(vm.attachedFiles.length).toBe(0)
+    expect(vm.attachError).toBeNull()
+    expect(vm.attachedFiles.length).toBe(1)
+    expect(vm.attachedFiles[0]!.name).toBe('memo.wav')
   })
 
   // The per-kind size cap is covered end-to-end in ApiChatControllerTest's

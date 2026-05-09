@@ -105,9 +105,11 @@ public class ApiChatController extends Controller {
         if (services.AttachmentService.anyImage(attachments) && !AgentService.supportsVision(agent)) {
             error(400, "This model does not support images");
         }
-        if (services.AttachmentService.anyAudio(attachments) && !AgentService.supportsAudio(agent)) {
-            error(400, "This model does not support audio");
-        }
+        // JCLAW-165: audio attachments are universally accepted now —
+        // text-only models receive a transcript text part (via the
+        // transcription pipeline + capability routing in AgentRunner.
+        // userMessageFor) and audio-capable models receive native input_audio.
+        // No model-side gate; the rest of the pipeline handles the format.
 
         return new ChatContext(agent, messageText, conversationId, session.get("username"), attachments);
     }

@@ -1676,13 +1676,9 @@ function addAttachments(files: File[]) {
       attachError.value = 'This model does not support images'
       continue
     }
-    // JCLAW-131: mirror gate for audio. Backend returns 400 on send if the
-    // client bypasses this; showing the refusal at attach time avoids a
-    // pointless round-trip and gives the operator the exact string.
-    if (isAudioFile(f) && !audioSupported.value) {
-      attachError.value = 'This model does not support audio'
-      continue
-    }
+    // JCLAW-165: audio is universally accepted regardless of the model's
+    // supportsAudio flag — the transcription pipeline gives text-only
+    // models a transcript text part. No client-side gate.
     attachedFiles.value.push(f)
     if (isImageFile(f)) {
       attachmentPreviews.value.set(f, URL.createObjectURL(f))
@@ -1745,14 +1741,9 @@ function releaseRecorder() {
 
 async function startRecording() {
   if (isRecording.value) return
-  // Cheap pre-check so we don't prompt for mic permission on a model that
-  // can't consume the resulting attachment anyway — addAttachments would
-  // reject it after the fact, which wastes both the permission grant and
-  // the recording itself. Mirrors the vision-gate error copy below.
-  if (!audioSupported.value) {
-    attachError.value = 'This model does not support audio'
-    return
-  }
+  // JCLAW-165: voice recording is universally available — the transcription
+  // pipeline pairs every audio attachment with a transcript before the LLM
+  // sees it, so model.supportsAudio no longer gates the mic.
   if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
     attachError.value = 'Voice recording not supported in this browser'
     return

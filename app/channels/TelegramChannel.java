@@ -499,13 +499,9 @@ public class TelegramChannel implements Channel {
                     "Rejected image upload: model does not support vision");
             return null;
         }
-        if (hasAudio && !services.AgentService.supportsAudio(sendAgent)) {
-            sendMessage(sendToken, sendChatId,
-                    "I can't handle audio files with the current model. Try an audio-capable model.");
-            EventLogger.warn("channel", sendAgent.name, "telegram",
-                    "Rejected audio upload: model does not support audio");
-            return null;
-        }
+        // JCLAW-165: audio is universally accepted — text-only models get
+        // a transcript text part via the transcription pipeline, audio-
+        // capable models get native input_audio. No model-side gate.
 
         var inputs = new java.util.ArrayList<services.AttachmentService.Input>(
                 message.attachments().size());
