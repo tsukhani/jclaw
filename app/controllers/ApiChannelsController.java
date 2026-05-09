@@ -8,6 +8,7 @@ import static utils.GsonHolder.INSTANCE;
 import models.ChannelConfig;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.ChannelStatusService;
 
 import java.util.List;
 import java.util.Map;
@@ -30,6 +31,23 @@ public class ApiChannelsController extends Controller {
         List<ChannelConfig> configs = ChannelConfig.findAll();
         var result = configs.stream().map(ChannelView::of).toList();
         renderJSON(gson.toJson(result));
+    }
+
+    /**
+     * GET /api/channels/active — channel kinds currently doing work,
+     * aggregated across the three sources of truth (web, telegram
+     * bindings, ChannelConfig). Dashboard-only consumer; the existing
+     * {@link #list()} endpoint stays as-is for the Channels admin page
+     * which legitimately wants the {@code ChannelConfig} rows directly.
+     *
+     * <p>Response: {@code {"count": N, "channelTypes": ["telegram", "web", ...]}}.
+     */
+    public static void active() {
+        var types = ChannelStatusService.activeChannelTypes();
+        renderJSON(gson.toJson(Map.of(
+                "count", types.size(),
+                "channelTypes", types
+        )));
     }
 
     public static void get(String channelType) {

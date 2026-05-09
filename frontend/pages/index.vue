@@ -12,20 +12,28 @@ import type { Agent, LatencyHistogram, LatencyMetrics, LogEvent } from '~/types/
 // mounting the dashboard.
 import { buildLatencyRows, buildChartSeries, listAvailableChannels } from '~/utils/latency-rows'
 
-interface ChannelStatus {
-  channelType: string
-  enabled: boolean
+interface ActiveChannelsResponse {
+  count: number
+  channelTypes: string[]
 }
 
 const [
   { data: agents },
-  { data: channels },
+  { data: activeChannels },
   { data: tasks },
   { data: logs, refresh: refreshLogs },
   { data: conversationCount },
 ] = await Promise.all([
   useFetch<Agent[]>('/api/agents'),
-  useFetch<ChannelStatus[]>('/api/channels'),
+  // /api/channels/active aggregates the three sources of truth (web,
+  // telegram bindings, slack/whatsapp ChannelConfig) into a single
+  // count. The plain /api/channels endpoint reads only ChannelConfig
+  // and silently misses Telegram bindings — that's why the previous
+  // dashboard showed "0 channels active" while Telegram polled
+  // messages live. See ChannelStatusService.activeChannelTypes for
+  // the per-channel logic.
+  useFetch<ActiveChannelsResponse>('/api/channels/active',
+    { default: () => ({ count: 0, channelTypes: [] }) }),
   useFetch<unknown[]>('/api/tasks?status=PENDING&limit=5'),
   useFetch<{ events: LogEvent[] }>('/api/logs?limit=10'),
   // Total conversation count: ask the listing endpoint with a tiny limit
@@ -42,7 +50,7 @@ const [
 
 const agentCount = computed(() => agents.value?.length ?? 0)
 const enabledAgents = computed(() => agents.value?.filter(a => a.enabled).length ?? 0)
-const channelCount = computed(() => channels.value?.filter(c => c.enabled).length ?? 0)
+const channelCount = computed(() => activeChannels.value?.count ?? 0)
 const pendingTasks = computed(() => tasks.value?.length ?? 0)
 const totalConversations = computed(() => conversationCount.value ?? 0)
 

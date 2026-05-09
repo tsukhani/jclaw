@@ -15,6 +15,10 @@ function setupMockApi() {
     { channelType: 'telegram', enabled: false },
     { channelType: 'slack', enabled: true },
   ])
+  registerEndpoint('/api/channels/active', () => ({
+    count: 2,
+    channelTypes: ['web', 'slack'],
+  }))
   registerEndpoint('/api/tasks', () => [])
   registerEndpoint('/api/logs', () => ({ events: [
     { id: 1, timestamp: '2026-04-07T10:00:00Z', level: 'INFO', category: 'system', agentId: null, message: 'Test event' },

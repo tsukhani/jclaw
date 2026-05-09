@@ -109,6 +109,8 @@ DELETE  /api/conversations/{id}/model-override  ApiConversationsController.clear
 
 # Channels API
 GET     /api/channels                           ApiChannelsController.list
+# Dashboard-only: aggregates web/telegram/slack/whatsapp from per-channel sources
+GET     /api/channels/active                    ApiChannelsController.active
 GET     /api/channels/telegram/bindings         ApiTelegramBindingsController.list
 POST    /api/channels/telegram/bindings         ApiTelegramBindingsController.create
 PUT     /api/channels/telegram/bindings/{id}    ApiTelegramBindingsController.update
