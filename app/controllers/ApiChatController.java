@@ -207,7 +207,7 @@ public class ApiChatController extends Controller {
      * conversation-keyed directory and {@code chat_message_attachment} row
      * insertion) happens in {@link AgentRunner} when the send lands.
      */
-    public static void uploadChatFiles(Long agentId, java.io.File[] files) {
+    public static void uploadChatFiles(Long agentId, play.data.Upload[] files) {
         if (agentId == null) badRequest();
         Agent agent = Agent.findById(agentId);
         if (agent == null) notFound();
@@ -218,8 +218,8 @@ public class ApiChatController extends Controller {
         if (files.length > MAX_UPLOAD_FILES) {
             error(400, "Too many files (max " + MAX_UPLOAD_FILES + ")");
         }
-        for (var f : files) {
-            if (f == null || !f.exists()) error(400, "Invalid file upload");
+        for (var u : files) {
+            if (u == null || u.asFile() == null || !u.asFile().exists()) error(400, "Invalid file upload");
         }
 
         java.nio.file.Path stagingDir;
@@ -233,23 +233,34 @@ public class ApiChatController extends Controller {
         var results = new ArrayList<Map<String, Object>>();
         try {
             Files.createDirectories(stagingDir);
-            for (var f : files) {
-                var safeName = sanitizeFilename(f.getName());
+            for (var upload : files) {
+                var f = upload.asFile();
+                var safeName = sanitizeFilename(upload.getFileName() != null ? upload.getFileName() : f.getName());
                 if (safeName.isEmpty()) {
-                    error(400, "Invalid filename: " + f.getName());
+                    error(400, "Invalid filename: " + upload.getFileName());
                 }
                 var uuid = UUID.randomUUID().toString();
                 // Tika reads file magic bytes — authoritative over browser-declared
-                // Content-Type (which can be absent, wrong, or spoofed). Kind
-                // classification and per-kind size caps both derive from this
-                // sniffed MIME, never the declared one.
+                // Content-Type for spoofing-resistance. ONE narrow exception
+                // (JCLAW-165 follow-up): Tika sniffs a WebM container as
+                // video/webm regardless of whether it has video tracks, so
+                // browser-recorded voice notes from MediaRecorder({audio:true})
+                // get misclassified as KIND_FILE and never enter the
+                // transcription pipeline. When the browser explicitly declared
+                // audio/* AND Tika returned the ambiguous video/webm, trust
+                // the browser hint. Other ambiguities still fall to Tika.
                 var sniffedMime = TIKA.detect(f);
+                var browserMime = upload.getContentType();
+                if ("video/webm".equals(sniffedMime)
+                        && browserMime != null && browserMime.startsWith("audio/")) {
+                    sniffedMime = "audio/webm";
+                }
                 var kind = models.MessageAttachment.kindForMime(sniffedMime);
                 var cap = services.UploadLimits.forKind(kind);
                 if (f.length() > cap) {
                     error(400, "%s too large: %s (max %d MB for %s)"
                             .formatted(services.UploadLimits.displayName(kind),
-                                    f.getName(), cap / (1024 * 1024),
+                                    upload.getFileName(), cap / (1024 * 1024),
                                     services.UploadLimits.displayName(kind)));
                 }
                 var ext = extensionFromFilename(safeName);
@@ -260,7 +271,7 @@ public class ApiChatController extends Controller {
                 try {
                     target = AgentService.acquireContained(stagingDir, onDiskName);
                 } catch (SecurityException e) {
-                    error(400, "Invalid filename: " + f.getName());
+                    error(400, "Invalid filename: " + upload.getFileName());
                     return;
                 }
                 Files.copy(f.toPath(), target, StandardCopyOption.REPLACE_EXISTING);
