@@ -3,6 +3,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.transcription.FfmpegProbe;
+import services.transcription.TranscriptionException;
 import services.transcription.WhisperJniTranscriber;
 import services.transcription.WhisperModel;
 import services.transcription.WhisperModelManager;
@@ -66,7 +67,7 @@ public class WhisperJniTranscriberTest extends UnitTest {
     public void transcribe_throws_whenFfmpegMissing() {
         FfmpegProbe.setForTest(new FfmpegProbe.ProbeResult(false, "forced-missing-for-test"));
         try {
-            var ex = assertThrows(WhisperJniTranscriber.TranscriptionException.class,
+            var ex = assertThrows(TranscriptionException.class,
                     () -> WhisperJniTranscriber.transcribe(tempWav, WhisperModel.DEFAULT));
             assertTrue(ex.getMessage().toLowerCase().contains("ffmpeg"),
                     "error must explicitly mention ffmpeg: " + ex.getMessage());
@@ -86,7 +87,7 @@ public class WhisperJniTranscriberTest extends UnitTest {
         var unlikelyDownloaded = WhisperModel.MEDIUM_MULTILINGUAL;
         assumeTrue(!WhisperModelManager.availableLocally(unlikelyDownloaded),
                 "MEDIUM_MULTILINGUAL is downloaded — skipping the not-downloaded branch test");
-        var ex = assertThrows(WhisperJniTranscriber.TranscriptionException.class,
+        var ex = assertThrows(TranscriptionException.class,
                 () -> WhisperJniTranscriber.transcribe(tempWav, unlikelyDownloaded));
         assertTrue(ex.getMessage().toLowerCase().contains("not downloaded"),
                 "error must explain the model is not downloaded: " + ex.getMessage());

@@ -47,11 +47,6 @@ public final class WhisperJniTranscriber {
 
     private WhisperJniTranscriber() {}
 
-    public static class TranscriptionException extends RuntimeException {
-        public TranscriptionException(String msg) { super(msg); }
-        public TranscriptionException(String msg, Throwable cause) { super(msg, cause); }
-    }
-
     /**
      * Transcribe an audio file using the named whisper model. Blocks the
      * caller; long-running and CPU-bound. Caller is responsible for running
