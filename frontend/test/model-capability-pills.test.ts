@@ -20,8 +20,8 @@ describe('ModelCapabilityPills', () => {
   })
 
   it('renders only supported capabilities', async () => {
-    // JCLAW-165: audio pill retired since transcription gives every model
-    // an audio path; only thinking/vision render now.
+    // JCLAW-165: audio pill stays visible as a capability indicator (model
+    // accepts native audio passthrough); thinking/vision stay interactive.
     const wrapper = await mountSuspended(ModelCapabilityPills, {
       props: { model: { id: 'm', supportsThinking: true, supportsAudio: true } },
     })
@@ -29,7 +29,22 @@ describe('ModelCapabilityPills', () => {
     const text = wrapper.text()
     expect(text).toContain('thinking')
     expect(text).not.toContain('vision')
-    expect(text).not.toContain('audio')
+    expect(text).toContain('audio')
+  })
+
+  it('audio pill renders as non-interactive (no toggle event)', async () => {
+    // Capability indicator only — clicking should NOT emit a toggle.
+    // Vision/thinking still emit; only audio short-circuits the click handler
+    // because there's no per-agent audio override to drive.
+    const wrapper = await mountSuspended(ModelCapabilityPills, {
+      props: { model: { id: 'm', supportsAudio: true } },
+    })
+    await nextTick()
+    // Audio pill renders as a span, not a button.
+    const buttons = wrapper.findAll('button')
+    expect(buttons.length).toBe(0)
+    const text = wrapper.text()
+    expect(text).toContain('audio')
   })
 
   it('thinking pill is on when thinkingMode is a non-empty string', async () => {

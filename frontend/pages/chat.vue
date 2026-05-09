@@ -15,6 +15,7 @@ import {
   PaperClipIcon,
   PencilIcon,
   PencilSquareIcon,
+  SpeakerWaveIcon,
   TrashIcon,
   WrenchIcon,
   WrenchScrewdriverIcon,
@@ -250,6 +251,12 @@ const thinkingLevels = computed<string[]>(() => effectiveThinkingLevels(selected
 // metadata (OpenRouter architecture.input_modalities, Ollama capabilities)
 // or the operator-toggled checkbox in Settings; see ModelDiscoveryService.
 const visionSupported = computed(() => selectedModelInfo.value?.supportsVision === true)
+// JCLAW-165: capability indicator only — there's no per-agent audio toggle
+// to drive (transcription gives every model an audio path). The pill in
+// the composer signals "this model handles audio natively"; voice notes
+// to non-supportsAudio models go through the transcription pipeline
+// transparently.
+const audioSupported = computed(() => selectedModelInfo.value?.supportsAudio === true)
 
 // --- Pill toggle state ---
 
@@ -2771,6 +2778,24 @@ function exportConversation() {
                   />
                   Vision
                 </button>
+                <!--
+                  JCLAW-165: capability indicator only. Renders when the
+                  active model advertises native audio passthrough; not a
+                  toggle — voice notes to non-supportsAudio models still go
+                  through the transcription pipeline transparently. Span,
+                  not button — there's no behaviour to invite clicking on.
+                -->
+                <span
+                  v-if="audioSupported"
+                  class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium bg-amber-500/15 text-amber-400 cursor-default"
+                  title="This model handles audio natively. Voice notes pass through directly; non-audio models receive a transcript."
+                >
+                  <SpeakerWaveIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                  Audio
+                </span>
               </div>
               <div class="flex items-center gap-1 justify-self-end">
                 <button
