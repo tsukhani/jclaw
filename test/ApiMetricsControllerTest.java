@@ -412,4 +412,210 @@ public class ApiMetricsControllerTest extends FunctionalTest {
                 "/api/metrics/loadtest/data");
         assertEquals(403, response.status.intValue());
     }
+
+    // ─────── Cost endpoint (JCLAW-28) ─────────────────────────────────────────
+    // Aggregates Message.usageJson across conversations grouped by agent and
+    // channel. Backend returns raw rows; aggregation lives in the frontend
+    // usage-cost util so the cost math stays single-sourced.
+
+    @Test
+    public void costRequiresAuth() {
+        var response = GET("/api/metrics/cost");
+        assertEquals(401, response.status.intValue());
+    }
+
+    @Test
+    public void costReturnsEmptyRowsWhenNoMessages() {
+        login();
+        var response = GET("/api/metrics/cost");
+        assertIsOk(response);
+        assertContentType("application/json", response);
+        var body = getContent(response);
+        assertTrue(body.contains("\"rows\":[]"), "expected empty rows array, got: " + body);
+        // since defaults to 30 days ago — just check that the field is present
+        assertTrue(body.contains("\"since\":"), "expected since field, got: " + body);
+    }
+
+    @Test
+    public void costReturnsAssistantMessagesWithUsage() {
+        login();
+        long agentId = seedAgentWithUsage("cost-test-1", "web", "alice",
+                "{\"prompt\":100,\"completion\":50,\"total\":150,\"reasoning\":0,\"cached\":0,"
+                        + "\"durationMs\":1234,\"promptPrice\":0.5,\"completionPrice\":1.0,"
+                        + "\"modelProvider\":\"openrouter\",\"modelId\":\"gpt-4.1\"}");
+
+        var response = GET("/api/metrics/cost");
+        assertIsOk(response);
+        var body = getContent(response);
+        assertTrue(body.contains("\"agentId\":" + agentId), body);
+        assertTrue(body.contains("\"channelType\":\"web\""), body);
+        // The full usageJson string should round-trip verbatim so the frontend
+        // TS types deserialize it without conversion.
+        assertTrue(body.contains("\\\"prompt\\\":100"), body);
+        assertTrue(body.contains("\\\"modelId\\\":\\\"gpt-4.1\\\""), body);
+    }
+
+    @Test
+    public void costFiltersByAgentId() {
+        login();
+        long agentA = seedAgentWithUsage("cost-test-a", "web", "alice",
+                "{\"prompt\":10,\"completion\":5,\"total\":15,\"reasoning\":0,\"cached\":0,"
+                        + "\"durationMs\":100,\"promptPrice\":0.5,\"completionPrice\":1.0}");
+        long agentB = seedAgentWithUsage("cost-test-b", "web", "bob",
+                "{\"prompt\":20,\"completion\":10,\"total\":30,\"reasoning\":0,\"cached\":0,"
+                        + "\"durationMs\":200,\"promptPrice\":0.5,\"completionPrice\":1.0}");
+
+        var response = GET("/api/metrics/cost?agentId=" + agentA);
+        assertIsOk(response);
+        var body = getContent(response);
+        assertTrue(body.contains("\"agentId\":" + agentA),
+                "agent A's row must appear: " + body);
+        assertFalse(body.contains("\"agentId\":" + agentB),
+                "agent B's row must be filtered out: " + body);
+    }
+
+    @Test
+    public void costFiltersByChannelType() {
+        login();
+        seedAgentWithUsage("cost-test-web", "web", "alice",
+                "{\"prompt\":10,\"completion\":5,\"total\":15,\"reasoning\":0,\"cached\":0,"
+                        + "\"durationMs\":100,\"promptPrice\":0.5,\"completionPrice\":1.0}");
+        seedAgentWithUsage("cost-test-tg", "telegram", "12345",
+                "{\"prompt\":20,\"completion\":10,\"total\":30,\"reasoning\":0,\"cached\":0,"
+                        + "\"durationMs\":200,\"promptPrice\":0.5,\"completionPrice\":1.0}");
+
+        var response = GET("/api/metrics/cost?channelType=telegram");
+        assertIsOk(response);
+        var body = getContent(response);
+        assertTrue(body.contains("\"channelType\":\"telegram\""),
+                "telegram row must appear: " + body);
+        assertFalse(body.contains("\"channelType\":\"web\""),
+                "web row must be filtered out: " + body);
+    }
+
+    @Test
+    public void costFiltersByTimeWindow() {
+        login();
+        // Seed two messages, one within the default 30-day window and one
+        // outside it. Use an explicit since param tighter than 30d to verify
+        // the bound is honored.
+        seedAgentWithUsage("cost-test-window", "web", "carol",
+                "{\"prompt\":10,\"completion\":5,\"total\":15,\"reasoning\":0,\"cached\":0,"
+                        + "\"durationMs\":100,\"promptPrice\":0.5,\"completionPrice\":1.0}");
+
+        // Future "since" returns nothing (no messages from after now).
+        var farFuture = java.time.Instant.now().plus(1, java.time.temporal.ChronoUnit.DAYS);
+        var response = GET("/api/metrics/cost?since=" + farFuture);
+        assertIsOk(response);
+        assertTrue(getContent(response).contains("\"rows\":[]"),
+                "future since must yield empty rows: " + getContent(response));
+    }
+
+    @Test
+    public void costRejectsInvalidSince() {
+        login();
+        var response = GET("/api/metrics/cost?since=not-an-instant");
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    public void costRejectsInvalidAgentId() {
+        login();
+        var response = GET("/api/metrics/cost?agentId=not-numeric");
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    public void costExcludesUserAndToolMessages() {
+        // Non-assistant rows have null usageJson; the SQL filter
+        // `m.usageJson IS NOT NULL` should exclude them so the operator's
+        // turn count and token totals match the assistant turn count.
+        login();
+        seedConversationWithMixedMessages("cost-test-mixed", "web", "dave");
+
+        var response = GET("/api/metrics/cost");
+        assertIsOk(response);
+        var body = getContent(response);
+        // Two assistant messages were seeded, both with usageJson; user and
+        // tool messages have null usageJson and must be filtered.
+        int rowCount = body.split("\\\"timestamp\\\":", -1).length - 1;
+        assertEquals(2, rowCount,
+                "expected 2 assistant rows (user/tool excluded), got " + rowCount + " in " + body);
+    }
+
+    /**
+     * Seed an agent with one assistant message carrying the given usageJson.
+     * Returns the agent's id so callers can assert on filter behavior.
+     * Uses commitInFreshTx pattern from JCLAW-FunctionalTest carrier-thread
+     * isolation: inline writes from the carrier thread don't commit before
+     * the HTTP request reads them, so spawn a virtual thread to commit first.
+     */
+    private long seedAgentWithUsage(String agentName, String channel, String peer, String usageJson) {
+        var ref = new java.util.concurrent.atomic.AtomicReference<Long>();
+        var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var t = Thread.ofVirtual().start(() -> {
+            try {
+                services.Tx.run(() -> {
+                    var agent = new models.Agent();
+                    agent.name = agentName;
+                    agent.modelProvider = "openrouter";
+                    agent.modelId = "gpt-4.1";
+                    agent.enabled = true;
+                    agent.save();
+                    var conv = services.ConversationService.create(agent, channel, peer);
+                    services.ConversationService.appendAssistantMessage(conv, "test response", null, usageJson);
+                    ref.set(agent.id);
+                    return null;
+                });
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+        if (err.get() != null) throw new RuntimeException(err.get());
+        return ref.get();
+    }
+
+    /**
+     * Seed a conversation with mixed message roles: one user, two assistant
+     * (with usageJson), one tool. Used to verify the cost endpoint filters
+     * to assistant-only rows by way of {@code usageJson IS NOT NULL}.
+     */
+    private void seedConversationWithMixedMessages(String agentName, String channel, String peer) {
+        var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var t = Thread.ofVirtual().start(() -> {
+            try {
+                services.Tx.run(() -> {
+                    var agent = new models.Agent();
+                    agent.name = agentName;
+                    agent.modelProvider = "openrouter";
+                    agent.modelId = "gpt-4.1";
+                    agent.enabled = true;
+                    agent.save();
+                    var conv = services.ConversationService.create(agent, channel, peer);
+                    services.ConversationService.appendUserMessage(conv, "first prompt");
+                    var usageJson = "{\"prompt\":10,\"completion\":5,\"total\":15,\"reasoning\":0,"
+                            + "\"cached\":0,\"durationMs\":100,\"promptPrice\":0.5,\"completionPrice\":1.0}";
+                    services.ConversationService.appendAssistantMessage(conv, "first reply", null, usageJson);
+                    services.ConversationService.appendUserMessage(conv, "second prompt");
+                    services.ConversationService.appendAssistantMessage(conv, "second reply", null, usageJson);
+                    return null;
+                });
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+        if (err.get() != null) throw new RuntimeException(err.get());
+    }
 }

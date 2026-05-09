@@ -165,6 +165,9 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <!-- Chat Cost (JCLAW-28): persisted aggregated token usage and cost. -->
+    <ChatCostSection :agents="agents" />
+
     <!-- Chat Performance -->
     <div class="bg-surface-elevated border border-border mb-8">
       <!--

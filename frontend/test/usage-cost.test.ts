@@ -1,11 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import {
+  computeFleetCost,
   computeUsageCostBreakdown,
   computeConversationCost,
   formatConversationCost,
   formatConversationCostTooltip,
+  formatCostUsd,
   formatUsageCost,
   formatUsageCostTooltip,
+  listChannelsInRows,
+  type FleetCostRow,
   type MessageUsage,
 } from '~/utils/usage-cost'
 
@@ -350,5 +354,215 @@ describe('computeConversationCost (JCLAW-108)', () => {
 
     expect(tooltip).toContain('ollama-cloud/kimi-k2.5: $0.00 / 3 turns')
     expect(tooltip).toContain('openrouter/google-flash: $0.0149 / 3 turns')
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
+// JCLAW-28: fleet aggregation
+// ──────────────────────────────────────────────────────────────────────────
+
+function row(partial: {
+  agentId: number
+  channelType: string
+  usage: Partial<MessageUsage>
+  timestamp?: string
+}): FleetCostRow {
+  return {
+    timestamp: partial.timestamp ?? '2026-05-09T12:00:00Z',
+    agentId: partial.agentId,
+    channelType: partial.channelType,
+    usageJson: JSON.stringify({
+      prompt: 0,
+      completion: 0,
+      total: 0,
+      reasoning: 0,
+      cached: 0,
+      durationMs: 0,
+      ...partial.usage,
+    }),
+  }
+}
+
+describe('computeFleetCost (JCLAW-28)', () => {
+  it('returns zeros for an empty row set', () => {
+    const out = computeFleetCost([], { agentId: null, channelType: null })
+    expect(out.total).toBe(0)
+    expect(out.turnCount).toBe(0)
+    expect(out.perAgent).toEqual([])
+    expect(out.perChannel).toEqual([])
+    expect(out.perModel).toEqual([])
+  })
+
+  it('aggregates total cost and tokens across rows', () => {
+    const rows = [
+      row({
+        agentId: 1, channelType: 'web',
+        usage: {
+          prompt: 100, completion: 50, reasoning: 0, cached: 0,
+          ...OPENAI_PRICES, modelId: 'gpt-4.1', modelProvider: 'openai',
+        },
+      }),
+      row({
+        agentId: 1, channelType: 'web',
+        usage: {
+          prompt: 200, completion: 100, reasoning: 0, cached: 0,
+          ...OPENAI_PRICES, modelId: 'gpt-4.1', modelProvider: 'openai',
+        },
+      }),
+    ]
+    const out = computeFleetCost(rows, { agentId: null, channelType: null })
+    expect(out.turnCount).toBe(2)
+    expect(out.prompt).toBe(300)
+    expect(out.completion).toBe(150)
+    // Cost: prompt 300 × $3/M = $0.0009 + completion 150 × $15/M = $0.00225
+    expect(out.total).toBeCloseTo(0.0009 + 0.00225, 6)
+  })
+
+  it('groups by agent, channel, and model independently', () => {
+    const rows = [
+      row({
+        agentId: 1, channelType: 'web',
+        usage: {
+          prompt: 100, completion: 50, ...OPENAI_PRICES,
+          modelId: 'gpt-4.1', modelProvider: 'openai',
+        },
+      }),
+      row({
+        agentId: 2, channelType: 'telegram',
+        usage: {
+          prompt: 200, completion: 100, ...CLAUDE_OPUS_PRICES,
+          modelId: 'claude-opus-4', modelProvider: 'anthropic',
+        },
+      }),
+    ]
+    const out = computeFleetCost(rows, { agentId: null, channelType: null })
+    expect(out.perAgent).toHaveLength(2)
+    expect(out.perChannel).toHaveLength(2)
+    expect(out.perModel).toHaveLength(2)
+    // Sorted by cost descending: Claude Opus (more expensive) first.
+    expect(out.perModel[0]!.modelId).toBe('claude-opus-4')
+    expect(out.perAgent[0]!.agentId).toBe(2) // agent 2 ran the more expensive model
+  })
+
+  it('filters by agentId client-side', () => {
+    const rows = [
+      row({
+        agentId: 1, channelType: 'web',
+        usage: { prompt: 100, completion: 50, ...OPENAI_PRICES, modelId: 'gpt-4.1' },
+      }),
+      row({
+        agentId: 2, channelType: 'web',
+        usage: { prompt: 200, completion: 100, ...OPENAI_PRICES, modelId: 'gpt-4.1' },
+      }),
+    ]
+    const out = computeFleetCost(rows, { agentId: 1, channelType: null })
+    expect(out.turnCount).toBe(1)
+    expect(out.perAgent).toHaveLength(1)
+    expect(out.perAgent[0]!.agentId).toBe(1)
+  })
+
+  it('filters by channelType client-side', () => {
+    const rows = [
+      row({
+        agentId: 1, channelType: 'web',
+        usage: { prompt: 100, completion: 50, ...OPENAI_PRICES, modelId: 'gpt-4.1' },
+      }),
+      row({
+        agentId: 1, channelType: 'telegram',
+        usage: { prompt: 200, completion: 100, ...OPENAI_PRICES, modelId: 'gpt-4.1' },
+      }),
+    ]
+    const out = computeFleetCost(rows, { agentId: null, channelType: 'telegram' })
+    expect(out.turnCount).toBe(1)
+    expect(out.perChannel).toHaveLength(1)
+    expect(out.perChannel[0]!.channelType).toBe('telegram')
+  })
+
+  it('combines agent and channel filters', () => {
+    const rows = [
+      row({ agentId: 1, channelType: 'web',
+        usage: { prompt: 100, completion: 50, ...OPENAI_PRICES, modelId: 'gpt-4.1' } }),
+      row({ agentId: 1, channelType: 'telegram',
+        usage: { prompt: 100, completion: 50, ...OPENAI_PRICES, modelId: 'gpt-4.1' } }),
+      row({ agentId: 2, channelType: 'web',
+        usage: { prompt: 100, completion: 50, ...OPENAI_PRICES, modelId: 'gpt-4.1' } }),
+    ]
+    const out = computeFleetCost(rows, { agentId: 1, channelType: 'web' })
+    expect(out.turnCount).toBe(1)
+  })
+
+  it('counts free-tier rows toward turn count without contributing cost', () => {
+    // No promptPrice / completionPrice — computeUsageCostBreakdown returns
+    // null, but the row should still appear in turn counts and token totals
+    // so the operator sees ollama-cloud activity at "$0.00, 5 turns."
+    const rows = [
+      row({ agentId: 1, channelType: 'web',
+        usage: { prompt: 100, completion: 50, modelId: 'kimi-k2.5' } }),
+      row({ agentId: 1, channelType: 'web',
+        usage: { prompt: 200, completion: 100, modelId: 'kimi-k2.5' } }),
+    ]
+    const out = computeFleetCost(rows, { agentId: null, channelType: null })
+    expect(out.total).toBe(0)
+    expect(out.turnCount).toBe(2)
+    expect(out.prompt).toBe(300)
+    expect(out.completion).toBe(150)
+    expect(out.perModel[0]!.turnCount).toBe(2)
+  })
+
+  it('skips malformed usageJson rows defensively', () => {
+    const goodRow = row({ agentId: 1, channelType: 'web',
+      usage: { prompt: 100, completion: 50, ...OPENAI_PRICES, modelId: 'gpt-4.1' } })
+    const badRow: FleetCostRow = {
+      timestamp: '2026-05-09T12:00:00Z',
+      agentId: 2,
+      channelType: 'web',
+      usageJson: 'not-valid-json',
+    }
+    const out = computeFleetCost([goodRow, badRow], { agentId: null, channelType: null })
+    expect(out.turnCount).toBe(1)
+    expect(out.perAgent).toHaveLength(1)
+    expect(out.perAgent[0]!.agentId).toBe(1)
+  })
+
+  it('uses (unknown) model key for rows lacking modelId', () => {
+    // Pre-JCLAW-107 rows had no modelId capture. Bucket them under a clear
+    // sentinel key so the per-model table shows them as a discrete row.
+    const rows = [
+      row({ agentId: 1, channelType: 'web',
+        usage: { prompt: 100, completion: 50, ...OPENAI_PRICES } }),
+    ]
+    const out = computeFleetCost(rows, { agentId: null, channelType: null })
+    expect(out.perModel[0]!.modelId).toBe('(unknown)')
+  })
+})
+
+describe('listChannelsInRows', () => {
+  it('returns distinct channel types sorted alphabetically', () => {
+    const rows = [
+      row({ agentId: 1, channelType: 'web', usage: {} }),
+      row({ agentId: 1, channelType: 'telegram', usage: {} }),
+      row({ agentId: 2, channelType: 'web', usage: {} }),
+      row({ agentId: 2, channelType: 'whatsapp', usage: {} }),
+    ]
+    expect(listChannelsInRows(rows)).toEqual(['telegram', 'web', 'whatsapp'])
+  })
+
+  it('returns empty array for no rows', () => {
+    expect(listChannelsInRows([])).toEqual([])
+  })
+})
+
+describe('formatCostUsd', () => {
+  it('formats zero as $0.00', () => {
+    expect(formatCostUsd(0)).toBe('$0.00')
+  })
+
+  it('formats sub-tenth-cent as < $0.0001', () => {
+    expect(formatCostUsd(0.00001)).toBe('< $0.0001')
+  })
+
+  it('formats normal costs to four decimals', () => {
+    expect(formatCostUsd(0.0149)).toBe('$0.0149')
+    expect(formatCostUsd(1.2345)).toBe('$1.2345')
   })
 })

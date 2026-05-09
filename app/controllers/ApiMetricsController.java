@@ -35,7 +35,7 @@ import static utils.GsonHolder.INSTANCE;
  */
 public class ApiMetricsController extends Controller {
 
-    @Before(only = {"latency", "resetLatency"})
+    @Before(only = {"latency", "resetLatency", "cost"})
     static void requireAdminSession() {
         AuthCheck.checkAuthentication();
     }
@@ -54,6 +54,113 @@ public class ApiMetricsController extends Controller {
     public static void resetLatency() {
         LatencyStats.reset();
         renderJSON("{\"status\":\"reset\"}");
+    }
+
+    /**
+     * GET /api/metrics/cost — raw per-turn cost rows for client-side aggregation.
+     *
+     * <p>Returns one row per assistant message with embedded {@code usageJson}
+     * + agent and channel context. The frontend aggregates across rows via the
+     * existing {@code computeUsageCostBreakdown} helpers in
+     * {@code utils/usage-cost.ts} — keeps cost math single-sourced (already
+     * battle-tested by the conversation-detail per-turn display).
+     *
+     * <p>Query params:
+     * <ul>
+     *   <li>{@code since} — ISO-8601 instant lower bound (inclusive). Default:
+     *       30 days before now. The frontend's window selector (7d/30d/all-time)
+     *       drives this.</li>
+     *   <li>{@code agentId}, {@code channelType} — optional server-side filters.
+     *       The dashboard does interactive filter changes client-side from a
+     *       single window load, so these are only used by callers that want a
+     *       narrower payload (e.g. CSV export tooling). Both omitted is the
+     *       common case.</li>
+     * </ul>
+     *
+     * <p>Response shape: {@code {"since": "ISO", "rows": [{"timestamp": "ISO",
+     * "agentId": N, "channelType": "...", "usageJson": "{...}"}, ...]}}.
+     * {@code usageJson} is the original Message column verbatim so the
+     * frontend's TS types ({@code MessageUsage}) deserialize without
+     * conversion; carries every pricing/token field the cost helpers need.
+     *
+     * <p>Only rows with non-null {@code usageJson} are returned — user and
+     * tool messages have no usage and would just be filtered out client-side
+     * anyway.
+     */
+    public static void cost() {
+        var sinceParam = params.get("since");
+        var agentIdParam = params.get("agentId");
+        var channelTypeParam = params.get("channelType");
+
+        java.time.Instant since;
+        if (sinceParam != null && !sinceParam.isBlank()) {
+            try {
+                since = java.time.Instant.parse(sinceParam);
+            } catch (java.time.format.DateTimeParseException e) {
+                error(400, "Invalid 'since' — must be ISO-8601 instant (e.g. 2026-04-10T00:00:00Z)");
+                return;
+            }
+        } else {
+            since = java.time.Instant.now().minus(30, java.time.temporal.ChronoUnit.DAYS);
+        }
+
+        Long agentId = null;
+        if (agentIdParam != null && !agentIdParam.isBlank()) {
+            try {
+                agentId = Long.parseLong(agentIdParam);
+            } catch (NumberFormatException e) {
+                error(400, "Invalid 'agentId' — must be numeric");
+                return;
+            }
+        }
+        String channelType = (channelTypeParam != null && !channelTypeParam.isBlank())
+                ? channelTypeParam : null;
+
+        // Build JPQL with positional params. Hibernate's optimizer collapses
+        // the JOIN to the existing idx_message_conversation index plus the
+        // conversation row lookup; for operator-scale traffic the planner is
+        // fast enough that an explicit Message.created_at index isn't needed.
+        var jpql = new StringBuilder(
+                "SELECT m.createdAt, c.agent.id, c.channelType, m.usageJson "
+                        + "FROM Message m JOIN m.conversation c "
+                        + "WHERE m.createdAt >= ?1 "
+                        + "AND m.usageJson IS NOT NULL");
+        int paramIdx = 2;
+        Integer agentParamIdx = null;
+        Integer channelParamIdx = null;
+        if (agentId != null) {
+            jpql.append(" AND c.agent.id = ?").append(paramIdx);
+            agentParamIdx = paramIdx;
+            paramIdx++;
+        }
+        if (channelType != null) {
+            jpql.append(" AND c.channelType = ?").append(paramIdx);
+            channelParamIdx = paramIdx;
+            paramIdx++;
+        }
+        jpql.append(" ORDER BY m.createdAt ASC");
+
+        var query = JPA.em().createQuery(jpql.toString(), Object[].class);
+        query.setParameter(1, since);
+        if (agentParamIdx != null) query.setParameter(agentParamIdx, agentId);
+        if (channelParamIdx != null) query.setParameter(channelParamIdx, channelType);
+
+        var results = query.getResultList();
+
+        var rowsArray = new com.google.gson.JsonArray();
+        for (var r : results) {
+            var row = new JsonObject();
+            row.addProperty("timestamp", ((java.time.Instant) r[0]).toString());
+            row.addProperty("agentId", (Long) r[1]);
+            row.addProperty("channelType", (String) r[2]);
+            row.addProperty("usageJson", (String) r[3]);
+            rowsArray.add(row);
+        }
+
+        var out = new JsonObject();
+        out.addProperty("since", since.toString());
+        out.add("rows", rowsArray);
+        renderJSON(INSTANCE.toJson(out));
     }
 
     /**

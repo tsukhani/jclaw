@@ -127,6 +127,8 @@ GET     /api/logs                               ApiLogsController.list
 # Metrics API (in-memory latency histograms — reset on JVM restart)
 GET     /api/metrics/latency                    ApiMetricsController.latency
 DELETE  /api/metrics/latency                    ApiMetricsController.resetLatency
+# Cost is durable — aggregates persisted Message.usageJson across conversations
+GET     /api/metrics/cost                       ApiMetricsController.cost
 POST    /api/metrics/loadtest                   ApiMetricsController.loadtest
 DELETE  /api/metrics/loadtest                   ApiMetricsController.stopLoadtest
 DELETE  /api/metrics/loadtest/data              ApiMetricsController.cleanLoadtest

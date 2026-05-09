@@ -208,6 +208,228 @@ export function formatConversationCostTooltip(breakdown: ConversationCostBreakdo
     .join('\n')
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// Fleet-level aggregation (JCLAW-28)
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Per-agent aggregation row in the fleet cost summary. */
+export interface FleetCostPerAgent {
+  agentId: number
+  turnCount: number
+  total: number
+  prompt: number
+  completion: number
+  reasoning: number
+  cached: number
+}
+
+/** Per-channel aggregation row in the fleet cost summary. */
+export interface FleetCostPerChannel {
+  channelType: string
+  turnCount: number
+  total: number
+  prompt: number
+  completion: number
+  reasoning: number
+  cached: number
+}
+
+/** Per-model aggregation row in the fleet cost summary. */
+export interface FleetCostPerModel {
+  modelId: string
+  modelProvider?: string
+  turnCount: number
+  total: number
+  prompt: number
+  completion: number
+  reasoning: number
+  cached: number
+}
+
+/**
+ * Whole-fleet cost summary (JCLAW-28). Built by {@link computeFleetCost} from
+ * a list of raw per-turn rows returned by GET /api/metrics/cost.
+ *
+ * <p>{@code total} is the straight sum of each turn's cost at the price regime
+ * frozen on the row when it was emitted (matches {@link ConversationCostBreakdown}'s
+ * semantic). Free-tier turns contribute 0 cost but still count toward
+ * {@code turnCount} and the token subtotals so the operator sees activity for
+ * all-free agents.
+ */
+export interface FleetCostBreakdown {
+  total: number
+  turnCount: number
+  prompt: number
+  completion: number
+  reasoning: number
+  cached: number
+  perAgent: FleetCostPerAgent[]
+  perChannel: FleetCostPerChannel[]
+  perModel: FleetCostPerModel[]
+}
+
+/** Raw row shape returned by GET /api/metrics/cost. */
+export interface FleetCostRow {
+  timestamp: string
+  agentId: number
+  channelType: string
+  /** Original Message.usageJson string. Parse with JSON.parse to MessageUsage. */
+  usageJson: string
+}
+
+/** Filter shape for {@link computeFleetCost}. Null fields = no filter on that dimension. */
+export interface FleetCostFilter {
+  agentId: number | null
+  channelType: string | null
+}
+
+/**
+ * Aggregate raw per-turn rows into total/per-agent/per-channel/per-model
+ * breakdowns. Filter narrows the input set client-side; the time window is
+ * already applied server-side via the {@code since} param. Each filter
+ * dimension is independent — null means "all values."
+ */
+export function computeFleetCost(
+  rows: FleetCostRow[],
+  filter: FleetCostFilter,
+): FleetCostBreakdown {
+  const perAgent = new Map<number, FleetCostPerAgent>()
+  const perChannel = new Map<string, FleetCostPerChannel>()
+  const perModel = new Map<string, FleetCostPerModel>()
+  let total = 0
+  let turnCount = 0
+  let prompt = 0
+  let completion = 0
+  let reasoning = 0
+  let cached = 0
+
+  for (const row of rows) {
+    if (filter.agentId !== null && row.agentId !== filter.agentId) continue
+    if (filter.channelType !== null && row.channelType !== filter.channelType) continue
+
+    let usage: MessageUsage
+    try {
+      usage = JSON.parse(row.usageJson) as MessageUsage
+    }
+    catch {
+      // Malformed payload — skip rather than crash the whole aggregation.
+      // The conversation-detail view does the same defensive handling.
+      continue
+    }
+
+    const turn = computeUsageCostBreakdown(usage)
+    const turnTotal = turn?.total ?? 0
+    const p = usage.prompt ?? 0
+    const c = usage.completion ?? 0
+    const r = usage.reasoning ?? 0
+    const cd = usage.cached ?? 0
+
+    total += turnTotal
+    turnCount++
+    prompt += p
+    completion += c
+    reasoning += r
+    cached += cd
+
+    // Per-agent
+    const agentRow = perAgent.get(row.agentId)
+    if (agentRow) {
+      agentRow.turnCount++
+      agentRow.total += turnTotal
+      agentRow.prompt += p
+      agentRow.completion += c
+      agentRow.reasoning += r
+      agentRow.cached += cd
+    }
+    else {
+      perAgent.set(row.agentId, {
+        agentId: row.agentId,
+        turnCount: 1,
+        total: turnTotal,
+        prompt: p,
+        completion: c,
+        reasoning: r,
+        cached: cd,
+      })
+    }
+
+    // Per-channel
+    const channelRow = perChannel.get(row.channelType)
+    if (channelRow) {
+      channelRow.turnCount++
+      channelRow.total += turnTotal
+      channelRow.prompt += p
+      channelRow.completion += c
+      channelRow.reasoning += r
+      channelRow.cached += cd
+    }
+    else {
+      perChannel.set(row.channelType, {
+        channelType: row.channelType,
+        turnCount: 1,
+        total: turnTotal,
+        prompt: p,
+        completion: c,
+        reasoning: r,
+        cached: cd,
+      })
+    }
+
+    // Per-model. Use modelId as key, falling back to '(unknown)' for rows
+    // that pre-date JCLAW-107's model-identity capture.
+    const modelKey = usage.modelId ?? '(unknown)'
+    const modelRow = perModel.get(modelKey)
+    if (modelRow) {
+      modelRow.turnCount++
+      modelRow.total += turnTotal
+      modelRow.prompt += p
+      modelRow.completion += c
+      modelRow.reasoning += r
+      modelRow.cached += cd
+    }
+    else {
+      perModel.set(modelKey, {
+        modelId: modelKey,
+        modelProvider: usage.modelProvider,
+        turnCount: 1,
+        total: turnTotal,
+        prompt: p,
+        completion: c,
+        reasoning: r,
+        cached: cd,
+      })
+    }
+  }
+
+  return {
+    total,
+    turnCount,
+    prompt,
+    completion,
+    reasoning,
+    cached,
+    // Sort all three breakdowns by cost descending so the highest-spend rows
+    // surface first in the table view.
+    perAgent: Array.from(perAgent.values()).sort((a, b) => b.total - a.total),
+    perChannel: Array.from(perChannel.values()).sort((a, b) => b.total - a.total),
+    perModel: Array.from(perModel.values()).sort((a, b) => b.total - a.total),
+  }
+}
+
+/** Distinct channel types present in the row set, sorted alphabetically. */
+export function listChannelsInRows(rows: FleetCostRow[]): string[] {
+  const set = new Set<string>()
+  for (const r of rows) set.add(r.channelType)
+  return Array.from(set).sort()
+}
+
+/** Format dollar amount with the same convention as formatUsageCost. */
+export function formatCostUsd(cost: number): string {
+  if (cost === 0) return '$0.00'
+  if (cost < 0.0001) return '< $0.0001'
+  return '$' + cost.toFixed(4)
+}
+
 /** Tooltip breakdown showing each billing category separately. */
 export function formatUsageCostTooltip(usage: MessageUsage): string {
   const b = computeUsageCostBreakdown(usage)
