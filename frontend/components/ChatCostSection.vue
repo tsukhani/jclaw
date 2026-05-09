@@ -17,7 +17,10 @@
  * client-side over the loaded rows. Keeps filter switches instant and
  * the network surface small.
  */
-import { ArrowDownTrayIcon, Bars3Icon, PresentationChartLineIcon } from '@heroicons/vue/24/outline'
+import {
+  ArrowDownTrayIcon, Bars3Icon, ChevronDownIcon, ChevronUpIcon,
+  PresentationChartLineIcon,
+} from '@heroicons/vue/24/outline'
 import type { Agent } from '~/types/api'
 import {
   computeFleetCost,
@@ -25,6 +28,7 @@ import {
   listChannelsInRows,
   type FleetCostBreakdown,
   type FleetCostFilter,
+  type FleetCostPerModel,
   type FleetCostRow,
 } from '~/utils/usage-cost'
 
@@ -144,6 +148,60 @@ function agentLabel(id: number): string {
   return agentNameById.value.get(id) ?? `agent #${id}`
 }
 
+// ── Per-model table sort state ────────────────────────────────────────────
+// Operator clicks a column header to sort. Numeric columns default to
+// descending (biggest spend first feels more useful at a glance); the
+// Model column defaults to ascending (alphabetical reads naturally).
+// Click the same column again to flip direction; click a different column
+// to switch and reset to that column's natural default direction.
+type SortColumn = 'model' | 'turnCount' | 'total' | 'prompt' | 'completion' | 'reasoning' | 'cached'
+type SortDir = 'asc' | 'desc'
+
+const sortBy = ref<SortColumn>('total')
+const sortDir = ref<SortDir>('desc')
+
+function defaultDirFor(col: SortColumn): SortDir {
+  return col === 'model' ? 'asc' : 'desc'
+}
+
+function toggleSort(col: SortColumn) {
+  if (sortBy.value === col) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+  }
+  else {
+    sortBy.value = col
+    sortDir.value = defaultDirFor(col)
+  }
+}
+
+function modelLabel(m: FleetCostPerModel): string {
+  return m.modelProvider ? `${m.modelProvider}/${m.modelId}` : m.modelId
+}
+
+const sortedPerModel = computed<FleetCostPerModel[]>(() => {
+  const rows = [...breakdown.value.perModel]
+  const dir = sortDir.value === 'asc' ? 1 : -1
+  rows.sort((a, b) => {
+    let cmp = 0
+    if (sortBy.value === 'model') {
+      cmp = modelLabel(a).localeCompare(modelLabel(b))
+    }
+    else if (sortBy.value === 'turnCount') {
+      cmp = a.turnCount - b.turnCount
+    }
+    else {
+      // total / prompt / completion / reasoning / cached are all numeric
+      // members of FleetCostPerModel with the same name as the column.
+      cmp = (a[sortBy.value] as number) - (b[sortBy.value] as number)
+    }
+    if (cmp !== 0) return cmp * dir
+    // Tie-breaker: alphabetical by model so the order is deterministic
+    // when (e.g.) two free-tier models both report $0.00 cost.
+    return modelLabel(a).localeCompare(modelLabel(b))
+  })
+  return rows
+})
+
 // Chart geometry. Horizontal bars: one per agent (or per model in chart
 // view). Width is proportional to cost share. Inline SVG, no library.
 const chartRows = computed(() => {
@@ -172,13 +230,16 @@ const chartMaxCost = computed(() => {
 
 // CSV export. Generates per-model breakdown (one row per model with cost
 // and token totals) since that's the most actionable view; the operator
-// can pivot externally if they need agent or channel cuts.
+// can pivot externally if they need agent or channel cuts. Honors the
+// active table sort so the export matches what the operator is looking
+// at — useful when they're viewing "sort by reasoning tokens desc" and
+// want that ordering preserved in the spreadsheet.
 function exportCsv() {
   const header = [
     'modelProvider', 'modelId', 'turnCount', 'totalCost',
     'promptTokens', 'completionTokens', 'reasoningTokens', 'cachedTokens',
   ].join(',')
-  const lines = breakdown.value.perModel.map(m => [
+  const lines = sortedPerModel.value.map(m => [
     csvCell(m.modelProvider ?? ''),
     csvCell(m.modelId),
     m.turnCount.toString(),
@@ -416,7 +477,11 @@ defineExpose({ refresh })
         </div>
       </div>
 
-      <!-- Table view: per-model breakdown sorted by cost descending -->
+      <!--
+        Per-model breakdown table. Click any header cell to sort by that
+        column; click again to flip direction. Active column shows a
+        chevron in its sort direction. Default: Cost descending.
+      -->
       <div
         v-if="view === 'table'"
         class="overflow-x-auto"
@@ -424,32 +489,68 @@ defineExpose({ refresh })
         <table class="w-full text-xs">
           <thead class="text-fg-muted bg-muted/20">
             <tr>
-              <th class="text-left px-4 py-2 font-medium">
-                Model
+              <th
+                scope="col"
+                class="text-left px-4 py-2 font-medium"
+              >
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
+                  :class="sortBy === 'model' ? 'text-fg-strong' : ''"
+                  :aria-sort="sortBy === 'model' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
+                  @click="toggleSort('model')"
+                >
+                  Model
+                  <ChevronUpIcon
+                    v-if="sortBy === 'model' && sortDir === 'asc'"
+                    class="w-3 h-3"
+                    aria-hidden="true"
+                  />
+                  <ChevronDownIcon
+                    v-else-if="sortBy === 'model' && sortDir === 'desc'"
+                    class="w-3 h-3"
+                    aria-hidden="true"
+                  />
+                </button>
               </th>
-              <th class="text-right px-3 py-2 font-medium">
-                Turns
-              </th>
-              <th class="text-right px-3 py-2 font-medium">
-                Cost
-              </th>
-              <th class="text-right px-3 py-2 font-medium">
-                Prompt
-              </th>
-              <th class="text-right px-3 py-2 font-medium">
-                Completion
-              </th>
-              <th class="text-right px-3 py-2 font-medium">
-                Reasoning
-              </th>
-              <th class="text-right px-3 py-2 font-medium">
-                Cached
+              <th
+                v-for="col in [
+                  { key: 'turnCount', label: 'Turns' },
+                  { key: 'total', label: 'Cost' },
+                  { key: 'prompt', label: 'Prompt' },
+                  { key: 'completion', label: 'Completion' },
+                  { key: 'reasoning', label: 'Reasoning' },
+                  { key: 'cached', label: 'Cached' },
+                ] as { key: SortColumn, label: string }[]"
+                :key="col.key"
+                scope="col"
+                class="text-right px-3 py-2 font-medium"
+              >
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
+                  :class="sortBy === col.key ? 'text-fg-strong' : ''"
+                  :aria-sort="sortBy === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
+                  @click="toggleSort(col.key)"
+                >
+                  {{ col.label }}
+                  <ChevronUpIcon
+                    v-if="sortBy === col.key && sortDir === 'asc'"
+                    class="w-3 h-3"
+                    aria-hidden="true"
+                  />
+                  <ChevronDownIcon
+                    v-else-if="sortBy === col.key && sortDir === 'desc'"
+                    class="w-3 h-3"
+                    aria-hidden="true"
+                  />
+                </button>
               </th>
             </tr>
           </thead>
           <tbody>
             <tr
-              v-for="m in breakdown.perModel"
+              v-for="m in sortedPerModel"
               :key="m.modelId"
               class="border-t border-border"
             >

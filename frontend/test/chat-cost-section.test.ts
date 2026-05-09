@@ -170,6 +170,103 @@ describe('ChatCostSection (JCLAW-28)', () => {
     expect(csvBtn!.attributes('disabled')).toBeDefined()
   })
 
+  it('sorts table by Cost descending by default', async () => {
+    registerEndpoint('/api/metrics/cost', () => ({
+      since: '2026-04-10T00:00:00Z',
+      rows: [
+        { timestamp: '2026-05-09T12:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: makeUsage({ prompt: 50, completion: 25,
+            modelId: 'cheap-model', modelProvider: 'p',
+            promptPrice: 0.1, completionPrice: 0.2 }) },
+        { timestamp: '2026-05-09T13:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: makeUsage({ prompt: 1000, completion: 500,
+            modelId: 'expensive-model', modelProvider: 'p',
+            promptPrice: 5.0, completionPrice: 10.0 }) },
+      ],
+    }))
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    const rows = wrapper.findAll('tbody tr')
+    // expensive-model has the higher cost — should be first row by default.
+    expect(rows[0]!.text()).toContain('expensive-model')
+    expect(rows[1]!.text()).toContain('cheap-model')
+  })
+
+  it('flips direction when the same column header is clicked twice', async () => {
+    registerEndpoint('/api/metrics/cost', () => ({
+      since: '2026-04-10T00:00:00Z',
+      rows: [
+        { timestamp: '2026-05-09T12:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: makeUsage({ prompt: 100, modelId: 'a-model' }) },
+        { timestamp: '2026-05-09T13:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: makeUsage({ prompt: 200, modelId: 'b-model' }) },
+      ],
+    }))
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    const promptHeader = wrapper.findAll('thead button').find(b => b.text().includes('Prompt'))!
+    // First click: sort by Prompt descending (numeric default).
+    await promptHeader.trigger('click')
+    await flushPromises()
+    let rows = wrapper.findAll('tbody tr')
+    expect(rows[0]!.text()).toContain('b-model') // 200 prompt tokens
+    expect(rows[1]!.text()).toContain('a-model') // 100 prompt tokens
+    // Second click: flip to ascending.
+    await promptHeader.trigger('click')
+    await flushPromises()
+    rows = wrapper.findAll('tbody tr')
+    expect(rows[0]!.text()).toContain('a-model')
+    expect(rows[1]!.text()).toContain('b-model')
+  })
+
+  it('sorts the Model column alphabetically ascending by default', async () => {
+    // Strings default to ascending — alphabetical order reads naturally
+    // for the operator scanning model names.
+    registerEndpoint('/api/metrics/cost', () => ({
+      since: '2026-04-10T00:00:00Z',
+      rows: [
+        { timestamp: '2026-05-09T12:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: makeUsage({ modelId: 'zeta-model' }) },
+        { timestamp: '2026-05-09T13:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: makeUsage({ modelId: 'alpha-model' }) },
+      ],
+    }))
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    const modelHeader = wrapper.findAll('thead button').find(b => b.text().includes('Model'))!
+    await modelHeader.trigger('click')
+    await flushPromises()
+    const rows = wrapper.findAll('tbody tr')
+    expect(rows[0]!.text()).toContain('alpha-model')
+    expect(rows[1]!.text()).toContain('zeta-model')
+  })
+
+  it('shows a chevron indicator on the active sort column', async () => {
+    registerEndpoint('/api/metrics/cost', () => ({
+      since: '2026-04-10T00:00:00Z',
+      rows: [
+        { timestamp: '2026-05-09T12:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: makeUsage() },
+      ],
+    }))
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    // Default active column is Cost (descending). Cost button should carry
+    // a chevron-down svg; Model button should not.
+    const costHeader = wrapper.findAll('thead button').find(b => b.text().includes('Cost'))!
+    const modelHeader = wrapper.findAll('thead button').find(b => b.text().includes('Model'))!
+    expect(costHeader.find('svg').exists()).toBe(true)
+    expect(modelHeader.find('svg').exists()).toBe(false)
+  })
+
   it('exposes refresh via defineExpose', async () => {
     registerEndpoint('/api/metrics/cost', () => ({
       since: '2026-04-10T00:00:00Z',
