@@ -741,9 +741,24 @@ public class AgentRunner {
 
         if (checkCancelled(isCancelled, agent, channelType, cb)) return;
 
+        // JCLAW-165: fire AUDIO_PASSTHROUGH_OUTCOME for the round-1 LLM call
+        // when the request carried audio. Streaming has no retry (you can't
+        // un-send streamed tokens) so the outcome here is binary — accepted
+        // or error. transcript_awaited is true when the rewrite already ran
+        // (text-only model), false when the audio rode native (passthrough
+        // happy path on a supportsAudio model).
+        boolean hasAudioForStream = !prepared.audioBearers().isEmpty();
         if (accumulator.error != null) {
+            if (hasAudioForStream) {
+                logAudioPassthroughOutcome(agent, conversation, primary, "error",
+                        shortErrorTag(accumulator.error), !supportsAudioForStream);
+            }
             cb.onError().accept(accumulator.error);
             return;
+        }
+        if (hasAudioForStream) {
+            logAudioPassthroughOutcome(agent, conversation, primary, "accepted",
+                    null, !supportsAudioForStream);
         }
 
         // Round 1 folded into turn-level usage. addRound also propagates
