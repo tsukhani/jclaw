@@ -24,9 +24,25 @@ public class DefaultConfigJob extends Job<Void> {
         seedToolConfig();
         seedDefaultAgent();
         seedDispatcherTuning();
+        seedTranscription();
         agents.SkillLoader.syncSkillConfigs();
         utils.HttpFactories.applyDispatcherConfig();
+        // JCLAW-163: prime the ffmpeg cache so the Settings UI can render a
+        // "ffmpeg missing" banner without paying the probe cost on first
+        // page load. Cheap (~ms when ffmpeg is present, ~tens of ms when not).
+        services.transcription.FfmpegProbe.probe();
         EventLogger.info("system", "Default configuration seeded");
+    }
+
+    /**
+     * JCLAW-163: seed the local Whisper model selection so the Settings UI
+     * has a defined default to display, and the writer (JCLAW-165) has a
+     * non-null model to ensure-available before the first audio attachment
+     * lands.
+     */
+    private void seedTranscription() {
+        seedIfAbsent("transcription.localModel",
+                services.transcription.WhisperModel.DEFAULT.id());
     }
 
     /**

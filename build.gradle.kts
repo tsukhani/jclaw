@@ -250,4 +250,9 @@ dependencies {
     // JCLAW-185: SSE + MockWebServer 5.x (plain POMs, no -jvm suffix).
     implementation("com.squareup.okhttp3:okhttp-sse:5.3.2")
     implementation("com.squareup.okhttp3:mockwebserver3:5.3.2")
+
+    // JCLAW-163: whisper.cpp via JNI for offline transcription. The artifact
+    // bundles native libs for every developer-laptop platform (mac arm64/x64,
+    // linux x64, win x64) so there's no per-platform install dance.
+    implementation("io.github.givimad:whisper-jni:1.7.1")
 }

@@ -1,0 +1,185 @@
+import mockwebserver3.MockResponse;
+import mockwebserver3.MockWebServer;
+import okio.Buffer;
+import okio.ByteString;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import play.test.UnitTest;
+import services.transcription.WhisperModel;
+import services.transcription.WhisperModelManager;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.HexFormat;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Verifies {@link WhisperModelManager} download semantics in isolation:
+ * the HEAD-then-GET dance, SHA256 verification against the
+ * {@code X-Linked-Etag} HF header, and concurrent-call coalescing.
+ *
+ * <p>Uses {@code mockwebserver3} (already on the classpath for OkHttp 5
+ * SSE tests) so the manager makes real socket connections to a server we
+ * control — that exercises the OkHttp path end-to-end rather than mocking
+ * the client out.
+ */
+public class WhisperModelManagerTest extends UnitTest {
+
+    private MockWebServer server;
+    private Path tempRoot;
+    private static final WhisperModel MODEL = WhisperModel.BASE_EN;
+
+    @BeforeEach
+    public void setUp() throws Exception {
+        server = new MockWebServer();
+        server.start();
+        tempRoot = Files.createTempDirectory("whisper-model-test-");
+        WhisperModelManager.resetForTest();
+        WhisperModelManager.setRootForTest(tempRoot);
+    }
+
+    @AfterEach
+    public void tearDown() throws Exception {
+        WhisperModelManager.resetForTest();
+        server.close();
+        deleteRecursive(tempRoot);
+    }
+
+    @Test
+    public void download_succeeds_whenSha256MatchesHfEtag() throws Exception {
+        var body = "fake-ggml-model-bytes-payload-of-arbitrary-length".getBytes();
+        var sha256 = sha256Hex(body);
+
+        enqueueHeadResponse(sha256, body.length);
+        enqueueGetResponse(body);
+
+        var url = server.url("/" + MODEL.filename()).toString();
+        var path = WhisperModelManager.doDownload(MODEL, url, null);
+
+        assertEquals(WhisperModelManager.localPath(MODEL), path,
+                "download writes to the manager's resolved local path");
+        assertTrue(Files.isRegularFile(path), "file should exist after successful download");
+        assertArrayEquals(body, Files.readAllBytes(path),
+                "file contents should match exactly what the mock server sent");
+        var status = WhisperModelManager.status(MODEL);
+        assertEquals(WhisperModelManager.State.AVAILABLE, status.state(),
+                "status should land on AVAILABLE after a successful download");
+    }
+
+    @Test
+    public void download_throwsAndDeletesPartial_onSha256Mismatch() throws Exception {
+        var body = "the-real-bytes-the-server-streams-to-us".getBytes();
+        var lyingHash = sha256Hex("a-completely-different-payload-than-what-was-sent".getBytes());
+
+        enqueueHeadResponse(lyingHash, body.length);
+        enqueueGetResponse(body);
+
+        var url = server.url("/" + MODEL.filename()).toString();
+        var io = assertThrows(IOException.class,
+                () -> WhisperModelManager.doDownload(MODEL, url, null),
+                "hash mismatch must throw");
+        assertTrue(io.getMessage().contains("SHA256 mismatch"),
+                "error message should name the SHA256 mismatch: " + io.getMessage());
+        assertFalse(Files.exists(WhisperModelManager.localPath(MODEL)),
+                "final file must not exist on hash failure");
+        assertFalse(Files.exists(tempRoot.resolve(MODEL.filename() + ".part")),
+                "partial file must be cleaned up on hash failure");
+    }
+
+    @Test
+    public void ensureAvailable_coalescesConcurrentCallers_toSingleDownload() throws Exception {
+        var body = "single-flight-test-body-bytes-with-enough-mass-to-be-real".getBytes();
+        var sha256 = sha256Hex(body);
+
+        // Two callers will arrive at ensureAvailable concurrently. Only ONE
+        // pair of HEAD+GET should hit the server — the other caller must
+        // attach to the in-flight CompletableFuture.
+        enqueueHeadResponse(sha256, body.length);
+        enqueueGetResponse(body);
+
+        // Override URL by using an in-process trick: we register two callers
+        // both calling ensureAvailable; the manager will use the model's
+        // built-in URL, which we can't easily redirect. Instead, exercise
+        // single-flight via the in-flight map directly.
+        var ready = new CountDownLatch(2);
+        var go = new CountDownLatch(1);
+        var hits = new AtomicInteger();
+
+        // Pre-populate the in-flight map with a future we control to prove
+        // the coalescing contract holds: subsequent ensureAvailable callers
+        // observing an in-flight future receive the SAME instance.
+        var sentinel = new CompletableFuture<Path>();
+        WhisperModelManager.putInFlightForTest(MODEL.id(), sentinel);
+
+        var t1 = Thread.ofVirtual().start(() -> {
+            ready.countDown();
+            try { go.await(); } catch (InterruptedException ignored) {}
+            var f = WhisperModelManager.ensureAvailable(MODEL, null);
+            if (f == sentinel) hits.incrementAndGet();
+        });
+        var t2 = Thread.ofVirtual().start(() -> {
+            ready.countDown();
+            try { go.await(); } catch (InterruptedException ignored) {}
+            var f = WhisperModelManager.ensureAvailable(MODEL, null);
+            if (f == sentinel) hits.incrementAndGet();
+        });
+
+        assertTrue(ready.await(2, TimeUnit.SECONDS), "both threads should reach the gate");
+        go.countDown();
+
+        // Complete the sentinel so threads exit; the assertion of interest
+        // is that BOTH callers got the same future, not whether the body
+        // was delivered.
+        var dummy = tempRoot.resolve(MODEL.filename());
+        Files.writeString(dummy, "stub");
+        sentinel.complete(dummy);
+
+        t1.join(2000);
+        t2.join(2000);
+
+        assertEquals(2, hits.get(),
+                "both concurrent ensureAvailable callers must receive the in-flight CompletableFuture, "
+                        + "not a fresh one");
+    }
+
+    private void enqueueHeadResponse(String sha256, long size) {
+        // mockwebserver3 distinguishes HEAD vs GET by the request method;
+        // the response body is irrelevant for HEAD. We only need the headers.
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("X-Linked-Etag", "\"" + sha256 + "\"")
+                .addHeader("X-Linked-Size", String.valueOf(size))
+                .build());
+    }
+
+    private void enqueueGetResponse(byte[] body) {
+        var buf = new Buffer();
+        buf.write(ByteString.of(body));
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/octet-stream")
+                .body(buf)
+                .build());
+    }
+
+    private static String sha256Hex(byte[] bytes) throws Exception {
+        var md = MessageDigest.getInstance("SHA-256");
+        return HexFormat.of().formatHex(md.digest(bytes));
+    }
+
+    private static void deleteRecursive(Path dir) throws IOException {
+        if (!Files.exists(dir)) return;
+        try (var stream = Files.walk(dir)) {
+            stream.sorted(java.util.Comparator.reverseOrder())
+                    .forEach(p -> { try { Files.deleteIfExists(p); } catch (IOException ignored) {} });
+        }
+    }
+}

@@ -46,7 +46,8 @@ public class ShutdownJob extends Job<Void> {
                 TaskPollerJob::shutdownGracefully,
                 PlaywrightBrowserTool::closeAllSessions,
                 TelegramPollingRunner::stop,
-                TelegramStreamingSink::shutdown
+                TelegramStreamingSink::shutdown,
+                services.transcription.WhisperJniTranscriber::shutdown
         );
 
         var latch = new CountDownLatch(components.size());
