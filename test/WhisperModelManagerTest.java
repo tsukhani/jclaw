@@ -146,26 +146,18 @@ public class WhisperModelManagerTest extends UnitTest {
 
     @Test
     public void ensureAvailable_coalescesConcurrentCallers_toSingleDownload() throws Exception {
-        var body = "single-flight-test-body-bytes-with-enough-mass-to-be-real".getBytes();
-        var sha256 = sha256Hex(body);
-
-        // Two callers will arrive at ensureAvailable concurrently. Only ONE
-        // pair of HEAD+GET should hit the server — the other caller must
-        // attach to the in-flight CompletableFuture.
-        enqueueHeadResponse(sha256, body.length);
-        enqueueGetResponse(body);
-
-        // Override URL by using an in-process trick: we register two callers
-        // both calling ensureAvailable; the manager will use the model's
-        // built-in URL, which we can't easily redirect. Instead, exercise
-        // single-flight via the in-flight map directly.
+        // Two callers arrive at ensureAvailable concurrently with an
+        // in-flight future already seeded; both must receive that same
+        // future instance rather than each kicking off a fresh download.
+        // The test threads compare references and exit — they never call
+        // f.get(), so the seeded sentinel intentionally stays incomplete.
+        // No file is written under tempRoot, so availableLocally(model)
+        // returns false on every call and the inFlight.computeIfAbsent
+        // path is the only one exercised.
         var ready = new CountDownLatch(2);
         var go = new CountDownLatch(1);
         var hits = new AtomicInteger();
 
-        // Pre-populate the in-flight map with a future we control to prove
-        // the coalescing contract holds: subsequent ensureAvailable callers
-        // observing an in-flight future receive the SAME instance.
         var sentinel = new CompletableFuture<Path>();
         WhisperModelManager.putInFlightForTest(MODEL.id(), sentinel);
 
@@ -184,13 +176,6 @@ public class WhisperModelManagerTest extends UnitTest {
 
         assertTrue(ready.await(2, TimeUnit.SECONDS), "both threads should reach the gate");
         go.countDown();
-
-        // Complete the sentinel so threads exit; the assertion of interest
-        // is that BOTH callers got the same future, not whether the body
-        // was delivered.
-        var dummy = tempRoot.resolve(MODEL.filename());
-        Files.writeString(dummy, "stub");
-        sentinel.complete(dummy);
 
         t1.join(2000);
         t2.join(2000);
