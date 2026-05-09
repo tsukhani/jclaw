@@ -1,17 +1,21 @@
 <script setup lang="ts">
 /**
- * Interactive capability toggles (thinking / vision / audio) for an agent.
+ * Interactive capability toggles (thinking / vision) for an agent.
  *
  * Pills render only when the selected model advertises the capability. Each
  * pill is a button that toggles the agent's override for that capability:
  * colored when active, muted when disabled. Parents listen for the `toggle`
  * event and are responsible for persisting the new state (local form mutation
  * on the edit page, PUT /api/agents/{id} on the listing page).
+ *
+ * JCLAW-165 retired the audio pill — the transcription pipeline gives every
+ * model an audio path so a per-agent audio toggle no longer changes any
+ * user-visible behaviour.
  */
 import type { ProviderModel } from '~/composables/useProviders'
-import { Lightbulb, Eye, Volume2 } from 'lucide-vue-next'
+import { Lightbulb, Eye } from 'lucide-vue-next'
 
-export type Capability = 'thinking' | 'vision' | 'audio'
+export type Capability = 'thinking' | 'vision'
 
 const props = withDefaults(defineProps<{
   model: ProviderModel | null | undefined
@@ -19,13 +23,11 @@ const props = withDefaults(defineProps<{
   thinkingMode?: string | null
   /** null or true render as on; only explicit false renders as off. */
   visionEnabled?: boolean | null
-  audioEnabled?: boolean | null
   /** Controls pill height / icon size. Defaults to the compact listing size. */
   size?: 'sm' | 'md'
 }>(), {
   thinkingMode: null,
   visionEnabled: null,
-  audioEnabled: null,
   size: 'sm',
 })
 
@@ -46,6 +48,10 @@ interface PillDef {
 const pills = computed<PillDef[]>(() => {
   const m = props.model
   if (!m) return []
+  // JCLAW-165 retired the audio pill. Every model can consume audio now
+  // (text-only models via transcript, audio-capable models via native
+  // input_audio passthrough), so an Audio capability pill no longer
+  // changes any user-visible behaviour and was being toggled to no effect.
   const all: PillDef[] = [
     {
       capability: 'thinking',
@@ -62,14 +68,6 @@ const pills = computed<PillDef[]>(() => {
       supported: !!m.supportsVision,
       enabled: props.visionEnabled !== false,
       onCls: 'text-sky-400 border-sky-400/40 bg-sky-400/5 hover:bg-sky-400/10',
-    },
-    {
-      capability: 'audio',
-      label: 'audio',
-      icon: Volume2,
-      supported: !!m.supportsAudio,
-      enabled: props.audioEnabled !== false,
-      onCls: 'text-amber-400 border-amber-400/40 bg-amber-400/5 hover:bg-amber-400/10',
     },
   ]
   return all.filter(p => p.supported)

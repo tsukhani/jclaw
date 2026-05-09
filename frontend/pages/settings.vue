@@ -168,8 +168,24 @@ const { data: transcriptionState, refresh: refreshTranscriptionState }
   = await useFetch<TranscriptionState>('/api/transcription/state')
 
 const selectedTranscriptionProvider = computed(() =>
-  configData.value?.entries?.find(e => e.key === 'transcription.provider')?.value ?? 'whisper-local',
+  configData.value?.entries?.find(e => e.key === 'transcription.provider')?.value ?? '',
 )
+// Master toggle: presence of a non-empty transcription.provider IS the
+// "enabled" state. No separate config key needed; toggling off clears the
+// value and toggling on defaults to whisper-local (the only backend that
+// works without external setup, so it's the safest fresh-enable target).
+const transcriptionEnabled = computed(() =>
+  selectedTranscriptionProvider.value.trim().length > 0,
+)
+async function toggleTranscriptionEnabled() {
+  saving.value = true
+  try {
+    const next = transcriptionEnabled.value ? '' : 'whisper-local'
+    await $fetch('/api/config', { method: 'POST', body: { key: 'transcription.provider', value: next } })
+    refresh()
+  }
+  finally { saving.value = false }
+}
 const selectedLocalModel = computed(() =>
   configData.value?.entries?.find(e => e.key === 'transcription.localModel')?.value ?? 'small.en',
 )
@@ -2297,85 +2313,126 @@ async function handleResetPassword() {
         Transcription
       </h2>
       <p class="text-xs text-fg-muted">
-        Audio attachments are transcribed before being sent to the LLM. Pick a backend below.
-        Cloud options reuse the API keys configured in <span class="text-fg-muted">LLM Providers</span> above;
-        the self-hosted option runs <span class="font-mono">whisper.cpp</span> locally and downloads its
-        model from Hugging Face on first use.
+        Pair every audio attachment with a text transcript before it reaches the LLM.
+        Audio-capable models still receive native audio; text-only models receive the
+        transcript as text. Cloud options reuse the API keys configured in
+        <span class="text-fg-muted">LLM Providers</span> above; the self-hosted option
+        runs <span class="font-mono">whisper.cpp</span> locally and downloads its model
+        from Hugging Face on first use.
       </p>
-      <div
-        v-if="transcriptionState && !transcriptionState.ffmpegAvailable"
-        class="px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 text-[11px] text-amber-800 dark:text-amber-300"
-      >
-        ⚠ <span class="font-mono">ffmpeg</span> is not on PATH. The self-hosted Whisper backend
-        needs ffmpeg to convert audio attachments to PCM before inference.
-        Install it (e.g. <span class="font-mono">brew install ffmpeg</span>) and reload this page.
-        <span
-          v-if="transcriptionState?.ffmpegReason"
-          class="block opacity-70 mt-0.5"
-        >Probe: {{ transcriptionState.ffmpegReason }}</span>
-      </div>
-      <fieldset class="bg-surface-elevated border border-border">
-        <legend class="sr-only">Transcription backend</legend>
-        <div class="divide-y divide-border">
-          <label
-            class="px-4 py-2.5 flex items-center gap-3"
-            :class="openrouterApiKeyConfigured ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'"
-            :title="openrouterApiKeyConfigured ? '' : 'Add an OpenRouter API key in LLM Providers above to enable.'"
-          >
-            <input
-              type="radio"
-              name="transcription-provider"
-              value="openrouter"
-              :checked="selectedTranscriptionProvider === 'openrouter'"
-              :disabled="!openrouterApiKeyConfigured"
-              class="accent-emerald-600"
-              @change="setTranscriptionProvider('openrouter')"
-            >
-            <span class="flex-1 text-sm text-fg-primary">OpenRouter</span>
-            <span
-              v-if="!openrouterApiKeyConfigured"
-              class="text-[10px] text-fg-muted border border-input px-1"
-            >no API key</span>
-          </label>
-          <label
-            class="px-4 py-2.5 flex items-center gap-3"
-            :class="openaiApiKeyConfigured ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'"
-            :title="openaiApiKeyConfigured ? '' : 'Add an OpenAI API key in LLM Providers above to enable.'"
-          >
-            <input
-              type="radio"
-              name="transcription-provider"
-              value="openai"
-              :checked="selectedTranscriptionProvider === 'openai'"
-              :disabled="!openaiApiKeyConfigured"
-              class="accent-emerald-600"
-              @change="setTranscriptionProvider('openai')"
-            >
-            <span class="flex-1 text-sm text-fg-primary">OpenAI</span>
-            <span
-              v-if="!openaiApiKeyConfigured"
-              class="text-[10px] text-fg-muted border border-input px-1"
-            >no API key</span>
-          </label>
-          <label class="px-4 py-2.5 flex items-center gap-3 cursor-pointer">
-            <input
-              type="radio"
-              name="transcription-provider"
-              value="whisper-local"
-              :checked="selectedTranscriptionProvider === 'whisper-local'"
-              class="accent-emerald-600"
-              @change="setTranscriptionProvider('whisper-local')"
-            >
-            <span class="flex-1 text-sm text-fg-primary">Self-Hosted Whisper</span>
-            <span class="text-[10px] text-fg-muted border border-input px-1">offline</span>
-          </label>
-        </div>
-      </fieldset>
 
-      <div
-        v-if="selectedTranscriptionProvider === 'whisper-local'"
-        class="bg-surface-elevated border border-border"
-      >
+      <!-- Master toggle: ON when transcription.provider is non-empty. -->
+      <div class="bg-surface-elevated border border-border">
+        <label class="px-4 py-2.5 flex items-center gap-3 cursor-pointer">
+          <button
+            type="button"
+            :aria-pressed="transcriptionEnabled"
+            aria-label="Enable transcription"
+            :class="transcriptionEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+            class="relative w-9 h-5 rounded-full transition-colors"
+            @click="toggleTranscriptionEnabled"
+          >
+            <span
+              :class="transcriptionEnabled ? 'translate-x-4' : 'translate-x-0.5'"
+              class="block w-4 h-4 bg-white rounded-full transition-transform"
+            />
+          </button>
+          <span class="text-sm font-medium text-fg-strong">Enable transcription</span>
+          <span class="ml-auto text-[11px] text-fg-muted">
+            {{ transcriptionEnabled ? 'on' : 'off' }}
+          </span>
+        </label>
+      </div>
+
+      <template v-if="transcriptionEnabled">
+        <div
+          v-if="transcriptionState && !transcriptionState.ffmpegAvailable && selectedTranscriptionProvider === 'whisper-local'"
+          class="px-3 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 text-[11px] text-amber-800 dark:text-amber-300"
+        >
+          ⚠ <span class="font-mono">ffmpeg</span> is not on PATH. The self-hosted Whisper backend
+          needs ffmpeg to convert audio attachments to PCM before inference.
+          Install it (e.g. <span class="font-mono">brew install ffmpeg</span>) and reload this page.
+          <span
+            v-if="transcriptionState?.ffmpegReason"
+            class="block opacity-70 mt-0.5"
+          >Probe: {{ transcriptionState.ffmpegReason }}</span>
+        </div>
+        <fieldset class="bg-surface-elevated border border-border">
+          <legend class="sr-only">Transcription backend</legend>
+          <div class="divide-y divide-border">
+            <label
+              class="px-4 py-2.5 flex items-center gap-3"
+              :class="openrouterApiKeyConfigured
+                ? 'cursor-pointer'
+                : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+              :title="openrouterApiKeyConfigured ? '' : 'Add an OpenRouter API key in LLM Providers above to enable.'"
+            >
+              <input
+                type="radio"
+                name="transcription-provider"
+                value="openrouter"
+                :checked="selectedTranscriptionProvider === 'openrouter'"
+                :disabled="!openrouterApiKeyConfigured"
+                class="accent-emerald-600"
+                @change="setTranscriptionProvider('openrouter')"
+              >
+              <span
+                class="flex-1 text-sm"
+                :class="openrouterApiKeyConfigured
+                  ? 'text-fg-primary'
+                  : 'text-amber-800 dark:text-amber-300 opacity-80'"
+              >OpenRouter</span>
+              <span
+                v-if="!openrouterApiKeyConfigured"
+                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              >no API key — configure in LLM Providers</span>
+            </label>
+            <label
+              class="px-4 py-2.5 flex items-center gap-3"
+              :class="openaiApiKeyConfigured
+                ? 'cursor-pointer'
+                : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+              :title="openaiApiKeyConfigured ? '' : 'Add an OpenAI API key in LLM Providers above to enable.'"
+            >
+              <input
+                type="radio"
+                name="transcription-provider"
+                value="openai"
+                :checked="selectedTranscriptionProvider === 'openai'"
+                :disabled="!openaiApiKeyConfigured"
+                class="accent-emerald-600"
+                @change="setTranscriptionProvider('openai')"
+              >
+              <span
+                class="flex-1 text-sm"
+                :class="openaiApiKeyConfigured
+                  ? 'text-fg-primary'
+                  : 'text-amber-800 dark:text-amber-300 opacity-80'"
+              >OpenAI</span>
+              <span
+                v-if="!openaiApiKeyConfigured"
+                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              >no API key — configure in LLM Providers</span>
+            </label>
+            <label class="px-4 py-2.5 flex items-center gap-3 cursor-pointer">
+              <input
+                type="radio"
+                name="transcription-provider"
+                value="whisper-local"
+                :checked="selectedTranscriptionProvider === 'whisper-local'"
+                class="accent-emerald-600"
+                @change="setTranscriptionProvider('whisper-local')"
+              >
+              <span class="flex-1 text-sm text-fg-primary">Self-Hosted Whisper</span>
+              <span class="text-[10px] text-fg-muted border border-input px-1">offline</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div
+          v-if="selectedTranscriptionProvider === 'whisper-local'"
+          class="bg-surface-elevated border border-border"
+        >
         <div class="px-4 py-2.5 flex items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-32 shrink-0">Model size</span>
           <select
@@ -2438,7 +2495,8 @@ async function handleResetPassword() {
         >
           {{ selectedLocalModelStatus.error }}
         </div>
-      </div>
+        </div>
+      </template>
     </div>
 
     <!-- Chat Settings -->

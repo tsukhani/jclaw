@@ -122,28 +122,25 @@ public class AgentServiceTest extends UnitTest {
     // =====================
 
     @Test
-    public void updatePreservesVisionAndAudioOverloadDefaults() {
+    public void updatePreservesVisionOverloadDefault() {
         // The 5-arg overload (agent, name, provider, modelId, enabled) must
-        // forward the agent's existing vision/audio overrides untouched.
+        // forward the agent's existing vision override untouched. JCLAW-165
+        // retired the parallel audio toggle.
         var agent = AgentService.create("svc-update-preserve", "openrouter", "gpt-4.1");
         agent.visionEnabled = true;
-        agent.audioEnabled = false;
         agent.save();
 
         var updated = AgentService.update(agent, agent.name, agent.modelProvider, agent.modelId, true);
         assertEquals(Boolean.TRUE, updated.visionEnabled,
                 "5-arg overload must preserve visionEnabled");
-        assertEquals(Boolean.FALSE, updated.audioEnabled,
-                "5-arg overload must preserve audioEnabled");
     }
 
     @Test
-    public void updateAcceptsExplicitVisionAndAudioOverrides() {
+    public void updateAcceptsExplicitVisionOverride() {
         var agent = AgentService.create("svc-update-explicit", "openrouter", "gpt-4.1");
         var updated = AgentService.update(agent, agent.name, agent.modelProvider,
-                agent.modelId, true, null, Boolean.TRUE, Boolean.FALSE);
+                agent.modelId, true, null, Boolean.TRUE);
         assertEquals(Boolean.TRUE, updated.visionEnabled);
-        assertEquals(Boolean.FALSE, updated.audioEnabled);
     }
 
     @Test

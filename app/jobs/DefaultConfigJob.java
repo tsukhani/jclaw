@@ -91,6 +91,12 @@ public class DefaultConfigJob extends Job<Void> {
         try (var conn = play.db.DB.getDataSource("default").getConnection();
              var stmt = conn.createStatement()) {
             stmt.execute("ALTER TABLE agent DROP COLUMN IF EXISTS is_default");
+            // JCLAW-165 cleanup: per-agent audio toggle is no longer
+            // meaningful — the transcription pipeline lets every model
+            // consume audio (text-only via transcript, audio-capable via
+            // native input_audio passthrough). The gate that read this
+            // column is gone; the column itself is now dead weight.
+            stmt.execute("ALTER TABLE agent DROP COLUMN IF EXISTS audio_enabled");
             stmt.execute("ALTER TABLE conversation DROP COLUMN IF EXISTS title_generated");
             stmt.execute("ALTER TABLE conversation DROP COLUMN IF EXISTS title_generation_count");
             stmt.execute("ALTER TABLE message ADD COLUMN IF NOT EXISTS reasoning TEXT");

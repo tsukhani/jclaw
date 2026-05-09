@@ -20,6 +20,8 @@ describe('ModelCapabilityPills', () => {
   })
 
   it('renders only supported capabilities', async () => {
+    // JCLAW-165: audio pill retired since transcription gives every model
+    // an audio path; only thinking/vision render now.
     const wrapper = await mountSuspended(ModelCapabilityPills, {
       props: { model: { id: 'm', supportsThinking: true, supportsAudio: true } },
     })
@@ -27,7 +29,7 @@ describe('ModelCapabilityPills', () => {
     const text = wrapper.text()
     expect(text).toContain('thinking')
     expect(text).not.toContain('vision')
-    expect(text).toContain('audio')
+    expect(text).not.toContain('audio')
   })
 
   it('thinking pill is on when thinkingMode is a non-empty string', async () => {

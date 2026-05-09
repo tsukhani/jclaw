@@ -16,8 +16,6 @@ export interface Agent {
   providerConfigured?: boolean
   /** Whether vision input is enabled for this agent (null when not applicable to the model). */
   visionEnabled?: boolean | null
-  /** Whether audio input is enabled for this agent (null when not applicable to the model). */
-  audioEnabled?: boolean | null
 }
 
 /**

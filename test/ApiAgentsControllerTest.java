@@ -284,30 +284,28 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     // =====================
-    // Vision / audio toggle persistence on update
+    // Vision toggle persistence on update — JCLAW-165 retired the audio toggle
+    // since the transcription pipeline lets every model consume audio.
     // =====================
 
     @Test
-    public void updatePersistsExplicitVisionAndAudioToggles() {
+    public void updatePersistsExplicitVisionToggle() {
         login();
-        var id = createAgent("vision-audio-agent");
+        var id = createAgent("vision-agent");
         var body = """
-                {"visionEnabled": true, "audioEnabled": false}
+                {"visionEnabled": true}
                 """;
         var resp = PUT("/api/agents/" + id, "application/json", body);
         assertIsOk(resp);
         var content = getContent(resp);
         assertTrue(content.contains("\"visionEnabled\":true"),
                 "visionEnabled must persist as true: " + content);
-        assertTrue(content.contains("\"audioEnabled\":false"),
-                "audioEnabled must persist as false: " + content);
 
         // GET round-trip confirms persistence (not just response shaping).
         var getResp = GET("/api/agents/" + id);
         assertIsOk(getResp);
         var getContentBody = getContent(getResp);
         assertTrue(getContentBody.contains("\"visionEnabled\":true"));
-        assertTrue(getContentBody.contains("\"audioEnabled\":false"));
     }
 
     // =====================

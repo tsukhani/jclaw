@@ -62,7 +62,7 @@ public class ApiAgentsController extends Controller {
     private record AgentView(Long id, String name, String description,
                              String modelProvider, String modelId,
                              boolean enabled, boolean isMain, String thinkingMode,
-                             Boolean visionEnabled, Boolean audioEnabled,
+                             Boolean visionEnabled,
                              String createdAt, String updatedAt, boolean providerConfigured) {
         static AgentView of(Agent a) {
             return of(a, AgentService.isProviderConfigured(a.modelProvider, a.modelId));
@@ -82,7 +82,7 @@ public class ApiAgentsController extends Controller {
         private static AgentView of(Agent a, boolean configured) {
             return new AgentView(a.id, a.name, a.description, a.modelProvider, a.modelId,
                     a.enabled, a.isMain(), a.thinkingMode,
-                    a.visionEnabled, a.audioEnabled,
+                    a.visionEnabled,
                     a.createdAt.toString(), a.updatedAt.toString(), configured);
         }
     }
@@ -260,18 +260,15 @@ public class ApiAgentsController extends Controller {
                 ? readOptionalString(body, "thinkingMode")
                 : agent.thinkingMode;
 
-        // visionEnabled / audioEnabled follow the same absent-leaves-untouched
-        // convention as thinkingMode. Three-state semantics (null/true/false)
-        // are preserved end-to-end: a JSON null in the body clears the override
-        // (falling back to the model's capability default); true or false pins
-        // the operator's explicit choice. Both pills on the chat page PUT
-        // boolean values only; null arrives only from a rare API consumer.
+        // visionEnabled follows the same absent-leaves-untouched convention as
+        // thinkingMode. Three-state semantics (null/true/false) are preserved
+        // end-to-end: a JSON null in the body clears the override (falling
+        // back to the model's capability default); true or false pins the
+        // operator's explicit choice. The pill on the chat page PUTs boolean
+        // values only; null arrives only from a rare API consumer.
         var visionEnabled = body.has("visionEnabled")
                 ? readOptionalBoolean(body, "visionEnabled")
                 : agent.visionEnabled;
-        var audioEnabled = body.has("audioEnabled")
-                ? readOptionalBoolean(body, "audioEnabled")
-                : agent.audioEnabled;
         // description follows the same absent-leaves-untouched convention; an
         // explicit null or blank clears the field.
         var description = body.has("description")
@@ -279,7 +276,7 @@ public class ApiAgentsController extends Controller {
                 : agent.description;
 
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode,
-                visionEnabled, audioEnabled, description);
+                visionEnabled, description);
         renderJSON(gson.toJson(AgentView.of(agent)));
     }
 

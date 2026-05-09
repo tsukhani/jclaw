@@ -73,7 +73,6 @@ interface AgentForm {
   thinkingMode: string
   /** null preserves the "inherit capability default" semantic on untouched saves. */
   visionEnabled: boolean | null
-  audioEnabled: boolean | null
 }
 const form = ref<AgentForm>({
   name: '',
@@ -83,7 +82,6 @@ const form = ref<AgentForm>({
   enabled: true,
   thinkingMode: '',
   visionEnabled: null,
-  audioEnabled: null,
 })
 // Snapshot of the agent form at load time (or after a successful save). See
 // formDirty below — together they gate the Save button so it's only active
@@ -300,7 +298,6 @@ function newAgent() {
     enabled: true,
     thinkingMode: '',
     visionEnabled: null,
-    audioEnabled: null,
   }
   formBaseline.value = { ...form.value }
   creating.value = true
@@ -316,7 +313,6 @@ function editAgent(agent: Agent) {
     enabled: agent.enabled,
     thinkingMode: agent.thinkingMode ?? '',
     visionEnabled: agent.visionEnabled ?? null,
-    audioEnabled: agent.audioEnabled ?? null,
   }
   formBaseline.value = { ...form.value }
   editing.value = agent
@@ -341,24 +337,21 @@ watch(() => [form.value.modelProvider, form.value.modelId], () => {
 
 // Pill toggle from inside the Edit Agent form — purely local state. The
 // form save performs the API call once the operator clicks Save.
-function toggleFormCapability(capability: 'thinking' | 'vision' | 'audio') {
+function toggleFormCapability(capability: 'thinking' | 'vision') {
   if (capability === 'thinking') {
     form.value.thinkingMode = form.value.thinkingMode
       ? ''
       : defaultThinkingLevel(selectedModel.value)
   }
-  else if (capability === 'vision') {
-    form.value.visionEnabled = form.value.visionEnabled === false
-  }
   else {
-    form.value.audioEnabled = form.value.audioEnabled === false
+    form.value.visionEnabled = form.value.visionEnabled === false
   }
 }
 
 // Pill toggle from a listing row — persists immediately via a partial PUT
 // so the row stays in sync with the backend. Only the touched field is
 // sent; the update endpoint honours absent-key-leaves-unchanged.
-async function toggleListingCapability(agent: Agent | undefined, capability: 'thinking' | 'vision' | 'audio') {
+async function toggleListingCapability(agent: Agent | undefined, capability: 'thinking' | 'vision') {
   if (!agent) return
   const body: Record<string, unknown> = {}
   if (capability === 'thinking') {
@@ -366,11 +359,8 @@ async function toggleListingCapability(agent: Agent | undefined, capability: 'th
       ? null
       : defaultThinkingLevel(modelForAgent(agent))
   }
-  else if (capability === 'vision') {
-    body.visionEnabled = agent.visionEnabled === false
-  }
   else {
-    body.audioEnabled = agent.audioEnabled === false
+    body.visionEnabled = agent.visionEnabled === false
   }
   try {
     await $fetch(`/api/agents/${agent.id}`, { method: 'PUT', body })
@@ -553,11 +543,10 @@ async function saveAgent() {
     const payload = {
       ...form.value,
       thinkingMode: form.value.thinkingMode || null,
-      // visionEnabled / audioEnabled are already null|true|false in the form;
-      // pass through verbatim so the "null = inherit capability" semantic is
-      // preserved on untouched saves.
+      // visionEnabled is null|true|false in the form; pass through verbatim
+      // so the "null = inherit capability" semantic is preserved on
+      // untouched saves.
       visionEnabled: form.value.visionEnabled,
-      audioEnabled: form.value.audioEnabled,
       // Blank description clears the column; backend also strips/trims.
       description: form.value.description.trim() || null,
     }
@@ -781,7 +770,6 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               :model="modelForAgent(mainAgent)"
               :thinking-mode="mainAgent.thinkingMode"
               :vision-enabled="mainAgent.visionEnabled"
-              :audio-enabled="mainAgent.audioEnabled"
               class="mt-2"
               @toggle="(cap) => toggleListingCapability(mainAgent, cap)"
             />
@@ -842,7 +830,6 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                 :model="modelForAgent(agent)"
                 :thinking-mode="agent.thinkingMode"
                 :vision-enabled="agent.visionEnabled"
-                :audio-enabled="agent.audioEnabled"
                 class="mt-2"
                 @toggle="(cap) => toggleListingCapability(agent, cap)"
               />
@@ -983,7 +970,6 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           :model="selectedModel"
           :thinking-mode="form.thinkingMode"
           :vision-enabled="form.visionEnabled"
-          :audio-enabled="form.audioEnabled"
           size="md"
           class="mt-5"
           @toggle="toggleFormCapability"

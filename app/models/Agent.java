@@ -64,10 +64,6 @@ public class Agent extends Model {
     @Column(name = "vision_enabled")
     public Boolean visionEnabled;
 
-    /** Per-agent audio toggle; same three-state semantics as {@link #visionEnabled}. */
-    @Column(name = "audio_enabled")
-    public Boolean audioEnabled;
-
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 

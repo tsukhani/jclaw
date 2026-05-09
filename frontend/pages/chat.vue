@@ -15,7 +15,6 @@ import {
   PaperClipIcon,
   PencilIcon,
   PencilSquareIcon,
-  SpeakerWaveIcon,
   TrashIcon,
   WrenchIcon,
   WrenchScrewdriverIcon,
@@ -251,7 +250,6 @@ const thinkingLevels = computed<string[]>(() => effectiveThinkingLevels(selected
 // metadata (OpenRouter architecture.input_modalities, Ollama capabilities)
 // or the operator-toggled checkbox in Settings; see ModelDiscoveryService.
 const visionSupported = computed(() => selectedModelInfo.value?.supportsVision === true)
-const audioSupported = computed(() => selectedModelInfo.value?.supportsAudio === true)
 
 // --- Pill toggle state ---
 
@@ -269,12 +267,12 @@ const thinkingActive = computed(() => {
 // fresh from whatever the agent's stored thinkingMode was.
 const lastThinkingLevel = ref<string>('medium')
 
-// Vision/Audio pills: active-by-default on a capable model (agent field null).
-// Only an explicit `false` on the agent record pins them off. This keeps the
-// UX aligned with the rest of jclaw — operators opt OUT of a capability, not
-// INTO one — and avoids a migration for existing agents on capable models.
+// Vision pill: active-by-default on a vision-capable model (agent field null).
+// Only an explicit `false` on the agent record pins it off. JCLAW-165 retired
+// the parallel audio pill — every model can consume audio now via the
+// transcription pipeline, so there's nothing meaningful for an audio toggle
+// to gate.
 const visionActive = computed(() => selectedAgent.value?.visionEnabled !== false)
-const audioActive = computed(() => selectedAgent.value?.audioEnabled !== false)
 
 function toggleThinkingPill() {
   if (!thinkingSupported.value) return
@@ -389,11 +387,6 @@ onBeforeUnmount(() => {
 function toggleVisionPill() {
   if (!visionSupported.value) return
   updateAgentSetting({ visionEnabled: !visionActive.value })
-}
-
-function toggleAudioPill() {
-  if (!audioSupported.value) return
-  updateAgentSetting({ audioEnabled: !audioActive.value })
 }
 
 // Sync model or thinking mode change back to the agent
@@ -1701,8 +1694,8 @@ function removeAttachment(idx: number) {
 // ────────────────────── Voice-note recording (browser mic) ─────────────────
 // One click starts the recorder; a second click stops it and attaches the
 // captured blob through the same addAttachments() pipeline as paperclip
-// uploads. Gated on audioSupported at the button level — consistent with
-// the Audio capability pill, and avoids a rejection on attach time.
+// uploads. Universally available — JCLAW-165's transcription pipeline lets
+// every model consume audio, so no capability gate is needed.
 
 const isRecording = ref(false)
 // Kept as plain non-reactive bindings — Vue reactivity on a MediaRecorder
@@ -2777,22 +2770,6 @@ function exportConversation() {
                     aria-hidden="true"
                   />
                   Vision
-                </button>
-                <button
-                  v-if="audioSupported"
-                  type="button"
-                  class="inline-flex items-center gap-1.5 px-3 h-8 rounded-full text-xs font-medium transition-colors"
-                  :class="audioActive
-                    ? 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
-                    : 'border border-border text-fg-muted hover:text-fg-strong hover:bg-muted'"
-                  :title="audioActive ? 'Audio on — click to turn off' : 'Audio off — click to turn on'"
-                  @click="toggleAudioPill"
-                >
-                  <SpeakerWaveIcon
-                    class="w-3.5 h-3.5"
-                    aria-hidden="true"
-                  />
-                  Audio
                 </button>
               </div>
               <div class="flex items-center gap-1 justify-self-end">

@@ -39,11 +39,6 @@ public class AgentService {
         return hasModelCapability(agent, llm.LlmTypes.ModelInfo::supportsVision);
     }
 
-    /** Mirror of {@link #supportsVision} for the JCLAW-131 audio modality gate. */
-    public static boolean supportsAudio(Agent agent) {
-        return hasModelCapability(agent, llm.LlmTypes.ModelInfo::supportsAudio);
-    }
-
     private static boolean hasModelCapability(Agent agent,
                                               java.util.function.Predicate<llm.LlmTypes.ModelInfo> test) {
         if (agent == null || agent.modelProvider == null || agent.modelId == null) return false;
@@ -114,25 +109,25 @@ public class AgentService {
     public static Agent update(Agent agent, String name, String modelProvider, String modelId,
                                 boolean enabled) {
         return update(agent, name, modelProvider, modelId, enabled, agent.thinkingMode,
-                agent.visionEnabled, agent.audioEnabled, agent.description);
+                agent.visionEnabled, agent.description);
     }
 
     public static Agent update(Agent agent, String name, String modelProvider, String modelId,
                                 boolean enabled, String thinkingMode) {
         return update(agent, name, modelProvider, modelId, enabled, thinkingMode,
-                agent.visionEnabled, agent.audioEnabled, agent.description);
+                agent.visionEnabled, agent.description);
     }
 
     public static Agent update(Agent agent, String name, String modelProvider, String modelId,
                                 boolean enabled, String thinkingMode,
-                                Boolean visionEnabled, Boolean audioEnabled) {
+                                Boolean visionEnabled) {
         return update(agent, name, modelProvider, modelId, enabled, thinkingMode,
-                visionEnabled, audioEnabled, agent.description);
+                visionEnabled, agent.description);
     }
 
     public static Agent update(Agent agent, String name, String modelProvider, String modelId,
                                 boolean enabled, String thinkingMode,
-                                Boolean visionEnabled, Boolean audioEnabled, String description) {
+                                Boolean visionEnabled, String description) {
         agent.name = name;
         agent.modelProvider = modelProvider;
         agent.modelId = modelId;
@@ -144,7 +139,6 @@ public class AgentService {
         agent.enabled = agent.isMain() || (enabled && isProviderConfigured(modelProvider, modelId));
         agent.thinkingMode = normalizeThinkingMode(thinkingMode, modelProvider, modelId);
         agent.visionEnabled = visionEnabled;
-        agent.audioEnabled = audioEnabled;
         agent.save();
         return agent;
     }
