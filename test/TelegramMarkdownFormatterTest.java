@@ -247,6 +247,33 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
+    public void rawTelegramSafeHtmlPassesThrough() {
+        // LLMs sometimes emit literal <b>...</b> in place of **bold**. Telegram's
+        // HTML parse mode supports a small no-attribute tag subset; pass those
+        // through verbatim so the user actually sees bold rather than the
+        // literal "<b>...</b>" characters.
+        var html = TelegramMarkdownFormatter.toHtml("<b>Lazada</b> is <i>strong</i>.");
+        assertTrue(html.contains("<b>Lazada</b>"),
+                () -> "<b> tag should pass through, not be escaped: " + html);
+        assertTrue(html.contains("<i>strong</i>"),
+                () -> "<i> tag should pass through, not be escaped: " + html);
+        assertFalse(html.contains("&lt;b&gt;"),
+                () -> "safe tags must not be escaped: " + html);
+    }
+
+    @Test
+    public void rawHtmlWithAttributesIsEscaped() {
+        // Attribute parsing is a foot-gun (event handlers, javascript: URLs,
+        // injection vectors). Even allowlisted tags lose pass-through when
+        // they carry any attribute.
+        var html = TelegramMarkdownFormatter.toHtml("<b onclick=\"evil()\">bad</b>");
+        assertFalse(html.contains("<b onclick"),
+                () -> "tag with attribute must not pass through: " + html);
+        assertTrue(html.contains("&lt;b onclick"),
+                () -> "attributed tag must be escaped: " + html);
+    }
+
+    @Test
     public void plainTextIsPassedThroughEscaped() {
         var html = TelegramMarkdownFormatter.toHtml("just some text");
         assertTrue(html.contains("just some text"),

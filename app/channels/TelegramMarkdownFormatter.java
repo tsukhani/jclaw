@@ -50,6 +50,14 @@ public final class TelegramMarkdownFormatter {
     private static final String PRE_CODE_OPEN = "<pre><code>";
     private static final String PRE_CODE_CLOSE = "</code></pre>";
 
+    /** Telegram's HTML parse mode accepts a small no-attribute tag subset. When
+     *  the agent emits raw HTML, we pass tags matching this allowlist through
+     *  verbatim so bold/italic/etc. actually render — anything outside the
+     *  allowlist (attributes, unknown tags, script, etc.) still gets escaped. */
+    private static final java.util.regex.Pattern SAFE_TG_TAG = java.util.regex.Pattern.compile(
+            "</?(?:b|strong|i|em|u|ins|s|strike|del|code|pre|blockquote)>",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
     private static final Parser PARSER = Parser.builder(new MutableDataSet())
             .extensions(List.of(
                     TablesExtension.create(),
@@ -189,10 +197,20 @@ public final class TelegramMarkdownFormatter {
             }
             else if (node instanceof HtmlInline || node instanceof HtmlBlock
                     || node instanceof HtmlCommentBlock || node instanceof HtmlInlineComment) {
-                // Agents occasionally emit raw HTML. Don't trust it — pass through as
-                // escaped text so we can't unintentionally ship script tags, open
-                // unexpected tags, or inject attributes.
-                out.append(escapeHtml(node.getChars().toString()));
+                // Agents occasionally emit raw HTML instead of markdown — usually
+                // simple emphasis tags (e.g. <b>Lazada</b>) that the LLM picked
+                // because the system prompt mentioned Telegram. Telegram's HTML
+                // parse mode supports a small no-attribute tag subset; pass those
+                // through verbatim so the user sees actual bold/italic instead of
+                // literal "<b>...</b>". Anything else (script, attributes, unknown
+                // tags) still goes through escapeHtml so we can't unintentionally
+                // ship dangerous markup.
+                String chars = node.getChars().toString();
+                if (SAFE_TG_TAG.matcher(chars).matches()) {
+                    out.append(chars);
+                } else {
+                    out.append(escapeHtml(chars));
+                }
             }
             else {
                 // Fallback: walk children. Covers container nodes we haven't enumerated
