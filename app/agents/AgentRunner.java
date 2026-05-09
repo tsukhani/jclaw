@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -982,6 +983,13 @@ public class AgentRunner {
     private static String callWithToolLoop(Agent agent, Conversation conversation, Long conversationId,
                                             List<ChatMessage> messages, List<ToolDef> tools,
                                             LlmProvider primary, LlmProvider secondary) {
+        // Helpers like effectiveModelId / effectiveMaxTokens accept a nullable
+        // conversation for use elsewhere, but this loop dereferences
+        // conversation.channelType when handing off to the LLM provider —
+        // the channel type is a required field on the call. Assert the
+        // precondition explicitly so a future caller passing null gets a
+        // clear failure here instead of an opaque NPE deeper in the stack.
+        Objects.requireNonNull(conversation, "conversation");
         var currentMessages = new ArrayList<>(messages);
         var thinkingMode = resolveThinkingMode(agent, conversation, primary);
         var effectiveModelId = effectiveModelId(agent, conversation);
