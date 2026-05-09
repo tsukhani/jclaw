@@ -56,9 +56,11 @@ public final class TelegramModelSelector {
 
     /**
      * Short summary rendered in the initial {@code /model} Telegram
-     * bubble. Matches OpenClaw's parity format — one "Current:" line
-     * plus two usage hints. Details live behind the inline keyboard's
-     * "Show details" button rather than inline.
+     * bubble. One "Current:" line followed by a usage hint and two
+     * indented command examples on their own lines — Telegram bubbles
+     * read better with the verbs broken out vertically than crammed
+     * into one wrapped paragraph. Details live behind {@code /model status}
+     * rather than inline.
      */
     public static String summaryText(Agent agent, Conversation conversation) {
         var overrideActive = conversation != null
@@ -72,8 +74,9 @@ public final class TelegramModelSelector {
             sb.append("  <i>(conversation override)</i>");
         }
         sb.append('\n');
-        sb.append("Tap below to browse models, or use <code>/model &lt;provider/model&gt;</code> to switch directly. ");
-        sb.append("Type <code>/model status</code> for full details on the current model.");
+        sb.append("Tap below to browse models, or use:\n");
+        sb.append("<code>/model &lt;provider/model&gt;</code> to switch\n");
+        sb.append("<code>/model status</code> for details");
         return sb.toString();
     }
 
