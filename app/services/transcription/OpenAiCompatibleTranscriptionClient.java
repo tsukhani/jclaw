@@ -101,15 +101,15 @@ public class OpenAiCompatibleTranscriptionClient implements TranscriptionService
                 .build();
 
         try (var response = client.newCall(request).execute()) {
+            // OkHttp 5 guarantees response.body() is non-null on a
+            // synchronously-executed call, so no defensive null guards
+            // are needed below — the body may be empty, but never null.
             if (!response.isSuccessful()) {
-                var snippet = response.body() == null ? "" : truncate(response.body().string(), 500);
+                var snippet = truncate(response.body().string(), 500);
                 throw new TranscriptionException(
                         "%s transcription failed: HTTP %d %s%s".formatted(
                                 providerName, response.code(), response.message(),
                                 snippet.isEmpty() ? "" : (" — " + snippet)));
-            }
-            if (response.body() == null) {
-                throw new TranscriptionException(providerName + " transcription returned empty body");
             }
             var json = JsonParser.parseString(response.body().string()).getAsJsonObject();
             // OpenAI/OpenRouter return {"text":"..."} for response_format=json.

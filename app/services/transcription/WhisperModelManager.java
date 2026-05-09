@@ -35,7 +35,10 @@ import java.util.function.Consumer;
 public final class WhisperModelManager {
 
     private static final Path DEFAULT_ROOT = Path.of("data", "whisper-models");
-    private static volatile Path root = DEFAULT_ROOT;
+    // Production never writes this field. Test setups call setRootForTest
+    // before any virtual threads start, so Thread.start()'s happens-before
+    // relationship covers visibility — no need for volatile or AtomicReference.
+    private static Path root = DEFAULT_ROOT;
 
     private static final ConcurrentHashMap<String, CompletableFuture<Path>> inFlight = new ConcurrentHashMap<>();
     private static final ConcurrentHashMap<String, ModelStatus> statuses = new ConcurrentHashMap<>();

@@ -41,9 +41,13 @@ public final class WhisperJniTranscriber {
     private static final long FFMPEG_TIMEOUT_SECONDS = 300;
 
     private static final Object inferenceLock = new Object();
-    private static volatile WhisperJNI jni = null;
-    private static volatile WhisperContext activeContext = null;
-    private static volatile WhisperModel activeModel = null;
+    // All access to these fields is guarded by inferenceLock — the
+    // synchronized blocks already provide the happens-before ordering
+    // volatile would give, plus mutual exclusion, so volatile would be
+    // redundant.
+    private static WhisperJNI jni = null;
+    private static WhisperContext activeContext = null;
+    private static WhisperModel activeModel = null;
 
     private WhisperJniTranscriber() {}
 

@@ -80,7 +80,11 @@ public class ApiTranscriptionController extends Controller {
     public static void download(String id) {
         var model = WhisperModel.byId(id);
         if (model.isEmpty()) {
+            // Play's error() throws a Result internally, but the static
+            // analyzer can't see that — explicit return makes the flow
+            // legible and lets the model.get() below be unambiguously safe.
             error(400, "Unknown whisper model id: " + id);
+            return;
         }
         // ensureAvailable is single-flight; concurrent calls from the
         // polling UI all attach to the same in-flight future, no harm done.
