@@ -178,8 +178,26 @@ function modelLabel(m: FleetCostPerModel): string {
   return m.modelProvider ? `${m.modelProvider}/${m.modelId}` : m.modelId
 }
 
+// Restrict the per-model breakdown to models that actually contributed
+// to total cost — operator's question is "which models cost what," not
+// "what activity happened on free tiers." Free-tier rows still count
+// toward the summary row at the top (turn counts, token totals) so the
+// operator's "what happened in this window" view stays comprehensive;
+// this filter is display-layer only, NOT applied at computeFleetCost
+// so future views (e.g., per-channel free-tier audit) can still read
+// the unfiltered data from breakdown.value.perModel.
+const paidPerModel = computed<FleetCostPerModel[]>(() =>
+  breakdown.value.perModel.filter(m => m.total > 0),
+)
+
+// Distinguishes "no data at all in this window" from "all data was
+// free-tier" — the second case needs its own empty-state message so
+// the operator isn't confused about why the table looks empty when
+// the summary row shows positive turn counts.
+const hasPaidData = computed(() => paidPerModel.value.length > 0)
+
 const sortedPerModel = computed<FleetCostPerModel[]>(() => {
-  const rows = [...breakdown.value.perModel]
+  const rows = [...paidPerModel.value]
   const dir = sortDir.value === 'asc' ? 1 : -1
   rows.sort((a, b) => {
     let cmp = 0
@@ -204,17 +222,21 @@ const sortedPerModel = computed<FleetCostPerModel[]>(() => {
 
 // Chart geometry. Horizontal bars: one per agent (or per model in chart
 // view). Width is proportional to cost share. Inline SVG, no library.
+// Same paid-only filter as the table — chart visualizes cost contribution,
+// so zero-bars for free-tier rows would be visual noise.
 const chartRows = computed(() => {
+  const paidModels = breakdown.value.perModel.filter(m => m.total > 0)
+  const paidAgents = breakdown.value.perAgent.filter(a => a.total > 0)
   // Pick the dimension with more entries — usually agent for fleet view,
   // model when filtered to one agent.
-  const useModel = breakdown.value.perModel.length >= breakdown.value.perAgent.length
+  const useModel = paidModels.length >= paidAgents.length
   return useModel
-    ? breakdown.value.perModel.map(m => ({
+    ? paidModels.map(m => ({
         label: m.modelProvider ? `${m.modelProvider}/${m.modelId}` : m.modelId,
         cost: m.total,
         turnCount: m.turnCount,
       }))
-    : breakdown.value.perAgent.map(a => ({
+    : paidAgents.map(a => ({
         label: agentLabel(a.agentId),
         cost: a.total,
         turnCount: a.turnCount,
@@ -291,7 +313,7 @@ defineExpose({ refresh })
           Chat Cost
         </h2>
         <div
-          v-if="hasData"
+          v-if="hasPaidData"
           class="inline-flex items-center border border-border overflow-hidden"
           role="tablist"
           aria-label="Chat cost view"
@@ -404,7 +426,7 @@ defineExpose({ refresh })
         <button
           type="button"
           class="inline-flex items-center gap-1 text-fg-muted hover:text-fg-strong transition-colors p-1 disabled:opacity-40 disabled:cursor-not-allowed"
-          :disabled="!hasData"
+          :disabled="!hasPaidData"
           title="Export per-model breakdown to CSV"
           @click="exportCsv"
         >
@@ -478,12 +500,28 @@ defineExpose({ refresh })
       </div>
 
       <!--
-        Per-model breakdown table. Click any header cell to sort by that
-        column; click again to flip direction. Active column shows a
-        chevron in its sort direction. Default: Cost descending.
+        All-free-tier empty state. The summary row above shows positive
+        turn counts, but no model contributed to billable cost — surface
+        the why explicitly so the operator isn't confused by an empty
+        breakdown. Different message and styling from the no-data state
+        (which short-circuits earlier in the v-else-if chain).
       -->
       <div
-        v-if="view === 'table'"
+        v-if="!hasPaidData"
+        class="px-4 py-6 text-center text-sm text-fg-muted"
+      >
+        All turns in this window were on free-tier models — no cost to attribute.
+      </div>
+
+      <!--
+        Per-model breakdown table. Click any header cell to sort by that
+        column; click again to flip direction. Active column shows a
+        chevron in its sort direction. Default: Cost descending. Free-tier
+        models (total === 0) are filtered out to keep the table focused
+        on cost contributors.
+      -->
+      <div
+        v-else-if="view === 'table'"
         class="overflow-x-auto"
       >
         <table class="w-full text-xs">

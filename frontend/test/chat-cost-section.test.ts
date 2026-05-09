@@ -267,6 +267,121 @@ describe('ChatCostSection (JCLAW-28)', () => {
     expect(modelHeader.find('svg').exists()).toBe(false)
   })
 
+  it('excludes zero-cost models from the per-model table', async () => {
+    // Operator's question is "which models cost what" — free-tier rows
+    // contribute nothing to that answer and are visual noise.
+    registerEndpoint('/api/metrics/cost', () => ({
+      since: '2026-04-10T00:00:00Z',
+      rows: [
+        // Paid: should appear
+        { timestamp: '2026-05-09T12:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: makeUsage({ modelId: 'gpt-4.1', modelProvider: 'openai',
+            promptPrice: 3, completionPrice: 15 }) },
+        // Free-tier: should be filtered from the table
+        { timestamp: '2026-05-09T13:00:00Z', agentId: 2, channelType: 'web',
+          usageJson: JSON.stringify({
+            prompt: 100, completion: 50, total: 150, reasoning: 0,
+            cached: 0, durationMs: 100,
+            modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+            // No promptPrice / completionPrice — computeUsageCostBreakdown
+            // returns null, so total cost contribution is 0.
+          }) },
+      ],
+    }))
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    const text = wrapper.text()
+    expect(text).toContain('gpt-4.1')
+    expect(text).not.toContain('kimi-k2.5')
+  })
+
+  it('keeps free-tier turn count and tokens in the summary row', async () => {
+    // Filter is display-layer only — the summary row above the breakdown
+    // must answer "what happened in this window" comprehensively, including
+    // free-tier activity. Operator looking at "Turns: 6" with only 1
+    // billed model should see 6, not 1.
+    registerEndpoint('/api/metrics/cost', () => ({
+      since: '2026-04-10T00:00:00Z',
+      rows: [
+        { timestamp: '2026-05-09T12:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: makeUsage({ prompt: 100, completion: 50,
+            promptPrice: 3, completionPrice: 15 }) },
+        // Five free-tier turns
+        ...Array.from({ length: 5 }, (_, i) => ({
+          timestamp: `2026-05-09T1${i}:00:00Z`,
+          agentId: 2,
+          channelType: 'web',
+          usageJson: JSON.stringify({
+            prompt: 200, completion: 100, total: 300, reasoning: 0,
+            cached: 0, durationMs: 100,
+            modelId: 'kimi-k2.5',
+          }),
+        })),
+      ],
+    }))
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    const text = wrapper.text()
+    // 6 total turns (1 paid + 5 free-tier) — summary row honors all.
+    expect(text).toContain('Turns')
+    expect(text).toMatch(/Turns[\s\S]*?6/)
+    // 100 + 5×200 = 1100 prompt tokens — token totals span free-tier too.
+    expect(text).toContain('1,100')
+  })
+
+  it('shows the all-free-tier empty state when no models contributed cost', async () => {
+    // Distinguished from "no data at all" — summary row is still
+    // populated, but the breakdown table is replaced with a clear message
+    // so the operator isn't confused by an empty table.
+    registerEndpoint('/api/metrics/cost', () => ({
+      since: '2026-04-10T00:00:00Z',
+      rows: [
+        { timestamp: '2026-05-09T12:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: JSON.stringify({
+            prompt: 100, completion: 50, total: 150, reasoning: 0,
+            cached: 0, durationMs: 100, modelId: 'kimi-k2.5',
+          }) },
+      ],
+    }))
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('All turns in this window were on free-tier models')
+    // The summary row is still present (it's "what happened" not "what
+    // cost") so the activity count is still visible.
+    expect(wrapper.text()).toContain('Turns')
+    // No table rendered when there are no paid models.
+    expect(wrapper.find('tbody tr').exists()).toBe(false)
+  })
+
+  it('disables CSV export when all data is free-tier', async () => {
+    // Same gating as the no-data state — there's nothing meaningful to
+    // export when no models contributed cost. Different from the
+    // already-tested no-data case (which has zero rows entirely).
+    registerEndpoint('/api/metrics/cost', () => ({
+      since: '2026-04-10T00:00:00Z',
+      rows: [
+        { timestamp: '2026-05-09T12:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: JSON.stringify({
+            prompt: 100, completion: 50, total: 150, reasoning: 0,
+            cached: 0, durationMs: 100, modelId: 'kimi-k2.5',
+          }) },
+      ],
+    }))
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    const csvBtn = wrapper.findAll('button').find(b => b.attributes('title')?.includes('CSV'))
+    expect(csvBtn).toBeDefined()
+    expect(csvBtn!.attributes('disabled')).toBeDefined()
+  })
+
   it('exposes refresh via defineExpose', async () => {
     registerEndpoint('/api/metrics/cost', () => ({
       since: '2026-04-10T00:00:00Z',
