@@ -196,6 +196,27 @@ const paidPerModel = computed<FleetCostPerModel[]>(() =>
 // the summary row shows positive turn counts.
 const hasPaidData = computed(() => paidPerModel.value.length > 0)
 
+// Totals row for the per-model table — matches the Chat Performance
+// "Total" row pattern. Sums across the visible (paid) rows only, which
+// makes it different from the comprehensive summary row above the table:
+// the summary answers "what happened" (paid + free); this row answers
+// "what cost what — totaled across the rows you see." When there's no
+// free-tier activity the two row totals match; with free-tier present
+// they diverge by the free-tier activity (turns + tokens, never cost).
+const paidTotals = computed(() => {
+  return paidPerModel.value.reduce(
+    (acc, m) => ({
+      turnCount: acc.turnCount + m.turnCount,
+      total: acc.total + m.total,
+      prompt: acc.prompt + m.prompt,
+      completion: acc.completion + m.completion,
+      reasoning: acc.reasoning + m.reasoning,
+      cached: acc.cached + m.cached,
+    }),
+    { turnCount: 0, total: 0, prompt: 0, completion: 0, reasoning: 0, cached: 0 },
+  )
+})
+
 const sortedPerModel = computed<FleetCostPerModel[]>(() => {
   const rows = [...paidPerModel.value]
   const dir = sortDir.value === 'asc' ? 1 : -1
@@ -615,6 +636,37 @@ defineExpose({ refresh })
               </td>
               <td class="px-3 py-2 text-right font-mono text-fg-muted">
                 {{ m.cached.toLocaleString() }}
+              </td>
+            </tr>
+            <!--
+              Totals row, matching the Chat Performance table pattern.
+              Stays at the bottom regardless of column sort — totals
+              don't have a meaningful position in a column-sorted
+              ordering. Heavier border + tinted background + bold
+              font is the same affordance Chat Performance uses to
+              signal summary-vs-detail.
+            -->
+            <tr class="border-t-2 border-fg-muted/30 bg-muted/30 font-semibold">
+              <td class="px-4 py-2 text-fg-strong">
+                Total
+              </td>
+              <td class="px-3 py-2 text-right font-mono text-fg-strong">
+                {{ paidTotals.turnCount.toLocaleString() }}
+              </td>
+              <td class="px-3 py-2 text-right font-mono text-fg-strong">
+                {{ formatCostUsd(paidTotals.total) }}
+              </td>
+              <td class="px-3 py-2 text-right font-mono text-fg-strong">
+                {{ paidTotals.prompt.toLocaleString() }}
+              </td>
+              <td class="px-3 py-2 text-right font-mono text-fg-strong">
+                {{ paidTotals.completion.toLocaleString() }}
+              </td>
+              <td class="px-3 py-2 text-right font-mono text-fg-strong">
+                {{ paidTotals.reasoning.toLocaleString() }}
+              </td>
+              <td class="px-3 py-2 text-right font-mono text-fg-strong">
+                {{ paidTotals.cached.toLocaleString() }}
               </td>
             </tr>
           </tbody>
