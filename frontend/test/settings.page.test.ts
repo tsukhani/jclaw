@@ -409,12 +409,21 @@ describe('Settings page — Transcription section (JCLAW-164)', () => {
   })
 
   it('shows the ffmpeg banner when the probe reports it missing', async () => {
+    // Match sibling tests in this describe block: register endpoints
+    // directly with configPayload so transcription.provider is set, which
+    // gates transcriptionEnabled and unwraps the v-if around the banner.
+    // setupConfigApi() omits transcription.provider entirely, so the
+    // banner stays hidden under the off-state outer template.
     transcriptionStatePayload = {
       ...transcriptionStatePayload,
       ffmpegAvailable: false,
       ffmpegReason: 'ffmpeg not found on PATH',
     }
-    setupConfigApi()
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/config', () => configPayload([]))
+    registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
+    registerEndpoint('/api/transcription/state', () => transcriptionStatePayload)
     const component = await mountSuspended(Settings)
     await flushPromises()
 

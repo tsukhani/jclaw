@@ -2378,7 +2378,7 @@ async function handleResetPassword() {
 
       <!-- Master toggle: ON when transcription.provider is non-empty. -->
       <div class="bg-surface-elevated border border-border">
-        <label class="px-4 py-2.5 flex items-center gap-3 cursor-pointer">
+        <div class="px-4 py-2.5 flex items-center gap-3 cursor-pointer">
           <button
             type="button"
             :aria-pressed="transcriptionEnabled"
@@ -2396,7 +2396,7 @@ async function handleResetPassword() {
           <span class="ml-auto text-[11px] text-fg-muted">
             {{ transcriptionEnabled ? 'on' : 'off' }}
           </span>
-        </label>
+        </div>
       </div>
 
       <template v-if="transcriptionEnabled">
@@ -2418,6 +2418,7 @@ async function handleResetPassword() {
           </legend>
           <div class="divide-y divide-border">
             <label
+              for="transcription-provider-openrouter"
               class="px-4 py-2.5 flex items-center gap-3"
               :class="openrouterApiKeyConfigured
                 ? 'cursor-pointer'
@@ -2425,6 +2426,7 @@ async function handleResetPassword() {
               :title="openrouterApiKeyConfigured ? '' : 'Add an OpenRouter API key in LLM Providers above to enable.'"
             >
               <input
+                id="transcription-provider-openrouter"
                 type="radio"
                 name="transcription-provider"
                 value="openrouter"
@@ -2445,6 +2447,7 @@ async function handleResetPassword() {
               >no API key — configure in LLM Providers</span>
             </label>
             <label
+              for="transcription-provider-openai"
               class="px-4 py-2.5 flex items-center gap-3"
               :class="openaiApiKeyConfigured
                 ? 'cursor-pointer'
@@ -2452,6 +2455,7 @@ async function handleResetPassword() {
               :title="openaiApiKeyConfigured ? '' : 'Add an OpenAI API key in LLM Providers above to enable.'"
             >
               <input
+                id="transcription-provider-openai"
                 type="radio"
                 name="transcription-provider"
                 value="openai"
@@ -2471,8 +2475,12 @@ async function handleResetPassword() {
                 class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
               >no API key — configure in LLM Providers</span>
             </label>
-            <label class="px-4 py-2.5 flex items-center gap-3 cursor-pointer">
+            <label
+              for="transcription-provider-whisper-local"
+              class="px-4 py-2.5 flex items-center gap-3 cursor-pointer"
+            >
               <input
+                id="transcription-provider-whisper-local"
                 type="radio"
                 name="transcription-provider"
                 value="whisper-local"
