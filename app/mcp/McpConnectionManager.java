@@ -196,6 +196,17 @@ public final class McpConnectionManager {
         client.onToolsChanged(tools -> republishTools(server.name, tools));
         try {
             client.connect();
+            // If the operator toggled this server off (or replaced its
+            // config) while client.connect() was in-flight, the entry was
+            // removed from the connections map by stop(). Detect that and
+            // roll back the just-finished handshake — without this, the
+            // orphaned doConnect would re-publish tools, re-write the
+            // allowlist, and persist status=CONNECTED for a server the
+            // user just disabled.
+            if (connections.get(server.name) != entry) {
+                try { client.close(); } catch (RuntimeException ignored) { /* best effort */ }
+                return;
+            }
             entry.client = client;
             // republishTools publishes the in-memory tool adapters AND syncs
             // the DB-authoritative allowlist (JCLAW-32). Both must complete

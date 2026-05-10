@@ -135,6 +135,10 @@ async function saveForm() {
   await refresh()
   editing.value = null
   expandedRowId.value = null
+  // A newly-created or edited server may be in CONNECTING for a few
+  // seconds while the connector handshakes. Poll so the badge ticks
+  // over to CONNECTED/ERROR without requiring a manual refresh.
+  await pollUntilStable()
 }
 
 async function toggleEnabled(s: McpServer) {
@@ -143,6 +147,24 @@ async function toggleEnabled(s: McpServer) {
     body: { enabled: !s.enabled },
   })
   await refresh()
+  await pollUntilStable()
+}
+
+/**
+ * Poll the list while any row is in CONNECTING state. The connect handshake
+ * takes a few seconds (Docker spawn for STDIO, network handshake for HTTP),
+ * during which the row would otherwise display "CONNECTING" indefinitely
+ * because the page only re-fetches on user actions. Bounded by maxAttempts
+ * to avoid an infinite loop on a server stuck in CONNECTING.
+ */
+async function pollUntilStable() {
+  const intervalMs = 600
+  const maxAttempts = 60 // ~36s ceiling, well past the 30s request timeout
+  for (let i = 0; i < maxAttempts; i++) {
+    if (!servers.value?.some(row => row.status === 'CONNECTING')) return
+    await new Promise(r => setTimeout(r, intervalMs))
+    await refresh()
+  }
 }
 
 async function deleteServer(s: McpServer) {

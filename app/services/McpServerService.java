@@ -65,11 +65,19 @@ public final class McpServerService {
         public static View of(McpServer row) {
             var cfg = explodeConfigJson(row.transport, row.configJson);
             int tools = McpConnectionManager.tools(row.name).size();
+            // Live status preferred over the persisted column. The in-memory
+            // state is updated synchronously by connect()/stop() and the
+            // watchdog; the DB column lags behind by however long the
+            // background persistStatus call takes to commit. For rows with
+            // no in-memory entry (disabled or never connected), the manager
+            // returns DISCONNECTED naturally. The persisted column remains
+            // useful for post-restart display before the connector reports.
+            var liveStatus = McpConnectionManager.status(row.name).name();
             return new View(
                     row.id, row.name, row.enabled, row.transport.name(),
                     cfg.command, cfg.args, cfg.env,
                     cfg.url, cfg.headers,
-                    row.status != null ? row.status.name() : McpServer.Status.DISCONNECTED.name(),
+                    liveStatus,
                     row.lastError,
                     row.lastConnectedAt != null ? row.lastConnectedAt.toString() : null,
                     row.lastDisconnectedAt != null ? row.lastDisconnectedAt.toString() : null,
@@ -158,12 +166,23 @@ public final class McpServerService {
      * update). Idempotent: {@link McpConnectionManager#connect} replaces
      * any prior entry, and we call {@link McpConnectionManager#stop} for
      * disabled rows so a recently-flipped-off server actually disconnects.
+     *
+     * <p>For the disable path we also reset the row's persisted status to
+     * {@code DISCONNECTED}. The {@link McpConnectionManager#status} call
+     * site reads {@code McpServer.status} (the DB column), but
+     * {@link McpConnectionManager#stop} only mutates the in-memory map —
+     * without this explicit reset, a server toggled off would keep
+     * surfacing whatever status its last connect persisted.
      */
     public static void syncRuntime(McpServer row) {
         if (row.enabled) {
             McpConnectionManager.connect(row);
         } else {
             McpConnectionManager.stop(row.name);
+            row.status = McpServer.Status.DISCONNECTED;
+            row.lastError = null;
+            row.lastDisconnectedAt = java.time.Instant.now();
+            row.save();
         }
     }
 
