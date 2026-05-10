@@ -51,6 +51,16 @@ public class ToolCatalog {
      * markdown section per category in canonical order (System → Files → Web → Utilities).
      * Categories outside the canonical set are appended at the end in the order the LLM
      * first encountered them, so a future custom category doesn't silently disappear.
+     *
+     * <p><b>MCP collapse.</b> Tools with a non-null {@link ToolRegistry.Tool#group()}
+     * (i.e., MCP-discovered tools sharing a server) are folded into one row per
+     * server instead of one row per tool. Without this, an MCP server with 72
+     * tools would emit ~10K tokens of per-tool rows that the model has to scan
+     * before deciding which to call. The collapsed row mentions the discovery
+     * mechanism ({@code list_mcp_tools}) so the model knows how to enumerate
+     * the server's individual tools when needed. The actual tool schemas are
+     * delivered out-of-band via the lazy-discovery path in
+     * {@code AgentRunner}; this catalog is just the operator-readable index.
      */
     private static String renderGroupedCatalog(List<ToolRegistry.Tool> tools) {
         var byCategory = new LinkedHashMap<String, List<ToolRegistry.Tool>>();
@@ -68,11 +78,31 @@ public class ToolCatalog {
             sb.append("### ").append(entry.getKey()).append("\n");
             sb.append("| Tool | Purpose |\n");
             sb.append("|---|---|\n");
+            // Group by `group()` first so MCP servers fold to one row each.
+            // Native tools (group=null) keep one row per tool.
+            var byGroup = new LinkedHashMap<String, List<ToolRegistry.Tool>>();
             for (var t : bucket) {
-                var summary = t.summary() != null ? t.summary().replace("\n", " ") : "";
-                sb.append("| `").append(t.name()).append("` | ")
-                  .append(summary)
-                  .append(" |\n");
+                var key = t.group() != null ? t.group() : ("__native__" + t.name());
+                byGroup.computeIfAbsent(key, _ -> new ArrayList<>()).add(t);
+            }
+            for (var groupEntry : byGroup.entrySet()) {
+                var members = groupEntry.getValue();
+                var first0 = members.get(0);
+                if (first0.group() != null) {
+                    var server = first0.group();
+                    sb.append("| `mcp_").append(server).append("_*` | ")
+                      .append(members.size()).append(" tools advertised by the `")
+                      .append(server).append("` MCP server. ")
+                      .append("Call `list_mcp_tools` with `{\"server\":\"")
+                      .append(server).append("\"}` before invoking any of them ")
+                      .append("to load their schemas into the conversation. |\n");
+                }
+                else {
+                    var summary = first0.summary() != null ? first0.summary().replace("\n", " ") : "";
+                    sb.append("| `").append(first0.name()).append("` | ")
+                      .append(summary)
+                      .append(" |\n");
+                }
             }
         }
         return sb.toString();
