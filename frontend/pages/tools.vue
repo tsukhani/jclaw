@@ -40,7 +40,15 @@ function iconFor(name: string): FunctionalComponent {
 // itself is global, but binding a tool to a specific agent is the only
 // meaningful axis. The previous "global toggle" was a fan-out that wrote
 // to every agent's AgentToolConfig row, which was a leaky abstraction.
-const { TOOL_META, ORDERED_TOOLS } = useToolMeta()
+const { TOOL_META, ORDERED_TOOLS, refresh: refreshTools } = useToolMeta()
+
+// Force a refetch on every visit so the MCP tab reflects live server
+// state. Without this the module-level cache means an operator who
+// disabled an MCP server in another tab still sees its card here until
+// a hard reload.
+onMounted(() => {
+  refreshTools()
+})
 
 const CATEGORIES = ['All', 'System', 'Web', 'Files', 'Utilities', 'MCP'] as const
 

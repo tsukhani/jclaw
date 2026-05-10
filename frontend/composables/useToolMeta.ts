@@ -116,6 +116,20 @@ async function ensureLoaded(): Promise<ToolApiMeta[]> {
   return fetchPromise
 }
 
+/**
+ * Drop the module-level cache and re-fetch /api/tools/meta. The default
+ * cache is sticky for the page lifetime (tools rarely change for native
+ * categories), but pages that need to reflect MCP server toggles — chiefly
+ * /tools and the agent detail page — should call this on mount so an
+ * operator who flipped a server in another tab sees the change without
+ * a full reload.
+ */
+async function refresh(): Promise<ToolApiMeta[]> {
+  metaList.value = []
+  fetchPromise = null
+  return ensureLoaded()
+}
+
 function augment(api: ToolApiMeta): ToolMeta {
   const styles = CATEGORY_STYLES[api.category] ?? CATEGORY_STYLES.Utilities
   return {
@@ -161,5 +175,8 @@ export function useToolMeta() {
     getPillClass,
     /** Awaitable — resolves once the /api/tools/meta fetch lands. */
     ready: ensureLoaded,
+    /** Drop the cache and re-fetch. Call on mount of pages that need to
+     *  reflect live MCP server state (e.g. /tools, agent detail). */
+    refresh,
   }
 }

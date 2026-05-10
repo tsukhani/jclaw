@@ -100,7 +100,14 @@ const allowlistExpanded = ref(false)
 
 // Group agentTools by category, in the canonical order from useToolMeta.
 // Each entry is { category, tools[] } — empty categories are omitted.
-const { TOOL_META, getToolMeta, getPillClass } = useToolMeta()
+const { TOOL_META, getToolMeta, getPillClass, refresh: refreshTools } = useToolMeta()
+
+// Force a refetch on visit so the MCP rows in the agent's tools section
+// reflect live server state (an operator who disabled a server in
+// another tab shouldn't see its row here until a hard reload).
+onMounted(() => {
+  refreshTools()
+})
 
 // Map the backend-supplied tool icon key (see useToolMeta) to a Heroicons
 // component. Returns null for unknown keys so the caller can suppress rendering.
