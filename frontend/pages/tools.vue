@@ -40,7 +40,7 @@ function iconFor(name: string): FunctionalComponent {
 // to every agent's AgentToolConfig row, which was a leaky abstraction.
 const { TOOL_META, ORDERED_TOOLS } = useToolMeta()
 
-const CATEGORIES = ['All', 'System', 'Web', 'Files', 'Utilities'] as const
+const CATEGORIES = ['All', 'System', 'Web', 'Files', 'Utilities', 'MCP'] as const
 
 // ─── Derived lists ─────────────────────────────────────────────────────────────
 

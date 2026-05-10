@@ -94,7 +94,8 @@ public class ToolCatalogTest extends UnitTest {
     public void canonicalCategoryOrderMatchesFrontendTaxonomy() {
         // Keep this list in sync with frontend/composables/useToolMeta.ts:TOOL_CATEGORIES.
         // JCLAW-72 collapses the dual source of truth; until then this guards drift.
-        assertEquals(List.of("System", "Files", "Web", "Utilities"),
+        // "MCP" added by JCLAW-33 — every McpToolAdapter reports that category.
+        assertEquals(List.of("System", "Files", "Web", "Utilities", "MCP"),
                 ToolCatalog.CANONICAL_CATEGORY_ORDER);
     }
 

@@ -79,11 +79,19 @@ public class ToolCatalog {
     }
 
     /**
-     * Canonical ordering for the four categories defined in
+     * Canonical ordering for the categories defined in
      * {@code frontend/composables/useToolMeta.ts:TOOL_CATEGORIES}. Both surfaces must
      * stay in sync until JCLAW-72 collapses the taxonomy to a single source of truth.
+     *
+     * <p>{@code "MCP"} (added with JCLAW-33) collects every tool the
+     * {@link mcp.McpToolAdapter} contributes — one per MCP-server-advertised
+     * tool. It sits last because the prior four categories describe what a
+     * tool DOES; "MCP" describes how it's reached, which is a useful filter
+     * on the /tools page but a less natural grouping in the system-prompt
+     * tool catalog.
      */
-    public static final List<String> CANONICAL_CATEGORY_ORDER = List.of("System", "Files", "Web", "Utilities");
+    public static final List<String> CANONICAL_CATEGORY_ORDER =
+            List.of("System", "Files", "Web", "Utilities", "MCP");
 
     public record ValidationResult(List<String> unknown, List<String> disabled) {
         public boolean isOk() { return unknown.isEmpty() && disabled.isEmpty(); }

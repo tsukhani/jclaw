@@ -32,7 +32,7 @@ export interface ToolApiMeta {
   actions: ToolAction[]
 }
 
-export type ToolCategory = 'System' | 'Web' | 'Files' | 'Utilities'
+export type ToolCategory = 'System' | 'Web' | 'Files' | 'Utilities' | 'MCP'
 
 /** Shape consumed by the tools page — backend meta plus derived styling. */
 export interface ToolMeta extends ToolApiMeta {
@@ -65,6 +65,14 @@ const CATEGORY_STYLES: Record<ToolCategory, { categoryColor: string, iconBg: str
     iconBg: 'bg-emerald-500/15',
     iconColor: 'text-emerald-400',
   },
+  // JCLAW-33: MCP tools live in a violet palette to distinguish "external
+  // connection" from native categories. Each MCP-server-discovered tool is
+  // wrapped by McpToolAdapter (backend) which reports category="MCP".
+  MCP: {
+    categoryColor: 'text-violet-400 bg-violet-500/15',
+    iconBg: 'bg-violet-500/15',
+    iconColor: 'text-violet-400',
+  },
 }
 
 const PILL_CLASSES: Record<ToolCategory, string> = {
@@ -72,9 +80,10 @@ const PILL_CLASSES: Record<ToolCategory, string> = {
   Files: 'bg-amber-500/10 border-amber-500/25 text-amber-400',
   Web: 'bg-blue-500/10 border-blue-500/25 text-blue-400',
   Utilities: 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400',
+  MCP: 'bg-violet-500/10 border-violet-500/25 text-violet-400',
 }
 
-export const TOOL_CATEGORIES = ['System', 'Files', 'Web', 'Utilities'] as const
+export const TOOL_CATEGORIES = ['System', 'Files', 'Web', 'Utilities', 'MCP'] as const
 
 // ───── Module-level cache ────────────────────────────────────────────────
 // One fetch per page load, shared across every component that calls
