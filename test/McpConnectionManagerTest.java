@@ -1,8 +1,11 @@
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import jobs.ToolRegistrationJob;
+import mcp.McpAllowlist;
 import mcp.McpClient;
 import mcp.McpConnectionManager;
+import models.Agent;
+import models.AgentSkillAllowedTool;
 import models.EventLog;
 import models.McpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -165,6 +168,52 @@ public class McpConnectionManagerTest extends UnitTest {
         assertEquals(McpServer.Status.DISCONNECTED, McpConnectionManager.status("fixture"));
     }
 
+    // ==================== JCLAW-32: allowlist + MCP_TOOL_UNREGISTER ====================
+
+    @Test
+    public void connectWritesAllowlistRowsForExistingAgents() throws Exception {
+        var agentId = commitInFreshTx(() -> seedAgent("alpha").id);
+        var server = seedStdioServer("fixture", FIXTURE_SCRIPT);
+
+        McpConnectionManager.connect(server);
+        awaitState("fixture", McpServer.Status.CONNECTED, 10);
+
+        Tx.run(() -> {
+            var agent = (Agent) Agent.findById(agentId);
+            assertTrue(McpAllowlist.isAllowed(agent, "fixture", "echo"),
+                    "alpha must be granted the fixture's 'echo' tool after connect");
+            var rows = AgentSkillAllowedTool.find(
+                    "skillName = ?1", "mcp:fixture").<AgentSkillAllowedTool>fetch();
+            assertEquals(1, rows.size(), "exactly one row: 1 agent x 1 tool");
+        });
+    }
+
+    @Test
+    public void stopClearsAllowlistAndEmitsMcpToolUnregisterEvent() throws Exception {
+        commitInFreshTx(() -> { seedAgent("alpha"); return null; });
+        var server = seedStdioServer("fixture", FIXTURE_SCRIPT);
+        McpConnectionManager.connect(server);
+        awaitState("fixture", McpServer.Status.CONNECTED, 10);
+
+        // Sanity: rows exist before stop.
+        Tx.run(() -> assertEquals(1L, AgentSkillAllowedTool.count(
+                "skillName = ?1", "mcp:fixture")));
+
+        McpConnectionManager.stop("fixture");
+
+        Tx.run(() -> {
+            assertEquals(0L, AgentSkillAllowedTool.count(
+                    "skillName = ?1", "mcp:fixture"),
+                    "allowlist rows must be cleared on stop");
+            var unregEvents = EventLog.find(
+                    "category = ?1 ORDER BY timestamp DESC", "MCP_TOOL_UNREGISTER")
+                    .<EventLog>fetch();
+            assertFalse(unregEvents.isEmpty(),
+                    "MCP_TOOL_UNREGISTER event must be persisted on stop");
+            assertTrue(unregEvents.get(0).message.contains("fixture"));
+        });
+    }
+
     @Test
     public void shutdownTearsDownAllConnections() throws Exception {
         var s1 = seedStdioServer("fix1", FIXTURE_SCRIPT);
@@ -206,6 +255,36 @@ public class McpConnectionManagerTest extends UnitTest {
             srv.save();
             return srv;
         });
+    }
+
+    private static Agent seedAgent(String name) {
+        var a = new Agent();
+        a.name = name;
+        a.modelProvider = "openrouter";
+        a.modelId = "gpt-4.1";
+        a.enabled = true;
+        a.save();
+        return a;
+    }
+
+    /** Run {@code block} in a fresh virtual thread + Tx so the commit lands
+     *  before the calling thread proceeds — needed when seed data must be
+     *  visible to a subsequent connector VT (mirrors WebhookControllerTest's
+     *  pattern, since UnitTest's outer carrier tx otherwise holds writes
+     *  uncommitted from peer threads' POV). */
+    private static <T> T commitInFreshTx(java.util.concurrent.Callable<T> block) {
+        var holder = new java.util.concurrent.atomic.AtomicReference<T>();
+        var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var t = Thread.ofVirtual().start(() -> {
+            try { holder.set(Tx.run(() -> {
+                try { return block.call(); }
+                catch (Exception e) { throw new RuntimeException(e); }
+            })); }
+            catch (Throwable e) { err.set(e); }
+        });
+        try { t.join(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        if (err.get() != null) throw new RuntimeException(err.get());
+        return holder.get();
     }
 
     private void awaitState(String name, McpServer.Status target, long maxSeconds) throws InterruptedException {

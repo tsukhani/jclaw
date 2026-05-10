@@ -93,6 +93,7 @@ public final class McpConnectionManager {
             try { client.close(); } catch (RuntimeException ignored) { /* best effort */ }
         }
         ToolRegistry.unpublishExternal(serverName);
+        clearAllowlistAndAudit(serverName);
     }
 
     /** Stop all connections. Called from {@code ShutdownJob}. */
@@ -189,10 +190,14 @@ public final class McpConnectionManager {
         try {
             client.connect();
             entry.client = client;
+            // republishTools publishes the in-memory tool adapters AND syncs
+            // the DB-authoritative allowlist (JCLAW-32). Both must complete
+            // before status flips to CONNECTED so observers polling state
+            // (tests, admin UI) only see CONNECTED after grants are durable.
+            republishTools(server.name, client.tools());
             entry.status = McpServer.Status.CONNECTED;
             entry.lastError = null;
             entry.attempts = 0;
-            republishTools(server.name, client.tools());
             persistStatus(server.id, McpServer.Status.CONNECTED, null);
             persistConnectedAt(server.id);
             EventLogger.info(CATEGORY_CONNECT,
@@ -225,6 +230,7 @@ public final class McpConnectionManager {
             if (client.state() == McpClient.State.READY) return;  // false alarm
 
             ToolRegistry.unpublishExternal(server.name);
+            clearAllowlistAndAudit(server.name);
             EventLogger.warn(CATEGORY_DISCONNECT,
                     "MCP server '%s' disconnected: %s".formatted(server.name, client.lastError()));
             entry.status = McpServer.Status.DISCONNECTED;
@@ -242,6 +248,7 @@ public final class McpConnectionManager {
             entry.client = null;
         }
         ToolRegistry.unpublishExternal(server.name);
+        if (hadConnection) clearAllowlistAndAudit(server.name);
         entry.status = McpServer.Status.ERROR;
         entry.lastError = error;
         entry.attempts = attempt + 1;
@@ -264,6 +271,40 @@ public final class McpConnectionManager {
             adapters.add(new McpToolAdapter(serverName, def, McpConnectionManager::callTool));
         }
         ToolRegistry.publishExternal(serverName, adapters);
+        // JCLAW-32: keep the DB-authoritative allowlist in sync with the
+        // in-memory ToolRegistry on every tool-list change. Idempotent —
+        // McpAllowlist.registerForAllAgents clears the prior set first so
+        // a shrinking tool list doesn't leave orphaned grants.
+        try {
+            Tx.run(() -> McpAllowlist.registerForAllAgents(serverName, defs));
+        } catch (RuntimeException e) {
+            EventLogger.warn("MCP_TOOL_REGISTER",
+                    "Allowlist sync failed for '%s': %s".formatted(serverName, e.getMessage()));
+        }
+    }
+
+    /** Atomic delete-and-audit: drop every allowlist row for this server in
+     *  the same tx as the {@code MCP_TOOL_UNREGISTER} log entry, so the
+     *  audit trail can never disagree with the live row state. Used by
+     *  every disconnect path: explicit {@link #stop}, watchdog teardown,
+     *  and connect-failure rollback. */
+    private static void clearAllowlistAndAudit(String serverName) {
+        try {
+            Tx.run(() -> {
+                int removed = McpAllowlist.unregister(serverName);
+                if (removed == 0) return;
+                var ev = new models.EventLog();
+                ev.timestamp = Instant.now();
+                ev.level = "INFO";
+                ev.category = "MCP_TOOL_UNREGISTER";
+                ev.message = "Removed %d MCP allowlist row(s) for server '%s'"
+                        .formatted(removed, serverName);
+                ev.save();
+            });
+        } catch (RuntimeException e) {
+            EventLogger.warn("MCP_TOOL_UNREGISTER",
+                    "Failed to clear allowlist for '%s': %s".formatted(serverName, e.getMessage()));
+        }
     }
 
     private static long backoffDelay(int attempt) {
