@@ -214,6 +214,33 @@ public class McpConnectionManagerTest extends UnitTest {
         });
     }
 
+    // ==================== JCLAW-32: agent-creation backfill ====================
+
+    @Test
+    public void agentCreatedAfterConnectGetsBackfilledGrants() throws Exception {
+        // 1. Connect with NO agents in the DB.
+        var server = seedStdioServer("fixture", FIXTURE_SCRIPT);
+        McpConnectionManager.connect(server);
+        awaitState("fixture", McpServer.Status.CONNECTED, 10);
+
+        Tx.run(() -> assertEquals(0L, AgentSkillAllowedTool.count(
+                "skillName = ?1", "mcp:fixture"),
+                "with zero agents at connect time, no rows are written"));
+
+        // 2. Now create a new agent the canonical way (AgentService.create).
+        var agentId = commitInFreshTx(() -> services.AgentService.create(
+                "fresh", "openrouter", "gpt-4.1").id);
+
+        // 3. Backfill should have written one row for this agent.
+        Tx.run(() -> {
+            var agent = (Agent) Agent.findById(agentId);
+            assertTrue(McpAllowlist.isAllowed(agent, "fixture", "echo"),
+                    "newly-created agent must be backfilled with MCP grants");
+            assertEquals(1L, AgentSkillAllowedTool.count(
+                    "agent.id = ?1 AND skillName = ?2", agentId, "mcp:fixture"));
+        });
+    }
+
     // ==================== JCLAW-32: gated invocation + MCP_TOOL_INVOKE ====================
 
     @Test

@@ -101,6 +101,17 @@ public class AgentService {
             browserConfig.save();
         }
 
+        // JCLAW-32: backfill MCP allowlist grants for currently-connected
+        // servers. JCLAW-31's broadcast happens on connect; without this,
+        // an agent created post-connect would silently see zero MCP tools.
+        try {
+            mcp.McpAllowlist.backfillForAgent(agent);
+        } catch (RuntimeException e) {
+            EventLogger.warn("MCP_TOOL_REGISTER",
+                    "MCP allowlist backfill failed for new agent '%s': %s"
+                            .formatted(name, e.getMessage()));
+        }
+
         EventLogger.info("agent", name, null, "Agent '%s' created (provider: %s, model: %s)"
                 .formatted(name, modelProvider, modelId));
         return agent;
