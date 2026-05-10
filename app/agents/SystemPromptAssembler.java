@@ -123,8 +123,17 @@ public class SystemPromptAssembler {
         // they travel separately as the `tools` array on the API request — but they are
         // counted as input tokens by every provider, so the breakdown surfaces them
         // alongside the prompt sections for a realistic total-token picture.
+        //
+        // We deliberately compute the FRESH-CONVERSATION baseline (empty
+        // discovered-MCP-servers set), not the worst-case "all servers
+        // discovered" view. Phase 2 lazy discovery means MCP tool schemas
+        // only ship to the LLM after the model has called list_mcp_tools
+        // for that server; counting them in the breakdown total when no
+        // conversation has happened would double-count cost the operator
+        // never pays. Native tools + the discovery tool itself ship every
+        // turn and are correctly included.
         var toolEntries = new ArrayList<PromptBreakdown.Entry>();
-        var toolDefs = ToolRegistry.getToolDefsForAgent(ToolRegistry.loadDisabledTools(agent));
+        var toolDefs = ToolRegistry.getToolDefsForAgent(agent, java.util.Set.<String>of());
         for (var tool : toolDefs) {
             var json = TOOL_GSON.toJson(tool);
             toolEntries.add(new PromptBreakdown.Entry(
