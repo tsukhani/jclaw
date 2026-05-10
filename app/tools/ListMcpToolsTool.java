@@ -97,11 +97,19 @@ public class ListMcpToolsTool implements ToolRegistry.Tool {
 
     @Override public String shortDescription() { return summary(); }
 
-    @Override public String category() { return "Utilities"; }
+    @Override public String category() { return "System"; }
 
     @Override public String icon() { return "search"; }
 
     /** Read-only metadata fetch — multiple parallel calls (e.g., for two
      *  different servers in one round) can race freely. */
     @Override public boolean parallelSafe() { return true; }
+
+    /** Always-on, hidden from per-agent toggling. The lazy-discovery
+     *  contract assumes this tool is callable whenever any MCP server
+     *  is enabled — letting an operator disable it per-agent would
+     *  break MCP entirely for that agent (server enabled → catalog
+     *  row visible → model tries to discover → call fails). System
+     *  tier removes the toggle and the foot-gun together. */
+    @Override public boolean isSystem() { return true; }
 }

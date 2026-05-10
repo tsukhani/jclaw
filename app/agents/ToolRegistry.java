@@ -400,10 +400,17 @@ public class ToolRegistry {
             var configs = AgentToolConfig.findByAgent(agent);
             var explicitState = new HashMap<String, Boolean>();
             for (var c : configs) explicitState.put(c.toolName, c.enabled);
+            // Snapshot of which currently-registered tools are system-tier so
+            // a stale AgentToolConfig row (e.g., for a tool that was later
+            // promoted to system status) can't hide a structural tool.
+            var systemNames = new HashSet<String>();
+            for (var t : tools.values()) if (t.isSystem()) systemNames.add(t.name());
 
             var disabled = new HashSet<String>();
             for (var entry : explicitState.entrySet()) {
-                if (!entry.getValue()) disabled.add(entry.getKey());
+                if (entry.getValue()) continue;
+                if (systemNames.contains(entry.getKey())) continue;  // system tools cannot be hidden
+                disabled.add(entry.getKey());
             }
             // MCP tools default-disabled for non-main agents (operator opts-in
             // per server on the agent detail page). Main agent unaffected.
