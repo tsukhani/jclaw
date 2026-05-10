@@ -111,7 +111,12 @@ public final class McpStdioTransport implements McpTransport {
         try (stderr) {
             String line;
             while ((line = stderr.readLine()) != null) {
-                Logger.info("[mcp:%s:stderr] %s", name, line);
+                // DEBUG (not INFO): MCP servers commonly use stderr for boot
+                // banners, framework copy, and operational chatter (FastMCP
+                // prints a 16-line ASCII art on every connect). Default
+                // visibility would drown the application log; flip on DEBUG
+                // when diagnosing a misbehaving server.
+                Logger.debug("[mcp:%s:stderr] %s", name, line);
             }
         } catch (IOException ignored) { /* process closed */ }
     }

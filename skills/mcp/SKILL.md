@@ -68,7 +68,7 @@ For a remote MCP server (managed providers like Composio, or a server you self-h
 
 Once a row is configured, the runtime handles:
 
-- **Process supervision** (STDIO) — restart on crash, kill on disable, drain stderr to the SLF4J log under `[mcp:<server>:stderr]`
+- **Process supervision** (STDIO) — restart on crash, kill on disable, drain stderr to the SLF4J log at DEBUG under `[mcp:<server>:stderr]`
 - **Reconnect with exponential backoff** — `min(2^attempts, 30) seconds`. Capped at 30s per the AC.
 - **Tool discovery + re-registration** — handles `notifications/tools/list_changed` so server restarts pick up new tools without operator action
 - **Per-agent allowlist** — a row in `agent_skill_allowed_tool` per (agent, advertised tool) on connect; cleared on disconnect; backfilled when a new agent is created
@@ -103,7 +103,7 @@ Out of scope for this skill — JClaw is the client. To build a custom server, u
 - **"Failed to connect" on Test (HTTP)** — verify the URL is reachable from the JClaw host (`curl -I <url>`). Check the auth header format the upstream service expects.
 - **Server connects but no tools show up** — the server connected fine but advertises zero tools. Some servers gate their tool list on auth scopes (e.g. GitHub returns more tools when the PAT has more scopes). Check the server's docs.
 - **Tool calls return "not on the allowlist"** — JCLAW-32's allowlist gate. New agents created BEFORE the server connected get backfilled automatically; agents created during a long disconnection might be missing rows. Toggle the server off and back on to re-broadcast.
-- **stderr noise from a stdio server** — surfaced under `[mcp:<server>:stderr]` in the application log. Servers commonly use stderr for log output (the protocol is on stdout); this is informational, not an error.
+- **stderr noise from a stdio server** — surfaced under `[mcp:<server>:stderr]` at DEBUG level. Hidden by default to keep the application log readable; raise the `mcp.transport` logger to DEBUG when diagnosing a misbehaving server (FastMCP-based servers print a 16-line ASCII banner on every connect that would otherwise drown the log).
 
 ## Configuration reference
 
@@ -165,7 +165,7 @@ JClaw declares **no client capabilities** during `initialize` — no sampling, n
 
 - **event_log** categories: `MCP_CONNECT`, `MCP_DISCONNECT`, `MCP_TOOL_INVOKE` (allowed=INFO, denied=WARN), `MCP_TOOL_UNREGISTER`. Every entry carries the server name in the message; `MCP_TOOL_INVOKE` rows carry the args JSON in the `details` column.
 - **Status fields** on `mcp_server`: `status`, `lastError`, `lastConnectedAt`, `lastDisconnectedAt` — mutated only by `McpConnectionManager`.
-- **Stdio stderr** drains to SLF4J under `[mcp:<server>:stderr]` so a misbehaving server's log output shows up next to the application log instead of polluting the JSON-RPC stream.
+- **Stdio stderr** drains to SLF4J at DEBUG under `[mcp:<server>:stderr]` so a misbehaving server's log output is recoverable without polluting the default INFO-level application log.
 
 ## References
 
