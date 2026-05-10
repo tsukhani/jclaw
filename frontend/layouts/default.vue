@@ -184,13 +184,18 @@ const navGroups: NavGroup[] = [
       // WrenchScrewdriverIcon (not Cog) — disambiguates Tools from Settings,
       // which was previously broken: both rendered the same gear glyph.
       { label: 'Tools', to: '/tools', icon: WrenchScrewdriverIcon },
+      // MCP Servers configures the upstream source of MCP tools that
+      // appear on the Tools page; placed adjacent so the "where do my
+      // tools come from?" question has both halves of the answer next
+      // to each other. Same conceptual category as Skills (runtime-
+      // configurable capability extension).
+      { label: 'MCP Servers', to: '/mcp-servers', icon: PuzzlePieceIcon },
     ],
   },
   {
     label: 'Admin',
     items: [
       { label: 'Settings', to: '/settings', icon: Cog6ToothIcon },
-      { label: 'MCP Servers', to: '/mcp-servers', icon: PuzzlePieceIcon },
       { label: 'Logs', to: '/logs', icon: Bars3Icon },
     ],
   },
