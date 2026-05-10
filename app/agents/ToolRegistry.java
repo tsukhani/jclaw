@@ -291,8 +291,44 @@ public class ToolRegistry {
         }
     }
 
-    /** Get tool definitions filtered by agent's tool configuration. */
+    /** Get tool definitions filtered by agent's tool configuration.
+     *  Equivalent to {@link #getToolDefsForAgent(Agent, models.Conversation)}
+     *  with a null conversation — every MCP tool is excluded since no
+     *  discovery history exists. Use the conversation-aware overload from
+     *  the agent loop so previously-discovered MCP tools surface to the model. */
     public static List<ToolDef> getToolDefsForAgent(Agent agent) {
+        return getToolDefsForAgent(agent, (models.Conversation) null);
+    }
+
+    /**
+     * Get tool definitions filtered by agent config AND lazy MCP discovery.
+     *
+     * <p>Native tools (group=null) ship every turn — they're predictable
+     * workhorses with bounded count. MCP tools (group=server name) are
+     * gated on the model having called {@code list_mcp_tools} for their
+     * server in this conversation's history. The discovery tool itself is
+     * native, so it's always callable and the model can self-bootstrap.
+     *
+     * <p>The lazy gate prevents an unbounded MCP tool count from drowning
+     * the prompt: a fresh conversation that never touches an MCP server
+     * pays only that server's listing-row cost (~50 tokens per server in
+     * the catalog markdown), not its full per-tool schemas (~500-2000
+     * tokens per tool × N tools).
+     */
+    public static List<ToolDef> getToolDefsForAgent(Agent agent, models.Conversation conv) {
+        // Conversation lookup hits the DB to read prior tool calls; delegate
+        // to the pure overload below, which is independently testable with
+        // a synthetic discovered-set.
+        return getToolDefsForAgent(agent, mcp.McpDiscovery.discoveredServers(conv));
+    }
+
+    /**
+     * Pure variant of the lazy-MCP gate, taking a pre-computed discovered
+     * set. The Conversation overload above derives the set from message
+     * history; tests can pass a synthetic set directly to verify the
+     * filter behaviour without seeding rows.
+     */
+    public static List<ToolDef> getToolDefsForAgent(Agent agent, Set<String> discoveredMcpServers) {
         // Loadtest agent: ship zero tools so cross-provider tokens-per-second
         // benchmarks measure pure model speed. Sending a populated tools
         // array adds ~2-3 KB of prefill on every request AND tempts the
@@ -302,10 +338,19 @@ public class ToolRegistry {
                 && services.LoadTestRunner.LOADTEST_AGENT_NAME.equals(agent.name)) {
             return List.of();
         }
-        return getToolDefsForAgent(loadDisabledTools(agent));
+        var disabled = loadDisabledTools(agent);
+        var discovered = discoveredMcpServers != null ? discoveredMcpServers : Set.<String>of();
+        return tools.values().stream()
+                .filter(t -> !disabled.contains(t.name()))
+                .filter(t -> t.group() == null || discovered.contains(t.group()))
+                .map(t -> ToolDef.of(t.name(), t.description(), t.parameters()))
+                .toList();
     }
 
-    /** Get tool definitions filtered by a pre-loaded set of disabled tool names. */
+    /** Get tool definitions filtered by a pre-loaded set of disabled tool names.
+     *  Used by hot paths that already have the disabled set in scope. Does NOT
+     *  apply the lazy MCP discovery gate — only call from contexts where every
+     *  MCP tool should ship (e.g., catalog metadata for the admin UI). */
     public static List<ToolDef> getToolDefsForAgent(Set<String> disabledTools) {
         if (disabledTools.isEmpty()) return getToolDefs();
         return tools.values().stream()

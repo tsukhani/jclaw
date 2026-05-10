@@ -358,7 +358,10 @@ public class AgentRunner {
                 }
                 var secondary = ProviderRegistry.getSecondary();
 
-                var tools = ToolRegistry.getToolDefsForAgent(agent);
+                // Conversation-aware overload: lazy-load MCP tool schemas
+                // based on which servers the model has discovered via
+                // list_mcp_tools. Native tools always ship.
+                var tools = ToolRegistry.getToolDefsForAgent(agent, conv);
 
                 EventLogger.info("llm", agent.name, conv.channelType,
                         "Calling %s / %s".formatted(primary.config().name(), effectiveModelId(agent, conv)));
@@ -671,11 +674,10 @@ public class AgentRunner {
             var sysPrompt = services.SessionCompactor.appendSummaryToPrompt(assembled0.systemPrompt(), convo);
             var audioBearers = new ArrayList<AudioBearer>();
             var msgs = buildMessages(sysPrompt, convo, audioBearers);
-            // Use the Agent overload so the loadtest-agent zero-tools
-            // short-circuit applies. loadDisabledTools is ConcurrentHashMap-
-            // cached, so the redundant lookup inside that overload is a
-            // single map.get and not worth optimizing around.
-            var toolDefs = ToolRegistry.getToolDefsForAgent(agent);
+            // Conversation-aware overload: applies the loadtest-agent
+            // short-circuit AND the lazy MCP discovery gate (only ship
+            // schemas for servers the model has called list_mcp_tools on).
+            var toolDefs = ToolRegistry.getToolDefsForAgent(agent, convo);
             return new PreparedPrologue(assembled0, msgs, toolDefs, disabledTools, audioBearers);
         });
 
