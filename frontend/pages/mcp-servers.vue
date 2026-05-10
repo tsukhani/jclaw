@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { McpServer, McpTestResult } from '~/types/api'
-import { ChevronDownIcon, PlusIcon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, BeakerIcon, ChevronDownIcon, PlusIcon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 
 const { data: servers, refresh } = await useFetch<McpServer[]>('/api/mcp-servers')
 const { mutate, error: mutationError } = useApiMutation()
@@ -542,13 +542,6 @@ function removeHeaderRow(i: number) {
                   </button>
                   <button
                     type="button"
-                    class="text-xs text-fg-muted hover:text-fg-strong transition-colors"
-                    @click="testServer(server)"
-                  >
-                    Test
-                  </button>
-                  <button
-                    type="button"
                     class="text-xs text-fg-muted hover:text-fg-strong transition-colors flex items-center gap-1"
                     @click="expandedRowId === server.id ? cancelEdit() : openEditForm(server)"
                   >
@@ -560,10 +553,29 @@ function removeHeaderRow(i: number) {
                   </button>
                   <button
                     type="button"
-                    class="text-xs text-fg-muted hover:text-red-400 transition-colors"
+                    class="text-fg-muted hover:text-fg-strong transition-colors disabled:opacity-50 disabled:cursor-wait"
+                    :title="testing && testResultForId === server.id ? 'Testing…' : 'Test connection'"
+                    :aria-label="`Test connection to ${server.name}`"
+                    :disabled="testing && testResultForId === server.id"
+                    @click="testServer(server)"
+                  >
+                    <ArrowPathIcon
+                      v-if="testing && testResultForId === server.id"
+                      class="w-4 h-4 animate-spin"
+                    />
+                    <BeakerIcon
+                      v-else
+                      class="w-4 h-4"
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    class="text-fg-muted hover:text-red-400 transition-colors"
+                    :title="`Delete ${server.name}`"
+                    :aria-label="`Delete ${server.name}`"
                     @click="deleteServer(server)"
                   >
-                    Delete
+                    <TrashIcon class="w-4 h-4" />
                   </button>
                 </div>
               </td>
