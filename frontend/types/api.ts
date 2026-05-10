@@ -254,6 +254,11 @@ export interface LogEvent {
 export interface AgentTool {
   name: string
   enabled: boolean
+  /** Optional grouping key: tools sharing one (currently MCP servers) fold
+   *  into a single agent-detail-page row with one toggle that flips every
+   *  member via PUT /api/agents/:id/tool-groups/:group. {@code undefined}
+   *  for native tools. */
+  group?: string
   [key: string]: unknown
 }
 

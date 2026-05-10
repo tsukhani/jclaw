@@ -11,6 +11,7 @@ import {
   GlobeAltIcon,
   MagnifyingGlassIcon,
   PlusIcon,
+  PuzzlePieceIcon,
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
@@ -118,28 +119,84 @@ function toolIconComponent(name: string) {
   const key = getToolMeta(name)?.icon as keyof typeof TOOL_ICON_COMPONENTS | undefined
   return key ? TOOL_ICON_COMPONENTS[key] ?? null : null
 }
+/**
+ * One row in the agent's tools section. Either a single native tool with
+ * its own toggle, or a folded group of MCP tools (all sharing one server)
+ * with a single toggle that flips every member via the bulk endpoint.
+ */
+type ToolRow
+  = | { kind: 'tool', key: string, tool: AgentTool, enabled: boolean }
+    | { kind: 'group', key: string, group: string, members: AgentTool[], enabled: boolean, functionCount: number }
+
 const toolsByCategory = computed(() => {
-  const categories = ['System', 'Files', 'Web', 'Utilities'] as const
+  const categories = ['System', 'Files', 'Web', 'Utilities', 'MCP'] as const
   const orderedNames = [
     'exec',
     'filesystem', 'documents',
     'web_fetch', 'web_search', 'browser',
     'datetime', 'checklist', 'task_manager',
   ]
-  // Build a lookup from tool name → its position in the canonical order
   const posOf = (name: string) => {
     const i = orderedNames.indexOf(name)
     return i === -1 ? 999 : i
   }
   return categories
-    .map(category => ({
-      category,
-      tools: agentTools.value
+    .map((category) => {
+      const inCategory = agentTools.value
         .filter(t => !TOOL_META.value[t.name]?.system)
         .filter(t => (TOOL_META.value[t.name]?.category ?? 'Utilities') === category)
-        .sort((a, b) => posOf(a.name) - posOf(b.name)),
-    }))
-    .filter(g => g.tools.length > 0)
+      // Fold tools that share a `group` (MCP) into one row; emit single-tool
+      // rows for everything else. Preserves first-appearance order within
+      // the category so the rendering stays stable across reloads.
+      const groupBuckets = new Map<string, AgentTool[]>()
+      const rows: ToolRow[] = []
+      for (const t of inCategory) {
+        const groupName = (t.group as string | undefined) ?? null
+        if (groupName) {
+          const existing = groupBuckets.get(groupName)
+          if (existing) {
+            existing.push(t)
+          }
+          else {
+            const bucket = [t]
+            groupBuckets.set(groupName, bucket)
+            // Reserve this group's slot on first sight; we'll fill its row
+            // shape after the loop completes.
+            rows.push({
+              kind: 'group',
+              key: `group:${groupName}`,
+              group: groupName,
+              members: bucket,
+              enabled: false,
+              functionCount: 0,
+            })
+          }
+        }
+        else {
+          rows.push({
+            kind: 'tool',
+            key: t.name,
+            tool: t,
+            enabled: t.enabled,
+          })
+        }
+      }
+      // Resolve group rows now that we have all members.
+      for (const row of rows) {
+        if (row.kind === 'group') {
+          row.enabled = row.members.every(m => m.enabled)
+          row.functionCount = row.members.length
+        }
+      }
+      // Native tools sort by canonical order; group rows trail.
+      rows.sort((a, b) => {
+        const ai = a.kind === 'tool' ? posOf(a.tool.name) : 1000
+        const bi = b.kind === 'tool' ? posOf(b.tool.name) : 1000
+        return ai - bi
+      })
+      return { category, rows }
+    })
+    .filter(g => g.rows.length > 0)
 })
 
 const queueMode = ref('queue')
@@ -380,6 +437,29 @@ async function toggleTool(toolName: string, enabled: boolean) {
   }
   catch (e) {
     console.error('Failed to toggle tool:', e)
+  }
+}
+
+/**
+ * Bulk-toggle every tool in a group (MCP server) for the editing agent,
+ * via PUT /api/agents/:id/tool-groups/:group. One HTTP call regardless of
+ * group size, and it updates the local agentTools state so the row's
+ * toggle reflects immediately without waiting for a refetch.
+ */
+async function toggleToolGroup(group: string, enabled: boolean) {
+  if (!editing.value) return
+  // Optimistic local update so the toggle animates without a roundtrip.
+  for (const t of agentTools.value) {
+    if ((t.group as string | undefined) === group) t.enabled = enabled
+  }
+  try {
+    await $fetch(`/api/agents/${editing.value.id}/tool-groups/${encodeURIComponent(group)}`, {
+      method: 'PUT',
+      body: { enabled },
+    })
+  }
+  catch (e) {
+    console.error('Failed to toggle tool group:', e)
   }
 }
 
@@ -1290,72 +1370,107 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         </div>
         <div>
           <template
-            v-for="group in toolsByCategory"
-            :key="group.category"
+            v-for="catGroup in toolsByCategory"
+            :key="catGroup.category"
           >
             <!-- Category header row -->
             <div class="px-4 py-1.5 border-b border-border bg-surface-elevated">
               <span
                 class="text-[10px] font-semibold uppercase tracking-widest"
                 :class="{
-                  'text-neutral-500': group.category === 'System',
-                  'text-amber-500/70': group.category === 'Files',
-                  'text-blue-500/70': group.category === 'Web',
-                  'text-emerald-500/70': group.category === 'Utilities',
+                  'text-neutral-500': catGroup.category === 'System',
+                  'text-amber-500/70': catGroup.category === 'Files',
+                  'text-blue-500/70': catGroup.category === 'Web',
+                  'text-emerald-500/70': catGroup.category === 'Utilities',
+                  'text-violet-500/70': catGroup.category === 'MCP',
                 }"
               >
-                {{ group.category }}
+                {{ catGroup.category }}
               </span>
             </div>
             <div class="divide-y divide-border">
+              <!-- Group rows: one per MCP server, single toggle flips every tool the server contributes via the bulk endpoint -->
               <div
-                v-for="tool in group.tools"
-                :key="tool.name"
+                v-for="row in catGroup.rows"
+                :key="row.key"
                 class="px-4 py-3 flex items-center gap-3"
               >
-                <!-- Colored icon matching the Tools page -->
-                <div
-                  class="w-8 h-8 rounded flex items-center justify-center shrink-0"
-                  :class="getToolMeta(tool.name)?.iconBg ?? 'bg-muted'"
-                >
-                  <component
-                    :is="toolIconComponent(tool.name)"
-                    v-if="toolIconComponent(tool.name)"
-                    class="w-4 h-4"
-                    :class="getToolMeta(tool.name)?.iconColor ?? 'text-fg-muted'"
-                    aria-hidden="true"
-                  />
-                </div>
-                <!-- Name + function pills -->
-                <div class="flex-1 min-w-0">
-                  <span class="text-sm text-fg-strong font-mono">{{ tool.name }}</span>
-                  <div class="flex flex-wrap gap-1 mt-1.5">
-                    <span
-                      v-for="fn in (getToolMeta(tool.name)?.functions ?? [])"
-                      :key="fn.name"
-                      class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm"
-                      :class="getPillClass(tool.name)"
-                    >
-                      {{ fn.name }}
-                    </span>
-                  </div>
-                </div>
-                <!-- Pill toggle -->
-                <button
-                  :title="tool.enabled ? 'Disable tool for this agent' : 'Enable tool for this agent'"
-                  class="shrink-0"
-                  @click="tool.enabled = !tool.enabled; toggleTool(tool.name, tool.enabled)"
-                >
-                  <div
-                    class="relative w-9 h-5 rounded-full transition-colors duration-200"
-                    :class="tool.enabled ? 'bg-emerald-500' : 'bg-muted'"
-                  >
-                    <div
-                      class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
-                      :class="tool.enabled ? 'left-[18px]' : 'left-0.5'"
+                <template v-if="row.kind === 'group'">
+                  <!-- Violet plug icon for MCP groups, matching the /tools page MCP card -->
+                  <div class="w-8 h-8 rounded flex items-center justify-center shrink-0 bg-violet-500/15">
+                    <PuzzlePieceIcon
+                      class="w-4 h-4 text-violet-400"
+                      aria-hidden="true"
                     />
                   </div>
-                </button>
+                  <div class="flex-1 min-w-0">
+                    <span class="text-sm text-fg-strong font-mono">{{ row.group }}</span>
+                    <div class="mt-1.5">
+                      <span class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm bg-violet-500/10 border-violet-500/25 text-violet-400">
+                        {{ row.functionCount }} function{{ row.functionCount === 1 ? '' : 's' }}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    :title="row.enabled ? `Disable ${row.group} for this agent` : `Enable ${row.group} for this agent`"
+                    :aria-label="row.enabled ? `Disable ${row.group} for this agent` : `Enable ${row.group} for this agent`"
+                    class="shrink-0"
+                    @click="toggleToolGroup(row.group, !row.enabled)"
+                  >
+                    <div
+                      class="relative w-9 h-5 rounded-full transition-colors duration-200"
+                      :class="row.enabled ? 'bg-emerald-500' : 'bg-muted'"
+                    >
+                      <div
+                        class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+                        :class="row.enabled ? 'left-[18px]' : 'left-0.5'"
+                      />
+                    </div>
+                  </button>
+                </template>
+                <template v-else>
+                  <!-- Single native tool: existing render -->
+                  <div
+                    class="w-8 h-8 rounded flex items-center justify-center shrink-0"
+                    :class="getToolMeta(row.tool.name)?.iconBg ?? 'bg-muted'"
+                  >
+                    <component
+                      :is="toolIconComponent(row.tool.name)"
+                      v-if="toolIconComponent(row.tool.name)"
+                      class="w-4 h-4"
+                      :class="getToolMeta(row.tool.name)?.iconColor ?? 'text-fg-muted'"
+                      aria-hidden="true"
+                    />
+                  </div>
+                  <div class="flex-1 min-w-0">
+                    <span class="text-sm text-fg-strong font-mono">{{ row.tool.name }}</span>
+                    <div class="flex flex-wrap gap-1 mt-1.5">
+                      <span
+                        v-for="fn in (getToolMeta(row.tool.name)?.functions ?? [])"
+                        :key="fn.name"
+                        class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm"
+                        :class="getPillClass(row.tool.name)"
+                      >
+                        {{ fn.name }}
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    :title="row.tool.enabled ? 'Disable tool for this agent' : 'Enable tool for this agent'"
+                    class="shrink-0"
+                    @click="row.tool.enabled = !row.tool.enabled; toggleTool(row.tool.name, row.tool.enabled)"
+                  >
+                    <div
+                      class="relative w-9 h-5 rounded-full transition-colors duration-200"
+                      :class="row.tool.enabled ? 'bg-emerald-500' : 'bg-muted'"
+                    >
+                      <div
+                        class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+                        :class="row.tool.enabled ? 'left-[18px]' : 'left-0.5'"
+                      />
+                    </div>
+                  </button>
+                </template>
               </div>
             </div>
           </template>

@@ -62,6 +62,7 @@ GET     /api/tools                              ApiToolsController.list
 GET     /api/tools/meta                         ApiToolsController.meta
 GET     /api/agents/{id}/tools                  ApiToolsController.listForAgent
 PUT     /api/agents/{id}/tools/{name}           ApiToolsController.updateForAgent
+PUT     /api/agents/{id}/tool-groups/{group}    ApiToolsController.updateGroupForAgent
 
 # Skills API
 # Skill authoring is read-only from the HTTP API: skills are created/updated only

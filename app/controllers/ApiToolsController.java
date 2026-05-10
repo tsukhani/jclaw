@@ -78,13 +78,20 @@ public class ApiToolsController extends Controller {
             configMap.put(c.toolName, c.enabled);
         }
 
+        // Default policy: native tools are enabled-by-default; grouped tools
+        // (MCP) are enabled-by-default for the main agent, disabled-by-default
+        // for custom agents. Mirrors ToolRegistry.loadDisabledTools so the UI
+        // and the agent loop agree on the resolved state.
+        boolean isMain = agent.isMain();
+
         var result = allTools.stream().map(t -> {
             var map = new HashMap<String, Object>();
             map.put("name", t.name());
             map.put("description", t.description());
             map.put("system", t.isSystem());
-            // System tools are always enabled; user config is ignored for them
-            map.put("enabled", t.isSystem() || configMap.getOrDefault(t.name(), true));
+            if (t.group() != null) map.put("group", t.group());
+            boolean defaultEnabled = t.group() == null || isMain;
+            map.put("enabled", t.isSystem() || configMap.getOrDefault(t.name(), defaultEnabled));
             return map;
         }).toList();
         renderJSON(gson.toJson(result));
@@ -128,6 +135,51 @@ public class ApiToolsController extends Controller {
         var map = new HashMap<String, Object>();
         map.put("name", name);
         map.put("enabled", enabled);
+        map.put("status", "ok");
+        renderJSON(gson.toJson(map));
+    }
+
+    /**
+     * PUT /api/agents/{id}/tool-groups/{group} — Bulk enable/disable every
+     * tool in a group for one agent. Used by the agent detail page so
+     * toggling an MCP server (which contributes N tools) is one HTTP call,
+     * not N. Body: {@code {"enabled": boolean}}.
+     */
+    public static void updateGroupForAgent(Long id, String group) {
+        Agent agent = Agent.findById(id);
+        if (agent == null) notFound();
+
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null || !body.has("enabled")) badRequest();
+        var enabled = body.get("enabled").getAsBoolean();
+
+        var members = ToolRegistry.listTools().stream()
+                .filter(t -> group.equals(t.group()))
+                .toList();
+        if (members.isEmpty()) notFound();
+
+        for (var tool : members) {
+            // System tools cannot be disabled; ignore them inside a group rather
+            // than failing the bulk call (lets a future "system" group still toggle
+            // its non-system members cleanly).
+            if (tool.isSystem() && !enabled) continue;
+            var config = AgentToolConfig.findByAgentAndTool(agent, tool.name());
+            if (config == null) {
+                config = new AgentToolConfig();
+                config.agent = agent;
+                config.toolName = tool.name();
+            }
+            config.enabled = enabled;
+            config.save();
+        }
+
+        SkillLoader.clearCache();
+        ToolRegistry.invalidateDisabledToolsCache(agent);
+
+        var map = new HashMap<String, Object>();
+        map.put("group", group);
+        map.put("enabled", enabled);
+        map.put("count", members.size());
         map.put("status", "ok");
         renderJSON(gson.toJson(map));
     }

@@ -10,6 +10,7 @@ import play.cache.Caches;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -176,12 +177,20 @@ public class ToolRegistry {
         for (var tool : toolList) map.put(tool.name(), tool);
         externalGroups.put(group, Collections.unmodifiableMap(map));
         rebuildMerged();
+        // The per-agent disabled-tools set folds in the "MCP defaults to disabled
+        // for custom agents" policy by walking the live tool registry. When that
+        // registry changes (server connects, list_changed adds tools), the cached
+        // per-agent set goes stale — bust it so next read recomputes.
+        clearDisabledToolsCache();
     }
 
     /** Remove all tools published under {@code group}. No-op if the group is
      *  unknown. Used when an MCP server disconnects. */
     public static void unpublishExternal(String group) {
-        if (externalGroups.remove(group) != null) rebuildMerged();
+        if (externalGroups.remove(group) != null) {
+            rebuildMerged();
+            clearDisabledToolsCache();
+        }
     }
 
     private static void rebuildMerged() {
@@ -326,7 +335,16 @@ public class ToolRegistry {
     /**
      * Load the set of disabled tool names for an agent. Cached per agent; the cache
      * is invalidated whenever an {@link models.AgentToolConfig} row is written via
-     * {@link #invalidateDisabledToolsCache}.
+     * {@link #invalidateDisabledToolsCache}, and broadly via
+     * {@link #clearDisabledToolsCache} whenever the registry's grouped tools change
+     * (so the per-agent default-disable for new MCP tools picks up immediately).
+     *
+     * <p><b>Default policy.</b> Native tools are enabled by default; explicit
+     * {@link models.AgentToolConfig} rows override. <em>Grouped tools (MCP, the
+     * only current source of {@link Tool#group()}) flip the default for non-main
+     * agents</em>: with no config row, custom agents see them as disabled. Operators
+     * opt-in by toggling them on per-(agent, MCP server) in the agent detail page,
+     * which writes an explicit AgentToolConfig row with {@code enabled=true}.
      */
     public static Set<String> loadDisabledTools(Agent agent) {
         if (agent == null || agent.id == null) {
@@ -335,9 +353,20 @@ public class ToolRegistry {
         }
         return DISABLED_TOOLS_CACHE.get(agent.id, _ -> {
             var configs = AgentToolConfig.findByAgent(agent);
+            var explicitState = new HashMap<String, Boolean>();
+            for (var c : configs) explicitState.put(c.toolName, c.enabled);
+
             var disabled = new HashSet<String>();
-            for (var c : configs) {
-                if (!c.enabled) disabled.add(c.toolName);
+            for (var entry : explicitState.entrySet()) {
+                if (!entry.getValue()) disabled.add(entry.getKey());
+            }
+            // MCP tools default-disabled for non-main agents (operator opts-in
+            // per server on the agent detail page). Main agent unaffected.
+            if (!agent.isMain()) {
+                for (var tool : tools.values()) {
+                    if (tool.group() == null) continue;
+                    if (!explicitState.containsKey(tool.name())) disabled.add(tool.name());
+                }
             }
             return Collections.unmodifiableSet(disabled);
         });
