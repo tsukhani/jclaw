@@ -214,8 +214,29 @@ const CATEGORY_PILL: Record<ToolCategory, string> = {
       </button>
     </div>
 
+    <!-- MCP-only empty state. Other categories ship native compile-time
+         tools so they're never empty in practice; only MCP can be empty
+         depending on operator configuration. Hint at the right page so
+         the operator knows where to wire up a server. -->
+    <div
+      v-if="activeCategory === 'MCP' && filteredCards.length === 0"
+      class="bg-surface-elevated border border-border p-8 text-center text-sm text-fg-muted"
+    >
+      No MCP tools available.
+      <NuxtLink
+        to="/mcp-servers"
+        class="text-emerald-500 hover:text-emerald-400 underline underline-offset-2"
+      >
+        Connect a server
+      </NuxtLink>
+      to populate this tab.
+    </div>
+
     <!-- Grid -->
-    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+    <div
+      v-else
+      class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4"
+    >
       <div
         v-for="card in filteredCards"
         :key="card.key"
