@@ -365,15 +365,31 @@ public final class McpConnectionManager {
         return map;
     }
 
+    /**
+     * Persist a status field with a partial JPQL UPDATE — never load + save
+     * the entity. The connector's persist calls run in their own VTs, in
+     * separate transactions from the controller that just toggled
+     * {@code enabled}. If we used {@code findById + setField + save()},
+     * Hibernate would write back ALL fields of the loaded entity from the
+     * connector's tx, which would race with the controller's pending
+     * {@code enabled=true} update. The lost-update bug surfaced as
+     * "row stays enabled=false even after toggling on" because
+     * persistStatus would load the pre-controller-commit row state and
+     * re-save it. Targeted UPDATE statements only touch the column we
+     * want, so concurrent enabled/configJson changes can't be clobbered.
+     */
     private static void persistStatus(Long serverId, McpServer.Status status, String error) {
         if (serverId == null) return;
+        var truncated = error != null && error.length() > 500 ? error.substring(0, 500) : error;
         try {
             Tx.run(() -> {
-                var row = (McpServer) McpServer.findById(serverId);
-                if (row == null) return;
-                row.status = status;
-                row.lastError = error != null && error.length() > 500 ? error.substring(0, 500) : error;
-                row.save();
+                play.db.jpa.JPA.em().createQuery(
+                        "UPDATE McpServer s SET s.status = :status, s.lastError = :err, s.updatedAt = :now WHERE s.id = :id")
+                        .setParameter("status", status)
+                        .setParameter("err", truncated)
+                        .setParameter("now", Instant.now())
+                        .setParameter("id", serverId)
+                        .executeUpdate();
             });
         } catch (RuntimeException ignored) { /* best effort persistence */ }
     }
@@ -382,8 +398,11 @@ public final class McpConnectionManager {
         if (serverId == null) return;
         try {
             Tx.run(() -> {
-                var row = (McpServer) McpServer.findById(serverId);
-                if (row != null) { row.lastConnectedAt = Instant.now(); row.save(); }
+                play.db.jpa.JPA.em().createQuery(
+                        "UPDATE McpServer s SET s.lastConnectedAt = :now, s.updatedAt = :now WHERE s.id = :id")
+                        .setParameter("now", Instant.now())
+                        .setParameter("id", serverId)
+                        .executeUpdate();
             });
         } catch (RuntimeException ignored) {}
     }
@@ -392,8 +411,11 @@ public final class McpConnectionManager {
         if (serverId == null) return;
         try {
             Tx.run(() -> {
-                var row = (McpServer) McpServer.findById(serverId);
-                if (row != null) { row.lastDisconnectedAt = Instant.now(); row.save(); }
+                play.db.jpa.JPA.em().createQuery(
+                        "UPDATE McpServer s SET s.lastDisconnectedAt = :now, s.updatedAt = :now WHERE s.id = :id")
+                        .setParameter("now", Instant.now())
+                        .setParameter("id", serverId)
+                        .executeUpdate();
             });
         } catch (RuntimeException ignored) {}
     }
