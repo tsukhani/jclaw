@@ -55,6 +55,9 @@ public class ApiToolsController extends Controller {
             if (t.requiresConfig() != null) {
                 map.put("requiresConfig", t.requiresConfig());
             }
+            if (t.group() != null) {
+                map.put("group", t.group());
+            }
             map.put("actions", t.actions());
             return map;
         }).toList();

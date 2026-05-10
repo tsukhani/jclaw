@@ -144,4 +144,13 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
     public List<ToolAction> actions() {
         return List.of(new ToolAction(def.name(), def.description()));
     }
+
+    /** Group all tools from one MCP server under a single /tools-page card
+     *  (JCLAW-33 follow-up). Card title becomes the server name; each
+     *  MCP-discovered tool's inner name + description folds into the
+     *  Functions disclosure. The LLM-facing tool catalog is unaffected:
+     *  every {@link McpToolAdapter} remains its own callable entry with
+     *  its own schema. */
+    @Override
+    public String group() { return serverName; }
 }

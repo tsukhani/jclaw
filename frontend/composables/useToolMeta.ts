@@ -29,6 +29,11 @@ export interface ToolApiMeta {
   shortDescription: string
   system: boolean
   requiresConfig?: string
+  /** Optional grouping key. Tools sharing the same group fold into a
+   *  single /tools-page card with their actions concatenated. Used by
+   *  MCP-discovered tools (group = MCP server name) so all tools from
+   *  one server render together. {@code undefined} for native tools. */
+  group?: string
   actions: ToolAction[]
 }
 

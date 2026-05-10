@@ -10,9 +10,10 @@ import {
   FolderIcon,
   GlobeAltIcon,
   MagnifyingGlassIcon,
+  PuzzlePieceIcon,
 } from '@heroicons/vue/24/outline'
 import type { FunctionalComponent } from 'vue'
-import type { ToolMeta } from '~/composables/useToolMeta'
+import type { ToolAction, ToolCategory, ToolMeta } from '~/composables/useToolMeta'
 
 // Maps the backend-supplied icon name (a stable string contract — see
 // composables/useToolMeta.ts) to the concrete Heroicons component. Unknown
@@ -28,6 +29,7 @@ const TOOL_ICONS: Record<string, FunctionalComponent> = {
   clock: ClockIcon,
   check: CheckCircleIcon,
   tasks: ClipboardDocumentCheckIcon,
+  plug: PuzzlePieceIcon,
 }
 function iconFor(name: string): FunctionalComponent {
   return TOOL_ICONS[name] ?? DocumentTextIcon
@@ -44,39 +46,109 @@ const CATEGORIES = ['All', 'System', 'Web', 'Files', 'Utilities', 'MCP'] as cons
 
 // ─── Derived lists ─────────────────────────────────────────────────────────────
 
+/**
+ * One renderable card on the /tools page. Native tools yield exactly one
+ * card per tool; MCP tools sharing a {@code group} (the server name) fold
+ * into a single card whose Functions disclosure lists every tool that
+ * server advertises. The LLM-facing tool catalog is unaffected — every
+ * MCP tool remains its own callable entry; this is purely UI grouping.
+ */
 interface ToolCard {
-  name: string
-  meta: ToolMeta
+  key: string
+  displayName: string
+  category: ToolCategory
+  iconBg: string
+  iconColor: string
+  iconKey: string
+  description: string
+  functions: ToolAction[]
 }
 
-const allTools = computed<ToolCard[]>(() =>
-  ORDERED_TOOLS.value
-    .map(name => ({ name, meta: TOOL_META.value[name] }))
-    .filter((t): t is ToolCard => !!t.meta && !t.meta.system),
-)
+function cardFromSingleTool(name: string, meta: ToolMeta): ToolCard {
+  return {
+    key: name,
+    displayName: name,
+    category: meta.category,
+    iconBg: meta.iconBg,
+    iconColor: meta.iconColor,
+    iconKey: meta.icon,
+    description: meta.shortDescription,
+    functions: meta.functions,
+  }
+}
+
+function cardFromGroup(groupName: string, members: [ToolMeta, ...ToolMeta[]]): ToolCard {
+  const [first, ...rest] = members
+  const folded: ToolAction[] = [...first.functions]
+  for (const m of rest) folded.push(...m.functions)
+  return {
+    key: `group:${groupName}`,
+    displayName: groupName,
+    category: first.category,
+    iconBg: first.iconBg,
+    iconColor: first.iconColor,
+    iconKey: first.icon,
+    description: members.length === 1
+      ? first.shortDescription
+      : `MCP server connection. ${members.length} tools available.`,
+    functions: folded,
+  }
+}
+
+const allCards = computed<ToolCard[]>(() => {
+  // Walk ORDERED_TOOLS to preserve registration order. Group on the fly so
+  // the first appearance of a group fixes its slot in the output sequence.
+  const groups = new Map<string, [ToolMeta, ...ToolMeta[]]>()
+  const groupOrder: string[] = []
+  const cards: ToolCard[] = []
+  for (const name of ORDERED_TOOLS.value) {
+    const meta = TOOL_META.value[name]
+    if (!meta || meta.system) continue
+    if (meta.group) {
+      const existing = groups.get(meta.group)
+      if (existing) {
+        existing.push(meta)
+      }
+      else {
+        groups.set(meta.group, [meta])
+        groupOrder.push(meta.group)
+      }
+    }
+    else {
+      cards.push(cardFromSingleTool(name, meta))
+    }
+  }
+  // Append one card per group, in first-appearance order. groupOrder only
+  // contains keys we set above, so every lookup is non-null.
+  for (const g of groupOrder) {
+    const members = groups.get(g)
+    if (members) cards.push(cardFromGroup(g, members))
+  }
+  return cards
+})
 
 const activeCategory = ref<typeof CATEGORIES[number]>('All')
 
-const filteredTools = computed(() =>
+const filteredCards = computed(() =>
   activeCategory.value === 'All'
-    ? allTools.value
-    : allTools.value.filter(t => t.meta.category === activeCategory.value),
+    ? allCards.value
+    : allCards.value.filter(c => c.category === activeCategory.value),
 )
 
 // ─── Expand/collapse ──────────────────────────────────────────────────────────
 
 const expandedSet = ref(new Set<string>())
 
-function toggleExpand(name: string) {
+function toggleExpand(key: string) {
   const s = new Set(expandedSet.value)
-  if (s.has(name)) s.delete(name)
-  else s.add(name)
+  if (s.has(key)) s.delete(key)
+  else s.add(key)
   expandedSet.value = s
 }
 
 const allExpanded = computed(() =>
-  filteredTools.value.length > 0
-  && filteredTools.value.every(t => expandedSet.value.has(t.name)),
+  filteredCards.value.length > 0
+  && filteredCards.value.every(c => expandedSet.value.has(c.key)),
 )
 
 function toggleAllExpanded() {
@@ -84,8 +156,18 @@ function toggleAllExpanded() {
     expandedSet.value = new Set()
   }
   else {
-    expandedSet.value = new Set(filteredTools.value.map(t => t.name))
+    expandedSet.value = new Set(filteredCards.value.map(c => c.key))
   }
+}
+
+// Per-category styles need to be looked up by name since cards may share
+// a category. Re-derived from the same source useToolMeta exposes.
+const CATEGORY_PILL: Record<ToolCategory, string> = {
+  System: 'text-neutral-400 bg-neutral-800',
+  Files: 'text-amber-400 bg-amber-500/15',
+  Web: 'text-blue-400 bg-blue-500/15',
+  Utilities: 'text-emerald-400 bg-emerald-500/15',
+  MCP: 'text-violet-400 bg-violet-500/15',
 }
 </script>
 
@@ -135,8 +217,8 @@ function toggleAllExpanded() {
     <!-- Grid -->
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
       <div
-        v-for="tool in filteredTools"
-        :key="tool.name"
+        v-for="card in filteredCards"
+        :key="card.key"
         class="bg-surface-elevated border border-border flex flex-col"
       >
         <!-- Card header -->
@@ -144,12 +226,12 @@ function toggleAllExpanded() {
           <!-- Icon -->
           <div
             class="w-9 h-9 rounded flex items-center justify-center shrink-0"
-            :class="tool.meta.iconBg"
+            :class="card.iconBg"
           >
             <component
-              :is="iconFor(tool.meta.icon)"
+              :is="iconFor(card.iconKey)"
               class="w-5 h-5"
-              :class="tool.meta.iconColor"
+              :class="card.iconColor"
               aria-hidden="true"
             />
           </div>
@@ -157,50 +239,50 @@ function toggleAllExpanded() {
           <!-- Name + category badge -->
           <div class="flex-1 min-w-0">
             <span class="text-sm font-mono font-semibold text-fg-strong truncate block">
-              {{ tool.name }}
+              {{ card.displayName }}
             </span>
             <span
               class="mt-1.5 inline-block text-[10px] font-medium px-1.5 py-px rounded-sm leading-tight"
-              :class="tool.meta.categoryColor"
+              :class="CATEGORY_PILL[card.category]"
             >
-              {{ tool.meta.category }}
+              {{ card.category }}
             </span>
           </div>
         </div>
 
         <!-- Description — fixed height so Functions header aligns across all cards in a row -->
         <p class="px-4 pb-4 text-xs text-fg-muted leading-relaxed min-h-[4rem] line-clamp-3">
-          {{ tool.meta.shortDescription }}
+          {{ card.description }}
         </p>
 
         <!-- Functions accordion header -->
         <button
           class="px-4 py-2.5 border-t border-border flex items-center justify-between w-full group transition-colors"
-          :class="expandedSet.has(tool.name) ? 'bg-muted' : 'hover:bg-muted'"
-          @click="toggleExpand(tool.name)"
+          :class="expandedSet.has(card.key) ? 'bg-muted' : 'hover:bg-muted'"
+          @click="toggleExpand(card.key)"
         >
           <div class="flex items-center gap-2">
             <span class="text-[11px] font-medium text-fg-muted group-hover:text-fg-primary transition-colors">
               Functions
             </span>
             <span class="text-[10px] text-fg-primary bg-muted px-1.5 py-px rounded tabular-nums">
-              {{ tool.meta.functions.length }}
+              {{ card.functions.length }}
             </span>
           </div>
           <ChevronDownIcon
             class="w-3.5 h-3.5 text-fg-muted group-hover:text-fg-muted transition-all duration-200 shrink-0"
-            :class="expandedSet.has(tool.name) ? 'rotate-180' : ''"
+            :class="expandedSet.has(card.key) ? 'rotate-180' : ''"
             aria-hidden="true"
           />
         </button>
 
         <!-- Functions panel -->
         <div
-          v-if="expandedSet.has(tool.name)"
+          v-if="expandedSet.has(card.key)"
           class="border-t border-border"
         >
           <div
-            v-for="fn in tool.meta.functions"
+            v-for="fn in card.functions"
             :key="fn.name"
             class="px-4 py-2 flex items-start gap-3 border-b border-border last:border-b-0"
           >

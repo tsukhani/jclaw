@@ -116,6 +116,15 @@ public class ToolRegistry {
          *  tradeoff: the screenshot-before-navigate class of race
          *  (JCLAW-80). When in doubt, leave it {@code false}. */
         default boolean parallelSafe() { return false; }
+
+        /** Optional grouping key for the {@code /tools} admin page. Tools
+         *  sharing the same {@code group} render as a single card with
+         *  their {@link #actions()} folded together. Used by
+         *  {@code McpToolAdapter} (returns the server name) so the 72
+         *  tools advertised by one MCP server display as one card titled
+         *  with the server name, instead of 72 separate cards. Native
+         *  tools default to {@code null} (one card per tool). */
+        default String group() { return null; }
     }
 
     /** Native (compile-time) tools published via {@link #publish(List)} from
