@@ -145,6 +145,13 @@ public final class McpConnectionManager {
 
     public static int connectionCount() { return connections.size(); }
 
+    /** Names of every server with an in-memory connection entry, regardless
+     *  of state. Used by {@link McpAllowlist#backfillForAgent} to know
+     *  which server scopes a new agent should be granted. */
+    public static java.util.Set<String> connectedServerNames() {
+        return java.util.Set.copyOf(connections.keySet());
+    }
+
     // ==================== internals ====================
 
     private static void scheduleConnect(Entry entry, McpServer server, int attempt) {
