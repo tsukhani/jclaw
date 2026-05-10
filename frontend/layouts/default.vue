@@ -16,6 +16,7 @@ import {
   MapIcon,
   MegaphoneIcon,
   MoonIcon,
+  PuzzlePieceIcon,
   SunIcon,
   WrenchScrewdriverIcon,
 } from '@heroicons/vue/24/outline'
@@ -189,6 +190,7 @@ const navGroups: NavGroup[] = [
     label: 'Admin',
     items: [
       { label: 'Settings', to: '/settings', icon: Cog6ToothIcon },
+      { label: 'MCP Servers', to: '/mcp-servers', icon: PuzzlePieceIcon },
       { label: 'Logs', to: '/logs', icon: Bars3Icon },
     ],
   },

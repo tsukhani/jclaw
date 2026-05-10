@@ -367,3 +367,45 @@ export interface DiscoveredModel extends ProviderModelDef {
 export interface DiscoverModelsResponse {
   models: DiscoveredModel[]
 }
+
+/**
+ * One configured MCP (Model Context Protocol) server, as surfaced by
+ * {@code GET /api/mcp-servers}. Transport-specific fields are exploded
+ * out of the row's stored configJson so the admin form binds directly:
+ * {@code command/args/env} for STDIO, {@code url/headers} for HTTP.
+ * Status/lastError/lastConnected* are populated from the runtime
+ * McpConnectionManager — they're cross-cutting state not stored on the row.
+ */
+export interface McpServer {
+  id: number
+  name: string
+  enabled: boolean
+  transport: 'STDIO' | 'HTTP'
+  /** STDIO only: subprocess executable. Empty for HTTP rows. */
+  command: string | null
+  /** STDIO only: subprocess args. Empty array for HTTP rows. */
+  args: string[]
+  /** STDIO only: environment vars. Empty object for HTTP rows. */
+  env: Record<string, string>
+  /** HTTP only: endpoint URL. null for STDIO rows. */
+  url: string | null
+  /** HTTP only: request headers. Empty object for STDIO rows. */
+  headers: Record<string, string>
+  /** Live connection state from McpConnectionManager. */
+  status: 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'ERROR'
+  lastError: string | null
+  lastConnectedAt: string | null
+  lastDisconnectedAt: string | null
+  /** Number of MCP tools currently advertised by this server. */
+  toolCount: number
+  createdAt: string | null
+  updatedAt: string | null
+}
+
+/** Result of POST /api/mcp-servers/{id}/test — synchronous connection probe. */
+export interface McpTestResult {
+  success: boolean
+  toolCount: number
+  message: string
+  toolNames: string[]
+}
