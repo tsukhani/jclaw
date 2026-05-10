@@ -49,6 +49,14 @@ GET     /api/agents/{id}/workspace/{filename}   ApiAgentsController.getWorkspace
 GET     /api/agents/{id}/files/{<.+>filePath}   ApiAgentsController.serveWorkspaceFile
 PUT     /api/agents/{id}/workspace/{filename}   ApiAgentsController.saveWorkspaceFile
 
+# MCP Servers API
+GET     /api/mcp-servers                        ApiMcpServersController.list
+POST    /api/mcp-servers                        ApiMcpServersController.create
+GET     /api/mcp-servers/{id}                   ApiMcpServersController.get
+PUT     /api/mcp-servers/{id}                   ApiMcpServersController.update
+DELETE  /api/mcp-servers/{id}                   ApiMcpServersController.delete
+POST    /api/mcp-servers/{id}/test              ApiMcpServersController.test
+
 # Tools API
 GET     /api/tools                              ApiToolsController.list
 GET     /api/tools/meta                         ApiToolsController.meta

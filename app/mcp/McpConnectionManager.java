@@ -83,16 +83,23 @@ public final class McpConnectionManager {
         scheduleConnect(entry, server, 0);
     }
 
-    /** Disconnect a single server and remove its tools. */
+    /** Disconnect a single server and remove its tools.
+     *
+     *  <p>Idempotent against missing entries: even when no in-memory connection
+     *  exists for {@code serverName}, the allowlist sweep + audit still run.
+     *  This matters for the admin {@code DELETE /api/mcp-servers/{id}} path
+     *  (JCLAW-33) which must clean up any orphaned {@code agent_skill_allowed_tool}
+     *  rows from prior crashes or pre-restart state. */
     public static void stop(String serverName) {
         var entry = connections.remove(serverName);
-        if (entry == null) return;
-        if (entry.scheduledRetry != null) entry.scheduledRetry.cancel(false);
-        var client = entry.client;
-        if (client != null) {
-            try { client.close(); } catch (RuntimeException ignored) { /* best effort */ }
+        if (entry != null) {
+            if (entry.scheduledRetry != null) entry.scheduledRetry.cancel(false);
+            var client = entry.client;
+            if (client != null) {
+                try { client.close(); } catch (RuntimeException ignored) { /* best effort */ }
+            }
+            ToolRegistry.unpublishExternal(serverName);
         }
-        ToolRegistry.unpublishExternal(serverName);
         clearAllowlistAndAudit(serverName);
     }
 
