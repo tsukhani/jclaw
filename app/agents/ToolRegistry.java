@@ -118,7 +118,27 @@ public class ToolRegistry {
         default boolean parallelSafe() { return false; }
     }
 
+    /** Native (compile-time) tools published via {@link #publish(List)} from
+     *  {@link jobs.ToolRegistrationJob}. Kept separate from external groups so
+     *  re-registering natives (e.g. when {@code provider.loadtest-mock.enabled}
+     *  flips at runtime) doesn't blow away MCP-discovered tools. */
+    private static volatile Map<String, Tool> nativeTools = Map.of();
+
+    /** Externally-sourced tool groups, keyed by group name (e.g. an MCP server
+     *  name). Each group's tools are published atomically together via
+     *  {@link #publishExternal(String, List)} and removed atomically via
+     *  {@link #unpublishExternal(String)}. */
+    private static final java.util.concurrent.ConcurrentHashMap<String, Map<String, Tool>> externalGroups =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Merged view of native + external tools. Recomputed under
+     *  {@link #rebuildLock} on every change and replaces this volatile field
+     *  in one assignment so readers see a consistent snapshot. The existing
+     *  reader code path ({@code tools.values()}, {@code tools.get(name)}) is
+     *  unchanged — this field carries the merged view under the same name. */
     private static volatile Map<String, Tool> tools = Map.of();
+
+    private static final Object rebuildLock = new Object();
 
     /**
      * Atomically publish a new tool set built by the caller. Uses LinkedHashMap
@@ -130,7 +150,37 @@ public class ToolRegistry {
         for (var tool : toolList) {
             map.put(tool.name(), tool);
         }
-        tools = Collections.unmodifiableMap(map);
+        nativeTools = Collections.unmodifiableMap(map);
+        rebuildMerged();
+    }
+
+    /**
+     * Publish a group of externally-sourced tools (JCLAW-31: one MCP server's
+     * discovered tools). Replaces any prior tools for the same {@code group}.
+     * Naming: callers SHOULD prefix tool names so they can't shadow native
+     * tools — {@link mcp.McpToolAdapter} uses {@code mcp_<server>_<tool>}.
+     * Last writer wins on collisions; native tools are merged first so
+     * external tools can override (intentional — useful for testing).
+     */
+    public static void publishExternal(String group, List<Tool> toolList) {
+        var map = new LinkedHashMap<String, Tool>();
+        for (var tool : toolList) map.put(tool.name(), tool);
+        externalGroups.put(group, Collections.unmodifiableMap(map));
+        rebuildMerged();
+    }
+
+    /** Remove all tools published under {@code group}. No-op if the group is
+     *  unknown. Used when an MCP server disconnects. */
+    public static void unpublishExternal(String group) {
+        if (externalGroups.remove(group) != null) rebuildMerged();
+    }
+
+    private static void rebuildMerged() {
+        synchronized (rebuildLock) {
+            var merged = new LinkedHashMap<String, Tool>(nativeTools);
+            for (var groupMap : externalGroups.values()) merged.putAll(groupMap);
+            tools = Collections.unmodifiableMap(merged);
+        }
     }
 
     public static List<ToolDef> getToolDefs() {
