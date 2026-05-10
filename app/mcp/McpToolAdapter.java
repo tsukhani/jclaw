@@ -5,7 +5,10 @@ import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
+import models.EventLog;
+import services.Tx;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -67,6 +70,29 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
         } catch (RuntimeException e) {
             return "Error parsing arguments for MCP tool '%s': %s".formatted(name(), e.getMessage());
         }
+        // JCLAW-32: gate + audit in one atomic Tx. The check (isAllowed) and
+        // the audit log (MCP_TOOL_INVOKE) MUST commit together so an attacker
+        // who somehow bypasses the in-memory ToolRegistry can't fabricate a
+        // grant the audit trail wouldn't show. The actual MCP server call
+        // happens AFTER commit — we don't hold a DB tx across the network.
+        boolean allowed;
+        try {
+            allowed = Tx.run(() -> {
+                var managed = (Agent) (agent == null || agent.id == null ? null
+                        : Agent.findById(agent.id));
+                boolean grant = managed != null
+                        && McpAllowlist.isAllowed(managed, serverName, def.name());
+                writeInvokeAudit(agent, argsJson, grant);
+                return grant;
+            });
+        } catch (RuntimeException e) {
+            return "Error checking MCP allowlist for '%s': %s".formatted(name(), e.getMessage());
+        }
+        if (!allowed) {
+            return "MCP tool '%s' is not on the allowlist for agent '%s'. "
+                   .formatted(name(), agent != null ? agent.name : "<unknown>")
+                   + "Connect the server or grant the agent first.";
+        }
         try {
             var result = invoker.invoke(serverName, def.name(), args);
             if (result.isError()) {
@@ -76,6 +102,22 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
         } catch (Exception e) {
             return "Error invoking MCP tool '%s': %s".formatted(name(), e.getMessage());
         }
+    }
+
+    /** Inline audit-log row save (bypasses {@link services.EventLogger}'s
+     *  async queue) so the row commits in the same Tx as the allowlist check.
+     *  The AC requires both to land atomically. */
+    private void writeInvokeAudit(Agent agent, String argsJson, boolean allowed) {
+        var ev = new EventLog();
+        ev.timestamp = Instant.now();
+        ev.level = allowed ? "INFO" : "WARN";
+        ev.category = "MCP_TOOL_INVOKE";
+        var agentName = agent != null && agent.name != null ? agent.name : "<unknown>";
+        ev.agentId = agent != null && agent.id != null ? String.valueOf(agent.id) : null;
+        ev.message = "%s/%s by '%s' [%s]".formatted(
+                serverName, def.name(), agentName, allowed ? "allowed" : "denied");
+        ev.details = argsJson;
+        ev.save();
     }
 
     @Override

@@ -214,6 +214,66 @@ public class McpConnectionManagerTest extends UnitTest {
         });
     }
 
+    // ==================== JCLAW-32: gated invocation + MCP_TOOL_INVOKE ====================
+
+    @Test
+    public void invokeViaToolRegistrySucceedsWhenAgentIsAllowed() throws Exception {
+        var agentId = commitInFreshTx(() -> seedAgent("alpha").id);
+        var server = seedStdioServer("fixture", FIXTURE_SCRIPT);
+        McpConnectionManager.connect(server);
+        awaitState("fixture", McpServer.Status.CONNECTED, 10);
+
+        var agent = Tx.run(() -> (Agent) Agent.findById(agentId));
+        var result = ToolRegistry.execute(
+                "mcp_fixture_echo", "{\"text\":\"world\"}", agent);
+        assertEquals("echo:world", result);
+
+        Tx.run(() -> {
+            var events = EventLog.find(
+                    "category = ?1 AND level = ?2", "MCP_TOOL_INVOKE", "INFO")
+                    .<EventLog>fetch();
+            assertFalse(events.isEmpty(),
+                    "successful invoke must log an MCP_TOOL_INVOKE row at INFO");
+            var ev = events.get(events.size() - 1);
+            assertTrue(ev.message.contains("allowed"), "audit message must say allowed");
+            assertTrue(ev.message.contains("echo"));
+            assertTrue(ev.details.contains("world"), "details must carry args JSON");
+        });
+    }
+
+    @Test
+    public void invokeViaToolRegistryDeniesWhenAllowlistRowMissing() throws Exception {
+        // Seed agent BEFORE connect so connect's broadcast grants it,
+        // then DELETE the row to simulate an admin-denied scenario.
+        var agentId = commitInFreshTx(() -> seedAgent("alpha").id);
+        var server = seedStdioServer("fixture", FIXTURE_SCRIPT);
+        McpConnectionManager.connect(server);
+        awaitState("fixture", McpServer.Status.CONNECTED, 10);
+
+        // Strip the broadcast grant for THIS agent (mimics what JCLAW-33
+        // admin UI would do for per-agent revocation).
+        commitInFreshTx(() -> {
+            AgentSkillAllowedTool.delete(
+                    "agent.id = ?1 AND skillName = ?2", agentId, "mcp:fixture");
+            return null;
+        });
+
+        var agent = Tx.run(() -> (Agent) Agent.findById(agentId));
+        var result = ToolRegistry.execute(
+                "mcp_fixture_echo", "{\"text\":\"world\"}", agent);
+        assertTrue(result.contains("not on the allowlist"),
+                "denied invoke must return allowlist error: " + result);
+
+        Tx.run(() -> {
+            var denied = EventLog.find(
+                    "category = ?1 AND level = ?2", "MCP_TOOL_INVOKE", "WARN")
+                    .<EventLog>fetch();
+            assertFalse(denied.isEmpty(),
+                    "denied invoke must log MCP_TOOL_INVOKE at WARN");
+            assertTrue(denied.get(denied.size() - 1).message.contains("denied"));
+        });
+    }
+
     @Test
     public void shutdownTearsDownAllConnections() throws Exception {
         var s1 = seedStdioServer("fix1", FIXTURE_SCRIPT);
