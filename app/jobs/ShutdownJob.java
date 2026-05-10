@@ -47,7 +47,8 @@ public class ShutdownJob extends Job<Void> {
                 PlaywrightBrowserTool::closeAllSessions,
                 TelegramPollingRunner::stop,
                 TelegramStreamingSink::shutdown,
-                services.transcription.WhisperJniTranscriber::shutdown
+                services.transcription.WhisperJniTranscriber::shutdown,
+                mcp.McpConnectionManager::shutdown
         );
 
         var latch = new CountDownLatch(components.size());
