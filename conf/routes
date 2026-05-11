@@ -104,6 +104,9 @@ POST    /api/chat/send                          ApiChatController.send
 POST    /api/chat/stream                        ApiChatController.streamChat
 POST    /api/chat/upload                        ApiChatController.uploadChatFiles
 
+# Persisted attachment downloads (JCLAW-279)
+GET     /api/attachments/{uuid}                 ApiAttachmentsController.download
+
 # Conversations API
 GET     /api/conversations                      ApiConversationsController.listConversations
 GET     /api/conversations/channels             ApiConversationsController.listConversationChannels

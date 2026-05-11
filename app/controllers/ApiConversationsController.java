@@ -47,7 +47,14 @@ public class ApiConversationsController extends Controller {
                               JsonElement toolCalls, String toolResults,
                               JsonElement toolResultStructured,
                               String reasoning, String createdAt,
-                              JsonElement usage) {}
+                              JsonElement usage,
+                              List<MessageAttachmentView> attachments) {}
+
+    /** Per-attachment metadata surfaced to the frontend in /messages. The
+     *  {@code uuid} is the client-facing key for the
+     *  {@code GET /api/attachments/{uuid}} download endpoint (JCLAW-279). */
+    public record MessageAttachmentView(String uuid, String originalFilename,
+                                        String mimeType, long sizeBytes, String kind) {}
 
     public record QueueStatusResponse(boolean busy, int queueSize) {}
 
@@ -174,6 +181,21 @@ public class ApiConversationsController extends Controller {
             map.put("createdAt", m.createdAt.toString());
             if (m.usageJson != null) {
                 map.put("usage", jsonParser.parse(m.usageJson));
+            }
+            // JCLAW-279: surface attachment metadata so the chat UI can render
+            // download chips on conversation reload. Empty list rather than
+            // absent so the frontend can rely on the field always being present.
+            if (m.attachments != null && !m.attachments.isEmpty()) {
+                var atts = m.attachments.stream().map(a -> {
+                    var av = new HashMap<String, Object>();
+                    av.put("uuid", a.uuid);
+                    av.put("originalFilename", a.originalFilename);
+                    av.put("mimeType", a.mimeType);
+                    av.put("sizeBytes", a.sizeBytes);
+                    av.put("kind", a.kind);
+                    return av;
+                }).toList();
+                map.put("attachments", atts);
             }
             return map;
         }).toList();

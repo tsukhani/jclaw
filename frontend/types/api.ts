@@ -100,6 +100,18 @@ export interface ToolCall {
   _expanded?: boolean
 }
 
+/** Persisted attachment metadata surfaced under user messages on conversation
+ *  reload (JCLAW-279). The {@code uuid} is the opaque client key for the
+ *  {@code GET /api/attachments/{uuid}} download endpoint. */
+export interface MessageAttachment {
+  uuid: string
+  originalFilename: string
+  mimeType: string
+  sizeBytes: number
+  /** One of IMAGE, AUDIO, FILE — drives inline-vs-download disposition on the server. */
+  kind: 'IMAGE' | 'AUDIO' | 'FILE'
+}
+
 /** A single message within a conversation. */
 export interface Message {
   /** Server-assigned id. Absent on optimistic/streaming placeholders until the backend persists the row. */
@@ -112,6 +124,9 @@ export interface Message {
   /** JCLAW-170: tool invocations on this assistant turn, hydrated from the
    *  persisted message thread on load and appended via SSE during streaming. */
   toolCalls?: ToolCall[]
+  /** JCLAW-279: persisted attachments on a user turn. Absent for assistant
+   *  and tool rows. */
+  attachments?: MessageAttachment[]
   /** Frontend-only key assigned to optimistic/streaming placeholders. */
   _key?: string
   /** Client-only: whether the thinking/reasoning bubble is collapsed for this message. */

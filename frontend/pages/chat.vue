@@ -6,6 +6,7 @@ import {
   ChevronDownIcon,
   ClipboardIcon,
   CommandLineIcon,
+  DocumentIcon,
   EyeIcon,
   FolderIcon,
   GlobeAltIcon,
@@ -15,6 +16,7 @@ import {
   PaperClipIcon,
   PencilIcon,
   PencilSquareIcon,
+  PhotoIcon,
   SpeakerWaveIcon,
   TrashIcon,
   WrenchIcon,
@@ -2078,6 +2080,39 @@ function exportConversation() {
                       class="inline-block bg-muted rounded-2xl text-fg-strong px-4 py-2 text-base whitespace-pre-wrap break-words"
                     >
                       {{ msg.content }}
+                    </div>
+                    <!-- JCLAW-279: persisted attachment chips, rendered on conversation reload. -->
+                    <div
+                      v-if="msg.attachments?.length"
+                      class="flex flex-wrap gap-2 mt-2 justify-end"
+                    >
+                      <a
+                        v-for="att in msg.attachments"
+                        :key="att.uuid"
+                        :href="`/api/attachments/${att.uuid}`"
+                        target="_blank"
+                        rel="noopener"
+                        class="inline-flex items-center gap-2 max-w-[260px] bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-fg-strong hover:bg-muted/60 transition-colors"
+                        :title="`${att.originalFilename} · ${formatSize(att.sizeBytes)} · ${att.mimeType}`"
+                      >
+                        <PhotoIcon
+                          v-if="att.kind === 'IMAGE'"
+                          class="w-4 h-4 shrink-0 text-fg-muted"
+                          aria-hidden="true"
+                        />
+                        <SpeakerWaveIcon
+                          v-else-if="att.kind === 'AUDIO'"
+                          class="w-4 h-4 shrink-0 text-fg-muted"
+                          aria-hidden="true"
+                        />
+                        <DocumentIcon
+                          v-else
+                          class="w-4 h-4 shrink-0 text-fg-muted"
+                          aria-hidden="true"
+                        />
+                        <span class="truncate">{{ att.originalFilename }}</span>
+                        <span class="text-fg-muted shrink-0">{{ formatSize(att.sizeBytes) }}</span>
+                      </a>
                     </div>
                     <div class="flex items-center justify-end gap-1 mt-1 h-5 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
