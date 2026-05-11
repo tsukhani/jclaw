@@ -252,6 +252,15 @@ const hasSubscriptionSection = computed(() => configuredSubscriptionProviders.va
 // Combined total = per-token actuals + pro-rated subscription accrual.
 const combinedTotal = computed(() => perTokenBreakdown.value.total + subscriptionFee.value)
 
+// JCLAW-280: combined activity stats — sum the per-token and subscription
+// breakdowns so the footer can mirror the per-subsection strip layout
+// with grand totals across both modalities.
+const combinedTurns = computed(() => perTokenBreakdown.value.turnCount + subscriptionBreakdown.value.turnCount)
+const combinedPrompt = computed(() => perTokenBreakdown.value.prompt + subscriptionBreakdown.value.prompt)
+const combinedCompletion = computed(() => perTokenBreakdown.value.completion + subscriptionBreakdown.value.completion)
+const combinedReasoning = computed(() => perTokenBreakdown.value.reasoning + subscriptionBreakdown.value.reasoning)
+const combinedCached = computed(() => perTokenBreakdown.value.cached + subscriptionBreakdown.value.cached)
+
 const hasData = computed(() => breakdown.value.turnCount > 0)
 
 // Resolve agent display names — operator sees "main" not "agent #7" in the
@@ -647,7 +656,7 @@ defineExpose({ refresh })
           </div>
           <div>
             <div class="text-xs text-fg-muted mb-0.5">
-              Prompt tokens
+              Prompt
             </div>
             <div class="text-sm font-mono text-fg-strong">
               {{ subscriptionBreakdown.prompt.toLocaleString() }}
@@ -705,6 +714,17 @@ defineExpose({ refresh })
                 >
                   Turns
                 </th>
+                <!-- Cost is always \$0.00 for subscription rows (no per-row
+                     attribution — the standing fee at the top is the total).
+                     Kept as a column so the subscription table's columns
+                     line up with the per-token table directly below it,
+                     making the two sections visually comparable. -->
+                <th
+                  scope="col"
+                  class="text-right px-3 py-2 font-medium"
+                >
+                  Cost
+                </th>
                 <th
                   scope="col"
                   class="text-right px-3 py-2 font-medium"
@@ -745,6 +765,9 @@ defineExpose({ refresh })
                 </td>
                 <td class="px-3 py-2 text-right font-mono text-fg-primary">
                   {{ m.turnCount.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                  $0.00
                 </td>
                 <td class="px-3 py-2 text-right font-mono text-fg-muted">
                   {{ m.prompt.toLocaleString() }}
@@ -794,7 +817,7 @@ defineExpose({ refresh })
           </div>
           <div>
             <div class="text-xs text-fg-muted mb-0.5">
-              Prompt tokens
+              Prompt
             </div>
             <div class="text-sm font-mono text-fg-strong">
               {{ perTokenBreakdown.prompt.toLocaleString() }}
@@ -983,20 +1006,68 @@ defineExpose({ refresh })
         </div>
       </div>
 
-      <!-- JCLAW-280: combined total — rendered at the very bottom, below
-           the per-model table/chart, so it reads as a footer summing the
-           Subscription + Per-Token subsections above. Only rendered when
-           at least one subsection has activity; the all-free-tier empty
-           state above suppresses everything else in that case. -->
+      <!-- JCLAW-280: combined total — rendered at the very bottom as a
+           strip mirroring the per-subsection layout, so cost/turns/tokens
+           grand totals across both modalities sit in the same columns the
+           Subscription and Per-Token strips above used. Only rendered
+           when at least one subsection has activity; the all-free-tier
+           empty state above suppresses everything else in that case. -->
       <div
         v-if="hasPaidData || hasSubscriptionSection"
-        class="px-4 py-2 flex items-center justify-between border-t border-border bg-muted/40"
+        class="border-t border-border bg-muted/40"
       >
-        <div class="text-xs text-fg-muted uppercase tracking-wide">
+        <div class="px-4 pt-3 pb-1 text-xs font-medium text-fg-muted uppercase tracking-wide">
           Combined total
         </div>
-        <div class="text-sm font-mono text-emerald-700 dark:text-emerald-400">
-          {{ formatStatCurrency(combinedTotal) }}
+        <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Cost
+            </div>
+            <div class="text-sm font-mono text-emerald-700 dark:text-emerald-400">
+              {{ formatStatCurrency(combinedTotal) }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Turns
+            </div>
+            <div class="text-sm font-mono text-fg-strong">
+              {{ combinedTurns.toLocaleString() }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Prompt
+            </div>
+            <div class="text-sm font-mono text-fg-strong">
+              {{ combinedPrompt.toLocaleString() }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Completion
+            </div>
+            <div class="text-sm font-mono text-fg-strong">
+              {{ combinedCompletion.toLocaleString() }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Reasoning
+            </div>
+            <div class="text-sm font-mono text-fg-strong">
+              {{ combinedReasoning.toLocaleString() }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Cached
+            </div>
+            <div class="text-sm font-mono text-yellow-700 dark:text-yellow-400">
+              {{ combinedCached.toLocaleString() }}
+            </div>
+          </div>
         </div>
       </div>
     </template>
