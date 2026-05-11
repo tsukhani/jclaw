@@ -2957,8 +2957,8 @@ async function handleResetPassword() {
       <p class="text-xs text-fg-muted">
         Per-kind attachment size caps and per-message file count. The sniffed MIME
         decides which size limit applies — images, audio, or everything else. Takes
-        effect without a restart; raise <code class="font-mono text-fg-strong">play.netty.maxContentLength</code>
-        in <code class="font-mono text-fg-strong">conf/application.conf</code> if you need over the bundled 512 MB
+        effect without a restart; raise <code class="font-mono">play.netty.maxContentLength</code>
+        in <code class="font-mono">conf/application.conf</code> if you need over the bundled 512 MB
         transport-layer ceiling.
       </p>
       <div class="bg-surface-elevated border border-border">
