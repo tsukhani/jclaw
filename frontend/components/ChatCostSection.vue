@@ -737,8 +737,8 @@ defineExpose({ refresh })
                  subscription fee (pro-rated to the window). Always
                  rendered so a subscription with zero in-window activity
                  still surfaces its fee. -->
-            <tfoot class="bg-muted/30 border-t border-border">
-              <tr>
+            <tfoot>
+              <tr class="bg-muted/30 border-t border-border">
                 <td class="px-4 py-2 text-xs font-medium text-fg-muted uppercase tracking-wide">
                   Total
                 </td>
@@ -891,8 +891,8 @@ defineExpose({ refresh })
                the per-token grand total via formatStatCurrency for the
                same two-decimal convention used in the Combined Total
                below. -->
-            <tfoot class="bg-muted/30 border-t border-border">
-              <tr>
+            <tfoot>
+              <tr class="bg-muted/30 border-t border-border">
                 <td class="px-4 py-2 text-xs font-medium text-fg-muted uppercase tracking-wide">
                   Total
                 </td>
@@ -978,25 +978,25 @@ defineExpose({ refresh })
         <table class="w-full text-xs table-fixed">
           <tbody>
             <tr>
-              <td class="px-4 py-3 text-xs font-medium text-fg-muted uppercase tracking-wide w-1/4">
+              <td class="px-4 py-2 text-xs font-medium text-fg-muted uppercase tracking-wide w-1/4">
                 Combined total
               </td>
-              <td class="px-3 py-3 text-right font-mono text-fg-primary">
+              <td class="px-3 py-2 text-right font-mono text-fg-primary">
                 {{ combinedTurns.toLocaleString() }}
               </td>
-              <td class="px-3 py-3 text-right font-mono text-fg-muted">
+              <td class="px-3 py-2 text-right font-mono text-fg-muted">
                 {{ combinedPrompt.toLocaleString() }}
               </td>
-              <td class="px-3 py-3 text-right font-mono text-fg-muted">
+              <td class="px-3 py-2 text-right font-mono text-fg-muted">
                 {{ combinedCompletion.toLocaleString() }}
               </td>
-              <td class="px-3 py-3 text-right font-mono text-fg-muted">
+              <td class="px-3 py-2 text-right font-mono text-fg-muted">
                 {{ combinedReasoning.toLocaleString() }}
               </td>
-              <td class="px-3 py-3 text-right font-mono text-yellow-700 dark:text-yellow-400">
+              <td class="px-3 py-2 text-right font-mono text-yellow-700 dark:text-yellow-400">
                 {{ combinedCached.toLocaleString() }}
               </td>
-              <td class="px-3 py-3 text-right font-mono text-emerald-700 dark:text-emerald-400">
+              <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
                 {{ formatStatCurrency(combinedTotal) }}
               </td>
             </tr>
