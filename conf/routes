@@ -87,6 +87,7 @@ POST    /api/agents/{id}/skills/{name}/copy     ApiSkillsController.copyToAgent
 GET     /api/events                             ApiEventsController.stream
 
 # Providers API
+GET     /api/providers                          ApiProvidersController.list
 POST    /api/providers/{name}/discover-models   ApiProvidersController.discoverModels
 POST    /api/providers/refresh-prices           ApiProvidersController.refreshPrices
 

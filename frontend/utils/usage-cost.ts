@@ -275,6 +275,15 @@ export interface FleetCostRow {
   channelType: string
   /** Original Message.usageJson string. Parse with JSON.parse to MessageUsage. */
   usageJson: string
+  /**
+   * JCLAW-280: canonical provider name for the conversation that emitted this
+   * turn — projected server-side as COALESCE(modelProviderOverride, agent.modelProvider).
+   * Used to partition the dashboard by payment modality (per-token vs subscription).
+   * Distinct from {@link MessageUsage.modelProvider} embedded in usageJson, which
+   * snapshots the agent's provider at turn time and can drift if the agent's
+   * provider was swapped after the turn ran.
+   */
+  modelProvider?: string
 }
 
 /** Filter shape for {@link computeFleetCost}. Null fields = no filter on that dimension. */

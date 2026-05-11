@@ -2,6 +2,7 @@ package llm;
 
 import models.MessageRole;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -187,8 +188,18 @@ public final class LlmTypes {
             String name,
             String baseUrl,
             String apiKey,
-            List<ModelInfo> models
-    ) {}
+            List<ModelInfo> models,
+            PaymentModality paymentModality,
+            BigDecimal subscriptionMonthlyUsd
+    ) {
+        /** Back-compat constructor: defaults the modality to the provider's
+         *  default and leaves the subscription price at zero. Used by older
+         *  call sites and tests that don't care about billing shape. */
+        public ProviderConfig(String name, String baseUrl, String apiKey, List<ModelInfo> models) {
+            this(name, baseUrl, apiKey, models,
+                    PaymentModality.defaultFor(name), BigDecimal.ZERO);
+        }
+    }
 
     /**
      * Default reasoning-effort levels assumed when a thinking-capable model does

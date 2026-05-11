@@ -1,9 +1,12 @@
 package controllers;
 
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import llm.PaymentModality;
+import llm.ProviderRegistry;
 import play.mvc.Controller;
 import play.mvc.With;
 
@@ -13,6 +16,7 @@ import services.ModelDiscoveryService;
 import services.ModelDiscoveryService.DiscoveryResult;
 import services.PricingRefreshService;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -27,6 +31,37 @@ public class ApiProvidersController extends Controller {
     public record DiscoverModelsResponse(List<Map<String, Object>> models, int count) {}
 
     public record RefreshPricesResponse(boolean skipped, int providersScanned, int modelsUpdated, List<String> warnings) {}
+
+    public record ProviderInfo(String name,
+                               String paymentModality,
+                               BigDecimal subscriptionMonthlyUsd,
+                               List<String> supportedModalities) {}
+
+    /**
+     * GET /api/providers — billing-shape projection of each configured
+     * provider. Returns name, selected modality, subscription monthly
+     * price, and the supported-modality set so the Settings UI knows
+     * which choices to offer and the Chat Cost dashboard knows how to
+     * partition spend.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ProviderInfo.class))))
+    public static void list() {
+        var infos = ProviderRegistry.listAll().stream()
+                .map(p -> {
+                    var cfg = p.config();
+                    var supported = PaymentModality.supportedFor(cfg.name()).stream()
+                            .map(Enum::name)
+                            .sorted()
+                            .toList();
+                    return new ProviderInfo(
+                            cfg.name(),
+                            cfg.paymentModality().name(),
+                            cfg.subscriptionMonthlyUsd(),
+                            supported);
+                })
+                .toList();
+        renderJSON(gson.toJson(infos));
+    }
 
     /**
      * POST /api/providers/{name}/discover-models

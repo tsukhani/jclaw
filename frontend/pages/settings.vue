@@ -29,6 +29,34 @@ const { data: configData, refresh } = await useFetch<ConfigResponse>('/api/confi
 // regardless of what the stored ocr.tesseract.enabled row says.
 const { data: ocrStatus, refresh: refreshOcrStatus }
   = await useFetch<OcrStatusResponse>('/api/ocr/status')
+
+// JCLAW-280: provider billing-shape info. Carries the selected
+// paymentModality, monthly subscription price, and the supported-
+// modality set. Used by the per-provider Settings card to know which
+// modality choices to offer and by the modality+subscription rows to
+// render their current values.
+interface ProviderInfo {
+  name: string
+  paymentModality: 'PER_TOKEN' | 'SUBSCRIPTION'
+  subscriptionMonthlyUsd: number
+  supportedModalities: ('PER_TOKEN' | 'SUBSCRIPTION')[]
+}
+const { data: providersInfo, refresh: refreshProviders }
+  = await useFetch<ProviderInfo[]>('/api/providers')
+const providerInfoMap = computed(() => {
+  const map = new Map<string, ProviderInfo>()
+  for (const p of providersInfo.value ?? []) map.set(p.name, p)
+  return map
+})
+function supportedModalitiesFor(name: string): ('PER_TOKEN' | 'SUBSCRIPTION')[] {
+  return providerInfoMap.value.get(name)?.supportedModalities ?? []
+}
+function paymentModalityFor(name: string): 'PER_TOKEN' | 'SUBSCRIPTION' {
+  return providerInfoMap.value.get(name)?.paymentModality ?? 'PER_TOKEN'
+}
+function subscriptionMonthlyFor(name: string): number {
+  return providerInfoMap.value.get(name)?.subscriptionMonthlyUsd ?? 0
+}
 const saving = ref(false)
 const editingKey = ref<string | null>(null)
 const editValue = ref('')
@@ -42,6 +70,10 @@ async function updateEntry(key: string) {
     })
     editingKey.value = null
     refresh()
+    // JCLAW-280: provider-scoped config rows (modality, subscription
+    // price) feed the /api/providers projection; refresh it so the
+    // pencil-edit row reflects the new value immediately.
+    if (key.startsWith('provider.')) refreshProviders()
   }
   catch (e) {
     console.error('Failed to update config:', e)
@@ -1373,8 +1405,12 @@ async function handleResetPassword() {
           </div>
           <div class="divide-y divide-border">
             <!-- Non-models entries (baseUrl, apiKey) -->
+            <!-- paymentModality + subscriptionMonthlyUsd render below in dedicated rows
+                 (JCLAW-280) so the operator gets the right input affordance: dropdown
+                 constrained to supportedModalities, and a $/mo numeric only when the
+                 selected modality is SUBSCRIPTION. -->
             <div
-              v-for="entry in entries.filter((e: any) => !e.key.endsWith('.models'))"
+              v-for="entry in entries.filter((e: any) => !e.key.endsWith('.models') && !e.key.endsWith('.paymentModality') && !e.key.endsWith('.subscriptionMonthlyUsd'))"
               :key="entry.key"
               class="px-4 py-2 flex items-center gap-3"
             >
@@ -1413,6 +1449,154 @@ async function handleResetPassword() {
                   class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
                   title="Edit"
                   @click="startEdit(entry)"
+                >
+                  <PencilIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+              </template>
+            </div>
+            <!-- JCLAW-280: paymentModality row — dropdown when the provider supports
+                 more than one modality (OpenAI), locked label otherwise (OpenRouter,
+                 Together = per-token only; Ollama Cloud = subscription only). Local
+                 providers (lm-studio, ollama-local) have an empty supported set and
+                 skip the row entirely — they're free at point of use so billing
+                 modality is meaningless. -->
+            <div
+              v-if="supportedModalitiesFor(name).length > 0"
+              class="px-4 py-2 flex items-center gap-3"
+            >
+              <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+                paymentModality
+                <span class="relative group/tip">
+                  <InformationCircleIcon
+                    class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
+                    aria-hidden="true"
+                  />
+                  <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-60 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+                    How this provider bills you. <code class="font-mono">PER_TOKEN</code> uses model pricing to estimate cost per turn. <code class="font-mono">SUBSCRIPTION</code> ignores per-token pricing and pro-rates the monthly fee instead.
+                  </span>
+                </span>
+              </span>
+              <template v-if="supportedModalitiesFor(name).length > 1 && editingKey === `provider.${name}.paymentModality`">
+                <select
+                  v-model="editValue"
+                  :aria-label="`Edit payment modality for ${name}`"
+                  class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+                >
+                  <option
+                    v-for="m in supportedModalitiesFor(name)"
+                    :key="m"
+                    :value="m"
+                  >
+                    {{ m }}
+                  </option>
+                </select>
+                <button
+                  class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                  title="Save"
+                  @click="updateEntry(`provider.${name}.paymentModality`)"
+                >
+                  <CheckIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+                <button
+                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                  title="Cancel"
+                  @click="editingKey = null"
+                >
+                  <XMarkIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+              </template>
+              <template v-else>
+                <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ paymentModalityFor(name) }}</span>
+                <button
+                  v-if="supportedModalitiesFor(name).length > 1"
+                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                  title="Edit"
+                  @click="editingKey = `provider.${name}.paymentModality`; editValue = paymentModalityFor(name)"
+                >
+                  <PencilIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+                <span
+                  v-else
+                  class="relative group/lock p-1 text-fg-muted"
+                >
+                  <LockClosedIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                  <span class="absolute right-0 top-7 z-20 hidden group-hover/lock:block w-56 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+                    {{ providerLabel(name) }} only supports {{ paymentModalityFor(name) }} billing.
+                  </span>
+                </span>
+              </template>
+            </div>
+            <!-- JCLAW-280: subscriptionMonthlyUsd — only when the selected modality is
+                 SUBSCRIPTION. Pro-rated into the Chat Cost dashboard's subscription
+                 subsection by (window_days / 30). -->
+            <div
+              v-if="paymentModalityFor(name) === 'SUBSCRIPTION' && supportedModalitiesFor(name).includes('SUBSCRIPTION')"
+              class="px-4 py-2 flex items-center gap-3"
+            >
+              <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+                subscriptionMonthlyUsd
+                <span class="relative group/tip">
+                  <InformationCircleIcon
+                    class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
+                    aria-hidden="true"
+                  />
+                  <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-60 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+                    Monthly USD you pay {{ providerLabel(name) }}. The Chat Cost dashboard pro-rates this to the selected time window (<code class="font-mono">monthly × window_days / 30</code>).
+                  </span>
+                </span>
+              </span>
+              <template v-if="editingKey === `provider.${name}.subscriptionMonthlyUsd`">
+                <span class="text-sm text-fg-muted">$</span>
+                <input
+                  v-model="editValue"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  :aria-label="`Edit monthly subscription price for ${name}`"
+                  class="flex-1 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+                >
+                <button
+                  class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+                  title="Save"
+                  @click="updateEntry(`provider.${name}.subscriptionMonthlyUsd`)"
+                >
+                  <CheckIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+                <button
+                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                  title="Cancel"
+                  @click="editingKey = null"
+                >
+                  <XMarkIcon
+                    class="w-3.5 h-3.5"
+                    aria-hidden="true"
+                  />
+                </button>
+              </template>
+              <template v-else>
+                <span class="flex-1 text-sm text-fg-primary font-mono truncate">${{ Number(subscriptionMonthlyFor(name)).toFixed(2) }}/mo</span>
+                <button
+                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                  title="Edit"
+                  @click="editingKey = `provider.${name}.subscriptionMonthlyUsd`; editValue = String(subscriptionMonthlyFor(name))"
                 >
                   <PencilIcon
                     class="w-3.5 h-3.5"

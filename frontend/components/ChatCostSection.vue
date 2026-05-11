@@ -111,6 +111,60 @@ const { data: costData, refresh, pending } = useFetch<CostResponse>('/api/metric
 
 const rows = computed<FleetCostRow[]>(() => costData.value?.rows ?? [])
 
+// JCLAW-280: provider modality + monthly subscription price. Drives the
+// per-token vs subscription partition of the Chat Cost dashboard. Defaults
+// (empty maps) are safe: every row is treated as PER_TOKEN and the
+// subscription subsection collapses to nothing until /api/providers loads.
+interface ProviderInfo {
+  name: string
+  paymentModality: 'PER_TOKEN' | 'SUBSCRIPTION'
+  subscriptionMonthlyUsd: number
+  supportedModalities: ('PER_TOKEN' | 'SUBSCRIPTION')[]
+}
+const { data: providersInfo } = useFetch<ProviderInfo[]>('/api/providers', {
+  default: () => [],
+})
+
+const modalityByProvider = computed(() => {
+  const m = new Map<string, 'PER_TOKEN' | 'SUBSCRIPTION'>()
+  for (const p of providersInfo.value ?? []) m.set(p.name, p.paymentModality)
+  return m
+})
+
+const subscriptionMonthlyByProvider = computed(() => {
+  const m = new Map<string, number>()
+  for (const p of providersInfo.value ?? []) {
+    if (p.paymentModality === 'SUBSCRIPTION') {
+      m.set(p.name, Number(p.subscriptionMonthlyUsd) || 0)
+    }
+  }
+  return m
+})
+
+// Partition raw rows by modality. Rows whose modelProvider doesn't match a
+// known SUBSCRIPTION provider fall into the per-token bucket — that covers
+// rows from registry-removed providers and any pre-JCLAW-280 rows where the
+// modality wasn't yet a concept.
+const perTokenRows = computed<FleetCostRow[]>(() =>
+  rows.value.filter(r => modalityByProvider.value.get(r.modelProvider ?? '') !== 'SUBSCRIPTION'),
+)
+const subscriptionRows = computed<FleetCostRow[]>(() =>
+  rows.value.filter(r => modalityByProvider.value.get(r.modelProvider ?? '') === 'SUBSCRIPTION'),
+)
+
+// Set of subscription providers actually represented in the loaded window —
+// used to compute the pro-rated subscription fee total. If the operator
+// configured Ollama Cloud at $20/mo but had no Ollama-Cloud turns in the
+// window, we don't bill them for the fee (a flat monthly accrual would be
+// misleading on a dashboard whose unit of analysis is observed activity).
+const subscriptionProvidersInWindow = computed(() => {
+  const set = new Set<string>()
+  for (const r of subscriptionRows.value) {
+    if (r.modelProvider) set.add(r.modelProvider)
+  }
+  return set
+})
+
 // Channel options: only channel kinds that have data in the loaded window.
 // Operator filtering by a channel that has no data would be confusing;
 // surfacing only-with-data matches Chat Performance's behavior.
@@ -132,6 +186,59 @@ const filter = computed<FleetCostFilter>(() => ({
 const breakdown = computed<FleetCostBreakdown>(() =>
   computeFleetCost(rows.value, filter.value),
 )
+
+// JCLAW-280: per-modality breakdowns. The original `breakdown` stays as the
+// whole-fleet aggregate (still used by the agent/channel filter availability
+// logic and as the source of `hasData`); the partitioned breakdowns drive
+// the rendered subsections.
+const perTokenBreakdown = computed<FleetCostBreakdown>(() =>
+  computeFleetCost(perTokenRows.value, filter.value),
+)
+const subscriptionBreakdown = computed<FleetCostBreakdown>(() =>
+  computeFleetCost(subscriptionRows.value, filter.value),
+)
+
+// Window length in days — used to pro-rate the subscription monthly fee.
+// For the "all time" window we derive the span from the earliest
+// subscription row's timestamp through now; for a 60-day data set under a
+// $30/mo plan that produces "$60.00 charged over this window," which is
+// the most honest mapping of a flat fee to an open-ended view.
+const windowDays = computed(() => {
+  if (selectedWindow.value === '7d') return 7
+  if (selectedWindow.value === '30d') return 30
+  // all-time: derive from data span. If there are no subscription rows
+  // yet, the value is irrelevant (subscriptionFee will be 0 anyway), so
+  // default to 30 to avoid a div-by-zero or 0-day pro-rate.
+  const subRows = subscriptionRows.value
+  if (subRows.length === 0) return 30
+  let earliest = Date.now()
+  for (const r of subRows) {
+    const t = Date.parse(r.timestamp)
+    if (!isNaN(t) && t < earliest) earliest = t
+  }
+  const spanMs = Math.max(0, Date.now() - earliest)
+  return Math.max(1, spanMs / (24 * 60 * 60 * 1000))
+})
+
+// Pro-rated subscription accrual = sum of monthly fees for providers that
+// actually had turns in this window × (window_days / 30). Excluded providers
+// don't show up regardless of whether they're configured.
+const subscriptionFee = computed(() => {
+  let sumMonthly = 0
+  for (const name of subscriptionProvidersInWindow.value) {
+    sumMonthly += subscriptionMonthlyByProvider.value.get(name) ?? 0
+  }
+  return sumMonthly * (windowDays.value / 30)
+})
+
+// Subscription subsection visibility. Per-token visibility is governed by
+// the pre-existing `hasPaidData` (defined below) which also gates the
+// per-model table — keeping a single source of truth means the strip and
+// the table can't disagree about whether to render.
+const hasSubscriptionActivity = computed(() => subscriptionBreakdown.value.turnCount > 0)
+
+// Combined total = per-token actuals + pro-rated subscription accrual.
+const combinedTotal = computed(() => perTokenBreakdown.value.total + subscriptionFee.value)
 
 const hasData = computed(() => breakdown.value.turnCount > 0)
 
@@ -179,21 +286,19 @@ function modelLabel(m: FleetCostPerModel): string {
 }
 
 // Restrict the per-model breakdown to models that actually contributed
-// to total cost — operator's question is "which models cost what," not
-// "what activity happened on free tiers." Free-tier rows still count
-// toward the summary row at the top (turn counts, token totals) so the
-// operator's "what happened in this window" view stays comprehensive;
-// this filter is display-layer only, NOT applied at computeFleetCost
-// so future views (e.g., per-channel free-tier audit) can still read
-// the unfiltered data from breakdown.value.perModel.
+// to per-token cost — operator's question is "which models cost what,"
+// not "what activity happened on free tiers." Subscription-provider rows
+// are excluded by sourcing from perTokenBreakdown rather than the whole
+// breakdown: their per-row "cost" is bundled into the monthly fee and
+// double-counting it here would inflate the totals.
 const paidPerModel = computed<FleetCostPerModel[]>(() =>
-  breakdown.value.perModel.filter(m => m.total > 0),
+  perTokenBreakdown.value.perModel.filter(m => m.total > 0),
 )
 
-// Distinguishes "no data at all in this window" from "all data was
-// free-tier" — the second case needs its own empty-state message so
-// the operator isn't confused about why the table looks empty when
-// the summary row shows positive turn counts.
+// Distinguishes "no data at all in this window" from "all per-token data
+// was free-tier" — the second case needs its own empty-state message so
+// the operator isn't confused about why the table looks empty when the
+// summary row shows positive turn counts.
 const hasPaidData = computed(() => paidPerModel.value.length > 0)
 
 const sortedPerModel = computed<FleetCostPerModel[]>(() => {
@@ -225,8 +330,10 @@ const sortedPerModel = computed<FleetCostPerModel[]>(() => {
 // Same paid-only filter as the table — chart visualizes cost contribution,
 // so zero-bars for free-tier rows would be visual noise.
 const chartRows = computed(() => {
-  const paidModels = breakdown.value.perModel.filter(m => m.total > 0)
-  const paidAgents = breakdown.value.perAgent.filter(a => a.total > 0)
+  // Scoped to per-token activity for the same reason paidPerModel is —
+  // subscription costs aren't attributable to individual models or agents.
+  const paidModels = perTokenBreakdown.value.perModel.filter(m => m.total > 0)
+  const paidAgents = perTokenBreakdown.value.perAgent.filter(a => a.total > 0)
   // Pick the dimension with more entries — usually agent for fleet view,
   // model when filtered to one agent.
   const useModel = paidModels.length >= paidAgents.length
@@ -455,63 +562,140 @@ defineExpose({ refresh })
     </div>
 
     <template v-else>
-      <!-- Aggregate summary row. Hidden when no paid model contributed —
-           every aggregate (cost, turns, tokens) would otherwise be a free-
-           tier figure under a section whose entire purpose is cost
-           attribution. The empty-state message below tells the operator
-           why, and is the only thing rendered in that case. -->
+      <!-- JCLAW-280: per-token subsection. Summary strip + (further down)
+           per-model table/chart. Rendered only when paid per-token activity
+           exists in the window. Subscription-provider turns are excluded by
+           sourcing from perTokenBreakdown. -->
       <div
         v-if="hasPaidData"
-        class="px-4 py-3 grid grid-cols-2 sm:grid-cols-5 gap-3 border-b border-border bg-muted/30"
+        class="border-b border-border"
       >
-        <div>
-          <div class="text-xs text-fg-muted mb-0.5">
-            Total cost
-          </div>
-          <div class="text-sm font-mono text-fg-strong">
-            {{ formatCostUsd(breakdown.total) }}
-          </div>
+        <div class="px-4 pt-3 pb-1 text-xs font-medium text-fg-muted uppercase tracking-wide">
+          Per-token
         </div>
-        <div>
-          <div class="text-xs text-fg-muted mb-0.5">
-            Turns
+        <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-5 gap-3 bg-muted/30">
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Cost
+            </div>
+            <div class="text-sm font-mono text-fg-strong">
+              {{ formatCostUsd(perTokenBreakdown.total) }}
+            </div>
           </div>
-          <div class="text-sm font-mono text-fg-strong">
-            {{ breakdown.turnCount.toLocaleString() }}
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Turns
+            </div>
+            <div class="text-sm font-mono text-fg-strong">
+              {{ perTokenBreakdown.turnCount.toLocaleString() }}
+            </div>
           </div>
-        </div>
-        <div>
-          <div class="text-xs text-fg-muted mb-0.5">
-            Prompt tokens
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Prompt tokens
+            </div>
+            <div class="text-sm font-mono text-fg-strong">
+              {{ perTokenBreakdown.prompt.toLocaleString() }}
+            </div>
           </div>
-          <div class="text-sm font-mono text-fg-strong">
-            {{ breakdown.prompt.toLocaleString() }}
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Completion
+            </div>
+            <div class="text-sm font-mono text-fg-strong">
+              {{ perTokenBreakdown.completion.toLocaleString() }}
+            </div>
           </div>
-        </div>
-        <div>
-          <div class="text-xs text-fg-muted mb-0.5">
-            Completion
-          </div>
-          <div class="text-sm font-mono text-fg-strong">
-            {{ breakdown.completion.toLocaleString() }}
-          </div>
-        </div>
-        <div>
-          <div class="text-xs text-fg-muted mb-0.5">
-            Reasoning · Cached
-          </div>
-          <div class="text-sm font-mono text-fg-strong">
-            {{ breakdown.reasoning.toLocaleString() }} · {{ breakdown.cached.toLocaleString() }}
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Reasoning · Cached
+            </div>
+            <div class="text-sm font-mono text-fg-strong">
+              {{ perTokenBreakdown.reasoning.toLocaleString() }} · {{ perTokenBreakdown.cached.toLocaleString() }}
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- All-free-tier empty state. The only thing rendered (after the
-           filter row) when no paid model contributed; the summary strip
-           above is suppressed because those aggregates would all be
-           free-tier counts under a cost-attribution section. -->
+      <!-- JCLAW-280: subscription subsection. Shows turns + tokens for
+           subscription-provider activity plus the pro-rated monthly fee.
+           Subscription has no per-row cost attribution so this subsection
+           never feeds the per-model table or chart below. -->
       <div
-        v-if="!hasPaidData"
+        v-if="hasSubscriptionActivity"
+        class="border-b border-border"
+      >
+        <div class="px-4 pt-3 pb-1 text-xs font-medium text-fg-muted uppercase tracking-wide">
+          Subscription
+        </div>
+        <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-5 gap-3 bg-muted/30">
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Fee (window)
+            </div>
+            <div
+              class="text-sm font-mono text-fg-strong"
+              :title="`monthly × (window_days / 30) = ${formatCostUsd(subscriptionFee)} over ${windowDays.toFixed(1)} days`"
+            >
+              {{ formatCostUsd(subscriptionFee) }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Turns
+            </div>
+            <div class="text-sm font-mono text-fg-strong">
+              {{ subscriptionBreakdown.turnCount.toLocaleString() }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Prompt tokens
+            </div>
+            <div class="text-sm font-mono text-fg-strong">
+              {{ subscriptionBreakdown.prompt.toLocaleString() }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Completion
+            </div>
+            <div class="text-sm font-mono text-fg-strong">
+              {{ subscriptionBreakdown.completion.toLocaleString() }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Reasoning · Cached
+            </div>
+            <div class="text-sm font-mono text-fg-strong">
+              {{ subscriptionBreakdown.reasoning.toLocaleString() }} · {{ subscriptionBreakdown.cached.toLocaleString() }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Combined total — rendered when *either* subsection has activity.
+           For per-token-only, this just echoes the per-token total; for
+           subscription-only, the subscription accrual. Mixed: the sum. -->
+      <div
+        v-if="hasPaidData || hasSubscriptionActivity"
+        class="px-4 py-2 flex items-center justify-between border-b border-border bg-muted/40"
+      >
+        <div class="text-xs text-fg-muted uppercase tracking-wide">
+          Combined total
+        </div>
+        <div class="text-sm font-mono text-fg-strong">
+          {{ formatCostUsd(combinedTotal) }}
+        </div>
+      </div>
+
+      <!-- All-free-tier empty state. Only rendered when no paid per-token
+           activity AND no subscription activity exist — both subsections
+           are suppressed because their aggregates would all be free-tier
+           counts under a cost-attribution section. -->
+      <div
+        v-if="!hasPaidData && !hasSubscriptionActivity"
         class="px-4 py-6 text-center text-sm text-fg-muted"
       >
         All turns in this window were on free-tier models — no cost to attribute.

@@ -52,7 +52,8 @@ public class ApiMetricsController extends Controller {
 
     public record StatusResponse(String status) {}
 
-    public record CostRow(String timestamp, Long agentId, String channelType, String usageJson) {}
+    public record CostRow(String timestamp, Long agentId, String channelType, String usageJson,
+                          String modelProvider) {}
 
     public record CostResponse(String since, List<CostRow> rows) {}
 
@@ -151,8 +152,14 @@ public class ApiMetricsController extends Controller {
         // the JOIN to the existing idx_message_conversation index plus the
         // conversation row lookup; for operator-scale traffic the planner is
         // fast enough that an explicit Message.created_at index isn't needed.
+        //
+        // JCLAW-280: project the conversation's effective model provider via
+        // COALESCE(conversation.modelProviderOverride, agent.modelProvider).
+        // The cost dashboard partitions rows into per-token vs subscription
+        // subsections by reading each provider's modality from ProviderRegistry.
         var jpql = new StringBuilder(
-                "SELECT m.createdAt, c.agent.id, c.channelType, m.usageJson "
+                "SELECT m.createdAt, c.agent.id, c.channelType, m.usageJson, "
+                        + "COALESCE(c.modelProviderOverride, c.agent.modelProvider) "
                         + "FROM Message m JOIN m.conversation c "
                         + "WHERE m.createdAt >= ?1 "
                         + "AND m.usageJson IS NOT NULL");
@@ -184,7 +191,8 @@ public class ApiMetricsController extends Controller {
                     ((java.time.Instant) r[0]).toString(),
                     (Long) r[1],
                     (String) r[2],
-                    (String) r[3]));
+                    (String) r[3],
+                    (String) r[4]));
         }
 
         renderJSON(INSTANCE.toJson(new CostResponse(since.toString(), rows)));

@@ -4,6 +4,7 @@ import com.google.gson.reflect.TypeToken;
 import llm.LlmTypes.*;
 import services.ConfigService;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -107,7 +108,28 @@ public class ProviderRegistry {
                 }
             }
 
-            var config = new ProviderConfig(name, baseUrl, apiKey, models);
+            // JCLAW-280: payment modality + monthly subscription price.
+            // Defaults derive from the provider's supported-modality set,
+            // so a fresh-install Ollama-Cloud row is SUBSCRIPTION without
+            // any explicit config row; OpenAI defaults to PER_TOKEN; and
+            // free-at-point-of-use providers (ollama-local, lm-studio)
+            // get an empty supported set so the registry leaves modality
+            // at its safe PER_TOKEN default — the cost path treats them
+            // as free-tier regardless.
+            var modalityRaw = configMap.get("provider." + name + ".paymentModality");
+            var modality = PaymentModality.parseOrDefault(modalityRaw, name);
+            var subscriptionRaw = configMap.get("provider." + name + ".subscriptionMonthlyUsd");
+            BigDecimal subscriptionMonthly = BigDecimal.ZERO;
+            if (subscriptionRaw != null && !subscriptionRaw.isBlank()) {
+                try {
+                    subscriptionMonthly = new BigDecimal(subscriptionRaw.trim());
+                    if (subscriptionMonthly.signum() < 0) subscriptionMonthly = BigDecimal.ZERO;
+                } catch (NumberFormatException _) {
+                    // Malformed price — fall back to zero rather than refuse the provider.
+                }
+            }
+
+            var config = new ProviderConfig(name, baseUrl, apiKey, models, modality, subscriptionMonthly);
             newCache.put(name, LlmProvider.forConfig(config));
         }
 
