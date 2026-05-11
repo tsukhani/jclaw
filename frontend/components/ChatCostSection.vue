@@ -301,6 +301,19 @@ const paidPerModel = computed<FleetCostPerModel[]>(() =>
 // summary row shows positive turn counts.
 const hasPaidData = computed(() => paidPerModel.value.length > 0)
 
+/**
+ * Format a subscription fee in plain-currency style — "$100" when the
+ * amount is whole dollars, "$99.99" otherwise. Distinct from
+ * {@link formatCostUsd} which renders four decimals and is used for the
+ * per-token side where sub-cent precision matters; subscription fees are
+ * always whole-dollar amounts at the source, so trailing-zero noise just
+ * looks like a programmatic artifact.
+ */
+function formatSubscriptionFee(amount: number): string {
+  const rounded = Math.round(amount * 100) / 100
+  return rounded % 1 === 0 ? `$${rounded.toFixed(0)}` : `$${rounded.toFixed(2)}`
+}
+
 const sortedPerModel = computed<FleetCostPerModel[]>(() => {
   const rows = [...paidPerModel.value]
   const dir = sortDir.value === 'asc' ? 1 : -1
@@ -562,6 +575,76 @@ defineExpose({ refresh })
     </div>
 
     <template v-else>
+      <!-- JCLAW-280: subscription subsection (rendered first because it
+           reflects an already-committed monthly spend, while per-token is
+           accruing-as-you-go — operators read the standing commitment
+           before the variable line, matching how P&L statements are
+           ordered). Shows turns + tokens for subscription-provider
+           activity plus the pro-rated monthly fee. Subscription has no
+           per-row cost attribution so this subsection never feeds the
+           per-model table or chart below. -->
+      <div
+        v-if="hasSubscriptionActivity"
+        class="border-b border-border"
+      >
+        <div class="px-4 pt-3 pb-1 text-xs font-medium text-fg-muted uppercase tracking-wide">
+          Subscription
+        </div>
+        <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 bg-muted/30">
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Fee (window)
+            </div>
+            <div
+              class="text-sm font-mono text-emerald-700 dark:text-emerald-400"
+              :title="`monthly × (window_days / 30) = ${formatSubscriptionFee(subscriptionFee)} over ${windowDays.toFixed(1)} days`"
+            >
+              {{ formatSubscriptionFee(subscriptionFee) }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Turns
+            </div>
+            <div class="text-sm font-mono text-fg-strong">
+              {{ subscriptionBreakdown.turnCount.toLocaleString() }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Prompt tokens
+            </div>
+            <div class="text-sm font-mono text-fg-strong">
+              {{ subscriptionBreakdown.prompt.toLocaleString() }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Completion
+            </div>
+            <div class="text-sm font-mono text-fg-strong">
+              {{ subscriptionBreakdown.completion.toLocaleString() }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Reasoning
+            </div>
+            <div class="text-sm font-mono text-fg-strong">
+              {{ subscriptionBreakdown.reasoning.toLocaleString() }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Cached
+            </div>
+            <div class="text-sm font-mono text-yellow-700 dark:text-yellow-400">
+              {{ subscriptionBreakdown.cached.toLocaleString() }}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- JCLAW-280: per-token subsection. Summary strip + (further down)
            per-model table/chart. Rendered only when paid per-token activity
            exists in the window. Subscription-provider turns are excluded by
@@ -573,12 +656,12 @@ defineExpose({ refresh })
         <div class="px-4 pt-3 pb-1 text-xs font-medium text-fg-muted uppercase tracking-wide">
           Per-token
         </div>
-        <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-5 gap-3 bg-muted/30">
+        <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 bg-muted/30">
           <div>
             <div class="text-xs text-fg-muted mb-0.5">
               Cost
             </div>
-            <div class="text-sm font-mono text-fg-strong">
+            <div class="text-sm font-mono text-emerald-700 dark:text-emerald-400">
               {{ formatCostUsd(perTokenBreakdown.total) }}
             </div>
           </div>
@@ -608,85 +691,20 @@ defineExpose({ refresh })
           </div>
           <div>
             <div class="text-xs text-fg-muted mb-0.5">
-              Reasoning · Cached
+              Reasoning
             </div>
             <div class="text-sm font-mono text-fg-strong">
-              {{ perTokenBreakdown.reasoning.toLocaleString() }} · {{ perTokenBreakdown.cached.toLocaleString() }}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- JCLAW-280: subscription subsection. Shows turns + tokens for
-           subscription-provider activity plus the pro-rated monthly fee.
-           Subscription has no per-row cost attribution so this subsection
-           never feeds the per-model table or chart below. -->
-      <div
-        v-if="hasSubscriptionActivity"
-        class="border-b border-border"
-      >
-        <div class="px-4 pt-3 pb-1 text-xs font-medium text-fg-muted uppercase tracking-wide">
-          Subscription
-        </div>
-        <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-5 gap-3 bg-muted/30">
-          <div>
-            <div class="text-xs text-fg-muted mb-0.5">
-              Fee (window)
-            </div>
-            <div
-              class="text-sm font-mono text-fg-strong"
-              :title="`monthly × (window_days / 30) = ${formatCostUsd(subscriptionFee)} over ${windowDays.toFixed(1)} days`"
-            >
-              {{ formatCostUsd(subscriptionFee) }}
+              {{ perTokenBreakdown.reasoning.toLocaleString() }}
             </div>
           </div>
           <div>
             <div class="text-xs text-fg-muted mb-0.5">
-              Turns
+              Cached
             </div>
-            <div class="text-sm font-mono text-fg-strong">
-              {{ subscriptionBreakdown.turnCount.toLocaleString() }}
-            </div>
-          </div>
-          <div>
-            <div class="text-xs text-fg-muted mb-0.5">
-              Prompt tokens
-            </div>
-            <div class="text-sm font-mono text-fg-strong">
-              {{ subscriptionBreakdown.prompt.toLocaleString() }}
+            <div class="text-sm font-mono text-yellow-700 dark:text-yellow-400">
+              {{ perTokenBreakdown.cached.toLocaleString() }}
             </div>
           </div>
-          <div>
-            <div class="text-xs text-fg-muted mb-0.5">
-              Completion
-            </div>
-            <div class="text-sm font-mono text-fg-strong">
-              {{ subscriptionBreakdown.completion.toLocaleString() }}
-            </div>
-          </div>
-          <div>
-            <div class="text-xs text-fg-muted mb-0.5">
-              Reasoning · Cached
-            </div>
-            <div class="text-sm font-mono text-fg-strong">
-              {{ subscriptionBreakdown.reasoning.toLocaleString() }} · {{ subscriptionBreakdown.cached.toLocaleString() }}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Combined total — rendered when *either* subsection has activity.
-           For per-token-only, this just echoes the per-token total; for
-           subscription-only, the subscription accrual. Mixed: the sum. -->
-      <div
-        v-if="hasPaidData || hasSubscriptionActivity"
-        class="px-4 py-2 flex items-center justify-between border-b border-border bg-muted/40"
-      >
-        <div class="text-xs text-fg-muted uppercase tracking-wide">
-          Combined total
-        </div>
-        <div class="text-sm font-mono text-fg-strong">
-          {{ formatCostUsd(combinedTotal) }}
         </div>
       </div>
 
@@ -789,7 +807,7 @@ defineExpose({ refresh })
               <td class="px-3 py-2 text-right font-mono text-fg-primary">
                 {{ m.turnCount.toLocaleString() }}
               </td>
-              <td class="px-3 py-2 text-right font-mono text-fg-strong">
+              <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
                 {{ formatCostUsd(m.total) }}
               </td>
               <td class="px-3 py-2 text-right font-mono text-fg-muted">
@@ -801,7 +819,7 @@ defineExpose({ refresh })
               <td class="px-3 py-2 text-right font-mono text-fg-muted">
                 {{ m.reasoning.toLocaleString() }}
               </td>
-              <td class="px-3 py-2 text-right font-mono text-fg-muted">
+              <td class="px-3 py-2 text-right font-mono text-yellow-700 dark:text-yellow-400">
                 {{ m.cached.toLocaleString() }}
               </td>
             </tr>
@@ -836,10 +854,27 @@ defineExpose({ refresh })
               :style="{ width: ((r.cost / chartMaxCost) * 100).toFixed(2) + '%' }"
             />
           </div>
-          <div class="font-mono text-fg-strong tabular-nums shrink-0">
+          <div class="font-mono text-emerald-700 dark:text-emerald-400 tabular-nums shrink-0">
             {{ formatCostUsd(r.cost) }}
             <span class="text-fg-muted">· {{ r.turnCount }}t</span>
           </div>
+        </div>
+      </div>
+
+      <!-- JCLAW-280: combined total — rendered at the very bottom, below
+           the per-model table/chart, so it reads as a footer summing the
+           Subscription + Per-Token subsections above. Only rendered when
+           at least one subsection has activity; the all-free-tier empty
+           state above suppresses everything else in that case. -->
+      <div
+        v-if="hasPaidData || hasSubscriptionActivity"
+        class="px-4 py-2 flex items-center justify-between border-t border-border bg-muted/40"
+      >
+        <div class="text-xs text-fg-muted uppercase tracking-wide">
+          Combined total
+        </div>
+        <div class="text-sm font-mono text-emerald-700 dark:text-emerald-400">
+          {{ formatCostUsd(combinedTotal) }}
         </div>
       </div>
     </template>
