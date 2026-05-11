@@ -2076,15 +2076,13 @@ function exportConversation() {
                     v-if="msg.role === 'user'"
                     class="group"
                   >
-                    <div
-                      class="inline-block bg-muted rounded-2xl text-fg-strong px-4 py-2 text-base whitespace-pre-wrap break-words"
-                    >
-                      {{ msg.content }}
-                    </div>
-                    <!-- JCLAW-279: persisted attachment chips, rendered on conversation reload. -->
+                    <!-- JCLAW-279: persisted attachment chips, rendered on conversation reload.
+                         Placed above the message bubble so the hover-action icons that sit below
+                         the bubble unambiguously apply to the message text rather than the
+                         attachment row. -->
                     <div
                       v-if="msg.attachments?.length"
-                      class="flex flex-wrap gap-2 mt-2 justify-end"
+                      class="flex flex-wrap gap-2 mb-2 justify-end"
                     >
                       <a
                         v-for="att in msg.attachments"
@@ -2113,6 +2111,11 @@ function exportConversation() {
                         <span class="truncate">{{ att.originalFilename }}</span>
                         <span class="text-fg-muted shrink-0">{{ formatSize(att.sizeBytes) }}</span>
                       </a>
+                    </div>
+                    <div
+                      class="inline-block bg-muted rounded-2xl text-fg-strong px-4 py-2 text-base whitespace-pre-wrap break-words"
+                    >
+                      {{ msg.content }}
                     </div>
                     <div class="flex items-center justify-end gap-1 mt-1 h-5 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
