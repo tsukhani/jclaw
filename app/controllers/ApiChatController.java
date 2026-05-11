@@ -191,8 +191,6 @@ public class ApiChatController extends Controller {
         renderJSON(gson.toJson(resp));
     }
 
-    private static final int MAX_UPLOAD_FILES = 5;
-
     /**
      * POST /api/chat/upload — Multipart upload for chat attachments. JCLAW-25:
      * files stage under {@code workspace/{agent.name}/attachments/staging/{uuid}.{ext}}
@@ -209,8 +207,9 @@ public class ApiChatController extends Controller {
         if (files == null || files.length == 0) {
             error(400, "No files uploaded");
         }
-        if (files.length > MAX_UPLOAD_FILES) {
-            error(400, "Too many files (max " + MAX_UPLOAD_FILES + ")");
+        int maxFiles = services.UploadLimits.maxFiles();
+        if (files.length > maxFiles) {
+            error(400, "Too many files (max " + maxFiles + ")");
         }
         for (var u : files) {
             if (u == null || u.asFile() == null || !u.asFile().exists()) error(400, "Invalid file upload");

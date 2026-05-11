@@ -25,10 +25,18 @@ public final class UploadLimits {
     public static final String KEY_MAX_IMAGE_BYTES = "upload.maxImageBytes";
     public static final String KEY_MAX_AUDIO_BYTES = "upload.maxAudioBytes";
     public static final String KEY_MAX_FILE_BYTES = "upload.maxFileBytes";
+    public static final String KEY_MAX_FILES = "upload.maxFiles";
 
     public static final int DEFAULT_MAX_IMAGE_BYTES = 20 * 1024 * 1024;
     public static final int DEFAULT_MAX_AUDIO_BYTES = 100 * 1024 * 1024;
     public static final int DEFAULT_MAX_FILE_BYTES = 100 * 1024 * 1024;
+
+    /** Hard ceiling on {@link #maxFiles()} — operators can lower the per-message
+     *  file count, but never raise it above this. Keeping the cap centralised
+     *  here means the Settings slider, the server-side check, and any future
+     *  callers all agree on the same upper bound. */
+    public static final int ABSOLUTE_MAX_FILES = 5;
+    public static final int DEFAULT_MAX_FILES = ABSOLUTE_MAX_FILES;
 
     /** Resolve the effective cap for the given attachment kind. */
     public static long forKind(String kind) {
@@ -40,6 +48,16 @@ public final class UploadLimits {
             default ->
                     ConfigService.getInt(KEY_MAX_FILE_BYTES, DEFAULT_MAX_FILE_BYTES);
         };
+    }
+
+    /** Resolve the effective per-message file-count cap. Clamps the configured
+     *  value into [1, {@link #ABSOLUTE_MAX_FILES}] so a malformed or
+     *  out-of-range config row never lifts the policy ceiling. */
+    public static int maxFiles() {
+        int configured = ConfigService.getInt(KEY_MAX_FILES, DEFAULT_MAX_FILES);
+        if (configured < 1) return 1;
+        if (configured > ABSOLUTE_MAX_FILES) return ABSOLUTE_MAX_FILES;
+        return configured;
     }
 
     /** Human-friendly name for error messages — "image", "audio", or "file". */

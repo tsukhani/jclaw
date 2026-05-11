@@ -326,12 +326,23 @@ onUnmounted(() => stopTranscriptionPolling())
 const DEFAULT_MAX_IMAGE_MB = 20
 const DEFAULT_MAX_AUDIO_MB = 100
 const DEFAULT_MAX_FILE_MB = 100
+// Slider ceilings — operator-tunable downward, but never above these. Must
+// stay in sync with the per-kind defaults the server bakes in (a slider that
+// can only lower the cap matches the policy intent: defaults are the
+// maximum reasonable values, operators can be stricter).
+const SLIDER_MAX_IMAGE_MB = 20
+const SLIDER_MAX_AUDIO_MB = 100
+const SLIDER_MAX_FILE_MB = 100
 
-function bytesToMb(raw: string | undefined, fallback: number): string {
-  if (!raw) return String(fallback)
+// JCLAW upload count cap (mirrors services/UploadLimits.java ABSOLUTE_MAX_FILES).
+const DEFAULT_MAX_FILES = 5
+const SLIDER_MAX_FILES = 5
+
+function bytesToMb(raw: string | undefined, fallback: number): number {
+  if (!raw) return fallback
   const bytes = Number.parseInt(raw, 10)
-  if (!Number.isFinite(bytes) || bytes <= 0) return String(fallback)
-  return String(Math.round(bytes / (1024 * 1024)))
+  if (!Number.isFinite(bytes) || bytes <= 0) return fallback
+  return Math.round(bytes / (1024 * 1024))
 }
 
 const uploadMaxImageMb = computed(() => {
@@ -346,17 +357,33 @@ const uploadMaxFileMb = computed(() => {
   const raw = configData.value?.entries?.find(e => e.key === 'upload.maxFileBytes')?.value
   return bytesToMb(raw, DEFAULT_MAX_FILE_MB)
 })
+const uploadMaxFiles = computed(() => {
+  const raw = configData.value?.entries?.find(e => e.key === 'upload.maxFiles')?.value
+  if (!raw) return DEFAULT_MAX_FILES
+  const n = Number.parseInt(raw, 10)
+  if (!Number.isFinite(n) || n < 1) return 1
+  if (n > SLIDER_MAX_FILES) return SLIDER_MAX_FILES
+  return n
+})
 
-const editingUploadField = ref<string | null>(null)
-const uploadFieldEdit = ref('')
-
-async function saveUploadMb(configKey: string, mbValue: string) {
+async function saveUploadMb(configKey: string, mbValue: number) {
   saving.value = true
   try {
-    const mb = Math.max(1, Number.parseInt(mbValue, 10) || 0)
+    const mb = Math.max(1, Number(mbValue) || 0)
     const bytes = mb * 1024 * 1024
     await $fetch('/api/config', { method: 'POST', body: { key: configKey, value: String(bytes) } })
-    editingUploadField.value = null
+    refresh()
+  }
+  finally {
+    saving.value = false
+  }
+}
+
+async function saveUploadCount(value: number) {
+  saving.value = true
+  try {
+    const n = Math.max(1, Math.min(SLIDER_MAX_FILES, Number(value) || 1))
+    await $fetch('/api/config', { method: 'POST', body: { key: 'upload.maxFiles', value: String(n) } })
     refresh()
   }
   finally {
@@ -2942,49 +2969,17 @@ async function handleResetPassword() {
                 </span>
               </span>
             </span>
-            <template v-if="editingUploadField === 'maxImageMb'">
-              <input
-                v-model="uploadFieldEdit"
-                type="number"
-                min="1"
-                max="512"
-                aria-label="Max image upload MB"
-                class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
-              >
-              <button
-                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-                title="Save"
-                @click="saveUploadMb('upload.maxImageBytes', uploadFieldEdit)"
-              >
-                <CheckIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                title="Cancel"
-                @click="editingUploadField = null"
-              >
-                <XMarkIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
-            <template v-else>
-              <span class="flex-1 text-sm text-fg-primary font-mono">{{ uploadMaxImageMb }} MB</span>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                title="Edit"
-                @click="editingUploadField = 'maxImageMb'; uploadFieldEdit = uploadMaxImageMb"
-              >
-                <PencilIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
+            <input
+              :value="uploadMaxImageMb"
+              type="range"
+              min="1"
+              :max="SLIDER_MAX_IMAGE_MB"
+              step="1"
+              aria-label="Max image upload MB"
+              class="flex-1 accent-emerald-600 dark:accent-emerald-500"
+              @change="saveUploadMb('upload.maxImageBytes', Number(($event.target as HTMLInputElement).value))"
+            >
+            <span class="text-sm text-fg-primary font-mono w-20 text-right">{{ uploadMaxImageMb }} MB</span>
           </div>
           <div class="px-4 py-2.5 flex items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
@@ -2999,49 +2994,17 @@ async function handleResetPassword() {
                 </span>
               </span>
             </span>
-            <template v-if="editingUploadField === 'maxAudioMb'">
-              <input
-                v-model="uploadFieldEdit"
-                type="number"
-                min="1"
-                max="512"
-                aria-label="Max audio upload MB"
-                class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
-              >
-              <button
-                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-                title="Save"
-                @click="saveUploadMb('upload.maxAudioBytes', uploadFieldEdit)"
-              >
-                <CheckIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                title="Cancel"
-                @click="editingUploadField = null"
-              >
-                <XMarkIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
-            <template v-else>
-              <span class="flex-1 text-sm text-fg-primary font-mono">{{ uploadMaxAudioMb }} MB</span>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                title="Edit"
-                @click="editingUploadField = 'maxAudioMb'; uploadFieldEdit = uploadMaxAudioMb"
-              >
-                <PencilIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
+            <input
+              :value="uploadMaxAudioMb"
+              type="range"
+              min="1"
+              :max="SLIDER_MAX_AUDIO_MB"
+              step="1"
+              aria-label="Max audio upload MB"
+              class="flex-1 accent-emerald-600 dark:accent-emerald-500"
+              @change="saveUploadMb('upload.maxAudioBytes', Number(($event.target as HTMLInputElement).value))"
+            >
+            <span class="text-sm text-fg-primary font-mono w-20 text-right">{{ uploadMaxAudioMb }} MB</span>
           </div>
           <div class="px-4 py-2.5 flex items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
@@ -3056,49 +3019,42 @@ async function handleResetPassword() {
                 </span>
               </span>
             </span>
-            <template v-if="editingUploadField === 'maxFileMb'">
-              <input
-                v-model="uploadFieldEdit"
-                type="number"
-                min="1"
-                max="512"
-                aria-label="Max file upload MB"
-                class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
-              >
-              <button
-                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-                title="Save"
-                @click="saveUploadMb('upload.maxFileBytes', uploadFieldEdit)"
-              >
-                <CheckIcon
-                  class="w-3.5 h-3.5"
+            <input
+              :value="uploadMaxFileMb"
+              type="range"
+              min="1"
+              :max="SLIDER_MAX_FILE_MB"
+              step="1"
+              aria-label="Max file upload MB"
+              class="flex-1 accent-emerald-600 dark:accent-emerald-500"
+              @change="saveUploadMb('upload.maxFileBytes', Number(($event.target as HTMLInputElement).value))"
+            >
+            <span class="text-sm text-fg-primary font-mono w-20 text-right">{{ uploadMaxFileMb }} MB</span>
+          </div>
+          <div class="px-4 py-2.5 flex items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-48 shrink-0 flex items-center gap-1.5">
+              maxFiles
+              <span class="relative group/tip">
+                <InformationCircleIcon
+                  class="w-3 h-3 text-fg-muted group-hover/tip:text-fg-muted cursor-help transition-colors"
                   aria-hidden="true"
                 />
-              </button>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                title="Cancel"
-                @click="editingUploadField = null"
-              >
-                <XMarkIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
-            <template v-else>
-              <span class="flex-1 text-sm text-fg-primary font-mono">{{ uploadMaxFileMb }} MB</span>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                title="Edit"
-                @click="editingUploadField = 'maxFileMb'; uploadFieldEdit = uploadMaxFileMb"
-              >
-                <PencilIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
+                <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none">
+                  Maximum number of files a user can attach to a single chat message. Capped at 5 system-wide; this lets operators be stricter.
+                </span>
+              </span>
+            </span>
+            <input
+              :value="uploadMaxFiles"
+              type="range"
+              min="1"
+              :max="SLIDER_MAX_FILES"
+              step="1"
+              aria-label="Max files per message"
+              class="flex-1 accent-emerald-600 dark:accent-emerald-500"
+              @change="saveUploadCount(Number(($event.target as HTMLInputElement).value))"
+            >
+            <span class="text-sm text-fg-primary font-mono w-20 text-right">{{ uploadMaxFiles }} files</span>
           </div>
         </div>
       </div>
