@@ -19,6 +19,7 @@
  */
 import {
   ArrowDownTrayIcon, Bars3Icon, ChevronDownIcon, ChevronUpIcon,
+  InformationCircleIcon,
   PresentationChartLineIcon,
 } from '@heroicons/vue/24/outline'
 import type { Agent } from '~/types/api'
@@ -173,6 +174,24 @@ const configuredSubscriptionProviders = computed(() => {
   }
   return out
 })
+
+// Display names for the configured-provider tooltip. Mirrors the
+// PROVIDER_LABELS map in settings.vue (small enough that duplicating is
+// cheaper than threading a shared util through). Unknown providers fall
+// back to their raw registry name.
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  'ollama-cloud': 'Ollama Cloud',
+  'openrouter': 'OpenRouter',
+  'openai': 'OpenAI',
+  'together': 'TogetherAI',
+  'ollama-local': 'Ollama Local',
+  'lm-studio': 'LM Studio',
+}
+const subscriptionProviderLabels = computed(() =>
+  configuredSubscriptionProviders.value
+    .map(p => PROVIDER_DISPLAY_NAMES[p.name] ?? p.name)
+    .join(', '),
+)
 
 // Channel options: only channel kinds that have data in the loaded window.
 // Operator filtering by a channel that has no data would be confusing;
@@ -740,7 +759,25 @@ defineExpose({ refresh })
             <tfoot>
               <tr class="bg-muted/30 border-t border-border">
                 <td class="px-4 py-2 text-xs font-medium text-fg-muted uppercase tracking-wide">
-                  Total
+                  <span class="inline-flex items-center gap-1.5">
+                    Total
+                    <!-- Hover-tooltip listing the providers that are
+                         configured as SUBSCRIPTION — answers "which fees
+                         is this Total summing?" without consuming row
+                         space. normal-case on the popover so the
+                         humanized provider names (mixed case) aren't
+                         force-uppercased by the cell's tracking-wide
+                         uppercase class. -->
+                    <span class="relative group/tip">
+                      <InformationCircleIcon
+                        class="w-3 h-3 text-fg-muted cursor-help transition-colors"
+                        aria-hidden="true"
+                      />
+                      <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none normal-case tracking-normal">
+                        Subscription providers: {{ subscriptionProviderLabels }}
+                      </span>
+                    </span>
+                  </span>
                 </td>
                 <td class="px-3 py-2 text-right font-mono text-fg-primary">
                   {{ subscriptionBreakdown.turnCount.toLocaleString() }}
