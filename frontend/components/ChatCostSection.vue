@@ -314,28 +314,19 @@ const paidPerModel = computed<FleetCostPerModel[]>(() =>
 const hasPaidData = computed(() => paidPerModel.value.length > 0)
 
 /**
- * Format a subscription fee in plain-currency style — "$100" when the
- * amount is whole dollars, "$99.99" otherwise. Distinct from
- * {@link formatCostUsd} which renders four decimals and is used for the
- * per-token side where sub-cent precision matters; subscription fees are
- * always whole-dollar amounts at the source, so trailing-zero noise just
- * looks like a programmatic artifact.
+ * Format a stat-strip headline amount in plain-currency style — "$120"
+ * when whole, "$99.99" or "$0.05" otherwise. Rounds *up* to the next
+ * cent so sub-cent per-token contributions don't silently vanish from
+ * the headline figure (e.g., $0.0001 renders as "$0.01" rather than
+ * "$0.00"). Used for the Per-Token cost stat, the Subscription fee, and
+ * the Combined Total — every headline figure is consistent. The per-
+ * model table cells keep four-decimal precision via {@link formatCostUsd}
+ * because per-row cost contribution still needs sub-cent granularity.
  */
-function formatSubscriptionFee(amount: number): string {
-  const rounded = Math.round(amount * 100) / 100
-  return rounded % 1 === 0 ? `$${rounded.toFixed(0)}` : `$${rounded.toFixed(2)}`
-}
-
-/**
- * Format the combined-total row. Whole-dollar amounts (the subscription-
- * only case) render as "$120" without trailing zeros; mixed totals
- * (subscription + per-token sub-cent contributions) keep four-decimal
- * precision so the per-token contribution doesn't disappear.
- */
-function formatCombinedTotal(amount: number): string {
-  if (amount === 0) return '$0.00'
-  if (amount % 1 === 0) return `$${amount.toFixed(0)}`
-  return '$' + amount.toFixed(4)
+function formatStatCurrency(amount: number): string {
+  if (amount === 0) return '$0'
+  const ceiled = Math.ceil(amount * 100) / 100
+  return ceiled % 1 === 0 ? `$${ceiled.toFixed(0)}` : `$${ceiled.toFixed(2)}`
 }
 
 const sortedPerModel = computed<FleetCostPerModel[]>(() => {
@@ -641,9 +632,9 @@ defineExpose({ refresh })
             </div>
             <div
               class="text-sm font-mono text-emerald-700 dark:text-emerald-400"
-              :title="`monthly × (window_days / 30) = ${formatSubscriptionFee(subscriptionFee)} over ${windowDays.toFixed(1)} days`"
+              :title="`monthly × (window_days / 30) = ${formatStatCurrency(subscriptionFee)} over ${windowDays.toFixed(1)} days`"
             >
-              {{ formatSubscriptionFee(subscriptionFee) }}
+              {{ formatStatCurrency(subscriptionFee) }}
             </div>
           </div>
           <div>
@@ -790,7 +781,7 @@ defineExpose({ refresh })
               Cost
             </div>
             <div class="text-sm font-mono text-emerald-700 dark:text-emerald-400">
-              {{ formatCostUsd(perTokenBreakdown.total) }}
+              {{ formatStatCurrency(perTokenBreakdown.total) }}
             </div>
           </div>
           <div>
@@ -1005,7 +996,7 @@ defineExpose({ refresh })
           Combined total
         </div>
         <div class="text-sm font-mono text-emerald-700 dark:text-emerald-400">
-          {{ formatCombinedTotal(combinedTotal) }}
+          {{ formatStatCurrency(combinedTotal) }}
         </div>
       </div>
     </template>
