@@ -19,7 +19,6 @@
  */
 import {
   ArrowDownTrayIcon, Bars3Icon, ChevronDownIcon, ChevronUpIcon,
-  InformationCircleIcon,
   PresentationChartLineIcon,
 } from '@heroicons/vue/24/outline'
 import type { Agent } from '~/types/api'
@@ -187,10 +186,18 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   'ollama-local': 'Ollama Local',
   'lm-studio': 'LM Studio',
 }
-const subscriptionProviderLabels = computed(() =>
-  configuredSubscriptionProviders.value
-    .map(p => PROVIDER_DISPLAY_NAMES[p.name] ?? p.name)
-    .join(', '),
+// JCLAW-280: per-provider subscription breakdown rows. Each row appears
+// in the Subscription tfoot just above the Total row, with the
+// pro-rated monthly fee in the Cost cell. The Total fee is the literal
+// sum of these rows, so the operator can see exactly which providers
+// are contributing how much. Computed lazily off windowDays so the
+// pro-rating updates when the operator switches the time window.
+const subscriptionProviderBreakdown = computed(() =>
+  configuredSubscriptionProviders.value.map(p => ({
+    name: p.name,
+    displayName: PROVIDER_DISPLAY_NAMES[p.name] ?? p.name,
+    proRatedFee: (Number(p.subscriptionMonthlyUsd) || 0) * (windowDays.value / 30),
+  })),
 )
 
 // Channel options: only channel kinds that have data in the loaded window.
@@ -751,33 +758,49 @@ defineExpose({ refresh })
                 </td>
               </tr>
             </tbody>
-            <!-- Section total. Stat cells are the column sums of the
-                 bodies above; the Cost cell carries the standing
-                 subscription fee (pro-rated to the window). Always
-                 rendered so a subscription with zero in-window activity
-                 still surfaces its fee. -->
+            <!-- Per-provider subscription rows. Each row shows the
+                 humanized provider name and its window-pro-rated fee in
+                 the Cost cell; stat cells are em-dashes because
+                 subscription has no per-row activity attribution at the
+                 provider level. The Total row directly below sums these
+                 Cost cells (and the bodies' aggregate stats) so the math
+                 reads as a literal addition. -->
             <tfoot>
+              <tr
+                v-for="p in subscriptionProviderBreakdown"
+                :key="p.name"
+                class="bg-muted/30 border-t border-border"
+              >
+                <td class="px-4 py-2 font-mono text-fg-primary">
+                  {{ p.displayName }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  —
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  —
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  —
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  —
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  —
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                  {{ formatStatCurrency(p.proRatedFee) }}
+                </td>
+              </tr>
+              <!-- Section total. Stat cells are the column sums of the
+                   bodies above; the Cost cell is the sum of the per-
+                   provider rows above this one. Always rendered so a
+                   subscription with zero in-window activity still
+                   surfaces its fee. -->
               <tr class="bg-muted/30 border-t border-border">
                 <td class="px-4 py-2 text-xs font-medium text-fg-muted uppercase tracking-wide">
-                  <span class="inline-flex items-center gap-1.5">
-                    Total
-                    <!-- Hover-tooltip listing the providers that are
-                         configured as SUBSCRIPTION — answers "which fees
-                         is this Total summing?" without consuming row
-                         space. normal-case on the popover so the
-                         humanized provider names (mixed case) aren't
-                         force-uppercased by the cell's tracking-wide
-                         uppercase class. -->
-                    <span class="relative group/tip">
-                      <InformationCircleIcon
-                        class="w-3 h-3 text-fg-muted cursor-help transition-colors"
-                        aria-hidden="true"
-                      />
-                      <span class="absolute left-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none normal-case tracking-normal">
-                        Subscription providers: {{ subscriptionProviderLabels }}
-                      </span>
-                    </span>
-                  </span>
+                  Total
                 </td>
                 <td class="px-3 py-2 text-right font-mono text-fg-primary">
                   {{ subscriptionBreakdown.turnCount.toLocaleString() }}
