@@ -635,7 +635,7 @@ defineExpose({ refresh })
           Subscription
         </div>
         <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 bg-muted/30">
-          <div>
+          <div class="text-center">
             <div class="text-xs text-fg-muted mb-0.5">
               Turns
             </div>
@@ -643,7 +643,7 @@ defineExpose({ refresh })
               {{ subscriptionBreakdown.turnCount.toLocaleString() }}
             </div>
           </div>
-          <div>
+          <div class="text-center">
             <div class="text-xs text-fg-muted mb-0.5">
               Prompt
             </div>
@@ -651,7 +651,7 @@ defineExpose({ refresh })
               {{ subscriptionBreakdown.prompt.toLocaleString() }}
             </div>
           </div>
-          <div>
+          <div class="text-center">
             <div class="text-xs text-fg-muted mb-0.5">
               Completion
             </div>
@@ -659,7 +659,7 @@ defineExpose({ refresh })
               {{ subscriptionBreakdown.completion.toLocaleString() }}
             </div>
           </div>
-          <div>
+          <div class="text-center">
             <div class="text-xs text-fg-muted mb-0.5">
               Reasoning
             </div>
@@ -667,7 +667,7 @@ defineExpose({ refresh })
               {{ subscriptionBreakdown.reasoning.toLocaleString() }}
             </div>
           </div>
-          <div>
+          <div class="text-center">
             <div class="text-xs text-fg-muted mb-0.5">
               Cached
             </div>
@@ -806,7 +806,7 @@ defineExpose({ refresh })
           Per-token
         </div>
         <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 bg-muted/30">
-          <div>
+          <div class="text-center">
             <div class="text-xs text-fg-muted mb-0.5">
               Turns
             </div>
@@ -814,7 +814,7 @@ defineExpose({ refresh })
               {{ perTokenBreakdown.turnCount.toLocaleString() }}
             </div>
           </div>
-          <div>
+          <div class="text-center">
             <div class="text-xs text-fg-muted mb-0.5">
               Prompt
             </div>
@@ -822,7 +822,7 @@ defineExpose({ refresh })
               {{ perTokenBreakdown.prompt.toLocaleString() }}
             </div>
           </div>
-          <div>
+          <div class="text-center">
             <div class="text-xs text-fg-muted mb-0.5">
               Completion
             </div>
@@ -830,7 +830,7 @@ defineExpose({ refresh })
               {{ perTokenBreakdown.completion.toLocaleString() }}
             </div>
           </div>
-          <div>
+          <div class="text-center">
             <div class="text-xs text-fg-muted mb-0.5">
               Reasoning
             </div>
@@ -838,7 +838,7 @@ defineExpose({ refresh })
               {{ perTokenBreakdown.reasoning.toLocaleString() }}
             </div>
           </div>
-          <div>
+          <div class="text-center">
             <div class="text-xs text-fg-muted mb-0.5">
               Cached
             </div>
@@ -1029,7 +1029,7 @@ defineExpose({ refresh })
           Combined total
         </div>
         <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          <div>
+          <div class="text-center">
             <div class="text-xs text-fg-muted mb-0.5">
               Turns
             </div>
@@ -1037,7 +1037,7 @@ defineExpose({ refresh })
               {{ combinedTurns.toLocaleString() }}
             </div>
           </div>
-          <div>
+          <div class="text-center">
             <div class="text-xs text-fg-muted mb-0.5">
               Prompt
             </div>
@@ -1045,7 +1045,7 @@ defineExpose({ refresh })
               {{ combinedPrompt.toLocaleString() }}
             </div>
           </div>
-          <div>
+          <div class="text-center">
             <div class="text-xs text-fg-muted mb-0.5">
               Completion
             </div>
@@ -1053,7 +1053,7 @@ defineExpose({ refresh })
               {{ combinedCompletion.toLocaleString() }}
             </div>
           </div>
-          <div>
+          <div class="text-center">
             <div class="text-xs text-fg-muted mb-0.5">
               Reasoning
             </div>
@@ -1061,7 +1061,7 @@ defineExpose({ refresh })
               {{ combinedReasoning.toLocaleString() }}
             </div>
           </div>
-          <div>
+          <div class="text-center">
             <div class="text-xs text-fg-muted mb-0.5">
               Cached
             </div>
