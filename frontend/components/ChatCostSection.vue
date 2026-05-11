@@ -634,77 +634,15 @@ defineExpose({ refresh })
         <div class="px-4 pt-3 pb-3 text-xs font-medium text-fg-muted uppercase tracking-wide">
           Subscription
         </div>
-        <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 bg-muted/30">
-          <div class="text-center">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Turns
-            </div>
-            <div class="text-sm font-mono text-fg-strong">
-              {{ subscriptionBreakdown.turnCount.toLocaleString() }}
-            </div>
-          </div>
-          <div class="text-center">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Prompt
-            </div>
-            <div class="text-sm font-mono text-fg-strong">
-              {{ subscriptionBreakdown.prompt.toLocaleString() }}
-            </div>
-          </div>
-          <div class="text-center">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Completion
-            </div>
-            <div class="text-sm font-mono text-fg-strong">
-              {{ subscriptionBreakdown.completion.toLocaleString() }}
-            </div>
-          </div>
-          <div class="text-center">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Reasoning
-            </div>
-            <div class="text-sm font-mono text-fg-strong">
-              {{ subscriptionBreakdown.reasoning.toLocaleString() }}
-            </div>
-          </div>
-          <div class="text-center">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Cached
-            </div>
-            <div class="text-sm font-mono text-yellow-700 dark:text-yellow-400">
-              {{ subscriptionBreakdown.cached.toLocaleString() }}
-            </div>
-          </div>
-          <!-- Fee (window) is the rightmost column so the headline currency
-               sits at the end of the row, matching finance-statement
-               convention (inputs left, outcome right) and lining up with
-               the Cost column in the per-model table directly below.
-               Right-aligned content so the dollar figures across the three
-               strips (Subscription/Per-Token/Combined) line up vertically. -->
-          <div class="text-right">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Fee (window)
-            </div>
-            <div
-              class="text-sm font-mono text-emerald-700 dark:text-emerald-400"
-              :title="`monthly × (window_days / 30) = ${formatStatCurrency(subscriptionFee)} over ${windowDays.toFixed(1)} days`"
-            >
-              {{ formatStatCurrency(subscriptionFee) }}
-            </div>
-          </div>
-        </div>
 
-        <!-- Per-model breakdown for subscription activity. Drops the Cost
-             column (subscription has no per-row cost attribution — the
-             fee at the top is the total). Fixed sort by turn count
-             descending; interactive sort would be overkill on what's
-             usually a 1–2 model set per subscription provider. Only
-             rendered in the table view; chart view applies to per-token
-             cost contribution only. -->
-        <div
-          v-if="view === 'table' && subscriptionPerModel.length > 0"
-          class="overflow-x-auto border-t border-border"
-        >
+        <!-- Per-model breakdown for subscription activity. Drops a per-row
+             Cost figure (subscription has no per-row attribution — the
+             standing fee surfaces in the tfoot Total instead). Fixed sort
+             by turn count descending; interactive sort would be overkill
+             on what's usually a 1–2 model set per subscription provider.
+             Always rendered when a subscription is configured so the
+             Total row shows the fee even on weeks with no activity. -->
+        <div class="overflow-x-auto border-t border-border">
           <table class="w-full text-xs table-fixed">
             <thead class="text-fg-muted bg-muted/20">
               <tr>
@@ -794,14 +732,47 @@ defineExpose({ refresh })
                 </td>
               </tr>
             </tbody>
+            <!-- Section total. Stat cells are the column sums of the
+                 bodies above; the Cost cell carries the standing
+                 subscription fee (pro-rated to the window). Always
+                 rendered so a subscription with zero in-window activity
+                 still surfaces its fee. -->
+            <tfoot class="bg-muted/30 border-t border-border">
+              <tr>
+                <td class="px-4 py-2 text-xs font-medium text-fg-muted uppercase tracking-wide">
+                  Total
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-primary">
+                  {{ subscriptionBreakdown.turnCount.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  {{ subscriptionBreakdown.prompt.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  {{ subscriptionBreakdown.completion.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  {{ subscriptionBreakdown.reasoning.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-yellow-700 dark:text-yellow-400">
+                  {{ subscriptionBreakdown.cached.toLocaleString() }}
+                </td>
+                <td
+                  class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400"
+                  :title="`monthly × (window_days / 30) = ${formatStatCurrency(subscriptionFee)} over ${windowDays.toFixed(1)} days`"
+                >
+                  {{ formatStatCurrency(subscriptionFee) }}
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </div>
 
-      <!-- JCLAW-280: per-token subsection. Summary strip + (further down)
-           per-model table/chart. Rendered only when paid per-token activity
-           exists in the window. Subscription-provider turns are excluded by
-           sourcing from perTokenBreakdown. -->
+      <!-- JCLAW-280: per-token subsection. Header + (table OR chart based
+           on the view toggle). Rendered only when paid per-token activity
+           exists in the window. Subscription-provider turns are excluded
+           by sourcing from perTokenBreakdown. -->
       <div
         v-if="hasPaidData"
         class="border-b border-border"
@@ -809,55 +780,175 @@ defineExpose({ refresh })
         <div class="px-4 pt-3 pb-3 text-xs font-medium text-fg-muted uppercase tracking-wide">
           Per-token
         </div>
-        <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 bg-muted/30">
-          <div class="text-center">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Turns
+
+        <!--
+          Per-model breakdown table. Click any header cell to sort by that
+          column; click again to flip direction. Active column shows a
+          chevron in its sort direction. Default: Cost descending. Free-tier
+          models (total === 0) are filtered out to keep the table focused
+          on cost contributors. tfoot Total row carries the column sums and
+          the cost grand total for this modality.
+        -->
+        <div
+          v-if="view === 'table'"
+          class="overflow-x-auto border-t border-border"
+        >
+          <table class="w-full text-xs table-fixed">
+            <thead class="text-fg-muted bg-muted/20">
+              <tr>
+                <th
+                  scope="col"
+                  class="text-left px-4 py-2 font-medium w-1/4"
+                >
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
+                    :class="sortBy === 'model' ? 'text-fg-strong' : ''"
+                    :aria-sort="sortBy === 'model' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
+                    @click="toggleSort('model')"
+                  >
+                    Model
+                    <ChevronUpIcon
+                      v-if="sortBy === 'model' && sortDir === 'asc'"
+                      class="w-3 h-3"
+                      aria-hidden="true"
+                    />
+                    <ChevronDownIcon
+                      v-else-if="sortBy === 'model' && sortDir === 'desc'"
+                      class="w-3 h-3"
+                      aria-hidden="true"
+                    />
+                  </button>
+                </th>
+                <th
+                  v-for="col in [
+                    { key: 'turnCount', label: 'Turns' },
+                    { key: 'prompt', label: 'Prompt' },
+                    { key: 'completion', label: 'Completion' },
+                    { key: 'reasoning', label: 'Reasoning' },
+                    { key: 'cached', label: 'Cached' },
+                    { key: 'total', label: 'Cost' },
+                  ] as { key: SortColumn, label: string }[]"
+                  :key="col.key"
+                  scope="col"
+                  class="text-right px-3 py-2 font-medium"
+                >
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
+                    :class="sortBy === col.key ? 'text-fg-strong' : ''"
+                    :aria-sort="sortBy === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
+                    @click="toggleSort(col.key)"
+                  >
+                    {{ col.label }}
+                    <ChevronUpIcon
+                      v-if="sortBy === col.key && sortDir === 'asc'"
+                      class="w-3 h-3"
+                      aria-hidden="true"
+                    />
+                    <ChevronDownIcon
+                      v-else-if="sortBy === col.key && sortDir === 'desc'"
+                      class="w-3 h-3"
+                      aria-hidden="true"
+                    />
+                  </button>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="m in sortedPerModel"
+                :key="m.modelId"
+                class="border-t border-border"
+              >
+                <td class="px-4 py-2 font-mono text-fg-primary">
+                  <span
+                    v-if="m.modelProvider"
+                    class="text-fg-muted"
+                  >{{ m.modelProvider }}/</span>{{ m.modelId }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-primary">
+                  {{ m.turnCount.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  {{ m.prompt.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  {{ m.completion.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  {{ m.reasoning.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-yellow-700 dark:text-yellow-400">
+                  {{ m.cached.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                  {{ formatCostUsd(m.total) }}
+                </td>
+              </tr>
+            </tbody>
+            <!-- Section total. Column sums of the body; Cost cell carries
+               the per-token grand total via formatStatCurrency for the
+               same two-decimal convention used in the Combined Total
+               below. -->
+            <tfoot class="bg-muted/30 border-t border-border">
+              <tr>
+                <td class="px-4 py-2 text-xs font-medium text-fg-muted uppercase tracking-wide">
+                  Total
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-primary">
+                  {{ perTokenBreakdown.turnCount.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  {{ perTokenBreakdown.prompt.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  {{ perTokenBreakdown.completion.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  {{ perTokenBreakdown.reasoning.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-yellow-700 dark:text-yellow-400">
+                  {{ perTokenBreakdown.cached.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                  {{ formatStatCurrency(perTokenBreakdown.total) }}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <!--
+          Chart view: horizontal bars sorted by cost. Picks per-model when
+          the breakdown has more model entries than agent entries (typical
+          fleet view); switches to per-agent when an agent filter narrows
+          the scope. Inline SVG with relative widths.
+        -->
+        <div
+          v-else
+          class="px-4 py-3 space-y-1.5 border-t border-border"
+        >
+          <div
+            v-for="(r, i) in chartRows"
+            :key="i"
+            class="grid grid-cols-[1fr_3fr_auto] items-center gap-3 text-xs"
+          >
+            <div
+              class="font-mono text-fg-primary truncate"
+              :title="r.label"
+            >
+              {{ r.label }}
             </div>
-            <div class="text-sm font-mono text-fg-strong">
-              {{ perTokenBreakdown.turnCount.toLocaleString() }}
+            <div class="relative h-5 bg-muted/30 border border-border overflow-hidden">
+              <div
+                class="h-full bg-emerald-500/30"
+                :style="{ width: ((r.cost / chartMaxCost) * 100).toFixed(2) + '%' }"
+              />
             </div>
-          </div>
-          <div class="text-center">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Prompt
-            </div>
-            <div class="text-sm font-mono text-fg-strong">
-              {{ perTokenBreakdown.prompt.toLocaleString() }}
-            </div>
-          </div>
-          <div class="text-center">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Completion
-            </div>
-            <div class="text-sm font-mono text-fg-strong">
-              {{ perTokenBreakdown.completion.toLocaleString() }}
-            </div>
-          </div>
-          <div class="text-center">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Reasoning
-            </div>
-            <div class="text-sm font-mono text-fg-strong">
-              {{ perTokenBreakdown.reasoning.toLocaleString() }}
-            </div>
-          </div>
-          <div class="text-center">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Cached
-            </div>
-            <div class="text-sm font-mono text-yellow-700 dark:text-yellow-400">
-              {{ perTokenBreakdown.cached.toLocaleString() }}
-            </div>
-          </div>
-          <!-- Cost is the rightmost column — see same-named row in the
-               Subscription strip for the rationale. -->
-          <div class="text-right">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Cost
-            </div>
-            <div class="text-sm font-mono text-emerald-700 dark:text-emerald-400">
-              {{ formatStatCurrency(perTokenBreakdown.total) }}
+            <div class="font-mono text-emerald-700 dark:text-emerald-400 tabular-nums shrink-0">
+              {{ formatCostUsd(r.cost) }}
+              <span class="text-fg-muted">· {{ r.turnCount }}t</span>
             </div>
           </div>
         </div>
@@ -874,157 +965,13 @@ defineExpose({ refresh })
         All turns in this window were on free-tier models — no cost to attribute.
       </div>
 
-      <!--
-        Per-model breakdown table. Click any header cell to sort by that
-        column; click again to flip direction. Active column shows a
-        chevron in its sort direction. Default: Cost descending. Free-tier
-        models (total === 0) are filtered out to keep the table focused
-        on cost contributors. Guarded on hasPaidData specifically (rather
-        than the v-else-if chaining off the empty-state predicate) so it
-        doesn't leak into render when only a subscription is configured.
-      -->
-      <div
-        v-else-if="hasPaidData && view === 'table'"
-        class="overflow-x-auto"
-      >
-        <table class="w-full text-xs table-fixed">
-          <thead class="text-fg-muted bg-muted/20">
-            <tr>
-              <th
-                scope="col"
-                class="text-left px-4 py-2 font-medium w-1/4"
-              >
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
-                  :class="sortBy === 'model' ? 'text-fg-strong' : ''"
-                  :aria-sort="sortBy === 'model' ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
-                  @click="toggleSort('model')"
-                >
-                  Model
-                  <ChevronUpIcon
-                    v-if="sortBy === 'model' && sortDir === 'asc'"
-                    class="w-3 h-3"
-                    aria-hidden="true"
-                  />
-                  <ChevronDownIcon
-                    v-else-if="sortBy === 'model' && sortDir === 'desc'"
-                    class="w-3 h-3"
-                    aria-hidden="true"
-                  />
-                </button>
-              </th>
-              <th
-                v-for="col in [
-                  { key: 'turnCount', label: 'Turns' },
-                  { key: 'prompt', label: 'Prompt' },
-                  { key: 'completion', label: 'Completion' },
-                  { key: 'reasoning', label: 'Reasoning' },
-                  { key: 'cached', label: 'Cached' },
-                  { key: 'total', label: 'Cost' },
-                ] as { key: SortColumn, label: string }[]"
-                :key="col.key"
-                scope="col"
-                class="text-right px-3 py-2 font-medium"
-              >
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
-                  :class="sortBy === col.key ? 'text-fg-strong' : ''"
-                  :aria-sort="sortBy === col.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'"
-                  @click="toggleSort(col.key)"
-                >
-                  {{ col.label }}
-                  <ChevronUpIcon
-                    v-if="sortBy === col.key && sortDir === 'asc'"
-                    class="w-3 h-3"
-                    aria-hidden="true"
-                  />
-                  <ChevronDownIcon
-                    v-else-if="sortBy === col.key && sortDir === 'desc'"
-                    class="w-3 h-3"
-                    aria-hidden="true"
-                  />
-                </button>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="m in sortedPerModel"
-              :key="m.modelId"
-              class="border-t border-border"
-            >
-              <td class="px-4 py-2 font-mono text-fg-primary">
-                <span
-                  v-if="m.modelProvider"
-                  class="text-fg-muted"
-                >{{ m.modelProvider }}/</span>{{ m.modelId }}
-              </td>
-              <td class="px-3 py-2 text-right font-mono text-fg-primary">
-                {{ m.turnCount.toLocaleString() }}
-              </td>
-              <td class="px-3 py-2 text-right font-mono text-fg-muted">
-                {{ m.prompt.toLocaleString() }}
-              </td>
-              <td class="px-3 py-2 text-right font-mono text-fg-muted">
-                {{ m.completion.toLocaleString() }}
-              </td>
-              <td class="px-3 py-2 text-right font-mono text-fg-muted">
-                {{ m.reasoning.toLocaleString() }}
-              </td>
-              <td class="px-3 py-2 text-right font-mono text-yellow-700 dark:text-yellow-400">
-                {{ m.cached.toLocaleString() }}
-              </td>
-              <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
-                {{ formatCostUsd(m.total) }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <!--
-        Chart view: horizontal bars sorted by cost. Picks per-model when the
-        breakdown has more model entries than agent entries (typical fleet
-        view); switches to per-agent when an agent filter narrows the scope.
-        Inline SVG with relative widths — no library, scales via flexbox.
-        Same hasPaidData guard rationale as the table branch above.
-      -->
-      <div
-        v-else-if="hasPaidData"
-        class="px-4 py-3 space-y-1.5"
-      >
-        <div
-          v-for="(r, i) in chartRows"
-          :key="i"
-          class="grid grid-cols-[1fr_3fr_auto] items-center gap-3 text-xs"
-        >
-          <div
-            class="font-mono text-fg-primary truncate"
-            :title="r.label"
-          >
-            {{ r.label }}
-          </div>
-          <div class="relative h-5 bg-muted/30 border border-border overflow-hidden">
-            <div
-              class="h-full bg-emerald-500/30"
-              :style="{ width: ((r.cost / chartMaxCost) * 100).toFixed(2) + '%' }"
-            />
-          </div>
-          <div class="font-mono text-emerald-700 dark:text-emerald-400 tabular-nums shrink-0">
-            {{ formatCostUsd(r.cost) }}
-            <span class="text-fg-muted">· {{ r.turnCount }}t</span>
-          </div>
-        </div>
-      </div>
-
       <!-- JCLAW-280: combined total — rendered at the very bottom as a
-           strip mirroring the per-subsection layout, so cost/turns/tokens
-           grand totals across both modalities sit in the same columns the
-           Subscription and Per-Token strips above used. Only rendered
-           when at least one subsection has activity; the all-free-tier
-           empty state above suppresses everything else in that case. -->
+           single-row table sharing the per-model tables' column widths
+           (table-fixed + w-1/4 Model column). That guarantees the grand-
+           total stat cells sit vertically aligned with their per-modality
+           Total rows above, so the operator can read straight down a
+           column from a model row through both section totals into the
+           combined figure. -->
       <div
         v-if="hasPaidData || hasSubscriptionSection"
         class="border-t border-border bg-muted/40"
@@ -1032,57 +979,34 @@ defineExpose({ refresh })
         <div class="px-4 pt-3 pb-3 text-xs font-medium text-fg-muted uppercase tracking-wide">
           Combined total
         </div>
-        <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          <div class="text-center">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Turns
-            </div>
-            <div class="text-sm font-mono text-fg-strong">
-              {{ combinedTurns.toLocaleString() }}
-            </div>
-          </div>
-          <div class="text-center">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Prompt
-            </div>
-            <div class="text-sm font-mono text-fg-strong">
-              {{ combinedPrompt.toLocaleString() }}
-            </div>
-          </div>
-          <div class="text-center">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Completion
-            </div>
-            <div class="text-sm font-mono text-fg-strong">
-              {{ combinedCompletion.toLocaleString() }}
-            </div>
-          </div>
-          <div class="text-center">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Reasoning
-            </div>
-            <div class="text-sm font-mono text-fg-strong">
-              {{ combinedReasoning.toLocaleString() }}
-            </div>
-          </div>
-          <div class="text-center">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Cached
-            </div>
-            <div class="text-sm font-mono text-yellow-700 dark:text-yellow-400">
-              {{ combinedCached.toLocaleString() }}
-            </div>
-          </div>
-          <!-- Cost is the rightmost column — see same-named row in the
-               Subscription strip for the rationale. -->
-          <div class="text-right">
-            <div class="text-xs text-fg-muted mb-0.5">
-              Cost
-            </div>
-            <div class="text-sm font-mono text-emerald-700 dark:text-emerald-400">
-              {{ formatStatCurrency(combinedTotal) }}
-            </div>
-          </div>
+        <div class="overflow-x-auto border-t border-border">
+          <table class="w-full text-xs table-fixed">
+            <tbody>
+              <tr>
+                <td class="px-4 py-2 text-xs font-medium text-fg-muted uppercase tracking-wide w-1/4">
+                  Total
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-primary">
+                  {{ combinedTurns.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  {{ combinedPrompt.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  {{ combinedCompletion.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  {{ combinedReasoning.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-yellow-700 dark:text-yellow-400">
+                  {{ combinedCached.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                  {{ formatStatCurrency(combinedTotal) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </template>
