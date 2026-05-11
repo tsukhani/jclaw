@@ -629,7 +629,7 @@ defineExpose({ refresh })
            per-model table or chart below. -->
       <div
         v-if="hasSubscriptionSection"
-        class="border-b border-border py-3"
+        class="border-b border-border"
       >
         <div class="px-4 pt-3 pb-3 text-xs font-medium text-fg-muted uppercase tracking-wide">
           Subscription
@@ -775,7 +775,7 @@ defineExpose({ refresh })
            by sourcing from perTokenBreakdown. -->
       <div
         v-if="hasPaidData"
-        class="border-b border-border py-3"
+        class="border-b border-border"
       >
         <div class="px-4 pt-3 pb-3 text-xs font-medium text-fg-muted uppercase tracking-wide">
           Per-token
