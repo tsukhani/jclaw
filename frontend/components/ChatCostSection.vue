@@ -629,7 +629,7 @@ defineExpose({ refresh })
            per-model table or chart below. -->
       <div
         v-if="hasSubscriptionSection"
-        class="border-b border-border"
+        class="border-b border-border mb-6"
       >
         <div class="px-4 pt-3 pb-3 text-xs font-medium text-fg-muted uppercase tracking-wide">
           Subscription
