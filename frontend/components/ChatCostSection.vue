@@ -629,7 +629,7 @@ defineExpose({ refresh })
            per-model table or chart below. -->
       <div
         v-if="hasSubscriptionSection"
-        class="border-b border-border"
+        class="border-b border-border py-3"
       >
         <div class="px-4 pt-3 pb-3 text-xs font-medium text-fg-muted uppercase tracking-wide">
           Subscription
@@ -775,7 +775,7 @@ defineExpose({ refresh })
            by sourcing from perTokenBreakdown. -->
       <div
         v-if="hasPaidData"
-        class="border-b border-border"
+        class="border-b border-border py-3"
       >
         <div class="px-4 pt-3 pb-3 text-xs font-medium text-fg-muted uppercase tracking-wide">
           Per-token
@@ -966,48 +966,42 @@ defineExpose({ refresh })
       </div>
 
       <!-- JCLAW-280: combined total — rendered at the very bottom as a
-           single-row table sharing the per-model tables' column widths
-           (table-fixed + w-1/4 Model column). That guarantees the grand-
-           total stat cells sit vertically aligned with their per-modality
-           Total rows above, so the operator can read straight down a
-           column from a model row through both section totals into the
-           combined figure. -->
+           single table row sharing the per-model tables' column widths
+           (table-fixed + w-1/4 Model column). The "Combined total"
+           label lives in the first cell rather than a separate header
+           strip above, so the whole grand-total reads as one row that
+           lines up vertically with the section Total rows above. -->
       <div
         v-if="hasPaidData || hasSubscriptionSection"
-        class="border-t border-border bg-muted/40"
+        class="overflow-x-auto border-t border-border bg-muted/40"
       >
-        <div class="px-4 pt-3 pb-3 text-xs font-medium text-fg-muted uppercase tracking-wide">
-          Combined total
-        </div>
-        <div class="overflow-x-auto border-t border-border">
-          <table class="w-full text-xs table-fixed">
-            <tbody>
-              <tr>
-                <td class="px-4 py-2 text-xs font-medium text-fg-muted uppercase tracking-wide w-1/4">
-                  Total
-                </td>
-                <td class="px-3 py-2 text-right font-mono text-fg-primary">
-                  {{ combinedTurns.toLocaleString() }}
-                </td>
-                <td class="px-3 py-2 text-right font-mono text-fg-muted">
-                  {{ combinedPrompt.toLocaleString() }}
-                </td>
-                <td class="px-3 py-2 text-right font-mono text-fg-muted">
-                  {{ combinedCompletion.toLocaleString() }}
-                </td>
-                <td class="px-3 py-2 text-right font-mono text-fg-muted">
-                  {{ combinedReasoning.toLocaleString() }}
-                </td>
-                <td class="px-3 py-2 text-right font-mono text-yellow-700 dark:text-yellow-400">
-                  {{ combinedCached.toLocaleString() }}
-                </td>
-                <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
-                  {{ formatStatCurrency(combinedTotal) }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <table class="w-full text-xs table-fixed">
+          <tbody>
+            <tr>
+              <td class="px-4 py-3 text-xs font-medium text-fg-muted uppercase tracking-wide w-1/4">
+                Combined total
+              </td>
+              <td class="px-3 py-3 text-right font-mono text-fg-primary">
+                {{ combinedTurns.toLocaleString() }}
+              </td>
+              <td class="px-3 py-3 text-right font-mono text-fg-muted">
+                {{ combinedPrompt.toLocaleString() }}
+              </td>
+              <td class="px-3 py-3 text-right font-mono text-fg-muted">
+                {{ combinedCompletion.toLocaleString() }}
+              </td>
+              <td class="px-3 py-3 text-right font-mono text-fg-muted">
+                {{ combinedReasoning.toLocaleString() }}
+              </td>
+              <td class="px-3 py-3 text-right font-mono text-yellow-700 dark:text-yellow-400">
+                {{ combinedCached.toLocaleString() }}
+              </td>
+              <td class="px-3 py-3 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                {{ formatStatCurrency(combinedTotal) }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </template>
   </div>
