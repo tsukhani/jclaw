@@ -678,8 +678,10 @@ defineExpose({ refresh })
           <!-- Fee (window) is the rightmost column so the headline currency
                sits at the end of the row, matching finance-statement
                convention (inputs left, outcome right) and lining up with
-               the Cost column in the per-model table directly below. -->
-          <div>
+               the Cost column in the per-model table directly below.
+               Right-aligned content so the dollar figures across the three
+               strips (Subscription/Per-Token/Combined) line up vertically. -->
+          <div class="text-right">
             <div class="text-xs text-fg-muted mb-0.5">
               Fee (window)
             </div>
@@ -846,7 +848,7 @@ defineExpose({ refresh })
           </div>
           <!-- Cost is the rightmost column — see same-named row in the
                Subscription strip for the rationale. -->
-          <div>
+          <div class="text-right">
             <div class="text-xs text-fg-muted mb-0.5">
               Cost
             </div>
@@ -1069,7 +1071,7 @@ defineExpose({ refresh })
           </div>
           <!-- Cost is the rightmost column — see same-named row in the
                Subscription strip for the rationale. -->
-          <div>
+          <div class="text-right">
             <div class="text-xs text-fg-muted mb-0.5">
               Cost
             </div>
