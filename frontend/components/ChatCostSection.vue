@@ -30,6 +30,7 @@ import {
   type FleetCostFilter,
   type FleetCostPerModel,
   type FleetCostRow,
+  type MessageUsage,
 } from '~/utils/usage-cost'
 
 interface CostResponse {
@@ -131,15 +132,33 @@ const modalityByProvider = computed(() => {
   return m
 })
 
-// Partition raw rows by modality. Rows whose modelProvider doesn't match a
+/**
+ * Resolve a row's billing provider — the one that actually served the
+ * turn, not the conversation's owning provider. Sources from
+ * usageJson.modelProvider (snapshotted at emission time per JCLAW-107)
+ * because that's what reflects per-turn billing reality when an agent
+ * swaps providers mid-conversation. Falls back to the conversation-level
+ * r.modelProvider only when the snapshot is missing (very old rows from
+ * before JCLAW-107 captured the field).
+ */
+function rowBillingProvider(r: FleetCostRow): string | undefined {
+  try {
+    const u = JSON.parse(r.usageJson) as MessageUsage
+    if (u.modelProvider) return u.modelProvider
+  }
+  catch { /* fall through to conversation-level */ }
+  return r.modelProvider
+}
+
+// Partition raw rows by modality. Rows whose provider doesn't match a
 // known SUBSCRIPTION provider fall into the per-token bucket — that covers
-// rows from registry-removed providers and any pre-JCLAW-280 rows where the
-// modality wasn't yet a concept.
+// rows from registry-removed providers and any pre-JCLAW-280 rows where
+// the modality wasn't yet a concept.
 const perTokenRows = computed<FleetCostRow[]>(() =>
-  rows.value.filter(r => modalityByProvider.value.get(r.modelProvider ?? '') !== 'SUBSCRIPTION'),
+  rows.value.filter(r => modalityByProvider.value.get(rowBillingProvider(r) ?? '') !== 'SUBSCRIPTION'),
 )
 const subscriptionRows = computed<FleetCostRow[]>(() =>
-  rows.value.filter(r => modalityByProvider.value.get(r.modelProvider ?? '') === 'SUBSCRIPTION'),
+  rows.value.filter(r => modalityByProvider.value.get(rowBillingProvider(r) ?? '') === 'SUBSCRIPTION'),
 )
 
 // Configured subscription providers. Drives the fee accrual — the
@@ -305,6 +324,18 @@ const hasPaidData = computed(() => paidPerModel.value.length > 0)
 function formatSubscriptionFee(amount: number): string {
   const rounded = Math.round(amount * 100) / 100
   return rounded % 1 === 0 ? `$${rounded.toFixed(0)}` : `$${rounded.toFixed(2)}`
+}
+
+/**
+ * Format the combined-total row. Whole-dollar amounts (the subscription-
+ * only case) render as "$120" without trailing zeros; mixed totals
+ * (subscription + per-token sub-cent contributions) keep four-decimal
+ * precision so the per-token contribution doesn't disappear.
+ */
+function formatCombinedTotal(amount: number): string {
+  if (amount === 0) return '$0.00'
+  if (amount % 1 === 0) return `$${amount.toFixed(0)}`
+  return '$' + amount.toFixed(4)
 }
 
 const sortedPerModel = computed<FleetCostPerModel[]>(() => {
@@ -821,10 +852,12 @@ defineExpose({ refresh })
         column; click again to flip direction. Active column shows a
         chevron in its sort direction. Default: Cost descending. Free-tier
         models (total === 0) are filtered out to keep the table focused
-        on cost contributors.
+        on cost contributors. Guarded on hasPaidData specifically (rather
+        than the v-else-if chaining off the empty-state predicate) so it
+        doesn't leak into render when only a subscription is configured.
       -->
       <div
-        v-else-if="view === 'table'"
+        v-else-if="hasPaidData && view === 'table'"
         class="overflow-x-auto"
       >
         <table class="w-full text-xs">
@@ -929,9 +962,10 @@ defineExpose({ refresh })
         breakdown has more model entries than agent entries (typical fleet
         view); switches to per-agent when an agent filter narrows the scope.
         Inline SVG with relative widths — no library, scales via flexbox.
+        Same hasPaidData guard rationale as the table branch above.
       -->
       <div
-        v-else
+        v-else-if="hasPaidData"
         class="px-4 py-3 space-y-1.5"
       >
         <div
@@ -971,7 +1005,7 @@ defineExpose({ refresh })
           Combined total
         </div>
         <div class="text-sm font-mono text-emerald-700 dark:text-emerald-400">
-          {{ formatCostUsd(combinedTotal) }}
+          {{ formatCombinedTotal(combinedTotal) }}
         </div>
       </div>
     </template>
