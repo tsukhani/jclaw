@@ -448,19 +448,59 @@ const chartMaxCost = computed(() => {
 // want that ordering preserved in the spreadsheet.
 function exportCsv() {
   const header = [
-    'modelProvider', 'modelId', 'turnCount', 'totalCost',
+    'modality', 'provider', 'modelId', 'turnCount', 'cost',
     'promptTokens', 'completionTokens', 'reasoningTokens', 'cachedTokens',
   ].join(',')
-  const lines = sortedPerModel.value.map(m => [
-    csvCell(m.modelProvider ?? ''),
-    csvCell(m.modelId),
-    m.turnCount.toString(),
-    m.total.toFixed(6),
-    m.prompt.toString(),
-    m.completion.toString(),
-    m.reasoning.toString(),
-    m.cached.toString(),
-  ].join(','))
+
+  const lines: string[] = []
+
+  // Subscription per-model rows: activity is real, but per-row cost
+  // isn't attributable (the fee surfaces in the per-provider rows
+  // below), so the cost cell is blank.
+  for (const m of subscriptionPerModel.value) {
+    lines.push([
+      'subscription',
+      csvCell(m.modelProvider ?? ''),
+      csvCell(m.modelId),
+      m.turnCount.toString(),
+      '',
+      m.prompt.toString(),
+      m.completion.toString(),
+      m.reasoning.toString(),
+      m.cached.toString(),
+    ].join(','))
+  }
+
+  // Subscription per-provider fee rows. Carry the pro-rated monthly
+  // fee in the cost cell; modelId is blank because the fee isn't tied
+  // to any single model run.
+  for (const p of subscriptionProviderBreakdown.value) {
+    lines.push([
+      'subscription',
+      csvCell(p.name),
+      '',
+      '',
+      p.proRatedFee.toFixed(6),
+      '', '', '', '',
+    ].join(','))
+  }
+
+  // Per-token per-model rows in current sort order so the export
+  // matches what the operator is looking at on screen.
+  for (const m of sortedPerModel.value) {
+    lines.push([
+      'per-token',
+      csvCell(m.modelProvider ?? ''),
+      csvCell(m.modelId),
+      m.turnCount.toString(),
+      m.total.toFixed(6),
+      m.prompt.toString(),
+      m.completion.toString(),
+      m.reasoning.toString(),
+      m.cached.toString(),
+    ].join(','))
+  }
+
   const csv = [header, ...lines].join('\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
   const url = URL.createObjectURL(blob)
@@ -616,7 +656,7 @@ defineExpose({ refresh })
         <button
           type="button"
           class="inline-flex items-center gap-1 text-fg-muted hover:text-fg-strong transition-colors p-1 disabled:opacity-40 disabled:cursor-not-allowed"
-          :disabled="!hasPaidData"
+          :disabled="!hasPaidData && !hasSubscriptionSection"
           title="Export per-model breakdown to CSV"
           @click="exportCsv"
         >
