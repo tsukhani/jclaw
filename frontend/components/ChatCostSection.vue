@@ -131,16 +131,6 @@ const modalityByProvider = computed(() => {
   return m
 })
 
-const subscriptionMonthlyByProvider = computed(() => {
-  const m = new Map<string, number>()
-  for (const p of providersInfo.value ?? []) {
-    if (p.paymentModality === 'SUBSCRIPTION') {
-      m.set(p.name, Number(p.subscriptionMonthlyUsd) || 0)
-    }
-  }
-  return m
-})
-
 // Partition raw rows by modality. Rows whose modelProvider doesn't match a
 // known SUBSCRIPTION provider fall into the per-token bucket — that covers
 // rows from registry-removed providers and any pre-JCLAW-280 rows where the
@@ -152,17 +142,17 @@ const subscriptionRows = computed<FleetCostRow[]>(() =>
   rows.value.filter(r => modalityByProvider.value.get(r.modelProvider ?? '') === 'SUBSCRIPTION'),
 )
 
-// Set of subscription providers actually represented in the loaded window —
-// used to compute the pro-rated subscription fee total. If the operator
-// configured Ollama Cloud at $20/mo but had no Ollama-Cloud turns in the
-// window, we don't bill them for the fee (a flat monthly accrual would be
-// misleading on a dashboard whose unit of analysis is observed activity).
-const subscriptionProvidersInWindow = computed(() => {
-  const set = new Set<string>()
-  for (const r of subscriptionRows.value) {
-    if (r.modelProvider) set.add(r.modelProvider)
+// Configured subscription providers. Drives the fee accrual — the
+// operator is paying the monthly regardless of in-window activity, so a
+// quiet week still shows the fee. Distinct from
+// `subscriptionRows`-derived stats, which reflect only activity that
+// actually happened.
+const configuredSubscriptionProviders = computed(() => {
+  const out: ProviderInfo[] = []
+  for (const p of providersInfo.value ?? []) {
+    if (p.paymentModality === 'SUBSCRIPTION') out.push(p)
   }
-  return set
+  return out
 })
 
 // Channel options: only channel kinds that have data in the loaded window.
@@ -199,20 +189,19 @@ const subscriptionBreakdown = computed<FleetCostBreakdown>(() =>
 )
 
 // Window length in days — used to pro-rate the subscription monthly fee.
-// For the "all time" window we derive the span from the earliest
-// subscription row's timestamp through now; for a 60-day data set under a
-// $30/mo plan that produces "$60.00 charged over this window," which is
-// the most honest mapping of a flat fee to an open-ended view.
+// For the "all time" window we fall back to the full row set's earliest
+// timestamp (not just subscription rows): the operator is asking "how
+// much did I spend over all my recorded activity?" and answering that
+// in terms of subscription-only data would understate the window when
+// the operator has months of per-token activity but only recently
+// started a subscription.
 const windowDays = computed(() => {
   if (selectedWindow.value === '7d') return 7
   if (selectedWindow.value === '30d') return 30
-  // all-time: derive from data span. If there are no subscription rows
-  // yet, the value is irrelevant (subscriptionFee will be 0 anyway), so
-  // default to 30 to avoid a div-by-zero or 0-day pro-rate.
-  const subRows = subscriptionRows.value
-  if (subRows.length === 0) return 30
+  const allRows = rows.value
+  if (allRows.length === 0) return 30
   let earliest = Date.now()
-  for (const r of subRows) {
+  for (const r of allRows) {
     const t = Date.parse(r.timestamp)
     if (!isNaN(t) && t < earliest) earliest = t
   }
@@ -220,22 +209,26 @@ const windowDays = computed(() => {
   return Math.max(1, spanMs / (24 * 60 * 60 * 1000))
 })
 
-// Pro-rated subscription accrual = sum of monthly fees for providers that
-// actually had turns in this window × (window_days / 30). Excluded providers
-// don't show up regardless of whether they're configured.
+// Pro-rated subscription accrual = sum of monthly fees across every
+// configured subscription provider × (window_days / 30). Independent of
+// in-window activity — the operator is paying the monthly fee whether
+// they used the provider this week or not.
 const subscriptionFee = computed(() => {
   let sumMonthly = 0
-  for (const name of subscriptionProvidersInWindow.value) {
-    sumMonthly += subscriptionMonthlyByProvider.value.get(name) ?? 0
+  for (const p of configuredSubscriptionProviders.value) {
+    sumMonthly += Number(p.subscriptionMonthlyUsd) || 0
   }
   return sumMonthly * (windowDays.value / 30)
 })
 
-// Subscription subsection visibility. Per-token visibility is governed by
-// the pre-existing `hasPaidData` (defined below) which also gates the
-// per-model table — keeping a single source of truth means the strip and
-// the table can't disagree about whether to render.
-const hasSubscriptionActivity = computed(() => subscriptionBreakdown.value.turnCount > 0)
+// Subscription subsection visibility — render whenever the operator has
+// at least one subscription provider configured, so the standing fee
+// accrual is always surfaced even on weeks with no subscription-modality
+// activity. Per-token visibility is governed by the pre-existing
+// `hasPaidData` (defined below) which also gates the per-model table —
+// keeping a single source of truth means the strip and the table can't
+// disagree about whether to render.
+const hasSubscriptionSection = computed(() => configuredSubscriptionProviders.value.length > 0)
 
 // Combined total = per-token actuals + pro-rated subscription accrual.
 const combinedTotal = computed(() => perTokenBreakdown.value.total + subscriptionFee.value)
@@ -568,7 +561,7 @@ defineExpose({ refresh })
     </div>
 
     <div
-      v-else-if="!hasData"
+      v-else-if="!hasData && !hasSubscriptionSection"
       class="px-4 py-8 text-center text-sm text-fg-muted"
     >
       No conversations match the current filter.
@@ -584,7 +577,7 @@ defineExpose({ refresh })
            per-row cost attribution so this subsection never feeds the
            per-model table or chart below. -->
       <div
-        v-if="hasSubscriptionActivity"
+        v-if="hasSubscriptionSection"
         class="border-b border-border"
       >
         <div class="px-4 pt-3 pb-1 text-xs font-medium text-fg-muted uppercase tracking-wide">
@@ -713,7 +706,7 @@ defineExpose({ refresh })
            are suppressed because their aggregates would all be free-tier
            counts under a cost-attribution section. -->
       <div
-        v-if="!hasPaidData && !hasSubscriptionActivity"
+        v-if="!hasPaidData && !hasSubscriptionSection"
         class="px-4 py-6 text-center text-sm text-fg-muted"
       >
         All turns in this window were on free-tier models — no cost to attribute.
@@ -867,7 +860,7 @@ defineExpose({ refresh })
            at least one subsection has activity; the all-free-tier empty
            state above suppresses everything else in that case. -->
       <div
-        v-if="hasPaidData || hasSubscriptionActivity"
+        v-if="hasPaidData || hasSubscriptionSection"
         class="px-4 py-2 flex items-center justify-between border-t border-border bg-muted/40"
       >
         <div class="text-xs text-fg-muted uppercase tracking-wide">
