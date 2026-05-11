@@ -973,7 +973,7 @@ defineExpose({ refresh })
            lines up vertically with the section Total rows above. -->
       <div
         v-if="hasPaidData || hasSubscriptionSection"
-        class="overflow-x-auto border-t border-border bg-muted/40 mt-6"
+        class="overflow-x-auto border-t border-border mt-6"
       >
         <table class="w-full text-xs table-fixed">
           <tbody>
