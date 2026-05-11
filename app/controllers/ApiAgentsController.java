@@ -90,7 +90,7 @@ public class ApiAgentsController extends Controller {
         }
     }
 
-    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = Agent.class))))
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentView.class))))
     public static void list() {
         var agents = AgentService.listAll();
         var configuredKeys = AgentService.configuredModelKeys();
@@ -101,7 +101,7 @@ public class ApiAgentsController extends Controller {
         renderJSON(gson.toJson(result));
     }
 
-    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = Agent.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     public static void get(Long id) {
         var agent = requireAgent(id);
         renderJSON(gson.toJson(AgentView.of(agent)));
@@ -179,7 +179,7 @@ public class ApiAgentsController extends Controller {
         )));
     }
 
-    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = Agent.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
@@ -227,7 +227,7 @@ public class ApiAgentsController extends Controller {
         return el.getAsBoolean();
     }
 
-    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = Agent.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     public static void update(Long id) {
         var agent = requireAgent(id);
 

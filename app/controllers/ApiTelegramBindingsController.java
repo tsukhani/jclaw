@@ -55,7 +55,7 @@ public class ApiTelegramBindingsController extends Controller {
         }
     }
 
-    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TelegramBinding.class))))
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = BindingView.class))))
     public static void list() {
         var items = TelegramBinding.<TelegramBinding>findAll().stream()
                 .map(BindingView::of)
@@ -63,7 +63,7 @@ public class ApiTelegramBindingsController extends Controller {
         renderJSON(gson.toJson(items));
     }
 
-    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TelegramBinding.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
@@ -111,7 +111,7 @@ public class ApiTelegramBindingsController extends Controller {
         renderJSON(gson.toJson(BindingView.of(binding)));
     }
 
-    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TelegramBinding.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     public static void update(Long id) {
         var binding = TelegramBinding.<TelegramBinding>findById(id);
         if (binding == null) notFound();

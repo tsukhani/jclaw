@@ -28,7 +28,7 @@ public class ApiBindingsController extends Controller {
         }
     }
 
-    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentBinding.class))))
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = BindingView.class))))
     public static void list() {
         java.util.List<AgentBinding> bindings = JPA.em()
                 .createQuery("SELECT b FROM AgentBinding b JOIN FETCH b.agent", AgentBinding.class)
@@ -39,7 +39,7 @@ public class ApiBindingsController extends Controller {
         renderJSON(gson.toJson(result));
     }
 
-    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentBinding.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
@@ -59,7 +59,7 @@ public class ApiBindingsController extends Controller {
         renderJSON(gson.toJson(BindingView.of(binding)));
     }
 
-    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentBinding.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = BindingView.class)))
     public static void update(Long id) {
         var binding = (AgentBinding) AgentBinding.findById(id);
         if (binding == null) notFound();

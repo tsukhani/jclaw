@@ -31,7 +31,7 @@ public class ApiChannelsController extends Controller {
         }
     }
 
-    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ChannelConfig.class))))
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ChannelView.class))))
     public static void list() {
         List<ChannelConfig> configs = ChannelConfig.findAll();
         var result = configs.stream().map(ChannelView::of).toList();
@@ -55,14 +55,14 @@ public class ApiChannelsController extends Controller {
         )));
     }
 
-    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ChannelConfig.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ChannelView.class)))
     public static void get(String channelType) {
         var config = ChannelConfig.findByType(channelType);
         if (config == null) notFound();
         renderJSON(gson.toJson(ChannelView.of(config)));
     }
 
-    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ChannelConfig.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ChannelView.class)))
     public static void save(String channelType) {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
