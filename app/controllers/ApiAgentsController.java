@@ -5,6 +5,7 @@ import com.google.gson.Gson;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Agent;
 import play.mvc.Controller;
@@ -180,6 +181,7 @@ public class ApiAgentsController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = Agent.class)))
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
@@ -228,6 +230,7 @@ public class ApiAgentsController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = Agent.class)))
     public static void update(Long id) {
         var agent = requireAgent(id);
 

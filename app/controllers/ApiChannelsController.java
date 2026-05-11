@@ -6,6 +6,7 @@ import com.google.gson.JsonParser;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 
 import static utils.GsonHolder.INSTANCE;
@@ -63,6 +64,7 @@ public class ApiChannelsController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ChannelView.class)))
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ChannelConfig.class)))
     public static void save(String channelType) {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
