@@ -3,6 +3,10 @@ package controllers;
 import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 
 import static utils.GsonHolder.INSTANCE;
 import models.ChannelConfig;
@@ -27,6 +31,7 @@ public class ApiChannelsController extends Controller {
         }
     }
 
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ChannelConfig.class))))
     public static void list() {
         List<ChannelConfig> configs = ChannelConfig.findAll();
         var result = configs.stream().map(ChannelView::of).toList();
@@ -50,12 +55,14 @@ public class ApiChannelsController extends Controller {
         )));
     }
 
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ChannelConfig.class)))
     public static void get(String channelType) {
         var config = ChannelConfig.findByType(channelType);
         if (config == null) notFound();
         renderJSON(gson.toJson(ChannelView.of(config)));
     }
 
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ChannelConfig.class)))
     public static void save(String channelType) {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();

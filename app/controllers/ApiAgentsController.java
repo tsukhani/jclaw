@@ -1,6 +1,11 @@
 package controllers;
 
+import agents.SystemPromptAssembler.PromptBreakdown;
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Agent;
 import play.mvc.Controller;
 import play.mvc.With;
@@ -85,6 +90,7 @@ public class ApiAgentsController extends Controller {
         }
     }
 
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = Agent.class))))
     public static void list() {
         var agents = AgentService.listAll();
         var configuredKeys = AgentService.configuredModelKeys();
@@ -95,6 +101,7 @@ public class ApiAgentsController extends Controller {
         renderJSON(gson.toJson(result));
     }
 
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = Agent.class)))
     public static void get(Long id) {
         var agent = requireAgent(id);
         renderJSON(gson.toJson(AgentView.of(agent)));
@@ -106,6 +113,7 @@ public class ApiAgentsController extends Controller {
      * skipped (null user message) so the breakdown is deterministic for a given
      * agent state and doesn't depend on a hypothetical user query.
      */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PromptBreakdown.class)))
     public static void promptBreakdown(Long id) {
         var agent = requireAgent(id);
         // channelType is required: every real chat lives on a channel, so the
@@ -171,6 +179,7 @@ public class ApiAgentsController extends Controller {
         )));
     }
 
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = Agent.class)))
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
@@ -218,6 +227,7 @@ public class ApiAgentsController extends Controller {
         return el.getAsBoolean();
     }
 
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = Agent.class)))
     public static void update(Long id) {
         var agent = requireAgent(id);
 

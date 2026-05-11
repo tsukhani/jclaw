@@ -1,6 +1,10 @@
 package controllers;
 
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import mcp.McpConnectionManager;
 import models.McpServer;
 import play.mvc.Controller;
@@ -37,15 +41,18 @@ public class ApiMcpServersController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = McpServer.class))))
     public static void list() {
         renderJSON(gson.toJson(McpServerService.listAll()));
     }
 
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServer.class)))
     public static void get(Long id) {
         var row = requireServer(id);
         renderJSON(gson.toJson(McpServerService.View.of(row)));
     }
 
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServer.class)))
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
@@ -72,6 +79,7 @@ public class ApiMcpServersController extends Controller {
         renderJSON(gson.toJson(McpServerService.View.of(row)));
     }
 
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServer.class)))
     public static void update(Long id) {
         var row = requireServer(id);
         var body = JsonBodyReader.readJsonBody();

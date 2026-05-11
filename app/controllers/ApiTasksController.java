@@ -1,6 +1,10 @@
 package controllers;
 
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Task;
 import play.db.jpa.JPA;
 
@@ -30,6 +34,7 @@ public class ApiTasksController extends Controller {
         }
     }
 
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = Task.class))))
     public static void list(String status, String type, Long agentId, Integer limit, Integer offset) {
         var filter = new JpqlFilter()
                 .eq("status", status != null && !status.isBlank() ? Task.Status.valueOf(status.toUpperCase()) : null)
@@ -54,6 +59,7 @@ public class ApiTasksController extends Controller {
         renderJSON(gson.toJson(tasks.stream().map(TaskView::of).toList()));
     }
 
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = Task.class)))
     public static void cancel(Long id) {
         Task task = Task.findById(id);
         if (task == null) notFound();
@@ -65,6 +71,7 @@ public class ApiTasksController extends Controller {
         renderJSON(gson.toJson(TaskView.of(task)));
     }
 
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = Task.class)))
     public static void retry(Long id) {
         Task task = Task.findById(id);
         if (task == null) notFound();
