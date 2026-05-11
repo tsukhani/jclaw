@@ -637,17 +637,6 @@ defineExpose({ refresh })
         <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 bg-muted/30">
           <div>
             <div class="text-xs text-fg-muted mb-0.5">
-              Fee (window)
-            </div>
-            <div
-              class="text-sm font-mono text-emerald-700 dark:text-emerald-400"
-              :title="`monthly × (window_days / 30) = ${formatStatCurrency(subscriptionFee)} over ${windowDays.toFixed(1)} days`"
-            >
-              {{ formatStatCurrency(subscriptionFee) }}
-            </div>
-          </div>
-          <div>
-            <div class="text-xs text-fg-muted mb-0.5">
               Turns
             </div>
             <div class="text-sm font-mono text-fg-strong">
@@ -686,6 +675,21 @@ defineExpose({ refresh })
               {{ subscriptionBreakdown.cached.toLocaleString() }}
             </div>
           </div>
+          <!-- Fee (window) is the rightmost column so the headline currency
+               sits at the end of the row, matching finance-statement
+               convention (inputs left, outcome right) and lining up with
+               the Cost column in the per-model table directly below. -->
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Fee (window)
+            </div>
+            <div
+              class="text-sm font-mono text-emerald-700 dark:text-emerald-400"
+              :title="`monthly × (window_days / 30) = ${formatStatCurrency(subscriptionFee)} over ${windowDays.toFixed(1)} days`"
+            >
+              {{ formatStatCurrency(subscriptionFee) }}
+            </div>
+          </div>
         </div>
 
         <!-- Per-model breakdown for subscription activity. Drops the Cost
@@ -714,17 +718,6 @@ defineExpose({ refresh })
                 >
                   Turns
                 </th>
-                <!-- Cost is always \$0.00 for subscription rows (no per-row
-                     attribution — the standing fee at the top is the total).
-                     Kept as a column so the subscription table's columns
-                     line up with the per-token table directly below it,
-                     making the two sections visually comparable. -->
-                <th
-                  scope="col"
-                  class="text-right px-3 py-2 font-medium"
-                >
-                  Cost
-                </th>
                 <th
                   scope="col"
                   class="text-right px-3 py-2 font-medium"
@@ -749,6 +742,18 @@ defineExpose({ refresh })
                 >
                   Cached
                 </th>
+                <!-- Cost is always \$0.00 for subscription rows (no per-row
+                     attribution — the standing fee at the top is the total).
+                     Kept as a column at the end so the subscription table's
+                     columns line up with the per-token table directly below
+                     it, and so the headline currency sits rightmost like
+                     in the strips above. -->
+                <th
+                  scope="col"
+                  class="text-right px-3 py-2 font-medium"
+                >
+                  Cost
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -766,9 +771,6 @@ defineExpose({ refresh })
                 <td class="px-3 py-2 text-right font-mono text-fg-primary">
                   {{ m.turnCount.toLocaleString() }}
                 </td>
-                <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
-                  $0.00
-                </td>
                 <td class="px-3 py-2 text-right font-mono text-fg-muted">
                   {{ m.prompt.toLocaleString() }}
                 </td>
@@ -780,6 +782,9 @@ defineExpose({ refresh })
                 </td>
                 <td class="px-3 py-2 text-right font-mono text-yellow-700 dark:text-yellow-400">
                   {{ m.cached.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                  $0.00
                 </td>
               </tr>
             </tbody>
@@ -799,14 +804,6 @@ defineExpose({ refresh })
           Per-token
         </div>
         <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 bg-muted/30">
-          <div>
-            <div class="text-xs text-fg-muted mb-0.5">
-              Cost
-            </div>
-            <div class="text-sm font-mono text-emerald-700 dark:text-emerald-400">
-              {{ formatStatCurrency(perTokenBreakdown.total) }}
-            </div>
-          </div>
           <div>
             <div class="text-xs text-fg-muted mb-0.5">
               Turns
@@ -845,6 +842,16 @@ defineExpose({ refresh })
             </div>
             <div class="text-sm font-mono text-yellow-700 dark:text-yellow-400">
               {{ perTokenBreakdown.cached.toLocaleString() }}
+            </div>
+          </div>
+          <!-- Cost is the rightmost column — see same-named row in the
+               Subscription strip for the rationale. -->
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Cost
+            </div>
+            <div class="text-sm font-mono text-emerald-700 dark:text-emerald-400">
+              {{ formatStatCurrency(perTokenBreakdown.total) }}
             </div>
           </div>
         </div>
@@ -904,11 +911,11 @@ defineExpose({ refresh })
               <th
                 v-for="col in [
                   { key: 'turnCount', label: 'Turns' },
-                  { key: 'total', label: 'Cost' },
                   { key: 'prompt', label: 'Prompt' },
                   { key: 'completion', label: 'Completion' },
                   { key: 'reasoning', label: 'Reasoning' },
                   { key: 'cached', label: 'Cached' },
+                  { key: 'total', label: 'Cost' },
                 ] as { key: SortColumn, label: string }[]"
                 :key="col.key"
                 scope="col"
@@ -951,9 +958,6 @@ defineExpose({ refresh })
               <td class="px-3 py-2 text-right font-mono text-fg-primary">
                 {{ m.turnCount.toLocaleString() }}
               </td>
-              <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
-                {{ formatCostUsd(m.total) }}
-              </td>
               <td class="px-3 py-2 text-right font-mono text-fg-muted">
                 {{ m.prompt.toLocaleString() }}
               </td>
@@ -965,6 +969,9 @@ defineExpose({ refresh })
               </td>
               <td class="px-3 py-2 text-right font-mono text-yellow-700 dark:text-yellow-400">
                 {{ m.cached.toLocaleString() }}
+              </td>
+              <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                {{ formatCostUsd(m.total) }}
               </td>
             </tr>
           </tbody>
@@ -1022,14 +1029,6 @@ defineExpose({ refresh })
         <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <div>
             <div class="text-xs text-fg-muted mb-0.5">
-              Cost
-            </div>
-            <div class="text-sm font-mono text-emerald-700 dark:text-emerald-400">
-              {{ formatStatCurrency(combinedTotal) }}
-            </div>
-          </div>
-          <div>
-            <div class="text-xs text-fg-muted mb-0.5">
               Turns
             </div>
             <div class="text-sm font-mono text-fg-strong">
@@ -1066,6 +1065,16 @@ defineExpose({ refresh })
             </div>
             <div class="text-sm font-mono text-yellow-700 dark:text-yellow-400">
               {{ combinedCached.toLocaleString() }}
+            </div>
+          </div>
+          <!-- Cost is the rightmost column — see same-named row in the
+               Subscription strip for the rationale. -->
+          <div>
+            <div class="text-xs text-fg-muted mb-0.5">
+              Cost
+            </div>
+            <div class="text-sm font-mono text-emerald-700 dark:text-emerald-400">
+              {{ formatStatCurrency(combinedTotal) }}
             </div>
           </div>
         </div>
