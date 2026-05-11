@@ -1,6 +1,12 @@
 package controllers;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Conversation;
 import models.Message;
 import play.db.jpa.JPA;
@@ -26,6 +32,41 @@ public class ApiConversationsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    public record ConversationView(Long id, Long agentId, String agentName, String channelType,
+                                   String peerId, String createdAt, String updatedAt,
+                                   long messageCount, String preview,
+                                   String modelProviderOverride, String modelIdOverride) {}
+
+    /** Documents the {@code GET /messages} response shape. The actual emission
+     *  uses a HashMap because several fields are conditionally absent (only
+     *  populated when the underlying Message column is non-null); converting
+     *  to a record would change the wire format from "field absent" to
+     *  "field: null" for those fields, which the chat-history hydrator on
+     *  the frontend may treat differently. */
+    public record MessageView(Long id, String role, String content,
+                              JsonElement toolCalls, String toolResults,
+                              JsonElement toolResultStructured,
+                              String reasoning, String createdAt,
+                              JsonElement usage) {}
+
+    public record QueueStatusResponse(boolean busy, int queueSize) {}
+
+    public record StatusResponse(String status) {}
+
+    public record DeletedCountResponse(int deleted) {}
+
+    public record DeleteByIdsRequest(List<Long> ids) {}
+
+    public record DeleteFilter(String channel, Long agentId, String name, String peer) {}
+
+    public record DeleteByFilterRequest(DeleteFilter filter) {}
+
+    public record ModelOverrideRequest(String modelProvider, String modelId) {}
+
+    public record ModelOverrideResponse(String modelProvider, String modelId) {}
+
+    public record ErrorResponse(String error) {}
+
     /**
      * GET /api/conversations — List conversations with optional filters.
      *
@@ -38,6 +79,7 @@ public class ApiConversationsController extends Controller {
      * (Slack, Discord, etc); the upside of word-boundary refinement was
      * not worth the unbounded fetch cost.
      */
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ConversationView.class))))
     public static void listConversations(String channel, Long agentId, String name, String peer, Integer limit, Integer offset) {
         boolean hasNameFilter = name != null && !name.isBlank();
 
@@ -85,6 +127,7 @@ public class ApiConversationsController extends Controller {
      * (which the list endpoint silently ignores, returning the most-recently-
      * updated row regardless of the requested id).
      */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConversationView.class)))
     public static void getConversation(Long id) {
         Conversation conversation = Conversation.findById(id);
         if (conversation == null) notFound();
@@ -94,6 +137,7 @@ public class ApiConversationsController extends Controller {
     /**
      * GET /api/conversations/{id}/messages
      */
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = MessageView.class))))
     public static void getMessages(Long id, Integer limit, Integer offset) {
         Conversation conversation = Conversation.findById(id);
         if (conversation == null) notFound();
@@ -140,10 +184,11 @@ public class ApiConversationsController extends Controller {
     /**
      * GET /api/conversations/{id}/queue
      */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = QueueStatusResponse.class)))
     public static void getQueueStatus(Long id) {
         var busy = services.ConversationQueue.isBusy(id);
         var queueSize = services.ConversationQueue.getQueueSize(id);
-        renderJSON(gson.toJson(Map.of("busy", busy, "queueSize", queueSize)));
+        renderJSON(gson.toJson(new QueueStatusResponse(busy, queueSize)));
     }
 
     /**
@@ -153,6 +198,7 @@ public class ApiConversationsController extends Controller {
      * (prevents a spoofed path from deleting a foreign message even if the
      * mid were somehow known).
      */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     public static void deleteMessage(Long id, Long mid) {
         Conversation conversation = Conversation.findById(id);
         if (conversation == null) notFound();
@@ -162,17 +208,18 @@ public class ApiConversationsController extends Controller {
             badRequest();
         }
         services.Tx.run(() -> { message.delete(); });
-        renderJSON(gson.toJson(Map.of("status", "deleted")));
+        renderJSON(gson.toJson(new StatusResponse("deleted")));
     }
 
     /**
      * DELETE /api/conversations/{id}
      */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     public static void deleteConversation(Long id) {
         Conversation conversation = Conversation.findById(id);
         if (conversation == null) notFound();
         ConversationService.deleteByIds(List.of(id));
-        renderJSON(gson.toJson(Map.of("status", "deleted")));
+        renderJSON(gson.toJson(new StatusResponse("deleted")));
     }
 
     /**
@@ -192,6 +239,7 @@ public class ApiConversationsController extends Controller {
      * accidental empty-body DELETE wiping the entire table without an
      * explicit "filter" intent from the caller.
      */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DeletedCountResponse.class)))
     public static void deleteConversations() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
@@ -201,11 +249,11 @@ public class ApiConversationsController extends Controller {
             var idList = new ArrayList<Long>();
             for (var elem : ids) idList.add(elem.getAsLong());
             if (idList.isEmpty()) {
-                renderJSON(gson.toJson(Map.of("deleted", 0)));
+                renderJSON(gson.toJson(new DeletedCountResponse(0)));
                 return;
             }
             int deleted = ConversationService.deleteByIds(idList);
-            renderJSON(gson.toJson(Map.of("deleted", deleted)));
+            renderJSON(gson.toJson(new DeletedCountResponse(deleted)));
             return;
         }
 
@@ -216,7 +264,7 @@ public class ApiConversationsController extends Controller {
             String name = stringField(f, "name");
             String peer = stringField(f, "peer");
             int deleted = ConversationService.deleteByFilter(channel, agentId, name, peer);
-            renderJSON(gson.toJson(Map.of("deleted", deleted)));
+            renderJSON(gson.toJson(new DeletedCountResponse(deleted)));
             return;
         }
 
@@ -237,6 +285,7 @@ public class ApiConversationsController extends Controller {
     /**
      * GET /api/conversations/channels — Distinct channel types in use.
      */
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(type = "string"))))
     public static void listConversationChannels() {
         List<String> channels = JPA.em()
                 .createQuery("SELECT DISTINCT c.channelType FROM Conversation c ORDER BY c.channelType", String.class)
@@ -258,6 +307,8 @@ public class ApiConversationsController extends Controller {
      * and to the {@code /model NAME} slash command (which shares validation
      * logic via {@link slash.Commands#performModelSwitch}).
      */
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ModelOverrideRequest.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ModelOverrideResponse.class)))
     public static void setModelOverride(Long id) {
         Conversation conversation = Conversation.findById(id);
         if (conversation == null) notFound();
@@ -273,7 +324,7 @@ public class ApiConversationsController extends Controller {
         var provider = llm.ProviderRegistry.get(newProvider);
         if (provider == null) {
             response.status = 400;
-            renderJSON(gson.toJson(Map.of("error",
+            renderJSON(gson.toJson(new ErrorResponse(
                     "Provider '" + newProvider + "' is not configured.")));
             return;
         }
@@ -281,15 +332,13 @@ public class ApiConversationsController extends Controller {
                 .anyMatch(m -> newModelId.equals(m.id()));
         if (!modelExists) {
             response.status = 400;
-            renderJSON(gson.toJson(Map.of("error",
+            renderJSON(gson.toJson(new ErrorResponse(
                     "Provider '" + newProvider + "' has no model with id '" + newModelId + "'.")));
             return;
         }
 
         ConversationService.setModelOverride(conversation, newProvider, newModelId);
-        renderJSON(gson.toJson(Map.of(
-                "modelProvider", newProvider,
-                "modelId", newModelId)));
+        renderJSON(gson.toJson(new ModelOverrideResponse(newProvider, newModelId)));
     }
 
     /**
@@ -298,11 +347,12 @@ public class ApiConversationsController extends Controller {
      * <p>Clear the conversation-scoped override, reverting to the agent's
      * default. Idempotent — returns 200 whether or not an override was set.
      */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     public static void clearModelOverride(Long id) {
         Conversation conversation = Conversation.findById(id);
         if (conversation == null) notFound();
         ConversationService.clearModelOverride(conversation);
-        renderJSON(gson.toJson(Map.of("status", "cleared")));
+        renderJSON(gson.toJson(new StatusResponse("cleared")));
     }
 
     // --- Helpers ---

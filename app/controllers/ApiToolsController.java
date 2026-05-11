@@ -3,13 +3,17 @@ package controllers;
 import agents.SkillLoader;
 import agents.ToolRegistry;
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 
 import static utils.GsonHolder.INSTANCE;
 import models.Agent;
 import models.AgentToolConfig;
 import play.mvc.Controller;
 import play.mvc.With;
-import services.AgentService;
 
 import java.util.HashMap;
 import java.util.List;
@@ -19,18 +23,27 @@ public class ApiToolsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    public record ToolListEntry(String name, String description, boolean system) {}
+
+    public record ToolMetaEntry(String name, String category, String icon, String shortDescription,
+                                boolean system, String requiresConfig, String group, List<agents.ToolAction> actions) {}
+
+    public record AgentToolEntry(String name, String description, boolean system, String group, boolean enabled) {}
+
+    public record ToolToggleRequest(boolean enabled) {}
+
+    public record ToolToggleResponse(String name, boolean enabled, String status) {}
+
+    public record ToolGroupToggleResponse(String group, boolean enabled, int count, String status) {}
+
     /**
      * GET /api/tools — List all registered tools (global catalog).
      */
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ToolListEntry.class))))
     public static void list() {
-        var tools = ToolRegistry.listTools();
-        var result = tools.stream().map(t -> {
-            var map = new HashMap<String, Object>();
-            map.put("name", t.name());
-            map.put("description", t.description());
-            map.put("system", t.isSystem());
-            return map;
-        }).toList();
+        var result = ToolRegistry.listTools().stream()
+                .map(t -> new ToolListEntry(t.name(), t.description(), t.isSystem()))
+                .toList();
         renderJSON(gson.toJson(result));
     }
 
@@ -44,29 +57,26 @@ public class ApiToolsController extends Controller {
      * dictionary). Purely static registry metadata — no per-agent filtering,
      * no DB transaction.
      */
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ToolMetaEntry.class))))
     public static void meta() {
-        var result = ToolRegistry.listTools().stream().map(t -> {
-            var map = new HashMap<String, Object>();
-            map.put("name", t.name());
-            map.put("category", t.category());
-            map.put("icon", t.icon());
-            map.put("shortDescription", t.shortDescription());
-            map.put("system", t.isSystem());
-            if (t.requiresConfig() != null) {
-                map.put("requiresConfig", t.requiresConfig());
-            }
-            if (t.group() != null) {
-                map.put("group", t.group());
-            }
-            map.put("actions", t.actions());
-            return map;
-        }).toList();
+        var result = ToolRegistry.listTools().stream()
+                .map(t -> new ToolMetaEntry(
+                        t.name(),
+                        t.category(),
+                        t.icon(),
+                        t.shortDescription(),
+                        t.isSystem(),
+                        t.requiresConfig(),
+                        t.group(),
+                        t.actions()))
+                .toList();
         renderJSON(gson.toJson(result));
     }
 
     /**
      * GET /api/agents/{id}/tools — List tools for an agent with enabled status.
      */
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentToolEntry.class))))
     public static void listForAgent(Long id) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
@@ -85,14 +95,9 @@ public class ApiToolsController extends Controller {
         boolean isMain = agent.isMain();
 
         var result = allTools.stream().map(t -> {
-            var map = new HashMap<String, Object>();
-            map.put("name", t.name());
-            map.put("description", t.description());
-            map.put("system", t.isSystem());
-            if (t.group() != null) map.put("group", t.group());
             boolean defaultEnabled = t.group() == null || isMain;
-            map.put("enabled", t.isSystem() || configMap.getOrDefault(t.name(), defaultEnabled));
-            return map;
+            boolean enabled = t.isSystem() || configMap.getOrDefault(t.name(), defaultEnabled);
+            return new AgentToolEntry(t.name(), t.description(), t.isSystem(), t.group(), enabled);
         }).toList();
         renderJSON(gson.toJson(result));
     }
@@ -100,6 +105,8 @@ public class ApiToolsController extends Controller {
     /**
      * PUT /api/agents/{id}/tools/{name} — Enable or disable a tool for an agent.
      */
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ToolToggleRequest.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ToolToggleResponse.class)))
     public static void updateForAgent(Long id, String name) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
@@ -132,11 +139,7 @@ public class ApiToolsController extends Controller {
         // new configuration immediately instead of on cache expiry.
         ToolRegistry.invalidateDisabledToolsCache(agent);
 
-        var map = new HashMap<String, Object>();
-        map.put("name", name);
-        map.put("enabled", enabled);
-        map.put("status", "ok");
-        renderJSON(gson.toJson(map));
+        renderJSON(gson.toJson(new ToolToggleResponse(name, enabled, "ok")));
     }
 
     /**
@@ -145,6 +148,8 @@ public class ApiToolsController extends Controller {
      * toggling an MCP server (which contributes N tools) is one HTTP call,
      * not N. Body: {@code {"enabled": boolean}}.
      */
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ToolToggleRequest.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ToolGroupToggleResponse.class)))
     public static void updateGroupForAgent(Long id, String group) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
@@ -176,12 +181,7 @@ public class ApiToolsController extends Controller {
         SkillLoader.clearCache();
         ToolRegistry.invalidateDisabledToolsCache(agent);
 
-        var map = new HashMap<String, Object>();
-        map.put("group", group);
-        map.put("enabled", enabled);
-        map.put("count", members.size());
-        map.put("status", "ok");
-        renderJSON(gson.toJson(map));
+        renderJSON(gson.toJson(new ToolGroupToggleResponse(group, enabled, members.size(), "ok")));
     }
 
 }

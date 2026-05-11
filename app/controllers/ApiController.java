@@ -1,7 +1,11 @@
 package controllers;
 
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import play.mvc.Controller;
-import com.google.gson.JsonObject;
+
+import static utils.GsonHolder.INSTANCE;
 
 /**
  * API controller for the Nuxt 3 frontend.
@@ -9,12 +13,15 @@ import com.google.gson.JsonObject;
  */
 public class ApiController extends Controller {
 
+    public record StatusResponse(String status, String application, String mode, String applicationVersion) {}
+
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     public static void status() {
-        var json = new JsonObject();
-        json.addProperty("status", "ok");
-        json.addProperty("application", play.Play.configuration.getProperty("application.name"));
-        json.addProperty("mode", play.Play.mode.toString());
-        json.addProperty("applicationVersion", play.Play.configuration.getProperty("application.version", "0.0.0"));
-        renderJSON(json.toString());
+        var resp = new StatusResponse(
+                "ok",
+                play.Play.configuration.getProperty("application.name"),
+                play.Play.mode.toString(),
+                play.Play.configuration.getProperty("application.version", "0.0.0"));
+        renderJSON(INSTANCE.toJson(resp));
     }
 }

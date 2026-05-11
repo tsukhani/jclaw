@@ -2,6 +2,10 @@ package controllers;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonParser;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import play.Play;
 
 import static utils.GsonHolder.INSTANCE;
@@ -14,8 +18,6 @@ import utils.PasswordHasher;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * Admin authentication.
@@ -34,27 +36,44 @@ public class ApiAuthController extends Controller {
     private static final Gson gson = INSTANCE;
     public static final String PASSWORD_HASH_KEY = "auth.admin.passwordHash";
 
+    public record AuthStatusResponse(boolean passwordSet) {}
+
+    public record SetupRequest(String password) {}
+
+    public record SetupErrorResponse(String type, String code, String message) {}
+
+    public record SetupOkResponse(String status) {}
+
+    public record LoginRequest(String username, String password) {}
+
+    public record LoginResponse(String status, String username) {}
+
+    public record LogoutResponse(String status) {}
+
+    public record ResetPasswordResponse(String status) {}
+
     /** GET /api/auth/status — unauthenticated. Returns whether a password
      *  has been set, so the login/setup routing decision lives client-side. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AuthStatusResponse.class)))
     public static void status() {
         var hash = ConfigService.get(PASSWORD_HASH_KEY);
         var passwordSet = hash != null && !hash.isBlank();
-        renderJSON(gson.toJson(Map.of("passwordSet", passwordSet)));
+        renderJSON(gson.toJson(new AuthStatusResponse(passwordSet)));
     }
 
     /** POST /api/auth/setup — unauthenticated but only accepted when no
      *  password has been set yet. Body: {@code {"password":"..."}}.
      *  Returning 409 when a password already exists closes a race where a
      *  second actor could overwrite the first install's credentials. */
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = SetupRequest.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SetupOkResponse.class)))
     public static void setup() {
         try {
             var existing = ConfigService.get(PASSWORD_HASH_KEY);
             if (existing != null && !existing.isBlank()) {
                 response.status = 409;
-                renderJSON(gson.toJson(Map.of(
-                        "type", "error",
-                        "code", "already_set",
-                        "message", "Password is already set")));
+                renderJSON(gson.toJson(new SetupErrorResponse(
+                        "error", "already_set", "Password is already set")));
                 return;
             }
             var reader = new InputStreamReader(Http.Request.current().body, StandardCharsets.UTF_8);
@@ -62,21 +81,21 @@ public class ApiAuthController extends Controller {
             var password = body.get("password").getAsString();
             if (password.length() < 8) {
                 response.status = 400;
-                renderJSON(gson.toJson(Map.of(
-                        "type", "error",
-                        "code", "password_too_short",
-                        "message", "Password must be at least 8 characters")));
+                renderJSON(gson.toJson(new SetupErrorResponse(
+                        "error", "password_too_short", "Password must be at least 8 characters")));
                 return;
             }
             ConfigService.set(PASSWORD_HASH_KEY, PasswordHasher.hash(password));
             EventLogger.info("auth", "Admin password set for the first time");
-            renderJSON(gson.toJson(Map.of("status", "ok")));
+            renderJSON(gson.toJson(new SetupOkResponse("ok")));
         }
         catch (Exception e) {
             badRequest();
         }
     }
 
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = LoginRequest.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LoginResponse.class)))
     public static void login() {
         try {
             var reader = new InputStreamReader(Http.Request.current().body, StandardCharsets.UTF_8);
@@ -103,10 +122,7 @@ public class ApiAuthController extends Controller {
                 session.put("authenticated", "true");
                 session.put("username", username);
                 EventLogger.info("auth", "Admin login successful");
-                var result = new HashMap<String, Object>();
-                result.put("status", "ok");
-                result.put("username", username);
-                renderJSON(gson.toJson(result));
+                renderJSON(gson.toJson(new LoginResponse("ok", username)));
             }
             else {
                 EventLogger.warn("auth", "Admin login failed for username: %s".formatted(username));
@@ -119,12 +135,11 @@ public class ApiAuthController extends Controller {
         }
     }
 
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LogoutResponse.class)))
     public static void logout() {
         session.clear();
         EventLogger.info("auth", "Admin logged out");
-        var result = new HashMap<String, Object>();
-        result.put("status", "ok");
-        renderJSON(gson.toJson(result));
+        renderJSON(gson.toJson(new LogoutResponse("ok")));
     }
 
     /**
@@ -139,6 +154,7 @@ public class ApiAuthController extends Controller {
      * succeeds). Separate endpoints keep the authentication-required gate
      * on reset and the no-auth gate on setup from getting tangled.
      */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ResetPasswordResponse.class)))
     public static void resetPassword() {
         var authed = session.get("authenticated");
         if (!"true".equals(authed)) {
@@ -149,7 +165,7 @@ public class ApiAuthController extends Controller {
         ConfigService.delete(PASSWORD_HASH_KEY);
         session.clear();
         EventLogger.info("auth", "Admin password reset — user signed out");
-        renderJSON(gson.toJson(Map.of("status", "ok")));
+        renderJSON(gson.toJson(new ResetPasswordResponse("ok")));
     }
 
     private static boolean constantTimeEquals(String expected, String actual) {

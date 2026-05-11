@@ -1,11 +1,15 @@
 package controllers;
 
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
 
-import java.util.HashMap;
+import java.util.List;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -18,40 +22,48 @@ public class ApiConfigController extends Controller {
     private static final String RESERVED_KEY_PREFIX =
             "provider." + services.LoadTestRunner.LOADTEST_PROVIDER + ".";
 
+    public record ConfigEntry(String key, String value, String updatedAt) {}
+
+    public record ConfigListResponse(List<ConfigEntry> entries) {}
+
+    public record ConfigSaveRequest(String key, String value) {}
+
+    public record ConfigSaveResponse(String key, String value, String status) {}
+
+    public record ConfigDeleteResponse(String status, String key) {}
+
     private static boolean isReservedKey(String key) {
         return key != null && key.startsWith(RESERVED_KEY_PREFIX);
     }
 
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigListResponse.class)))
     public static void list() {
         var configs = ConfigService.listAll();
         var entries = configs.stream()
                 .filter(c -> !isReservedKey(c.key))
-                .map(c -> {
-                    var map = new HashMap<String, Object>();
-                    map.put("key", c.key);
-                    map.put("value", ConfigService.maskValue(c.key, c.value));
-                    map.put("updatedAt", c.updatedAt.toString());
-                    return map;
-                }).toList();
-
-        var result = new HashMap<String, Object>();
-        result.put("entries", entries);
-        renderJSON(gson.toJson(result));
+                .map(c -> new ConfigEntry(
+                        c.key,
+                        ConfigService.maskValue(c.key, c.value),
+                        c.updatedAt.toString()))
+                .toList();
+        renderJSON(gson.toJson(new ConfigListResponse(entries)));
     }
 
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigEntry.class)))
     public static void get(String key) {
         if (isReservedKey(key)) notFound();
         var config = models.Config.findByKey(key);
         if (config == null) {
             notFound();
         }
-        var map = new HashMap<String, Object>();
-        map.put("key", config.key);
-        map.put("value", ConfigService.maskValue(config.key, config.value));
-        map.put("updatedAt", config.updatedAt.toString());
-        renderJSON(gson.toJson(map));
+        renderJSON(gson.toJson(new ConfigEntry(
+                config.key,
+                ConfigService.maskValue(config.key, config.value),
+                config.updatedAt.toString())));
     }
 
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ConfigSaveRequest.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigSaveResponse.class)))
     public static void save() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("key") || !body.has("value")) {
@@ -73,24 +85,18 @@ public class ApiConfigController extends Controller {
             return;
         }
 
-        var map = new HashMap<String, Object>();
-        map.put("key", key);
-        map.put("value", ConfigService.maskValue(key, value));
-        map.put("status", "ok");
-        renderJSON(gson.toJson(map));
+        renderJSON(gson.toJson(new ConfigSaveResponse(
+                key, ConfigService.maskValue(key, value), "ok")));
     }
 
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigDeleteResponse.class)))
     public static void delete(String key) {
         if (isReservedKey(key)) {
             error(409, "The config key prefix '%s' is reserved for internal use"
                     .formatted(RESERVED_KEY_PREFIX));
         }
         ConfigService.deleteWithSideEffects(key);
-
-        var map = new HashMap<String, Object>();
-        map.put("status", "ok");
-        map.put("key", key);
-        renderJSON(gson.toJson(map));
+        renderJSON(gson.toJson(new ConfigDeleteResponse("ok", key)));
     }
 
 }

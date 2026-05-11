@@ -1,6 +1,9 @@
 package controllers;
 
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.EventLog;
 import play.mvc.Controller;
 
@@ -9,7 +12,6 @@ import play.mvc.With;
 import utils.JpqlFilter;
 
 import java.time.Instant;
-import java.util.HashMap;
 import java.util.List;
 
 @With(AuthCheck.class)
@@ -17,6 +19,12 @@ public class ApiLogsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    public record LogEntry(Long id, String timestamp, String level, String category,
+                           String agentId, String channel, String message, String details) {}
+
+    public record LogListResponse(List<LogEntry> events, int limit, int offset) {}
+
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LogListResponse.class)))
     public static void list(String category, String level, String agentId, String channel,
                             String since, String until, String search,
                             Integer limit, Integer offset) {
@@ -38,22 +46,17 @@ public class ApiLogsController extends Controller {
         var jpql = EventLog.find(query, filter.params());
         List<EventLog> events = jpql.from(effectiveOffset).fetch(effectiveLimit);
 
-        var result = new HashMap<String, Object>();
-        result.put("events", events.stream().map(e -> {
-            var map = new HashMap<String, Object>();
-            map.put("id", e.id);
-            map.put("timestamp", e.timestamp.toString());
-            map.put("level", e.level);
-            map.put("category", e.category);
-            map.put("agentId", e.agentId);
-            map.put("channel", e.channel);
-            map.put("message", e.message);
-            map.put("details", e.details);
-            return map;
-        }).toList());
-        result.put("limit", effectiveLimit);
-        result.put("offset", effectiveOffset);
+        var entries = events.stream().map(e -> new LogEntry(
+                e.id,
+                e.timestamp.toString(),
+                e.level,
+                e.category,
+                e.agentId,
+                e.channel,
+                e.message,
+                e.details
+        )).toList();
 
-        renderJSON(gson.toJson(result));
+        renderJSON(gson.toJson(new LogListResponse(entries, effectiveLimit, effectiveOffset)));
     }
 }

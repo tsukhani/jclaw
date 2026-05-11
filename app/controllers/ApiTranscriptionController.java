@@ -1,6 +1,9 @@
 package controllers;
 
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
@@ -10,8 +13,7 @@ import services.transcription.WhisperModel;
 import services.transcription.WhisperModelManager;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.List;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -39,7 +41,18 @@ public class ApiTranscriptionController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    public record WhisperModelEntry(String id, String displayName, int approxSizeMb,
+                                    String status, long bytesDownloaded, Long totalBytes,
+                                    String error) {}
+
+    public record TranscriptionStateResponse(String provider, String localModel,
+                                             boolean ffmpegAvailable, String ffmpegReason,
+                                             List<WhisperModelEntry> models) {}
+
+    public record DownloadStartedResponse(String status, String modelId) {}
+
     /** GET /api/transcription/state — snapshot for the Settings UI. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TranscriptionStateResponse.class)))
     public static void state() {
         var ffmpeg = FfmpegProbe.lastResult();
         // Force one probe if the cache is still on the UNRUN sentinel —
@@ -50,26 +63,25 @@ public class ApiTranscriptionController extends Controller {
             ffmpeg = FfmpegProbe.probe();
         }
 
-        var models = new ArrayList<Map<String, Object>>();
+        var models = new ArrayList<WhisperModelEntry>();
         for (var m : WhisperModel.values()) {
             var status = WhisperModelManager.status(m);
-            var entry = new LinkedHashMap<String, Object>();
-            entry.put("id", m.id());
-            entry.put("displayName", m.displayName());
-            entry.put("approxSizeMb", m.approxSizeMb());
-            entry.put("status", status.state().name());
-            entry.put("bytesDownloaded", status.bytesDownloaded());
-            entry.put("totalBytes", status.totalBytes());
-            entry.put("error", status.error());
-            models.add(entry);
+            models.add(new WhisperModelEntry(
+                    m.id(),
+                    m.displayName(),
+                    m.approxSizeMb(),
+                    status.state().name(),
+                    status.bytesDownloaded(),
+                    status.totalBytes(),
+                    status.error()));
         }
 
-        var payload = new LinkedHashMap<String, Object>();
-        payload.put("provider", ConfigService.get("transcription.provider"));
-        payload.put("localModel", ConfigService.get("transcription.localModel"));
-        payload.put("ffmpegAvailable", ffmpeg.available());
-        payload.put("ffmpegReason", ffmpeg.reason());
-        payload.put("models", models);
+        var payload = new TranscriptionStateResponse(
+                ConfigService.get("transcription.provider"),
+                ConfigService.get("transcription.localModel"),
+                ffmpeg.available(),
+                ffmpeg.reason(),
+                models);
         renderJSON(gson.toJson(payload));
     }
 
@@ -77,6 +89,7 @@ public class ApiTranscriptionController extends Controller {
      *  download for the model with the given id. Returns 202-style
      *  {@code {"status":"downloading"}} immediately on success, 400 on
      *  unknown id. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DownloadStartedResponse.class)))
     public static void download(String id) {
         var model = WhisperModel.byId(id);
         if (model.isEmpty()) {
@@ -91,6 +104,6 @@ public class ApiTranscriptionController extends Controller {
         WhisperModelManager.ensureAvailable(model.get(), null);
         EventLogger.info("transcription",
                 "Whisper model download requested: %s".formatted(id));
-        renderJSON(gson.toJson(Map.of("status", "downloading", "modelId", id)));
+        renderJSON(gson.toJson(new DownloadStartedResponse("downloading", id)));
     }
 }

@@ -1,12 +1,14 @@
 package controllers;
 
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
 import services.EventLogger;
-
-import java.util.Map;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -32,22 +34,28 @@ public class ApiOnboardingController extends Controller {
     public static final String CONFIG_KEY = "onboarding.tourMaxStep";
     private static final int TOTAL_STEPS = 6;
 
+    public record TourStatusResponse(int maxStepReached, int totalSteps, boolean shouldAutoShow) {}
+
+    public record TourProgressRequest(int step) {}
+
+    public record TourProgressResponse(int maxStepReached) {}
+
     /** GET /api/onboarding/tour-status — returns the recorded max step,
      *  total step count, and whether the dashboard should auto-show the
      *  intro dialog. Auto-show fires when the user has never interacted
      *  with the tour ({@code maxStep == 0}); once they click Start or Skip
      *  on the intro dialog (or advance any step), the flag flips forever. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TourStatusResponse.class)))
     public static void status() {
         var maxStep = ConfigService.getInt(CONFIG_KEY, 0);
-        renderJSON(gson.toJson(Map.of(
-                "maxStepReached", maxStep,
-                "totalSteps", TOTAL_STEPS,
-                "shouldAutoShow", maxStep == 0)));
+        renderJSON(gson.toJson(new TourStatusResponse(maxStep, TOTAL_STEPS, maxStep == 0)));
     }
 
     /** POST /api/onboarding/tour-progress — body {@code {"step":N}}.
      *  Upserts {@code Math.max(existing, step)} so out-of-order writes can
      *  never lower the recorded max. Validates step is in [1, TOTAL_STEPS]. */
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TourProgressRequest.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TourProgressResponse.class)))
     public static void recordProgress() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null || !body.has("step")) badRequest();
@@ -68,6 +76,6 @@ public class ApiOnboardingController extends Controller {
                     "Tour progressed to step %s".formatted(newMax),
                     "previous=%s".formatted(existing));
         }
-        renderJSON(gson.toJson(Map.of("maxStepReached", newMax)));
+        renderJSON(gson.toJson(new TourProgressResponse(newMax)));
     }
 }

@@ -1,6 +1,9 @@
 package controllers;
 
 import com.google.gson.JsonObject;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import play.db.jpa.JPA;
 import play.mvc.Before;
 import play.mvc.Controller;
@@ -8,6 +11,8 @@ import services.ConfigService;
 import services.LoadTestHarness;
 import services.LoadTestRunner;
 import utils.LatencyStats;
+
+import java.util.List;
 
 import static utils.GsonHolder.INSTANCE;
 
@@ -45,15 +50,40 @@ public class ApiMetricsController extends Controller {
         LoadtestAuthCheck.checkLoadtestAuth();
     }
 
-    /** GET /api/metrics/latency — JSON snapshot of segment histograms. */
+    public record StatusResponse(String status) {}
+
+    public record CostRow(String timestamp, Long agentId, String channelType, String usageJson) {}
+
+    public record CostResponse(String since, List<CostRow> rows) {}
+
+    /**
+     * Loadtest response schema descriptor (JCLAW-278). Used solely for OpenAPI
+     * spec generation — the actual response is built as a JsonObject below so
+     * the conditional fields (turnBuckets, serverSegments, provider, model)
+     * are emitted only when populated, matching the historical wire format.
+     */
+    public record LoadtestResponse(int totalRequests, int successCount, int errorCount,
+                                   long wallClockMs, long avgPerRequestMs, long minPerRequestMs,
+                                   long maxPerRequestMs, long avgTtftMs, int avgResponseTokens,
+                                   int avgReasoningTokens, double avgTokensPerSec,
+                                   String provider, String model,
+                                   List<LoadTestRunner.TurnBucket> turnBuckets,
+                                   List<LoadTestRunner.SegmentBreakdown> serverSegments) {}
+
+    /** GET /api/metrics/latency — JSON snapshot of segment histograms.
+     *  Returns the raw {@code LatencyStats.snapshot()} JSON tree which has a
+     *  dynamic shape (one entry per segment); not annotated with a fixed
+     *  schema since the shape is dictated at runtime by the segments that
+     *  have observed traffic. */
     public static void latency() {
         renderJSON(LatencyStats.snapshot().toString());
     }
 
     /** DELETE /api/metrics/latency — reset histograms. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     public static void resetLatency() {
         LatencyStats.reset();
-        renderJSON("{\"status\":\"reset\"}");
+        renderJSON(INSTANCE.toJson(new StatusResponse("reset")));
     }
 
     /**
@@ -87,6 +117,7 @@ public class ApiMetricsController extends Controller {
      * tool messages have no usage and would just be filtered out client-side
      * anyway.
      */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CostResponse.class)))
     public static void cost() {
         var sinceParam = params.get("since");
         var agentIdParam = params.get("agentId");
@@ -147,20 +178,16 @@ public class ApiMetricsController extends Controller {
 
         var results = query.getResultList();
 
-        var rowsArray = new com.google.gson.JsonArray();
+        var rows = new java.util.ArrayList<CostRow>(results.size());
         for (var r : results) {
-            var row = new JsonObject();
-            row.addProperty("timestamp", ((java.time.Instant) r[0]).toString());
-            row.addProperty("agentId", (Long) r[1]);
-            row.addProperty("channelType", (String) r[2]);
-            row.addProperty("usageJson", (String) r[3]);
-            rowsArray.add(row);
+            rows.add(new CostRow(
+                    ((java.time.Instant) r[0]).toString(),
+                    (Long) r[1],
+                    (String) r[2],
+                    (String) r[3]));
         }
 
-        var out = new JsonObject();
-        out.addProperty("since", since.toString());
-        out.add("rows", rowsArray);
-        renderJSON(INSTANCE.toJson(out));
+        renderJSON(INSTANCE.toJson(new CostResponse(since.toString(), rows)));
     }
 
     /**
@@ -203,6 +230,7 @@ public class ApiMetricsController extends Controller {
      * <p>Returns the aggregate counts + wall-clock. Use GET
      * /api/metrics/latency afterwards for per-segment histograms.
      */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LoadtestResponse.class)))
     public static void loadtest() {
         var body = JsonBodyReader.readJsonBody();
         int concurrency = readInt(body, "concurrency", 10);
@@ -365,15 +393,17 @@ public class ApiMetricsController extends Controller {
     }
 
     /** DELETE /api/metrics/loadtest — stop the embedded mock provider. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     public static void stopLoadtest() {
         LoadTestHarness.stop();
-        renderJSON("{\"status\":\"stopped\"}");
+        renderJSON(INSTANCE.toJson(new StatusResponse("stopped")));
     }
 
     /** DELETE /api/metrics/loadtest/data — delete loadtest conversations, messages, and events. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StatusResponse.class)))
     public static void cleanLoadtest() {
         LoadTestRunner.cleanupConversations();
-        renderJSON("{\"status\":\"cleaned\"}");
+        renderJSON(INSTANCE.toJson(new StatusResponse("cleaned")));
     }
 
     private static int readInt(com.google.gson.JsonObject body, String key, int defaultValue) {

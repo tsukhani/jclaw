@@ -1,12 +1,14 @@
 package controllers;
 
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.ConfigService;
 import services.OcrHealthProbe;
 
-import java.util.HashMap;
 import java.util.List;
 
 import static utils.GsonHolder.INSTANCE;
@@ -28,31 +30,34 @@ public class ApiOcrController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    public record OcrProvider(String name, String displayName, boolean available,
+                              String version, String reason, boolean enabled,
+                              String configKey, String description, String installHint) {}
+
+    public record OcrStatusResponse(List<OcrProvider> providers) {}
+
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = OcrStatusResponse.class)))
     public static void status() {
         var probe = OcrHealthProbe.lastResult();
         var enabled = "true".equalsIgnoreCase(
                 ConfigService.get("ocr.tesseract.enabled", "true"));
 
-        var tesseract = new HashMap<String, Object>();
-        tesseract.put("name", "tesseract");
-        tesseract.put("displayName", "Tesseract OCR");
-        tesseract.put("available", probe.available());
-        tesseract.put("version", probe.version());
-        tesseract.put("reason", probe.reason());
-        tesseract.put("enabled", enabled);
-        tesseract.put("configKey", "ocr.tesseract.enabled");
-        tesseract.put("description",
+        var tesseract = new OcrProvider(
+                "tesseract",
+                "Tesseract OCR",
+                probe.available(),
+                probe.version(),
+                probe.reason(),
+                enabled,
+                "ocr.tesseract.enabled",
                 "Apache Tika's TesseractOCRParser. Extracts text from images and "
-                + "scanned PDFs by shelling out to the tesseract binary. Fast and "
-                + "predictable for English-language print scans; weaker on "
-                + "handwriting and complex layouts.");
-        tesseract.put("installHint",
+                        + "scanned PDFs by shelling out to the tesseract binary. Fast and "
+                        + "predictable for English-language print scans; weaker on "
+                        + "handwriting and complex layouts.",
                 "Install tesseract on the host: brew install tesseract (macOS), "
-                + "apt-get install tesseract-ocr (Debian/Ubuntu). A JVM restart is "
-                + "required for the startup probe to re-detect the binary.");
+                        + "apt-get install tesseract-ocr (Debian/Ubuntu). A JVM restart is "
+                        + "required for the startup probe to re-detect the binary.");
 
-        var result = new HashMap<String, Object>();
-        result.put("providers", List.of(tesseract));
-        renderJSON(gson.toJson(result));
+        renderJSON(gson.toJson(new OcrStatusResponse(List.of(tesseract))));
     }
 }

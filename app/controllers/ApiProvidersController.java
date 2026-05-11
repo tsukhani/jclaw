@@ -1,6 +1,9 @@
 package controllers;
 
 import com.google.gson.Gson;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import play.mvc.Controller;
 import play.mvc.With;
 
@@ -10,6 +13,7 @@ import services.ModelDiscoveryService;
 import services.ModelDiscoveryService.DiscoveryResult;
 import services.PricingRefreshService;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -20,11 +24,16 @@ public class ApiProvidersController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    public record DiscoverModelsResponse(List<Map<String, Object>> models, int count) {}
+
+    public record RefreshPricesResponse(boolean skipped, int providersScanned, int modelsUpdated, List<String> warnings) {}
+
     /**
      * POST /api/providers/{name}/discover-models
      * Fetches the model catalog from the provider's /models endpoint.
      * Returns normalized model info including auto-detected capabilities.
      */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DiscoverModelsResponse.class)))
     public static void discoverModels(String name) {
         var baseUrl = ConfigService.get("provider." + name + ".baseUrl");
         var apiKey = ConfigService.get("provider." + name + ".apiKey");
@@ -39,7 +48,7 @@ public class ApiProvidersController extends Controller {
         var result = ModelDiscoveryService.discover(name, baseUrl, apiKey);
         switch (result) {
             case DiscoveryResult.Ok ok ->
-                    renderJSON(gson.toJson(Map.of("models", ok.models(), "count", ok.models().size())));
+                    renderJSON(gson.toJson(new DiscoverModelsResponse(ok.models(), ok.models().size())));
             case DiscoveryResult.Error err ->
                     error(err.statusCode(), err.message());
         }
@@ -55,13 +64,13 @@ public class ApiProvidersController extends Controller {
      * Settings UI can surface "enable the toggle first" rather than
      * silently appearing to do nothing.
      */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = RefreshPricesResponse.class)))
     public static void refreshPrices() {
         var result = PricingRefreshService.refresh();
-        renderJSON(gson.toJson(Map.of(
-                "skipped", result.skipped(),
-                "providersScanned", result.providersScanned(),
-                "modelsUpdated", result.modelsUpdated(),
-                "warnings", result.warnings()
-        )));
+        renderJSON(gson.toJson(new RefreshPricesResponse(
+                result.skipped(),
+                result.providersScanned(),
+                result.modelsUpdated(),
+                result.warnings())));
     }
 }
