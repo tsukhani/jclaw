@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import {
   CheckCircleIcon,
+  ChevronDownIcon,
   ChevronRightIcon,
+  ChevronUpIcon,
   ClipboardDocumentCheckIcon,
   ClockIcon,
   CommandLineIcon,
@@ -288,6 +290,70 @@ function copyPromptBreakdownJson() {
   navigator.clipboard.writeText(JSON.stringify(promptBreakdownData.value, null, 2))
 }
 
+const skillsExpanded = ref(true)
+
+/**
+ * Sort state for the two breakdown tables. `null` sortBy means
+ * "as-is" (the order the backend sends, which for prompt sections is
+ * the actual assembly order — meaningful, so it's the default).
+ *
+ * Click cycle on a column: desc → asc → as-is. Skill subrows ride
+ * along with the parent Skills row regardless of sort, since they're
+ * rendered inside the same v-for template; the Total row sits outside
+ * the loop, so it always stays at the bottom.
+ */
+type BreakdownSortCol = 'name' | 'chars'
+const sectionsSortBy = ref<BreakdownSortCol | null>(null)
+const sectionsSortDir = ref<'asc' | 'desc'>('desc')
+const toolsSortBy = ref<BreakdownSortCol | null>(null)
+const toolsSortDir = ref<'asc' | 'desc'>('desc')
+
+function cycleSectionsSort(col: BreakdownSortCol) {
+  if (sectionsSortBy.value !== col) {
+    sectionsSortBy.value = col
+    sectionsSortDir.value = 'desc'
+  }
+  else if (sectionsSortDir.value === 'desc') {
+    sectionsSortDir.value = 'asc'
+  }
+  else {
+    sectionsSortBy.value = null
+    sectionsSortDir.value = 'desc'
+  }
+}
+function cycleToolsSort(col: BreakdownSortCol) {
+  if (toolsSortBy.value !== col) {
+    toolsSortBy.value = col
+    toolsSortDir.value = 'desc'
+  }
+  else if (toolsSortDir.value === 'desc') {
+    toolsSortDir.value = 'asc'
+  }
+  else {
+    toolsSortBy.value = null
+    toolsSortDir.value = 'desc'
+  }
+}
+function sortBreakdownRows<T extends { name: string, chars: number, tokens: number }>(
+  rows: T[],
+  by: BreakdownSortCol | null,
+  dir: 'asc' | 'desc',
+): T[] {
+  if (!by) return rows
+  const sorted = [...rows]
+  sorted.sort((a, b) => {
+    const cmp = by === 'name' ? a.name.localeCompare(b.name) : a[by] - b[by]
+    return dir === 'desc' ? -cmp : cmp
+  })
+  return sorted
+}
+const sortedSections = computed(() =>
+  sortBreakdownRows(promptBreakdownData.value?.sections ?? [], sectionsSortBy.value, sectionsSortDir.value),
+)
+const sortedTools = computed(() =>
+  sortBreakdownRows(promptBreakdownData.value?.tools ?? [], toolsSortBy.value, toolsSortDir.value),
+)
+
 function formatChars(n: number): string {
   return n.toLocaleString()
 }
@@ -300,6 +366,47 @@ function percentOfTotal(chars: number, total: number): string {
   if (total === 0) return '0%'
   return ((chars / total) * 100).toFixed(1) + '%'
 }
+
+/**
+ * Bottom-of-table subtotals: PROMPT SECTIONS sum and TOOL SCHEMAS sum.
+ * Together they equal TOTAL CHARS.
+ */
+const sectionsAggregate = computed(() => {
+  const rows = promptBreakdownData.value?.sections ?? []
+  return {
+    chars: rows.reduce((s, r) => s + r.chars, 0),
+    tokens: rows.reduce((s, r) => s + r.tokens, 0),
+  }
+})
+const toolSchemasAggregate = computed(() => {
+  const rows = promptBreakdownData.value?.tools ?? []
+  return {
+    chars: rows.reduce((s, r) => s + r.chars, 0),
+    tokens: rows.reduce((s, r) => s + r.tokens, 0),
+  }
+})
+
+/**
+ * Per-skill rows account for the <skill> XML entries inside
+ * <available_skills>, but the Skills section *also* carries the
+ * skill-matching prose preamble + the <available_skills> open/close
+ * tags. Surface that delta as its own subrow so the inlined children
+ * genuinely sum to the parent Skills row.
+ */
+const skillsMatchingGap = computed(() => {
+  const data = promptBreakdownData.value
+  if (!data) return { chars: 0, tokens: 0 }
+  const skillsSection = data.sections.find(s => s.name === 'Skills')
+  if (!skillsSection) return { chars: 0, tokens: 0 }
+  const itemized = data.skills.reduce(
+    (acc, sk) => ({ chars: acc.chars + sk.chars, tokens: acc.tokens + sk.tokens }),
+    { chars: 0, tokens: 0 },
+  )
+  return {
+    chars: skillsSection.chars - itemized.chars,
+    tokens: skillsSection.tokens - itemized.tokens,
+  }
+})
 
 // The main agent is a structural singleton (seeded on first boot, cannot be
 // renamed or deleted, always enabled). Splitting it out of the list keeps the
@@ -1677,79 +1784,141 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             <h4 class="text-[11px] text-neutral-500 uppercase tracking-wide mb-1.5">
               Prompt sections
             </h4>
-            <table class="w-full text-xs font-mono">
+            <table class="w-full text-xs font-mono table-fixed">
+              <colgroup>
+                <col>
+                <col class="w-24">
+                <col class="w-24">
+                <col class="w-24">
+              </colgroup>
               <thead class="text-[10px] text-neutral-500 border-b border-border">
                 <tr>
                   <th class="text-left py-1 pr-2">
-                    Section
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 whitespace-nowrap hover:text-fg-strong transition-colors"
+                      :class="sectionsSortBy === 'name' ? 'text-fg-strong' : ''"
+                      @click="cycleSectionsSort('name')"
+                    >
+                      Section
+                      <ChevronUpIcon
+                        v-if="sectionsSortBy === 'name' && sectionsSortDir === 'asc'"
+                        class="w-3 h-3"
+                        aria-hidden="true"
+                      />
+                      <ChevronDownIcon
+                        v-else-if="sectionsSortBy === 'name' && sectionsSortDir === 'desc'"
+                        class="w-3 h-3"
+                        aria-hidden="true"
+                      />
+                    </button>
                   </th>
                   <th class="text-right py-1 px-2">
-                    Chars
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 whitespace-nowrap hover:text-fg-strong transition-colors"
+                      :class="sectionsSortBy === 'chars' ? 'text-fg-strong' : ''"
+                      @click="cycleSectionsSort('chars')"
+                    >
+                      Chars
+                      <ChevronUpIcon
+                        v-if="sectionsSortBy === 'chars' && sectionsSortDir === 'asc'"
+                        class="w-3 h-3"
+                        aria-hidden="true"
+                      />
+                      <ChevronDownIcon
+                        v-else-if="sectionsSortBy === 'chars' && sectionsSortDir === 'desc'"
+                        class="w-3 h-3"
+                        aria-hidden="true"
+                      />
+                    </button>
                   </th>
-                  <th class="text-right py-1 px-2">
+                  <th class="text-right py-1 px-2 whitespace-nowrap">
                     ≈ Tokens
                   </th>
-                  <th class="text-right py-1 pl-2">
-                    % of prompt
+                  <th class="text-right py-1 pl-2 whitespace-nowrap">
+                    % of total
                   </th>
                 </tr>
               </thead>
               <tbody>
-                <tr
-                  v-for="s in promptBreakdownData.sections"
+                <template
+                  v-for="s in sortedSections"
                   :key="'section-' + s.name"
-                  class="border-b border-neutral-900/50"
                 >
-                  <td class="py-1 pr-2 text-fg-primary">
-                    {{ s.name }}
+                  <tr
+                    class="border-b border-neutral-900/50"
+                    :class="s.name === 'Skills' && promptBreakdownData.skills.length > 0 ? 'cursor-pointer hover:bg-neutral-900/30' : ''"
+                    @click="s.name === 'Skills' && promptBreakdownData.skills.length > 0 ? (skillsExpanded = !skillsExpanded) : null"
+                  >
+                    <td class="py-1 pr-2 text-fg-primary">
+                      {{ s.name }}<ChevronRightIcon
+                        v-if="s.name === 'Skills' && promptBreakdownData.skills.length > 0"
+                        class="inline-block w-2.5 h-2.5 ml-1 align-middle transition-transform"
+                        :class="skillsExpanded ? 'rotate-90' : ''"
+                        aria-hidden="true"
+                      />
+                    </td>
+                    <td class="py-1 px-2 text-right text-fg-muted">
+                      {{ formatChars(s.chars) }}
+                    </td>
+                    <td class="py-1 px-2 text-right text-amber-300/80">
+                      {{ formatTokens(s.tokens) }}
+                    </td>
+                    <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400">
+                      {{ percentOfTotal(s.chars, promptBreakdownData.totalChars) }}
+                    </td>
+                  </tr>
+                  <!-- Inlined skill itemization: indented child rows under
+                       the Skills section row. Chars/tokens are *inside*
+                       the Skills row's totals, not additive — same pattern
+                       as the dashboard's per-model rollup under Total.
+                       The trailing "matching instructions" row absorbs
+                       the prose preamble + <available_skills> wrapper so
+                       all subrows together equal the parent. -->
+                  <tr
+                    v-for="sk in (s.name === 'Skills' && skillsExpanded ? promptBreakdownData.skills : [])"
+                    :key="'skill-' + sk.name"
+                  >
+                    <td class="py-0.5 pr-2 pl-6 text-fg-muted text-[11px]">
+                      <span class="text-neutral-600 mr-1">└</span>{{ sk.name }}
+                    </td>
+                    <td class="py-0.5 px-2 text-right text-fg-muted text-[11px]">
+                      {{ formatChars(sk.chars) }}
+                    </td>
+                    <td class="py-0.5 px-2 text-right text-amber-300/60 text-[11px]">
+                      {{ formatTokens(sk.tokens) }}
+                    </td>
+                    <td class="py-0.5 pl-2 text-right text-[11px]" />
+                  </tr>
+                  <tr
+                    v-if="s.name === 'Skills' && skillsExpanded && promptBreakdownData.skills.length > 0 && skillsMatchingGap.chars > 0"
+                    class="border-b border-neutral-900/50"
+                  >
+                    <td class="py-0.5 pr-2 pl-6 text-fg-muted text-[11px]">
+                      <span class="text-neutral-600 mr-1">└</span>matching instructions
+                    </td>
+                    <td class="py-0.5 px-2 text-right text-fg-muted text-[11px]">
+                      {{ formatChars(skillsMatchingGap.chars) }}
+                    </td>
+                    <td class="py-0.5 px-2 text-right text-amber-300/60 text-[11px]">
+                      {{ formatTokens(skillsMatchingGap.tokens) }}
+                    </td>
+                    <td class="py-0.5 pl-2 text-right text-[11px]" />
+                  </tr>
+                </template>
+                <tr class="border-t border-border">
+                  <td class="py-1 pr-2 text-fg-primary font-semibold">
+                    Total
                   </td>
-                  <td class="py-1 px-2 text-right text-fg-muted">
-                    {{ formatChars(s.chars) }}
+                  <td class="py-1 px-2 text-right text-fg-primary font-semibold">
+                    {{ formatChars(sectionsAggregate.chars) }}
                   </td>
-                  <td class="py-1 px-2 text-right text-amber-300/80">
-                    {{ formatTokens(s.tokens) }}
+                  <td class="py-1 px-2 text-right text-amber-300 font-semibold">
+                    {{ formatTokens(sectionsAggregate.tokens) }}
                   </td>
-                  <td class="py-1 pl-2 text-right text-neutral-500">
-                    {{ percentOfTotal(s.chars, promptBreakdownData.cacheablePrefixChars + promptBreakdownData.variableSuffixChars) }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          <!-- Skills table -->
-          <div v-if="promptBreakdownData.skills.length > 0">
-            <h4 class="text-[11px] text-neutral-500 uppercase tracking-wide mb-1.5">
-              Skills included ({{ promptBreakdownData.skills.length }})
-            </h4>
-            <table class="w-full text-xs font-mono">
-              <thead class="text-[10px] text-neutral-500 border-b border-border">
-                <tr>
-                  <th class="text-left py-1 pr-2">
-                    Skill
-                  </th>
-                  <th class="text-right py-1 px-2">
-                    Chars
-                  </th>
-                  <th class="text-right py-1 pl-2">
-                    ≈ Tokens
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="s in promptBreakdownData.skills"
-                  :key="'skill-' + s.name"
-                  class="border-b border-neutral-900/50"
-                >
-                  <td class="py-1 pr-2 text-fg-primary">
-                    {{ s.name }}
-                  </td>
-                  <td class="py-1 px-2 text-right text-fg-muted">
-                    {{ formatChars(s.chars) }}
-                  </td>
-                  <td class="py-1 pl-2 text-right text-amber-300/80">
-                    {{ formatTokens(s.tokens) }}
+                  <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400 font-semibold">
+                    {{ percentOfTotal(sectionsAggregate.chars, promptBreakdownData.totalChars) }}
                   </td>
                 </tr>
               </tbody>
@@ -1764,23 +1933,66 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             <p class="text-[10px] text-fg-muted mb-1">
               Sent separately as the <code class="text-neutral-500">tools</code> array, not part of the prompt string, but counted as input tokens by every provider.
             </p>
-            <table class="w-full text-xs font-mono">
+            <table class="w-full text-xs font-mono table-fixed">
+              <colgroup>
+                <col>
+                <col class="w-24">
+                <col class="w-24">
+                <col class="w-24">
+              </colgroup>
               <thead class="text-[10px] text-neutral-500 border-b border-border">
                 <tr>
                   <th class="text-left py-1 pr-2">
-                    Tool
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 whitespace-nowrap hover:text-fg-strong transition-colors"
+                      :class="toolsSortBy === 'name' ? 'text-fg-strong' : ''"
+                      @click="cycleToolsSort('name')"
+                    >
+                      Tool
+                      <ChevronUpIcon
+                        v-if="toolsSortBy === 'name' && toolsSortDir === 'asc'"
+                        class="w-3 h-3"
+                        aria-hidden="true"
+                      />
+                      <ChevronDownIcon
+                        v-else-if="toolsSortBy === 'name' && toolsSortDir === 'desc'"
+                        class="w-3 h-3"
+                        aria-hidden="true"
+                      />
+                    </button>
                   </th>
                   <th class="text-right py-1 px-2">
-                    Schema chars
+                    <button
+                      type="button"
+                      class="inline-flex items-center gap-1 whitespace-nowrap hover:text-fg-strong transition-colors"
+                      :class="toolsSortBy === 'chars' ? 'text-fg-strong' : ''"
+                      @click="cycleToolsSort('chars')"
+                    >
+                      Chars
+                      <ChevronUpIcon
+                        v-if="toolsSortBy === 'chars' && toolsSortDir === 'asc'"
+                        class="w-3 h-3"
+                        aria-hidden="true"
+                      />
+                      <ChevronDownIcon
+                        v-else-if="toolsSortBy === 'chars' && toolsSortDir === 'desc'"
+                        class="w-3 h-3"
+                        aria-hidden="true"
+                      />
+                    </button>
                   </th>
-                  <th class="text-right py-1 pl-2">
+                  <th class="text-right py-1 px-2 whitespace-nowrap">
                     ≈ Tokens
+                  </th>
+                  <th class="text-right py-1 pl-2 whitespace-nowrap">
+                    % of total
                   </th>
                 </tr>
               </thead>
               <tbody>
                 <tr
-                  v-for="t in promptBreakdownData.tools"
+                  v-for="t in sortedTools"
                   :key="'tool-' + t.name"
                   class="border-b border-neutral-900/50"
                 >
@@ -1790,8 +2002,25 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                   <td class="py-1 px-2 text-right text-fg-muted">
                     {{ formatChars(t.chars) }}
                   </td>
-                  <td class="py-1 pl-2 text-right text-amber-300/80">
+                  <td class="py-1 px-2 text-right text-amber-300/80">
                     {{ formatTokens(t.tokens) }}
+                  </td>
+                  <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400">
+                    {{ percentOfTotal(t.chars, promptBreakdownData.totalChars) }}
+                  </td>
+                </tr>
+                <tr class="border-t border-border">
+                  <td class="py-1 pr-2 text-fg-primary font-semibold">
+                    Total
+                  </td>
+                  <td class="py-1 px-2 text-right text-fg-primary font-semibold">
+                    {{ formatChars(toolSchemasAggregate.chars) }}
+                  </td>
+                  <td class="py-1 px-2 text-right text-amber-300 font-semibold">
+                    {{ formatTokens(toolSchemasAggregate.tokens) }}
+                  </td>
+                  <td class="py-1 pl-2 text-right text-emerald-700 dark:text-emerald-400 font-semibold">
+                    {{ percentOfTotal(toolSchemasAggregate.chars, promptBreakdownData.totalChars) }}
                   </td>
                 </tr>
               </tbody>
