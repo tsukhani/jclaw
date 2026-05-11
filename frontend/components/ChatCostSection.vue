@@ -331,6 +331,26 @@ const sortedPerModel = computed<FleetCostPerModel[]>(() => {
   return rows
 })
 
+// JCLAW-280: subscription per-model breakdown. Distinct from `paidPerModel`
+// because subscription rows have no per-row cost attribution (their cost
+// is the flat monthly fee surfaced in the strip above), so the table
+// drops the Cost column and shows only activity stats. Filters out
+// zero-turn entries — they shouldn't exist in `subscriptionBreakdown.perModel`
+// by construction but the filter guards against future edge cases.
+// Fixed sort: turn count descending, model name tie-break. The per-token
+// table's interactive sort is overkill here — subscription is a small set
+// (usually 1–2 models per provider) and the operator's question is
+// "what's running against my subscription," not "which is most expensive."
+const subscriptionPerModel = computed<FleetCostPerModel[]>(() => {
+  const items = subscriptionBreakdown.value.perModel
+    .filter(m => m.turnCount > 0)
+  items.sort((a, b) => {
+    if (a.turnCount !== b.turnCount) return b.turnCount - a.turnCount
+    return modelLabel(a).localeCompare(modelLabel(b))
+  })
+  return items
+})
+
 // Chart geometry. Horizontal bars: one per agent (or per model in chart
 // view). Width is proportional to cost share. Inline SVG, no library.
 // Same paid-only filter as the table — chart visualizes cost contribution,
@@ -635,6 +655,90 @@ defineExpose({ refresh })
               {{ subscriptionBreakdown.cached.toLocaleString() }}
             </div>
           </div>
+        </div>
+
+        <!-- Per-model breakdown for subscription activity. Drops the Cost
+             column (subscription has no per-row cost attribution — the
+             fee at the top is the total). Fixed sort by turn count
+             descending; interactive sort would be overkill on what's
+             usually a 1–2 model set per subscription provider. Only
+             rendered in the table view; chart view applies to per-token
+             cost contribution only. -->
+        <div
+          v-if="view === 'table' && subscriptionPerModel.length > 0"
+          class="overflow-x-auto border-t border-border"
+        >
+          <table class="w-full text-xs">
+            <thead class="text-fg-muted bg-muted/20">
+              <tr>
+                <th
+                  scope="col"
+                  class="text-left px-4 py-2 font-medium"
+                >
+                  Model
+                </th>
+                <th
+                  scope="col"
+                  class="text-right px-3 py-2 font-medium"
+                >
+                  Turns
+                </th>
+                <th
+                  scope="col"
+                  class="text-right px-3 py-2 font-medium"
+                >
+                  Prompt
+                </th>
+                <th
+                  scope="col"
+                  class="text-right px-3 py-2 font-medium"
+                >
+                  Completion
+                </th>
+                <th
+                  scope="col"
+                  class="text-right px-3 py-2 font-medium"
+                >
+                  Reasoning
+                </th>
+                <th
+                  scope="col"
+                  class="text-right px-3 py-2 font-medium"
+                >
+                  Cached
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="m in subscriptionPerModel"
+                :key="m.modelId"
+                class="border-t border-border"
+              >
+                <td class="px-4 py-2 font-mono text-fg-primary">
+                  <span
+                    v-if="m.modelProvider"
+                    class="text-fg-muted"
+                  >{{ m.modelProvider }}/</span>{{ m.modelId }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-primary">
+                  {{ m.turnCount.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  {{ m.prompt.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  {{ m.completion.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  {{ m.reasoning.toLocaleString() }}
+                </td>
+                <td class="px-3 py-2 text-right font-mono text-yellow-700 dark:text-yellow-400">
+                  {{ m.cached.toLocaleString() }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
