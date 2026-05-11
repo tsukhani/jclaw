@@ -629,7 +629,7 @@ defineExpose({ refresh })
            per-model table or chart below. -->
       <div
         v-if="hasSubscriptionSection"
-        class="border-b border-border mb-6"
+        class="border-b border-border mt-6 mb-6"
       >
         <div class="px-4 pt-3 pb-3 text-xs font-medium text-fg-muted uppercase tracking-wide">
           Subscription
@@ -973,7 +973,7 @@ defineExpose({ refresh })
            lines up vertically with the section Total rows above. -->
       <div
         v-if="hasPaidData || hasSubscriptionSection"
-        class="overflow-x-auto border-t border-border bg-muted/40"
+        class="overflow-x-auto border-t border-border bg-muted/40 mt-6"
       >
         <table class="w-full text-xs table-fixed">
           <tbody>
