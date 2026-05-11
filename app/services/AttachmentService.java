@@ -3,6 +3,7 @@ package services;
 import models.Agent;
 import models.Message;
 import models.MessageAttachment;
+import utils.TikaHolder;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -57,7 +58,7 @@ public final class AttachmentService {
         String sniffedMime;
         long sizeBytes;
         try {
-            sniffedMime = new org.apache.tika.Tika().detect(stagedFile);
+            sniffedMime = TikaHolder.TIKA.detect(stagedFile);
             sizeBytes = Files.size(stagedFile);
         } catch (IOException e) {
             throw new RuntimeException("Failed to inspect staged attachment: " + e.getMessage(), e);

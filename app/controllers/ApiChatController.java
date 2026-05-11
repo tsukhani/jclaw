@@ -5,7 +5,6 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import models.Agent;
 import models.Conversation;
-import org.apache.tika.Tika;
 import play.db.jpa.NoTransaction;
 import play.mvc.Controller;
 import play.mvc.SseStream;
@@ -25,6 +24,7 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static utils.GsonHolder.INSTANCE;
+import static utils.TikaHolder.TIKA;
 
 /**
  * Chat dispatch endpoints: sync send, SSE streaming, and file upload.
@@ -192,14 +192,6 @@ public class ApiChatController extends Controller {
     }
 
     private static final int MAX_UPLOAD_FILES = 5;
-
-    /**
-     * Shared Tika instance for server-side MIME sniffing. Tika is thread-safe
-     * once constructed and caches its detector config internally, so one
-     * process-wide instance avoids re-parsing the classpath mime-types tree
-     * per upload.
-     */
-    private static final Tika TIKA = new Tika();
 
     /**
      * POST /api/chat/upload — Multipart upload for chat attachments. JCLAW-25:

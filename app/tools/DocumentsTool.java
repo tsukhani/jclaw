@@ -14,6 +14,7 @@ import org.xml.sax.SAXException;
 import services.AgentService;
 import services.DocumentWriter;
 import services.OcrHealthProbe;
+import utils.TikaHolder;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -309,7 +310,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
                         .formatted(MAX_DOCUMENT_READ_BYTES, size);
             }
 
-            var parser = new AutoDetectParser();
+            var parser = TikaHolder.PARSER;
             var handler = new BodyContentHandler(MAX_DOCUMENT_TEXT_CHARS);
             var metadata = new Metadata();
             boolean ocrActive = ocrEnabled();
