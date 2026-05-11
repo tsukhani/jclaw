@@ -2159,6 +2159,14 @@ do_start_prod() {
     #     postmortem, then exit cleanly so a process manager can restart.
     #   - MaxDirectMemorySize: caps Netty off-heap buffer allocation so a
     #     leak here can't exhaust native memory unnoticed.
+    #   - io.netty.leakDetection.level=DISABLED: Netty defaults to SIMPLE,
+    #     which allocates an Exception (with captured stack) per sampled
+    #     ByteBuf (~1/128) to support leak diagnostics. Under sustained SSE
+    #     traffic this is ~100+ Exception allocs/sec of pure overhead — dev
+    #     mode keeps the default so handler authors catch forgotten
+    #     releases, prod turns it off. Must be a -D (JVM property): Netty
+    #     reads it once in ResourceLeakDetector's static initializer, so
+    #     setting it via application.conf is too late.
     #   - DNS TTLs: LLM providers rotate endpoints via DNS; 30 s positive
     #     TTL keeps us close to current, 0 s negative TTL prevents caching
     #     transient lookup failures indefinitely.
@@ -2189,6 +2197,7 @@ do_start_prod() {
         "-XX:HeapDumpPath=$SCRIPT_DIR/logs/heap-oom.hprof"
         "-XX:+ExitOnOutOfMemoryError"
         "-XX:MaxDirectMemorySize=256m"
+        "-Dio.netty.leakDetection.level=DISABLED"
         "-Dnetworkaddress.cache.ttl=30"
         "-Dnetworkaddress.cache.negative.ttl=0"
         "-Xlog:gc*:file=$SCRIPT_DIR/logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M"

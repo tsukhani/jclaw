@@ -302,12 +302,18 @@ EXPOSE 9443/udp
 # or pin both with `-e JCLAW_JVM_HEAP=4g`.
 #
 # JAVA_TOOL_OPTIONS is honored by the JVM and prepended to its argv — we
-# use it to inject heap flags without forking the bundle's `play`
-# launcher. The launcher itself sets -javaagent (framework jar),
-# -Dprecompiled=true, -Dapplication.path, -Dplay.id, classpath, and
-# execs play.server.Server directly. The launcher also auto-sources
-# certs/.env (so the entrypoint-generated PLAY_SECRET propagates) before
-# the exec.
+# use it to inject heap and prod-only system-property flags without
+# forking the bundle's `play` launcher. The launcher itself sets
+# -javaagent (framework jar), -Dprecompiled=true, -Dapplication.path,
+# -Dplay.id, classpath, and execs play.server.Server directly. The
+# launcher also auto-sources certs/.env (so the entrypoint-generated
+# PLAY_SECRET propagates) before the exec.
+#
+# io.netty.leakDetection.level=DISABLED: Netty's default (SIMPLE) allocates
+# an Exception with a captured stack per sampled ByteBuf for leak
+# diagnostics. Useful in dev (catches forgotten releases), pure overhead
+# in prod (~100+ Exception allocs/sec under sustained SSE traffic). The
+# Dockerfile is a prod-only artifact, so it's always set here.
 #
 # --https.port=9443 lights up the HTTPS listener (ALPN h2 + h3 over
 # QUIC) for which the entrypoint provisioned cert + key. The launcher
@@ -334,4 +340,4 @@ EXPOSE 9443/udp
 # is itself replaced by `bash ./play` (exec), which is itself replaced
 # by `java` (exec inside the launcher), so the signal chain is intact
 # end-to-end.
-CMD ["sh", "-c", "export JAVA_TOOL_OPTIONS=\"-Xms${JCLAW_JVM_XMS:-${JCLAW_JVM_HEAP:-512m}} -Xmx${JCLAW_JVM_XMX:-${JCLAW_JVM_HEAP:-2g}}\" && exec ./play run --%prod --https.port=${JCLAW_HTTPS_PORT:-9443}"]
+CMD ["sh", "-c", "export JAVA_TOOL_OPTIONS=\"-Xms${JCLAW_JVM_XMS:-${JCLAW_JVM_HEAP:-512m}} -Xmx${JCLAW_JVM_XMX:-${JCLAW_JVM_HEAP:-2g}} -Dio.netty.leakDetection.level=DISABLED\" && exec ./play run --%prod --https.port=${JCLAW_HTTPS_PORT:-9443}"]
