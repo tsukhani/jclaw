@@ -334,9 +334,10 @@ describe('ChatCostSection (JCLAW-28)', () => {
   })
 
   it('shows the all-free-tier empty state when no models contributed cost', async () => {
-    // Distinguished from "no data at all" — summary row is still
-    // populated, but the breakdown table is replaced with a clear message
-    // so the operator isn't confused by an empty table.
+    // Distinguished from "no data at all" — turns did happen, but the
+    // entire summary strip is suppressed (the section is about cost
+    // attribution; aggregating free-tier turns/tokens under "Total cost
+    // $0.00" was misleading). Only the empty-state message renders.
     registerEndpoint('/api/metrics/cost', () => ({
       since: '2026-04-10T00:00:00Z',
       rows: [
@@ -352,10 +353,10 @@ describe('ChatCostSection (JCLAW-28)', () => {
     })
     await flushPromises()
     expect(wrapper.text()).toContain('All turns in this window were on free-tier models')
-    // The summary row is still present (it's "what happened" not "what
-    // cost") so the activity count is still visible.
-    expect(wrapper.text()).toContain('Turns')
-    // No table rendered when there are no paid models.
+    // Summary strip suppressed: no Total cost / Turns / Prompt tokens labels.
+    expect(wrapper.text()).not.toContain('Total cost')
+    expect(wrapper.text()).not.toContain('Prompt tokens')
+    // No per-model breakdown table either.
     expect(wrapper.find('tbody tr').exists()).toBe(false)
   })
 

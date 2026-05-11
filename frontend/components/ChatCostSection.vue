@@ -455,8 +455,15 @@ defineExpose({ refresh })
     </div>
 
     <template v-else>
-      <!-- Aggregate summary row, always visible above the detail breakdown -->
-      <div class="px-4 py-3 grid grid-cols-2 sm:grid-cols-5 gap-3 border-b border-border bg-muted/30">
+      <!-- Aggregate summary row. Hidden when no paid model contributed —
+           every aggregate (cost, turns, tokens) would otherwise be a free-
+           tier figure under a section whose entire purpose is cost
+           attribution. The empty-state message below tells the operator
+           why, and is the only thing rendered in that case. -->
+      <div
+        v-if="hasPaidData"
+        class="px-4 py-3 grid grid-cols-2 sm:grid-cols-5 gap-3 border-b border-border bg-muted/30"
+      >
         <div>
           <div class="text-xs text-fg-muted mb-0.5">
             Total cost
@@ -499,13 +506,10 @@ defineExpose({ refresh })
         </div>
       </div>
 
-      <!--
-        All-free-tier empty state. The summary row above shows positive
-        turn counts, but no model contributed to billable cost — surface
-        the why explicitly so the operator isn't confused by an empty
-        breakdown. Different message and styling from the no-data state
-        (which short-circuits earlier in the v-else-if chain).
-      -->
+      <!-- All-free-tier empty state. The only thing rendered (after the
+           filter row) when no paid model contributed; the summary strip
+           above is suppressed because those aggregates would all be
+           free-tier counts under a cost-attribution section. -->
       <div
         v-if="!hasPaidData"
         class="px-4 py-6 text-center text-sm text-fg-muted"
