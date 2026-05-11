@@ -705,12 +705,16 @@ defineExpose({ refresh })
           v-if="view === 'table' && subscriptionPerModel.length > 0"
           class="overflow-x-auto border-t border-border"
         >
-          <table class="w-full text-xs">
+          <table class="w-full text-xs table-fixed">
             <thead class="text-fg-muted bg-muted/20">
               <tr>
+                <!-- Model column gets a fixed 1/4 share so the 6 stat columns
+                     auto-distribute the remaining 75% (12.5% each) under
+                     table-fixed. Same width on both per-model tables means
+                     their stat columns line up vertically. -->
                 <th
                   scope="col"
-                  class="text-left px-4 py-2 font-medium"
+                  class="text-left px-4 py-2 font-medium w-1/4"
                 >
                   Model
                 </th>
@@ -883,12 +887,12 @@ defineExpose({ refresh })
         v-else-if="hasPaidData && view === 'table'"
         class="overflow-x-auto"
       >
-        <table class="w-full text-xs">
+        <table class="w-full text-xs table-fixed">
           <thead class="text-fg-muted bg-muted/20">
             <tr>
               <th
                 scope="col"
-                class="text-left px-4 py-2 font-medium"
+                class="text-left px-4 py-2 font-medium w-1/4"
               >
                 <button
                   type="button"
