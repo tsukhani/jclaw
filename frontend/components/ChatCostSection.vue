@@ -753,8 +753,8 @@ defineExpose({ refresh })
                 <td class="px-3 py-2 text-right font-mono text-yellow-700 dark:text-yellow-400">
                   {{ m.cached.toLocaleString() }}
                 </td>
-                <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
-                  $0.00
+                <td class="px-3 py-2 text-right font-mono text-fg-muted">
+                  —
                 </td>
               </tr>
             </tbody>
