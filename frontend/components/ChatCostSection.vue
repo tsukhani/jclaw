@@ -631,7 +631,7 @@ defineExpose({ refresh })
         v-if="hasSubscriptionSection"
         class="border-b border-border"
       >
-        <div class="px-4 pt-3 pb-1 text-xs font-medium text-fg-muted uppercase tracking-wide">
+        <div class="px-4 pt-3 pb-3 text-xs font-medium text-fg-muted uppercase tracking-wide">
           Subscription
         </div>
         <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 bg-muted/30">
@@ -802,7 +802,7 @@ defineExpose({ refresh })
         v-if="hasPaidData"
         class="border-b border-border"
       >
-        <div class="px-4 pt-3 pb-1 text-xs font-medium text-fg-muted uppercase tracking-wide">
+        <div class="px-4 pt-3 pb-3 text-xs font-medium text-fg-muted uppercase tracking-wide">
           Per-token
         </div>
         <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 bg-muted/30">
@@ -1025,7 +1025,7 @@ defineExpose({ refresh })
         v-if="hasPaidData || hasSubscriptionSection"
         class="border-t border-border bg-muted/40"
       >
-        <div class="px-4 pt-3 pb-1 text-xs font-medium text-fg-muted uppercase tracking-wide">
+        <div class="px-4 pt-3 pb-3 text-xs font-medium text-fg-muted uppercase tracking-wide">
           Combined total
         </div>
         <div class="px-4 pb-3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
