@@ -10,6 +10,8 @@ import services.EventLogger;
 import services.Tx;
 import services.scanners.ScannerRegistry;
 
+import java.util.List;
+
 /**
  * Seeds default runtime configuration and default agent on first startup.
  * Only writes values that don't already exist.
@@ -23,6 +25,7 @@ public class DefaultConfigJob extends Job<Void> {
         seedProviders();
         seedToolConfig();
         seedDefaultAgent();
+        seedJClawApiTooling();
         seedDispatcherTuning();
         seedTranscription();
         agents.SkillLoader.syncSkillConfigs();
@@ -329,6 +332,90 @@ public class DefaultConfigJob extends Job<Void> {
      * except promotion, and the capability gate will reject promotion attempts
      * with an actionable error.
      */
+    /**
+     * JCLAW-282: bring up the in-process JClaw API tool. Three steps:
+     * <ol>
+     *   <li>Mint (or recover) the internal bearer token so {@code jclaw_api}
+     *       can authenticate against the same auth filter that gates
+     *       external clients.</li>
+     *   <li>Install the {@code jclaw-api} skill into {@code main}'s
+     *       workspace so it surfaces in main's {@code <available_skills>}
+     *       block. Other agents don't get the skill — its installation
+     *       location <em>is</em> the gating mechanism for which agents
+     *       can use it. {@link services.SkillPromotionService#copyToAgentWorkspace}
+     *       is idempotent.</li>
+     *   <li>Backfill {@link models.AgentToolConfig} rows so existing
+     *       non-main agents from earlier installs get the tool explicitly
+     *       disabled. New non-main agents pick up the same gate from
+     *       {@link AgentService#create}.</li>
+     * </ol>
+     */
+    private void seedJClawApiTooling() {
+        // Step 1: ensure the internal bearer token exists. The first
+        // call mints it; subsequent boots reuse the stored value.
+        services.InternalApiTokenService.token();
+
+        // Step 2: install the skill into main's workspace.
+        seedJClawApiSkillForMain();
+
+        // Step 3: backfill tool-disable rows for existing non-main agents.
+        backfillJClawApiDisableForNonMain();
+    }
+
+    /** Mirror of {@link #seedSkillCreatorForMain} for the jclaw-api skill.
+     *  Skipped silently if the global registry doesn't ship the skill —
+     *  the tool stays callable for any agent that has it allowlisted,
+     *  but main won't see the curated SKILL.md until an operator drops
+     *  it back in. */
+    private void seedJClawApiSkillForMain() {
+        var skillName = "jclaw-api";
+        var globalSkillMd = agents.SkillLoader.globalSkillsPath()
+                .resolve(skillName).resolve("SKILL.md");
+        if (!java.nio.file.Files.exists(globalSkillMd)) {
+            play.Logger.info("jclaw-api skill not present in global registry — skipping bootstrap");
+            return;
+        }
+        var main = Agent.findByName("main");
+        if (main == null) return;
+        try {
+            services.SkillPromotionService.copyToAgentWorkspace(main, skillName);
+            EventLogger.info("agent", "main", null,
+                    "jclaw-api skill installed for main agent (in-process API access seeded)");
+        } catch (java.io.IOException e) {
+            play.Logger.warn("Failed to bootstrap jclaw-api skill for main: %s", e.getMessage());
+        }
+    }
+
+    /** Existing non-main agents created before JCLAW-282 don't have a
+     *  disable row for {@code jclaw_api}, so the tool would be implicitly
+     *  enabled for them on first boot. Walk every agent once and add the
+     *  disable row where it's missing. Idempotent — only writes rows that
+     *  don't already exist, so re-runs at boot do nothing. */
+    private void backfillJClawApiDisableForNonMain() {
+        services.Tx.run(() -> {
+            List<Agent> all = Agent.findAll();
+            int patched = 0;
+            for (var agent : all) {
+                if (agent.isMain()) continue;
+                var existing = models.AgentToolConfig
+                        .find("agent = ?1 AND toolName = ?2",
+                                agent, tools.JClawApiTool.TOOL_NAME)
+                        .first();
+                if (existing != null) continue;
+                var row = new models.AgentToolConfig();
+                row.agent = agent;
+                row.toolName = tools.JClawApiTool.TOOL_NAME;
+                row.enabled = false;
+                row.save();
+                patched++;
+            }
+            if (patched > 0) {
+                EventLogger.info("agent",
+                        "Backfilled jclaw_api disable for %d non-main agent(s)".formatted(patched));
+            }
+        });
+    }
+
     private void seedSkillCreatorForMain() {
         var skillName = services.SkillPromotionService.SKILL_CREATOR_NAME;
         var globalSkillMd = agents.SkillLoader.globalSkillsPath()

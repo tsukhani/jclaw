@@ -32,8 +32,17 @@ public class ApiConfigController extends Controller {
 
     public record ConfigDeleteResponse(String status, String key) {}
 
+    /** True for any key the user must not see or mutate through the
+     *  Config API: the load-test reservation plus the
+     *  {@code auth.internal.*} prefix that {@link services.InternalApiTokenService}
+     *  uses for the auto-managed bearer token plaintext. The latter is
+     *  not just hidden but rejected outright on save/delete so an
+     *  operator typing the key by mistake gets a clear error instead
+     *  of breaking the in-process {@code jclaw_api} tool. */
     private static boolean isReservedKey(String key) {
-        return key != null && key.startsWith(RESERVED_KEY_PREFIX);
+        if (key == null) return false;
+        return key.startsWith(RESERVED_KEY_PREFIX)
+                || key.startsWith(services.InternalApiTokenService.INTERNAL_KEY_PREFIX);
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigListResponse.class)))
