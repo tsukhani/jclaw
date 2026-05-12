@@ -1,6 +1,11 @@
 package channels;
 
 import services.EventLogger;
+import utils.RetryScheduler;
+
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Contract for outbound message delivery to an external channel. Each implementation
@@ -45,18 +50,27 @@ public interface Channel {
      * is taken from the prior {@link SendResult#retryAfterMs()} when non-zero,
      * or 1 s otherwise, capped at 60 s so a buggy platform response can't stall
      * an agent response indefinitely.
+     *
+     * <p>The retry is scheduled via {@link RetryScheduler} on a platform-thread
+     * carrier so a virtual-thread caller (the agent dispatch path) unmounts
+     * cleanly during the wait — avoiding JDK-8373224 FJP starvation that
+     * direct {@code Thread.sleep} on many concurrent VTs would trigger.
      */
     default boolean sendWithRetry(String peerId, String text) {
         SendResult result = trySend(peerId, text);
         if (result.ok()) return true;
         long delayMs = Math.min(result.retryAfterMs() > 0 ? result.retryAfterMs() : 1000L, 60_000L);
         try {
-            Thread.sleep(delayMs);
+            // 5 s slack covers the scheduler hop + the second trySend's own latency.
+            boolean ok = RetryScheduler.schedule(() -> trySend(peerId, text).ok(), delayMs)
+                    .get(delayMs + 5_000L, TimeUnit.MILLISECONDS);
+            if (ok) return true;
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return false;
+        } catch (ExecutionException | TimeoutException _) {
+            // Fall through to the error-log branch below.
         }
-        if (trySend(peerId, text).ok()) return true;
         EventLogger.error("channel", null, channelName(),
                 "Failed to send message to %s after retries".formatted(peerId));
         return false;
