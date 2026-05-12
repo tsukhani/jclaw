@@ -55,8 +55,13 @@ public class McpClient implements AutoCloseable {
     private final ConcurrentHashMap<Object, CompletableFuture<JsonRpc.Response>> pending = new ConcurrentHashMap<>();
     private final AtomicReference<State> state = new AtomicReference<>(State.DISCONNECTED);
 
+    // Reassigned with List.copyOf(...) / List.of(); the held list is immutable
+    // so volatile-on-reference is sufficient publication.
+    @SuppressWarnings("java:S3077")
     private volatile List<McpToolDef> cachedTools = List.of();
     private volatile String lastError;
+    // Reassigned with a stateless Consumer; volatile-on-reference is sufficient.
+    @SuppressWarnings("java:S3077")
     private volatile Consumer<List<McpToolDef>> onToolsChanged = (tools) -> {};
 
     public McpClient(String name, McpTransport transport, String clientVersion) {

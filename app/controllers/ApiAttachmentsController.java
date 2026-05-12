@@ -23,7 +23,7 @@ public class ApiAttachmentsController extends Controller {
      *  attachment. */
     public static void download(String uuid) {
         var att = MessageAttachment.findByUuid(uuid);
-        if (att == null) notFound();
+        if (att == null) { notFound(); return; }
 
         // storagePath is workspace-relative and looks like
         // "<agentName>/attachments/<conversationId>/<uuid>.<ext>". Strip the

@@ -206,6 +206,7 @@ public class ApiChatController extends Controller {
 
         if (files == null || files.length == 0) {
             error(400, "No files uploaded");
+            return;
         }
         int maxFiles = services.UploadLimits.maxFiles();
         if (files.length > maxFiles) {

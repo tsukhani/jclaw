@@ -429,7 +429,7 @@ export function computeFleetCost(
 export function listChannelsInRows(rows: FleetCostRow[]): string[] {
   const set = new Set<string>()
   for (const r of rows) set.add(r.channelType)
-  return Array.from(set).sort()
+  return Array.from(set).sort((a, b) => a.localeCompare(b))
 }
 
 /** Format dollar amount with the same convention as formatUsageCost. */

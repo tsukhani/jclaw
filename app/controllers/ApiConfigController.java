@@ -55,6 +55,7 @@ public class ApiConfigController extends Controller {
         var config = models.Config.findByKey(key);
         if (config == null) {
             notFound();
+            return;
         }
         renderJSON(gson.toJson(new ConfigEntry(
                 config.key,

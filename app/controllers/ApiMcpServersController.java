@@ -57,7 +57,7 @@ public class ApiMcpServersController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServer.class)))
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) { badRequest(); return; }
 
         var name = readRequiredString(body, "name");
         if (McpServer.findByName(name) != null) {
@@ -86,7 +86,7 @@ public class ApiMcpServersController extends Controller {
     public static void update(Long id) {
         var row = requireServer(id);
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) { badRequest(); return; }
 
         // Renaming is allowed; if it happens we tear down the prior connection
         // (under the OLD name) before re-syncing under the new one. Otherwise
@@ -150,8 +150,9 @@ public class ApiMcpServersController extends Controller {
 
     private static McpServer requireServer(Long id) {
         var row = (McpServer) McpServer.findById(id);
-        if (row == null) notFound();
-        return row;
+        if (row != null) return row;
+        notFound();
+        throw new AssertionError("notFound() did not throw");
     }
 
     private static String readRequiredString(com.google.gson.JsonObject body, String key) {
