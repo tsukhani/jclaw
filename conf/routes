@@ -18,6 +18,13 @@ POST    /api/auth/login                         ApiAuthController.login
 POST    /api/auth/logout                        ApiAuthController.logout
 POST    /api/auth/reset-password                ApiAuthController.resetPassword
 
+# API Tokens (JCLAW-282) — bearer-auth credentials for the JClaw MCP server
+# and any other out-of-process API client. Session-only at the CRUD layer
+# (see ApiTokensController.requireSessionAuth).
+GET     /api/api-tokens                         ApiTokensController.list
+POST    /api/api-tokens                         ApiTokensController.mint
+DELETE  /api/api-tokens/{id}                    ApiTokensController.revoke
+
 # Onboarding API
 GET     /api/onboarding/tour-status             ApiOnboardingController.status
 POST    /api/onboarding/tour-progress           ApiOnboardingController.recordProgress

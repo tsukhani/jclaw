@@ -429,3 +429,26 @@ export interface McpTestResult {
   message: string
   toolNames: string[]
 }
+
+/**
+ * API token row (JCLAW-282). Bearer credentials for the JClaw MCP
+ * server and any out-of-process API client.
+ *
+ * `plaintext` is populated exactly once — on the mint response — and
+ * is `null` on every subsequent listing. The frontend must surface it
+ * immediately in a copy-once modal because there is no recovery path
+ * if the operator misses it.
+ */
+export interface ApiToken {
+  id: number
+  name: string
+  /** Short non-secret fragment for the listing UI ('jcl_xxxxxxxx'). */
+  displayPrefix: string
+  scope: 'READ_ONLY' | 'FULL'
+  ownerUsername: string
+  createdAt: string
+  lastUsedAt: string | null
+  revokedAt: string | null
+  /** The full bearer string. Only populated on mint; null on list. */
+  plaintext: string | null
+}
