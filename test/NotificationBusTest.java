@@ -129,4 +129,51 @@ public class NotificationBusTest extends UnitTest {
         // Should complete without error even if no subscribers exist
         NotificationBus.publish("orphan.event", Map.of("lonely", "true"));
     }
+
+    // --- per-listener timeout: slow listener is auto-removed, fast listener still receives ---
+
+    @Test
+    public void slowListenerIsRemovedAndFastListenerStillReceives() throws Exception {
+        int before = NotificationBus.listenerCount();
+
+        var received = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        // Fast listener: records the event. Tracked via @AfterEach cleanup.
+        subscribe(received::add);
+
+        // Slow listener: sleeps well past the per-listener timeout. Tracked too — even though
+        // publish() will remove it, the unsubscribe handle is a safe no-op if already gone.
+        var slowEntered = new java.util.concurrent.CountDownLatch(1);
+        subscribe(msg -> {
+            slowEntered.countDown();
+            try {
+                Thread.sleep(NotificationBus.LISTENER_TIMEOUT_MS + 2_000L);
+            } catch (InterruptedException _) {
+                // Future.cancel(true) interrupts us — expected.
+                Thread.currentThread().interrupt();
+            }
+        });
+
+        assertEquals(before + 2, NotificationBus.listenerCount(),
+                "Both listeners should be subscribed before publish");
+
+        var publishStart = System.currentTimeMillis();
+        NotificationBus.publish("timeout.test", Map.of("k", "v"));
+        var publishElapsed = System.currentTimeMillis() - publishStart;
+
+        // Fast listener received the event.
+        assertEquals(1, received.size(), "Fast listener should have received the event");
+        assertTrue(received.getFirst().contains("timeout.test"));
+
+        // Slow listener was entered (i.e., dispatch happened) and removed after timeout.
+        assertTrue(slowEntered.await(1, java.util.concurrent.TimeUnit.SECONDS),
+                "Slow listener should have been invoked");
+
+        // Slow listener should now be gone; fast listener remains.
+        assertEquals(before + 1, NotificationBus.listenerCount(),
+                "Slow listener should have been removed after exceeding the timeout");
+
+        // Total publish time was bounded by the timeout, not by the slow listener's sleep.
+        assertTrue(publishElapsed < NotificationBus.LISTENER_TIMEOUT_MS + 1_000L,
+                "publish() should not block past the per-listener timeout (elapsed=" + publishElapsed + "ms)");
+    }
 }
