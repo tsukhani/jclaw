@@ -255,7 +255,10 @@ public class SystemPromptAssembler {
         if (!mcpCatalog.isEmpty()) {
             b.startSection("MCP Servers");
             b.sb.append("\n## MCP Servers\n");
-            b.sb.append("MCP-connected servers exposed as parameterized tools. Each server is one entry in your function-calling schema: call `mcp_<server>` with no arguments to enumerate the server's available actions and their input schemas, then call again with `{\"tool\": \"<action>\", \"args\": {...}}` to execute one.\n\n");
+            b.sb.append("MCP servers are a separate capability category from tools. ");
+            b.sb.append("When the user asks about your tools, list only entries from the Tool Catalog above — do not include the entries below. ");
+            b.sb.append("When the user asks about MCP servers (or asks what external systems you can reach), describe the entries below.\n\n");
+            b.sb.append("To invoke an MCP server, call `mcp_<server>` with no arguments to enumerate the server's available actions and their input schemas, then call again with `{\"tool\": \"<action>\", \"args\": {...}}` to execute one.\n\n");
             b.sb.append(mcpCatalog);
             b.sb.append("\n");
         }
