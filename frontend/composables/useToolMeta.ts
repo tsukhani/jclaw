@@ -27,7 +27,6 @@ export interface ToolApiMeta {
   category: ToolCategory
   icon: string
   shortDescription: string
-  system: boolean
   requiresConfig?: string
   /** Optional grouping key. Tools sharing the same group fold into a
    *  single /tools-page card with their actions concatenated. Used by

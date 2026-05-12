@@ -27,7 +27,10 @@ public class LoadTestSleepTool implements ToolRegistry.Tool {
     @Override public String shortDescription() {
         return "Internal load-testing sleep tool — not surfaced in the admin UI.";
     }
-    @Override public boolean isSystem() { return true; }
+    // JCLAW-281: isSystem mechanism deleted. This tool is gated by
+    // conditional registration in ToolRegistrationJob (only registered
+    // when provider.loadtest-mock.enabled=true), so it's not visible to
+    // operators in normal runs regardless.
 
     @Override public String description() {
         return "Load-test fixture: sleeps the current thread for the given "

@@ -23,12 +23,15 @@ public class ApiToolsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
-    public record ToolListEntry(String name, String description, boolean system) {}
+    // JCLAW-281: the `system` boolean is gone — there are no system tools
+    // any more (list_mcp_tools deleted, loadtest_sleep gated by conditional
+    // registration). The field is removed from every entry record.
+    public record ToolListEntry(String name, String description) {}
 
     public record ToolMetaEntry(String name, String category, String icon, String shortDescription,
-                                boolean system, String requiresConfig, String group, List<agents.ToolAction> actions) {}
+                                String requiresConfig, String group, List<agents.ToolAction> actions) {}
 
-    public record AgentToolEntry(String name, String description, boolean system, String group, boolean enabled) {}
+    public record AgentToolEntry(String name, String description, String group, boolean enabled) {}
 
     public record ToolToggleRequest(boolean enabled) {}
 
@@ -42,7 +45,7 @@ public class ApiToolsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ToolListEntry.class))))
     public static void list() {
         var result = ToolRegistry.listTools().stream()
-                .map(t -> new ToolListEntry(t.name(), t.description(), t.isSystem()))
+                .map(t -> new ToolListEntry(t.name(), t.description()))
                 .toList();
         renderJSON(gson.toJson(result));
     }
@@ -65,7 +68,6 @@ public class ApiToolsController extends Controller {
                         t.category(),
                         t.icon(),
                         t.shortDescription(),
-                        t.isSystem(),
                         t.requiresConfig(),
                         t.group(),
                         t.actions()))
@@ -79,7 +81,7 @@ public class ApiToolsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = AgentToolEntry.class))))
     public static void listForAgent(Long id) {
         Agent agent = Agent.findById(id);
-        if (agent == null) notFound();
+        if (agent == null) { notFound(); return; }
 
         var allTools = ToolRegistry.listTools();
         var configs = AgentToolConfig.findByAgent(agent);
@@ -96,8 +98,8 @@ public class ApiToolsController extends Controller {
 
         var result = allTools.stream().map(t -> {
             boolean defaultEnabled = t.group() == null || isMain;
-            boolean enabled = t.isSystem() || configMap.getOrDefault(t.name(), defaultEnabled);
-            return new AgentToolEntry(t.name(), t.description(), t.isSystem(), t.group(), enabled);
+            boolean enabled = configMap.getOrDefault(t.name(), defaultEnabled);
+            return new AgentToolEntry(t.name(), t.description(), t.group(), enabled);
         }).toList();
         renderJSON(gson.toJson(result));
     }
@@ -115,11 +117,8 @@ public class ApiToolsController extends Controller {
         if (body == null || !body.has("enabled")) badRequest();
         var enabled = body.get("enabled").getAsBoolean();
 
-        // System tools cannot be disabled — they are always available to the agent.
-        var tool = ToolRegistry.listTools().stream().filter(t -> t.name().equals(name)).findFirst();
-        if (tool.isPresent() && tool.get().isSystem() && !enabled) {
-            error(403, "System tool '%s' cannot be disabled.".formatted(name));
-        }
+        // JCLAW-281: no system-tier tools any more; every registered tool is
+        // toggleable by the operator.
 
         var config = AgentToolConfig.findByAgentAndTool(agent, name);
         if (config == null) {
@@ -152,10 +151,10 @@ public class ApiToolsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ToolGroupToggleResponse.class)))
     public static void updateGroupForAgent(Long id, String group) {
         Agent agent = Agent.findById(id);
-        if (agent == null) notFound();
+        if (agent == null) { notFound(); return; }
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has("enabled")) badRequest();
+        if (body == null || !body.has("enabled")) { badRequest(); return; }
         var enabled = body.get("enabled").getAsBoolean();
 
         var members = ToolRegistry.listTools().stream()
@@ -164,10 +163,6 @@ public class ApiToolsController extends Controller {
         if (members.isEmpty()) notFound();
 
         for (var tool : members) {
-            // System tools cannot be disabled; ignore them inside a group rather
-            // than failing the bulk call (lets a future "system" group still toggle
-            // its non-system members cleanly).
-            if (tool.isSystem() && !enabled) continue;
             var config = AgentToolConfig.findByAgentAndTool(agent, tool.name());
             if (config == null) {
                 config = new AgentToolConfig();

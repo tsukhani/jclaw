@@ -152,7 +152,6 @@ const toolsByCategory = computed(() => {
   return categories
     .map((category) => {
       const inCategory = agentTools.value
-        .filter(t => !TOOL_META.value[t.name]?.system)
         .filter(t => (TOOL_META.value[t.name]?.category ?? 'Utilities') === category)
       // Fold tools that share a `group` (MCP) into one row; emit single-tool
       // rows for everything else. Preserves first-appearance order within
@@ -577,9 +576,10 @@ async function toggleToolGroup(group: string, enabled: boolean) {
   }
 }
 
-const toggleableAgentTools = computed(() =>
-  agentTools.value.filter(t => !TOOL_META.value[t.name]?.system),
-)
+// JCLAW-281: every tool is operator-toggleable now (the system flag is gone),
+// so the filter is a pure pass-through. Kept as a named computed for symmetry
+// with the rest of the page rather than removing its call sites.
+const toggleableAgentTools = computed(() => agentTools.value)
 
 const allAgentToolsEnabled = computed(() =>
   toggleableAgentTools.value.length > 0 && toggleableAgentTools.value.every(t => t.enabled),

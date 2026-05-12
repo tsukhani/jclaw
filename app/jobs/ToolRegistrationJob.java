@@ -36,12 +36,10 @@ public class ToolRegistrationJob extends Job<Void> {
         // them from any agent that doesn't want them.
         toolList.add(new PlaywrightBrowserTool());
         toolList.add(new ShellExecTool());
-        // Discovery entrypoint for MCP tools — always registered so the
-        // model can issue list_mcp_tools(server) even before any MCP
-        // server has connected. After a successful call, the server's
-        // tool schemas become callable for the rest of the conversation
-        // (gated by ToolRegistry.getToolDefsForAgent + McpDiscovery).
-        toolList.add(new ListMcpToolsTool());
+        // JCLAW-281: list_mcp_tools is gone. Discovery is folded into each
+        // MCP server's own surface — the model calls mcp_<server> with
+        // empty args to enumerate that server's actions, registered by
+        // McpConnectionManager.republishTools.
         if ("true".equals(services.ConfigService.get("provider.loadtest-mock.enabled"))) {
             toolList.add(new LoadTestSleepTool());
         }

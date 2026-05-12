@@ -1,25 +1,18 @@
 import agents.ToolRegistry;
-import com.google.gson.JsonObject;
-import mcp.McpDiscovery;
 import models.Agent;
-import models.Message;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 /**
- * Verifies the JCLAW-281 MCP-server function-calling contract:
+ * JCLAW-281: verifies the function-calling filter contract for MCP servers.
  *
  * <ul>
- *   <li>{@link McpDiscovery#discoveredServers(List)} continues to extract
- *       the {@code server} argument from prior {@code list_mcp_tools}
- *       tool calls — kept for legacy conversation replay.</li>
  *   <li>{@link ToolRegistry#getToolDefsForAgent(Agent, Set)} hides every
  *       per-action MCP wrapper (group set, not server-level) from the
  *       function-calling defs unconditionally — the server-level handle
@@ -31,6 +24,10 @@ import java.util.Set;
  *       empty args — discovery is built into the server-level surface
  *       itself, no separate {@code list_mcp_tools} tool needed.</li>
  * </ul>
+ *
+ * <p>Pre-JCLAW-281 this file also covered {@code McpDiscovery}'s parser
+ * for prior {@code list_mcp_tools} calls in conversation history; that
+ * class is gone now, so the parser tests went with it.
  */
 public class McpDiscoveryTest extends UnitTest {
 
@@ -45,64 +42,6 @@ public class McpDiscoveryTest extends UnitTest {
     public void restoreRegistry() {
         ToolRegistry.publish(originalTools);
     }
-
-    // ==================== McpDiscovery — pure parsing ====================
-
-    @Test
-    public void discoveredServersIsEmptyForBlankHistory() {
-        assertTrue(McpDiscovery.discoveredServers(List.<Message>of()).isEmpty());
-        assertTrue(McpDiscovery.discoveredServers((List<Message>) null).isEmpty());
-    }
-
-    @Test
-    public void discoveredServersIgnoresUserAndToolRoles() {
-        var msgs = new ArrayList<Message>();
-        msgs.add(messageWithToolCalls("user", "[]"));
-        msgs.add(messageWithToolCalls("tool", listMcpToolsCall("jira")));
-        assertTrue(McpDiscovery.discoveredServers(msgs).isEmpty());
-    }
-
-    @Test
-    public void discoveredServersExtractsServerNameFromAssistantToolCalls() {
-        var msgs = new ArrayList<Message>();
-        msgs.add(messageWithToolCalls("assistant", listMcpToolsCall("jira-confluence")));
-        var found = McpDiscovery.discoveredServers(msgs);
-        assertEquals(1, found.size());
-        assertTrue(found.contains("jira-confluence"));
-    }
-
-    @Test
-    public void discoveredServersAccumulatesAcrossMultipleCalls() {
-        var msgs = new ArrayList<Message>();
-        msgs.add(messageWithToolCalls("assistant", listMcpToolsCall("jira-confluence")));
-        msgs.add(messageWithToolCalls("user", null));
-        msgs.add(messageWithToolCalls("assistant", listMcpToolsCall("github")));
-        var found = McpDiscovery.discoveredServers(msgs);
-        assertEquals(2, found.size());
-        assertTrue(found.contains("jira-confluence"));
-        assertTrue(found.contains("github"));
-    }
-
-    @Test
-    public void discoveredServersIgnoresOtherToolNames() {
-        var msgs = new ArrayList<Message>();
-        msgs.add(messageWithToolCalls("assistant", toolCallJson("filesystem", "{\"path\":\"a\"}")));
-        msgs.add(messageWithToolCalls("assistant", toolCallJson("web_search", "{\"q\":\"x\"}")));
-        assertTrue(McpDiscovery.discoveredServers(msgs).isEmpty());
-    }
-
-    @Test
-    public void discoveredServersToleratesMalformedJson() {
-        var msgs = new ArrayList<Message>();
-        msgs.add(messageWithToolCalls("assistant", "not json"));
-        msgs.add(messageWithToolCalls("assistant", "[]"));
-        msgs.add(messageWithToolCalls("assistant", listMcpToolsCall("jira")));
-        var found = McpDiscovery.discoveredServers(msgs);
-        assertEquals(1, found.size());
-        assertTrue(found.contains("jira"));
-    }
-
-    // ==================== ToolRegistry function-calling filter (JCLAW-281) ====================
 
     @Test
     public void perActionMcpWrappersAreHiddenFromFunctionCallingDefs() {
@@ -156,30 +95,6 @@ public class McpDiscoveryTest extends UnitTest {
     }
 
     // ==================== helpers ====================
-
-    private static Message messageWithToolCalls(String role, String toolCallsJson) {
-        var m = new Message();
-        m.role = role;
-        m.toolCalls = toolCallsJson;
-        return m;
-    }
-
-    private static String listMcpToolsCall(String server) {
-        return toolCallJson("list_mcp_tools", "{\"server\":\"" + server + "\"}");
-    }
-
-    private static String toolCallJson(String name, String argsJson) {
-        // OpenAI shape: arguments is itself a JSON-encoded string.
-        var fn = new JsonObject();
-        fn.addProperty("name", name);
-        fn.addProperty("arguments", argsJson);
-        var call = new JsonObject();
-        call.addProperty("id", "call_" + name);
-        call.add("function", fn);
-        var arr = new com.google.gson.JsonArray();
-        arr.add(call);
-        return arr.toString();
-    }
 
     private static ToolRegistry.Tool stubTool(String name, String group) {
         return new ToolRegistry.Tool() {

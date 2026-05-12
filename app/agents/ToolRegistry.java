@@ -60,11 +60,6 @@ public class ToolRegistry {
          *  details as top-level tool names. */
         default String summary() { return description(); }
 
-        /** System tools are always available, cannot be disabled by users, and are
-         *  hidden from the system prompt's tool catalog (the LLM can still invoke
-         *  them via the tool schema — they just aren't advertised to users). */
-        default boolean isSystem() { return false; }
-
         /** Taxonomy bucket used to group tools in the system-prompt Tool Catalog.
          *  Must be one of {@code "System"}, {@code "Files"}, {@code "Web"},
          *  {@code "Utilities"} — matching the {@code CANONICAL_CATEGORY_ORDER}
@@ -337,7 +332,10 @@ public class ToolRegistry {
      * new design folds that bootstrap into every server's own surface.
      */
     public static List<ToolDef> getToolDefsForAgent(Agent agent, models.Conversation conv) {
-        return getToolDefsForAgent(agent, mcp.McpDiscovery.discoveredServers(conv));
+        // JCLAW-281: discoveredMcpServers no longer drives filtering, but
+        // the overload is kept so callers don't need to track which
+        // signature to use. Just delegates with an empty set.
+        return getToolDefsForAgent(agent, java.util.Set.<String>of());
     }
 
     /**
@@ -423,16 +421,10 @@ public class ToolRegistry {
             var configs = AgentToolConfig.findByAgent(agent);
             var explicitState = new HashMap<String, Boolean>();
             for (var c : configs) explicitState.put(c.toolName, c.enabled);
-            // Snapshot of which currently-registered tools are system-tier so
-            // a stale AgentToolConfig row (e.g., for a tool that was later
-            // promoted to system status) can't hide a structural tool.
-            var systemNames = new HashSet<String>();
-            for (var t : tools.values()) if (t.isSystem()) systemNames.add(t.name());
 
             var disabled = new HashSet<String>();
             for (var entry : explicitState.entrySet()) {
                 if (entry.getValue()) continue;
-                if (systemNames.contains(entry.getKey())) continue;  // system tools cannot be hidden
                 disabled.add(entry.getKey());
             }
             // MCP tools default-disabled for non-main agents (operator opts-in

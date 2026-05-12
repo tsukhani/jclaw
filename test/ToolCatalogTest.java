@@ -29,10 +29,10 @@ public class ToolCatalogTest extends UnitTest {
     @Test
     public void catalogGroupsToolsByCanonicalCategoryOrder() {
         ToolRegistry.publish(List.of(
-                stubTool("notes",   "Utilities", "Keep notes",              false),
-                stubTool("grep",    "Files",     "Search files",            false),
-                stubTool("curl",    "Web",       "Fetch a URL",             false),
-                stubTool("sudo",    "System",    "Elevated shell commands", false)
+                stubTool("notes",   "Utilities", "Keep notes"),
+                stubTool("grep",    "Files",     "Search files"),
+                stubTool("curl",    "Web",       "Fetch a URL"),
+                stubTool("sudo",    "System",    "Elevated shell commands")
         ));
 
         var catalog = ToolCatalog.formatCatalogForPrompt(Set.of());
@@ -57,23 +57,26 @@ public class ToolCatalogTest extends UnitTest {
     }
 
     @Test
-    public void catalogExcludesSystemTools() {
+    public void catalogExcludesGroupedToolsBecauseTheyOwnTheirOwnSection() {
+        // JCLAW-281: MCP servers (and any other grouped tool source) render
+        // in their own ## MCP Servers section via McpServerCatalog, so the
+        // ## Tool Catalog is native-only.
         ToolRegistry.publish(List.of(
-                stubTool("notes",        "Utilities", "Keep notes",      false),
-                stubTool("introspector", "Utilities", "Internal lookup", true)
+                stubTool("notes",   "Utilities", "Keep notes"),
+                stubMcpTool("mcp_jira_get_issue", "jira", "Look up an issue")
         ));
 
         var catalog = ToolCatalog.formatCatalogForPrompt(Set.of());
 
-        assertTrue(catalog.contains("notes"), "non-system tool appears");
-        assertFalse(catalog.contains("introspector"), "isSystem()=true tool is filtered out");
+        assertTrue(catalog.contains("notes"), "native tool appears");
+        assertFalse(catalog.contains("mcp_jira_get_issue"), "grouped tool excluded from Tool Catalog");
     }
 
     @Test
     public void catalogSkipsDisabledTools() {
         ToolRegistry.publish(List.of(
-                stubTool("allowed",  "Utilities", "Allowed tool",  false),
-                stubTool("disabled", "Utilities", "Disabled tool", false)
+                stubTool("allowed",  "Utilities", "Allowed tool"),
+                stubTool("disabled", "Utilities", "Disabled tool")
         ));
 
         var catalog = ToolCatalog.formatCatalogForPrompt(Set.of("disabled"));
@@ -83,9 +86,9 @@ public class ToolCatalogTest extends UnitTest {
     }
 
     @Test
-    public void catalogIsEmptyStringWhenNothingToShow() {
+    public void catalogIsEmptyStringWhenOnlyGroupedToolsAreRegistered() {
         ToolRegistry.publish(List.of(
-                stubTool("only-system", "Utilities", "Internal tool", true)
+                stubMcpTool("mcp_jira_get_issue", "jira", "Look up an issue")
         ));
         assertEquals("", ToolCatalog.formatCatalogForPrompt(Set.of()));
     }
@@ -111,33 +114,13 @@ public class ToolCatalogTest extends UnitTest {
     }
 
     @Test
-    public void mcpToolsCollapseToOneRowPerServer() {
-        // 3 tools from one MCP server. Each one would normally render as its
-        // own row; the catalog should fold them into a single server row.
+    public void groupedToolsAreFullyExcludedFromNativeCatalog() {
+        // JCLAW-281: MCP-style grouped tools no longer collapse into a
+        // wildcard row in this catalog — they render in their own ## MCP
+        // Servers section via McpServerCatalog. Native tools render here
+        // unchanged.
         ToolRegistry.publish(List.of(
-                stubMcpTool("mcp_jira_get_issue",    "jira", "Look up an issue"),
-                stubMcpTool("mcp_jira_create_issue", "jira", "Create an issue"),
-                stubMcpTool("mcp_jira_search",       "jira", "Search via JQL")
-        ));
-
-        var catalog = ToolCatalog.formatCatalogForPrompt(Set.of());
-
-        // One row per server (not per tool): the wildcard placeholder shows
-        // up exactly once and the individual tool names do NOT appear in the
-        // catalog body.
-        assertTrue(catalog.contains("`mcp_jira_*`"), "server-level wildcard row present");
-        assertTrue(catalog.contains("3 tools advertised"), "tool count surfaced");
-        assertTrue(catalog.contains("list_mcp_tools"), "discovery hint present");
-        assertFalse(catalog.contains("get_issue"), "individual tool name suppressed: " + catalog);
-        assertFalse(catalog.contains("create_issue"), "individual tool name suppressed: " + catalog);
-        assertFalse(catalog.contains("Search via JQL"), "individual tool description suppressed");
-    }
-
-    @Test
-    public void mcpAndNativeToolsCoexistCleanly() {
-        // A native tool keeps its own row; an MCP server with two tools folds.
-        ToolRegistry.publish(List.of(
-                stubTool("filesystem", "Files", "Read and write files", false),
+                stubTool("filesystem", "Files", "Read and write files"),
                 stubMcpTool("mcp_jira_get_issue",    "jira", "Look up an issue"),
                 stubMcpTool("mcp_jira_create_issue", "jira", "Create an issue")
         ));
@@ -145,17 +128,16 @@ public class ToolCatalogTest extends UnitTest {
         var catalog = ToolCatalog.formatCatalogForPrompt(Set.of());
 
         assertTrue(catalog.contains("`filesystem`"), "native tool row preserved");
-        assertTrue(catalog.contains("`mcp_jira_*`"), "MCP server row present");
-        assertTrue(catalog.contains("2 tools advertised"));
+        assertFalse(catalog.contains("mcp_jira"),
+                "grouped tools completely absent (their section is built by McpServerCatalog)");
     }
 
-    private static ToolRegistry.Tool stubTool(String name, String category, String summary, boolean system) {
+    private static ToolRegistry.Tool stubTool(String name, String category, String summary) {
         return new ToolRegistry.Tool() {
             @Override public String name() { return name; }
             @Override public String description() { return summary; }
             @Override public String summary() { return summary; }
             @Override public String category() { return category; }
-            @Override public boolean isSystem() { return system; }
             @Override public Map<String, Object> parameters() { return Map.of(); }
             @Override public String execute(String argsJson, models.Agent agent) { return ""; }
         };
@@ -168,7 +150,6 @@ public class ToolCatalogTest extends UnitTest {
             @Override public String summary() { return summary; }
             @Override public String category() { return "MCP"; }
             @Override public String group() { return server; }
-            @Override public boolean isSystem() { return false; }
             @Override public Map<String, Object> parameters() { return Map.of(); }
             @Override public String execute(String argsJson, models.Agent agent) { return ""; }
         };

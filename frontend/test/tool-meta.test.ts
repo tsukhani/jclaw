@@ -11,7 +11,6 @@ const FIXTURE_META = [
     category: 'System',
     icon: 'terminal',
     shortDescription: 'Execute shell commands on the host system.',
-    system: false,
     actions: [{ name: 'exec', description: 'Run a shell command' }],
   },
   {
@@ -19,18 +18,16 @@ const FIXTURE_META = [
     category: 'Web',
     icon: 'globe',
     shortDescription: 'Fetch any URL.',
-    system: false,
     actions: [{ name: 'fetch (text)', description: 'Extract text' }],
   },
   {
-    // Stand-in system tool for the fixture. Doesn't need to match any real
-    // registered tool — the test exercises the composable's handling of a
-    // system=true entry (pill colors etc.), not a specific tool name.
+    // Stand-in utility tool for the fixture — exercises the composable's
+    // handling of a generic Utilities-category entry (pill colors etc.),
+    // not a specific tool name.
     name: 'introspect',
     category: 'Utilities',
     icon: 'wrench',
-    shortDescription: 'Stub system tool used only by this fixture.',
-    system: true,
+    shortDescription: 'Stub utility tool used only by this fixture.',
     actions: [{ name: 'inspect', description: 'Inspect something' }],
   },
 ]

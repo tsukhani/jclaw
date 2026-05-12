@@ -111,7 +111,7 @@ const allCards = computed<ToolCard[]>(() => {
   const cards: ToolCard[] = []
   for (const name of ORDERED_TOOLS.value) {
     const meta = TOOL_META.value[name]
-    if (!meta || meta.system) continue
+    if (!meta) continue
     if (meta.group) {
       const existing = groups.get(meta.group)
       if (existing) {
