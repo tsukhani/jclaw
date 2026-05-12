@@ -30,6 +30,14 @@ public class ConversationQueue {
         String mode = "queue";
         /** Signals in-flight processing to cancel. Set by interrupt mode, cleared on drain. */
         final AtomicBoolean cancelled = new AtomicBoolean(false);
+        /**
+         * Wall-clock ms of the last activity that touched this state (tryAcquire / drain /
+         * releaseOwnership). Used by {@link #evictIdle} to skip recently-active entries.
+         * Volatile so the read path of evictIdle's iterator doesn't have to take the lock
+         * before deciding whether a state is even a candidate; the authoritative check
+         * (under the per-state lock) re-reads it.
+         */
+        volatile long lastActivityMs = System.currentTimeMillis();
 
         synchronized boolean tryStartProcessing() {
             if (processing) return false;
@@ -61,6 +69,7 @@ public class ConversationQueue {
         // TOCTOU races where two threads both believe they acquired the conversation.
         synchronized (state) {
             state.mode = mode;
+            state.lastActivityMs = System.currentTimeMillis();
 
             if (!state.processing) {
                 state.processing = true;
@@ -136,6 +145,7 @@ public class ConversationQueue {
 
         synchronized (state) {
             state.cancelled.set(false);
+            state.lastActivityMs = System.currentTimeMillis();
 
             if (state.pending.isEmpty()) {
                 // Nothing to do — release ownership and return. The next
@@ -177,6 +187,7 @@ public class ConversationQueue {
         var state = queues.get(conversationId);
         if (state == null) return;
         synchronized (state) {
+            state.lastActivityMs = System.currentTimeMillis();
             state.finishProcessing();
         }
     }
@@ -211,5 +222,42 @@ public class ConversationQueue {
     public static boolean isBusy(Long conversationId) {
         var state = queues.get(conversationId);
         return state != null && state.isProcessing();
+    }
+
+    /**
+     * Periodic sweep that removes idle {@link QueueState} entries whose
+     * {@code lastActivityMs} is older than {@code olderThanMs} ago AND which
+     * are quiescent (no pending messages, not processing, no cancellation
+     * pending). Called by {@code jobs.ConversationQueueEvictionJob} (JCLAW-286).
+     *
+     * <p>The per-state check runs under the state's monitor so a concurrent
+     * {@link #tryAcquire} that just did {@code computeIfAbsent} cannot lose
+     * its state to a racing eviction — the {@code synchronized (state)} block
+     * in {@code tryAcquire} stamps {@code lastActivityMs} and flips
+     * {@code processing}, both of which this sweep observes before removing.
+     *
+     * <p>{@link ConcurrentHashMap}'s entry iterator is safe for concurrent
+     * removal via {@link java.util.Iterator#remove()}.
+     *
+     * @return number of entries evicted (visible to tests)
+     */
+    public static int evictIdle(long olderThanMs) {
+        var threshold = System.currentTimeMillis() - olderThanMs;
+        var evicted = 0;
+        var it = queues.entrySet().iterator();
+        while (it.hasNext()) {
+            var entry = it.next();
+            var state = entry.getValue();
+            synchronized (state) {
+                if (state.lastActivityMs <= threshold
+                        && state.pending.isEmpty()
+                        && !state.processing
+                        && !state.cancelled.get()) {
+                    it.remove();
+                    evicted++;
+                }
+            }
+        }
+        return evicted;
     }
 }
