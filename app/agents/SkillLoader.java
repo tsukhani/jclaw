@@ -42,32 +42,46 @@ public class SkillLoader {
      * @param author        name of the agent that authored the skill, from the {@code author:}
      *                      frontmatter key. Empty string when the skill predates the field
      *                      (caller should render no attribution rather than guessing).
+     * @param mcpServers    JCLAW-281: MCP server dependencies declared via the
+     *                      {@code mcp_servers:} frontmatter key. A skill that uses Jira via
+     *                      the {@code jira-confluence} MCP server declares
+     *                      {@code mcp_servers: [jira-confluence]} once instead of listing
+     *                      every Jira action by name in {@code tools}. Empty when the skill
+     *                      predates the field or doesn't need any MCP server.
      */
     public record SkillInfo(String name, String description, Path location,
                             List<String> tools, boolean toolsDeclared, String version,
-                            List<String> commands, String author, String icon) {
+                            List<String> commands, String author, String icon,
+                            List<String> mcpServers) {
         public SkillInfo(String name, String description, Path location) {
-            this(name, description, location, List.of(), false, "0.0.0", List.of(), "", "");
+            this(name, description, location, List.of(), false, "0.0.0", List.of(), "", "", List.of());
         }
 
-        /** Backwards-compatible 6-arg constructor for call sites predating the {@code commands}/{@code author}/{@code icon} fields. */
+        /** Backwards-compatible 6-arg constructor predating the {@code commands}/{@code author}/{@code icon}/{@code mcpServers} fields. */
         public SkillInfo(String name, String description, Path location,
                          List<String> tools, boolean toolsDeclared, String version) {
-            this(name, description, location, tools, toolsDeclared, version, List.of(), "", "");
+            this(name, description, location, tools, toolsDeclared, version, List.of(), "", "", List.of());
         }
 
-        /** Backwards-compatible 7-arg constructor for call sites predating the {@code author}/{@code icon} fields. */
+        /** Backwards-compatible 7-arg constructor predating the {@code author}/{@code icon}/{@code mcpServers} fields. */
         public SkillInfo(String name, String description, Path location,
                          List<String> tools, boolean toolsDeclared, String version,
                          List<String> commands) {
-            this(name, description, location, tools, toolsDeclared, version, commands, "", "");
+            this(name, description, location, tools, toolsDeclared, version, commands, "", "", List.of());
         }
 
-        /** Backwards-compatible 8-arg constructor for call sites predating the {@code icon} field. */
+        /** Backwards-compatible 8-arg constructor predating the {@code icon}/{@code mcpServers} fields. */
         public SkillInfo(String name, String description, Path location,
                          List<String> tools, boolean toolsDeclared, String version,
                          List<String> commands, String author) {
-            this(name, description, location, tools, toolsDeclared, version, commands, author, "");
+            this(name, description, location, tools, toolsDeclared, version, commands, author, "", List.of());
+        }
+
+        /** Backwards-compatible 9-arg constructor predating the {@code mcpServers} field (JCLAW-281). */
+        public SkillInfo(String name, String description, Path location,
+                         List<String> tools, boolean toolsDeclared, String version,
+                         List<String> commands, String author, String icon) {
+            this(name, description, location, tools, toolsDeclared, version, commands, author, icon, List.of());
         }
     }
 
@@ -184,14 +198,14 @@ public class SkillLoader {
         scanSkillsDirectory(agentDir, allSkills);
 
         // Make locations relative to the agent's workspace (readFile tool resolves relative to workspace).
-        // Preserve every field on the record — the 6-arg constructor used previously
-        // silently defaulted commands/author/icon to empty, which is how JCLAW-71's
-        // icon field leaked back to "" after parsing.
+        // Preserve every field on the record — earlier truncated constructors silently
+        // defaulted later fields to empty, which is how JCLAW-71's icon field leaked
+        // back to "" after parsing. JCLAW-281 adds mcpServers as the tenth field.
         allSkills.replaceAll(s -> {
             if (s.location() != null && s.location().startsWith(workspaceDir)) {
                 return new SkillInfo(s.name(), s.description(), workspaceDir.relativize(s.location()),
                         s.tools(), s.toolsDeclared(), s.version(),
-                        s.commands(), s.author(), s.icon());
+                        s.commands(), s.author(), s.icon(), s.mcpServers());
             }
             return s;
         });
@@ -385,11 +399,16 @@ public class SkillLoader {
             var commands = extractYamlList(frontmatter, "commands");
             var author = extractYamlValue(frontmatter, "author");
             var icon = extractYamlValue(frontmatter, "icon");
+            // JCLAW-281: MCP server dependencies (sibling to tools:). Empty
+            // list when the key is absent — extractYamlList returns List.of()
+            // for that case, which matches the "no servers needed" intent.
+            var mcpServers = extractYamlList(frontmatter, "mcp_servers");
             if (name != null) {
                 return new SkillInfo(name, description != null ? description : "", locationHint,
                         tools, toolsDeclared, version != null ? version : "0.0.0",
                         commands, author != null ? author : "",
-                        icon != null ? icon : "");
+                        icon != null ? icon : "",
+                        mcpServers);
             }
         }
         return null;
@@ -532,6 +551,16 @@ public class SkillLoader {
         sb.append("    <location>").append(skill.location() != null ? skill.location() : "").append("</location>\n");
         if (skill.tools() != null && !skill.tools().isEmpty()) {
             sb.append("    <tools>").append(String.join(", ", skill.tools())).append("</tools>\n");
+        }
+        // JCLAW-281: surface MCP server dependencies as a peer category to
+        // tools. A skill that needs Jira declares mcp_servers: [jira-confluence]
+        // once; the model uses this to decide whether the skill is reachable
+        // given the connected servers, parallel to how it reads <tools> for
+        // native tool requirements.
+        if (skill.mcpServers() != null && !skill.mcpServers().isEmpty()) {
+            sb.append("    <mcp_servers>")
+              .append(String.join(", ", skill.mcpServers()))
+              .append("</mcp_servers>\n");
         }
         sb.append("  </skill>\n");
         return sb.toString();
