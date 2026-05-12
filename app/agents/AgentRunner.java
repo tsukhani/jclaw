@@ -1403,26 +1403,68 @@ public class AgentRunner {
      * call from multiple virtual threads concurrently.
      */
     private static ToolRegistry.ToolResult runToolCall(ToolCall toolCall, Agent agent, Consumer<String> onStatus) {
+        var rawName = toolCall.function().name();
+        var rawArgs = toolCall.function().arguments();
+        // JCLAW-281: when the model invokes a server-level mcp_<server> handle
+        // with {tool, args}, expand the log line to the underlying action
+        // form so operators see mcp_jira-confluence_create_issue <args> in
+        // the events stream — same shape as the pre-281 per-action logs,
+        // even though the wire-format tool name is just mcp_<server>.
+        var display = expandMcpCallForLogging(rawName, rawArgs);
+        var displayName = display.name();
+        var displayArgs = display.args();
         if (onStatus != null) {
-            onStatus.accept("Using tool: " + toolCall.function().name());
+            onStatus.accept("Using tool: " + displayName);
         }
         EventLogger.info("tool", agent.name, null,
                 "Executing tool '%s' (id: %s, args: %s)"
-                        .formatted(toolCall.function().name(), toolCall.id(),
-                                toolCall.function().arguments().length() > 200
-                                        ? toolCall.function().arguments().substring(0, 200) + "..."
-                                        : toolCall.function().arguments()));
+                        .formatted(displayName, toolCall.id(),
+                                displayArgs.length() > 200
+                                        ? displayArgs.substring(0, 200) + "..."
+                                        : displayArgs));
         // JCLAW-170: use the rich-output path so search-style tools can emit a
         // structured JSON payload alongside the LLM-visible text. Non-rich
         // tools fall through the default and return a text-only ToolResult.
-        var result = ToolRegistry.executeRich(toolCall.function().name(),
-                toolCall.function().arguments(), agent);
+        var result = ToolRegistry.executeRich(rawName, rawArgs, agent);
         var text = result.text();
         var resultPreview = text.length() > 200
                 ? text.substring(0, 200) + "... (%d chars)".formatted(text.length()) : text;
         EventLogger.info("tool", agent.name, null,
-                "Tool '%s' returned: %s".formatted(toolCall.function().name(), resultPreview));
+                "Tool '%s' returned: %s".formatted(displayName, resultPreview));
         return result;
+    }
+
+    private record McpCallDisplay(String name, String args) {}
+
+    /**
+     * JCLAW-281: synthesize the human-friendly display name and args for a
+     * tool call. For native tools this is a pass-through. For MCP
+     * server-level handles ({@code mcp_<server>}) invoked with
+     * {@code {tool, args}}, returns the per-action display form
+     * ({@code mcp_<server>_<action>}, inner args) so operators can scan
+     * the event log without manually unpacking the parameterized envelope.
+     */
+    private static McpCallDisplay expandMcpCallForLogging(String rawName, String rawArgs) {
+        if (rawName == null || !rawName.startsWith("mcp_")) {
+            return new McpCallDisplay(rawName, rawArgs == null ? "" : rawArgs);
+        }
+        try {
+            var parsed = com.google.gson.JsonParser.parseString(
+                    rawArgs == null || rawArgs.isBlank() ? "{}" : rawArgs);
+            if (!parsed.isJsonObject()) return new McpCallDisplay(rawName, rawArgs);
+            var obj = parsed.getAsJsonObject();
+            if (!obj.has("tool") || obj.get("tool").isJsonNull()) {
+                // Discovery call (no tool field) — display as-is.
+                return new McpCallDisplay(rawName, rawArgs);
+            }
+            var actionName = obj.get("tool").getAsString();
+            var actionArgs = obj.has("args") && obj.get("args").isJsonObject()
+                    ? obj.getAsJsonObject("args").toString()
+                    : "{}";
+            return new McpCallDisplay(rawName + "_" + actionName, actionArgs);
+        } catch (RuntimeException _) {
+            return new McpCallDisplay(rawName, rawArgs == null ? "" : rawArgs);
+        }
     }
 
     /**

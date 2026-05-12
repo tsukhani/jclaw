@@ -50,7 +50,8 @@ onMounted(() => {
   refreshTools()
 })
 
-const CATEGORIES = ['All', 'System', 'Web', 'Files', 'Utilities', 'MCP'] as const
+// JCLAW-281: 'MCP' filter dropped — MCP servers live on /mcp-servers, not here.
+const CATEGORIES = ['All', 'System', 'Web', 'Files', 'Utilities'] as const
 
 // ─── Derived lists ─────────────────────────────────────────────────────────────
 
@@ -85,52 +86,18 @@ function cardFromSingleTool(name: string, meta: ToolMeta): ToolCard {
   }
 }
 
-function cardFromGroup(groupName: string, members: [ToolMeta, ...ToolMeta[]]): ToolCard {
-  const [first, ...rest] = members
-  const folded: ToolAction[] = [...first.functions]
-  for (const m of rest) folded.push(...m.functions)
-  return {
-    key: `group:${groupName}`,
-    displayName: groupName,
-    category: first.category,
-    iconBg: first.iconBg,
-    iconColor: first.iconColor,
-    iconKey: first.icon,
-    description: members.length === 1
-      ? first.shortDescription
-      : `MCP server connection. ${members.length} tools available.`,
-    functions: folded,
-  }
-}
-
 const allCards = computed<ToolCard[]>(() => {
-  // Walk ORDERED_TOOLS to preserve registration order. Group on the fly so
-  // the first appearance of a group fixes its slot in the output sequence.
-  const groups = new Map<string, [ToolMeta, ...ToolMeta[]]>()
-  const groupOrder: string[] = []
+  // JCLAW-281: MCP servers are a separate abstraction and own the
+  // /mcp-servers page; this Tools page only renders native tools so the
+  // two abstractions don't blur. Tools with a non-null group() (MCP per-
+  // action wrappers and server-level handles) are filtered out
+  // unconditionally.
   const cards: ToolCard[] = []
   for (const name of ORDERED_TOOLS.value) {
     const meta = TOOL_META.value[name]
     if (!meta) continue
-    if (meta.group) {
-      const existing = groups.get(meta.group)
-      if (existing) {
-        existing.push(meta)
-      }
-      else {
-        groups.set(meta.group, [meta])
-        groupOrder.push(meta.group)
-      }
-    }
-    else {
-      cards.push(cardFromSingleTool(name, meta))
-    }
-  }
-  // Append one card per group, in first-appearance order. groupOrder only
-  // contains keys we set above, so every lookup is non-null.
-  for (const g of groupOrder) {
-    const members = groups.get(g)
-    if (members) cards.push(cardFromGroup(g, members))
+    if (meta.group) continue
+    cards.push(cardFromSingleTool(name, meta))
   }
   return cards
 })

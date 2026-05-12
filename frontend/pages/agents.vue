@@ -138,7 +138,9 @@ type ToolRow
     | { kind: 'group', key: string, group: string, members: AgentTool[], enabled: boolean, functionCount: number }
 
 const toolsByCategory = computed(() => {
-  const categories = ['System', 'Files', 'Web', 'Utilities', 'MCP'] as const
+  // JCLAW-281: MCP servers render in their own section below; this computed
+  // is native-only now. The remaining four categories cover every native tool.
+  const categories = ['System', 'Files', 'Web', 'Utilities'] as const
   const orderedNames = [
     'exec',
     'filesystem', 'documents',
@@ -205,6 +207,51 @@ const toolsByCategory = computed(() => {
       return { category, rows }
     })
     .filter(g => g.rows.length > 0)
+})
+
+/**
+ * JCLAW-281: per-server toggle rows for the agent detail page's MCP Servers
+ * sub-section. Each connected MCP server folds into one row regardless of
+ * how many actions it advertises; the bulk-toggle endpoint flips every
+ * AgentToolConfig entry for the server's per-action wrappers in one call.
+ */
+type McpServerRow = {
+  key: string
+  server: string
+  members: AgentTool[]
+  enabled: boolean
+  actionCount: number
+}
+const mcpServerRows = computed<McpServerRow[]>(() => {
+  const buckets = new Map<string, AgentTool[]>()
+  for (const t of agentTools.value) {
+    const group = (t.group as string | undefined) ?? null
+    if (!group) continue
+    let bucket = buckets.get(group)
+    if (!bucket) {
+      bucket = []
+      buckets.set(group, bucket)
+    }
+    bucket.push(t)
+  }
+  const rows: McpServerRow[] = []
+  for (const [server, members] of buckets) {
+    // Members include the McpServerTool handle (one) plus each per-action
+    // wrapper. For the toggle's "all enabled" semantic, every member must
+    // be enabled; for the action count we exclude the server-level handle
+    // so "12 actions" matches what the model can actually invoke.
+    const actions = members.filter(m => m.name !== `mcp_${server}`)
+    rows.push({
+      key: `mcp:${server}`,
+      server,
+      members,
+      enabled: members.every(m => m.enabled),
+      actionCount: actions.length,
+    })
+  }
+  // Sort alphabetically by server name for stable rendering.
+  rows.sort((a, b) => a.server.localeCompare(b.server))
+  return rows
 })
 
 const queueMode = ref('queue')
@@ -576,10 +623,12 @@ async function toggleToolGroup(group: string, enabled: boolean) {
   }
 }
 
-// JCLAW-281: every tool is operator-toggleable now (the system flag is gone),
-// so the filter is a pure pass-through. Kept as a named computed for symmetry
-// with the rest of the page rather than removing its call sites.
-const toggleableAgentTools = computed(() => agentTools.value)
+// JCLAW-281: drives the "Tools" section header count and bulk-toggle.
+// MCP server rows live in their own section below and have their own
+// per-server enable state, so they're excluded here.
+const toggleableAgentTools = computed(() =>
+  agentTools.value.filter(t => !t.group),
+)
 
 const allAgentToolsEnabled = computed(() =>
   toggleableAgentTools.value.length > 0 && toggleableAgentTools.value.every(t => t.enabled),
@@ -1594,6 +1643,62 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           class="px-4 py-4 text-xs text-fg-muted text-center"
         >
           No tools registered
+        </div>
+      </div>
+
+      <!-- MCP Servers (JCLAW-281): separate sub-section parallel to Tools.
+           One row per connected MCP server with a single server-level toggle
+           that flips every per-action AgentToolConfig row via the existing
+           bulk-toggle endpoint. No per-action toggling — operators enable a
+           server as a unit, matching the function-calling schema's
+           parameterized-tool shape. -->
+      <div
+        v-if="editing && mcpServerRows.length"
+        class="bg-surface-elevated border border-border"
+      >
+        <div class="px-4 py-2.5 border-b border-border flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium text-fg-strong">MCP Servers</span>
+            <span class="text-xs text-neutral-500">{{ mcpServerRows.filter(r => r.enabled).length }}/{{ mcpServerRows.length }} enabled</span>
+          </div>
+        </div>
+        <div class="divide-y divide-border">
+          <div
+            v-for="row in mcpServerRows"
+            :key="row.key"
+            class="px-4 py-3 flex items-center gap-3"
+          >
+            <div class="w-8 h-8 rounded flex items-center justify-center shrink-0 bg-violet-500/15">
+              <PuzzlePieceIcon
+                class="w-4 h-4 text-violet-400"
+                aria-hidden="true"
+              />
+            </div>
+            <div class="flex-1 min-w-0">
+              <span class="text-sm text-fg-strong font-mono">{{ row.server }}</span>
+              <div class="mt-1.5">
+                <span class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm bg-violet-500/10 border-violet-500/25 text-violet-400">
+                  {{ row.actionCount }} action{{ row.actionCount === 1 ? '' : 's' }}
+                </span>
+              </div>
+            </div>
+            <button
+              :title="row.enabled ? `Disable ${row.server} for this agent` : `Enable ${row.server} for this agent`"
+              :aria-label="row.enabled ? `Disable ${row.server} for this agent` : `Enable ${row.server} for this agent`"
+              class="shrink-0"
+              @click="toggleToolGroup(row.server, !row.enabled)"
+            >
+              <div
+                class="relative w-9 h-5 rounded-full transition-colors duration-200"
+                :class="row.enabled ? 'bg-emerald-500' : 'bg-muted'"
+              >
+                <div
+                  class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+                  :class="row.enabled ? 'left-[18px]' : 'left-0.5'"
+                />
+              </div>
+            </button>
+          </div>
         </div>
       </div>
 
