@@ -3829,6 +3829,13 @@ async function handleResetPassword() {
       </div>
     </div>
 
+    <!-- API Tokens (JCLAW-282) — bearer credentials for the JClaw MCP
+         server and any out-of-process API client. Implementation lives
+         in ApiTokensSection.vue to keep settings.vue from growing the
+         mint-modal + copy-to-clipboard logic on top of its existing
+         3.9k lines. -->
+    <ApiTokensSection />
+
     <!-- Password / account management -->
     <div class="mb-6 space-y-4">
       <h2 class="text-sm font-medium text-fg-muted">
