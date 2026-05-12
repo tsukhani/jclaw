@@ -245,9 +245,17 @@ function removeHeaderRow(i: number) {
     </div>
 
     <p class="text-sm text-fg-muted mb-4">
-      Configured MCP servers JClaw will connect to at startup. Discovered tools register as
-      <code class="text-xs">mcp_&lt;server&gt;_&lt;tool&gt;</code> and gate through the per-agent allowlist (JCLAW-32).
-      Deleting a server disconnects it and clears every per-agent grant.
+      MCP (Model Context Protocol) servers let your agents reach external systems —
+      Jira, Confluence, GitHub, your filesystem, and so on — through a standard
+      action protocol. Add a server here, and the actions it exposes become
+      available to any agent you grant access to. Each agent's allowed servers
+      are configured per-agent on the
+      <NuxtLink
+        to="/agents"
+        class="underline decoration-dotted hover:text-fg-strong"
+      >
+        Agents page
+      </NuxtLink>. Deleting a server disconnects it and revokes every agent's access.
     </p>
 
     <!-- Add form (when no row is being edited) -->
