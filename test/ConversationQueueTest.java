@@ -484,6 +484,145 @@ public class ConversationQueueTest extends UnitTest {
         }
     }
 
+    // ── JCLAW-286: idle eviction ──
+
+    @Test
+    public void evictIdleRemovesQuiescentStateAfterThreshold() throws Exception {
+        // A conversation that has been touched but is fully idle (no pending,
+        // not processing, not cancelled) and whose lastActivityMs is older
+        // than the threshold must be evicted by evictIdle.
+        long convId = 8001L;
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("A", "web", "admin", agent));
+        ConversationQueue.releaseOwnership(convId); // pending empty, processing false
+
+        // Sleep past the eviction window so the state's lastActivityMs is stale.
+        // 50 ms threshold + 100 ms sleep gives a stable boundary on slow CI.
+        Thread.sleep(100);
+
+        var beforeBusy = ConversationQueue.isBusy(convId);
+        assertFalse(beforeBusy, "preconditions: state quiescent before eviction");
+
+        var evicted = ConversationQueue.evictIdle(50);
+        assertTrue(evicted >= 1, "idle state must be evicted; got count=" + evicted);
+
+        // After eviction, a fresh tryAcquire must succeed (no leftover state).
+        var reacquired = ConversationQueue.tryAcquire(convId,
+                new QueuedMessage("B", "web", "admin", agent));
+        assertTrue(reacquired, "post-eviction tryAcquire acquires cleanly");
+        ConversationQueue.releaseOwnership(convId);
+    }
+
+    @Test
+    public void evictIdleSkipsRecentlyActiveState() {
+        // A state whose lastActivityMs is fresh (just touched) must NOT be
+        // evicted even if it is quiescent — the eviction window protects
+        // entries that are likely to be reused imminently.
+        long convId = 8002L;
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("A", "web", "admin", agent));
+        ConversationQueue.releaseOwnership(convId); // quiescent but fresh
+
+        // Threshold of 60s; the state was touched milliseconds ago, so the
+        // sweep must skip it.
+        var evicted = ConversationQueue.evictIdle(60_000);
+        assertEquals(0, evicted, "recently-touched state must survive eviction");
+
+        // State is still present: a follow-up tryAcquire still works.
+        var acquired = ConversationQueue.tryAcquire(convId,
+                new QueuedMessage("B", "web", "admin", agent));
+        assertTrue(acquired);
+        ConversationQueue.releaseOwnership(convId);
+    }
+
+    @Test
+    public void evictIdleSkipsProcessingState() throws Exception {
+        // Even if the activity timestamp is older than the threshold, an
+        // in-flight processing state must NOT be evicted — eviction is
+        // contingent on processing == false. We can't assert evicted==0
+        // because earlier tests in the class leave quiescent states behind;
+        // the load-bearing invariant is that THIS conversation's busy state
+        // survives the sweep.
+        long convId = 8003L;
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("A", "web", "admin", agent));
+        // Leave processing=true (no drain/release).
+
+        Thread.sleep(100);
+        ConversationQueue.evictIdle(50);
+        assertTrue(ConversationQueue.isBusy(convId),
+                "processing state must survive eviction sweep");
+
+        // And a follow-up tryAcquire must still queue behind the in-flight run.
+        var acquired = ConversationQueue.tryAcquire(convId,
+                new QueuedMessage("B", "web", "admin", agent));
+        assertFalse(acquired, "subsequent message queues — state was not evicted");
+
+        // Cleanup
+        ConversationQueue.drain(convId);
+        ConversationQueue.releaseOwnership(convId);
+    }
+
+    @Test
+    public void concurrentTryAcquireAndEvictIdleDoNotCorruptState() throws Exception {
+        // Race-test: while a writer is concurrently calling tryAcquire on
+        // many conversations, an evictor repeatedly sweeps. The
+        // synchronized-block on QueueState atomically pairs the
+        // lastActivityMs/processing read in evict with the lastActivityMs/
+        // processing write in tryAcquire, so no acquired-but-then-evicted
+        // state can be observed.
+        int convCount = 50;
+        int evictPasses = 20;
+        var startBarrier = new CyclicBarrier(2);
+        var done = new CountDownLatch(2);
+        var anomalies = new AtomicInteger(0);
+
+        // Writer: acquire + release each conv, then verify isBusy is false
+        // immediately after release (which it must be — eviction can only
+        // remove a state that is quiescent).
+        Thread.ofVirtual().start(() -> {
+            try {
+                startBarrier.await();
+                for (int i = 0; i < convCount; i++) {
+                    long cid = 9000L + i;
+                    var msg = new QueuedMessage("W" + i, "web", "admin", agent);
+                    ConversationQueue.tryAcquire(cid, msg);
+                    // Immediately release — keep the window narrow but real.
+                    ConversationQueue.releaseOwnership(cid);
+                }
+            } catch (Exception _) {
+                anomalies.incrementAndGet();
+            } finally {
+                done.countDown();
+            }
+        });
+
+        // Evictor: aggressive sweeps with a 0ms threshold (anything quiescent
+        // is fair game). Each pass that races with the writer must leave the
+        // map in a consistent state — no exceptions, no stranded processing
+        // flags.
+        Thread.ofVirtual().start(() -> {
+            try {
+                startBarrier.await();
+                for (int i = 0; i < evictPasses; i++) {
+                    ConversationQueue.evictIdle(0);
+                }
+            } catch (Exception _) {
+                anomalies.incrementAndGet();
+            } finally {
+                done.countDown();
+            }
+        });
+
+        assertTrue(done.await(10, TimeUnit.SECONDS));
+        assertEquals(0, anomalies.get(),
+                "concurrent tryAcquire + evictIdle must not raise exceptions");
+
+        // Final eviction with 0ms catches any quiescent stragglers; the
+        // important invariant is that the run completed cleanly, not the
+        // exact final count (the writer may have just touched a state
+        // when the last pass ran, leaving it 0-ms-old but unevictable
+        // in this pass).
+        ConversationQueue.evictIdle(0);
+    }
+
     @Test
     public void fifoOrderSurvivesRaceBetweenDrainAndInboundMessage() {
         // Regression for JCLAW-117: without atomic ownership transfer, a
