@@ -1076,11 +1076,47 @@ defineExpose({ refresh })
         class="overflow-x-auto mt-6"
       >
         <table class="w-full text-xs table-fixed">
+          <!-- Visually-hidden header so screen readers can announce each
+               cell's column. The per-modality tables above already render
+               their column headers visibly, and this footer mirrors their
+               column layout — no need for a second visible header row,
+               but WCAG 2 A requires the structural markup regardless. -->
+          <thead class="sr-only">
+            <tr>
+              <th
+                scope="col"
+                class="w-1/4"
+              >
+                Row label
+              </th>
+              <th scope="col">
+                Turns
+              </th>
+              <th scope="col">
+                Prompt
+              </th>
+              <th scope="col">
+                Completion
+              </th>
+              <th scope="col">
+                Reasoning
+              </th>
+              <th scope="col">
+                Cached
+              </th>
+              <th scope="col">
+                Cost
+              </th>
+            </tr>
+          </thead>
           <tbody>
             <tr>
-              <td class="px-4 py-2 text-xs font-medium text-fg-muted uppercase tracking-wide w-1/4">
+              <th
+                scope="row"
+                class="px-4 py-2 text-left text-xs font-medium text-fg-muted uppercase tracking-wide w-1/4"
+              >
                 Combined total
-              </td>
+              </th>
               <td class="px-3 py-2 text-right font-mono text-fg-primary">
                 {{ combinedTurns.toLocaleString() }}
               </td>
