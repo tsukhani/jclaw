@@ -480,6 +480,44 @@ public class ChannelTest extends UnitTest {
         assertFalse(channel.sendWithRetry("peer", "hello"));
     }
 
+    @Test
+    public void channelSendWithRetryRunsRetryOnSchedulerThreadNotCaller() throws Exception {
+        // Regression: the original implementation called Thread.sleep on the
+        // caller's thread. Under virtual-thread dispatch, that pinned the
+        // carrier per JDK-8373224. The fix routes the delay through a
+        // platform-thread scheduler (RetryScheduler), so the second trySend
+        // must run on the scheduler thread, not the caller.
+        var firstAttemptThread = new java.util.concurrent.atomic.AtomicReference<String>();
+        var secondAttemptThread = new java.util.concurrent.atomic.AtomicReference<String>();
+        var channel = new Channel() {
+            int attempts = 0;
+            @Override public String channelName() { return "test"; }
+            @Override public SendResult trySend(String peer, String text) {
+                var name = Thread.currentThread().getName();
+                if (++attempts == 1) {
+                    firstAttemptThread.set(name);
+                    return SendResult.FAILED;
+                }
+                secondAttemptThread.set(name);
+                return SendResult.OK;
+            }
+        };
+
+        long start = System.currentTimeMillis();
+        assertTrue(channel.sendWithRetry("peer", "hello"));
+        long elapsed = System.currentTimeMillis() - start;
+
+        // Default delay is 1s when no retry-after hint is present.
+        assertTrue(elapsed >= 800 && elapsed < 2500,
+                () -> "Expected ~1s scheduled delay, got " + elapsed + "ms");
+        assertNotNull(firstAttemptThread.get());
+        assertNotNull(secondAttemptThread.get());
+        assertNotEquals(firstAttemptThread.get(), secondAttemptThread.get(),
+                "Retry must run on the platform-thread scheduler, not the caller's thread");
+        assertEquals("jclaw-retry-scheduler", secondAttemptThread.get(),
+                "Retry must run on the named platform-thread scheduler");
+    }
+
     // === Slack ===
 
     @Test
