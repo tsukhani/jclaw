@@ -36,6 +36,11 @@ public class ToolRegistrationJob extends Job<Void> {
         // them from any agent that doesn't want them.
         toolList.add(new PlaywrightBrowserTool());
         toolList.add(new ShellExecTool());
+        // JCLAW-282: in-process JClaw API tool. Registered globally so the
+        // Tools page shows it, but AgentService.create disables it for
+        // every non-main agent so only main can actually invoke it
+        // (defense in depth alongside the skill-not-installed gate).
+        toolList.add(new JClawApiTool());
         // JCLAW-281: list_mcp_tools is gone. Discovery is folded into each
         // MCP server's own surface — the model calls mcp_<server> with
         // empty args to enumerate that server's actions, registered by

@@ -22,9 +22,3 @@ pluginManagement {
     }
 }
 rootProject.name = "jclaw"
-
-// JCLAW-282: the standalone MCP server that exposes JClaw's API as
-// agent-callable tools. Lives in mcp-server/ as a separate Gradle
-// sub-project so its build doesn't drag in the Play 1.x classpath —
-// it ships as an executable jar invoked over stdio by an MCP client.
-include("mcp-server")
