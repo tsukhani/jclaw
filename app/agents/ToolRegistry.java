@@ -126,12 +126,35 @@ public class ToolRegistry {
          *  with the server name, instead of 72 separate cards. Native
          *  tools default to {@code null} (one card per tool). */
         default String group() { return null; }
+
+        /** JCLAW-281: marks a tool as the server-level handle for its
+         *  {@link #group()}, i.e. the single parameterized entry that
+         *  represents an MCP server in the LLM's function-calling schema.
+         *  Tools with a non-null {@code group()} that return {@code false}
+         *  here (the per-action MCP adapters) stay in the registry for
+         *  execution lookups but are hidden from
+         *  {@link #getToolDefsForAgent} — the server-level handle is the
+         *  sole face the model sees. Native tools and tools without a
+         *  group return {@code false} by default; their visibility is
+         *  unaffected. */
+        default boolean isServerLevel() { return false; }
+    }
+
+    /** JCLAW-281: by-name lookup used by server-level handles to delegate
+     *  parameterized invocations to the per-action adapter that already
+     *  carries the allowlist gate + audit trail. Returns {@code null} when
+     *  no tool with that name is registered. */
+    public static Tool lookupTool(String name) {
+        return tools.get(name);
     }
 
     /** Native (compile-time) tools published via {@link #publish(List)} from
      *  {@link jobs.ToolRegistrationJob}. Kept separate from external groups so
      *  re-registering natives (e.g. when {@code provider.loadtest-mock.enabled}
      *  flips at runtime) doesn't blow away MCP-discovered tools. */
+    // Reference is replaced atomically with an unmodifiableMap; the held map
+    // is immutable so volatile-on-reference is sufficient publication.
+    @SuppressWarnings("java:S3077")
     private static volatile Map<String, Tool> nativeTools = Map.of();
 
     /** Externally-sourced tool groups, keyed by group name (e.g. an MCP server
@@ -291,42 +314,36 @@ public class ToolRegistry {
         }
     }
 
-    /** Get tool definitions filtered by agent's tool configuration.
-     *  Equivalent to {@link #getToolDefsForAgent(Agent, models.Conversation)}
-     *  with a null conversation — every MCP tool is excluded since no
-     *  discovery history exists. Use the conversation-aware overload from
-     *  the agent loop so previously-discovered MCP tools surface to the model. */
+    /** Get tool definitions filtered by agent's tool configuration. */
     public static List<ToolDef> getToolDefsForAgent(Agent agent) {
         return getToolDefsForAgent(agent, (models.Conversation) null);
     }
 
     /**
-     * Get tool definitions filtered by agent config AND lazy MCP discovery.
+     * Get tool definitions filtered by agent config.
      *
      * <p>Native tools (group=null) ship every turn — they're predictable
-     * workhorses with bounded count. MCP tools (group=server name) are
-     * gated on the model having called {@code list_mcp_tools} for their
-     * server in this conversation's history. The discovery tool itself is
-     * native, so it's always callable and the model can self-bootstrap.
+     * workhorses with bounded count. MCP servers (group=server name) ship
+     * exactly one parameterized entry each via {@link McpServerTool}; the
+     * per-action {@code McpToolAdapter} wrappers stay in the registry for
+     * the execution path but are hidden from these defs (JCLAW-281).
      *
-     * <p>The lazy gate prevents an unbounded MCP tool count from drowning
-     * the prompt: a fresh conversation that never touches an MCP server
-     * pays only that server's listing-row cost (~50 tokens per server in
-     * the catalog markdown), not its full per-tool schemas (~500-2000
-     * tokens per tool × N tools).
+     * <p>The {@code conv} parameter is retained for binary compatibility
+     * but no longer drives a lazy gate: the parameterized handle is small
+     * (one entry per server) and is always emitted when the server is
+     * connected, so the model can call it (with empty args) to bootstrap
+     * its action catalog. The pre-JCLAW-281 design gated per-action
+     * adapters on a history scan for {@code list_mcp_tools} calls; the
+     * new design folds that bootstrap into every server's own surface.
      */
     public static List<ToolDef> getToolDefsForAgent(Agent agent, models.Conversation conv) {
-        // Conversation lookup hits the DB to read prior tool calls; delegate
-        // to the pure overload below, which is independently testable with
-        // a synthetic discovered-set.
         return getToolDefsForAgent(agent, mcp.McpDiscovery.discoveredServers(conv));
     }
 
     /**
-     * Pure variant of the lazy-MCP gate, taking a pre-computed discovered
-     * set. The Conversation overload above derives the set from message
-     * history; tests can pass a synthetic set directly to verify the
-     * filter behaviour without seeding rows.
+     * Pure variant. The {@code discoveredMcpServers} parameter is retained
+     * for binary compatibility with tests but no longer used as a filter
+     * input — JCLAW-281 made the server-level handle always-emitted.
      */
     public static List<ToolDef> getToolDefsForAgent(Agent agent, Set<String> discoveredMcpServers) {
         // Loadtest agent: ship zero tools so cross-provider tokens-per-second
@@ -339,10 +356,16 @@ public class ToolRegistry {
             return List.of();
         }
         var disabled = loadDisabledTools(agent);
-        var discovered = discoveredMcpServers != null ? discoveredMcpServers : Set.<String>of();
+        // JCLAW-281: function-calling defs emit at most one entry per MCP
+        // server (the server-level handle from McpServerTool). The per-
+        // action adapters stay in the registry as the execution path, but
+        // hiding them here saves the schema from N-tools-per-server bloat
+        // and removes the need for the legacy list_mcp_tools discovery
+        // primitive — discovery is now part of the server-level handle's
+        // own surface (empty args returns the action catalog).
         return tools.values().stream()
                 .filter(t -> !disabled.contains(t.name()))
-                .filter(t -> t.group() == null || discovered.contains(t.group()))
+                .filter(t -> t.group() == null || t.isServerLevel())
                 .map(t -> ToolDef.of(t.name(), t.description(), t.parameters()))
                 .toList();
     }
@@ -415,9 +438,28 @@ public class ToolRegistry {
             // MCP tools default-disabled for non-main agents (operator opts-in
             // per server on the agent detail page). Main agent unaffected.
             if (!agent.isMain()) {
+                // JCLAW-281: bridge pre-281 per-action enablement to the new
+                // server-level handle. If the operator has explicitly
+                // enabled any per-action row for an MCP server, treat the
+                // server-level handle as enabled too — without this, the
+                // LLM would lose access to the parameterized def and the
+                // agent's previously-granted actions would become
+                // unreachable. Once Phase 6 migrates AgentToolConfig rows
+                // to server-level keys, this derivation becomes a no-op.
+                var serversWithEnabledAction = new HashSet<String>();
+                for (var entry : explicitState.entrySet()) {
+                    if (!entry.getValue()) continue;
+                    var tool = tools.get(entry.getKey());
+                    if (tool != null && tool.group() != null && !tool.isServerLevel()) {
+                        serversWithEnabledAction.add(tool.group());
+                    }
+                }
                 for (var tool : tools.values()) {
                     if (tool.group() == null) continue;
-                    if (!explicitState.containsKey(tool.name())) disabled.add(tool.name());
+                    if (explicitState.containsKey(tool.name())) continue;
+                    if (tool.isServerLevel()
+                            && serversWithEnabledAction.contains(tool.group())) continue;
+                    disabled.add(tool.name());
                 }
             }
             return Collections.unmodifiableSet(disabled);

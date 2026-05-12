@@ -14,16 +14,22 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Verifies the lazy MCP discovery contract:
+ * Verifies the JCLAW-281 MCP-server function-calling contract:
  *
  * <ul>
- *   <li>{@link McpDiscovery#discoveredServers(List)} extracts the
- *       {@code server} argument from prior {@code list_mcp_tools} tool
- *       calls in conversation history.</li>
- *   <li>{@link ToolRegistry#getToolDefsForAgent(Agent, Set)} hides MCP
- *       tool schemas until the model has discovered their server.</li>
- *   <li>The discovery tool itself ({@code list_mcp_tools}) ships every
- *       turn so the model can self-bootstrap.</li>
+ *   <li>{@link McpDiscovery#discoveredServers(List)} continues to extract
+ *       the {@code server} argument from prior {@code list_mcp_tools}
+ *       tool calls — kept for legacy conversation replay.</li>
+ *   <li>{@link ToolRegistry#getToolDefsForAgent(Agent, Set)} hides every
+ *       per-action MCP wrapper (group set, not server-level) from the
+ *       function-calling defs unconditionally — the server-level handle
+ *       is the sole face the LLM sees. The {@code discoveredMcpServers}
+ *       argument no longer drives filtering; it's retained for binary
+ *       compatibility with tests and callers.</li>
+ *   <li>Server-level MCP handles ({@code isServerLevel()=true}) ship
+ *       every turn so the model can self-bootstrap by calling with
+ *       empty args — discovery is built into the server-level surface
+ *       itself, no separate {@code list_mcp_tools} tool needed.</li>
  * </ul>
  */
 public class McpDiscoveryTest extends UnitTest {
@@ -96,48 +102,57 @@ public class McpDiscoveryTest extends UnitTest {
         assertTrue(found.contains("jira"));
     }
 
-    // ==================== ToolRegistry lazy gate ====================
+    // ==================== ToolRegistry function-calling filter (JCLAW-281) ====================
 
     @Test
-    public void mcpToolsAreHiddenUntilDiscovered() {
+    public void perActionMcpWrappersAreHiddenFromFunctionCallingDefs() {
         var nativeTool = stubTool("filesystem", null);
-        var mcpTool = stubMcpTool("mcp_jira_get_issue", "jira");
-        var discovery = stubTool("list_mcp_tools", null);
-        ToolRegistry.publish(List.of(nativeTool, mcpTool, discovery));
+        var perActionWrapper = stubMcpTool("mcp_jira_get_issue", "jira");
+        var serverHandle = stubMcpServerHandle("mcp_jira", "jira");
+        ToolRegistry.publish(List.of(nativeTool, perActionWrapper, serverHandle));
 
-        // Empty discovered set → MCP tool excluded; native + discovery present.
         var defs = ToolRegistry.getToolDefsForAgent((Agent) null, Set.<String>of());
         var names = defs.stream().map(d -> d.function().name()).toList();
         assertTrue(names.contains("filesystem"), "native tool present");
-        assertTrue(names.contains("list_mcp_tools"), "discovery tool present");
-        assertFalse(names.contains("mcp_jira_get_issue"), "undiscovered MCP tool hidden");
+        assertTrue(names.contains("mcp_jira"), "server-level handle present");
+        assertFalse(names.contains("mcp_jira_get_issue"),
+                "per-action wrapper hidden from function-calling defs: " + names);
     }
 
     @Test
-    public void mcpToolsAppearAfterDiscovery() {
-        var nativeTool = stubTool("filesystem", null);
-        var mcpTool = stubMcpTool("mcp_jira_get_issue", "jira");
-        var discovery = stubTool("list_mcp_tools", null);
-        ToolRegistry.publish(List.of(nativeTool, mcpTool, discovery));
+    public void serverLevelHandleAlwaysSurfacesRegardlessOfDiscoveredSet() {
+        var serverHandle = stubMcpServerHandle("mcp_jira", "jira");
+        ToolRegistry.publish(List.of(serverHandle));
 
-        var defs = ToolRegistry.getToolDefsForAgent((Agent) null, Set.of("jira"));
-        var names = defs.stream().map(d -> d.function().name()).toList();
-        assertTrue(names.contains("mcp_jira_get_issue"),
-                "post-discovery MCP tool surfaced: " + names);
+        // Empty discovered set: server-level handle still emitted (the parameterized
+        // entry is what the model uses to discover; no lazy gate any more).
+        var emptyNames = ToolRegistry.getToolDefsForAgent((Agent) null, Set.<String>of())
+                .stream().map(d -> d.function().name()).toList();
+        assertTrue(emptyNames.contains("mcp_jira"),
+                "server-level handle ships even with empty discovered set: " + emptyNames);
+
+        // Pre-populated discovered set: same result. discoveredMcpServers no
+        // longer drives filtering in JCLAW-281.
+        var preDiscoveredNames = ToolRegistry.getToolDefsForAgent((Agent) null, Set.of("jira"))
+                .stream().map(d -> d.function().name()).toList();
+        assertTrue(preDiscoveredNames.contains("mcp_jira"));
     }
 
     @Test
-    public void unrelatedServerDiscoveryDoesNotUnlockOthers() {
+    public void multipleServerHandlesAllSurfacePerActionWrappersStayHidden() {
         ToolRegistry.publish(List.of(
+                stubMcpServerHandle("mcp_jira", "jira"),
                 stubMcpTool("mcp_jira_get_issue", "jira"),
+                stubMcpServerHandle("mcp_github", "github"),
                 stubMcpTool("mcp_github_create_issue", "github")
         ));
 
-        var names = ToolRegistry.getToolDefsForAgent((Agent) null, Set.of("jira"))
+        var names = ToolRegistry.getToolDefsForAgent((Agent) null, Set.<String>of())
                 .stream().map(d -> d.function().name()).toList();
-        assertTrue(names.contains("mcp_jira_get_issue"));
-        assertFalse(names.contains("mcp_github_create_issue"),
-                "github tool stays hidden when only jira was discovered");
+        assertTrue(names.contains("mcp_jira"), "jira server-level handle present");
+        assertTrue(names.contains("mcp_github"), "github server-level handle present");
+        assertFalse(names.contains("mcp_jira_get_issue"), "jira per-action wrapper hidden");
+        assertFalse(names.contains("mcp_github_create_issue"), "github per-action wrapper hidden");
     }
 
     // ==================== helpers ====================
@@ -184,6 +199,19 @@ public class McpDiscoveryTest extends UnitTest {
             @Override public String execute(String argsJson, Agent agent) { return ""; }
             @Override public String category() { return "MCP"; }
             @Override public String group() { return server; }
+        };
+    }
+
+    /** JCLAW-281: stub of the server-level handle ({@code McpServerTool} shape). */
+    private static ToolRegistry.Tool stubMcpServerHandle(String name, String server) {
+        return new ToolRegistry.Tool() {
+            @Override public String name() { return name; }
+            @Override public String description() { return name + " server handle stub"; }
+            @Override public Map<String, Object> parameters() { return Map.of(); }
+            @Override public String execute(String argsJson, Agent agent) { return ""; }
+            @Override public String category() { return "MCP"; }
+            @Override public String group() { return server; }
+            @Override public boolean isServerLevel() { return true; }
         };
     }
 }

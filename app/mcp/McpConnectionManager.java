@@ -59,6 +59,9 @@ public final class McpConnectionManager {
     private static volatile long backoffCeilingMillis = 30_000L;
 
     private static final ConcurrentHashMap<String, Entry> connections = new ConcurrentHashMap<>();
+    // Reference is reassigned under synchronized ensureScheduler(); the held
+    // executor is itself thread-safe, so volatile-on-reference is sufficient.
+    @SuppressWarnings("java:S3077")
     private static volatile ScheduledExecutorService scheduler;
 
     private McpConnectionManager() {}
@@ -284,11 +287,21 @@ public final class McpConnectionManager {
     }
 
     private static void republishTools(String serverName, List<McpToolDef> defs) {
-        var adapters = new ArrayList<ToolRegistry.Tool>(defs.size());
+        // JCLAW-281: the server-level handle is what the LLM sees in its
+        // function-calling defs (one parameterized entry per server). The
+        // per-action McpToolAdapter wrappers stay in the registry too —
+        // they're the execution path that McpServerTool delegates to once
+        // the model has chosen an action — but they're hidden from the
+        // function-calling defs by Tool.isServerLevel + the filter in
+        // ToolRegistry.getToolDefsForAgent. Server-level handle goes
+        // first so iteration order keeps the per-server card grouping
+        // intact in the admin UI.
+        var tools = new ArrayList<ToolRegistry.Tool>(defs.size() + 1);
+        tools.add(new McpServerTool(serverName));
         for (var def : defs) {
-            adapters.add(new McpToolAdapter(serverName, def, McpConnectionManager::callTool));
+            tools.add(new McpToolAdapter(serverName, def, McpConnectionManager::callTool));
         }
-        ToolRegistry.publishExternal(serverName, adapters);
+        ToolRegistry.publishExternal(serverName, tools);
         // JCLAW-32: keep the DB-authoritative allowlist in sync with the
         // in-memory ToolRegistry on every tool-list change. Idempotent —
         // McpAllowlist.registerForAllAgents clears the prior set first so
@@ -441,10 +454,15 @@ public final class McpConnectionManager {
     /** Per-server runtime state. Lives in {@link #connections}. */
     private static final class Entry {
         final String name;
+        // McpClient manages its own internal thread-safety (state via AtomicReference,
+        // ConcurrentHashMap for pending requests); volatile here just publishes the
+        // reference. Likewise ScheduledFuture is thread-safe by JDK contract.
+        @SuppressWarnings("java:S3077")
         volatile McpClient client;
         volatile McpServer.Status status = McpServer.Status.DISCONNECTED;
         volatile String lastError;
         volatile int attempts;
+        @SuppressWarnings("java:S3077")
         volatile ScheduledFuture<?> scheduledRetry;
 
         Entry(String name) { this.name = name; }
