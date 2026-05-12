@@ -245,6 +245,21 @@ public class SystemPromptAssembler {
             }
         }
 
+        // 4b. MCP Servers manifest (JCLAW-281). Rendered independently of
+        // the skills block above — the model needs to know which MCP
+        // servers exist for invocation purposes even when no skill
+        // references one. Filtered per-agent so an operator who's
+        // disabled a server for this agent doesn't see it advertised.
+        var mcpDisabled = disabledTools != null ? disabledTools : ToolRegistry.loadDisabledTools(agent);
+        var mcpCatalog = McpServerCatalog.formatCatalogForPrompt(mcpDisabled);
+        if (!mcpCatalog.isEmpty()) {
+            b.startSection("MCP Servers");
+            b.sb.append("\n## MCP Servers\n");
+            b.sb.append("MCP-connected servers exposed as parameterized tools. Each server is one entry in your function-calling schema: call `mcp_<server>` with no arguments to enumerate the server's available actions and their input schemas, then call again with `{\"tool\": \"<action>\", \"args\": {...}}` to execute one.\n\n");
+            b.sb.append(mcpCatalog);
+            b.sb.append("\n");
+        }
+
         // 5. Workspace file delivery convention
         b.startSection("Workspace File Delivery");
         appendFileDeliveryConvention(b.sb);
