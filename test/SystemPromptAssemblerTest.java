@@ -307,7 +307,11 @@ public class SystemPromptAssemblerTest extends UnitTest {
                 "Loadtest path must NOT include the workspace-file-delivery convention section");
         assertFalse(prompt.contains("Environment"),
                 "Loadtest path must NOT include the environment-info section");
-        assertFalse(prompt.contains("Tool Catalog"),
+        // JCLAW-281: the Execution Bias section now references "Tool Catalog"
+        // by name in a behavioral rule about MCP/tools categorization. Assert
+        // on the literal section header so this stays a check that the
+        // section itself isn't rendered, not that the phrase never appears.
+        assertFalse(prompt.contains("## Tool Catalog"),
                 "Loadtest path must NOT include the tool-catalog section");
         assertFalse(prompt.contains("Relevant Memories") || prompt.contains("memories"),
                 "Loadtest path must NOT include the recalled-memories section");

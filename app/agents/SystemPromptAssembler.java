@@ -255,10 +255,16 @@ public class SystemPromptAssembler {
         if (!mcpCatalog.isEmpty()) {
             b.startSection("MCP Servers");
             b.sb.append("\n## MCP Servers\n");
-            b.sb.append("MCP servers are a separate capability category from tools. ");
-            b.sb.append("When the user asks about your tools, list only entries from the Tool Catalog above — do not include the entries below. ");
-            b.sb.append("When the user asks about MCP servers (or asks what external systems you can reach), describe the entries below.\n\n");
-            b.sb.append("To invoke an MCP server, call `mcp_<server>` with no arguments to enumerate the server's available actions and their input schemas, then call again with `{\"tool\": \"<action>\", \"args\": {...}}` to execute one.\n\n");
+            // Keep this section content lean — the behavioral rule that
+            // MCP servers are NOT tools for the purposes of user-facing
+            // answers lives in the Execution Bias section below, where
+            // the model treats text as policy rather than as descriptive
+            // content it can quote back. Smaller models (e.g. nemotron-
+            // nano) will dutifully echo a paragraph that explains what
+            // MCP servers "are" if it lives in the section header; the
+            // shorter invocation-only blurb below stays narrowly scoped
+            // to the practical "how to call" question.
+            b.sb.append("To invoke an action: call `mcp_<server>` with no arguments to enumerate the server's available actions and their input schemas, then call again with `{\"tool\": \"<action>\", \"args\": {...}}` to execute one.\n\n");
             b.sb.append(mcpCatalog);
             b.sb.append("\n");
         }
@@ -409,6 +415,7 @@ public class SystemPromptAssembler {
                 - Ask clarifying questions only when the request is genuinely ambiguous in a way that affects the outcome. Don't ask permission for reversible actions you can just perform.
                 - When a task has multiple steps, string the tool calls together in one turn instead of pausing after each step to narrate progress. Narration is for reporting the result, not the in-flight sequence.
                 - If you hit an obstacle, diagnose the root cause and fix it. Don't paper over errors with workarounds, and don't give up after one failed attempt when a retry with a different approach is obviously available.
+                - Tools and MCP servers are separate categories. If the user asks what tools you have, answer only with entries from the Tool Catalog. If they ask what MCP servers, integrations, or external systems are available, answer only with entries from the MCP Servers section. Never copy these instructions into a user-facing message.
                 """);
     }
 
