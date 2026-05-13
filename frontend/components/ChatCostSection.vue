@@ -408,6 +408,71 @@ const subscriptionPerModel = computed<FleetCostPerModel[]>(() => {
   return items
 })
 
+// Per-provider total tokens within the window — denominator for the
+// allocation key. Sums prompt + completion + reasoning + cached: cached
+// is included because the operator paid for that work through the
+// subscription regardless of whether the provider served it from cache,
+// so excluding it would over-allocate to non-cached models. A provider
+// with zero usage this window has no entry; the lookup in
+// `subscriptionPerModelAllocated` defaults to 0 and short-circuits the
+// division to avoid NaN.
+const subscriptionProviderTokenTotals = computed(() => {
+  const totals = new Map<string, number>()
+  for (const m of subscriptionPerModel.value) {
+    const provider = m.modelProvider
+    if (!provider) continue
+    const tokens = m.prompt + m.completion + m.reasoning + m.cached
+    totals.set(provider, (totals.get(provider) ?? 0) + tokens)
+  }
+  return totals
+})
+
+// Per-model rows with an `allocatedCost` field — provider's pro-rated
+// monthly fee × (this model's tokens / this provider's total tokens this
+// window). Subscription bills are flat-rate at the provider level, so any
+// per-model attribution is a proxy; we expose it as "allocated cost" with
+// a footnote on the section so operators understand it's a derived
+// share-of-tokens figure, not actual per-call billing. Picking the
+// allocation key (total tokens) is the most defensible default because it
+// tracks "work the model did for the operator", which is what the flat
+// fee buys.
+const subscriptionPerModelAllocated = computed<(FleetCostPerModel & { allocatedCost: number })[]>(() => {
+  const feeByProvider = new Map(subscriptionProviderBreakdown.value.map(p => [p.name, p.proRatedFee]))
+  return subscriptionPerModel.value.map((m) => {
+    const provider = m.modelProvider ?? ''
+    const providerTokens = subscriptionProviderTokenTotals.value.get(provider) ?? 0
+    const providerFee = feeByProvider.get(provider) ?? 0
+    const modelTokens = m.prompt + m.completion + m.reasoning + m.cached
+    const allocatedCost = providerTokens > 0
+      ? providerFee * (modelTokens / providerTokens)
+      : 0
+    return { ...m, allocatedCost }
+  })
+})
+
+// Providers with a configured subscription bill but zero usage this
+// window. Their fee is real money the operator is paying, so we surface
+// it in a footnote rather than silently dropping it — accounting honesty
+// beats spreadsheet neatness. The Total row in the table sums only the
+// allocated cost, so `unallocatedSubscriptions` is what makes up the gap
+// between the table Total and the bill subtotal.
+const unallocatedSubscriptions = computed(() => {
+  const usedProviders = new Set(
+    subscriptionPerModel.value.map(m => m.modelProvider).filter(Boolean),
+  )
+  return subscriptionProviderBreakdown.value
+    .filter(p => !usedProviders.has(p.name))
+    .filter(p => p.proRatedFee > 0)
+})
+
+// Sum of allocations across all subscription model rows. Equals the
+// total bill when every configured subscription provider had usage this
+// window; less than the bill when one or more are unallocated (see
+// `unallocatedSubscriptions`).
+const subscriptionAllocatedTotal = computed(() =>
+  subscriptionPerModelAllocated.value.reduce((sum, m) => sum + m.allocatedCost, 0),
+)
+
 // Chart geometry. Horizontal bars: one per agent (or per model in chart
 // view). Width is proportional to cost share. Inline SVG, no library.
 // Same paid-only filter as the table — chart visualizes cost contribution,
@@ -454,16 +519,18 @@ function exportCsv() {
 
   const lines: string[] = []
 
-  // Subscription per-model rows: activity is real, but per-row cost
-  // isn't attributable (the fee surfaces in the per-provider rows
-  // below), so the cost cell is blank.
-  for (const m of subscriptionPerModel.value) {
+  // Subscription per-model rows: cost cell carries the proportional
+  // allocation (provider's pro-rated bill × this model's token share
+  // for the provider). A spreadsheet column summing these reproduces
+  // the dashboard's Total — minus any unallocated amount, which is
+  // exported as its own row below.
+  for (const m of subscriptionPerModelAllocated.value) {
     lines.push([
       'subscription',
       csvCell(m.modelProvider ?? ''),
       csvCell(m.modelId),
       m.turnCount.toString(),
-      '',
+      m.allocatedCost.toFixed(6),
       m.prompt.toString(),
       m.completion.toString(),
       m.reasoning.toString(),
@@ -471,12 +538,13 @@ function exportCsv() {
     ].join(','))
   }
 
-  // Subscription per-provider fee rows. Carry the pro-rated monthly
-  // fee in the cost cell; modelId is blank because the fee isn't tied
-  // to any single model run.
-  for (const p of subscriptionProviderBreakdown.value) {
+  // Subscription bills that couldn't be allocated this window — the
+  // provider was configured (and billed) but had no usage. Exported as
+  // a separate row per provider so accounting math reconciles: sum of
+  // allocated rows + sum of these = total bill.
+  for (const p of unallocatedSubscriptions.value) {
     lines.push([
-      'subscription',
+      'subscription-unallocated',
       csvCell(p.name),
       '',
       '',
@@ -697,15 +765,35 @@ defineExpose({ refresh })
         v-if="hasSubscriptionSection"
         class="border-b border-border mt-6 mb-6"
       >
-        <div class="px-4 pt-3 pb-3 text-xs font-medium text-fg-muted uppercase tracking-wide">
-          Subscription
+        <div class="px-4 pt-3 pb-3">
+          <div class="text-xs font-medium text-fg-muted uppercase tracking-wide">
+            Subscription
+          </div>
+          <!-- Per-provider bill breakdown for the active window. Pulled
+               above the table so the operator sees the standing fees as
+               a header summary, not as row-shaped data masquerading as
+               usage stats. Plural-vs-singular phrasing keeps a single
+               provider from reading awkwardly. -->
+          <div
+            v-if="subscriptionProviderBreakdown.length > 0"
+            class="mt-1 text-[11px] text-fg-muted"
+          >
+            <span class="font-mono text-fg-primary">{{ formatStatCurrency(subscriptionFee) }}</span>
+            this window —
+            <template
+              v-for="(p, idx) in subscriptionProviderBreakdown"
+              :key="p.name"
+            ><span v-if="idx > 0">, </span>{{ p.displayName }}
+              <span class="font-mono text-fg-primary">{{ formatStatCurrency(p.proRatedFee) }}</span></template>
+          </div>
         </div>
 
-        <!-- Per-model breakdown for subscription activity. Drops a per-row
-             Cost figure (subscription has no per-row attribution — the
-             standing fee surfaces in the tfoot Total instead). Fixed sort
+        <!-- Per-model breakdown for subscription activity. Each row's
+             Cost is the provider's pro-rated bill × (this model's
+             tokens / this provider's total tokens this window) — the
+             flat fee allocated proportionally to work done. Fixed sort
              by turn count descending; interactive sort would be overkill
-             on what's usually a 1–2 model set per subscription provider.
+             on what's usually a 1-2 model set per subscription provider.
              Always rendered when a subscription is configured so the
              Total row shows the fee even on weeks with no activity. -->
         <div class="overflow-x-auto border-t border-border">
@@ -752,23 +840,22 @@ defineExpose({ refresh })
                 >
                   Cached
                 </th>
-                <!-- Cost is always \$0.00 for subscription rows (no per-row
-                     attribution — the standing fee at the top is the total).
-                     Kept as a column at the end so the subscription table's
-                     columns line up with the per-token table directly below
-                     it, and so the headline currency sits rightmost like
-                     in the strips above. -->
+                <!-- Cost cell carries the per-model allocation =
+                     provider's pro-rated bill × (this model's tokens /
+                     this provider's total tokens this window). It's a
+                     derived share, not actual per-call billing — the
+                     footnote below the table calls that out explicitly. -->
                 <th
                   scope="col"
                   class="text-right px-3 py-2 font-medium"
                 >
-                  Cost
+                  Cost*
                 </th>
               </tr>
             </thead>
             <tbody>
               <tr
-                v-for="m in subscriptionPerModel"
+                v-for="m in subscriptionPerModelAllocated"
                 :key="m.modelId"
                 class="border-t border-border"
               >
@@ -793,51 +880,20 @@ defineExpose({ refresh })
                 <td class="px-3 py-2 text-right font-mono text-yellow-700 dark:text-yellow-400">
                   {{ m.cached.toLocaleString() }}
                 </td>
-                <td class="px-3 py-2 text-right font-mono text-fg-muted">
-                  —
+                <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                  {{ formatStatCurrency(m.allocatedCost) }}
                 </td>
               </tr>
             </tbody>
-            <!-- Per-provider subscription rows. Each row shows the
-                 humanized provider name and its window-pro-rated fee in
-                 the Cost cell; stat cells are em-dashes because
-                 subscription has no per-row activity attribution at the
-                 provider level. The Total row directly below sums these
-                 Cost cells (and the bodies' aggregate stats) so the math
-                 reads as a literal addition. -->
+            <!-- Section total. Stat cells are the column sums of the
+                 bodies above; the Cost cell is the sum of allocated
+                 per-model costs and equals the bill total iff every
+                 configured subscription provider had at least some
+                 usage this window. When one or more providers had
+                 zero usage, this Total falls short of the bill by
+                 exactly the unallocated amount — surfaced in the
+                 footnote below. -->
             <tfoot>
-              <tr
-                v-for="p in subscriptionProviderBreakdown"
-                :key="p.name"
-                class="bg-muted/30 border-t border-border"
-              >
-                <td class="px-4 py-2 font-mono text-fg-primary">
-                  {{ p.displayName }}
-                </td>
-                <td class="px-3 py-2 text-right font-mono text-fg-muted">
-                  —
-                </td>
-                <td class="px-3 py-2 text-right font-mono text-fg-muted">
-                  —
-                </td>
-                <td class="px-3 py-2 text-right font-mono text-fg-muted">
-                  —
-                </td>
-                <td class="px-3 py-2 text-right font-mono text-fg-muted">
-                  —
-                </td>
-                <td class="px-3 py-2 text-right font-mono text-fg-muted">
-                  —
-                </td>
-                <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
-                  {{ formatStatCurrency(p.proRatedFee) }}
-                </td>
-              </tr>
-              <!-- Section total. Stat cells are the column sums of the
-                   bodies above; the Cost cell is the sum of the per-
-                   provider rows above this one. Always rendered so a
-                   subscription with zero in-window activity still
-                   surfaces its fee. -->
               <tr class="bg-muted/30 border-t border-border">
                 <td class="px-4 py-2 text-xs font-medium text-fg-muted uppercase tracking-wide">
                   Total
@@ -859,13 +915,32 @@ defineExpose({ refresh })
                 </td>
                 <td
                   class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400"
-                  :title="`monthly × (window_days / 30) = ${formatStatCurrency(subscriptionFee)} over ${windowDays.toFixed(1)} days`"
+                  :title="`Sum of per-model allocations. Bill total this window: ${formatStatCurrency(subscriptionFee)}`"
                 >
-                  {{ formatStatCurrency(subscriptionFee) }}
+                  {{ formatStatCurrency(subscriptionAllocatedTotal) }}
                 </td>
               </tr>
             </tfoot>
           </table>
+          <!-- Footnote: clarifies the allocation, and flags any
+               subscription bill that couldn't be allocated because the
+               provider had zero usage this window. The Total above
+               equals the bill iff this footnote shows no unallocated
+               entries; otherwise the gap is exactly the sum of the
+               listed amounts. -->
+          <div class="px-4 py-2 text-[11px] text-fg-muted border-t border-border">
+            *Subscription cost allocated across models by total tokens (prompt + completion + reasoning + cached).
+            <div
+              v-if="unallocatedSubscriptions.length > 0"
+              class="mt-1"
+            >
+              <template
+                v-for="(p, idx) in unallocatedSubscriptions"
+                :key="p.name"
+              ><span v-if="idx > 0">; </span><span class="font-mono text-fg-primary">{{ formatStatCurrency(p.proRatedFee) }}</span>
+                unallocated — {{ p.displayName }} has no usage this window</template>
+          </div>
+          </div>
         </div>
       </div>
 

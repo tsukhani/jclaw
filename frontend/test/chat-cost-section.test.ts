@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
+import { clearNuxtData } from '#app'
 import ChatCostSection from '~/components/ChatCostSection.vue'
 import type { Agent } from '~/types/api'
 
@@ -395,5 +396,177 @@ describe('ChatCostSection (JCLAW-28)', () => {
     // The component exposes refresh so a parent could trigger reload after
     // a config change. Just assert the API surface exists.
     expect(typeof (wrapper.vm as { refresh?: () => void }).refresh).toBe('function')
+  })
+
+  // ==================== Subscription allocation ====================
+  //
+  // The Subscription subsection allocates each provider's flat monthly
+  // bill across model rows proportionally to total tokens
+  // (prompt + completion + reasoning + cached). Per-provider rows that
+  // used to sit in the table footer are gone; the bill breakdown lives
+  // in the section subtitle, and any subscription with zero usage this
+  // window shows up as an "unallocated" footnote.
+
+  // clearNuxtData() between tests so useFetch's per-URL cache doesn't
+  // leak a prior test's /api/providers or /api/metrics/cost payload
+  // into the next mount. Same gotcha as the OCR section in
+  // settings.page.test.ts.
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  /** Fixture: makes both /api/metrics/cost and /api/providers stubs at
+   *  once so each test reads as "given this providers config and these
+   *  rows, expect this rendered output". */
+  function stubSubscriptionFixture(opts: {
+    providers: { name: string, paymentModality: 'PER_TOKEN' | 'SUBSCRIPTION', subscriptionMonthlyUsd: number }[]
+    rows: { agentId: number, channelType: string, usage: UsagePartial }[]
+  }) {
+    registerEndpoint('/api/providers', () => opts.providers.map(p => ({
+      name: p.name,
+      paymentModality: p.paymentModality,
+      subscriptionMonthlyUsd: p.subscriptionMonthlyUsd,
+      supportedModalities: [p.paymentModality],
+    })))
+    registerEndpoint('/api/metrics/cost', () => ({
+      since: '2026-04-10T00:00:00Z',
+      rows: opts.rows.map((r, i) => ({
+        timestamp: `2026-05-09T12:0${i}:00Z`,
+        agentId: r.agentId,
+        channelType: r.channelType,
+        usageJson: makeUsage(r.usage),
+      })),
+    }))
+  }
+
+  it('allocates a subscription bill across model rows by total tokens', async () => {
+    // Ollama Cloud at $100/month, 30d window → $100 prorated. Two models
+    // share the bill: 75% tokens / 25% tokens. Expected: $75 / $25.
+    // promptPrice=0 keeps these rows in the SUBSCRIPTION partition (the
+    // modality comes from the providers endpoint, not the row prices).
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+      ],
+      rows: [
+        // Model A: 750 total tokens (75% of provider's 1000)
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 500, completion: 250, promptPrice: 0, completionPrice: 0,
+        } },
+        // Model B: 250 total tokens (25%)
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'gemini-3-flash', modelProvider: 'ollama-cloud',
+          prompt: 200, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    // 30d default window → full $100 monthly fee is the prorated bill.
+    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await flushPromises()
+
+    const text = wrapper.text()
+    // Both models render with their allocated share, not "—".
+    // formatStatCurrency drops trailing .00 on whole-dollar values.
+    expect(text).toContain('$75')
+    expect(text).toContain('$25')
+    // Section subtitle carries the provider bill breakdown (the data
+    // that used to be a row inside the table footer).
+    expect(text).toContain('Ollama Cloud')
+    expect(text).toContain('$100')
+  })
+
+  it('shows an unallocated footnote when a subscription provider has zero usage', async () => {
+    // OpenAI subscribed at $20/month but never used. Ollama Cloud
+    // subscribed at $100/month with one model in use. Expected: model
+    // row gets $100 allocated; footnote calls out $20 unallocated for
+    // OpenAI; Total = $100 (sum of allocations only, per option (a)).
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+        { name: 'openai', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 20 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await flushPromises()
+
+    const text = wrapper.text()
+    // The allocated row.
+    expect(text).toContain('$100')
+    // Footnote names OpenAI and the unallocated amount. The "no usage
+    // this window" phrasing is part of the footnote so we assert on it
+    // to pin the wording — operators read it to understand the gap
+    // between the section subtitle ("$120 this window") and the table
+    // total ("$100").
+    expect(text).toContain('$20 unallocated')
+    expect(text).toContain('OpenAI has no usage this window')
+  })
+
+  it('cached + reasoning tokens count toward the allocation key', async () => {
+    // Model A: 100 prompt + 0 completion + 0 reasoning + 0 cached = 100 tokens
+    // Model B: 0 prompt + 0 completion + 50 reasoning + 50 cached = 100 tokens
+    // Equal allocation key → equal $50/$50 split of a $100 bill. If the
+    // allocation accidentally only counted prompt+completion, model B
+    // would get $0 and model A would get $100.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'model-a', modelProvider: 'ollama-cloud',
+          prompt: 100, completion: 0, promptPrice: 0, completionPrice: 0,
+        } },
+      ],
+    })
+    // Override the rows endpoint with reasoning + cached on model B —
+    // makeUsage() defaults reasoning and cached to 0 so we need a raw
+    // payload here.
+    registerEndpoint('/api/metrics/cost', () => ({
+      since: '2026-04-10T00:00:00Z',
+      rows: [
+        { timestamp: '2026-05-09T12:00:00Z', agentId: 1, channelType: 'web',
+          usageJson: JSON.stringify({
+            prompt: 100, completion: 0, total: 100, reasoning: 0, cached: 0,
+            durationMs: 100, promptPrice: 0, completionPrice: 0,
+            modelId: 'model-a', modelProvider: 'ollama-cloud',
+          }) },
+        { timestamp: '2026-05-09T12:01:00Z', agentId: 1, channelType: 'web',
+          usageJson: JSON.stringify({
+            prompt: 0, completion: 0, total: 0, reasoning: 50, cached: 50,
+            durationMs: 100, promptPrice: 0, completionPrice: 0,
+            modelId: 'model-b', modelProvider: 'ollama-cloud',
+          }) },
+      ],
+    }))
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await flushPromises()
+
+    const text = wrapper.text()
+    // 50/50 split — the $50 appears twice (once per row). It's the
+    // strongest signal that cached + reasoning both made it into the key.
+    // formatStatCurrency drops trailing .00 on whole-dollar values, so
+    // the literal we hunt for is "$50" — but we want a tight match to
+    // avoid colliding with substrings of larger numbers like "$500".
+    const fiftyMatches = text.match(/\$50(?!\d)/g) ?? []
+    expect(fiftyMatches.length).toBeGreaterThanOrEqual(2)
   })
 })
