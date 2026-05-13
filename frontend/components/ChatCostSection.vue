@@ -783,8 +783,10 @@ defineExpose({ refresh })
             <template
               v-for="(p, idx) in subscriptionProviderBreakdown"
               :key="p.name"
-            ><span v-if="idx > 0">, </span>{{ p.displayName }}
-              <span class="font-mono text-fg-primary">{{ formatStatCurrency(p.proRatedFee) }}</span></template>
+            >
+              <span v-if="idx > 0">, </span>{{ p.displayName }}
+              <span class="font-mono text-fg-primary">{{ formatStatCurrency(p.proRatedFee) }}</span>
+            </template>
           </div>
         </div>
 
@@ -937,9 +939,11 @@ defineExpose({ refresh })
               <template
                 v-for="(p, idx) in unallocatedSubscriptions"
                 :key="p.name"
-              ><span v-if="idx > 0">; </span><span class="font-mono text-fg-primary">{{ formatStatCurrency(p.proRatedFee) }}</span>
-                unallocated — {{ p.displayName }} has no usage this window</template>
-          </div>
+              >
+                <span v-if="idx > 0">; </span><span class="font-mono text-fg-primary">{{ formatStatCurrency(p.proRatedFee) }}</span>
+                unallocated — {{ p.displayName }} has no usage this window
+              </template>
+            </div>
           </div>
         </div>
       </div>

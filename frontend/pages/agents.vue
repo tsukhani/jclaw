@@ -1545,7 +1545,6 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                   'text-amber-500/70': catGroup.category === 'Files',
                   'text-blue-500/70': catGroup.category === 'Web',
                   'text-emerald-500/70': catGroup.category === 'Utilities',
-                  'text-violet-500/70': catGroup.category === 'MCP',
                 }"
               >
                 {{ catGroup.category }}
