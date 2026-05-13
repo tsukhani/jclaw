@@ -55,10 +55,11 @@ function onSkip() {
         <DialogDescription class="pt-2">
           Hi, I'm Clawdia — your JClaw sidekick. I help you wire up AI agents to chat, skills,
           and channels, all from one place. Want me to show you around? This 30-second tour
-          walks through the four things to set up before your first real conversation: an LLM
-          provider, your Main Agent, the model it'll use, and the chat composer itself. If
-          you'd rather poke around on your own, no worries — I'll be waving from the sidebar
-          any time you want a refresher.
+          walks through the four things you need before your first real conversation — an LLM
+          provider, your Main Agent, the model it'll use, and the chat composer — plus two
+          optional stops for adding skills and connecting a channel. If you'd rather poke
+          around on your own, no worries — I'll be waving from the sidebar any time you want
+          a refresher.
         </DialogDescription>
       </DialogHeader>
       <DialogFooter class="gap-2 sm:gap-2">
