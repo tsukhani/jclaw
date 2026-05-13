@@ -1,7 +1,6 @@
 package controllers;
 
 import models.ApiToken;
-import play.Play;
 import play.mvc.Before;
 import play.mvc.Controller;
 import play.mvc.Http;
@@ -14,10 +13,13 @@ import services.ConfigService;
  *
  * <ul>
  *   <li><b>Bearer token</b> — {@code Authorization: Bearer <plaintext>}
- *       resolves to an {@link ApiToken} row (JCLAW-282). The token's owner
- *       becomes the session username for downstream ownership checks.
- *       Read-only scoped tokens are restricted to GET; mutating verbs 403
- *       before the controller runs.</li>
+ *       resolves to an {@link ApiToken} row (JCLAW-282). The token's
+ *       owner becomes the session username so downstream identity reads
+ *       see a stable value. After the external-surface drop, the only
+ *       bearer issuer in-tree is
+ *       {@link services.InternalApiTokenService} (the {@code jclaw_api}
+ *       tool's loopback-auth pathway), so every bearer admission is
+ *       effectively the system principal calling its own API.</li>
  *   <li><b>Session cookie</b> — Play 1.x's stateless session, populated by
  *       {@code POST /api/auth/login}. Cross-checked against the DB to catch
  *       stale cookies that survived a password wipe (see comment in body).</li>
@@ -89,61 +91,33 @@ public class AuthCheck extends Controller {
         return token.isEmpty() ? null : token;
     }
 
-    /** Marker key set on {@code Http.Request.current().args} when the
-     *  request was admitted via a bearer token rather than a session
-     *  cookie. Controllers that should refuse the bearer path (e.g.
-     *  token CRUD, password reset) check this before proceeding. */
-    public static final String AUTH_METHOD_KEY = "jclaw.authMethod";
-    public static final String AUTH_METHOD_BEARER = "bearer";
-
-    /** True if the current request was admitted via a bearer token. */
-    public static boolean isBearerRequest() {
-        return AUTH_METHOD_BEARER.equals(Http.Request.current().args.get(AUTH_METHOD_KEY));
-    }
-
-    /** Resolve a bearer token to its owner + scope, populating the
-     *  session so downstream code reads identity the same way it does
-     *  after a cookie login. Renders 401/403 directly on rejection. */
+    /** Resolve a bearer token to its row and populate the session so
+     *  downstream code reads identity the same way it does after a
+     *  cookie login. Renders 401 directly on rejection. */
     private static void authenticateByBearer(String plaintext) {
         var token = ApiToken.findActiveByPlaintext(plaintext);
         if (token == null) {
             response.status = 401;
-            renderJSON("{\"error\":\"Invalid or revoked token\",\"code\":\"invalid_token\"}");
-            return;
-        }
-
-        if (token.scope == ApiToken.Scope.READ_ONLY
-                && !"GET".equalsIgnoreCase(Http.Request.current().method)) {
-            response.status = 403;
-            renderJSON("{\"error\":\"Token is read-only\",\"code\":\"token_read_only\"}");
+            renderJSON("{\"error\":\"Invalid token\",\"code\":\"invalid_token\"}");
             return;
         }
 
         // Stash identity in the request-local session so controllers that
         // read session.get("username") keep working transparently. Play 1.x
         // will emit a Set-Cookie on the response — harmless for the bearer
-        // case (the MCP server doesn't keep a cookie jar) and the cheapest
-        // way to avoid sprinkling "bearer or cookie?" branches everywhere.
+        // case (the jclaw_api tool doesn't keep a cookie jar) and the
+        // cheapest way to avoid sprinkling "bearer or cookie?" branches
+        // everywhere.
         session.put("authenticated", "true");
         session.put("username", token.ownerUsername);
-        Http.Request.current().args.put(AUTH_METHOD_KEY, AUTH_METHOD_BEARER);
 
-        // Audit the usage in the same JPA tx as the request. The cost is
-        // one extra UPDATE per bearer call — negligible for the admin-
-        // grade token traffic this serves, and the synchronous write
-        // keeps tests deterministic (an earlier async-on-virtual-thread
-        // attempt raced with the test's subsequent read). Skip the
-        // re-fetch — `token` is already the managed entity from the
-        // findActiveByPlaintext query above.
+        // Audit the usage in the same JPA tx as the request. The 60s
+        // throttle in ApiToken.markUsed() means most calls within a
+        // burst are no-ops at the Hibernate dirty-check level — that's
+        // what keeps the ApiToken.findActiveByPlaintext query-cache
+        // entry valid across the burst. Skip the re-fetch — `token` is
+        // already the managed entity from the lookup above.
         token.markUsed();
         token.save();
-    }
-
-    /** Read the configured admin username — the only valid {@link ApiToken#ownerUsername}
-     *  in the single-admin model. Tokens minted by this admin should resolve
-     *  to this same username on subsequent requests so downstream ownership
-     *  checks line up with the cookie-auth path. */
-    static String configuredAdminUsername() {
-        return Play.configuration.getProperty("jclaw.admin.username", "admin");
     }
 }

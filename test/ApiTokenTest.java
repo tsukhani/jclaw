@@ -4,10 +4,16 @@ import play.test.*;
 import utils.TokenHasher;
 
 /**
- * Model-level + helper coverage for the API-token persistence layer
- * (JCLAW-282). FunctionalTest coverage of the bearer auth path lives in
- * {@link AuthTest}; this file focuses on units that don't need a live
- * HTTP request.
+ * Model-level + helper coverage for the in-process API-token
+ * persistence layer (JCLAW-282, post-external-surface-drop).
+ *
+ * <p>Pre-cleanup this file also covered scope enforcement, revocation
+ * idempotence, and the {@code listForOwner} sort/scoping contract.
+ * Those tests came out with the surface they were guarding — there's
+ * no longer a way to mint a {@code READ_ONLY} or
+ * {@code ownerUsername="admin"} token, and the listing endpoint that
+ * called {@code listForOwner} is gone. Git history retains them in
+ * case external tokens come back as an explicit ticket.
  */
 public class ApiTokenTest extends UnitTest {
 
@@ -52,33 +58,6 @@ public class ApiTokenTest extends UnitTest {
         assertThrows(IllegalArgumentException.class, () -> TokenHasher.hash(null));
     }
 
-    @Test
-    public void prefixReturnsLeadingCharacters() {
-        var t = "jcl_abcdefghijklmnopqrstuvwxyz";
-        // 4-char "jcl_" plus 8 randoms = the 12-char fingerprint stored
-        // alongside the row for the listing UI.
-        assertEquals("jcl_abcdefgh", TokenHasher.prefix(t));
-    }
-
-    @Test
-    public void prefixHandlesShortInput() {
-        // Defensive: a fabricated token shorter than the display window
-        // should round-trip unchanged rather than IOOB.
-        assertEquals("jcl_x", TokenHasher.prefix("jcl_x"));
-    }
-
-    @Test
-    public void hashesEqualIsConstantTime() {
-        // Functional check only — timing-safe-ness is enforced by
-        // MessageDigest.isEqual; we just verify the comparison itself
-        // returns the right answer.
-        assertTrue(TokenHasher.hashesEqual("abc", "abc"));
-        assertFalse(TokenHasher.hashesEqual("abc", "abd"));
-        assertFalse(TokenHasher.hashesEqual("abc", "abcd"));
-        assertFalse(TokenHasher.hashesEqual(null, "abc"));
-        assertFalse(TokenHasher.hashesEqual("abc", null));
-    }
-
     // ==================== ApiToken model ====================
 
     @BeforeEach
@@ -89,26 +68,13 @@ public class ApiTokenTest extends UnitTest {
     @Test
     public void findActiveByPlaintextResolvesNewToken() {
         var plaintext = TokenHasher.mint();
-        var row = freshRow("test-token", plaintext, ApiToken.Scope.READ_ONLY);
+        var row = freshRow(plaintext);
         row.save();
 
         var resolved = ApiToken.findActiveByPlaintext(plaintext);
         assertNotNull(resolved, "minted token should round-trip via findActiveByPlaintext");
         assertEquals(row.id, resolved.id);
-        assertEquals("test-token", resolved.name);
-    }
-
-    @Test
-    public void findActiveByPlaintextReturnsNullForRevokedToken() {
-        var plaintext = TokenHasher.mint();
-        var row = freshRow("revoked-token", plaintext, ApiToken.Scope.FULL);
-        row.revoke();
-        row.save();
-
-        // Revoked rows are intentionally treated the same as unknown
-        // ones at the bearer-resolve layer — see ApiToken.findActiveByPlaintext
-        // javadoc on why we don't differentiate.
-        assertNull(ApiToken.findActiveByPlaintext(plaintext));
+        assertEquals("system", resolved.ownerUsername);
     }
 
     @Test
@@ -119,23 +85,8 @@ public class ApiTokenTest extends UnitTest {
     }
 
     @Test
-    public void revokeIsIdempotent() {
-        var row = freshRow("idempotent", TokenHasher.mint(), ApiToken.Scope.READ_ONLY);
-        row.save();
-
-        row.revoke();
-        var firstAt = row.revokedAt;
-        assertNotNull(firstAt);
-
-        // Re-revoking must not move the timestamp — the audit record of
-        // when the operator first pulled the plug should be stable.
-        row.revoke();
-        assertEquals(firstAt, row.revokedAt);
-    }
-
-    @Test
     public void markUsedUpdatesLastUsedAt() {
-        var row = freshRow("usage", TokenHasher.mint(), ApiToken.Scope.READ_ONLY);
+        var row = freshRow(TokenHasher.mint());
         row.save();
         assertNull(row.lastUsedAt);
 
@@ -149,7 +100,7 @@ public class ApiTokenTest extends UnitTest {
         // throttling, every request would UPDATE this row and invalidate
         // the query-cache entry that the same request just populated.
         // The throttle is what keeps the cache effective.
-        var row = freshRow("throttled", TokenHasher.mint(), ApiToken.Scope.READ_ONLY);
+        var row = freshRow(TokenHasher.mint());
         row.save();
 
         row.markUsed();
@@ -165,7 +116,7 @@ public class ApiTokenTest extends UnitTest {
 
     @Test
     public void markUsedUpdatesAfterThrottleExpires() {
-        var row = freshRow("expired", TokenHasher.mint(), ApiToken.Scope.READ_ONLY);
+        var row = freshRow(TokenHasher.mint());
         row.save();
 
         // Simulate a prior call that landed before the throttle window.
@@ -180,46 +131,10 @@ public class ApiTokenTest extends UnitTest {
                 "markUsed() outside the throttle window must update lastUsedAt");
     }
 
-    @Test
-    public void listForOwnerReturnsActiveBeforeRevoked() {
-        var active = freshRow("active", TokenHasher.mint(), ApiToken.Scope.FULL);
-        active.save();
-        var revoked = freshRow("revoked", TokenHasher.mint(), ApiToken.Scope.READ_ONLY);
-        revoked.revoke();
-        revoked.save();
-
-        // Sort spec is "active first, then by created_at DESC" so the
-        // operator's freshest live token surfaces at the top of the
-        // Settings UI without scrolling past dead history.
-        var list = ApiToken.listForOwner("admin");
-        assertEquals(2, list.size());
-        assertEquals("active", list.get(0).name);
-        assertEquals("revoked", list.get(1).name);
-    }
-
-    @Test
-    public void listForOwnerScopesToOwner() {
-        var mine = freshRow("mine", TokenHasher.mint(), ApiToken.Scope.READ_ONLY);
-        mine.save();
-        var someone = freshRow("someone", TokenHasher.mint(), ApiToken.Scope.READ_ONLY);
-        someone.ownerUsername = "other-admin";
-        someone.save();
-
-        // Today JClaw is single-admin so this is precautionary, but the
-        // ownerUsername scoping is the contract listForOwner promises and
-        // future multi-tenancy depends on it staying correct.
-        var list = ApiToken.listForOwner("admin");
-        assertEquals(1, list.size());
-        assertEquals("mine", list.get(0).name);
-    }
-
-    private static ApiToken freshRow(String name, String plaintext, ApiToken.Scope scope) {
+    private static ApiToken freshRow(String plaintext) {
         var row = new ApiToken();
-        row.name = name;
-        row.scope = scope;
-        row.ownerUsername = "admin";
+        row.ownerUsername = "system";
         row.secretHash = TokenHasher.hash(plaintext);
-        row.displayPrefix = TokenHasher.prefix(plaintext);
         return row;
     }
 }
