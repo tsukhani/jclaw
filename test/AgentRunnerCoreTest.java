@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * resolution, tool-call cycling, and queue interaction. Uses an embedded HTTP
  * server to mock the LLM provider — zero mocks, real H2 DB.
  */
-public class AgentRunnerCoreTest extends UnitTest {
+class AgentRunnerCoreTest extends UnitTest {
 
     private com.sun.net.httpserver.HttpServer llmServer;
     private int port;
@@ -37,7 +37,7 @@ public class AgentRunnerCoreTest extends UnitTest {
     // --- Provider resolution ---
 
     @Test
-    public void runReturnsErrorWhenNoProviderConfigured() {
+    void runReturnsErrorWhenNoProviderConfigured() {
         var agent = createAgent("no-provider-agent", "nonexistent", "model");
         var convo = ConversationService.create(agent, "web", "user1");
 
@@ -55,7 +55,7 @@ public class AgentRunnerCoreTest extends UnitTest {
     // --- Simple completion (no tool calls) ---
 
     @Test
-    public void runCompletesWithSimpleResponse() throws Exception {
+    void runCompletesWithSimpleResponse() throws Exception {
         startLlmServer(simpleResponse("Hello, I am your assistant!"));
         configureProvider();
 
@@ -81,7 +81,7 @@ public class AgentRunnerCoreTest extends UnitTest {
     // --- JCLAW-178: ollama-local end-to-end ---
 
     @Test
-    public void agentBoundToOllamaLocalReceivesCannedResponse() throws Exception {
+    void agentBoundToOllamaLocalReceivesCannedResponse() throws Exception {
         // Pin the routing path: Config DB seed → ProviderRegistry refresh →
         // forConfig substring match on "ollama" → OllamaProvider HTTP call →
         // canned response surfaces back to the agent.
@@ -103,7 +103,7 @@ public class AgentRunnerCoreTest extends UnitTest {
     // --- Tool call loop ---
 
     @Test
-    public void runExecutesToolCallAndContinues() throws Exception {
+    void runExecutesToolCallAndContinues() throws Exception {
         // First LLM call returns a tool call, second returns final text
         var callCount = new java.util.concurrent.atomic.AtomicInteger(0);
         startLlmServer(exchange -> {
@@ -141,7 +141,7 @@ public class AgentRunnerCoreTest extends UnitTest {
     // --- Truncation handling ---
 
     @Test
-    public void runHandlesTruncatedToolCall() throws Exception {
+    void runHandlesTruncatedToolCall() throws Exception {
         // LLM returns a tool call with finish_reason=length (truncated)
         startLlmServer(exchange -> {
             var body = """
@@ -173,7 +173,7 @@ public class AgentRunnerCoreTest extends UnitTest {
     // --- Max tool rounds ---
 
     @Test
-    public void runStopsAfterMaxToolRounds() throws Exception {
+    void runStopsAfterMaxToolRounds() throws Exception {
         // LLM always returns a tool call — should stop after maxToolRounds
         ConfigService.set("chat.maxToolRounds", "2");
 
@@ -207,7 +207,7 @@ public class AgentRunnerCoreTest extends UnitTest {
     // --- Conversation queuing ---
 
     @Test
-    public void runQueuesWhenConversationBusy() throws Exception {
+    void runQueuesWhenConversationBusy() throws Exception {
         var llmGate = new CountDownLatch(1);
         startLlmServer(exchange -> {
             try { llmGate.await(10, TimeUnit.SECONDS); } catch (InterruptedException _) {}
@@ -251,7 +251,7 @@ public class AgentRunnerCoreTest extends UnitTest {
     }
 
     @Test
-    public void runHandlesMaxTokensFinishReason() throws Exception {
+    void runHandlesMaxTokensFinishReason() throws Exception {
         // JCLAW-76 ground: Bedrock / Anthropic return finish_reason="max_tokens"
         // when output is cut off (vs OpenAI's "length"). Both must be treated as
         // truncation — otherwise the incomplete tool-call JSON flows into Gson
@@ -284,7 +284,7 @@ public class AgentRunnerCoreTest extends UnitTest {
     }
 
     @Test
-    public void runHandlesMalformedToolCallJson() throws Exception {
+    void runHandlesMalformedToolCallJson() throws Exception {
         // Tool-call with a valid finish_reason="tool_calls" but syntactically
         // broken JSON arguments. The runner must recover gracefully rather
         // than bubble a parse exception to the caller.
@@ -319,7 +319,7 @@ public class AgentRunnerCoreTest extends UnitTest {
     // --- LLM error handling ---
 
     @Test
-    public void runReturnsErrorOnLlmFailure() throws Exception {
+    void runReturnsErrorOnLlmFailure() throws Exception {
         startLlmServer(exchange -> {
             exchange.sendResponseHeaders(500, 0);
             exchange.close();
@@ -341,7 +341,7 @@ public class AgentRunnerCoreTest extends UnitTest {
     // --- max_tokens clamp (context-window headroom) ---
 
     @Test
-    public void passesConfiguredMaxTokensThroughWhenPromptFits() throws Exception {
+    void passesConfiguredMaxTokensThroughWhenPromptFits() throws Exception {
         var captured = new AtomicReference<Integer>();
         startLlmServer(capturingHandler(captured, simpleResponse("ok")));
         configureProvider(); // contextWindow=100000, maxTokens=4096 — tiny prompt fits easily
@@ -359,7 +359,7 @@ public class AgentRunnerCoreTest extends UnitTest {
     }
 
     @Test
-    public void clampsMaxTokensWhenConfiguredValueExceedsHeadroom() throws Exception {
+    void clampsMaxTokensWhenConfiguredValueExceedsHeadroom() throws Exception {
         var captured = new AtomicReference<Integer>();
         startLlmServer(capturingHandler(captured, simpleResponse("ok")));
 
@@ -389,7 +389,7 @@ public class AgentRunnerCoreTest extends UnitTest {
     }
 
     @Test
-    public void omitsMaxTokensWhenModelHasNoConfiguredCap() throws Exception {
+    void omitsMaxTokensWhenModelHasNoConfiguredCap() throws Exception {
         var captured = new AtomicReference<Integer>();
         var seen = new java.util.concurrent.atomic.AtomicBoolean(false);
         startLlmServer(exchange -> {

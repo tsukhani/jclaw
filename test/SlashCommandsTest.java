@@ -20,7 +20,7 @@ import java.time.Instant;
  * that actually matters (new row creation, reset watermark, history
  * filter) lives in this test class.
  */
-public class SlashCommandsTest extends UnitTest {
+class SlashCommandsTest extends UnitTest {
 
     private Agent agent;
 
@@ -55,7 +55,7 @@ public class SlashCommandsTest extends UnitTest {
     // ── parse ──────────────────────────────────────────────────────────
 
     @Test
-    public void parseRecognizesAllCommands() {
+    void parseRecognizesAllCommands() {
         assertEquals(Commands.Command.NEW, Commands.parse("/new").orElseThrow());
         assertEquals(Commands.Command.RESET, Commands.parse("/reset").orElseThrow());
         assertEquals(Commands.Command.COMPACT, Commands.parse("/compact").orElseThrow());
@@ -68,7 +68,7 @@ public class SlashCommandsTest extends UnitTest {
     // ── /compact ──────────────────────────────────────────────────────
 
     @Test
-    public void compactWithNoConversationReturnsFallback() {
+    void compactWithNoConversationReturnsFallback() {
         var result = Commands.execute(Commands.Command.COMPACT, agent, "web", "user1", null);
         assertEquals(Commands.Command.COMPACT, result.command());
         assertNull(result.conversation());
@@ -77,7 +77,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void compactWithNoProviderReturnsError() {
+    void compactWithNoProviderReturnsError() {
         // No provider seeded — registry is empty after refresh().
         var convo = ConversationService.create(agent, "web", "user1");
         var result = Commands.execute(Commands.Command.COMPACT, agent, "web", "user1", convo);
@@ -87,7 +87,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void compactOnShortConversationAcksNothingToCompact() {
+    void compactOnShortConversationAcksNothingToCompact() {
         // Seed a real provider so we pass the provider gate, then invoke
         // on a conversation with only 2 messages — below even the forced
         // minimums (keepMin=4, minCompactable=2 → requires total >= 6).
@@ -106,32 +106,32 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void compactParsesTrailingHintAsArgs() {
+    void compactParsesTrailingHintAsArgs() {
         assertEquals("focus on the sql migration work",
                 Commands.extractArgs("/compact focus on the sql migration work"));
         assertNull(Commands.extractArgs("/compact"));
     }
 
     @Test
-    public void parseIsCaseInsensitive() {
+    void parseIsCaseInsensitive() {
         assertEquals(Commands.Command.NEW, Commands.parse("/NEW").orElseThrow());
         assertEquals(Commands.Command.RESET, Commands.parse("/Reset").orElseThrow());
     }
 
     @Test
-    public void parseTrimsLeadingAndTrailingWhitespace() {
+    void parseTrimsLeadingAndTrailingWhitespace() {
         assertEquals(Commands.Command.HELP, Commands.parse("   /help\n").orElseThrow());
     }
 
     @Test
-    public void parseIgnoresArgumentsAfterCommand() {
+    void parseIgnoresArgumentsAfterCommand() {
         // Commands don't take arguments yet — extra tokens are discarded
         // rather than rejecting the whole input.
         assertEquals(Commands.Command.NEW, Commands.parse("/new please start fresh").orElseThrow());
     }
 
     @Test
-    public void parseReturnsEmptyForUnknownSlashCommand() {
+    void parseReturnsEmptyForUnknownSlashCommand() {
         assertTrue(Commands.parse("/tarun").isEmpty(),
                 "unknown slash commands must pass through so LLM sees them");
         assertTrue(Commands.parse("/start").isEmpty(),
@@ -139,7 +139,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void parseReturnsEmptyForNonSlashInput() {
+    void parseReturnsEmptyForNonSlashInput() {
         assertTrue(Commands.parse("hello").isEmpty());
         assertTrue(Commands.parse("").isEmpty());
         assertTrue(Commands.parse(null).isEmpty());
@@ -151,7 +151,7 @@ public class SlashCommandsTest extends UnitTest {
     // ── /new ───────────────────────────────────────────────────────────
 
     @Test
-    public void newCreatesFreshConversationAndIgnoresCurrent() {
+    void newCreatesFreshConversationAndIgnoresCurrent() {
         var existing = ConversationService.findOrCreate(agent, "telegram", "user-123");
         ConversationService.appendUserMessage(existing, "earlier message");
 
@@ -177,7 +177,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void findByAgentChannelPeerReturnsMostRecentAfterNew() {
+    void findByAgentChannelPeerReturnsMostRecentAfterNew() {
         // Critical for the /new handler to "stick" on Telegram: subsequent
         // findOrCreate calls must resolve to the new row, not the old one.
         // Before JCLAW-26 the JPQL had no ORDER BY — first() could return
@@ -194,7 +194,7 @@ public class SlashCommandsTest extends UnitTest {
     // ── /reset ─────────────────────────────────────────────────────────
 
     @Test
-    public void resetStampsContextSinceOnCurrentConversation() {
+    void resetStampsContextSinceOnCurrentConversation() {
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
         var before = Instant.now();
 
@@ -211,7 +211,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void resetExcludesPriorMessagesFromLlmContext() {
+    void resetExcludesPriorMessagesFromLlmContext() {
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
         ConversationService.appendUserMessage(convo, "pre-reset question");
         ConversationService.appendAssistantMessage(convo, "pre-reset answer", null);
@@ -232,7 +232,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void resetDoesNotPersistAck() {
+    void resetDoesNotPersistAck() {
         // /reset is a control signal — the ack text is delivered to the
         // user via the channel's response path (SSE complete frame / sink
         // seal) but must not enter Message history. Persisting it created
@@ -253,7 +253,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void resetWithoutCurrentConversationIsSafe() {
+    void resetWithoutCurrentConversationIsSafe() {
         // Defensive: caller may pass a null conversation (e.g. channel hasn't
         // resolved one yet). Should not throw; returns a fallback response.
         var result = Commands.execute(
@@ -265,7 +265,7 @@ public class SlashCommandsTest extends UnitTest {
     // ── /help ──────────────────────────────────────────────────────────
 
     @Test
-    public void helpReturnsHelpTextAndDoesNotMutateState() {
+    void helpReturnsHelpTextAndDoesNotMutateState() {
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
         ConversationService.appendUserMessage(convo, "prior message");
 
@@ -280,7 +280,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void helpTextListsAllRecognizedCommands() {
+    void helpTextListsAllRecognizedCommands() {
         // If a new command is added, HELP_TEXT must be updated — this test
         // fails loudly when any command is missing from the listing (a cheap
         // guardrail against silent drift).
@@ -295,7 +295,7 @@ public class SlashCommandsTest extends UnitTest {
     // ── /model ─────────────────────────────────────────────────────────
 
     @Test
-    public void modelWithoutProviderConfigExplainsMismatch() {
+    void modelWithoutProviderConfigExplainsMismatch() {
         // No provider seeded in ConfigService — resolveModel returns empty,
         // handler degrades to a clear explanation instead of NPE. This is
         // the "model removed from provider config after agent assignment"
@@ -311,7 +311,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void modelWithProviderConfigRendersCapabilities() {
+    void modelWithProviderConfigRendersCapabilities() {
         // Seed a provider with a model whose metadata covers the full set
         // JCLAW-107 renders. The response must name all seven fields plus
         // pricing so users coming from OpenClaw's /model see parity content.
@@ -337,7 +337,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void modelPersistsResponseAsAssistantMessage() {
+    void modelPersistsResponseAsAssistantMessage() {
         // Parity with /help: the canned response is appended to the
         // conversation so scrollback / reload shows the answer.
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
@@ -355,7 +355,7 @@ public class SlashCommandsTest extends UnitTest {
     // ── /model NAME (write path) ───────────────────────────────────────
 
     @Test
-    public void modelSwitchWritesOverrideAndConfirms() {
+    void modelSwitchWritesOverrideAndConfirms() {
         // JCLAW-108: /model provider/model-id populates both override columns
         // atomically and returns a confirmation naming the new model.
         seedProvider("openrouter", "gpt-4.1",
@@ -377,7 +377,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void modelSwitchRejectsUnknownProvider() {
+    void modelSwitchRejectsUnknownProvider() {
         // Validation path: unknown provider → no write, clear explanation.
         seedProvider("openrouter", "gpt-4.1",
                 "{\"id\":\"gpt-4.1\",\"contextWindow\":128000}");
@@ -394,7 +394,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void modelSwitchRejectsUnknownModelWithinKnownProvider() {
+    void modelSwitchRejectsUnknownModelWithinKnownProvider() {
         seedProvider("openrouter", "gpt-4.1",
                 "{\"id\":\"gpt-4.1\",\"contextWindow\":128000}");
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
@@ -409,7 +409,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void modelSwitchRejectsMalformedArgument() {
+    void modelSwitchRejectsMalformedArgument() {
         // No slash, or empty provider / model id → helpful format error, no write.
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
 
@@ -421,7 +421,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void modelSwitchEmitsShrinkageWarningWhenWindowShrinks() {
+    void modelSwitchEmitsShrinkageWarningWhenWindowShrinks() {
         // Seed two models: a 200K-window one that ran the last turn, and a
         // 10K-window one the user is switching to. Previous turn's prompt
         // was 50K → exceeds the new window → warning must appear.
@@ -446,7 +446,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void modelSwitchDoesNotWarnWhenNewWindowIsLarger() {
+    void modelSwitchDoesNotWarnWhenNewWindowIsLarger() {
         seedProvider("openrouter", "gpt-4.1",
                 "{\"id\":\"gpt-4.1\",\"contextWindow\":100000}");
         seedProvider("big", "big-model",
@@ -465,7 +465,7 @@ public class SlashCommandsTest extends UnitTest {
     // ── /model reset ───────────────────────────────────────────────────
 
     @Test
-    public void modelResetClearsOverrideAndConfirms() {
+    void modelResetClearsOverrideAndConfirms() {
         seedProvider("openrouter", "gpt-4.1",
                 "{\"id\":\"gpt-4.1\",\"contextWindow\":128000}");
         seedProvider("ollama-cloud", "kimi-k2",
@@ -487,7 +487,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void modelResetWithoutPriorOverrideIsNoOp() {
+    void modelResetWithoutPriorOverrideIsNoOp() {
         // Idempotent: calling /model reset without a prior override still
         // succeeds and reports the current (unchanged) agent default.
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
@@ -502,7 +502,7 @@ public class SlashCommandsTest extends UnitTest {
     // ── /model (display) with override ─────────────────────────────────
 
     @Test
-    public void modelDisplayReflectsActiveOverride() {
+    void modelDisplayReflectsActiveOverride() {
         // Once an override is set, /model (no args) shows the override's
         // identity along with a note naming the agent default.
         seedProvider("openrouter", "gpt-4.1",
@@ -527,7 +527,7 @@ public class SlashCommandsTest extends UnitTest {
     // ── /usage ─────────────────────────────────────────────────────────
 
     @Test
-    public void usageOnFreshConversationReportsZeros() {
+    void usageOnFreshConversationReportsZeros() {
         // AC: a brand-new conversation with zero assistant turns shows
         // Input: 0 / Output: 0 / Total: 0. The percentage line depends on
         // whether contextWindow is known; with no provider seeded it falls
@@ -547,7 +547,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void usagePullsLatestAssistantTurnTokens() {
+    void usagePullsLatestAssistantTurnTokens() {
         // After a real assistant turn with usage data, /usage surfaces THAT
         // turn's prompt and completion — not a lifetime accumulation. This
         // is the "current context size" interpretation that makes the
@@ -573,7 +573,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void usageMarksContextUnknownWhenModelMetadataIsMissing() {
+    void usageMarksContextUnknownWhenModelMetadataIsMissing() {
         // Divide-by-zero guard: when contextWindow is absent or zero the
         // percentage math is meaningless. Response must render the tokens
         // but tag the context line as unknown rather than showing "NaN%"
@@ -590,7 +590,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void usagePersistsResponseAsAssistantMessage() {
+    void usagePersistsResponseAsAssistantMessage() {
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
         var countBefore = Message.count("conversation = ?1", convo);
 
@@ -602,7 +602,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void usageWithoutCurrentConversationIsSafe() {
+    void usageWithoutCurrentConversationIsSafe() {
         // Parity with /reset's null-current handling: no conversation to
         // inspect, no token totals to compute. Must not throw.
         var result = Commands.execute(Commands.Command.USAGE, agent, "web", "admin", null);
@@ -613,7 +613,7 @@ public class SlashCommandsTest extends UnitTest {
     // ── /stop ──────────────────────────────────────────────────────────
 
     @Test
-    public void stopWithNoCurrentConversationReturnsFallback() {
+    void stopWithNoCurrentConversationReturnsFallback() {
         var result = Commands.execute(Commands.Command.STOP, agent, "web", "admin", null);
         assertEquals(Commands.Command.STOP, result.command());
         assertNull(result.conversation());
@@ -622,7 +622,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void stopOnIdleConversationReportsNothingToStop() {
+    void stopOnIdleConversationReportsNothingToStop() {
         // Conversation exists but no in-flight processing — ConversationQueue
         // has never seen this conversation id, so isBusy returns false.
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
@@ -637,7 +637,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void stopOnBusyConversationSetsCancellationFlag() {
+    void stopOnBusyConversationSetsCancellationFlag() {
         // Drive the queue into "processing" state via tryAcquire so isBusy
         // returns true. Then /stop must flip the cancellation flag — the
         // streaming thread's checkCancelled poll observes it on its next
@@ -666,7 +666,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void stopDoesNotPersistAck() {
+    void stopDoesNotPersistAck() {
         // Mirror /reset: /stop is a control signal, not conversation content.
         // Persisting "Stopped." next to a partial assistant message would
         // skew /usage accounting and clutter history.
@@ -685,7 +685,7 @@ public class SlashCommandsTest extends UnitTest {
     // ── handle() convenience ───────────────────────────────────────────
 
     @Test
-    public void handleReturnsEmptyForNonSlashInput() {
+    void handleReturnsEmptyForNonSlashInput() {
         var current = ConversationService.findOrCreate(agent, "web", "admin");
         var result = Commands.handle("regular message", agent, "web", "admin", current);
         assertTrue(result.isEmpty(),
@@ -693,7 +693,7 @@ public class SlashCommandsTest extends UnitTest {
     }
 
     @Test
-    public void handleDispatchesRecognizedCommand() {
+    void handleDispatchesRecognizedCommand() {
         var current = ConversationService.findOrCreate(agent, "web", "admin");
         var result = Commands.handle("/help", agent, "web", "admin", current);
         assertTrue(result.isPresent());

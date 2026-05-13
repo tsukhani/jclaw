@@ -31,24 +31,24 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * implementation-defined (typically the empty string or a hallucinated
  * filler word) and not a stable contract.
  */
-public class WhisperJniTranscriberTest extends UnitTest {
+class WhisperJniTranscriberTest extends UnitTest {
 
     private Path tempWav;
 
     @BeforeEach
-    public void setUp() throws Exception {
+    void setUp() throws Exception {
         tempWav = Files.createTempFile("whisper-test-", ".wav");
         writeSilentWav(tempWav, 16000, 1); // 1 second of silent 16 kHz mono PCM16
     }
 
     @AfterEach
-    public void tearDown() throws Exception {
+    void tearDown() throws Exception {
         Files.deleteIfExists(tempWav);
         WhisperJniTranscriber.resetForTest();
     }
 
     @Test
-    public void transcribe_returnsString_whenModelAndFfmpegPresent() {
+    void transcribe_returnsString_whenModelAndFfmpegPresent() {
         assumeTrue(FfmpegProbe.probe().available(),
                 "ffmpeg not on PATH — skipping integration test");
         var model = WhisperModel.DEFAULT;
@@ -64,7 +64,7 @@ public class WhisperJniTranscriberTest extends UnitTest {
     }
 
     @Test
-    public void transcribe_throws_whenFfmpegMissing() {
+    void transcribe_throws_whenFfmpegMissing() {
         FfmpegProbe.setForTest(new FfmpegProbe.ProbeResult(false, "forced-missing-for-test"));
         try {
             var ex = assertThrows(TranscriptionException.class,
@@ -77,7 +77,7 @@ public class WhisperJniTranscriberTest extends UnitTest {
     }
 
     @Test
-    public void transcribe_throws_whenModelNotDownloaded() {
+    void transcribe_throws_whenModelNotDownloaded() {
         assumeTrue(FfmpegProbe.probe().available(),
                 "ffmpeg not on PATH — skipping (this branch needs FfmpegProbe to pass first)");
         // Pick a model that almost certainly isn't downloaded in dev — the

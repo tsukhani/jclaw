@@ -29,22 +29,22 @@ import java.util.Set;
  * for prior {@code list_mcp_tools} calls in conversation history; that
  * class is gone now, so the parser tests went with it.
  */
-public class McpDiscoveryTest extends UnitTest {
+class McpDiscoveryTest extends UnitTest {
 
     private List<ToolRegistry.Tool> originalTools;
 
     @BeforeEach
-    public void saveRegistry() {
+    void saveRegistry() {
         originalTools = ToolRegistry.listTools();
     }
 
     @AfterEach
-    public void restoreRegistry() {
+    void restoreRegistry() {
         ToolRegistry.publish(originalTools);
     }
 
     @Test
-    public void perActionMcpWrappersAreHiddenFromFunctionCallingDefs() {
+    void perActionMcpWrappersAreHiddenFromFunctionCallingDefs() {
         var nativeTool = stubTool("filesystem", null);
         var perActionWrapper = stubMcpTool("mcp_jira_get_issue", "jira");
         var serverHandle = stubMcpServerHandle("mcp_jira", "jira");
@@ -59,7 +59,7 @@ public class McpDiscoveryTest extends UnitTest {
     }
 
     @Test
-    public void serverLevelHandleAlwaysSurfacesRegardlessOfDiscoveredSet() {
+    void serverLevelHandleAlwaysSurfacesRegardlessOfDiscoveredSet() {
         var serverHandle = stubMcpServerHandle("mcp_jira", "jira");
         ToolRegistry.publish(List.of(serverHandle));
 
@@ -78,7 +78,7 @@ public class McpDiscoveryTest extends UnitTest {
     }
 
     @Test
-    public void multipleServerHandlesAllSurfacePerActionWrappersStayHidden() {
+    void multipleServerHandlesAllSurfacePerActionWrappersStayHidden() {
         ToolRegistry.publish(List.of(
                 stubMcpServerHandle("mcp_jira", "jira"),
                 stubMcpTool("mcp_jira_get_issue", "jira"),

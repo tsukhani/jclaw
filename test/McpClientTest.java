@@ -18,20 +18,20 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
-public class McpClientTest extends UnitTest {
+class McpClientTest extends UnitTest {
 
     private FakeTransport transport;
     private McpClient client;
 
     @AfterEach
-    public void teardown() {
+    void teardown() {
         if (client != null) client.close();
     }
 
     // ==================== handshake ====================
 
     @Test
-    public void connectPerformsInitializeHandshake() throws Exception {
+    void connectPerformsInitializeHandshake() throws Exception {
         transport = new FakeTransport();
         client = new McpClient("test", transport, "0.0.1");
 
@@ -65,7 +65,7 @@ public class McpClientTest extends UnitTest {
     }
 
     @Test
-    public void connectRejectsServerErrorOnInitialize() throws Exception {
+    void connectRejectsServerErrorOnInitialize() throws Exception {
         transport = new FakeTransport();
         client = new McpClient("test", transport, "0.0.1");
 
@@ -84,7 +84,7 @@ public class McpClientTest extends UnitTest {
     }
 
     @Test
-    public void connectRefusedFromNonDisconnectedState() throws Exception {
+    void connectRefusedFromNonDisconnectedState() throws Exception {
         transport = new FakeTransport();
         client = new McpClient("test", transport, "0.0.1");
         completeHandshake();
@@ -94,7 +94,7 @@ public class McpClientTest extends UnitTest {
     // ==================== callTool ====================
 
     @Test
-    public void callToolReturnsTextContent() throws Exception {
+    void callToolReturnsTextContent() throws Exception {
         transport = new FakeTransport();
         client = new McpClient("test", transport, "0.0.1");
         completeHandshake();
@@ -122,7 +122,7 @@ public class McpClientTest extends UnitTest {
     }
 
     @Test
-    public void callToolPropagatesServerErrorAsMcpException() throws Exception {
+    void callToolPropagatesServerErrorAsMcpException() throws Exception {
         transport = new FakeTransport();
         client = new McpClient("test", transport, "0.0.1");
         completeHandshake();
@@ -142,7 +142,7 @@ public class McpClientTest extends UnitTest {
     }
 
     @Test
-    public void callToolRejectedBeforeReady() {
+    void callToolRejectedBeforeReady() {
         transport = new FakeTransport();
         client = new McpClient("test", transport, "0.0.1");
         // No connect() — state remains DISCONNECTED.
@@ -153,7 +153,7 @@ public class McpClientTest extends UnitTest {
     // ==================== notifications ====================
 
     @Test
-    public void toolsListChangedTriggersRefreshAndCallback() throws Exception {
+    void toolsListChangedTriggersRefreshAndCallback() throws Exception {
         transport = new FakeTransport();
         client = new McpClient("test", transport, "0.0.1");
         var fired = new AtomicReference<List<McpToolDef>>();
@@ -195,7 +195,7 @@ public class McpClientTest extends UnitTest {
     // ==================== server-initiated requests ====================
 
     @Test
-    public void serverInitiatedRequestRepliedWithMethodNotFound() throws Exception {
+    void serverInitiatedRequestRepliedWithMethodNotFound() throws Exception {
         transport = new FakeTransport();
         client = new McpClient("test", transport, "0.0.1");
         completeHandshake();
@@ -212,7 +212,7 @@ public class McpClientTest extends UnitTest {
     // ==================== transport errors ====================
 
     @Test
-    public void transportErrorMovesToDisconnectedAndCancelsPending() throws Exception {
+    void transportErrorMovesToDisconnectedAndCancelsPending() throws Exception {
         transport = new FakeTransport();
         client = new McpClient("test", transport, "0.0.1");
         completeHandshake();
@@ -239,7 +239,7 @@ public class McpClientTest extends UnitTest {
     // ==================== close ====================
 
     @Test
-    public void closeIsIdempotent() throws Exception {
+    void closeIsIdempotent() throws Exception {
         transport = new FakeTransport();
         client = new McpClient("test", transport, "0.0.1");
         client.close();

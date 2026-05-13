@@ -14,7 +14,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-public class AgentSystemTest extends UnitTest {
+class AgentSystemTest extends UnitTest {
 
     private static final String[] TEST_AGENTS = {
             "test-agent", "ws-agent", "missing-agent", "enabled-1", "disabled-1",
@@ -38,7 +38,7 @@ public class AgentSystemTest extends UnitTest {
     // --- AgentService tests ---
 
     @Test
-    public void thinkingModeIsPersistedWhenModelAdvertisesLevel() {
+    void thinkingModeIsPersistedWhenModelAdvertisesLevel() {
         // Seed an Ollama provider whose model declares all three levels, then
         // verify the agent row captures the chosen level verbatim.
         ConfigService.set("provider.ollama-cloud.baseUrl", "https://ollama.com/v1");
@@ -53,7 +53,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void thinkingModeUnknownLevelCollapsesToNull() {
+    void thinkingModeUnknownLevelCollapsesToNull() {
         // A level the model doesn't advertise must be silently dropped rather than
         // persisted — we'd otherwise send a bogus value on every LLM call.
         ConfigService.set("provider.ollama-cloud.baseUrl", "https://ollama.com/v1");
@@ -69,7 +69,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void createAgentCreatesWorkspace() {
+    void createAgentCreatesWorkspace() {
         var agent = AgentService.create("test-agent", "openrouter", "gpt-4.1");
         assertNotNull(agent);
         assertEquals("test-agent", agent.name);
@@ -86,7 +86,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void readAndWriteWorkspaceFile() {
+    void readAndWriteWorkspaceFile() {
         AgentService.create("ws-agent", "openrouter", "gpt-4.1");
 
         AgentService.writeWorkspaceFile("ws-agent", "AGENT.md", "# Custom Instructions\nBe helpful.");
@@ -96,14 +96,14 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void readMissingWorkspaceFileReturnsNull() {
+    void readMissingWorkspaceFileReturnsNull() {
         AgentService.create("missing-agent", "openrouter", "gpt-4.1");
         var content = AgentService.readWorkspaceFile("missing-agent", "NONEXISTENT.md");
         assertNull(content);
     }
 
     @Test
-    public void listEnabledFiltersDisabled() {
+    void listEnabledFiltersDisabled() {
         var agent1 = AgentService.create("enabled-1", "openrouter", "gpt-4.1");
         agent1.enabled = true;
         agent1.save();
@@ -119,7 +119,7 @@ public class AgentSystemTest extends UnitTest {
     // --- Main-agent invariants ---
 
     @Test
-    public void mainAgentIsCreatedEnabledEvenWithUnconfiguredProvider() {
+    void mainAgentIsCreatedEnabledEvenWithUnconfiguredProvider() {
         // Use a provider that's definitely not configured in tests — main should
         // still be created as enabled because the invariant is "main is always enabled."
         var main = AgentService.create("main", "nonexistent-provider", "nonexistent-model");
@@ -129,7 +129,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void mainAgentUpdateForcesEnabledTrue() {
+    void mainAgentUpdateForcesEnabledTrue() {
         var main = AgentService.create("main", "openrouter", "gpt-4.1");
         // Simulate a caller passing enabled=false — service layer must override it.
         var updated = AgentService.update(main, "main", "openrouter", "gpt-4.1", false);
@@ -138,7 +138,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void mainAgentSurvivesSyncEnabledStatesWithNoProvider() {
+    void mainAgentSurvivesSyncEnabledStatesWithNoProvider() {
         var main = AgentService.create("main", "nonexistent-provider", "nonexistent-model");
         assertTrue(main.enabled); // created enabled per the invariant above
 
@@ -153,7 +153,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void mainAgentSyncHealsADisabledMainRow() {
+    void mainAgentSyncHealsADisabledMainRow() {
         // If main was ever persisted as disabled (e.g. by a pre-fix boot), sync
         // must heal it on the next pass rather than leave it broken.
         var main = AgentService.create("main", "openrouter", "gpt-4.1");
@@ -167,7 +167,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void mainAgentWorkspaceEditsSurviveSeedPass() {
+    void mainAgentWorkspaceEditsSurviveSeedPass() {
         // Regression for the boot-time clobber of user-edited main workspace
         // files. Before the fix, seedDefaultAgent called resetWorkspace("main"),
         // rewriting every workspace .md with hardcoded Java defaults on each
@@ -193,7 +193,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void mainAgentWorkspaceSeedFillsMissingFiles() {
+    void mainAgentWorkspaceSeedFillsMissingFiles() {
         // createWorkspace must still populate any file that's missing on disk,
         // so a file accidentally deleted post-boot gets recreated with the
         // Java-literal fallback on the next seed pass.
@@ -215,7 +215,7 @@ public class AgentSystemTest extends UnitTest {
     // --- SkillLoader tests ---
 
     @Test
-    public void loadSkillsFromFilesystem() {
+    void loadSkillsFromFilesystem() {
         AgentService.create("skill-agent", "openrouter", "gpt-4.1");
 
         // Create a skill file in the agent's workspace
@@ -240,7 +240,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void loadSkillsReturnsEmptyForNoSkills() {
+    void loadSkillsReturnsEmptyForNoSkills() {
         AgentService.create("no-skills", "openrouter", "gpt-4.1");
         SkillLoader.clearCache();
         var skills = SkillLoader.loadSkills("no-skills");
@@ -248,7 +248,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void formatSkillsXmlContainsSkillData() {
+    void formatSkillsXmlContainsSkillData() {
         AgentService.create("xml-agent", "openrouter", "gpt-4.1");
 
         // Create a skill file in the agent's workspace
@@ -273,7 +273,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void yamlFrontmatterParsing() {
+    void yamlFrontmatterParsing() {
         assertEquals("my-skill", SkillLoader.extractYamlValue("name: my-skill", "name"));
         assertEquals("A description", SkillLoader.extractYamlValue("description: A description", "description"));
         assertNull(SkillLoader.extractYamlValue("other: value", "name"));
@@ -283,7 +283,7 @@ public class AgentSystemTest extends UnitTest {
     // --- ConversationService tests ---
 
     @Test
-    public void findOrCreateConversation() {
+    void findOrCreateConversation() {
         var agent = AgentService.create("convo-agent", "openrouter", "gpt-4.1");
         var convo1 = ConversationService.findOrCreate(agent, "web", "admin");
         assertNotNull(convo1);
@@ -293,7 +293,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void appendAndLoadMessages() {
+    void appendAndLoadMessages() {
         var agent = AgentService.create("msg-agent", "openrouter", "gpt-4.1");
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
 
@@ -310,7 +310,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void loadRecentMessagesRespectsChatMaxContextMessages() {
+    void loadRecentMessagesRespectsChatMaxContextMessages() {
         ConfigService.set("chat.maxContextMessages", "3");
         var agent = AgentService.create("window-agent", "openrouter", "gpt-4.1");
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
@@ -330,7 +330,7 @@ public class AgentSystemTest extends UnitTest {
     // --- DefaultConfigJob OpenAI seeding (JCLAW-160) ---
 
     @Test
-    public void seedProvidersWritesOpenAiDefaultsAndIsIdempotent() throws Exception {
+    void seedProvidersWritesOpenAiDefaultsAndIsIdempotent() throws Exception {
         // JCLAW-160 AC #2: seedProviders must write provider.openai.{baseUrl,apiKey}
         // on a fresh install with the documented defaults. Re-running mustn't
         // clobber operator-set values — the seedIfAbsent guard is what protects
@@ -354,7 +354,7 @@ public class AgentSystemTest extends UnitTest {
     // --- DefaultConfigJob rename migration ---
 
     @Test
-    public void renameMigratesAgentKeyToChatKey() throws Exception {
+    void renameMigratesAgentKeyToChatKey() throws Exception {
         // Pre-seed the legacy key as if an earlier build had written it
         ConfigService.set("agent.maxToolRounds", "25");
         ConfigService.clearCache();
@@ -377,7 +377,7 @@ public class AgentSystemTest extends UnitTest {
     // --- Cascade delete ---
 
     @Test
-    public void deleteAgentCascadesChildRows() throws Exception {
+    void deleteAgentCascadesChildRows() throws Exception {
         // Seed an agent plus one row in every FK-constrained child table so the delete
         // path has to clear each one. Creation itself writes an AgentToolConfig (the
         // seeded "browser=disabled" for non-main agents), so that table is pre-populated.
@@ -450,7 +450,7 @@ public class AgentSystemTest extends UnitTest {
     // --- SystemPromptAssembler tests ---
 
     @Test
-    public void assembleIncludesWorkspaceFiles() {
+    void assembleIncludesWorkspaceFiles() {
         var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile("prompt-agent", "AGENT.md", "# Be helpful and concise");
 
@@ -471,7 +471,7 @@ public class AgentSystemTest extends UnitTest {
      * tail, so we check stability with the same user message across both calls.
      */
     @Test
-    public void assembleIsStableAcrossCallsWithSameInputs() {
+    void assembleIsStableAcrossCallsWithSameInputs() {
         var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile("prompt-agent", "AGENT.md", "# Be stable");
 
@@ -486,7 +486,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void assembleSkipsOptionalFiles() {
+    void assembleSkipsOptionalFiles() {
         var agent = AgentService.create("minimal-agent", "openrouter", "gpt-4.1");
         // Delete optional files — SOUL, IDENTITY, USER, and BOOTSTRAP are all
         // optional; only AGENT.md is the load-bearing instruction file.
@@ -505,7 +505,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void assembleIncludesSoulAndBootstrapWhenPopulated() {
+    void assembleIncludesSoulAndBootstrapWhenPopulated() {
         var agent = AgentService.create("soul-boot-agent", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile("soul-boot-agent", "SOUL.md", "# Soul\nPragmatic realism.");
         AgentService.writeWorkspaceFile("soul-boot-agent", "BOOTSTRAP.md", "# Bootstrap\nPrime with caffeine.");
@@ -531,7 +531,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void breakdownExposesSoulAndBootstrapSections() {
+    void breakdownExposesSoulAndBootstrapSections() {
         var agent = AgentService.create("breakdown-agent", "openrouter", "gpt-4.1");
         var breakdown = SystemPromptAssembler.breakdown(agent, null, "web");
         var names = breakdown.sections().stream()
@@ -541,7 +541,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void assembleIncludesSafetyAndExecutionBias() {
+    void assembleIncludesSafetyAndExecutionBias() {
         var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1");
         var prompt = SystemPromptAssembler.assemble(agent, "test").systemPrompt();
         assertTrue(prompt.contains("## Safety"), "must include Safety section");
@@ -553,7 +553,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void assembleEnvironmentIncludesModelAndRuntime() {
+    void assembleEnvironmentIncludesModelAndRuntime() {
         var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1-new");
         var prompt = SystemPromptAssembler.assemble(agent, "test").systemPrompt();
         assertTrue(prompt.contains("Model: gpt-4.1-new"), "must expose the agent model id");
@@ -568,7 +568,7 @@ public class AgentSystemTest extends UnitTest {
      * routing both through the shared private helper.
      */
     @Test
-    public void breakdownMatchesAssembledPrompt() {
+    void breakdownMatchesAssembledPrompt() {
         var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile("prompt-agent", "AGENT.md", "# Be helpful");
 
@@ -608,7 +608,7 @@ public class AgentSystemTest extends UnitTest {
     // --- Channel-aware prompt sections (JCLAW-17) ---
 
     @Test
-    public void assembleWithNullChannelSkipsChannelGuidance() {
+    void assembleWithNullChannelSkipsChannelGuidance() {
         var agent = AgentService.create("channel-null-agent", "openrouter", "gpt-4.1");
         var prompt = SystemPromptAssembler.assemble(agent, null, null, null).systemPrompt();
         assertFalse(prompt.contains("## Channel Guidance"),
@@ -616,7 +616,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void assembleWithWebChannelInjectsWebGuidance() {
+    void assembleWithWebChannelInjectsWebGuidance() {
         var agent = AgentService.create("channel-web-agent", "openrouter", "gpt-4.1");
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
         assertTrue(prompt.contains("## Channel Guidance (web)"),
@@ -632,7 +632,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void assembleWithTelegramChannelInjectsTelegramGuidance() {
+    void assembleWithTelegramChannelInjectsTelegramGuidance() {
         var agent = AgentService.create("channel-tg-agent", "openrouter", "gpt-4.1");
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "telegram").systemPrompt();
         assertTrue(prompt.contains("## Channel Guidance (telegram)"),
@@ -644,7 +644,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void assembleWithChannelTypeCaseInsensitive() {
+    void assembleWithChannelTypeCaseInsensitive() {
         var agent = AgentService.create("channel-case-agent", "openrouter", "gpt-4.1");
         var upper = SystemPromptAssembler.assemble(agent, null, null, "TELEGRAM").systemPrompt();
         var lower = SystemPromptAssembler.assemble(agent, null, null, "telegram").systemPrompt();
@@ -658,7 +658,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void assembleWithUnregisteredChannelSkipsSection() {
+    void assembleWithUnregisteredChannelSkipsSection() {
         // Slack and WhatsApp have no registered guidance yet — they should produce
         // the same prompt as a null channelType (no section at all).
         var agent = AgentService.create("channel-unregistered-agent", "openrouter", "gpt-4.1");
@@ -672,7 +672,7 @@ public class AgentSystemTest extends UnitTest {
     }
 
     @Test
-    public void breakdownReportsChannelGuidanceAsItsOwnSection() {
+    void breakdownReportsChannelGuidanceAsItsOwnSection() {
         var agent = AgentService.create("channel-breakdown-agent", "openrouter", "gpt-4.1");
         var breakdown = SystemPromptAssembler.breakdown(agent, null, "telegram");
         var names = breakdown.sections().stream()
@@ -689,7 +689,7 @@ public class AgentSystemTest extends UnitTest {
      * (3) the memories section sits below the marker, not above.
      */
     @Test
-    public void assembleCacheBoundaryKeepsPrefixStable() {
+    void assembleCacheBoundaryKeepsPrefixStable() {
         var agent = AgentService.create("prompt-agent", "openrouter", "gpt-4.1");
 
         var first = SystemPromptAssembler.assemble(agent, "first user message").systemPrompt();

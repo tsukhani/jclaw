@@ -4,7 +4,7 @@ import play.test.*;
 import services.ConfigService;
 import services.Tx;
 
-public class ApiOnboardingControllerTest extends FunctionalTest {
+class ApiOnboardingControllerTest extends FunctionalTest {
 
     private static final String TEST_PASSWORD = "testpass-123";
 
@@ -51,7 +51,7 @@ public class ApiOnboardingControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void statusReturnsZeroForFreshInstall() {
+    void statusReturnsZeroForFreshInstall() {
         var response = GET("/api/onboarding/tour-status");
         assertIsOk(response);
         assertContentType("application/json", response);
@@ -62,7 +62,7 @@ public class ApiOnboardingControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void statusReturnsRecordedValueAndSuppressesAutoShow() {
+    void statusReturnsRecordedValueAndSuppressesAutoShow() {
         // Any recorded progress (including step 1, which we write on intro
         // Start or Skip) flips shouldAutoShow off. The "seen/unseen" flag is
         // binary — it's just encoded in the same maxStepReached counter.
@@ -75,14 +75,14 @@ public class ApiOnboardingControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void statusRequiresAuth() {
+    void statusRequiresAuth() {
         logout();
         var response = GET("/api/onboarding/tour-status");
         assertEquals(401, response.status.intValue());
     }
 
     @Test
-    public void recordProgressUpsertsValue() {
+    void recordProgressUpsertsValue() {
         var response = POST("/api/onboarding/tour-progress",
                 "application/json", "{\"step\":3}");
         assertIsOk(response);
@@ -95,7 +95,7 @@ public class ApiOnboardingControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void recordProgressClampsToMax() {
+    void recordProgressClampsToMax() {
         seedTourMaxStep(3);
         var response = POST("/api/onboarding/tour-progress",
                 "application/json", "{\"step\":1}");
@@ -106,7 +106,7 @@ public class ApiOnboardingControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void recordProgressRejectsOutOfRange() {
+    void recordProgressRejectsOutOfRange() {
         var low = POST("/api/onboarding/tour-progress",
                 "application/json", "{\"step\":0}");
         assertEquals(400, low.status.intValue());
@@ -117,14 +117,14 @@ public class ApiOnboardingControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void recordProgressRejectsMissingStep() {
+    void recordProgressRejectsMissingStep() {
         var response = POST("/api/onboarding/tour-progress",
                 "application/json", "{}");
         assertEquals(400, response.status.intValue());
     }
 
     @Test
-    public void recordProgressRequiresAuth() {
+    void recordProgressRequiresAuth() {
         logout();
         var response = POST("/api/onboarding/tour-progress",
                 "application/json", "{\"step\":2}");

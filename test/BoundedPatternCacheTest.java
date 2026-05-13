@@ -9,10 +9,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 
 /** Unit tests for the bounded LRU pattern cache (JCLAW-142). */
-public class BoundedPatternCacheTest extends UnitTest {
+class BoundedPatternCacheTest extends UnitTest {
 
     @Test
-    public void memoizesRepeatedLookups() {
+    void memoizesRepeatedLookups() {
         var cache = new BoundedPatternCache(8);
         var first = cache.computeIfAbsent("foo", k -> Pattern.compile(k));
         var second = cache.computeIfAbsent("foo", k -> Pattern.compile(k));
@@ -21,7 +21,7 @@ public class BoundedPatternCacheTest extends UnitTest {
     }
 
     @Test
-    public void evictsOldestEntriesBeyondCap() {
+    void evictsOldestEntriesBeyondCap() {
         var cap = 64;
         var cache = new BoundedPatternCache(cap);
         for (int i = 0; i < cap + 10; i++) {
@@ -32,7 +32,7 @@ public class BoundedPatternCacheTest extends UnitTest {
     }
 
     @Test
-    public void sizeStaysBoundedUnderConcurrentInsert() throws Exception {
+    void sizeStaysBoundedUnderConcurrentInsert() throws Exception {
         var cap = 64;
         var cache = new BoundedPatternCache(cap);
         var workers = 20;
@@ -78,7 +78,7 @@ public class BoundedPatternCacheTest extends UnitTest {
     }
 
     @Test
-    public void rejectsNonPositiveCap() {
+    void rejectsNonPositiveCap() {
         assertThrows(IllegalArgumentException.class, () -> new BoundedPatternCache(0));
         assertThrows(IllegalArgumentException.class, () -> new BoundedPatternCache(-1));
     }

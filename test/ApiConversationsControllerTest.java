@@ -16,7 +16,7 @@ import java.util.function.Supplier;
  * Functional HTTP tests for ApiConversationsController CRUD and query endpoints.
  * Uses real H2 DB, no mocks.
  */
-public class ApiConversationsControllerTest extends FunctionalTest {
+class ApiConversationsControllerTest extends FunctionalTest {
 
     @BeforeEach
     void setup() {
@@ -53,13 +53,13 @@ public class ApiConversationsControllerTest extends FunctionalTest {
     // --- Tests ---
 
     @Test
-    public void unauthenticatedRequestReturns401() {
+    void unauthenticatedRequestReturns401() {
         var response = GET("/api/conversations");
         assertEquals(401, response.status.intValue());
     }
 
     @Test
-    public void listConversationsReturnsJsonArray() {
+    void listConversationsReturnsJsonArray() {
         login();
         var response = GET("/api/conversations");
         assertIsOk(response);
@@ -68,7 +68,7 @@ public class ApiConversationsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void listConversationsReturnsEmptyAfterDbWipe() {
+    void listConversationsReturnsEmptyAfterDbWipe() {
         login();
         var response = GET("/api/conversations");
         assertIsOk(response);
@@ -76,7 +76,7 @@ public class ApiConversationsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void deleteConversationSucceeds() {
+    void deleteConversationSucceeds() {
         login();
         var agentId = createAgent("delete-test-agent");
 
@@ -100,7 +100,7 @@ public class ApiConversationsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void deleteByIdsPurgesSessionCompactionRows() {
+    void deleteByIdsPurgesSessionCompactionRows() {
         // Regression for a FK violation seen in prod: session_compaction.conversation_id
         // references conversation(id) without ON DELETE CASCADE, so deleteByIds must
         // hand-delete compaction rows before the parent Conversation delete.
@@ -150,21 +150,21 @@ public class ApiConversationsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void deleteNonExistentConversationReturns404() {
+    void deleteNonExistentConversationReturns404() {
         login();
         var response = DELETE("/api/conversations/999999");
         assertEquals(404, response.status.intValue());
     }
 
     @Test
-    public void getMessagesForNonExistentConversationReturns404() {
+    void getMessagesForNonExistentConversationReturns404() {
         login();
         var response = GET("/api/conversations/999999/messages");
         assertEquals(404, response.status.intValue());
     }
 
     @Test
-    public void paginationHeadersAreSet() {
+    void paginationHeadersAreSet() {
         login();
         var response = GET("/api/conversations");
         assertIsOk(response);
@@ -174,7 +174,7 @@ public class ApiConversationsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void listConversationsWithLimitAndOffset() {
+    void listConversationsWithLimitAndOffset() {
         login();
         var response = GET("/api/conversations?limit=5&offset=0");
         assertIsOk(response);
@@ -183,7 +183,7 @@ public class ApiConversationsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void listConversationChannels() {
+    void listConversationChannels() {
         login();
         var response = GET("/api/conversations/channels");
         assertIsOk(response);
@@ -201,7 +201,7 @@ public class ApiConversationsControllerTest extends FunctionalTest {
      * the row as empty and the tool-calls block vanishes on reload.
      */
     @Test
-    public void getMessagesNormalizesPersistedToolCallsToArrayWithIcons() {
+    void getMessagesNormalizesPersistedToolCallsToArrayWithIcons() {
         login();
         var cid = commitInFreshTx(() -> {
             var agent = new Agent();
@@ -262,7 +262,7 @@ public class ApiConversationsControllerTest extends FunctionalTest {
      * code used the list endpoint with an ignored ?id= filter.
      */
     @Test
-    public void getConversationReturnsRequestedIdEvenWhenAnotherIsNewer() {
+    void getConversationReturnsRequestedIdEvenWhenAnotherIsNewer() {
         login();
         var ids = commitInFreshTx(() -> {
             var agent = new Agent();
@@ -293,7 +293,7 @@ public class ApiConversationsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void getConversationReturns404ForUnknownId() {
+    void getConversationReturns404ForUnknownId() {
         login();
         var response = GET("/api/conversations/999999");
         assertEquals(404, response.status.intValue());
@@ -330,7 +330,7 @@ public class ApiConversationsControllerTest extends FunctionalTest {
      * conversations and verifies the agentId filter scopes the wipe.
      */
     @Test
-    public void deleteByFilterScopedToAgentDeletesOnlyMatchingRows() {
+    void deleteByFilterScopedToAgentDeletesOnlyMatchingRows() {
         login();
         long[] ids = commitInFreshTx(() -> {
             var keep = new Agent();
@@ -376,7 +376,7 @@ public class ApiConversationsControllerTest extends FunctionalTest {
      * no-filter semantic of GET /api/conversations.
      */
     @Test
-    public void deleteByEmptyFilterDeletesAllConversations() {
+    void deleteByEmptyFilterDeletesAllConversations() {
         login();
         commitInFreshTx(() -> {
             var agent = new Agent();
@@ -407,7 +407,7 @@ public class ApiConversationsControllerTest extends FunctionalTest {
      * fall through to either delete branch.
      */
     @Test
-    public void deleteWithNeitherIdsNorFilterReturns400() {
+    void deleteWithNeitherIdsNorFilterReturns400() {
         login();
         var resp = deleteWithJsonBody("/api/conversations", "{}");
         assertEquals(400, resp.status.intValue());
@@ -450,7 +450,7 @@ public class ApiConversationsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void getQueueStatusForNonExistentConversation() {
+    void getQueueStatusForNonExistentConversation() {
         login();
         // Queue status doesn't require the conversation to exist in DB —
         // it checks the in-memory queue. Should return a valid JSON response.

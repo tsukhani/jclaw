@@ -16,7 +16,7 @@ import services.Tx;
  * Telegram cell silently returned no result and the dashboard showed 0
  * while messages were flowing through the polling runner.
  */
-public class ChannelStatusServiceTest extends UnitTest {
+class ChannelStatusServiceTest extends UnitTest {
 
     @BeforeEach
     void setup() {
@@ -24,7 +24,7 @@ public class ChannelStatusServiceTest extends UnitTest {
     }
 
     @Test
-    public void emptyDatabaseReturnsEmptySet() {
+    void emptyDatabaseReturnsEmptySet() {
         var active = ChannelStatusService.activeChannelTypes();
         assertTrue(active.isEmpty(), "expected empty set, got: " + active);
     }
@@ -32,7 +32,7 @@ public class ChannelStatusServiceTest extends UnitTest {
     // ─── web ─────────────────────────────────────────────────────────
 
     @Test
-    public void webIsActiveWhenAtLeastOneAgentEnabled() {
+    void webIsActiveWhenAtLeastOneAgentEnabled() {
         Tx.run(() -> {
             seedAgent("main", true);
             return null;
@@ -42,7 +42,7 @@ public class ChannelStatusServiceTest extends UnitTest {
     }
 
     @Test
-    public void webNotActiveWhenAllAgentsDisabled() {
+    void webNotActiveWhenAllAgentsDisabled() {
         Tx.run(() -> {
             seedAgent("inactive", false);
             return null;
@@ -54,7 +54,7 @@ public class ChannelStatusServiceTest extends UnitTest {
     // ─── telegram ────────────────────────────────────────────────────
 
     @Test
-    public void telegramIsActiveWhenEnabledBindingExists() {
+    void telegramIsActiveWhenEnabledBindingExists() {
         Tx.run(() -> {
             var agent = seedAgent("main", true);
             seedTelegramBinding(agent, "1234:abc", "1001", true);
@@ -65,7 +65,7 @@ public class ChannelStatusServiceTest extends UnitTest {
     }
 
     @Test
-    public void telegramNotActiveWhenAllBindingsDisabled() {
+    void telegramNotActiveWhenAllBindingsDisabled() {
         Tx.run(() -> {
             var agent = seedAgent("main", true);
             seedTelegramBinding(agent, "1234:abc", "1001", false);
@@ -76,7 +76,7 @@ public class ChannelStatusServiceTest extends UnitTest {
     }
 
     @Test
-    public void telegramActiveWhenAtLeastOneBindingEnabledAmongMany() {
+    void telegramActiveWhenAtLeastOneBindingEnabledAmongMany() {
         Tx.run(() -> {
             var a1 = seedAgent("alice", true);
             var a2 = seedAgent("bob", true);
@@ -91,7 +91,7 @@ public class ChannelStatusServiceTest extends UnitTest {
     // ─── slack / whatsapp via ChannelConfig ──────────────────────────
 
     @Test
-    public void slackIsActiveWhenChannelConfigEnabled() {
+    void slackIsActiveWhenChannelConfigEnabled() {
         Tx.run(() -> {
             seedChannelConfig("slack", true);
             return null;
@@ -101,7 +101,7 @@ public class ChannelStatusServiceTest extends UnitTest {
     }
 
     @Test
-    public void slackNotActiveWhenChannelConfigDisabled() {
+    void slackNotActiveWhenChannelConfigDisabled() {
         Tx.run(() -> {
             seedChannelConfig("slack", false);
             return null;
@@ -111,7 +111,7 @@ public class ChannelStatusServiceTest extends UnitTest {
     }
 
     @Test
-    public void multipleChannelConfigsAllSurfaceWhenEnabled() {
+    void multipleChannelConfigsAllSurfaceWhenEnabled() {
         Tx.run(() -> {
             seedChannelConfig("slack", true);
             seedChannelConfig("whatsapp", true);
@@ -127,7 +127,7 @@ public class ChannelStatusServiceTest extends UnitTest {
     // ─── combined / regression scenarios ─────────────────────────────
 
     @Test
-    public void mixedFleetCountsEveryActiveChannelOnce() {
+    void mixedFleetCountsEveryActiveChannelOnce() {
         // Reproduces the exact scenario the user reported: a Telegram
         // binding works (polling runner active), a few agents are
         // enabled, and the dashboard previously showed 0. Should now
@@ -144,7 +144,7 @@ public class ChannelStatusServiceTest extends UnitTest {
     }
 
     @Test
-    public void duplicateChannelTypeFromBothSourcesDeduplicates() {
+    void duplicateChannelTypeFromBothSourcesDeduplicates() {
         // Edge case: an operator with a TelegramBinding row AND also a
         // legacy ChannelConfig row for "telegram". Both signals point at
         // active=true; the result should still be one entry, not two.

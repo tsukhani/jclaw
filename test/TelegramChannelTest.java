@@ -11,7 +11,7 @@ import play.test.UnitTest;
  * streamer (post empty {@code text}) required a raw-HTTP path. These tests
  * drive that path against {@link MockTelegramServer}.
  */
-public class TelegramChannelTest extends UnitTest {
+class TelegramChannelTest extends UnitTest {
 
     private MockTelegramServer mock;
     private String prevBase;
@@ -31,7 +31,7 @@ public class TelegramChannelTest extends UnitTest {
     }
 
     @Test
-    public void clearMessageDraft_postsEmptyTextToSendMessageDraft() {
+    void clearMessageDraft_postsEmptyTextToSendMessageDraft() {
         var ok = TelegramChannel.clearMessageDraft("bot-token", "12345", 42);
         assertTrue(ok, "mock returns 200 by default; helper should return true");
 
@@ -55,7 +55,7 @@ public class TelegramChannelTest extends UnitTest {
     }
 
     @Test
-    public void clearMessageDraft_returnsFalseOnServerError() {
+    void clearMessageDraft_returnsFalseOnServerError() {
         // Override to return 400 as the Telegram API would for a rejected clear.
         mock.respondWith("sendMessageDraft", 400,
                 "{\"ok\":false,\"error_code\":400,\"description\":\"test\"}");
@@ -64,7 +64,7 @@ public class TelegramChannelTest extends UnitTest {
     }
 
     @Test
-    public void clearMessageDraft_returnsFalseOnNullToken() {
+    void clearMessageDraft_returnsFalseOnNullToken() {
         // Must not make an HTTP call when the token is missing — gates the
         // clearDraftBestEffort no-op for test / admin sinks.
         var ok = TelegramChannel.clearMessageDraft(null, "12345", 42);
@@ -73,14 +73,14 @@ public class TelegramChannelTest extends UnitTest {
     }
 
     @Test
-    public void clearMessageDraft_returnsFalseOnBlankToken() {
+    void clearMessageDraft_returnsFalseOnBlankToken() {
         var ok = TelegramChannel.clearMessageDraft("", "12345", 42);
         assertFalse(ok);
         assertEquals(0, mock.requests().size());
     }
 
     @Test
-    public void clearMessageDraft_returnsFalseOnNullChatId() {
+    void clearMessageDraft_returnsFalseOnNullChatId() {
         var ok = TelegramChannel.clearMessageDraft("bot-token", null, 42);
         assertFalse(ok);
         assertEquals(0, mock.requests().size());
@@ -89,7 +89,7 @@ public class TelegramChannelTest extends UnitTest {
     // ─── Upload client timeouts (JCLAW-122) ─────────────────────────────
 
     @Test
-    public void trySendPhoto_succeedsWhenMockDelayExceedsTextPathTimeout() throws Exception {
+    void trySendPhoto_succeedsWhenMockDelayExceedsTextPathTimeout() throws Exception {
         // MockTelegramServer sits on 127.0.0.1 so the SDK's OkHttp client
         // will hit it directly. We install a TelegramChannel pointing at the
         // mock, then set a response delay of 3500ms — over the text-path

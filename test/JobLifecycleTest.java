@@ -14,7 +14,7 @@ import java.util.List;
  * that had no direct coverage. Each test drives a real job through its lifecycle
  * and asserts the observable effect, rather than mocking anything.
  */
-public class JobLifecycleTest extends UnitTest {
+class JobLifecycleTest extends UnitTest {
 
     @BeforeEach
     void setup() {
@@ -26,7 +26,7 @@ public class JobLifecycleTest extends UnitTest {
     // === EventLogCleanupJob ===
 
     @Test
-    public void eventLogCleanupDeletesRowsOlderThanCutoff() {
+    void eventLogCleanupDeletesRowsOlderThanCutoff() {
         // Seed two rows: one well past retention, one recent. Run the job
         // and assert only the old one is deleted.
         services.Tx.run(() -> {
@@ -57,7 +57,7 @@ public class JobLifecycleTest extends UnitTest {
     }
 
     @Test
-    public void eventLogCleanupIsNoOpWhenAllRowsWithinRetention() {
+    void eventLogCleanupIsNoOpWhenAllRowsWithinRetention() {
         services.Tx.run(() -> {
             var log = new EventLog();
             log.level = "INFO";
@@ -78,7 +78,7 @@ public class JobLifecycleTest extends UnitTest {
     // === ToolRegistrationJob ===
 
     @Test
-    public void toolRegistrationPublishesBaseTools() {
+    void toolRegistrationPublishesBaseTools() {
         // The always-on tools must land in the registry after registerAll.
         // This is the smoke test for the job's primary contract.
         new jobs.ToolRegistrationJob().doJob();
@@ -93,7 +93,7 @@ public class JobLifecycleTest extends UnitTest {
     }
 
     @Test
-    public void toolRegistrationIncludesExecAndBrowserUnconditionally() {
+    void toolRegistrationIncludesExecAndBrowserUnconditionally() {
         // JCLAW-172: shell.enabled and playwright.enabled used to gate these
         // two tools, but the global toggles are gone — per-agent enable lives
         // on the Tools page (AgentToolConfig) only. Both tools must register
@@ -115,7 +115,7 @@ public class JobLifecycleTest extends UnitTest {
     // === BrowserCleanupJob ===
 
     @Test
-    public void browserCleanupJobRunsWithoutError() {
+    void browserCleanupJobRunsWithoutError() {
         // With no open sessions, the cleanup pass must be a no-op that
         // doesn't throw — it runs every 60s and any exception would flood
         // the logs. The substantive cleanup logic is covered by
@@ -127,7 +127,7 @@ public class JobLifecycleTest extends UnitTest {
     // === ShutdownJob ===
 
     @Test
-    public void shutdownJobRunsWithoutError() {
+    void shutdownJobRunsWithoutError() {
         // The job chains three shutdown-style calls (task poller, browser
         // sessions, telegram poller). In a unit-test context with none of
         // those running, the job must still complete cleanly.
@@ -137,14 +137,14 @@ public class JobLifecycleTest extends UnitTest {
     // === TelegramStreamingRecoveryJob (JCLAW-95) ===
 
     @Test
-    public void streamingRecoveryIsNoOpWithNoOrphans() {
+    void streamingRecoveryIsNoOpWithNoOrphans() {
         // Empty DB — nothing to recover. Must not throw; must not log any
         // "recovery: N orphaned..." line.
         Assertions.assertDoesNotThrow(() -> new jobs.TelegramStreamingRecoveryJob().doJob());
     }
 
     @Test
-    public void streamingRecoveryClearsCheckpointEvenWithoutEnabledBinding() {
+    void streamingRecoveryClearsCheckpointEvenWithoutEnabledBinding() {
         // When a conversation has a dangling checkpoint but no TelegramBinding
         // exists for the agent (e.g. binding was deleted between crash and
         // recovery), the job must still clear the checkpoint columns.
@@ -170,7 +170,7 @@ public class JobLifecycleTest extends UnitTest {
     }
 
     @Test
-    public void streamingRecoveryEditsPlaceholderWhenBindingIsEnabled() throws Exception {
+    void streamingRecoveryEditsPlaceholderWhenBindingIsEnabled() throws Exception {
         // JCLAW-96 Gap 2: the interesting path — checkpoint + enabled binding
         // — was never wire-verified. This test stands up a MockTelegramServer,
         // routes TelegramChannel at it, seeds a Conversation with a checkpoint
@@ -232,7 +232,7 @@ public class JobLifecycleTest extends UnitTest {
     // elsewhere in this file.
 
     @Test
-    public void streamingRecoverySkipsConversationsWithoutCheckpoint() {
+    void streamingRecoverySkipsConversationsWithoutCheckpoint() {
         // Conversations without a checkpoint (the normal case) must not be
         // touched by the recovery pass — it's selected explicitly by the
         // activeStreamMessageId IS NOT NULL query.
@@ -255,7 +255,7 @@ public class JobLifecycleTest extends UnitTest {
     // === TelegramCommandsRegistrationJob (JCLAW-99) ===
 
     @Test
-    public void commandsRegistrationIsNoOpWithNoBindings() {
+    void commandsRegistrationIsNoOpWithNoBindings() {
         // No bindings in DB → job must run cleanly without throwing or
         // attempting any network calls. Mirrors TelegramStreamingRecoveryJob's
         // empty-DB defensive posture.
@@ -263,7 +263,7 @@ public class JobLifecycleTest extends UnitTest {
     }
 
     @Test
-    public void commandsRegistrationMappingCoversEveryRegisteredCommand() {
+    void commandsRegistrationMappingCoversEveryRegisteredCommand() {
         // The BotCommand list derived from slash.Commands.Command must
         // have one entry per enum value, with the leading "/" stripped
         // from each name and the description populated. This is the

@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class ConversationQueueTest extends UnitTest {
+class ConversationQueueTest extends UnitTest {
 
     private Agent agent;
 
@@ -25,7 +25,7 @@ public class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    public void firstMessageAcquiresImmediately() {
+    void firstMessageAcquiresImmediately() {
         var msg = new QueuedMessage("Hello", "web", "admin", agent);
         var acquired = ConversationQueue.tryAcquire(1000L, msg);
         assertTrue(acquired, "First message should acquire immediately");
@@ -35,7 +35,7 @@ public class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    public void secondMessageIsQueued() {
+    void secondMessageIsQueued() {
         var msg1 = new QueuedMessage("First", "web", "admin", agent);
         var msg2 = new QueuedMessage("Second", "web", "admin", agent);
 
@@ -49,7 +49,7 @@ public class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    public void drainReturnsQueuedMessages() {
+    void drainReturnsQueuedMessages() {
         var msg1 = new QueuedMessage("First", "web", "admin", agent);
         var msg2 = new QueuedMessage("Second", "web", "admin", agent);
         var msg3 = new QueuedMessage("Third", "web", "admin", agent);
@@ -74,7 +74,7 @@ public class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    public void isBusyReflectsProcessingState() {
+    void isBusyReflectsProcessingState() {
         assertFalse(ConversationQueue.isBusy(1003L));
 
         var msg = new QueuedMessage("Test", "web", "admin", agent);
@@ -86,14 +86,14 @@ public class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    public void formatCollectedMessagesSingleMessage() {
+    void formatCollectedMessagesSingleMessage() {
         var messages = java.util.List.of(new QueuedMessage("Hello", "web", "admin", agent));
         var formatted = ConversationQueue.formatCollectedMessages(messages);
         assertEquals("Hello", formatted);
     }
 
     @Test
-    public void formatCollectedMessagesMultipleMessages() {
+    void formatCollectedMessagesMultipleMessages() {
         var messages = java.util.List.of(
                 new QueuedMessage("First", "web", "admin", agent),
                 new QueuedMessage("Second", "web", "admin", agent)
@@ -107,7 +107,7 @@ public class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    public void queueCapDropsOldest() {
+    void queueCapDropsOldest() {
         var msg1 = new QueuedMessage("Acquired", "web", "admin", agent);
         ConversationQueue.tryAcquire(1004L, msg1);
 
@@ -133,7 +133,7 @@ public class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    public void concurrentAcquireSerializes() throws Exception {
+    void concurrentAcquireSerializes() throws Exception {
         int threadCount = 10;
         var latch = new CountDownLatch(threadCount);
         var acquiredCount = new AtomicInteger(0);
@@ -162,7 +162,7 @@ public class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    public void interruptModeAllowsExactlyOneAcquirerAtATime() throws Exception {
+    void interruptModeAllowsExactlyOneAcquirerAtATime() throws Exception {
         // Verifies the TOCTOU fix: in interrupt mode, only one thread at a time
         // should believe it acquired the conversation for processing.
         services.ConfigService.set("agent.queue-test-agent.queue.mode", "interrupt");
@@ -216,12 +216,12 @@ public class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    public void getQueueSizeReturnsZeroForUnknownConversation() {
+    void getQueueSizeReturnsZeroForUnknownConversation() {
         assertEquals(0, ConversationQueue.getQueueSize(9999L));
     }
 
     @Test
-    public void concurrentInterruptModeDoesNotCorruptArrayDeque() throws Exception {
+    void concurrentInterruptModeDoesNotCorruptArrayDeque() throws Exception {
         // Task 3.7: Two virtual threads call tryAcquire in interrupt mode simultaneously.
         // Before the fix, the unsynchronized state.pending.clear() could corrupt the deque.
         services.ConfigService.set("agent.queue-test-agent.queue.mode", "interrupt");
@@ -275,7 +275,7 @@ public class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    public void getQueueSizeConsistentUnderConcurrentEnqueue() throws Exception {
+    void getQueueSizeConsistentUnderConcurrentEnqueue() throws Exception {
         // Task 3.8: getQueueSize() returns a consistent value under concurrent enqueue
         long convId = 3000L;
         var msg1 = new QueuedMessage("First", "web", "admin", agent);
@@ -333,7 +333,7 @@ public class ConversationQueueTest extends UnitTest {
     // --- Collect mode ---
 
     @Test
-    public void collectModeReturnsAllPendingOnDrain() {
+    void collectModeReturnsAllPendingOnDrain() {
         // In collect mode, drain must return the ENTIRE pending list (for the
         // caller to fold into a single prompt) rather than a single message —
         // contrast with queue mode which returns just the next one.
@@ -370,7 +370,7 @@ public class ConversationQueueTest extends UnitTest {
     // --- Interrupt mode cancellation signal ---
 
     @Test
-    public void interruptModeSetsCancellationFlagForActiveProcessor() {
+    void interruptModeSetsCancellationFlagForActiveProcessor() {
         // When interrupt fires, the in-flight processor must observe the
         // cancelled flag via cancellationFlag(). Drain then clears it so
         // the next run starts fresh. This is the contract AgentRunner
@@ -399,7 +399,7 @@ public class ConversationQueueTest extends UnitTest {
     // ── JCLAW-117: atomic ownership transfer on drain ──
 
     @Test
-    public void drainKeepsProcessingTrueWhenReturningWork() {
+    void drainKeepsProcessingTrueWhenReturningWork() {
         // The core invariant the fix establishes: when drain returns a
         // non-empty list, processing stays true. This prevents a new
         // inbound tryAcquire from slipping in before the caller re-runs.
@@ -425,7 +425,7 @@ public class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    public void drainReleasesOwnershipWhenPendingEmpty() {
+    void drainReleasesOwnershipWhenPendingEmpty() {
         // When there's nothing to drain, processing flips to false so the
         // next message can be processed directly.
         long convId = 7002L;
@@ -442,7 +442,7 @@ public class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    public void releaseOwnershipFlipsProcessingToFalse() {
+    void releaseOwnershipFlipsProcessingToFalse() {
         long convId = 7003L;
         ConversationQueue.tryAcquire(convId, new QueuedMessage("A", "web", "admin", agent));
 
@@ -460,7 +460,7 @@ public class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    public void drainOverCollectModeKeepsOwnership() {
+    void drainOverCollectModeKeepsOwnership() {
         long convId = 7004L;
         services.ConfigService.set("agent.queue-test-agent.queue.mode", "collect");
         try {
@@ -487,7 +487,7 @@ public class ConversationQueueTest extends UnitTest {
     // ── JCLAW-286: idle eviction ──
 
     @Test
-    public void evictIdleRemovesQuiescentStateAfterThreshold() throws Exception {
+    void evictIdleRemovesQuiescentStateAfterThreshold() throws Exception {
         // A conversation that has been touched but is fully idle (no pending,
         // not processing, not cancelled) and whose lastActivityMs is older
         // than the threshold must be evicted by evictIdle.
@@ -513,7 +513,7 @@ public class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    public void evictIdleSkipsRecentlyActiveState() {
+    void evictIdleSkipsRecentlyActiveState() {
         // A state whose lastActivityMs is fresh (just touched) must NOT be
         // evicted even if it is quiescent — the eviction window protects
         // entries that are likely to be reused imminently.
@@ -534,7 +534,7 @@ public class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    public void evictIdleSkipsProcessingState() throws Exception {
+    void evictIdleSkipsProcessingState() throws Exception {
         // Even if the activity timestamp is older than the threshold, an
         // in-flight processing state must NOT be evicted — eviction is
         // contingent on processing == false. We can't assert evicted==0
@@ -561,7 +561,7 @@ public class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    public void concurrentTryAcquireAndEvictIdleDoNotCorruptState() throws Exception {
+    void concurrentTryAcquireAndEvictIdleDoNotCorruptState() throws Exception {
         // Race-test: while a writer is concurrently calling tryAcquire on
         // many conversations, an evictor repeatedly sweeps. The
         // synchronized-block on QueueState atomically pairs the
@@ -624,7 +624,7 @@ public class ConversationQueueTest extends UnitTest {
     }
 
     @Test
-    public void fifoOrderSurvivesRaceBetweenDrainAndInboundMessage() {
+    void fifoOrderSurvivesRaceBetweenDrainAndInboundMessage() {
         // Regression for JCLAW-117: without atomic ownership transfer, a
         // message arriving between drain()'s pop and the caller's re-run
         // could overtake the drained message. With the fix, this test

@@ -9,12 +9,12 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.HexFormat;
 
-public class ChannelTest extends UnitTest {
+class ChannelTest extends UnitTest {
 
     // === Telegram ===
 
     @Test
-    public void telegramParseValidUpdate() {
+    void telegramParseValidUpdate() {
         var json = JsonParser.parseString("""
                 {
                     "update_id": 12345,
@@ -37,7 +37,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void telegramParseNonMessageUpdate() {
+    void telegramParseNonMessageUpdate() {
         var json = JsonParser.parseString("""
                 {"update_id": 12345, "edited_message": {"text": "edited"}}
                 """).getAsJsonObject();
@@ -47,7 +47,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void telegramParseTrulyEmptyUpdateReturnsNull() {
+    void telegramParseTrulyEmptyUpdateReturnsNull() {
         // No text, no caption, no attachments — nothing to act on. JCLAW-136
         // preserved the null-return for this case so webhook handlers still
         // bail out cleanly on unhandled update shapes.
@@ -62,7 +62,7 @@ public class ChannelTest extends UnitTest {
     // === JCLAW-136: inbound attachment parsing ===
 
     @Test
-    public void telegramParsePhotoWithCaption() {
+    void telegramParsePhotoWithCaption() {
         var json = JsonParser.parseString("""
                 {
                   "update_id": 1,
@@ -91,7 +91,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void telegramParsePhotoWithoutCaptionYieldsEmptyText() {
+    void telegramParsePhotoWithoutCaptionYieldsEmptyText() {
         var json = JsonParser.parseString("""
                 {
                   "update_id": 1,
@@ -112,7 +112,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void telegramParseVoiceNote() {
+    void telegramParseVoiceNote() {
         var json = JsonParser.parseString("""
                 {
                   "update_id": 1,
@@ -133,7 +133,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void telegramParseAudioWithCaption() {
+    void telegramParseAudioWithCaption() {
         var json = JsonParser.parseString("""
                 {
                   "update_id": 1,
@@ -158,7 +158,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void telegramParseDocumentWithCaption() {
+    void telegramParseDocumentWithCaption() {
         var json = JsonParser.parseString("""
                 {
                   "update_id": 1,
@@ -181,7 +181,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void telegramParseDocumentWithImageMimeClassifiesAsImage() {
+    void telegramParseDocumentWithImageMimeClassifiesAsImage() {
         // User attached a PNG via "File" upload (to skip Telegram's JPEG
         // compression) instead of "Photo". We still want the multimodal
         // gate to treat it as an image so vision-capable models see it.
@@ -206,7 +206,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void telegramParseVideo() {
+    void telegramParseVideo() {
         var json = JsonParser.parseString("""
                 {
                   "update_id": 1,
@@ -228,7 +228,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void telegramParseMediaGroupIdPreserved() {
+    void telegramParseMediaGroupIdPreserved() {
         var json = JsonParser.parseString("""
                 {
                   "update_id": 1,
@@ -253,14 +253,14 @@ public class ChannelTest extends UnitTest {
     // === Telegram outbound chunker ===
 
     @Test
-    public void telegramChunkShortTextReturnsSingleChunk() {
+    void telegramChunkShortTextReturnsSingleChunk() {
         var chunks = TelegramChannel.chunk("hello world", 4000);
         assertEquals(1, chunks.size());
         assertEquals("hello world", chunks.getFirst());
     }
 
     @Test
-    public void telegramChunkSplitsAtParagraphBoundaries() {
+    void telegramChunkSplitsAtParagraphBoundaries() {
         var text = "A".repeat(100) + "\n\n" + "B".repeat(100) + "\n\n" + "C".repeat(100);
         var chunks = TelegramChannel.chunk(text, 150);
         assertEquals(3, chunks.size());
@@ -273,7 +273,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void telegramChunkFallsBackToLineBoundary() {
+    void telegramChunkFallsBackToLineBoundary() {
         // No paragraph break within 50 chars, but newlines are available.
         var text = "line1\n" + "line2\n" + "line3\n" + "x".repeat(100);
         var chunks = TelegramChannel.chunk(text, 50);
@@ -284,7 +284,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void telegramChunkHardCutsWhenNoBoundary() {
+    void telegramChunkHardCutsWhenNoBoundary() {
         var text = "X".repeat(12000);
         var chunks = TelegramChannel.chunk(text, 4000);
         assertEquals(3, chunks.size());
@@ -294,7 +294,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void telegramChunkRealAgentReply() {
+    void telegramChunkRealAgentReply() {
         // The production failure: a 4285-char agent response exceeded Telegram's
         // 4096 limit by ~200 chars. Verify a similar payload splits cleanly.
         var sb = new StringBuilder();
@@ -312,7 +312,7 @@ public class ChannelTest extends UnitTest {
     // === ChannelTransport enum ===
 
     @Test
-    public void channelTransportParsesFallbacks() {
+    void channelTransportParsesFallbacks() {
         assertEquals(ChannelTransport.POLLING, ChannelTransport.parse(null, ChannelTransport.POLLING));
         assertEquals(ChannelTransport.WEBHOOK, ChannelTransport.parse("", ChannelTransport.WEBHOOK));
         assertEquals(ChannelTransport.POLLING, ChannelTransport.parse("   ", ChannelTransport.POLLING));
@@ -320,7 +320,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void channelTransportParsesValidValuesCaseInsensitive() {
+    void channelTransportParsesValidValuesCaseInsensitive() {
         assertEquals(ChannelTransport.POLLING, ChannelTransport.parse("POLLING", ChannelTransport.WEBHOOK));
         assertEquals(ChannelTransport.POLLING, ChannelTransport.parse("polling", ChannelTransport.WEBHOOK));
         assertEquals(ChannelTransport.WEBHOOK, ChannelTransport.parse(" WEBHOOK ", ChannelTransport.POLLING));
@@ -333,7 +333,7 @@ public class ChannelTest extends UnitTest {
     // === Telegram bindings (JCLAW-89) ===
 
     @Test
-    public void telegramBindingPersistsAndQueriesByToken() {
+    void telegramBindingPersistsAndQueriesByToken() {
         var agent = findOrCreateAgent("test-bindings-agent");
         var binding = new models.TelegramBinding();
         binding.botToken = "tok-" + System.nanoTime();
@@ -354,7 +354,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void telegramBindingFindAllEnabledIsScopedToEnabled() {
+    void telegramBindingFindAllEnabledIsScopedToEnabled() {
         // Agent uniqueness is enforced at the schema (privacy constraint:
         // agent memory is per-agent, so binding one agent to two users would
         // share memories). Use distinct agents for the two bindings.
@@ -407,7 +407,7 @@ public class ChannelTest extends UnitTest {
     // === ChannelConfig cache-miss from non-request threads ===
 
     @Test
-    public void channelConfigFindByTypeSurvivesCacheMissFromBackgroundThread() throws Exception {
+    void channelConfigFindByTypeSurvivesCacheMissFromBackgroundThread() throws Exception {
         // Regression for the JPA "No active EntityManager" error seen in polling
         // flows after the 60s cache TTL expired: findByType must work from a
         // thread without a request-level transaction (SDK executor threads,
@@ -434,7 +434,7 @@ public class ChannelTest extends UnitTest {
     // === Channel.sendWithRetry ===
 
     @Test
-    public void channelSendWithRetryHonoursRetryAfterFromSendResult() {
+    void channelSendWithRetryHonoursRetryAfterFromSendResult() {
         var channel = new Channel() {
             int attempts = 0;
             @Override public String channelName() { return "test"; }
@@ -452,7 +452,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void channelSendWithRetryUsesDefaultWhenSendResultHasNoHint() {
+    void channelSendWithRetryUsesDefaultWhenSendResultHasNoHint() {
         var channel = new Channel() {
             int attempts = 0;
             @Override public String channelName() { return "test"; }
@@ -469,7 +469,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void channelSendWithRetryReturnsFalseWhenBothAttemptsFail() {
+    void channelSendWithRetryReturnsFalseWhenBothAttemptsFail() {
         var channel = new Channel() {
             @Override public String channelName() { return "test"; }
             @Override public SendResult trySend(String peer, String text) {
@@ -480,7 +480,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void channelSendWithRetryRunsRetryOnSchedulerThreadNotCaller() throws Exception {
+    void channelSendWithRetryRunsRetryOnSchedulerThreadNotCaller() throws Exception {
         // Regression: the original implementation called Thread.sleep on the
         // caller's thread. Under virtual-thread dispatch, that pinned the
         // carrier per JDK-8373224. The fix routes the delay through a
@@ -520,7 +520,7 @@ public class ChannelTest extends UnitTest {
     // === Slack ===
 
     @Test
-    public void slackVerifyValidSignature() throws Exception {
+    void slackVerifyValidSignature() throws Exception {
         var secret = "test_signing_secret";
         var timestamp = String.valueOf(Instant.now().getEpochSecond());
         var body = """
@@ -537,14 +537,14 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void slackRejectInvalidSignature() {
+    void slackRejectInvalidSignature() {
         assertFalse(SlackChannel.verifySignature("secret",
                 String.valueOf(Instant.now().getEpochSecond()),
                 "body", "v0=invalid_signature"));
     }
 
     @Test
-    public void slackRejectReplayAttack() throws Exception {
+    void slackRejectReplayAttack() throws Exception {
         var secret = "test_secret";
         var oldTimestamp = String.valueOf(Instant.now().getEpochSecond() - 600); // 10 min ago
         var body = "test";
@@ -558,7 +558,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void slackParseMessageEvent() {
+    void slackParseMessageEvent() {
         var json = JsonParser.parseString("""
                 {
                     "type": "event_callback",
@@ -579,7 +579,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void slackIgnoreBotMessage() {
+    void slackIgnoreBotMessage() {
         var json = JsonParser.parseString("""
                 {
                     "type": "event_callback",
@@ -597,7 +597,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void slackIgnoreSubtypeMessage() {
+    void slackIgnoreSubtypeMessage() {
         var json = JsonParser.parseString("""
                 {
                     "type": "event_callback",
@@ -617,7 +617,7 @@ public class ChannelTest extends UnitTest {
     // === WhatsApp ===
 
     @Test
-    public void whatsappVerifyValidSignature() throws Exception {
+    void whatsappVerifyValidSignature() throws Exception {
         var secret = "test_app_secret";
         var body = """
                 {"object":"whatsapp_business_account","entry":[]}
@@ -631,12 +631,12 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void whatsappRejectInvalidSignature() {
+    void whatsappRejectInvalidSignature() {
         assertFalse(WhatsAppChannel.verifySignature("secret", "body", "sha256=invalid"));
     }
 
     @Test
-    public void whatsappParseTextMessage() {
+    void whatsappParseTextMessage() {
         var json = JsonParser.parseString("""
                 {
                     "object": "whatsapp_business_account",
@@ -670,7 +670,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void whatsappParseStatusUpdate() {
+    void whatsappParseStatusUpdate() {
         var json = JsonParser.parseString("""
                 {
                     "object": "whatsapp_business_account",
@@ -691,7 +691,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void whatsappParseNonTextMessage() {
+    void whatsappParseNonTextMessage() {
         var json = JsonParser.parseString("""
                 {
                     "object": "whatsapp_business_account",
@@ -717,7 +717,7 @@ public class ChannelTest extends UnitTest {
     // === JCLAW-16: platform signature verification edge cases ===
 
     @Test
-    public void slackRejectMissingPrefix() {
+    void slackRejectMissingPrefix() {
         // Slack spec requires "v0=" prefix; a raw hex digest without it must fail.
         assertFalse(SlackChannel.verifySignature("secret",
                 String.valueOf(Instant.now().getEpochSecond()),
@@ -725,7 +725,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void slackRejectNullInputs() {
+    void slackRejectNullInputs() {
         var ts = String.valueOf(Instant.now().getEpochSecond());
         assertFalse(SlackChannel.verifySignature(null, ts, "body", "v0=abcd"));
         assertFalse(SlackChannel.verifySignature("secret", null, "body", "v0=abcd"));
@@ -733,7 +733,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void slackRejectTamperedByte() throws Exception {
+    void slackRejectTamperedByte() throws Exception {
         // Flip one hex nibble in a valid signature — constant-time compare
         // must still return false.
         var secret = "test_signing_secret";
@@ -748,20 +748,20 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void whatsappRejectNullAppSecret() {
+    void whatsappRejectNullAppSecret() {
         // Controller guards against null appSecret, but the verify helper must
         // also reject it defensively so no future caller can bypass.
         assertFalse(WhatsAppChannel.verifySignature(null, "body", "sha256=abcd"));
     }
 
     @Test
-    public void whatsappRejectMissingPrefix() {
+    void whatsappRejectMissingPrefix() {
         // Meta spec requires "sha256=" prefix; raw hex must fail.
         assertFalse(WhatsAppChannel.verifySignature("secret", "body", "abcdef0123456789"));
     }
 
     @Test
-    public void whatsappRejectTamperedByte() throws Exception {
+    void whatsappRejectTamperedByte() throws Exception {
         var secret = "test_app_secret";
         var body = "{\"entry\":[]}";
         var mac = Mac.getInstance("HmacSHA256");
@@ -781,7 +781,7 @@ public class ChannelTest extends UnitTest {
     // === Telegram forToken caching (Phase 3) ===
 
     @Test
-    public void telegramForTokenReturnsCachedInstancePerToken() {
+    void telegramForTokenReturnsCachedInstancePerToken() {
         // The token → instance cache is load-bearing: OkHttpTelegramClient owns
         // a dispatcher thread pool, so new instances leak threads if the cache
         // misses. Same token must return the same instance.
@@ -800,7 +800,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void telegramForTokenRejectsNullAndBlank() {
+    void telegramForTokenRejectsNullAndBlank() {
         assertThrows(IllegalArgumentException.class,
                 () -> TelegramChannel.forToken(null));
         assertThrows(IllegalArgumentException.class,
@@ -810,7 +810,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void telegramEvictTokenAllowsRebuildOnNextFetch() {
+    void telegramEvictTokenAllowsRebuildOnNextFetch() {
         // Critical for token rotation: after evict, the next forToken call must
         // hand back a fresh instance (the old OkHttpTelegramClient would still
         // hold stale bearer auth).
@@ -823,7 +823,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void telegramEvictTokenIgnoresNull() {
+    void telegramEvictTokenIgnoresNull() {
         // Defensive: the binding-delete path calls evictToken unconditionally.
         // A null bot token (misconfigured binding) must not throw.
         Assertions.assertDoesNotThrow(() -> TelegramChannel.evictToken(null));
@@ -832,7 +832,7 @@ public class ChannelTest extends UnitTest {
     // === ChannelType generic dispatch (Phase 3) ===
 
     @Test
-    public void channelTypeResolveReturnsNullForTelegramAndWeb() {
+    void channelTypeResolveReturnsNullForTelegramAndWeb() {
         // Contract documented at ChannelType.resolve: TELEGRAM needs a bot
         // token (carried by TelegramBinding, not the generic Channel), and
         // WEB is DB-polled not pushed. Callers rely on null to branch.
@@ -841,7 +841,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void channelTypeResolveReturnsConcreteChannelsForSlackAndWhatsApp() {
+    void channelTypeResolveReturnsConcreteChannelsForSlackAndWhatsApp() {
         assertNotNull(models.ChannelType.SLACK.resolve());
         assertNotNull(models.ChannelType.WHATSAPP.resolve());
         assertTrue(models.ChannelType.SLACK.resolve() instanceof SlackChannel);
@@ -849,7 +849,7 @@ public class ChannelTest extends UnitTest {
     }
 
     @Test
-    public void channelTypeFromValueReturnsNullForUnknownValues() {
+    void channelTypeFromValueReturnsNullForUnknownValues() {
         // Null fall-through, not throw — callers route unknown channels into
         // a default branch (e.g. treating as WEB) rather than crashing.
         assertNull(models.ChannelType.fromValue(null));

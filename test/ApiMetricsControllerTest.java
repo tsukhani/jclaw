@@ -13,7 +13,7 @@ import java.util.HashMap;
  * pipeline directly rather than through a real LLM call — the goal is to assert
  * the instrumentation plumbing, not provider behavior.
  */
-public class ApiMetricsControllerTest extends FunctionalTest {
+class ApiMetricsControllerTest extends FunctionalTest {
 
     @BeforeEach
     void setup() {
@@ -58,13 +58,13 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void latencyRequiresAuth() {
+    void latencyRequiresAuth() {
         var response = GET("/api/metrics/latency");
         assertEquals(401, response.status.intValue());
     }
 
     @Test
-    public void latencyReturnsEmptyJsonWhenNoSamples() {
+    void latencyReturnsEmptyJsonWhenNoSamples() {
         login();
         var response = GET("/api/metrics/latency");
         assertIsOk(response);
@@ -73,7 +73,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void endedTraceRecordsAllSegments() throws Exception {
+    void endedTraceRecordsAllSegments() throws Exception {
         login();
         var trace = new LatencyTrace();
         trace.mark(LatencyTrace.PROLOGUE_DONE);
@@ -103,7 +103,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void prologueSubSegmentsAreRecordedWhenMarksPresent() throws Exception {
+    void prologueSubSegmentsAreRecordedWhenMarksPresent() throws Exception {
         login();
         var trace = new LatencyTrace();
         Thread.sleep(2);
@@ -135,7 +135,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void prologueSubSegmentsSkippedWhenMarksMissing() {
+    void prologueSubSegmentsSkippedWhenMarksMissing() {
         login();
         // Only PROLOGUE_DONE set — none of the three finer marks.
         var trace = new LatencyTrace();
@@ -156,7 +156,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void earlyExitTraceWithoutPrologueRecordsNothing() {
+    void earlyExitTraceWithoutPrologueRecordsNothing() {
         login();
         new LatencyTrace().end();
         var response = GET("/api/metrics/latency");
@@ -165,7 +165,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void endIsIdempotent() {
+    void endIsIdempotent() {
         login();
         var trace = new LatencyTrace();
         trace.mark(LatencyTrace.PROLOGUE_DONE);
@@ -181,7 +181,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void queueWaitSegmentIsRecordedWhenAcceptedStampPresent() throws Exception {
+    void queueWaitSegmentIsRecordedWhenAcceptedStampPresent() throws Exception {
         login();
         // Simulate the PlayHandler stamp by writing acceptedAtNanos to the
         // current request's args before building the trace from it.
@@ -202,7 +202,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void queueWaitAbsentWhenNoAcceptedStamp() throws Exception {
+    void queueWaitAbsentWhenNoAcceptedStamp() throws Exception {
         login();
         play.mvc.Http.Request.current().args.remove("acceptedAtNanos");
 
@@ -217,7 +217,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void forTurnWithNullProducesPopulatedTrace() throws Exception {
+    void forTurnWithNullProducesPopulatedTrace() throws Exception {
         // Channels without a pre-runner timestamp (Telegram polling, TaskPoller)
         // pass null acceptedAtNs to forTurn. All segments except queue_wait
         // should still be recorded — that's the fix that makes non-web channels
@@ -253,7 +253,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void channelsStaySeparateInSnapshot() throws Exception {
+    void channelsStaySeparateInSnapshot() throws Exception {
         // JCLAW-102: a web turn and a telegram turn should land in distinct
         // channel sections rather than averaging their distributions.
         login();
@@ -281,7 +281,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     // header, non-loopback origin, and the correct combination.
 
     @Test
-    public void loadtestRejectsMissingAuthHeader() {
+    void loadtestRejectsMissingAuthHeader() {
         // Loopback origin but no X-Loadtest-Auth header → 403, not 401.
         var req = loadtestRequest("127.0.0.1", null);
         var response = POST(req, "/api/metrics/loadtest", "application/json", "{}");
@@ -289,7 +289,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void loadtestRejectsWrongAuthHeader() {
+    void loadtestRejectsWrongAuthHeader() {
         // Header present but wrong value → 403. Constant-time compare in the
         // guard means a near-miss must reject the same way as a wholly
         // unrelated value; both are exercised here.
@@ -304,7 +304,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void loadtestRejectsNonLoopbackOrigin() {
+    void loadtestRejectsNonLoopbackOrigin() {
         // Correct header but request origin is not loopback → 403. Loadtest
         // is bound to same-host operation by design.
         var req = loadtestRequest("192.168.1.100",
@@ -314,7 +314,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void loadtestRejectsInvalidConcurrency() {
+    void loadtestRejectsInvalidConcurrency() {
         // With auth gate satisfied, body validation runs and returns 400.
         // This test doubly proves the guard accepts a valid request — if the
         // guard wrongly rejected, we'd see 403 not 400.
@@ -325,7 +325,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void loadtestRejectsInvalidTurns() {
+    void loadtestRejectsInvalidTurns() {
         var response = POST(authedLoadtestRequest(),
                 "/api/metrics/loadtest", "application/json",
                 "{\"concurrency\":1,\"turns\":9999}");
@@ -333,7 +333,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void loadtestRejectsPromptsShorterThanTurns() {
+    void loadtestRejectsPromptsShorterThanTurns() {
         // Three turns requested but only two prompts supplied — workers would
         // index out of bounds on turn 3 if this slipped through validation.
         var response = POST(authedLoadtestRequest(),
@@ -343,7 +343,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void loadtestRejectsPromptsAndUserMessageTogether() {
+    void loadtestRejectsPromptsAndUserMessageTogether() {
         // The two carry conflicting per-turn message strategies; allowing both
         // would silently let one win and confuse operators about which fired.
         var response = POST(authedLoadtestRequest(),
@@ -353,14 +353,14 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void stopLoadtestEndpointAlwaysSucceeds() {
+    void stopLoadtestEndpointAlwaysSucceeds() {
         var response = DELETE(authedLoadtestRequest(), "/api/metrics/loadtest");
         assertIsOk(response);
         assertTrue(getContent(response).contains("\"status\":\"stopped\""));
     }
 
     @Test
-    public void stopLoadtestRequiresLoadtestAuth() {
+    void stopLoadtestRequiresLoadtestAuth() {
         // Verify the DELETE endpoint enforces the same gate as POST.
         var response = DELETE(loadtestRequest("127.0.0.1", null),
                 "/api/metrics/loadtest");
@@ -368,7 +368,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void resetClearsHistograms() {
+    void resetClearsHistograms() {
         login();
         var trace = new LatencyTrace();
         trace.mark(LatencyTrace.PROLOGUE_DONE);
@@ -384,7 +384,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void cleanLoadtestDataDoesNotTouchHistograms() {
+    void cleanLoadtestDataDoesNotTouchHistograms() {
         // /api/metrics/latency and /api/metrics/loadtest/data have orthogonal
         // scopes: the former clears runtime statistics, the latter clears DB
         // artifacts from load-test runs. Purging one should leave the other
@@ -406,7 +406,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void cleanLoadtestRequiresLoadtestAuth() {
+    void cleanLoadtestRequiresLoadtestAuth() {
         // The data-cleanup DELETE is also under LoadtestAuthCheck.
         var response = DELETE(loadtestRequest("127.0.0.1", null),
                 "/api/metrics/loadtest/data");
@@ -419,13 +419,13 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     // usage-cost util so the cost math stays single-sourced.
 
     @Test
-    public void costRequiresAuth() {
+    void costRequiresAuth() {
         var response = GET("/api/metrics/cost");
         assertEquals(401, response.status.intValue());
     }
 
     @Test
-    public void costReturnsEmptyRowsWhenNoMessages() {
+    void costReturnsEmptyRowsWhenNoMessages() {
         login();
         var response = GET("/api/metrics/cost");
         assertIsOk(response);
@@ -437,7 +437,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void costReturnsAssistantMessagesWithUsage() {
+    void costReturnsAssistantMessagesWithUsage() {
         login();
         long agentId = seedAgentWithUsage("cost-test-1", "web", "alice",
                 "{\"prompt\":100,\"completion\":50,\"total\":150,\"reasoning\":0,\"cached\":0,"
@@ -456,7 +456,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void costFiltersByAgentId() {
+    void costFiltersByAgentId() {
         login();
         long agentA = seedAgentWithUsage("cost-test-a", "web", "alice",
                 "{\"prompt\":10,\"completion\":5,\"total\":15,\"reasoning\":0,\"cached\":0,"
@@ -475,7 +475,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void costFiltersByChannelType() {
+    void costFiltersByChannelType() {
         login();
         seedAgentWithUsage("cost-test-web", "web", "alice",
                 "{\"prompt\":10,\"completion\":5,\"total\":15,\"reasoning\":0,\"cached\":0,"
@@ -494,7 +494,7 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void costFiltersByTimeWindow() {
+    void costFiltersByTimeWindow() {
         login();
         // Seed two messages, one within the default 30-day window and one
         // outside it. Use an explicit since param tighter than 30d to verify
@@ -512,21 +512,21 @@ public class ApiMetricsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void costRejectsInvalidSince() {
+    void costRejectsInvalidSince() {
         login();
         var response = GET("/api/metrics/cost?since=not-an-instant");
         assertEquals(400, response.status.intValue());
     }
 
     @Test
-    public void costRejectsInvalidAgentId() {
+    void costRejectsInvalidAgentId() {
         login();
         var response = GET("/api/metrics/cost?agentId=not-numeric");
         assertEquals(400, response.status.intValue());
     }
 
     @Test
-    public void costExcludesUserAndToolMessages() {
+    void costExcludesUserAndToolMessages() {
         // Non-assistant rows have null usageJson; the SQL filter
         // `m.usageJson IS NOT NULL` should exclude them so the operator's
         // turn count and token totals match the assistant turn count.

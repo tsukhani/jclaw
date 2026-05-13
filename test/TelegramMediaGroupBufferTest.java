@@ -11,10 +11,10 @@ import java.util.concurrent.atomic.AtomicReference;
  * Unit tests for {@link TelegramMediaGroupBuffer} (JCLAW-136). Bypasses the
  * scheduler via {@code flushForTest} so the tests don't rely on timing.
  */
-public class TelegramMediaGroupBufferTest extends UnitTest {
+class TelegramMediaGroupBufferTest extends UnitTest {
 
     @Test
-    public void passesThroughMessagesWithoutMediaGroupId() {
+    void passesThroughMessagesWithoutMediaGroupId() {
         var dispatched = new AtomicReference<TelegramChannel.InboundMessage>();
         var msg = new TelegramChannel.InboundMessage(
                 "chat", "private", "hello", "user", "user",
@@ -28,7 +28,7 @@ public class TelegramMediaGroupBufferTest extends UnitTest {
     }
 
     @Test
-    public void reassemblesPhotosInSameMediaGroup() {
+    void reassemblesPhotosInSameMediaGroup() {
         var dispatched = new AtomicReference<TelegramChannel.InboundMessage>();
 
         var first = new TelegramChannel.InboundMessage(
@@ -67,7 +67,7 @@ public class TelegramMediaGroupBufferTest extends UnitTest {
     }
 
     @Test
-    public void capturesCaptionFromWhicheverMessageHasIt() {
+    void capturesCaptionFromWhicheverMessageHasIt() {
         // Telegram usually puts the caption on the first message in an album,
         // but operators have observed it occasionally arriving on a later one.
         // The buffer picks whichever arrives first with non-empty text.
@@ -92,7 +92,7 @@ public class TelegramMediaGroupBufferTest extends UnitTest {
     }
 
     @Test
-    public void distinctGroupsDoNotInterfere() {
+    void distinctGroupsDoNotInterfere() {
         var dispatchedA = new AtomicReference<TelegramChannel.InboundMessage>();
         var dispatchedB = new AtomicReference<TelegramChannel.InboundMessage>();
 

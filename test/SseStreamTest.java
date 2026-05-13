@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Tests for SSE streaming safety: latch timeout and callback exception handling.
  */
-public class SseStreamTest extends UnitTest {
+class SseStreamTest extends UnitTest {
 
     private Agent agent;
 
@@ -31,7 +31,7 @@ public class SseStreamTest extends UnitTest {
     }
 
     @Test
-    public void latchTimesOutInsteadOfBlockingForever() throws Exception {
+    void latchTimesOutInsteadOfBlockingForever() throws Exception {
         // Simulate the controller pattern: latch.await with timeout
         var latch = new CountDownLatch(1);
 
@@ -42,7 +42,7 @@ public class SseStreamTest extends UnitTest {
     }
 
     @Test
-    public void latchReleasedWhenOnCompleteThrows() throws Exception {
+    void latchReleasedWhenOnCompleteThrows() throws Exception {
         var latch = new CountDownLatch(1);
         var completed = new AtomicBoolean(false);
 
@@ -60,7 +60,7 @@ public class SseStreamTest extends UnitTest {
     }
 
     @Test
-    public void latchReleasedWhenOnErrorThrows() throws Exception {
+    void latchReleasedWhenOnErrorThrows() throws Exception {
         var latch = new CountDownLatch(1);
 
         // Simulate onError callback that throws (client disconnected during error write)
@@ -78,7 +78,7 @@ public class SseStreamTest extends UnitTest {
     }
 
     @Test
-    public void streamingCallbacksAreExceptionSafe() {
+    void streamingCallbacksAreExceptionSafe() {
         // Verify that wrapping callbacks in try/catch doesn't prevent normal operation
         var initCalled = new AtomicBoolean(false);
         var tokenCalled = new AtomicBoolean(false);
@@ -112,7 +112,7 @@ public class SseStreamTest extends UnitTest {
     }
 
     @Test
-    public void conversationCreatedBeforeStreaming() {
+    void conversationCreatedBeforeStreaming() {
         // Verify conversation can be created and user message appended in one transaction
         var convo = ConversationService.create(agent, "web", "test-user");
         assertNotNull(convo);

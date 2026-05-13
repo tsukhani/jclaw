@@ -10,7 +10,7 @@ import java.nio.file.Path;
  * Smoke tests for DocumentWriter rendering methods. Verifies that each output
  * format produces a non-empty file from simple markdown input.
  */
-public class DocumentWriterTest extends UnitTest {
+class DocumentWriterTest extends UnitTest {
 
     private Path tempDir;
 
@@ -53,7 +53,7 @@ public class DocumentWriterTest extends UnitTest {
     // --- HTML ---
 
     @Test
-    public void writeHtmlCreatesFile() throws IOException {
+    void writeHtmlCreatesFile() throws IOException {
         var target = tempDir.resolve("output.html");
         DocumentWriter.writeHtml(target, SIMPLE_MARKDOWN);
 
@@ -66,7 +66,7 @@ public class DocumentWriterTest extends UnitTest {
     }
 
     @Test
-    public void writeHtmlWithMinimalMarkdown() throws IOException {
+    void writeHtmlWithMinimalMarkdown() throws IOException {
         var target = tempDir.resolve("minimal.html");
         DocumentWriter.writeHtml(target, "Hello world");
 
@@ -78,7 +78,7 @@ public class DocumentWriterTest extends UnitTest {
     // --- DOCX ---
 
     @Test
-    public void writeDocxCreatesFile() throws IOException {
+    void writeDocxCreatesFile() throws IOException {
         var target = tempDir.resolve("output.docx");
         DocumentWriter.writeDocx(target, SIMPLE_MARKDOWN);
 
@@ -87,7 +87,7 @@ public class DocumentWriterTest extends UnitTest {
     }
 
     @Test
-    public void writeDocxWithTableMarkdown() throws IOException {
+    void writeDocxWithTableMarkdown() throws IOException {
         var markdown = """
                 # Table Test
 
@@ -106,7 +106,7 @@ public class DocumentWriterTest extends UnitTest {
     // --- PDF ---
 
     @Test
-    public void writePdfCreatesFile() throws IOException {
+    void writePdfCreatesFile() throws IOException {
         var target = tempDir.resolve("output.pdf");
         DocumentWriter.writePdf(target, SIMPLE_MARKDOWN);
 
@@ -117,7 +117,7 @@ public class DocumentWriterTest extends UnitTest {
     // --- Edge cases ---
 
     @Test
-    public void writeHtmlCreatesParentDirectories() throws IOException {
+    void writeHtmlCreatesParentDirectories() throws IOException {
         var target = tempDir.resolve("sub/dir/output.html");
         DocumentWriter.writeHtml(target, "# Nested");
 
@@ -125,7 +125,7 @@ public class DocumentWriterTest extends UnitTest {
     }
 
     @Test
-    public void writeDocxWithEmptyMarkdown() throws IOException {
+    void writeDocxWithEmptyMarkdown() throws IOException {
         var target = tempDir.resolve("empty.docx");
         DocumentWriter.writeDocx(target, "");
 

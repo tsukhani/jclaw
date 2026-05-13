@@ -4,14 +4,14 @@ import models.*;
 
 import java.util.UUID;
 
-public class MessageAttachmentTest extends UnitTest {
+class MessageAttachmentTest extends UnitTest {
 
     private Agent agent;
     private Conversation conversation;
     private Message message;
 
     @BeforeEach
-    public void setUp() {
+    void setUp() {
         Fixtures.deleteDatabase();
         agent = new Agent();
         agent.name = "vision-agent";
@@ -33,7 +33,7 @@ public class MessageAttachmentTest extends UnitTest {
     }
 
     @Test
-    public void persistsImageAttachment() {
+    void persistsImageAttachment() {
         var uuid = UUID.randomUUID().toString();
         var att = new MessageAttachment();
         att.message = message;
@@ -57,7 +57,7 @@ public class MessageAttachmentTest extends UnitTest {
     }
 
     @Test
-    public void findByMessageReturnsInsertionOrder() {
+    void findByMessageReturnsInsertionOrder() {
         var first = persist("a.png", MessageAttachment.KIND_IMAGE);
         var second = persist("b.pdf", MessageAttachment.KIND_FILE);
         var third = persist("c.jpg", MessageAttachment.KIND_IMAGE);
@@ -70,7 +70,7 @@ public class MessageAttachmentTest extends UnitTest {
     }
 
     @Test
-    public void uuidIsUnique() {
+    void uuidIsUnique() {
         var uuid = UUID.randomUUID().toString();
         var first = new MessageAttachment();
         first.message = message;
@@ -97,7 +97,7 @@ public class MessageAttachmentTest extends UnitTest {
     }
 
     @Test
-    public void transcriptIsNullByDefault() {
+    void transcriptIsNullByDefault() {
         var att = persistAudio(null);
         att.em().flush();
         att.em().clear();
@@ -108,7 +108,7 @@ public class MessageAttachmentTest extends UnitTest {
     }
 
     @Test
-    public void persistsAudioAttachmentWithTranscript() {
+    void persistsAudioAttachmentWithTranscript() {
         var transcript = "Hello, this is a voice note recorded on Telegram. "
                 + "Whisper produced this transcript at 16 kHz mono PCM. "
                 + "End of message.";

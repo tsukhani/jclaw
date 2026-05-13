@@ -15,12 +15,12 @@ import utils.TokenHasher;
  * called {@code listForOwner} is gone. Git history retains them in
  * case external tokens come back as an explicit ticket.
  */
-public class ApiTokenTest extends UnitTest {
+class ApiTokenTest extends UnitTest {
 
     // ==================== TokenHasher ====================
 
     @Test
-    public void mintReturnsPrefixedToken() {
+    void mintReturnsPrefixedToken() {
         var t = TokenHasher.mint();
         assertTrue(t.startsWith(TokenHasher.TOKEN_PREFIX),
                 "minted token should carry the jcl_ prefix for log/secret-scanner recognition; got: " + t);
@@ -29,7 +29,7 @@ public class ApiTokenTest extends UnitTest {
     }
 
     @Test
-    public void mintReturnsDistinctValues() {
+    void mintReturnsDistinctValues() {
         // Sanity check on the SecureRandom path — two consecutive mints
         // colliding would suggest the underlying generator is broken.
         var a = TokenHasher.mint();
@@ -39,7 +39,7 @@ public class ApiTokenTest extends UnitTest {
     }
 
     @Test
-    public void hashIsDeterministic() {
+    void hashIsDeterministic() {
         // The whole point of SHA-256 over PBKDF2 here is O(1) bearer
         // lookup, which only works if hash(token) is the same every time.
         var t = TokenHasher.mint();
@@ -47,14 +47,14 @@ public class ApiTokenTest extends UnitTest {
     }
 
     @Test
-    public void hashDifferentForDifferentTokens() {
+    void hashDifferentForDifferentTokens() {
         var a = TokenHasher.mint();
         var b = TokenHasher.mint();
         assertNotEquals(TokenHasher.hash(a), TokenHasher.hash(b));
     }
 
     @Test
-    public void hashRejectsNull() {
+    void hashRejectsNull() {
         assertThrows(IllegalArgumentException.class, () -> TokenHasher.hash(null));
     }
 
@@ -66,7 +66,7 @@ public class ApiTokenTest extends UnitTest {
     }
 
     @Test
-    public void findActiveByPlaintextResolvesNewToken() {
+    void findActiveByPlaintextResolvesNewToken() {
         var plaintext = TokenHasher.mint();
         var row = freshRow(plaintext);
         row.save();
@@ -78,14 +78,14 @@ public class ApiTokenTest extends UnitTest {
     }
 
     @Test
-    public void findActiveByPlaintextReturnsNullForUnknownToken() {
+    void findActiveByPlaintextReturnsNullForUnknownToken() {
         assertNull(ApiToken.findActiveByPlaintext("jcl_not-a-real-token"));
         assertNull(ApiToken.findActiveByPlaintext(""));
         assertNull(ApiToken.findActiveByPlaintext(null));
     }
 
     @Test
-    public void markUsedUpdatesLastUsedAt() {
+    void markUsedUpdatesLastUsedAt() {
         var row = freshRow(TokenHasher.mint());
         row.save();
         assertNull(row.lastUsedAt);
@@ -95,7 +95,7 @@ public class ApiTokenTest extends UnitTest {
     }
 
     @Test
-    public void markUsedIsThrottledWithinWindow() {
+    void markUsedIsThrottledWithinWindow() {
         // Bearer auth fires markUsed() on every /api/** call. Without
         // throttling, every request would UPDATE this row and invalidate
         // the query-cache entry that the same request just populated.
@@ -115,7 +115,7 @@ public class ApiTokenTest extends UnitTest {
     }
 
     @Test
-    public void markUsedUpdatesAfterThrottleExpires() {
+    void markUsedUpdatesAfterThrottleExpires() {
         var row = freshRow(TokenHasher.mint());
         row.save();
 

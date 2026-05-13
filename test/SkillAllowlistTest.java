@@ -24,7 +24,7 @@ import java.nio.file.Path;
  * expand an agent's allowlist.</em> The allowlist is sourced from DB
  * rows written at install time, not from re-reading workspace SKILL.md.
  */
-public class SkillAllowlistTest extends UnitTest {
+class SkillAllowlistTest extends UnitTest {
 
     private Agent agent;
     private Path globalSkillsDir;
@@ -94,7 +94,7 @@ public class SkillAllowlistTest extends UnitTest {
     // ==================== The six core tests ====================
 
     @Test
-    public void skillInstallPersistsAllowlistRows() throws Exception {
+    void skillInstallPersistsAllowlistRows() throws Exception {
         // Registry has "demo" skill with two commands
         var skillDir = globalSkillsDir.resolve("demo");
         writeSkillMd(skillDir, "demo", "wacli", "wacli-setup");
@@ -116,7 +116,7 @@ public class SkillAllowlistTest extends UnitTest {
     }
 
     @Test
-    public void skillTamperingDoesNotExpandAllowlist() throws Exception {
+    void skillTamperingDoesNotExpandAllowlist() throws Exception {
         // Registry blesses ONE command for "demo"
         var skillDir = globalSkillsDir.resolve("demo");
         writeSkillMd(skillDir, "demo", "wacli");
@@ -147,7 +147,7 @@ public class SkillAllowlistTest extends UnitTest {
     }
 
     @Test
-    public void unPromotedSkillDoesNotAffectAgent() throws Exception {
+    void unPromotedSkillDoesNotAffectAgent() throws Exception {
         var skillDir = globalSkillsDir.resolve("demo");
         writeSkillMd(skillDir, "demo", "wacli");
         seedRegistryTool("demo", "wacli");
@@ -166,7 +166,7 @@ public class SkillAllowlistTest extends UnitTest {
     }
 
     @Test
-    public void disablingSkillRemovesAllowlistContribution() throws Exception {
+    void disablingSkillRemovesAllowlistContribution() throws Exception {
         var skillDir = globalSkillsDir.resolve("demo");
         writeSkillMd(skillDir, "demo", "wacli");
         seedRegistryTool("demo", "wacli");
@@ -194,7 +194,7 @@ public class SkillAllowlistTest extends UnitTest {
     }
 
     @Test
-    public void skillDeleteRevokesAllowlistRows() throws Exception {
+    void skillDeleteRevokesAllowlistRows() throws Exception {
         var skillDir = globalSkillsDir.resolve("demo");
         writeSkillMd(skillDir, "demo", "wacli");
         seedRegistryTool("demo", "wacli");
@@ -212,7 +212,7 @@ public class SkillAllowlistTest extends UnitTest {
     }
 
     @Test
-    public void skillCreatorCapabilityGate() throws Exception {
+    void skillCreatorCapabilityGate() throws Exception {
         // Agent does not have skill-creator in its workspace → capability denied
         assertFalse(SkillPromotionService.hasSkillCreatorCapability(agent),
                 "agent without skill-creator in workspace must not have promote capability");
@@ -238,7 +238,7 @@ public class SkillAllowlistTest extends UnitTest {
     }
 
     @Test
-    public void commandsFrontmatterIsParsed() throws Exception {
+    void commandsFrontmatterIsParsed() throws Exception {
         var skillDir = globalSkillsDir.resolve("demo");
         writeSkillMd(skillDir, "demo", "foo", "bar", "baz");
 

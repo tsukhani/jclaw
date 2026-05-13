@@ -18,7 +18,7 @@ import java.util.HashMap;
  * before the LLM round (missing agent, missing fields). That keeps the suite
  * deterministic and free of provider configuration coupling.
  */
-public class ApiChatControllerTest extends FunctionalTest {
+class ApiChatControllerTest extends FunctionalTest {
 
     @BeforeEach
     void setup() {
@@ -66,13 +66,13 @@ public class ApiChatControllerTest extends FunctionalTest {
     // =====================
 
     @Test
-    public void sendRequiresAuth() {
+    void sendRequiresAuth() {
         var response = POST("/api/chat/send", "application/json", "{}");
         assertEquals(401, response.status.intValue());
     }
 
     @Test
-    public void sendRejectsEmptyBody() {
+    void sendRejectsEmptyBody() {
         login();
         // No agentId, no message: resolveChatContext calls badRequest().
         var response = POST("/api/chat/send", "application/json", "{}");
@@ -80,7 +80,7 @@ public class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void sendRejectsMissingMessage() {
+    void sendRejectsMissingMessage() {
         login();
         var id = createAgent("send-missing-msg");
         var body = """
@@ -91,7 +91,7 @@ public class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void sendRejectsMissingAgentId() {
+    void sendRejectsMissingAgentId() {
         login();
         var body = """
                 {"message": "hello"}
@@ -101,7 +101,7 @@ public class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void sendReturns404ForUnknownAgent() {
+    void sendReturns404ForUnknownAgent() {
         login();
         var body = """
                 {"agentId": 999999, "message": "hello"}
@@ -111,7 +111,7 @@ public class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void sendReturns404ForUnknownConversationId() {
+    void sendReturns404ForUnknownConversationId() {
         // When the caller pins an explicit conversationId that doesn't exist,
         // resolveChatContext lets it through — the second findById in send()
         // is responsible for the 404. This guards that branch.
@@ -125,7 +125,7 @@ public class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void sendSlashHelpReturnsSyntheticResponseWithoutLlm() {
+    void sendSlashHelpReturnsSyntheticResponseWithoutLlm() {
         // /help is the simplest slash-command path: it doesn't need any
         // provider configuration, doesn't hit Commands.executeArgs branches,
         // and never invokes the LLM. The response payload must include the
@@ -150,20 +150,20 @@ public class ApiChatControllerTest extends FunctionalTest {
     // =====================
 
     @Test
-    public void streamRequiresAuth() {
+    void streamRequiresAuth() {
         var response = POST("/api/chat/stream", "application/json", "{}");
         assertEquals(401, response.status.intValue());
     }
 
     @Test
-    public void streamRejectsEmptyBody() {
+    void streamRejectsEmptyBody() {
         login();
         var response = POST("/api/chat/stream", "application/json", "{}");
         assertEquals(400, response.status.intValue());
     }
 
     @Test
-    public void streamReturns404ForUnknownAgent() {
+    void streamReturns404ForUnknownAgent() {
         login();
         var body = """
                 {"agentId": 999999, "message": "hello"}
@@ -173,7 +173,7 @@ public class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void streamSlashCommandEmitsSseFrames() {
+    void streamSlashCommandEmitsSseFrames() {
         // Slash commands short-circuit before runStreaming is invoked, so this
         // path is independent of LLM provider state. The completed-future
         // handoff to await() unblocks immediately because sse.close() resolves
@@ -203,13 +203,13 @@ public class ApiChatControllerTest extends FunctionalTest {
     // =====================
 
     @Test
-    public void uploadRequiresAuth() {
+    void uploadRequiresAuth() {
         var response = POST("/api/chat/upload", "application/json", "{}");
         assertEquals(401, response.status.intValue());
     }
 
     @Test
-    public void uploadRejectsMissingAgentId() {
+    void uploadRejectsMissingAgentId() {
         login();
         // Body with no agentId param at all → controller's `if (agentId == null) badRequest()`.
         var response = POST("/api/chat/upload", "application/json", "{}");
@@ -217,7 +217,7 @@ public class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void uploadReturns404ForUnknownAgent() {
+    void uploadReturns404ForUnknownAgent() {
         login();
         var params = new HashMap<String, String>();
         params.put("agentId", "999999");
@@ -226,7 +226,7 @@ public class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void uploadRejectsZeroFilesForKnownAgent() {
+    void uploadRejectsZeroFilesForKnownAgent() {
         login();
         var id = createAgent("upload-no-files");
         var params = new HashMap<String, String>();
@@ -236,7 +236,7 @@ public class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void uploadAcceptsValidFileAndReturnsMetadata() throws Exception {
+    void uploadAcceptsValidFileAndReturnsMetadata() throws Exception {
         login();
         var id = createAgent("upload-ok");
         var f = makeTempFile("note.txt", 64);
@@ -266,7 +266,7 @@ public class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void uploadSanitizesUnsafeCharactersInFilename() throws Exception {
+    void uploadSanitizesUnsafeCharactersInFilename() throws Exception {
         // sanitizeFilename strips characters outside [A-Za-z0-9._\- ]. The
         // echoed originalFilename carries the sanitized leaf; the on-disk
         // filename is uuid.ext and never leaks back in the response.
@@ -292,7 +292,7 @@ public class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void uploadRejectsOversizedFileAgainstConfigCap() throws Exception {
+    void uploadRejectsOversizedFileAgainstConfigCap() throws Exception {
         // JCLAW-131: per-kind caps come from ConfigService, default 100 MB for
         // FILE kind. Pinning a tight cap via ConfigService.set and pushing a
         // file just past it proves both branches fire: the sniff + kind path
@@ -324,7 +324,7 @@ public class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void uploadSniffesAudioMimeAndKind() throws Exception {
+    void uploadSniffesAudioMimeAndKind() throws Exception {
         // A minimal valid WAV header — 46 bytes, enough for Tika to classify
         // decisively as audio/vnd.wave (or audio/x-wav on some platforms).
         // JCLAW-131 only requires that the sniffed MIME routes to KIND_AUDIO;
@@ -366,7 +366,7 @@ public class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void uploadSniffesImageMimeAndKind() throws Exception {
+    void uploadSniffesImageMimeAndKind() throws Exception {
         // JCLAW-25: server-side MIME sniffing via Tika is authoritative for
         // kind/mimeType (browser-declared MIME isn't trusted). A minimal 1×1
         // PNG lets Tika classify decisively without a large fixture.

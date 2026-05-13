@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * thread (JCLAW-80 — same-tool calls share backend state so concurrent
  * execution produces nondeterministic order under lock contention).
  */
-public class ParallelToolExecutionTest extends UnitTest {
+class ParallelToolExecutionTest extends UnitTest {
 
     private static final long TOOL_SLEEP_MS = 300;
 
@@ -120,7 +120,7 @@ public class ParallelToolExecutionTest extends UnitTest {
     }
 
     @Test
-    public void differentToolsRunInParallel() throws Exception {
+    void differentToolsRunInParallel() throws Exception {
         // Three calls to three different tools — each lands in its own
         // tool-name group, so they run on separate virtual threads. Wall
         // clock should be near TOOL_SLEEP_MS (parallel) not 3× it.
@@ -156,7 +156,7 @@ public class ParallelToolExecutionTest extends UnitTest {
     }
 
     @Test
-    public void sameToolCallsRunSequentiallyInDeclaredOrder() throws Exception {
+    void sameToolCallsRunSequentiallyInDeclaredOrder() throws Exception {
         // JCLAW-80 regression: when the LLM emits multiple calls to the
         // SAME tool in one round, they must run on a single virtual thread
         // in declared order — not race for a shared-state lock. This
@@ -196,7 +196,7 @@ public class ParallelToolExecutionTest extends UnitTest {
     }
 
     @Test
-    public void parallelSafeToolRunsAllCallsConcurrently() throws Exception {
+    void parallelSafeToolRunsAllCallsConcurrently() throws Exception {
         // JCLAW-81: a tool that overrides parallelSafe() → true opts out of
         // the same-tool-name group serialization. Three calls to one safe
         // tool run on three virtual threads → peak = 3, wall ≈ 1× sleep.
@@ -225,7 +225,7 @@ public class ParallelToolExecutionTest extends UnitTest {
     }
 
     @Test
-    public void mixedSafeAndUnsafeCallsUsingRightStrategyPerGroup() throws Exception {
+    void mixedSafeAndUnsafeCallsUsingRightStrategyPerGroup() throws Exception {
         // JCLAW-81: a batch that mixes parallel-safe tools with a same-tool
         // unsafe group should use per-call threads for the safe ones and a
         // single serial thread for the unsafe group. Two safe calls + two
@@ -265,7 +265,7 @@ public class ParallelToolExecutionTest extends UnitTest {
     }
 
     @Test
-    public void mixedCallsGroupByNameAndParallelizeAcrossGroups() throws Exception {
+    void mixedCallsGroupByNameAndParallelizeAcrossGroups() throws Exception {
         // [a, b, a, b] → two groups (a × 2, b × 2). Each group runs on its
         // own virtual thread → 2 threads active at peak, not 4 (no
         // within-group parallelism) and not 1 (no accidental single-thread
@@ -302,7 +302,7 @@ public class ParallelToolExecutionTest extends UnitTest {
     }
 
     @Test
-    public void singleToolSkipsParallelOverhead() throws Exception {
+    void singleToolSkipsParallelOverhead() throws Exception {
         long[] ids = seedAgentAndConversation();
         var agent = (Agent) Agent.findById(ids[0]);
 
@@ -319,7 +319,7 @@ public class ParallelToolExecutionTest extends UnitTest {
     }
 
     @Test
-    public void cancellationSkipsRemainingTools() throws Exception {
+    void cancellationSkipsRemainingTools() throws Exception {
         long[] ids = seedAgentAndConversation();
         var agent = (Agent) Agent.findById(ids[0]);
 

@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * - N+1 query fix: bindings list with JOIN FETCH
  * - Transaction scope: concurrent runs without pool exhaustion
  */
-public class PerformanceFixesTest extends UnitTest {
+class PerformanceFixesTest extends UnitTest {
 
     @BeforeEach
     void setup() throws InterruptedException {
@@ -30,7 +30,7 @@ public class PerformanceFixesTest extends UnitTest {
     // --- Task 5.10: JOIN FETCH query returns correct agent data ---
 
     @Test
-    public void joinFetchBindingsQueryReturnsAgentFields() {
+    void joinFetchBindingsQueryReturnsAgentFields() {
         // Create two agents
         var agent1 = new Agent();
         agent1.name = "agent-alpha";
@@ -83,7 +83,7 @@ public class PerformanceFixesTest extends UnitTest {
     }
 
     @Test
-    public void joinFetchConversationsQueryWithFilters() {
+    void joinFetchConversationsQueryWithFilters() {
         var agent = new Agent();
         agent.name = "convo-test-agent";
         agent.modelProvider = "openrouter";
@@ -117,7 +117,7 @@ public class PerformanceFixesTest extends UnitTest {
     }
 
     @Test
-    public void conversationsFiltersWordBoundaryPeerAndChannels() {
+    void conversationsFiltersWordBoundaryPeerAndChannels() {
         // Covers the filter pipeline in ApiChatController.listConversations:
         // - Peer: case-insensitive LIKE (substring)
         // - Name: SQL LIKE pre-filter + Java \b regex post-filter (word-boundary)
@@ -189,7 +189,7 @@ public class PerformanceFixesTest extends UnitTest {
     }
 
     @Test
-    public void joinFetchTasksQueryWithLeftJoin() {
+    void joinFetchTasksQueryWithLeftJoin() {
         var agent = new Agent();
         agent.name = "task-test-agent";
         agent.modelProvider = "openrouter";
@@ -231,7 +231,7 @@ public class PerformanceFixesTest extends UnitTest {
     // --- Task 4.7: Synchronous run releases connection during LLM phase ---
 
     @Test
-    public void syncRunReleasesConnectionBeforeLlmCall() {
+    void syncRunReleasesConnectionBeforeLlmCall() {
         // Create an agent with no provider configured — run() exercises the
         // Tx.run() setup path and returns early with "No LLM provider configured"
         // without holding the connection through an LLM call.
@@ -274,7 +274,7 @@ public class PerformanceFixesTest extends UnitTest {
      * matters for connection pool exhaustion under concurrent webhook load.
      */
     @Test
-    public void syncRunReleasesConnectionDuringLlmCall() throws Throwable {
+    void syncRunReleasesConnectionDuringLlmCall() throws Throwable {
         var llmHit = new CountDownLatch(1);
         var llmGate = new CountDownLatch(1);
         var activeConnectionsDuringLlm = new AtomicInteger(-1);

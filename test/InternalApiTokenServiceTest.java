@@ -21,7 +21,7 @@ import utils.TokenHasher;
  *       state where {@code jclaw_api} starts hitting 401.</li>
  * </ol>
  */
-public class InternalApiTokenServiceTest extends UnitTest {
+class InternalApiTokenServiceTest extends UnitTest {
 
     private void resetState() {
         ApiToken.deleteAll();
@@ -36,7 +36,7 @@ public class InternalApiTokenServiceTest extends UnitTest {
     void cleanup() { resetState(); }
 
     @Test
-    public void firstCallMintsTokenAndPersists() {
+    void firstCallMintsTokenAndPersists() {
         var token = InternalApiTokenService.token();
         assertNotNull(token);
         assertTrue(token.startsWith(TokenHasher.TOKEN_PREFIX),
@@ -53,7 +53,7 @@ public class InternalApiTokenServiceTest extends UnitTest {
     }
 
     @Test
-    public void subsequentCallsReuseStoredToken() {
+    void subsequentCallsReuseStoredToken() {
         var first = InternalApiTokenService.token();
         InternalApiTokenService.invalidateCache();
         var second = InternalApiTokenService.token();
@@ -66,7 +66,7 @@ public class InternalApiTokenServiceTest extends UnitTest {
     }
 
     @Test
-    public void reMintsWhenApiTokenRowMissing() {
+    void reMintsWhenApiTokenRowMissing() {
         var first = InternalApiTokenService.token();
         // Simulate: operator manually deleted the ApiToken row (e.g.
         // cleanup script) but the config row survives. The next boot
@@ -84,7 +84,7 @@ public class InternalApiTokenServiceTest extends UnitTest {
     }
 
     @Test
-    public void mintsFreshWhenConfigRowMissing() {
+    void mintsFreshWhenConfigRowMissing() {
         InternalApiTokenService.token();
         // Inverse scenario: config row wiped (e.g. via an admin's
         // /api/config DELETE before we filtered the prefix). Cache

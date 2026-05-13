@@ -35,7 +35,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * {@code scanner.*.url} keys are treated with the same trust as other
  * provider credentials the operator sets directly.
  */
-public class ScannerTest extends UnitTest {
+class ScannerTest extends UnitTest {
 
     /** SHA-256 of the empty string — any hash shape works here; the scanners
      *  just format it into the request path. */
@@ -101,7 +101,7 @@ public class ScannerTest extends UnitTest {
     }
 
     @Test
-    public void registryCreatesDefaultScannersAndConfigDefaults() {
+    void registryCreatesDefaultScannersAndConfigDefaults() {
         var names = ScannerRegistry.createDefaultScanners().stream()
                 .map(Scanner::name)
                 .toList();
@@ -120,7 +120,7 @@ public class ScannerTest extends UnitTest {
     // =============================================================
 
     @Test
-    public void virusTotal_enabledRequiresKey() {
+    void virusTotal_enabledRequiresKey() {
         ConfigService.set("scanner.virustotal.apiKey", "");
         ConfigService.clearCache();
         VirusTotalScanner.class.getName(); // force load for static OneShotWarning
@@ -129,7 +129,7 @@ public class ScannerTest extends UnitTest {
     }
 
     @Test
-    public void virusTotal_maliciousVerdictFromStats() {
+    void virusTotal_maliciousVerdictFromStats() {
         wireVirusTotal();
         respond(200, """
                 {"data":{"attributes":{
@@ -147,7 +147,7 @@ public class ScannerTest extends UnitTest {
     }
 
     @Test
-    public void virusTotal_cleanVerdictFromZeroMalicious() {
+    void virusTotal_cleanVerdictFromZeroMalicious() {
         wireVirusTotal();
         respond(200, """
                 {"data":{"attributes":{"last_analysis_stats":{"malicious":0,"undetected":70}}}}
@@ -157,7 +157,7 @@ public class ScannerTest extends UnitTest {
     }
 
     @Test
-    public void virusTotal_404TreatedAsClean() {
+    void virusTotal_404TreatedAsClean() {
         wireVirusTotal();
         respondEmpty(404);
         assertFalse(new VirusTotalScanner().lookup(SHA).malicious(),
@@ -165,7 +165,7 @@ public class ScannerTest extends UnitTest {
     }
 
     @Test
-    public void virusTotal_failsOpenOnUnauthorized() {
+    void virusTotal_failsOpenOnUnauthorized() {
         wireVirusTotal();
         respondEmpty(401);
         assertFalse(new VirusTotalScanner().lookup(SHA).malicious(),
@@ -173,7 +173,7 @@ public class ScannerTest extends UnitTest {
     }
 
     @Test
-    public void virusTotal_failsOpenOnRateLimit() {
+    void virusTotal_failsOpenOnRateLimit() {
         wireVirusTotal();
         respondEmpty(429);
         assertFalse(new VirusTotalScanner().lookup(SHA).malicious(),
@@ -181,7 +181,7 @@ public class ScannerTest extends UnitTest {
     }
 
     @Test
-    public void virusTotal_failsOpenOnServerError() {
+    void virusTotal_failsOpenOnServerError() {
         wireVirusTotal();
         respondEmpty(500);
         assertFalse(new VirusTotalScanner().lookup(SHA).malicious(),
@@ -189,7 +189,7 @@ public class ScannerTest extends UnitTest {
     }
 
     @Test
-    public void virusTotal_failsOpenOnMalformedJson() {
+    void virusTotal_failsOpenOnMalformedJson() {
         wireVirusTotal();
         respond(200, "{not valid json");
         assertFalse(new VirusTotalScanner().lookup(SHA).malicious(),
@@ -197,7 +197,7 @@ public class ScannerTest extends UnitTest {
     }
 
     @Test
-    public void virusTotal_failsOpenOnMissingDataField() {
+    void virusTotal_failsOpenOnMissingDataField() {
         wireVirusTotal();
         respond(200, "{}");
         assertFalse(new VirusTotalScanner().lookup(SHA).malicious(),
@@ -205,7 +205,7 @@ public class ScannerTest extends UnitTest {
     }
 
     @Test
-    public void virusTotal_failsOpenOnTimeout() {
+    void virusTotal_failsOpenOnTimeout() {
         wireVirusTotal();
         ConfigService.set("scanner.virustotal.timeoutMs", "100");
         ConfigService.clearCache();
@@ -229,7 +229,7 @@ public class ScannerTest extends UnitTest {
     // =============================================================
 
     @Test
-    public void metaDefender_maliciousVerdictFromResultCode1() {
+    void metaDefender_maliciousVerdictFromResultCode1() {
         wireMetaDefender();
         respond(200, """
                 {"scan_results":{
@@ -247,7 +247,7 @@ public class ScannerTest extends UnitTest {
     }
 
     @Test
-    public void metaDefender_cleanVerdictFromResultCode0() {
+    void metaDefender_cleanVerdictFromResultCode0() {
         wireMetaDefender();
         respond(200, """
                 {"scan_results":{"scan_all_result_i":0}}
@@ -257,7 +257,7 @@ public class ScannerTest extends UnitTest {
     }
 
     @Test
-    public void metaDefender_404TreatedAsClean() {
+    void metaDefender_404TreatedAsClean() {
         wireMetaDefender();
         respondEmpty(404);
         assertFalse(new MetaDefenderCloudScanner().lookup(SHA).malicious(),
@@ -265,28 +265,28 @@ public class ScannerTest extends UnitTest {
     }
 
     @Test
-    public void metaDefender_failsOpenOnUnauthorized() {
+    void metaDefender_failsOpenOnUnauthorized() {
         wireMetaDefender();
         respondEmpty(401);
         assertFalse(new MetaDefenderCloudScanner().lookup(SHA).malicious());
     }
 
     @Test
-    public void metaDefender_failsOpenOnRateLimit() {
+    void metaDefender_failsOpenOnRateLimit() {
         wireMetaDefender();
         respondEmpty(429);
         assertFalse(new MetaDefenderCloudScanner().lookup(SHA).malicious());
     }
 
     @Test
-    public void metaDefender_failsOpenOnMalformedJson() {
+    void metaDefender_failsOpenOnMalformedJson() {
         wireMetaDefender();
         respond(200, "{not json");
         assertFalse(new MetaDefenderCloudScanner().lookup(SHA).malicious());
     }
 
     @Test
-    public void metaDefender_failsOpenOnMissingScanResults() {
+    void metaDefender_failsOpenOnMissingScanResults() {
         wireMetaDefender();
         respond(200, "{}");
         assertFalse(new MetaDefenderCloudScanner().lookup(SHA).malicious(),
@@ -304,7 +304,7 @@ public class ScannerTest extends UnitTest {
     // =============================================================
 
     @Test
-    public void malwareBazaar_maliciousFromOkStatus() {
+    void malwareBazaar_maliciousFromOkStatus() {
         wireMalwareBazaar();
         respond(200, """
                 {"query_status":"ok","data":[{"signature":"TrojanDownloader.Win32.Agent"}]}
@@ -316,7 +316,7 @@ public class ScannerTest extends UnitTest {
     }
 
     @Test
-    public void malwareBazaar_cleanFromHashNotFound() {
+    void malwareBazaar_cleanFromHashNotFound() {
         wireMalwareBazaar();
         respond(200, """
                 {"query_status":"hash_not_found"}
@@ -326,7 +326,7 @@ public class ScannerTest extends UnitTest {
     }
 
     @Test
-    public void malwareBazaar_cleanFromNoResults() {
+    void malwareBazaar_cleanFromNoResults() {
         wireMalwareBazaar();
         respond(200, """
                 {"query_status":"no_results"}
@@ -335,7 +335,7 @@ public class ScannerTest extends UnitTest {
     }
 
     @Test
-    public void malwareBazaar_failsOpenOnUnknownStatus() {
+    void malwareBazaar_failsOpenOnUnknownStatus() {
         wireMalwareBazaar();
         respond(200, """
                 {"query_status":"illegal_auth_key"}
@@ -345,21 +345,21 @@ public class ScannerTest extends UnitTest {
     }
 
     @Test
-    public void malwareBazaar_failsOpenOnRateLimit() {
+    void malwareBazaar_failsOpenOnRateLimit() {
         wireMalwareBazaar();
         respondEmpty(429);
         assertFalse(new MalwareBazaarScanner().lookup(SHA).malicious());
     }
 
     @Test
-    public void malwareBazaar_failsOpenOnMalformedJson() {
+    void malwareBazaar_failsOpenOnMalformedJson() {
         wireMalwareBazaar();
         respond(200, "{not json");
         assertFalse(new MalwareBazaarScanner().lookup(SHA).malicious());
     }
 
     @Test
-    public void malwareBazaar_failsOpenOnEmptyBody() {
+    void malwareBazaar_failsOpenOnEmptyBody() {
         wireMalwareBazaar();
         respond(200, "");
         assertFalse(new MalwareBazaarScanner().lookup(SHA).malicious(),
@@ -377,7 +377,7 @@ public class ScannerTest extends UnitTest {
     // =============================================================
 
     @Test
-    public void urlOverrideAcceptsOperatorSetHost() {
+    void urlOverrideAcceptsOperatorSetHost() {
         // Pin the documented admin-trust boundary: scanner.*.url is treated as
         // operator-configured and has no scheme/host allowlist enforced in code.
         // If a future change introduces such an allowlist, this test will need

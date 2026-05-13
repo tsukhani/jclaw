@@ -11,7 +11,7 @@ import services.Tx;
  * {@code enabled} reflects the Config DB row independently — the Settings
  * page needs both signals to render the toggle correctly.
  */
-public class ApiOcrControllerTest extends FunctionalTest {
+class ApiOcrControllerTest extends FunctionalTest {
 
     private static final String TEST_PASSWORD = "testpass-123";
     private static final String CONFIG_KEY = "ocr.tesseract.enabled";
@@ -44,7 +44,7 @@ public class ApiOcrControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void statusReturnsTesseractBackendShape() {
+    void statusReturnsTesseractBackendShape() {
         var response = GET("/api/ocr/status");
         assertIsOk(response);
         assertContentType("application/json", response);
@@ -58,7 +58,7 @@ public class ApiOcrControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void statusReflectsConfigEnabledRow() {
+    void statusReflectsConfigEnabledRow() {
         runInFreshTx(() -> ConfigService.set(CONFIG_KEY, "false"));
         var response = GET("/api/ocr/status");
         assertIsOk(response);
@@ -72,7 +72,7 @@ public class ApiOcrControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void statusReflectsProbeAvailability() {
+    void statusReflectsProbeAvailability() {
         // Force the probe into both states via the test seam and verify
         // available flips independently of the enabled config row. This is
         // the key invariant the Settings page depends on for greying out
@@ -97,7 +97,7 @@ public class ApiOcrControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void statusRequiresAuth() {
+    void statusRequiresAuth() {
         POST("/api/auth/logout", "application/json", "{}");
         var response = GET("/api/ocr/status");
         assertStatus(401, response);

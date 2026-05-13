@@ -10,7 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Tests for the in-memory pub/sub NotificationBus.
  * Pure in-memory — no DB needed.
  */
-public class NotificationBusTest extends UnitTest {
+class NotificationBusTest extends UnitTest {
 
     private final java.util.List<Runnable> unsubscribers = new ArrayList<>();
 
@@ -32,7 +32,7 @@ public class NotificationBusTest extends UnitTest {
     // --- subscribe / unsubscribe lifecycle ---
 
     @Test
-    public void subscribeIncreasesListenerCount() {
+    void subscribeIncreasesListenerCount() {
         int before = NotificationBus.listenerCount();
         var unsub = subscribe(msg -> {});
         assertEquals(before + 1, NotificationBus.listenerCount());
@@ -41,7 +41,7 @@ public class NotificationBusTest extends UnitTest {
     }
 
     @Test
-    public void unsubscribeRemovesListener() {
+    void unsubscribeRemovesListener() {
         int before = NotificationBus.listenerCount();
         var unsub = subscribe(msg -> {});
         unsub.run();
@@ -53,7 +53,7 @@ public class NotificationBusTest extends UnitTest {
     // --- publish delivers to subscribers ---
 
     @Test
-    public void publishDeliversToSubscriber() {
+    void publishDeliversToSubscriber() {
         var received = new ArrayList<String>();
         subscribe(received::add);
 
@@ -65,7 +65,7 @@ public class NotificationBusTest extends UnitTest {
     }
 
     @Test
-    public void publishDeliversToMultipleSubscribers() {
+    void publishDeliversToMultipleSubscribers() {
         var received1 = new ArrayList<String>();
         var received2 = new ArrayList<String>();
         subscribe(received1::add);
@@ -78,7 +78,7 @@ public class NotificationBusTest extends UnitTest {
     }
 
     @Test
-    public void publishFormatsAsSsePayload() {
+    void publishFormatsAsSsePayload() {
         var received = new ArrayList<String>();
         subscribe(received::add);
 
@@ -92,7 +92,7 @@ public class NotificationBusTest extends UnitTest {
     // --- failed listener is auto-removed ---
 
     @Test
-    public void failedListenerIsAutoRemoved() {
+    void failedListenerIsAutoRemoved() {
         int before = NotificationBus.listenerCount();
         // Subscribe a listener that always throws
         NotificationBus.subscribe(msg -> { throw new RuntimeException("boom"); });
@@ -107,7 +107,7 @@ public class NotificationBusTest extends UnitTest {
     // --- listenerCount ---
 
     @Test
-    public void listenerCountReturnsCorrectCount() {
+    void listenerCountReturnsCorrectCount() {
         int before = NotificationBus.listenerCount();
         var unsub1 = subscribe(msg -> {});
         var unsub2 = subscribe(msg -> {});
@@ -125,7 +125,7 @@ public class NotificationBusTest extends UnitTest {
     }
 
     @Test
-    public void publishWithNoSubscribersDoesNotThrow() {
+    void publishWithNoSubscribersDoesNotThrow() {
         // Should complete without error even if no subscribers exist
         Assertions.assertDoesNotThrow(() -> NotificationBus.publish("orphan.event", Map.of("lonely", "true")));
     }
@@ -133,7 +133,7 @@ public class NotificationBusTest extends UnitTest {
     // --- per-listener timeout: slow listener is auto-removed, fast listener still receives ---
 
     @Test
-    public void slowListenerIsRemovedAndFastListenerStillReceives() throws Exception {
+    void slowListenerIsRemovedAndFastListenerStillReceives() throws Exception {
         int before = NotificationBus.listenerCount();
 
         var received = new java.util.concurrent.CopyOnWriteArrayList<String>();

@@ -14,7 +14,7 @@ import java.time.Instant;
  * onSuccess path for the "soft failure" case and the exception path for
  * onFailure.
  */
-public class TaskPollerJobTest extends UnitTest {
+class TaskPollerJobTest extends UnitTest {
 
     @BeforeEach
     void setup() throws InterruptedException {
@@ -31,7 +31,7 @@ public class TaskPollerJobTest extends UnitTest {
     // lifecycle methods directly instead.
 
     @Test
-    public void findPendingDueFiltersCorrectly() {
+    void findPendingDueFiltersCorrectly() {
         var agent = createAgent("due-filter-agent");
 
         // Past-due task — should be found
@@ -51,7 +51,7 @@ public class TaskPollerJobTest extends UnitTest {
     }
 
     @Test
-    public void onSuccessMarksTaskCompleted() throws Exception {
+    void onSuccessMarksTaskCompleted() throws Exception {
         var agent = createAgent("success-agent");
         var task = new Task();
         task.agent = agent;
@@ -75,7 +75,7 @@ public class TaskPollerJobTest extends UnitTest {
     // --- Exponential backoff ---
 
     @Test
-    public void onFailureSetsExponentialBackoff() throws Exception {
+    void onFailureSetsExponentialBackoff() throws Exception {
         // Create an agent with a provider that will cause an exception
         // (not a soft error) by using a provider that actively throws
         var agent = createAgent("backoff-agent");
@@ -129,7 +129,7 @@ public class TaskPollerJobTest extends UnitTest {
     }
 
     @Test
-    public void onFailureMarksFailedAfterMaxRetries() throws Exception {
+    void onFailureMarksFailedAfterMaxRetries() throws Exception {
         var agent = createAgent("max-retry-agent");
         var poller = new jobs.TaskPollerJob();
 
@@ -158,7 +158,7 @@ public class TaskPollerJobTest extends UnitTest {
     // --- CRON re-scheduling ---
 
     @Test
-    public void cronTaskSchedulesNextRunAfterCompletion() throws Exception {
+    void cronTaskSchedulesNextRunAfterCompletion() throws Exception {
         var agent = createAgent("cron-agent");
         var poller = new jobs.TaskPollerJob();
 
@@ -204,7 +204,7 @@ public class TaskPollerJobTest extends UnitTest {
     // --- Graceful shutdown ---
 
     @Test
-    public void shutdownGracefullyDoesNotThrowWhenIdle() {
+    void shutdownGracefullyDoesNotThrowWhenIdle() {
         // No active executor — should be a no-op
         assertDoesNotThrow(() -> jobs.TaskPollerJob.shutdownGracefully());
     }

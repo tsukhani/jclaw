@@ -4,7 +4,7 @@ import models.Agent;
 import services.AgentService;
 import services.ConfigService;
 
-public class ConfigServiceTest extends UnitTest {
+class ConfigServiceTest extends UnitTest {
 
     @BeforeEach
     void setup() {
@@ -13,30 +13,30 @@ public class ConfigServiceTest extends UnitTest {
     }
 
     @Test
-    public void setAndGet() {
+    void setAndGet() {
         ConfigService.set("test.key", "test-value");
         assertEquals("test-value", ConfigService.get("test.key"));
     }
 
     @Test
-    public void getWithDefault() {
+    void getWithDefault() {
         assertEquals("fallback", ConfigService.get("missing.key", "fallback"));
     }
 
     @Test
-    public void getReturnsNullForMissing() {
+    void getReturnsNullForMissing() {
         assertNull(ConfigService.get("nonexistent"));
     }
 
     @Test
-    public void setOverwrites() {
+    void setOverwrites() {
         ConfigService.set("key", "v1");
         ConfigService.set("key", "v2");
         assertEquals("v2", ConfigService.get("key"));
     }
 
     @Test
-    public void deleteRemovesEntry() {
+    void deleteRemovesEntry() {
         ConfigService.set("to-delete", "value");
         assertNotNull(ConfigService.get("to-delete"));
         ConfigService.delete("to-delete");
@@ -44,7 +44,7 @@ public class ConfigServiceTest extends UnitTest {
     }
 
     @Test
-    public void listAllReturnsAll() {
+    void listAllReturnsAll() {
         ConfigService.set("a", "1");
         ConfigService.set("b", "2");
         var all = ConfigService.listAll();
@@ -52,7 +52,7 @@ public class ConfigServiceTest extends UnitTest {
     }
 
     @Test
-    public void isSensitiveDetectsKeys() {
+    void isSensitiveDetectsKeys() {
         assertTrue(ConfigService.isSensitive("provider.openrouter.apiKey"));
         assertTrue(ConfigService.isSensitive("jclaw.admin.password"));
         assertTrue(ConfigService.isSensitive("slack.signing.secret"));
@@ -62,14 +62,14 @@ public class ConfigServiceTest extends UnitTest {
     }
 
     @Test
-    public void maskValueHidesSensitive() {
+    void maskValueHidesSensitive() {
         assertEquals("sk-t****", ConfigService.maskValue("apiKey", "sk-test-123"));
         assertEquals("https://openrouter.ai/api/v1",
                 ConfigService.maskValue("baseUrl", "https://openrouter.ai/api/v1"));
     }
 
     @Test
-    public void cacheServesWithoutDb() {
+    void cacheServesWithoutDb() {
         ConfigService.set("cached", "value");
         assertEquals("value", ConfigService.get("cached"));
         // Value is in cache, even if DB row were somehow gone the cache would serve it
@@ -78,7 +78,7 @@ public class ConfigServiceTest extends UnitTest {
     // --- setWithSideEffects: the privilege-guard path ---
 
     @Test
-    public void setWithSideEffectsRejectsShellBypassForNonMainAgent() {
+    void setWithSideEffectsRejectsShellBypassForNonMainAgent() {
         // Security-critical: shell bypass / global path privileges are only
         // legal for the main agent. A custom agent attempting to flip them
         // must be rejected BEFORE the set lands in the DB.
@@ -96,7 +96,7 @@ public class ConfigServiceTest extends UnitTest {
     }
 
     @Test
-    public void setWithSideEffectsRejectsAllowGlobalPathsForNonMainAgent() {
+    void setWithSideEffectsRejectsAllowGlobalPathsForNonMainAgent() {
         AgentService.create("helper", "openrouter", "gpt-4.1");
         var error = ConfigService.setWithSideEffects(
                 "agent.helper.shell.allowGlobalPaths", "true");
@@ -105,7 +105,7 @@ public class ConfigServiceTest extends UnitTest {
     }
 
     @Test
-    public void setWithSideEffectsAcceptsShellPrivilegeForMainAgent() {
+    void setWithSideEffectsAcceptsShellPrivilegeForMainAgent() {
         // Seed main agent via direct construction — AgentService.create rejects
         // "main" by convention, but the router identifies it by name so it
         // must exist under that name for the privilege check to pass.
@@ -123,7 +123,7 @@ public class ConfigServiceTest extends UnitTest {
     }
 
     @Test
-    public void deleteEvictsCacheSoSubsequentGetReturnsNull() {
+    void deleteEvictsCacheSoSubsequentGetReturnsNull() {
         // After delete, the in-memory cache entry must be removed or invalidated
         // so the next get() either returns null (if the caller knows to avoid
         // defaults) or forces a DB round-trip that also returns null.
@@ -138,7 +138,7 @@ public class ConfigServiceTest extends UnitTest {
     // --- setWithSideEffects: ollama-cloud LLM key → ollama search key linkage ---
 
     @Test
-    public void setWithSideEffectsMirrorsOllamaCloudKeyToSearchWhenSearchKeyEmpty() {
+    void setWithSideEffectsMirrorsOllamaCloudKeyToSearchWhenSearchKeyEmpty() {
         // Fresh state: no search.ollama.apiKey set. Operator sets the LLM key
         // via Settings — both providers hit the same Ollama account, so the
         // search key should auto-populate AND the search provider should flip
@@ -157,7 +157,7 @@ public class ConfigServiceTest extends UnitTest {
     }
 
     @Test
-    public void setWithSideEffectsLeavesExistingSearchKeyAlone() {
+    void setWithSideEffectsLeavesExistingSearchKeyAlone() {
         // The "set once, owned by you" rule: once the operator has explicitly
         // set search.ollama.apiKey, a later rotation of the LLM key must NOT
         // overwrite it. Search-key independence is preserved.
@@ -175,7 +175,7 @@ public class ConfigServiceTest extends UnitTest {
     }
 
     @Test
-    public void setWithSideEffectsDoesNotMirrorBlankLlmKey() {
+    void setWithSideEffectsDoesNotMirrorBlankLlmKey() {
         // Clearing the LLM key (operator pastes empty / removes credentials)
         // must not mirror the empty value into the search key — that would
         // silently break a working search-only setup. The mirror is a
@@ -191,7 +191,7 @@ public class ConfigServiceTest extends UnitTest {
     }
 
     @Test
-    public void setWithSideEffectsIgnoresUnrelatedProviderApiKey() {
+    void setWithSideEffectsIgnoresUnrelatedProviderApiKey() {
         // Sanity guard: the linkage is specific to provider.ollama-cloud.apiKey.
         // Setting a different provider's apiKey must not touch search.ollama.*.
         var error = ConfigService.setWithSideEffects(

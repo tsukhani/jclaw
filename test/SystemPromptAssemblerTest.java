@@ -27,7 +27,7 @@ import java.nio.file.Path;
  *       from the output instead of injecting an empty section.</li>
  * </ul>
  */
-public class SystemPromptAssemblerTest extends UnitTest {
+class SystemPromptAssemblerTest extends UnitTest {
 
     @BeforeEach
     void setup() {
@@ -50,7 +50,7 @@ public class SystemPromptAssemblerTest extends UnitTest {
     // =====================
 
     @Test
-    public void workspaceFilesAppearInDeclaredNarrativeOrder() throws Exception {
+    void workspaceFilesAppearInDeclaredNarrativeOrder() throws Exception {
         var agent = newAgent("spa-order-1");
         // Stamp each workspace file with a distinctive sentinel so we can read
         // their absolute positions back out of the assembled prompt.
@@ -76,7 +76,7 @@ public class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
-    public void blankWorkspaceFileIsDroppedSilently() throws Exception {
+    void blankWorkspaceFileIsDroppedSilently() throws Exception {
         var agent = newAgent("spa-blank-drop");
         writeWorkspaceFile(agent.name, "USER.md", "   \n  \n");
         writeWorkspaceFile(agent.name, "AGENT.md", "MARKER_AGENT_BD");
@@ -95,7 +95,7 @@ public class SystemPromptAssemblerTest extends UnitTest {
     // =====================
 
     @Test
-    public void cacheBoundaryMarkerAppearsExactlyOnce() {
+    void cacheBoundaryMarkerAppearsExactlyOnce() {
         var agent = newAgent("spa-cache-once");
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
         int first = prompt.indexOf(SystemPromptAssembler.CACHE_BOUNDARY_MARKER);
@@ -106,7 +106,7 @@ public class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
-    public void cacheBoundarySitsBetweenEnvironmentAndMemoriesSections() throws Exception {
+    void cacheBoundarySitsBetweenEnvironmentAndMemoriesSections() throws Exception {
         // Environment is the last section in the cacheable prefix; memories are
         // the only section after the boundary. This pin enforces the JCLAW-128
         // ordering invariant the prompt cache relies on.
@@ -124,7 +124,7 @@ public class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
-    public void breakdownReportsPrefixAndSuffixCharsAroundMarker() {
+    void breakdownReportsPrefixAndSuffixCharsAroundMarker() {
         var agent = newAgent("spa-breakdown-split");
         var bd = SystemPromptAssembler.breakdown(agent, null, "web");
         // Without a user message the memories section is empty, but the marker
@@ -143,7 +143,7 @@ public class SystemPromptAssemblerTest extends UnitTest {
     // =====================
 
     @Test
-    public void skillsXmlOmittedWhenAgentHasNoSkills() {
+    void skillsXmlOmittedWhenAgentHasNoSkills() {
         var agent = newAgent("spa-skills-absent");
         // Fresh workspace has skills/ directory but no SKILL.md inside.
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
@@ -154,7 +154,7 @@ public class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
-    public void skillsXmlEmittedWhenAgentHasAtLeastOneSkill() throws Exception {
+    void skillsXmlEmittedWhenAgentHasAtLeastOneSkill() throws Exception {
         var agent = newAgent("spa-skills-present");
         // Seed a minimal SKILL.md under skills/test-skill/. SkillLoader requires
         // YAML frontmatter with at least name + description; the body is freeform.
@@ -184,7 +184,7 @@ public class SystemPromptAssemblerTest extends UnitTest {
     // =====================
 
     @Test
-    public void telegramChannelInjectsTelegramGuidance() {
+    void telegramChannelInjectsTelegramGuidance() {
         var agent = newAgent("spa-channel-telegram");
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "telegram").systemPrompt();
         assertTrue(prompt.contains("Channel Guidance (telegram)"),
@@ -197,7 +197,7 @@ public class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
-    public void webChannelInjectsWebGuidance() {
+    void webChannelInjectsWebGuidance() {
         var agent = newAgent("spa-channel-web");
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
         assertTrue(prompt.contains("Channel Guidance (web)"),
@@ -207,7 +207,7 @@ public class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
-    public void slackChannelSkipsGuidanceSection() {
+    void slackChannelSkipsGuidanceSection() {
         var agent = newAgent("spa-channel-slack");
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "slack").systemPrompt();
         assertFalse(prompt.contains("Channel Guidance"),
@@ -215,14 +215,14 @@ public class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
-    public void whatsappChannelSkipsGuidanceSection() {
+    void whatsappChannelSkipsGuidanceSection() {
         var agent = newAgent("spa-channel-wa");
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "whatsapp").systemPrompt();
         assertFalse(prompt.contains("Channel Guidance"));
     }
 
     @Test
-    public void unknownChannelSkipsGuidanceSection() {
+    void unknownChannelSkipsGuidanceSection() {
         var agent = newAgent("spa-channel-unknown");
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "rocketchat").systemPrompt();
         assertFalse(prompt.contains("Channel Guidance"),
@@ -230,14 +230,14 @@ public class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
-    public void nullChannelSkipsGuidanceSection() {
+    void nullChannelSkipsGuidanceSection() {
         var agent = newAgent("spa-channel-null");
         var prompt = SystemPromptAssembler.assemble(agent, null, null, null).systemPrompt();
         assertFalse(prompt.contains("Channel Guidance"));
     }
 
     @Test
-    public void channelTypeIsCaseInsensitive() {
+    void channelTypeIsCaseInsensitive() {
         var agent = newAgent("spa-channel-case");
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "TELEGRAM").systemPrompt();
         assertTrue(prompt.contains("Channel Guidance (telegram)"),
@@ -276,7 +276,7 @@ public class SystemPromptAssemblerTest extends UnitTest {
     // =====================
 
     @Test
-    public void loadtestAgentEmitsOnlySafetyExecutionBiasAndChannelGuidance() throws Exception {
+    void loadtestAgentEmitsOnlySafetyExecutionBiasAndChannelGuidance() throws Exception {
         var agent = newAgent(services.LoadTestRunner.LOADTEST_AGENT_NAME);
         // Add a workspace file the loadtest path should IGNORE — proves the
         // slim path is genuinely skipping content rather than the test
@@ -321,7 +321,7 @@ public class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
-    public void loadtestAgentSkipsChannelGuidanceWhenChannelHasNone() throws Exception {
+    void loadtestAgentSkipsChannelGuidanceWhenChannelHasNone() throws Exception {
         var agent = newAgent(services.LoadTestRunner.LOADTEST_AGENT_NAME);
         // Slack has no registered channel guidance → section silently absent.
         var assembled = SystemPromptAssembler.assemble(agent, "x", null, "slack");

@@ -20,7 +20,7 @@ import java.util.List;
  * JCLAW-118) lives in {@code services.ModelDiscoveryService} and is covered by
  * {@code ModelDiscoveryServiceTest}; not duplicated here.
  */
-public class OllamaProviderTest extends UnitTest {
+class OllamaProviderTest extends UnitTest {
 
     @BeforeEach
     void setup() {
@@ -67,14 +67,14 @@ public class OllamaProviderTest extends UnitTest {
     // =====================
 
     @Test
-    public void addReasoningParamsEmitsReasoningEffortField() throws Exception {
+    void addReasoningParamsEmitsReasoningEffortField() throws Exception {
         var body = serialize(provider(), withThinking("low"));
         assertEquals("low", body.get("reasoning_effort").getAsString(),
                 "Ollama maps thinkingMode 1:1 onto reasoning_effort");
     }
 
     @Test
-    public void addReasoningParamsThreadsAllAcceptedValues() throws Exception {
+    void addReasoningParamsThreadsAllAcceptedValues() throws Exception {
         for (var level : List.of("low", "medium", "high")) {
             var body = serialize(provider(), withThinking(level));
             assertEquals(level, body.get("reasoning_effort").getAsString(),
@@ -83,7 +83,7 @@ public class OllamaProviderTest extends UnitTest {
     }
 
     @Test
-    public void addReasoningParamsDoesNotEmitThinkFieldWhenEnabled() throws Exception {
+    void addReasoningParamsDoesNotEmitThinkFieldWhenEnabled() throws Exception {
         // When reasoning IS enabled, the belt-and-braces "think:false" fallback
         // must NOT appear — that field is exclusive to the disable path.
         var body = serialize(provider(), withThinking("medium"));
@@ -96,7 +96,7 @@ public class OllamaProviderTest extends UnitTest {
     // =====================
 
     @Test
-    public void disableReasoningEmitsBothNoneAndThinkFalse() throws Exception {
+    void disableReasoningEmitsBothNoneAndThinkFalse() throws Exception {
         // When thinkingMode is null, disableReasoning fires and must send BOTH:
         //   reasoning_effort: "none"   (the documented /v1 off signal)
         //   think: false               (belt-and-braces for the native shim)
@@ -109,7 +109,7 @@ public class OllamaProviderTest extends UnitTest {
     }
 
     @Test
-    public void disableReasoningTriggersOnBlankThinkingMode() throws Exception {
+    void disableReasoningTriggersOnBlankThinkingMode() throws Exception {
         var body = serialize(provider(), withThinking(""));
         assertEquals("none", body.get("reasoning_effort").getAsString());
         assertFalse(body.get("think").getAsBoolean());
@@ -120,14 +120,14 @@ public class OllamaProviderTest extends UnitTest {
     // =====================
 
     @Test
-    public void extractReasoningFromDeltaReadsTopLevelReasoningString() throws Exception {
+    void extractReasoningFromDeltaReadsTopLevelReasoningString() throws Exception {
         var p = provider();
         var delta = new ChunkDelta("assistant", null, null, "thinking step 1", null);
         assertEquals("thinking step 1", extractReasoning(p, delta));
     }
 
     @Test
-    public void extractReasoningFromDeltaReturnsNullWhenAbsent() throws Exception {
+    void extractReasoningFromDeltaReturnsNullWhenAbsent() throws Exception {
         var p = provider();
         var delta = new ChunkDelta("assistant", "regular content", null, null, null);
         assertNull(extractReasoning(p, delta),
@@ -139,7 +139,7 @@ public class OllamaProviderTest extends UnitTest {
     // =====================
 
     @Test
-    public void extractReasoningTokensReadsTopLevelField() {
+    void extractReasoningTokensReadsTopLevelField() {
         var p = provider();
         var usage = p.parseUsage(JsonParser.parseString("""
                 {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
@@ -150,7 +150,7 @@ public class OllamaProviderTest extends UnitTest {
     }
 
     @Test
-    public void extractReasoningTokensReturnsZeroWhenAbsent() {
+    void extractReasoningTokensReturnsZeroWhenAbsent() {
         var p = provider();
         var usage = p.parseUsage(JsonParser.parseString("""
                 {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
@@ -159,7 +159,7 @@ public class OllamaProviderTest extends UnitTest {
     }
 
     @Test
-    public void extractReasoningTokensReturnsZeroWhenNull() {
+    void extractReasoningTokensReturnsZeroWhenNull() {
         var p = provider();
         var usage = p.parseUsage(JsonParser.parseString("""
                 {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
@@ -173,7 +173,7 @@ public class OllamaProviderTest extends UnitTest {
     // =====================
 
     @Test
-    public void applyCacheDirectivesEmitsKeepAliveDefaultThirtyMinutes() throws Exception {
+    void applyCacheDirectivesEmitsKeepAliveDefaultThirtyMinutes() throws Exception {
         // Config key absent → default to "30m" (constant inside the provider).
         var body = serialize(provider(), withThinking("medium"));
         assertEquals("30m", body.get("keep_alive").getAsString(),
@@ -181,7 +181,7 @@ public class OllamaProviderTest extends UnitTest {
     }
 
     @Test
-    public void applyCacheDirectivesHonorsConfigOverride() throws Exception {
+    void applyCacheDirectivesHonorsConfigOverride() throws Exception {
         ConfigService.set("ollama.keepAlive", "5m");
         var body = serialize(provider(), withThinking("medium"));
         assertEquals("5m", body.get("keep_alive").getAsString(),
@@ -189,7 +189,7 @@ public class OllamaProviderTest extends UnitTest {
     }
 
     @Test
-    public void applyCacheDirectivesIgnoresBlankConfigValue() throws Exception {
+    void applyCacheDirectivesIgnoresBlankConfigValue() throws Exception {
         // A blank config value should fall back to the default rather than
         // sending an empty string that the Ollama scheduler would reject.
         ConfigService.set("ollama.keepAlive", "   ");
@@ -202,7 +202,7 @@ public class OllamaProviderTest extends UnitTest {
     // =====================
 
     @Test
-    public void forConfigRoutesOllamaSubstringToOllamaProvider() {
+    void forConfigRoutesOllamaSubstringToOllamaProvider() {
         var ollamaCloud = LlmProvider.forConfig(new ProviderConfig(
                 "ollama-cloud", "https://ollama.com/v1", "k", List.of()));
         assertInstanceOf(OllamaProvider.class, ollamaCloud,

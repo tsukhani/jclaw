@@ -11,7 +11,7 @@ import models.Agent;
  * <p>{@code ControllerApiTest} owns the slug-validation matrix and basic CRUD;
  * this file deliberately avoids those scenarios to keep the suite DRY.
  */
-public class ApiAgentsControllerTest extends FunctionalTest {
+class ApiAgentsControllerTest extends FunctionalTest {
 
     @BeforeEach
     void setup() {
@@ -85,20 +85,20 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     // =====================
 
     @Test
-    public void effectiveShellAllowlistRequiresAuth() {
+    void effectiveShellAllowlistRequiresAuth() {
         var response = GET("/api/agents/1/shell/effective-allowlist");
         assertEquals(401, response.status.intValue());
     }
 
     @Test
-    public void effectiveShellAllowlistReturns404ForUnknownAgent() {
+    void effectiveShellAllowlistReturns404ForUnknownAgent() {
         login();
         var response = GET("/api/agents/999999/shell/effective-allowlist");
         assertEquals(404, response.status.intValue());
     }
 
     @Test
-    public void effectiveShellAllowlistReturnsGlobalAndPerSkillBreakdown() {
+    void effectiveShellAllowlistReturnsGlobalAndPerSkillBreakdown() {
         login();
         var id = createAgent("shell-allowlist-agent");
         var response = GET("/api/agents/" + id + "/shell/effective-allowlist");
@@ -116,13 +116,13 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     // =====================
 
     @Test
-    public void getWorkspaceFileRequiresAuth() {
+    void getWorkspaceFileRequiresAuth() {
         var response = GET("/api/agents/1/workspace/AGENT.md");
         assertEquals(401, response.status.intValue());
     }
 
     @Test
-    public void getWorkspaceFileReturnsSeededAgentMd() {
+    void getWorkspaceFileReturnsSeededAgentMd() {
         // AgentService.create seeds AGENT.md (and IDENTITY/USER/SOUL/BOOTSTRAP)
         // when the agent is created. The endpoint returns {filename, content}.
         login();
@@ -140,7 +140,7 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void getWorkspaceFileReturns404ForMissingFile() {
+    void getWorkspaceFileReturns404ForMissingFile() {
         login();
         var id = createAgent("workspace-missing");
         var response = GET("/api/agents/" + id + "/workspace/does-not-exist.md");
@@ -148,14 +148,14 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void getWorkspaceFileReturns404ForUnknownAgent() {
+    void getWorkspaceFileReturns404ForUnknownAgent() {
         login();
         var response = GET("/api/agents/999999/workspace/AGENT.md");
         assertEquals(404, response.status.intValue());
     }
 
     @Test
-    public void saveWorkspaceFileRoundTrips() {
+    void saveWorkspaceFileRoundTrips() {
         login();
         var id = createAgent("workspace-write-agent");
 
@@ -179,7 +179,7 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void saveWorkspaceFileRejectsMissingContent() {
+    void saveWorkspaceFileRejectsMissingContent() {
         login();
         var id = createAgent("workspace-missing-content");
         var response = PUT("/api/agents/" + id + "/workspace/AGENT.md",
@@ -188,7 +188,7 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void saveWorkspaceFileReturns404ForUnknownAgent() {
+    void saveWorkspaceFileReturns404ForUnknownAgent() {
         login();
         var body = """
                 {"content": "irrelevant"}
@@ -199,7 +199,7 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void serveWorkspaceFileReturnsBinaryWithContentType() {
+    void serveWorkspaceFileReturnsBinaryWithContentType() {
         // We only assert the contract — 200 + Content-Type header + a
         // Cache-Control hint — since {@code renderBinary} streams the file
         // through Play's binary pipeline rather than the response.out buffer
@@ -216,7 +216,7 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void serveWorkspaceFileReturns404ForMissingFile() {
+    void serveWorkspaceFileReturns404ForMissingFile() {
         login();
         var id = createAgent("serve-missing-file");
         var response = GET("/api/agents/" + id + "/files/does-not-exist.md");
@@ -224,13 +224,13 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void serveWorkspaceFileRequiresAuth() {
+    void serveWorkspaceFileRequiresAuth() {
         var response = GET("/api/agents/1/files/AGENT.md");
         assertEquals(401, response.status.intValue());
     }
 
     @Test
-    public void serveWorkspaceFileRejectsTraversalWith403() {
+    void serveWorkspaceFileRejectsTraversalWith403() {
         // The two-layer (lexical + canonical) path validation in
         // AgentService.acquireWorkspacePath rejects ".." traversal before any
         // file is opened. The controller maps SecurityException → forbidden().
@@ -250,7 +250,7 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     // =====================
 
     @Test
-    public void promptBreakdownAcceptsTelegramChannel() {
+    void promptBreakdownAcceptsTelegramChannel() {
         login();
         var id = createAgent("prompt-telegram");
         var response = GET("/api/agents/" + id + "/prompt-breakdown?channelType=telegram");
@@ -259,7 +259,7 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void promptBreakdownAcceptsSlackChannel() {
+    void promptBreakdownAcceptsSlackChannel() {
         login();
         var id = createAgent("prompt-slack");
         var response = GET("/api/agents/" + id + "/prompt-breakdown?channelType=slack");
@@ -268,7 +268,7 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void promptBreakdownAcceptsWhatsAppChannel() {
+    void promptBreakdownAcceptsWhatsAppChannel() {
         login();
         var id = createAgent("prompt-whatsapp");
         var response = GET("/api/agents/" + id + "/prompt-breakdown?channelType=whatsapp");
@@ -277,7 +277,7 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void promptBreakdownReturns404ForUnknownAgent() {
+    void promptBreakdownReturns404ForUnknownAgent() {
         login();
         var response = GET("/api/agents/999999/prompt-breakdown?channelType=web");
         assertEquals(404, response.status.intValue());
@@ -288,7 +288,7 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     // =====================
 
     @Test
-    public void deleteOnMainAgentReturns409() {
+    void deleteOnMainAgentReturns409() {
         login();
         var mainId = createMainAgent();
         var response = DELETE("/api/agents/" + mainId);
@@ -296,7 +296,7 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void updateRejectsDisablingMainAgent() {
+    void updateRejectsDisablingMainAgent() {
         login();
         var mainId = createMainAgent();
         var body = """
@@ -307,7 +307,7 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void updateRejectsRenamingMainAgentAway() {
+    void updateRejectsRenamingMainAgentAway() {
         login();
         var mainId = createMainAgent();
         var body = """
@@ -318,7 +318,7 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void updateRejectsRenamingNonMainAgentToMain() {
+    void updateRejectsRenamingNonMainAgentToMain() {
         login();
         var id = createAgent("non-main-rename-target");
         var body = """
@@ -329,7 +329,7 @@ public class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void mainAgentIsHiddenFromListEndpointWhenReservedFilterApplies() {
+    void mainAgentIsHiddenFromListEndpointWhenReservedFilterApplies() {
         // Sanity check: the "main" agent IS visible via the list endpoint
         // (only __loadtest__ is hidden). This test guards against an
         // accidental over-broadening of the reserved-name filter.

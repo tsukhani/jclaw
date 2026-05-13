@@ -4,10 +4,10 @@ import play.mvc.*;
 import play.mvc.Http.*;
 import models.*;
 
-public class ApplicationTest extends FunctionalTest {
+class ApplicationTest extends FunctionalTest {
 
     @Test
-    public void testThatIndexPageWorks() {
+    void testThatIndexPageWorks() {
         Response response = GET("/");
         assertIsOk(response);
         assertContentType("text/html", response);

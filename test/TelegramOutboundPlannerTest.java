@@ -10,18 +10,18 @@ import services.AgentService;
  * sendPhoto / sendDocument) is tested separately in ChannelTest against a
  * mocked TelegramClient.
  */
-public class TelegramOutboundPlannerTest extends UnitTest {
+class TelegramOutboundPlannerTest extends UnitTest {
 
     // ── Null / trivial inputs ──
 
     @Test
-    public void emptyMarkdownReturnsEmptyList() {
+    void emptyMarkdownReturnsEmptyList() {
         var segments = TelegramOutboundPlanner.plan("", "agent-x");
         assertTrue(segments.isEmpty());
     }
 
     @Test
-    public void nullAgentSkipsFileDetection() {
+    void nullAgentSkipsFileDetection() {
         // When no agent is in scope (webhook error path), the whole input is
         // treated as one text segment — no workspace resolution attempts.
         var md = "Click [here](<foo.png>) to see.";
@@ -33,7 +33,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     }
 
     @Test
-    public void markdownWithoutLinksReturnsSingleTextSegment() {
+    void markdownWithoutLinksReturnsSingleTextSegment() {
         var segments = TelegramOutboundPlanner.plan("Just some prose.", "agent-x");
         assertEquals(1, segments.size());
         assertTrue(segments.get(0) instanceof TelegramOutboundPlanner.TextSegment);
@@ -42,7 +42,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     // ── External URLs stay as text (they're real links, not workspace paths) ──
 
     @Test
-    public void httpUrlLinksStayInTextSegment() {
+    void httpUrlLinksStayInTextSegment() {
         var md = "See [example](https://example.com) for docs.";
         var segments = TelegramOutboundPlanner.plan(md, "agent-x");
         assertEquals(1, segments.size());
@@ -53,7 +53,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     }
 
     @Test
-    public void nonApiAbsolutePathLinksStayInText() {
+    void nonApiAbsolutePathLinksStayInText() {
         // Random absolute paths aren't workspace files — only the JClaw API
         // files URL shape is (tested below). Everything else stays as text.
         var md = "Look at [file](/etc/passwd) maybe.";
@@ -63,7 +63,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     }
 
     @Test
-    public void apiFilesUrlIsResolvedAsWorkspaceFile() {
+    void apiFilesUrlIsResolvedAsWorkspaceFile() {
         // The Playwright tool (and other tools that reply with a workspace-file
         // API URL) emits absolute /api/agents/{id}/files/{name} paths. The
         // planner should recognize that shape and pull the filename out so it
@@ -86,7 +86,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     }
 
     @Test
-    public void anchorLinksStayInText() {
+    void anchorLinksStayInText() {
         var md = "Jump to [section](#intro) here.";
         var segments = TelegramOutboundPlanner.plan(md, "agent-x");
         assertEquals(1, segments.size());
@@ -96,7 +96,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     // ── Resolved workspace files ──
 
     @Test
-    public void angleBracketFormResolvesToFileSegment() {
+    void angleBracketFormResolvesToFileSegment() {
         // Seed a real file in the agent's workspace, then assert the planner
         // produces a FileSegment wrapping it.
         var agent = AgentService.create("planner-angle", "openrouter", "gpt-4.1");
@@ -127,7 +127,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     }
 
     @Test
-    public void plainFormResolvesToFileSegment() {
+    void plainFormResolvesToFileSegment() {
         var agent = AgentService.create("planner-plain", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile(agent.name, "report.pdf", "fake-pdf-bytes");
 
@@ -140,7 +140,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     }
 
     @Test
-    public void imageExtensionClassificationIsCaseInsensitive() {
+    void imageExtensionClassificationIsCaseInsensitive() {
         var agent = AgentService.create("planner-case", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile(agent.name, "SHOT.JPG", "bytes");
         var segments = TelegramOutboundPlanner.plan("[img](<SHOT.JPG>)", agent.name);
@@ -151,7 +151,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     }
 
     @Test
-    public void webpAndGifAreImagesPdfAndHtmlAreDocuments() {
+    void webpAndGifAreImagesPdfAndHtmlAreDocuments() {
         assertTrue(TelegramOutboundPlanner.isImageFilename("foo.webp"));
         assertTrue(TelegramOutboundPlanner.isImageFilename("foo.gif"));
         assertTrue(TelegramOutboundPlanner.isImageFilename("foo.jpeg"));
@@ -165,7 +165,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     // ── Fallback: unresolvable paths ──
 
     @Test
-    public void nonexistentWorkspacePathFallsBackToText() {
+    void nonexistentWorkspacePathFallsBackToText() {
         var agent = AgentService.create("planner-missing", "openrouter", "gpt-4.1");
         // Note: no file written to the workspace.
         var md = "Link: [missing.png](<missing.png>)";
@@ -178,7 +178,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     }
 
     @Test
-    public void pathTraversalAttemptIsRejected() {
+    void pathTraversalAttemptIsRejected() {
         var agent = AgentService.create("planner-traverse", "openrouter", "gpt-4.1");
         // ../secrets would escape the workspace; acquireWorkspacePath throws
         // SecurityException, planner swallows and falls back to text.
@@ -191,7 +191,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     // ── Multi-file ordering + text merging ──
 
     @Test
-    public void multipleFilesProduceOneSegmentEachWithDocumentDuplicatesForImages() {
+    void multipleFilesProduceOneSegmentEachWithDocumentDuplicatesForImages() {
         var agent = AgentService.create("planner-multi", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile(agent.name, "a.png", "a");
         AgentService.writeWorkspaceFile(agent.name, "b.pdf", "b");
@@ -220,7 +220,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     }
 
     @Test
-    public void leadingFileProducesNoEmptyLeadingTextSegment() {
+    void leadingFileProducesNoEmptyLeadingTextSegment() {
         var agent = AgentService.create("planner-leading", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile(agent.name, "first.png", "x");
         var segments = TelegramOutboundPlanner.plan("[first.png](<first.png>) prose", agent.name);
@@ -234,7 +234,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     }
 
     @Test
-    public void adjacentFilesWithNoTextBetweenDontCreateEmptyTextSegment() {
+    void adjacentFilesWithNoTextBetweenDontCreateEmptyTextSegment() {
         var agent = AgentService.create("planner-adjacent", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile(agent.name, "a.png", "a");
         AgentService.writeWorkspaceFile(agent.name, "b.png", "b");
@@ -254,7 +254,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     // ── JCLAW-104: dedupe same-file references ──
 
     @Test
-    public void duplicateFileReferenceEmitsPhotoPlusDocumentAndStripsRedundantLink() {
+    void duplicateFileReferenceEmitsPhotoPlusDocumentAndStripsRedundantLink() {
         // JCLAW-104 originally asked that the planner dedupe duplicate file
         // references so Telegram didn't receive two sendPhoto uploads for the
         // same file. JCLAW-123 revisits this: for images, we WANT two
@@ -305,7 +305,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     }
 
     @Test
-    public void markdownImagePrefixBangIsNotEmittedAsStandaloneText() {
+    void markdownImagePrefixBangIsNotEmittedAsStandaloneText() {
         // JCLAW-104 three-fix patch: post-buildImagePrefix, every screenshot
         // turn's final content leads with "![Screenshot](url)". Pre-patch
         // the planner's LINK_PATTERN matched "[Screenshot](url)" starting
@@ -340,7 +340,7 @@ public class TelegramOutboundPlannerTest extends UnitTest {
     }
 
     @Test
-    public void differentFilesProduceMultipleFileSegments() {
+    void differentFilesProduceMultipleFileSegments() {
         // Dedupe is per-canonical-file, not per-URL-string: different files
         // with different names must still produce independent FileSegments.
         // This protects against over-zealous deduplication if the fix is

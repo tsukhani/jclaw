@@ -31,14 +31,14 @@ import static org.junit.jupiter.api.Assertions.*;
  * control — that exercises the OkHttp path end-to-end rather than mocking
  * the client out.
  */
-public class WhisperModelManagerTest extends UnitTest {
+class WhisperModelManagerTest extends UnitTest {
 
     private MockWebServer server;
     private Path tempRoot;
     private static final WhisperModel MODEL = WhisperModel.BASE_EN;
 
     @BeforeEach
-    public void setUp() throws Exception {
+    void setUp() throws Exception {
         server = new MockWebServer();
         server.start();
         tempRoot = Files.createTempDirectory("whisper-model-test-");
@@ -47,14 +47,14 @@ public class WhisperModelManagerTest extends UnitTest {
     }
 
     @AfterEach
-    public void tearDown() throws Exception {
+    void tearDown() throws Exception {
         WhisperModelManager.resetForTest();
         server.close();
         deleteRecursive(tempRoot);
     }
 
     @Test
-    public void download_succeeds_whenSha256MatchesHfEtag() throws Exception {
+    void download_succeeds_whenSha256MatchesHfEtag() throws Exception {
         var body = "fake-ggml-model-bytes-payload-of-arbitrary-length".getBytes();
         var sha256 = sha256Hex(body);
 
@@ -75,7 +75,7 @@ public class WhisperModelManagerTest extends UnitTest {
     }
 
     @Test
-    public void download_throwsAndDeletesPartial_onSha256Mismatch() throws Exception {
+    void download_throwsAndDeletesPartial_onSha256Mismatch() throws Exception {
         var body = "the-real-bytes-the-server-streams-to-us".getBytes();
         var lyingHash = sha256Hex("a-completely-different-payload-than-what-was-sent".getBytes());
 
@@ -95,7 +95,7 @@ public class WhisperModelManagerTest extends UnitTest {
     }
 
     @Test
-    public void status_dropsStaleAvailableCache_whenFileIsRemoved() throws Exception {
+    void status_dropsStaleAvailableCache_whenFileIsRemoved() throws Exception {
         // Simulate a successful prior download by seeding the cache and the
         // file together — same shape doDownload would leave behind.
         var bytes = "previously-downloaded-model-bytes".getBytes();
@@ -122,7 +122,7 @@ public class WhisperModelManagerTest extends UnitTest {
     }
 
     @Test
-    public void status_promotesToAvailable_whenFileAppearsOutOfBand() throws Exception {
+    void status_promotesToAvailable_whenFileAppearsOutOfBand() throws Exception {
         // Operator copies a model file from another machine into the data
         // directory while the JVM is running. No download was ever issued, so
         // the cache has no entry for this model — but status() should still
@@ -145,7 +145,7 @@ public class WhisperModelManagerTest extends UnitTest {
     }
 
     @Test
-    public void ensureAvailable_coalescesConcurrentCallers_toSingleDownload() throws Exception {
+    void ensureAvailable_coalescesConcurrentCallers_toSingleDownload() throws Exception {
         // Two callers arrive at ensureAvailable concurrently with an
         // in-flight future already seeded; both must receive that same
         // future instance rather than each kicking off a fresh download.

@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * whether the server replies with {@code application/json} (immediate)
  * or {@code text/event-stream} (streaming) per the MCP 2025-06-18 spec.
  */
-public class McpStreamableHttpTransportTest extends UnitTest {
+class McpStreamableHttpTransportTest extends UnitTest {
 
     private MockWebServer server;
     private McpStreamableHttpTransport transport;
@@ -30,7 +30,7 @@ public class McpStreamableHttpTransportTest extends UnitTest {
     private final AtomicReference<Throwable> error = new AtomicReference<>();
 
     @BeforeEach
-    public void setUp() throws Exception {
+    void setUp() throws Exception {
         server = new MockWebServer();
         server.start();
         var endpoint = URI.create(server.url("/mcp").toString());
@@ -38,7 +38,7 @@ public class McpStreamableHttpTransportTest extends UnitTest {
     }
 
     @AfterEach
-    public void tearDown() throws Exception {
+    void tearDown() throws Exception {
         if (transport != null) transport.close();
         server.close();
     }
@@ -46,7 +46,7 @@ public class McpStreamableHttpTransportTest extends UnitTest {
     // ==================== JSON response path ====================
 
     @Test
-    public void jsonResponseDispatchedAsResponseMessage() throws Exception {
+    void jsonResponseDispatchedAsResponseMessage() throws Exception {
         var resultJson = "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}";
         server.enqueue(new MockResponse.Builder()
                 .code(200)
@@ -66,7 +66,7 @@ public class McpStreamableHttpTransportTest extends UnitTest {
     }
 
     @Test
-    public void postCarriesAcceptHeaderAndAuthHeader() throws Exception {
+    void postCarriesAcceptHeaderAndAuthHeader() throws Exception {
         server.enqueue(new MockResponse.Builder()
                 .code(200)
                 .addHeader("Content-Type", "application/json")
@@ -89,7 +89,7 @@ public class McpStreamableHttpTransportTest extends UnitTest {
     // ==================== SSE response path ====================
 
     @Test
-    public void sseResponseEachEventDispatched() throws Exception {
+    void sseResponseEachEventDispatched() throws Exception {
         var sse = """
                 data: {"jsonrpc":"2.0","method":"notifications/progress","params":{"progress":0.5}}
 
@@ -115,7 +115,7 @@ public class McpStreamableHttpTransportTest extends UnitTest {
     }
 
     @Test
-    public void sseMultiLineDataConcatenatedWithNewline() throws Exception {
+    void sseMultiLineDataConcatenatedWithNewline() throws Exception {
         // Spec: when 'data:' appears multiple times in one event, values are joined with \n.
         var sse = """
                 data: {"jsonrpc":"2.0","id":1,
@@ -139,7 +139,7 @@ public class McpStreamableHttpTransportTest extends UnitTest {
     // ==================== notifications (202 Accepted) ====================
 
     @Test
-    public void notification202AcceptedNoOnMessageDispatch() throws Exception {
+    void notification202AcceptedNoOnMessageDispatch() throws Exception {
         server.enqueue(new MockResponse.Builder().code(202).build());
 
         transport.start(received::add, error::set);
@@ -159,7 +159,7 @@ public class McpStreamableHttpTransportTest extends UnitTest {
     // ==================== error paths ====================
 
     @Test
-    public void httpErrorTriggersOnError() throws Exception {
+    void httpErrorTriggersOnError() throws Exception {
         server.enqueue(new MockResponse.Builder().code(500).body("server bad").build());
 
         var latch = new CountDownLatch(1);
@@ -171,7 +171,7 @@ public class McpStreamableHttpTransportTest extends UnitTest {
     }
 
     @Test
-    public void closeAfterStartIsClean() {
+    void closeAfterStartIsClean() {
         transport.start(received::add, error::set);
         transport.close();
         // Sending after close should fail synchronously.
@@ -183,7 +183,7 @@ public class McpStreamableHttpTransportTest extends UnitTest {
     // ==================== body sanity ====================
 
     @Test
-    public void postBodyIsValidJsonRpc() throws Exception {
+    void postBodyIsValidJsonRpc() throws Exception {
         server.enqueue(new MockResponse.Builder()
                 .code(200)
                 .addHeader("Content-Type", "application/json")

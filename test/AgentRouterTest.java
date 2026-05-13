@@ -4,7 +4,7 @@ import agents.AgentRouter;
 import models.Agent;
 import models.AgentBinding;
 
-public class AgentRouterTest extends UnitTest {
+class AgentRouterTest extends UnitTest {
 
     @BeforeEach
     void setup() {
@@ -12,7 +12,7 @@ public class AgentRouterTest extends UnitTest {
     }
 
     @Test
-    public void tier1ExactPeerMatch() {
+    void tier1ExactPeerMatch() {
         var agent = createAgent("support");
         createBinding(agent, "telegram", "12345");
 
@@ -23,7 +23,7 @@ public class AgentRouterTest extends UnitTest {
     }
 
     @Test
-    public void tier2ChannelWideMatch() {
+    void tier2ChannelWideMatch() {
         var agent = createAgent("support");
         createBinding(agent, "slack", null);
 
@@ -34,7 +34,7 @@ public class AgentRouterTest extends UnitTest {
     }
 
     @Test
-    public void tier3MainAgentFallback() {
+    void tier3MainAgentFallback() {
         createAgent("main");
 
         var result = AgentRouter.resolve("whatsapp", "5551234");
@@ -44,7 +44,7 @@ public class AgentRouterTest extends UnitTest {
     }
 
     @Test
-    public void peerMatchTakesPriorityOverChannelMatch() {
+    void peerMatchTakesPriorityOverChannelMatch() {
         var support = createAgent("support");
         var other = createAgent("other");
         createBinding(support, "telegram", "VIP_USER");
@@ -57,7 +57,7 @@ public class AgentRouterTest extends UnitTest {
     }
 
     @Test
-    public void channelMatchTakesPriorityOverMainFallback() {
+    void channelMatchTakesPriorityOverMainFallback() {
         var channelAgent = createAgent("channel-agent");
         createAgent("main");
         createBinding(channelAgent, "slack", null);
@@ -69,14 +69,14 @@ public class AgentRouterTest extends UnitTest {
     }
 
     @Test
-    public void noRouteReturnsNull() {
+    void noRouteReturnsNull() {
         // No agents, no bindings
         var result = AgentRouter.resolve("telegram", "12345");
         assertNull(result);
     }
 
     @Test
-    public void disabledAgentSkipped() {
+    void disabledAgentSkipped() {
         var agent = createAgent("disabled");
         agent.enabled = false;
         agent.save();
@@ -88,7 +88,7 @@ public class AgentRouterTest extends UnitTest {
     }
 
     @Test
-    public void noMainAgentConfigured() {
+    void noMainAgentConfigured() {
         // Agents exist but none is named "main", and no binding matches
         createAgent("non-main");
 
@@ -97,7 +97,7 @@ public class AgentRouterTest extends UnitTest {
     }
 
     @Test
-    public void disabledAgentInChannelTierFallsThroughToMain() {
+    void disabledAgentInChannelTierFallsThroughToMain() {
         // Channel-tier binding points at a disabled agent; router should
         // skip it and fall back to main. This guard is at AgentRouter:35.
         var channelAgent = createAgent("channel-agent");
@@ -113,7 +113,7 @@ public class AgentRouterTest extends UnitTest {
     }
 
     @Test
-    public void disabledMainAgentReturnsNull() {
+    void disabledMainAgentReturnsNull() {
         // Main agent exists but is disabled; no other route available.
         // Guards AgentRouter:41 — without this check a disabled main would
         // still match and deliver messages to a shut-off agent.
@@ -126,7 +126,7 @@ public class AgentRouterTest extends UnitTest {
     }
 
     @Test
-    public void nullPeerIdSkipsPeerTierAndUsesChannelBinding() {
+    void nullPeerIdSkipsPeerTierAndUsesChannelBinding() {
         // Channel-wide binding (peerId IS NULL) must match when caller
         // passes null peerId — e.g. Slack app_mention without a user hint.
         var channelAgent = createAgent("channel-agent");

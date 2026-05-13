@@ -4,7 +4,7 @@ import models.Agent;
 import services.AgentService;
 import tools.DateTimeTool;
 
-public class DateTimeToolTest extends UnitTest {
+class DateTimeToolTest extends UnitTest {
 
     private DateTimeTool tool;
     private Agent agent;
@@ -24,18 +24,18 @@ public class DateTimeToolTest extends UnitTest {
     // ==================== Tool Metadata ====================
 
     @Test
-    public void nameIsDatetime() {
+    void nameIsDatetime() {
         assertEquals("datetime", tool.name());
     }
 
     @Test
-    public void descriptionIsNotBlank() {
+    void descriptionIsNotBlank() {
         assertNotNull(tool.description());
         assertFalse(tool.description().isBlank());
     }
 
     @Test
-    public void parametersContainAction() {
+    void parametersContainAction() {
         var params = tool.parameters();
         assertNotNull(params);
         assertTrue(params.containsKey("properties"));
@@ -44,7 +44,7 @@ public class DateTimeToolTest extends UnitTest {
     // ==================== "now" Action ====================
 
     @Test
-    public void nowReturnsCurrentDateTimeInfo() {
+    void nowReturnsCurrentDateTimeInfo() {
         var result = tool.execute("""
                 {"action": "now"}
                 """, agent);
@@ -54,7 +54,7 @@ public class DateTimeToolTest extends UnitTest {
     }
 
     @Test
-    public void nowWithExplicitTimezone() {
+    void nowWithExplicitTimezone() {
         var result = tool.execute("""
                 {"action": "now", "timezone": "America/New_York"}
                 """, agent);
@@ -62,7 +62,7 @@ public class DateTimeToolTest extends UnitTest {
     }
 
     @Test
-    public void nowWithInvalidTimezoneFallsBackToDefault() {
+    void nowWithInvalidTimezoneFallsBackToDefault() {
         var result = tool.execute("""
                 {"action": "now", "timezone": "Invalid/Zone"}
                 """, agent);
@@ -72,7 +72,7 @@ public class DateTimeToolTest extends UnitTest {
     }
 
     @Test
-    public void nowWithBlankTimezoneFallsBackToDefault() {
+    void nowWithBlankTimezoneFallsBackToDefault() {
         var result = tool.execute("""
                 {"action": "now", "timezone": "  "}
                 """, agent);
@@ -82,7 +82,7 @@ public class DateTimeToolTest extends UnitTest {
     // ==================== "convert" Action ====================
 
     @Test
-    public void convertBetweenTimezones() {
+    void convertBetweenTimezones() {
         var result = tool.execute("""
                 {"action": "convert", "timestamp": "2026-04-13T09:00:00",
                  "fromTimezone": "America/New_York", "toTimezone": "Asia/Tokyo"}
@@ -93,7 +93,7 @@ public class DateTimeToolTest extends UnitTest {
     }
 
     @Test
-    public void convertMissingTimestampReturnsError() {
+    void convertMissingTimestampReturnsError() {
         var result = tool.execute("""
                 {"action": "convert", "fromTimezone": "UTC", "toTimezone": "UTC"}
                 """, agent);
@@ -102,7 +102,7 @@ public class DateTimeToolTest extends UnitTest {
     }
 
     @Test
-    public void convertBadTimestampFormatReturnsError() {
+    void convertBadTimestampFormatReturnsError() {
         var result = tool.execute("""
                 {"action": "convert", "timestamp": "not-a-date",
                  "fromTimezone": "UTC", "toTimezone": "UTC"}
@@ -114,7 +114,7 @@ public class DateTimeToolTest extends UnitTest {
     // ==================== "calculate" Action ====================
 
     @Test
-    public void calculateAddDays() {
+    void calculateAddDays() {
         var result = tool.execute("""
                 {"action": "calculate", "timestamp": "2026-01-01T12:00:00",
                  "amount": 30, "unit": "days", "timezone": "UTC"}
@@ -124,7 +124,7 @@ public class DateTimeToolTest extends UnitTest {
     }
 
     @Test
-    public void calculateSubtractHours() {
+    void calculateSubtractHours() {
         var result = tool.execute("""
                 {"action": "calculate", "timestamp": "2026-04-13T18:00:00",
                  "amount": -6, "unit": "hours", "timezone": "UTC"}
@@ -134,7 +134,7 @@ public class DateTimeToolTest extends UnitTest {
     }
 
     @Test
-    public void calculateMissingAmountReturnsError() {
+    void calculateMissingAmountReturnsError() {
         var result = tool.execute("""
                 {"action": "calculate", "unit": "days"}
                 """, agent);
@@ -142,7 +142,7 @@ public class DateTimeToolTest extends UnitTest {
     }
 
     @Test
-    public void calculateDifferenceBetweenTimestamps() {
+    void calculateDifferenceBetweenTimestamps() {
         var result = tool.execute("""
                 {"action": "calculate",
                  "timestamp": "2026-04-01T00:00:00",
@@ -156,7 +156,7 @@ public class DateTimeToolTest extends UnitTest {
     }
 
     @Test
-    public void calculateWithoutTimestampUsesNow() {
+    void calculateWithoutTimestampUsesNow() {
         var result = tool.execute("""
                 {"action": "calculate", "amount": 1, "unit": "hours", "timezone": "UTC"}
                 """, agent);
@@ -166,7 +166,7 @@ public class DateTimeToolTest extends UnitTest {
     // ==================== Unknown Action ====================
 
     @Test
-    public void unknownActionReturnsError() {
+    void unknownActionReturnsError() {
         var result = tool.execute("""
                 {"action": "bogus"}
                 """, agent);

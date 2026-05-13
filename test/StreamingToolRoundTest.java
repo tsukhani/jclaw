@@ -11,10 +11,10 @@ import java.util.List;
 /**
  * Tests that streaming tool call recursion is capped at MAX_TOOL_ROUNDS.
  */
-public class StreamingToolRoundTest extends UnitTest {
+class StreamingToolRoundTest extends UnitTest {
 
     @Test
-    public void estimateTokensCalculatesApproximately() throws Exception {
+    void estimateTokensCalculatesApproximately() throws Exception {
         // Use reflection to test the private estimateTokens method
         var method = AgentRunner.class.getDeclaredMethod("estimateTokens", List.class);
         method.setAccessible(true);
@@ -29,7 +29,7 @@ public class StreamingToolRoundTest extends UnitTest {
     }
 
     @Test
-    public void estimateTokensHandlesEmptyMessages() throws Exception {
+    void estimateTokensHandlesEmptyMessages() throws Exception {
         var method = AgentRunner.class.getDeclaredMethod("estimateTokens", List.class);
         method.setAccessible(true);
 
@@ -39,7 +39,7 @@ public class StreamingToolRoundTest extends UnitTest {
     }
 
     @Test
-    public void estimateTokensHandlesNullContent() throws Exception {
+    void estimateTokensHandlesNullContent() throws Exception {
         var method = AgentRunner.class.getDeclaredMethod("estimateTokens", List.class);
         method.setAccessible(true);
 
@@ -57,7 +57,7 @@ public class StreamingToolRoundTest extends UnitTest {
     }
 
     @Test
-    public void trimToContextWindowPreservesSystemPrompt() throws Exception {
+    void trimToContextWindowPreservesSystemPrompt() throws Exception {
         // JCLAW-108: trimToContextWindow gained a Conversation parameter to
         // honor conversation-scoped model overrides. Pass null here — tests
         // that care about override behavior use the AgentRunnerUsageTest
@@ -90,7 +90,7 @@ public class StreamingToolRoundTest extends UnitTest {
     }
 
     @Test
-    public void trimToContextWindowNoOpWhenFits() throws Exception {
+    void trimToContextWindowNoOpWhenFits() throws Exception {
         var method = AgentRunner.class.getDeclaredMethod("trimToContextWindow",
                 List.class, models.Agent.class, models.Conversation.class, LlmProvider.class);
         method.setAccessible(true);
@@ -115,7 +115,7 @@ public class StreamingToolRoundTest extends UnitTest {
     }
 
     @Test
-    public void maxToolRoundsConstantExists() throws Exception {
+    void maxToolRoundsConstantExists() throws Exception {
         // Verify MAX_TOOL_ROUNDS is accessible and reasonable
         var field = AgentRunner.class.getDeclaredField("DEFAULT_MAX_TOOL_ROUNDS");
         field.setAccessible(true);
@@ -140,7 +140,7 @@ public class StreamingToolRoundTest extends UnitTest {
     }
 
     @Test
-    public void cancelledReturnPreservesNonBlankPriorContent() throws Exception {
+    void cancelledReturnPreservesNonBlankPriorContent() throws Exception {
         // When the round-1 model emitted a preamble before the tool calls
         // ("Looking that up for you…"), the user already saw it streamed.
         // A cancellation must not replace it with a "(cancelled)" marker.
@@ -157,7 +157,7 @@ public class StreamingToolRoundTest extends UnitTest {
     }
 
     @Test
-    public void cancelledReturnEmitsLabeledFallbackForEmptyPriorContent() throws Exception {
+    void cancelledReturnEmitsLabeledFallbackForEmptyPriorContent() throws Exception {
         // The bug fix: when priorContent="" (round 1 emitted only tool_calls),
         // returning "" was the silent-data-loss path. Emit a labeled fallback
         // instead so the persisted assistant row is non-empty and the user
@@ -177,7 +177,7 @@ public class StreamingToolRoundTest extends UnitTest {
     }
 
     @Test
-    public void cancelledReturnTreatsNullAndBlankAsEmpty() throws Exception {
+    void cancelledReturnTreatsNullAndBlankAsEmpty() throws Exception {
         var emitted1 = new java.util.concurrent.atomic.AtomicReference<String>();
         var emitted2 = new java.util.concurrent.atomic.AtomicReference<String>();
         var agent = new models.Agent();
@@ -195,7 +195,7 @@ public class StreamingToolRoundTest extends UnitTest {
     }
 
     @Test
-    public void cancelledReturnPrependsCollectedImagesOnFallback() throws Exception {
+    void cancelledReturnPrependsCollectedImagesOnFallback() throws Exception {
         // Tool calls that produced images (screenshots, QR codes) before
         // cancellation must not have those images dropped — they're already
         // committed to the conversation history and the user expects to see

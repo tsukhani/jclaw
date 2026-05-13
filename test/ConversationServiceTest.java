@@ -19,7 +19,7 @@ import java.util.List;
  * {@code compactionSince} watermark interaction), bulk delete cascade, and
  * the conversation-scoped model-override setters.
  */
-public class ConversationServiceTest extends UnitTest {
+class ConversationServiceTest extends UnitTest {
 
     @BeforeEach
     void setup() {
@@ -36,7 +36,7 @@ public class ConversationServiceTest extends UnitTest {
     // =====================
 
     @Test
-    public void findOrCreateReturnsExistingForRepeatTuple() {
+    void findOrCreateReturnsExistingForRepeatTuple() {
         var agent = newAgent("conv-find-or-create-1");
         var first = ConversationService.findOrCreate(agent, "web", "user-42");
         var second = ConversationService.findOrCreate(agent, "web", "user-42");
@@ -45,7 +45,7 @@ public class ConversationServiceTest extends UnitTest {
     }
 
     @Test
-    public void findOrCreateCreatesNewRowWhenTupleAbsent() {
+    void findOrCreateCreatesNewRowWhenTupleAbsent() {
         var agent = newAgent("conv-find-or-create-2");
         var conv = ConversationService.findOrCreate(agent, "web", "first-user");
         assertNotNull(conv.id);
@@ -56,7 +56,7 @@ public class ConversationServiceTest extends UnitTest {
     }
 
     @Test
-    public void createPersistsChannelAndPeer() {
+    void createPersistsChannelAndPeer() {
         var agent = newAgent("conv-create-direct");
         var conv = ConversationService.create(agent, "telegram", "tg-42");
         assertNotNull(conv.id);
@@ -66,7 +66,7 @@ public class ConversationServiceTest extends UnitTest {
     }
 
     @Test
-    public void findByIdReturnsConversationOrNull() {
+    void findByIdReturnsConversationOrNull() {
         var agent = newAgent("conv-find-by-id");
         var conv = ConversationService.create(agent, "web", "p-1");
         assertNotNull(ConversationService.findById(conv.id));
@@ -78,7 +78,7 @@ public class ConversationServiceTest extends UnitTest {
     // =====================
 
     @Test
-    public void appendUserMessageIncrementsCountAndSeedsPreview() {
+    void appendUserMessageIncrementsCountAndSeedsPreview() {
         var agent = newAgent("conv-append-user");
         var conv = ConversationService.create(agent, "web", "u");
         var msg = ConversationService.appendUserMessage(conv, "Hello, world.");
@@ -91,7 +91,7 @@ public class ConversationServiceTest extends UnitTest {
     }
 
     @Test
-    public void appendUserMessagePreviewTruncatesAt100Characters() {
+    void appendUserMessagePreviewTruncatesAt100Characters() {
         var agent = newAgent("conv-append-truncate");
         var conv = ConversationService.create(agent, "web", "u");
         var longText = "x".repeat(250);
@@ -101,7 +101,7 @@ public class ConversationServiceTest extends UnitTest {
     }
 
     @Test
-    public void appendUserMessageSecondTimeDoesNotOverwritePreview() {
+    void appendUserMessageSecondTimeDoesNotOverwritePreview() {
         var agent = newAgent("conv-append-no-overwrite");
         var conv = ConversationService.create(agent, "web", "u");
         ConversationService.appendUserMessage(conv, "first");
@@ -111,7 +111,7 @@ public class ConversationServiceTest extends UnitTest {
     }
 
     @Test
-    public void appendAssistantMessageStoresRoleAndContent() {
+    void appendAssistantMessageStoresRoleAndContent() {
         var agent = newAgent("conv-append-assistant");
         var conv = ConversationService.create(agent, "web", "u");
         var msg = ConversationService.appendAssistantMessage(conv, "Hi back!", null);
@@ -122,7 +122,7 @@ public class ConversationServiceTest extends UnitTest {
     }
 
     @Test
-    public void appendAssistantMessageThreadsUsageAndReasoning() {
+    void appendAssistantMessageThreadsUsageAndReasoning() {
         var agent = newAgent("conv-append-assistant-extras");
         var conv = ConversationService.create(agent, "web", "u");
         var msg = ConversationService.appendAssistantMessage(
@@ -132,7 +132,7 @@ public class ConversationServiceTest extends UnitTest {
     }
 
     @Test
-    public void appendToolResultStoresToolCallIdInToolResults() {
+    void appendToolResultStoresToolCallIdInToolResults() {
         var agent = newAgent("conv-append-tool");
         var conv = ConversationService.create(agent, "web", "u");
         var msg = ConversationService.appendToolResult(conv, "call-7", "result body");
@@ -147,7 +147,7 @@ public class ConversationServiceTest extends UnitTest {
     // =====================
 
     @Test
-    public void loadRecentMessagesReturnsAscendingOrder() throws Exception {
+    void loadRecentMessagesReturnsAscendingOrder() throws Exception {
         var agent = newAgent("conv-load-asc");
         var conv = ConversationService.create(agent, "web", "u");
         ConversationService.appendUserMessage(conv, "first");
@@ -164,7 +164,7 @@ public class ConversationServiceTest extends UnitTest {
     }
 
     @Test
-    public void loadRecentMessagesHonorsContextSinceWatermark() throws Exception {
+    void loadRecentMessagesHonorsContextSinceWatermark() throws Exception {
         var agent = newAgent("conv-load-context-since");
         var conv = ConversationService.create(agent, "web", "u");
         ConversationService.appendUserMessage(conv, "pre-reset");
@@ -183,7 +183,7 @@ public class ConversationServiceTest extends UnitTest {
     }
 
     @Test
-    public void loadRecentMessagesUsesMaxOfContextSinceAndCompactionSince() throws Exception {
+    void loadRecentMessagesUsesMaxOfContextSinceAndCompactionSince() throws Exception {
         // The tighter watermark wins: when compactionSince is later than
         // contextSince, only post-compaction messages are returned.
         var agent = newAgent("conv-load-max-watermark");
@@ -209,7 +209,7 @@ public class ConversationServiceTest extends UnitTest {
     }
 
     @Test
-    public void loadRecentMessagesReturnsEmptyWhenNoMessages() {
+    void loadRecentMessagesReturnsEmptyWhenNoMessages() {
         var agent = newAgent("conv-load-empty");
         var conv = ConversationService.create(agent, "web", "u");
         var loaded = ConversationService.loadRecentMessages(conv);
@@ -221,7 +221,7 @@ public class ConversationServiceTest extends UnitTest {
     // =====================
 
     @Test
-    public void setModelOverrideWritesBothColumnsAtomically() {
+    void setModelOverrideWritesBothColumnsAtomically() {
         var agent = newAgent("conv-override-set");
         var conv = ConversationService.create(agent, "web", "u");
 
@@ -233,7 +233,7 @@ public class ConversationServiceTest extends UnitTest {
     }
 
     @Test
-    public void clearModelOverrideNullsBothColumns() {
+    void clearModelOverrideNullsBothColumns() {
         var agent = newAgent("conv-override-clear");
         var conv = ConversationService.create(agent, "web", "u");
         ConversationService.setModelOverride(conv, "ollama", "llama3.1");
@@ -250,17 +250,17 @@ public class ConversationServiceTest extends UnitTest {
     // =====================
 
     @Test
-    public void deleteByIdsReturnsZeroForEmptyList() {
+    void deleteByIdsReturnsZeroForEmptyList() {
         assertEquals(0, ConversationService.deleteByIds(List.of()));
     }
 
     @Test
-    public void deleteByIdsReturnsZeroForNullList() {
+    void deleteByIdsReturnsZeroForNullList() {
         assertEquals(0, ConversationService.deleteByIds(null));
     }
 
     @Test
-    public void deleteByIdsRemovesMessagesAndCompactionsAndConversations() {
+    void deleteByIdsRemovesMessagesAndCompactionsAndConversations() {
         var agent = newAgent("conv-delete-cascade");
         var conv = ConversationService.create(agent, "web", "p");
         ConversationService.appendUserMessage(conv, "msg-1");
@@ -292,7 +292,7 @@ public class ConversationServiceTest extends UnitTest {
     }
 
     @Test
-    public void deleteByIdsSweepsAttachmentsBeforeMessages() {
+    void deleteByIdsSweepsAttachmentsBeforeMessages() {
         // Regression: FK2HSKR8CN6X9CEMKJWMA86XIIE from chat_message_attachment.message_id
         // to message.id was violating when a bulk DELETE FROM Message ran while
         // any attachment still pointed at one of the messages being deleted.
@@ -327,7 +327,7 @@ public class ConversationServiceTest extends UnitTest {
     }
 
     @Test
-    public void deleteByIdsHandlesMultipleConversations() {
+    void deleteByIdsHandlesMultipleConversations() {
         var agent = newAgent("conv-delete-multi");
         var c1 = ConversationService.create(agent, "web", "p1");
         var c2 = ConversationService.create(agent, "web", "p2");

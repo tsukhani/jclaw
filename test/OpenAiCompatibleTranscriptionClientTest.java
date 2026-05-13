@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * against a mocked HTTP transport (mockwebserver3) to confirm the
  * Bearer header, multipart shape, and JSON parse all hold.
  */
-public class OpenAiCompatibleTranscriptionClientTest extends UnitTest {
+class OpenAiCompatibleTranscriptionClientTest extends UnitTest {
 
     private MockWebServer server;
     private OkHttpClient testClient;
@@ -34,7 +34,7 @@ public class OpenAiCompatibleTranscriptionClientTest extends UnitTest {
     private Path tempAudio;
 
     @BeforeEach
-    public void setUp() throws Exception {
+    void setUp() throws Exception {
         server = new MockWebServer();
         server.start();
         // Plain default OkHttpClient — sidesteps the shared LLM dispatcher
@@ -59,7 +59,7 @@ public class OpenAiCompatibleTranscriptionClientTest extends UnitTest {
     }
 
     @AfterEach
-    public void tearDown() throws Exception {
+    void tearDown() throws Exception {
         server.close();
         Files.deleteIfExists(tempAudio);
         ConfigService.delete("provider.openai.baseUrl");
@@ -70,7 +70,7 @@ public class OpenAiCompatibleTranscriptionClientTest extends UnitTest {
     }
 
     @Test
-    public void openAi_happyPath_returnsTranscriptText() throws Exception {
+    void openAi_happyPath_returnsTranscriptText() throws Exception {
         ConfigService.set("provider.openai.baseUrl", server.url("/v1").toString());
         ConfigService.set("provider.openai.apiKey", "sk-openai-test");
         server.enqueue(jsonResponse(200, "{\"text\":\"hello world\"}"));
@@ -94,7 +94,7 @@ public class OpenAiCompatibleTranscriptionClientTest extends UnitTest {
     }
 
     @Test
-    public void openAi_httpError_throwsWithStatusInMessage() {
+    void openAi_httpError_throwsWithStatusInMessage() {
         ConfigService.set("provider.openai.baseUrl", server.url("/v1").toString());
         ConfigService.set("provider.openai.apiKey", "sk-openai-test");
         server.enqueue(jsonResponse(500, "{\"error\":{\"message\":\"upstream lit on fire\"}}"));
@@ -109,7 +109,7 @@ public class OpenAiCompatibleTranscriptionClientTest extends UnitTest {
     }
 
     @Test
-    public void openRouter_happyPath_usesRouterConfigNamespace() throws Exception {
+    void openRouter_happyPath_usesRouterConfigNamespace() throws Exception {
         ConfigService.set("provider.openrouter.baseUrl", server.url("/v1").toString());
         ConfigService.set("provider.openrouter.apiKey", "sk-or-test");
         ConfigService.set("transcription.model", "whisper-large-v3");
@@ -126,7 +126,7 @@ public class OpenAiCompatibleTranscriptionClientTest extends UnitTest {
     }
 
     @Test
-    public void openRouter_missingApiKey_throwsBeforeNetworkCall() {
+    void openRouter_missingApiKey_throwsBeforeNetworkCall() {
         ConfigService.set("provider.openrouter.baseUrl", server.url("/v1").toString());
         ConfigService.delete("provider.openrouter.apiKey");
 

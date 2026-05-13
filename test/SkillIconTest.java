@@ -13,10 +13,10 @@ import java.nio.file.Paths;
  * compatibility on SkillInfo constructors, and default-icon substitution
  * in the formatted skill entry the system prompt injects.
  */
-public class SkillIconTest extends UnitTest {
+class SkillIconTest extends UnitTest {
 
     @Test
-    public void parsesIconFromFrontmatter() {
+    void parsesIconFromFrontmatter() {
         var content = """
                 ---
                 name: sky-blue
@@ -31,7 +31,7 @@ public class SkillIconTest extends UnitTest {
     }
 
     @Test
-    public void missingIconLeavesFieldEmpty() {
+    void missingIconLeavesFieldEmpty() {
         var content = """
                 ---
                 name: no-icon-skill
@@ -45,7 +45,7 @@ public class SkillIconTest extends UnitTest {
     }
 
     @Test
-    public void defaultIconAppearsWhenSkillHasNone() {
+    void defaultIconAppearsWhenSkillHasNone() {
         var info = new SkillLoader.SkillInfo("plain", "no icon", Paths.get("plain/SKILL.md"));
         var xml = SkillLoader.formatSkillsXml(java.util.List.of(info));
         assertTrue(xml.contains("<icon>" + SkillLoader.DEFAULT_SKILL_ICON + "</icon>"),
@@ -53,7 +53,7 @@ public class SkillIconTest extends UnitTest {
     }
 
     @Test
-    public void explicitIconOverridesDefault() {
+    void explicitIconOverridesDefault() {
         var info = new SkillLoader.SkillInfo(
                 "sky-blue", "Explain why the sky is blue", Paths.get("sky-blue/SKILL.md"),
                 java.util.List.of(), false, "0.0.0",
@@ -64,7 +64,7 @@ public class SkillIconTest extends UnitTest {
     }
 
     @Test
-    public void sixArgConstructorStillWorks_iconDefaultsEmpty() {
+    void sixArgConstructorStillWorks_iconDefaultsEmpty() {
         // Backward compat: call sites that haven't been updated should compile
         // and produce a SkillInfo with icon() == "".
         var info = new SkillLoader.SkillInfo("old", "legacy caller", Paths.get("old/SKILL.md"),
@@ -73,7 +73,7 @@ public class SkillIconTest extends UnitTest {
     }
 
     @Test
-    public void eightArgConstructorStillWorks_iconDefaultsEmpty() {
+    void eightArgConstructorStillWorks_iconDefaultsEmpty() {
         // Added for JCLAW-71 — lets pre-icon call sites compile unchanged.
         var info = new SkillLoader.SkillInfo("old2", "legacy 8-arg", Paths.get("old2/SKILL.md"),
                 java.util.List.of(), false, "0.0.0",
@@ -83,13 +83,13 @@ public class SkillIconTest extends UnitTest {
     }
 
     @Test
-    public void defaultSkillIconIsTarget() {
+    void defaultSkillIconIsTarget() {
         // Locking in the specific emoji so a rename is an explicit code change.
         assertEquals("🎯", SkillLoader.DEFAULT_SKILL_ICON);
     }
 
     @Test
-    public void iconSurvivesWorkspaceRelativization() throws Exception {
+    void iconSurvivesWorkspaceRelativization() throws Exception {
         // Regression for JCLAW-71's first field-drop bug: the loader's
         // post-parse relativization used to rebuild SkillInfo via a 6-arg
         // ctor, silently losing commands / author / icon. This test hits the

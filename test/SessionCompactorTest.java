@@ -30,7 +30,7 @@ import java.util.List;
  * row and the compactionSince watermark bump are verified by reading
  * back through the JPA layer — same path production code takes.
  */
-public class SessionCompactorTest extends UnitTest {
+class SessionCompactorTest extends UnitTest {
 
     private Agent agent;
 
@@ -48,14 +48,14 @@ public class SessionCompactorTest extends UnitTest {
     // ─── findSafeBoundary ────────────────────────────────────────────────
 
     @Test
-    public void findSafeBoundary_returnsNegativeOne_whenBelowMinSize() {
+    void findSafeBoundary_returnsNegativeOne_whenBelowMinSize() {
         // total=8 < minCompactable (10 default): no boundary possible
         var msgs = buildFakeHistory(8, i -> i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT);
         assertEquals(-1, SessionCompactor.findSafeBoundary(msgs));
     }
 
     @Test
-    public void findSafeBoundary_picksLatestUserInRange() {
+    void findSafeBoundary_picksLatestUserInRange() {
         // total=25, keepMin=10 → maxBoundary=15, walk 15..10 looking for user.
         // Place user roles at 0,2,4,...,24 — so msg[14] is user (14 is even).
         var msgs = buildFakeHistory(25, i -> i % 2 == 0 ? MessageRole.USER : MessageRole.ASSISTANT);
@@ -64,7 +64,7 @@ public class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    public void findSafeBoundary_walksBackward_whenTrailingTurnsLackUser() {
+    void findSafeBoundary_walksBackward_whenTrailingTurnsLackUser() {
         // total=25; users at 0,5,10,15. keepMin=10 → maxBoundary=15.
         // msg[15] is user → boundary=15. (Verifies we don't miss the top of the range.)
         var msgs = buildFakeHistory(25, i -> i % 5 == 0 ? MessageRole.USER : MessageRole.ASSISTANT);
@@ -72,14 +72,14 @@ public class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    public void findSafeBoundary_returnsNegativeOne_whenNoUserInEligibleRange() {
+    void findSafeBoundary_returnsNegativeOne_whenNoUserInEligibleRange() {
         // total=25, only users at 0..5 (all below minCompactable=10). keepMin=10.
         var msgs = buildFakeHistory(25, i -> i < 6 ? MessageRole.USER : MessageRole.ASSISTANT);
         assertEquals(-1, SessionCompactor.findSafeBoundary(msgs));
     }
 
     @Test
-    public void findSafeBoundary_honorsConfigOverrides() {
+    void findSafeBoundary_honorsConfigOverrides() {
         ConfigService.set("chat.compactionKeepMessages", "5");
         ConfigService.set("chat.compactionMinTurns", "3");
         // total=12, keepMin=5 → maxBoundary=7. minCompactable=3.
@@ -91,32 +91,32 @@ public class SessionCompactorTest extends UnitTest {
     // ─── shouldCompact ──────────────────────────────────────────────────
 
     @Test
-    public void shouldCompact_false_whenModelInfoNull() {
+    void shouldCompact_false_whenModelInfoNull() {
         assertFalse(SessionCompactor.shouldCompact(999_999, null));
     }
 
     @Test
-    public void shouldCompact_false_whenContextWindowZero() {
+    void shouldCompact_false_whenContextWindowZero() {
         var mi = new ModelInfo("m", "M", 0, 0, false);
         assertFalse(SessionCompactor.shouldCompact(10_000, mi));
     }
 
     @Test
-    public void shouldCompact_false_whenUnderBudget() {
+    void shouldCompact_false_whenUnderBudget() {
         // contextWindow=200k, reserve=15k (default) → budget=185k. 100k is safely under.
         var mi = new ModelInfo("m", "M", 200_000, 8192, false);
         assertFalse(SessionCompactor.shouldCompact(100_000, mi));
     }
 
     @Test
-    public void shouldCompact_true_whenOverBudget() {
+    void shouldCompact_true_whenOverBudget() {
         // budget=200k-15k=185k. 190k triggers.
         var mi = new ModelInfo("m", "M", 200_000, 8192, false);
         assertTrue(SessionCompactor.shouldCompact(190_000, mi));
     }
 
     @Test
-    public void shouldCompact_reserveFloorClamps() {
+    void shouldCompact_reserveFloorClamps() {
         // If reserveTokens < floor, floor wins. Set reserve=1000, floor stays at default 9000.
         ConfigService.set("chat.compactionReserveTokens", "1000");
         // budget = 20000 - max(1000, 9000) = 11000. 12000 triggers.
@@ -128,7 +128,7 @@ public class SessionCompactorTest extends UnitTest {
     // ─── compact() end-to-end ──────────────────────────────────────────
 
     @Test
-    public void compact_persistsRowAndBumpsWatermark_onSuccess() throws Exception {
+    void compact_persistsRowAndBumpsWatermark_onSuccess() throws Exception {
         var conv = ConversationService.create(agent, "web", "user1");
         // Seed 25 messages — enough to pass the default 10-turn minimum.
         seedMessages(conv, 25);
@@ -156,7 +156,7 @@ public class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    public void compact_skipsWhenSummarizerReturnsEmpty() throws Exception {
+    void compact_skipsWhenSummarizerReturnsEmpty() throws Exception {
         var conv = ConversationService.create(agent, "web", "user1");
         seedMessages(conv, 25);
         commitAndReopen();
@@ -171,7 +171,7 @@ public class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    public void compact_skipsWhenSummarizerThrows() throws Exception {
+    void compact_skipsWhenSummarizerThrows() throws Exception {
         var conv = ConversationService.create(agent, "web", "user1");
         seedMessages(conv, 25);
         commitAndReopen();
@@ -187,7 +187,7 @@ public class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    public void compact_skipsWhenTooFewMessages() throws Exception {
+    void compact_skipsWhenTooFewMessages() throws Exception {
         var conv = ConversationService.create(agent, "web", "user1");
         seedMessages(conv, 5); // below minCompactable
         commitAndReopen();
@@ -199,7 +199,7 @@ public class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    public void compactForced_succeedsWhereAutoSkipsDueToLowTurnCount() throws Exception {
+    void compactForced_succeedsWhereAutoSkipsDueToLowTurnCount() throws Exception {
         // 8 messages — well below auto-trigger's 10-turn minimum.
         var conv = ConversationService.create(agent, "web", "user1");
         seedMessages(conv, 8);
@@ -219,7 +219,7 @@ public class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    public void compact_additionalInstructions_threadedIntoSystemPrompt() throws Exception {
+    void compact_additionalInstructions_threadedIntoSystemPrompt() throws Exception {
         var conv = ConversationService.create(agent, "web", "user1");
         seedMessages(conv, 25);
         commitAndReopen();
@@ -240,7 +240,7 @@ public class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    public void compact_keepsOriginalMessagesIntact_afterSuccess() throws Exception {
+    void compact_keepsOriginalMessagesIntact_afterSuccess() throws Exception {
         // AC: original turns remain accessible in conversation history.
         var conv = ConversationService.create(agent, "web", "user1");
         seedMessages(conv, 25);
@@ -258,7 +258,7 @@ public class SessionCompactorTest extends UnitTest {
     // ─── appendSummaryToPrompt ───────────────────────────────────────────
 
     @Test
-    public void appendSummaryToPrompt_returnsUnchanged_whenNoCompactionRow() throws Exception {
+    void appendSummaryToPrompt_returnsUnchanged_whenNoCompactionRow() throws Exception {
         var conv = ConversationService.create(agent, "web", "user1");
         commitAndReopen();
         var reloaded = Conversation.<Conversation>findById(conv.id);
@@ -268,7 +268,7 @@ public class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    public void appendSummaryToPrompt_appendsHeaderAndSummary_whenRowPresent() throws Exception {
+    void appendSummaryToPrompt_appendsHeaderAndSummary_whenRowPresent() throws Exception {
         var conv = ConversationService.create(agent, "web", "user1");
         var sc = new SessionCompaction();
         sc.conversation = conv;
@@ -288,7 +288,7 @@ public class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    public void appendSummaryToPrompt_picksMostRecentWhenMultiple() throws Exception {
+    void appendSummaryToPrompt_picksMostRecentWhenMultiple() throws Exception {
         var conv = ConversationService.create(agent, "web", "user1");
         var older = new SessionCompaction();
         older.conversation = conv;
@@ -318,7 +318,7 @@ public class SessionCompactorTest extends UnitTest {
     // ─── renderTurns ────────────────────────────────────────────────────
 
     @Test
-    public void renderTurns_includesRoleAndContent() {
+    void renderTurns_includesRoleAndContent() {
         var snaps = List.of(
                 new MessageSnapshot(MessageRole.USER.value, "Hello there", null, null, Instant.now()),
                 new MessageSnapshot(MessageRole.ASSISTANT.value, "Hi, how can I help?", null, null, Instant.now())
@@ -329,7 +329,7 @@ public class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    public void renderTurns_includesToolCallsAndResults() {
+    void renderTurns_includesToolCallsAndResults() {
         var snaps = List.of(
                 new MessageSnapshot(MessageRole.ASSISTANT.value, null,
                         "[{\"id\":\"c1\",\"fn\":\"search\"}]", null, Instant.now()),
@@ -345,7 +345,7 @@ public class SessionCompactorTest extends UnitTest {
     // ─── firstChoiceText ────────────────────────────────────────────────
 
     @Test
-    public void firstChoiceText_returnsStringContent() {
+    void firstChoiceText_returnsStringContent() {
         var msg = new ChatMessage("assistant", "The answer is 42", null, null, null);
         var resp = new ChatResponse("r1", "m",
                 List.of(new Choice(0, msg, "stop")),
@@ -354,13 +354,13 @@ public class SessionCompactorTest extends UnitTest {
     }
 
     @Test
-    public void firstChoiceText_returnsNullForEmptyChoices() {
+    void firstChoiceText_returnsNullForEmptyChoices() {
         var resp = new ChatResponse("r1", "m", List.of(), null);
         assertNull(SessionCompactor.firstChoiceText(resp));
     }
 
     @Test
-    public void firstChoiceText_returnsNullForNullResponse() {
+    void firstChoiceText_returnsNullForNullResponse() {
         assertNull(SessionCompactor.firstChoiceText(null));
     }
 

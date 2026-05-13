@@ -22,7 +22,7 @@ import services.AgentService;
  * outcomes. {@code @AfterEach} tears down both the server and the cache
  * entry so tests are independent.
  */
-public class MockTelegramSinkIntegrationTest extends UnitTest {
+class MockTelegramSinkIntegrationTest extends UnitTest {
 
     private static final String BOT_TOKEN = "mock-bot-token";
     private static final String CHAT_ID = "12345";
@@ -48,7 +48,7 @@ public class MockTelegramSinkIntegrationTest extends UnitTest {
     // ==================== Sanity: infrastructure wiring ====================
 
     @Test
-    public void mockServerReceivesSendMessageWhenChannelTargetsIt() {
+    void mockServerReceivesSendMessageWhenChannelTargetsIt() {
         boolean ok = TelegramChannel.sendMessage(BOT_TOKEN, CHAT_ID, "ping");
         assertTrue(ok, "sendMessage should succeed against the default-ok mock");
         assertEquals(1, server.countRequests("sendMessage"),
@@ -69,7 +69,7 @@ public class MockTelegramSinkIntegrationTest extends UnitTest {
     // same guard — DRAFT and EDIT_IN_PLACE share flushInFlight state.
 
     @Test
-    public void editInPlaceReentranceGuardPreventsSecondSendMessage() throws Exception {
+    void editInPlaceReentranceGuardPreventsSecondSendMessage() throws Exception {
         // EDIT_IN_PLACE variant: first flush sends a placeholder sendMessage;
         // while that's mid-HTTP, a second flush attempt must short-circuit.
         // Without the guard we'd see 2 sendMessages (both as placeholders,
@@ -97,7 +97,7 @@ public class MockTelegramSinkIntegrationTest extends UnitTest {
     // ==================== Gap 3: cross-sink parallelism timing ====================
 
     @Test
-    public void tenConcurrentSinksDoNotSerialize() throws Exception {
+    void tenConcurrentSinksDoNotSerialize() throws Exception {
         // JCLAW-95 AC3: 10 sinks each with one update(), mock delays each
         // sendMessage by 200ms. Parallel → ~200ms total. Serialized →
         // ~2000ms. Assert under 500ms (generous epsilon for CI jitter).
@@ -148,7 +148,7 @@ public class MockTelegramSinkIntegrationTest extends UnitTest {
     // ==================== Gap 4: adaptive 429 throttle ratchet (wire-level) ====================
 
     @Test
-    public void throttleRatchetsUpOnMockTelegram429() throws Exception {
+    void throttleRatchetsUpOnMockTelegram429() throws Exception {
         // Mock returns 429 with retry_after=1 on every sendMessage. The
         // real flush path catches TelegramApiRequestException and invokes
         // recordFlushFailure which ratchets currentThrottleMs. Previously
@@ -191,7 +191,7 @@ public class MockTelegramSinkIntegrationTest extends UnitTest {
     // ==================== Gap 6: planner-dedupe sendPhoto count ====================
 
     @Test
-    public void duplicateImageReferencesResultInOneSendPhoto() throws Exception {
+    void duplicateImageReferencesResultInOneSendPhoto() throws Exception {
         // Seed a workspace file so TelegramOutboundPlanner can resolve the URL.
         services.AgentService.writeWorkspaceFile(agent.name, "screenshot-42.png", "png-bytes");
         String url = "/api/agents/" + agent.id + "/files/screenshot-42.png";
@@ -212,7 +212,7 @@ public class MockTelegramSinkIntegrationTest extends UnitTest {
     // ==================== Gap 7: delivery-failure notifier (JCLAW-106) ====================
 
     @Test
-    public void deliveryFailureTriggersFollowUpNotifier() throws Exception {
+    void deliveryFailureTriggersFollowUpNotifier() throws Exception {
         // JCLAW-106 integration coverage: when the final sendMessage fails
         // through all retries, the sink fires a follow-up "please try
         // again" message. Mock returns 500 on sendMessage so Channel.sendWithRetry
@@ -242,7 +242,7 @@ public class MockTelegramSinkIntegrationTest extends UnitTest {
     }
 
     @Test
-    public void secondDeliveryFailureWithin60sDoesNotRefireNotifier() throws Exception {
+    void secondDeliveryFailureWithin60sDoesNotRefireNotifier() throws Exception {
         // JCLAW-106 AC6 second half (wire-level): the rate limiter holds
         // across actual failed seal() calls, not just the unit-test
         // invocations of tryFireNotifier. Two seals back-to-back on the

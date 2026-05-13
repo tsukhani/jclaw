@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * shutdown. Skipped when {@code node} is not on PATH so backend-only CI
  * environments don't fail.
  */
-public class McpStdioTransportTest extends UnitTest {
+class McpStdioTransportTest extends UnitTest {
 
     private static final String FIXTURE_SCRIPT = """
             // Minimal MCP-shaped echo server: reads line-delimited JSON-RPC
@@ -66,7 +66,7 @@ public class McpStdioTransportTest extends UnitTest {
     private final AtomicReference<Throwable> error = new AtomicReference<>();
 
     @BeforeEach
-    public void setUp() throws Exception {
+    void setUp() throws Exception {
         Assumptions.assumeTrue(nodeAvailable(), "node not on PATH; skipping stdio transport test");
         fixturePath = Files.createTempFile("mcp-fixture-", ".js");
         Files.writeString(fixturePath, FIXTURE_SCRIPT);
@@ -75,13 +75,13 @@ public class McpStdioTransportTest extends UnitTest {
     }
 
     @AfterEach
-    public void tearDown() throws Exception {
+    void tearDown() throws Exception {
         if (transport != null) transport.close();
         if (fixturePath != null) Files.deleteIfExists(fixturePath);
     }
 
     @Test
-    public void initializeAndCallToolRoundTrip() throws Exception {
+    void initializeAndCallToolRoundTrip() throws Exception {
         var initLatch = new CountDownLatch(1);
         var callLatch = new CountDownLatch(1);
         var tools = new AtomicReference<JsonRpc.Response>();
@@ -124,7 +124,7 @@ public class McpStdioTransportTest extends UnitTest {
     }
 
     @Test
-    public void closeTerminatesProcessAndStopsReader() throws Exception {
+    void closeTerminatesProcessAndStopsReader() throws Exception {
         transport.start(received::add, error::set);
         transport.send(new JsonRpc.Request(1L, "ping", null));
         // Wait for the response to come back so we know the process is alive.

@@ -21,7 +21,7 @@ import java.util.Map;
  * {@code parseUsageBlock}, OpenRouter cache breakpoints, the mergeToolCallChunks
  * variants, the StreamAccumulator) is not duplicated here.
  */
-public class LlmProviderTest extends UnitTest {
+class LlmProviderTest extends UnitTest {
 
     private static JsonObject serialize(LlmProvider p, ChatRequest req) throws Exception {
         Method m = LlmProvider.class.getDeclaredMethod("serializeRequest", ChatRequest.class);
@@ -40,21 +40,21 @@ public class LlmProviderTest extends UnitTest {
     // =====================
 
     @Test
-    public void forConfigRoutesOpenrouterNameToOpenRouterProvider() {
+    void forConfigRoutesOpenrouterNameToOpenRouterProvider() {
         var p = LlmProvider.forConfig(new ProviderConfig(
                 "openrouter", "https://openrouter.ai/api/v1", "sk", List.of()));
         assertInstanceOf(OpenRouterProvider.class, p);
     }
 
     @Test
-    public void forConfigRoutesOllamaSubstringToOllamaProvider() {
+    void forConfigRoutesOllamaSubstringToOllamaProvider() {
         var p = LlmProvider.forConfig(new ProviderConfig(
                 "ollama-cloud", "https://ollama.com/v1", "k", List.of()));
         assertInstanceOf(OllamaProvider.class, p);
     }
 
     @Test
-    public void forConfigRoutesOllamaLocalToOllamaProvider() {
+    void forConfigRoutesOllamaLocalToOllamaProvider() {
         // JCLAW-178 AC #2: ollama-local must route through OllamaProvider via
         // the substring match on "ollama" — no new provider class.
         var p = LlmProvider.forConfig(new ProviderConfig(
@@ -63,7 +63,7 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
-    public void forConfigDefaultsToOpenAiForUnknownNames() {
+    void forConfigDefaultsToOpenAiForUnknownNames() {
         var p = LlmProvider.forConfig(new ProviderConfig(
                 "lambda-labs", "https://api.lambdalabs.com/v1", "k", List.of()));
         assertInstanceOf(OpenAiProvider.class, p,
@@ -71,7 +71,7 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
-    public void forConfigRoutesOpenaiNameToOpenAiProvider() {
+    void forConfigRoutesOpenaiNameToOpenAiProvider() {
         // JCLAW-160 AC #1: openai is now an explicit factory entry rather
         // than relying on the unknown-name fallback. Pin so a future map
         // reshuffle can't accidentally route the canonical name elsewhere.
@@ -81,7 +81,7 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
-    public void forConfigRoutesLmStudioToOpenAiProviderViaFallback() {
+    void forConfigRoutesLmStudioToOpenAiProviderViaFallback() {
         // JCLAW-182 AC #2: lm-studio doesn't match either Ollama or OpenRouter
         // substrings, so the factory falls through to OpenAiProvider — perfect
         // because LM Studio speaks OpenAI-compatible /v1/chat/completions
@@ -93,7 +93,7 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
-    public void forConfigMatchesNameCaseInsensitively() {
+    void forConfigMatchesNameCaseInsensitively() {
         var p = LlmProvider.forConfig(new ProviderConfig(
                 "OpenRouter-Mirror", "https://example.com", "k", List.of()));
         assertInstanceOf(OpenRouterProvider.class, p,
@@ -105,7 +105,7 @@ public class LlmProviderTest extends UnitTest {
     // =====================
 
     @Test
-    public void parseUsageInstanceMethodUsesOpenAiNestedReasoning() {
+    void parseUsageInstanceMethodUsesOpenAiNestedReasoning() {
         var p = openAi();
         var usage = p.parseUsage(JsonParser.parseString("""
                 {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150,
@@ -116,7 +116,7 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
-    public void parseUsageInstanceMethodUsesOllamaTopLevelReasoning() {
+    void parseUsageInstanceMethodUsesOllamaTopLevelReasoning() {
         var ollama = new OllamaProvider(new ProviderConfig(
                 "ollama-cloud", "https://ollama.com/v1", "k", List.of()));
         var usage = ollama.parseUsage(JsonParser.parseString("""
@@ -128,7 +128,7 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
-    public void parseUsageInstancePicksUpCachedTokensFromBaseClass() {
+    void parseUsageInstancePicksUpCachedTokensFromBaseClass() {
         var p = openAi();
         var usage = p.parseUsage(JsonParser.parseString("""
                 {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150,
@@ -142,7 +142,7 @@ public class LlmProviderTest extends UnitTest {
     // =====================
 
     @Test
-    public void serializeRequestEmitsModelAndMessages() throws Exception {
+    void serializeRequestEmitsModelAndMessages() throws Exception {
         var req = new ChatRequest("gpt-4o",
                 List.of(ChatMessage.system("sys"), ChatMessage.user("hi")),
                 null, false, null, null);
@@ -155,7 +155,7 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
-    public void serializeRequestEmitsToolsArrayWhenPresent() throws Exception {
+    void serializeRequestEmitsToolsArrayWhenPresent() throws Exception {
         var tool = ToolDef.of("ping", "ping",
                 Map.of("type", "object", "properties", Map.of()));
         var req = new ChatRequest("gpt-4o", List.of(ChatMessage.user("hi")),
@@ -166,7 +166,7 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
-    public void serializeRequestOmitsToolsArrayWhenNullOrEmpty() throws Exception {
+    void serializeRequestOmitsToolsArrayWhenNullOrEmpty() throws Exception {
         var nullTools = new ChatRequest("gpt-4o", List.of(ChatMessage.user("hi")),
                 null, false, null, null);
         assertFalse(serialize(openAi(), nullTools).has("tools"),
@@ -179,7 +179,7 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
-    public void serializeRequestEmitsStreamAndStreamOptionsWhenStreaming() throws Exception {
+    void serializeRequestEmitsStreamAndStreamOptionsWhenStreaming() throws Exception {
         var req = new ChatRequest("gpt-4o", List.of(ChatMessage.user("hi")),
                 null, true, null, null);
         var body = serialize(openAi(), req);
@@ -193,7 +193,7 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
-    public void serializeRequestOmitsStreamFieldsWhenNotStreaming() throws Exception {
+    void serializeRequestOmitsStreamFieldsWhenNotStreaming() throws Exception {
         var req = new ChatRequest("gpt-4o", List.of(ChatMessage.user("hi")),
                 null, false, null, null);
         var body = serialize(openAi(), req);
@@ -203,7 +203,7 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
-    public void serializeRequestEmitsMaxTokensWhenSet() throws Exception {
+    void serializeRequestEmitsMaxTokensWhenSet() throws Exception {
         var req = new ChatRequest("gpt-4o", List.of(ChatMessage.user("hi")),
                 null, false, 2048, null);
         var body = serialize(openAi(), req);
@@ -211,7 +211,7 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
-    public void serializeRequestOmitsMaxTokensWhenNull() throws Exception {
+    void serializeRequestOmitsMaxTokensWhenNull() throws Exception {
         var req = new ChatRequest("gpt-4o", List.of(ChatMessage.user("hi")),
                 null, false, null, null);
         var body = serialize(openAi(), req);
@@ -219,7 +219,7 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
-    public void serializeMessagesPreservesToolCallId() throws Exception {
+    void serializeMessagesPreservesToolCallId() throws Exception {
         var req = new ChatRequest("gpt-4o",
                 List.of(ChatMessage.toolResult("call-99", "web_fetch", "result text")),
                 null, false, null, null);
@@ -232,7 +232,7 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
-    public void serializeMessagesOmitsNameWhenToolNameUnknown() throws Exception {
+    void serializeMessagesOmitsNameWhenToolNameUnknown() throws Exception {
         // Historical messages predating JCLAW-193 won't carry the name in DB.
         // We must not emit "name": null or empty — Ollama Cloud's Gemini bridge
         // rejects empty names with HTTP 400.
@@ -251,7 +251,7 @@ public class LlmProviderTest extends UnitTest {
     // =====================
 
     @Test
-    public void toolCallBuilderProducesToolCallWithAccumulatedArgs() {
+    void toolCallBuilderProducesToolCallWithAccumulatedArgs() {
         var b = new LlmProvider.ToolCallBuilder();
         b.id = "call-1";
         b.functionName = "web_fetch";
@@ -266,7 +266,7 @@ public class LlmProviderTest extends UnitTest {
     }
 
     @Test
-    public void toolCallBuilderRespectsExplicitType() {
+    void toolCallBuilderRespectsExplicitType() {
         var b = new LlmProvider.ToolCallBuilder();
         b.id = "x";
         b.type = "custom-type";

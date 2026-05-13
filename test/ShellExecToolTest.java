@@ -9,7 +9,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-public class ShellExecToolTest extends UnitTest {
+class ShellExecToolTest extends UnitTest {
 
     private ShellExecTool tool;
     private Agent agent;
@@ -33,13 +33,13 @@ public class ShellExecToolTest extends UnitTest {
     // ==================== Allowlist Validation ====================
 
     @Test
-    public void allowedCommandPasses() {
+    void allowedCommandPasses() {
         var error = tool.validateAllowlist("echo hello");
         assertNull(error);
     }
 
     @Test
-    public void blockedCommandRejected() {
+    void blockedCommandRejected() {
         var error = tool.validateAllowlist("rm -rf /");
         assertNotNull(error);
         assertTrue(error.contains("not in the allowed commands list"));
@@ -47,31 +47,31 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void pipeChainValidatesFirstCommandOnly() {
+    void pipeChainValidatesFirstCommandOnly() {
         var error = tool.validateAllowlist("git log | head -20");
         assertNull(error);
     }
 
     @Test
-    public void emptyCommandRejected() {
+    void emptyCommandRejected() {
         var error = tool.validateAllowlist("   ");
         assertNotNull(error);
     }
 
     @Test
-    public void commandWithLeadingWhitespace() {
+    void commandWithLeadingWhitespace() {
         var error = tool.validateAllowlist("  echo hello");
         assertNull(error);
     }
 
     @Test
-    public void singleWordCommand() {
+    void singleWordCommand() {
         var error = tool.validateAllowlist("ls");
         assertNull(error);
     }
 
     @Test
-    public void relativePathMatchesByBasename() {
+    void relativePathMatchesByBasename() {
         // Skill-provided tools are commonly invoked by their workspace-relative
         // path. Users list the binary *name* in the allowlist; the validator
         // must treat "./skills/.../wacli" as equivalent to "wacli" for matching.
@@ -81,14 +81,14 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void absolutePathMatchesByBasename() {
+    void absolutePathMatchesByBasename() {
         ConfigService.set("shell.allowlist", "grep");
         var error = tool.validateAllowlist("/usr/bin/grep foo bar");
         assertNull(error, "absolute-path invocation should match the basename entry");
     }
 
     @Test
-    public void explicitPathInAllowlistStillMatches() {
+    void explicitPathInAllowlistStillMatches() {
         // Operators who want strict path-scoped allowlists (list an exact relative
         // path) keep working — exact-token match is checked alongside basename.
         ConfigService.set("shell.allowlist", "./skills/foo/bar");
@@ -97,7 +97,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void basenameMismatchStillRejected() {
+    void basenameMismatchStillRejected() {
         ConfigService.set("shell.allowlist", "wacli");
         var error = tool.validateAllowlist("./skills/foo/rm -rf /");
         assertNotNull(error, "a binary whose basename is not in the allowlist must be rejected");
@@ -107,7 +107,7 @@ public class ShellExecToolTest extends UnitTest {
     // ==================== Working Directory Resolution ====================
 
     @Test
-    public void defaultWorkspaceDir() {
+    void defaultWorkspaceDir() {
         var workspace = AgentService.workspacePath(agent.name).toAbsolutePath().normalize();
         var args = com.google.gson.JsonParser.parseString("{}").getAsJsonObject();
         var resolved = tool.resolveWorkdir(args, workspace, false, agent.name);
@@ -115,7 +115,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void relativeSubdirectory() {
+    void relativeSubdirectory() {
         var workspace = AgentService.workspacePath(agent.name).toAbsolutePath().normalize();
         var args = com.google.gson.JsonParser.parseString("""
                 {"workdir": "skills"}
@@ -125,7 +125,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void pathTraversalBlocked() {
+    void pathTraversalBlocked() {
         var workspace = AgentService.workspacePath(agent.name).toAbsolutePath().normalize();
         var args = com.google.gson.JsonParser.parseString("""
                 {"workdir": "../../etc"}
@@ -134,7 +134,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void absolutePathBlockedByDefault() {
+    void absolutePathBlockedByDefault() {
         var workspace = AgentService.workspacePath(agent.name).toAbsolutePath().normalize();
         var args = com.google.gson.JsonParser.parseString("""
                 {"workdir": "/tmp"}
@@ -143,7 +143,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void shellWorkdirSymlinkEscapeBlocked() throws Exception {
+    void shellWorkdirSymlinkEscapeBlocked() throws Exception {
         // A symlink inside the workspace pointing to an outside directory used
         // to pass the textual containment check (the symlink's lexical path
         // stayed inside the workspace) and ProcessBuilder would happily follow
@@ -169,7 +169,7 @@ public class ShellExecToolTest extends UnitTest {
     // ==================== Environment Filtering ====================
 
     @Test
-    public void sensitiveVarsByNamePattern() {
+    void sensitiveVarsByNamePattern() {
         assertTrue(ShellExecTool.isSensitiveEnvVar("OPENAI_API_KEY"));
         assertTrue(ShellExecTool.isSensitiveEnvVar("my_secret_value"));
         assertTrue(ShellExecTool.isSensitiveEnvVar("DB_PASSWORD"));
@@ -179,7 +179,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void nonSensitiveVarsPass() {
+    void nonSensitiveVarsPass() {
         assertFalse(ShellExecTool.isSensitiveEnvVar("PATH"));
         assertFalse(ShellExecTool.isSensitiveEnvVar("HOME"));
         assertFalse(ShellExecTool.isSensitiveEnvVar("LANG"));
@@ -188,7 +188,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void customSensitiveVarsBlocked() {
+    void customSensitiveVarsBlocked() {
         var args = com.google.gson.JsonParser.parseString("""
                 {"env": {"OPENAI_API_KEY": "injected", "MY_VAR": "hello"}}
                 """).getAsJsonObject();
@@ -198,7 +198,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void hostEnvSensitiveVarsFilteredBeforeReachingChild() {
+    void hostEnvSensitiveVarsFilteredBeforeReachingChild() {
         // buildEnvironment starts from System.getenv(), which in real
         // deployments carries provider secrets (AWS_*, ANTHROPIC_*, ...).
         // Those must be stripped before the map is handed to ProcessBuilder —
@@ -214,7 +214,7 @@ public class ShellExecToolTest extends UnitTest {
     // ==================== End-to-End Execution ====================
 
     @Test
-    public void basicEchoCommand() {
+    void basicEchoCommand() {
         var result = tool.execute("""
                 {"command": "echo hello"}
                 """, agent);
@@ -224,7 +224,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void nonZeroExitCode() {
+    void nonZeroExitCode() {
         var result = tool.execute("""
                 {"command": "exit 42"}
                 """, agent);
@@ -233,7 +233,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void blockedCommandReturnsError() {
+    void blockedCommandReturnsError() {
         var result = tool.execute("""
                 {"command": "rm -rf /"}
                 """, agent);
@@ -241,7 +241,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void emptyCommandReturnsError() {
+    void emptyCommandReturnsError() {
         var result = tool.execute("""
                 {"command": "  "}
                 """, agent);
@@ -249,7 +249,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void timeoutKillsProcess() {
+    void timeoutKillsProcess() {
         var result = tool.execute("""
                 {"command": "sleep 30", "timeout": 1}
                 """, agent);
@@ -259,7 +259,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void pwdReturnsWorkspace() {
+    void pwdReturnsWorkspace() {
         var result = tool.execute("""
                 {"command": "pwd"}
                 """, agent);
@@ -268,7 +268,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void customEnvVarPassed() {
+    void customEnvVarPassed() {
         var result = tool.execute("""
                 {"command": "printenv MY_VAR", "env": {"MY_VAR": "test_value"}}
                 """, agent);
@@ -277,7 +277,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void pipelineExecution() {
+    void pipelineExecution() {
         var result = tool.execute("""
                 {"command": "echo 'line1\\nline2\\nline3' | wc -l"}
                 """, agent);
@@ -287,7 +287,7 @@ public class ShellExecToolTest extends UnitTest {
     // ==================== Main-Agent Privilege Escapes ====================
 
     @Test
-    public void mainAgentBypassesAllowlistWhenConfigured() {
+    void mainAgentBypassesAllowlistWhenConfigured() {
         var mainAgent = AgentService.create("main", "openrouter", "gpt-4.1");
         ConfigService.set("agent.main.shell.bypassAllowlist", "true");
 
@@ -300,7 +300,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void nonMainAgentIgnoresBypassAllowlistConfigRow() {
+    void nonMainAgentIgnoresBypassAllowlistConfigRow() {
         // An orphaned/out-of-band Config row for a non-main agent must have no effect:
         // the identity check must short-circuit before the Config is consulted.
         ConfigService.set("agent.shell-test-agent.shell.bypassAllowlist", "true");
@@ -313,7 +313,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void mainAgentUsesAbsoluteWorkdirWhenConfigured() {
+    void mainAgentUsesAbsoluteWorkdirWhenConfigured() {
         var mainAgent = AgentService.create("main", "openrouter", "gpt-4.1");
         ConfigService.set("agent.main.shell.allowGlobalPaths", "true");
 
@@ -326,7 +326,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void nonMainAgentIgnoresAllowGlobalPathsConfigRow() {
+    void nonMainAgentIgnoresAllowGlobalPathsConfigRow() {
         ConfigService.set("agent.shell-test-agent.shell.allowGlobalPaths", "true");
 
         var result = tool.execute("""
@@ -337,7 +337,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void mainAgentWithoutPrivilegeConfigStillRejected() {
+    void mainAgentWithoutPrivilegeConfigStillRejected() {
         // Main agent without the bypass config set: must still hit the allowlist
         var mainAgent = AgentService.create("main", "openrouter", "gpt-4.1");
 
@@ -359,7 +359,7 @@ public class ShellExecToolTest extends UnitTest {
     // not a silent upgrade.
 
     @Test
-    public void commandCompositionRunsBothCommands() {
+    void commandCompositionRunsBothCommands() {
         // `echo hi; echo world` — first-token is `echo` (allowed), shell
         // composition runs both statements.
         var result = tool.execute("""
@@ -371,7 +371,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void commandSubstitutionIsExecuted() {
+    void commandSubstitutionIsExecuted() {
         // `echo $(echo nested)` — first-token allowlist check passes,
         // subshell evaluates and produces "nested".
         var result = tool.execute("""
@@ -382,7 +382,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void shellRedirectionIsAllowed() {
+    void shellRedirectionIsAllowed() {
         // Redirect to a file within the workspace. Allowlist sees `echo`
         // only — the `>` is handled by /bin/sh.
         var result = tool.execute("""
@@ -395,7 +395,7 @@ public class ShellExecToolTest extends UnitTest {
     // ==================== UTF-8 + truncation ====================
 
     @Test
-    public void utf8MultiByteCharsRoundTripCorrectly() {
+    void utf8MultiByteCharsRoundTripCorrectly() {
         // InputStreamReader with UTF-8 handles partial multi-byte sequences
         // across read() boundaries internally. Output non-ASCII chars and
         // verify they survive the read loop without corruption.
@@ -408,7 +408,7 @@ public class ShellExecToolTest extends UnitTest {
     }
 
     @Test
-    public void outputTruncationMarksTruncatedTrue() {
+    void outputTruncationMarksTruncatedTrue() {
         // Keep the default allowlist and shell.maxOutputBytes cap, but force
         // a smaller cap for this test so the output overflows without
         // burning test time on a large process.
@@ -434,7 +434,7 @@ public class ShellExecToolTest extends UnitTest {
     // ==================== Watchdog race ====================
 
     @Test
-    public void fastExitDoesNotMarkTimedOut() {
+    void fastExitDoesNotMarkTimedOut() {
         // Regression guard: process that exits well within the timeout must
         // leave timedOut=false (watchdog sees waitFor(timeout) return true and
         // never sets the flag). If this ever flips to true, the watchdog race
@@ -451,7 +451,7 @@ public class ShellExecToolTest extends UnitTest {
     // ==================== Terminal-image early return ====================
 
     @Test
-    public void terminalImageTriggersEarlyReturn() {
+    void terminalImageTriggersEarlyReturn() {
         // 6 consecutive lines of U+2588 (full block, 12 chars each) — above
         // the 5-line/70% threshold in hasTerminalImage — triggers the
         // early-return branch that renders the block art as a PNG and marks

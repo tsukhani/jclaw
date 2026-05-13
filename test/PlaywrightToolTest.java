@@ -8,7 +8,7 @@ import services.AgentService;
 import java.io.IOException;
 import java.nio.file.Files;
 
-public class PlaywrightToolTest extends UnitTest {
+class PlaywrightToolTest extends UnitTest {
 
     private Agent agent;
 
@@ -40,7 +40,7 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void toolHasCorrectNameAndDescription() {
+    void toolHasCorrectNameAndDescription() {
         var tool = new PlaywrightBrowserTool();
         assertEquals("browser", tool.name());
         assertTrue(tool.description().contains("headless") || tool.description().contains("Headless"));
@@ -48,7 +48,7 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void toolParametersContainAllActions() {
+    void toolParametersContainAllActions() {
         var tool = new PlaywrightBrowserTool();
         var params = tool.parameters();
         assertNotNull(params);
@@ -73,21 +73,21 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void unknownActionReturnsError() {
+    void unknownActionReturnsError() {
         var tool = new PlaywrightBrowserTool();
         var result = tool.execute("{\"action\": \"unknownAction\"}", agent);
         assertTrue(result.contains("Error") || result.contains("Unknown"));
     }
 
     @Test
-    public void closeOnNonExistentSessionSucceeds() {
+    void closeOnNonExistentSessionSucceeds() {
         var tool = new PlaywrightBrowserTool();
         var result = tool.execute("{\"action\": \"close\"}", agent);
         assertTrue(result.contains("closed") || result.contains("Browser"));
     }
 
     @Test
-    public void browserToolDisabledForNonMainAgent() {
+    void browserToolDisabledForNonMainAgent() {
         var otherAgent = AgentService.create("non-main-agent", "openrouter", "gpt-4.1");
         // Check that AgentToolConfig was created with browser disabled
         var configs = models.AgentToolConfig.findByAgent(otherAgent);
@@ -106,7 +106,7 @@ public class PlaywrightToolTest extends UnitTest {
     // Playwright API is called. The tool returns the error string directly.
 
     @Test
-    public void navigateRejectsCloudMetadataEndpoint() {
+    void navigateRejectsCloudMetadataEndpoint() {
         var tool = new PlaywrightBrowserTool();
         var result = tool.execute(
                 "{\"action\":\"navigate\",\"url\":\"http://169.254.169.254/latest/meta-data/\"}",
@@ -118,7 +118,7 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void navigateRejectsLoopbackAddress() {
+    void navigateRejectsLoopbackAddress() {
         var tool = new PlaywrightBrowserTool();
         var result = tool.execute(
                 "{\"action\":\"navigate\",\"url\":\"http://127.0.0.1:9000/admin\"}",
@@ -127,7 +127,7 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void navigateRejectsPrivateNetworkAddress() {
+    void navigateRejectsPrivateNetworkAddress() {
         var tool = new PlaywrightBrowserTool();
         var result = tool.execute(
                 "{\"action\":\"navigate\",\"url\":\"http://10.0.0.5/\"}",
@@ -136,7 +136,7 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void navigateRejectsFileScheme() {
+    void navigateRejectsFileScheme() {
         var tool = new PlaywrightBrowserTool();
         var result = tool.execute(
                 "{\"action\":\"navigate\",\"url\":\"file:///etc/passwd\"}",
@@ -145,13 +145,13 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void idleSessionCleanupDoesNotThrow() {
+    void idleSessionCleanupDoesNotThrow() {
         // Just verify the cleanup method runs without error even with no sessions
         Assertions.assertDoesNotThrow(PlaywrightBrowserTool::cleanupIdleSessions);
     }
 
     @Test
-    public void parallelBrowserOpsOnSameAgentDoNotCorruptPage() throws Exception {
+    void parallelBrowserOpsOnSameAgentDoNotCorruptPage() throws Exception {
         // Regression: when the LLM emits navigate + screenshot in a single
         // streaming round, AgentRunner.executeToolsParallel dispatches them on
         // separate virtual threads. Playwright's Page is not thread-safe, so
@@ -198,7 +198,7 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void screenshotResultIsMinimalAndSuppressesPathEcho() {
+    void screenshotResultIsMinimalAndSuppressesPathEcho() {
         // Post-JCLAW-104 three-fix patch plus Option B: the tool result is a
         // bare acknowledgment plus one targeted directive telling the LLM
         // not to quote the file path. Pre-patch, the instruction prescribed
@@ -251,7 +251,7 @@ public class PlaywrightToolTest extends UnitTest {
     // skip them rather than hang on browser launch.
 
     @Test
-    public void navigateUnderNetworkFailureReturnsBrowserError() {
+    void navigateUnderNetworkFailureReturnsBrowserError() {
         // Pin: when the underlying chromium navigation can't reach the host
         // (e.g. RFC 6761 .invalid TLD that DNS guarantees never resolves),
         // execute() must surface a "Browser error: ..." string rather than
@@ -279,7 +279,7 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void sequentialNavigatesReuseTheSameSession() throws Exception {
+    void sequentialNavigatesReuseTheSameSession() throws Exception {
         // The session map keys on agent.name; subsequent calls for the same
         // agent must hit the cached BrowserSession path rather than launching
         // a fresh chromium per call. Verified by reflecting into the private
@@ -312,7 +312,7 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void executeAfterExplicitCloseRecreatesSessionCleanly() {
+    void executeAfterExplicitCloseRecreatesSessionCleanly() {
         // Crash recovery: getOrCreateSession's compute() branch re-launches
         // when the cached page is closed. We can't reliably simulate a SIGSEGV
         // in chromium from a test, but closing the session out-of-band is the
@@ -344,7 +344,7 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void closeSessionOnNonExistentAgentIsIdempotent() {
+    void closeSessionOnNonExistentAgentIsIdempotent() {
         // Pure unit-test path — no chromium needed. The static remove() on
         // ConcurrentHashMap returns null for a missing key, and the close
         // helper short-circuits in that branch. Calling it twice in a row
@@ -364,7 +364,7 @@ public class PlaywrightToolTest extends UnitTest {
     // the live action handlers (navigate, click, fill, ...) get skipped.
 
     @Test
-    public void categoryAndIconAreStableForToolCatalog() {
+    void categoryAndIconAreStableForToolCatalog() {
         // The tool catalog UI groups tools by category and renders an icon
         // per row, so a typo here surfaces as a misclassified tool. Pin
         // the values so a refactor that touches them must update this test
@@ -375,7 +375,7 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void shortDescriptionMentionsHeadlessAndJavaScript() {
+    void shortDescriptionMentionsHeadlessAndJavaScript() {
         // The short description lands in the tool-picker UI; it should give
         // an LLM (or a human reading the catalog) enough context to choose
         // browser over web_fetch when JS rendering is needed.
@@ -389,7 +389,7 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void actionsListExposesAllSevenActionsWithDescriptions() {
+    void actionsListExposesAllSevenActionsWithDescriptions() {
         // The actions() list drives the per-action permission UI in
         // AgentToolConfig. A missing entry here lets the LLM call an action
         // the operator can't gate. Pin the count and verify each action has
@@ -422,7 +422,7 @@ public class PlaywrightToolTest extends UnitTest {
     // anyMatch over the directory contents.
 
     @Test
-    public void chromiumPreinstalledAtReturnsFalseForMissingDir() throws Exception {
+    void chromiumPreinstalledAtReturnsFalseForMissingDir() throws Exception {
         var tmp = Files.createTempDirectory("playwright-coverage-");
         try {
             var nonExistent = tmp.resolve("does-not-exist");
@@ -433,7 +433,7 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void chromiumPreinstalledAtReturnsFalseForEmptyDir() throws Exception {
+    void chromiumPreinstalledAtReturnsFalseForEmptyDir() throws Exception {
         var tmp = Files.createTempDirectory("playwright-coverage-");
         try {
             assertFalse(PlaywrightBrowserTool.chromiumPreinstalledAt(tmp));
@@ -443,7 +443,7 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void chromiumPreinstalledAtReturnsTrueForChromiumSubdir() throws Exception {
+    void chromiumPreinstalledAtReturnsTrueForChromiumSubdir() throws Exception {
         var tmp = Files.createTempDirectory("playwright-coverage-");
         try {
             Files.createDirectory(tmp.resolve("chromium-1234"));
@@ -454,7 +454,7 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void chromiumPreinstalledAtReturnsTrueForHeadlessShellSubdir() throws Exception {
+    void chromiumPreinstalledAtReturnsTrueForHeadlessShellSubdir() throws Exception {
         // Per the helper's javadoc, the chromium_headless_shell-<rev> layout
         // is equally acceptable — the shell variant has the same launcher
         // contract from our POV.
@@ -468,7 +468,7 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void chromiumPreinstalledAtReturnsFalseWhenOnlyOtherBrowsersPresent() throws Exception {
+    void chromiumPreinstalledAtReturnsFalseWhenOnlyOtherBrowsersPresent() throws Exception {
         // Defensive: if a host has Firefox or WebKit installed but not
         // Chromium, we must NOT skip the install step — Playwright would
         // launch with a missing browser. This test pins that invariant.
@@ -485,7 +485,7 @@ public class PlaywrightToolTest extends UnitTest {
     // ─── cleanupIdleSessions: stale-entry removal ─────────────────────────
 
     @Test
-    public void cleanupIdleSessionsRemovesEntriesPastTimeout() throws Exception {
+    void cleanupIdleSessionsRemovesEntriesPastTimeout() throws Exception {
         // Inject a synthetic BrowserSession with lastUsed = 0L (epoch — far
         // older than the 5-minute IDLE_TIMEOUT_MS) and null Playwright /
         // Browser / Page handles. destroySession's three try/catch blocks
@@ -513,7 +513,7 @@ public class PlaywrightToolTest extends UnitTest {
     }
 
     @Test
-    public void cleanupIdleSessionsKeepsRecentlyUsedEntries() throws Exception {
+    void cleanupIdleSessionsKeepsRecentlyUsedEntries() throws Exception {
         // Counterpart to the removal test: an entry whose lastUsed is "now"
         // must survive a cleanup tick. This pins the timeout boundary so a
         // refactor that flips the comparison sign (>/<=) breaks loudly.

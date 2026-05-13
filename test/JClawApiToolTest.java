@@ -12,7 +12,7 @@ import tools.JClawApiTool;
  * is that the tool's blocklist and arg validation refuse bad inputs
  * before any socket opens.
  */
-public class JClawApiToolTest extends UnitTest {
+class JClawApiToolTest extends UnitTest {
 
     private static JClawApiTool tool;
 
@@ -24,28 +24,28 @@ public class JClawApiToolTest extends UnitTest {
     // ==================== argument validation ====================
 
     @Test
-    public void rejectsMalformedJson() {
+    void rejectsMalformedJson() {
         var result = tool.execute("this is not json", null);
         assertTrue(result.startsWith("Error: arguments are not valid JSON"),
                 "expected JSON-parse error; got: " + result);
     }
 
     @Test
-    public void rejectsMissingMethod() {
+    void rejectsMissingMethod() {
         var result = tool.execute("{\"path\":\"/api/agents\"}", null);
         assertTrue(result.startsWith("Error: both 'method' and 'path' are required"),
                 "got: " + result);
     }
 
     @Test
-    public void rejectsMissingPath() {
+    void rejectsMissingPath() {
         var result = tool.execute("{\"method\":\"GET\"}", null);
         assertTrue(result.startsWith("Error: both 'method' and 'path' are required"),
                 "got: " + result);
     }
 
     @Test
-    public void rejectsUnknownMethod() {
+    void rejectsUnknownMethod() {
         var result = tool.execute(
                 "{\"method\":\"OPTIONS\",\"path\":\"/api/agents\"}", null);
         assertTrue(result.contains("method must be one of"),
@@ -55,7 +55,7 @@ public class JClawApiToolTest extends UnitTest {
     }
 
     @Test
-    public void rejectsNonApiPath() {
+    void rejectsNonApiPath() {
         var result = tool.execute(
                 "{\"method\":\"GET\",\"path\":\"/somewhere-else\"}", null);
         assertTrue(result.contains("path must start with /api/"),
@@ -65,7 +65,7 @@ public class JClawApiToolTest extends UnitTest {
     // ==================== path blocklist (security) ====================
 
     @Test
-    public void blocksChatSendPath() {
+    void blocksChatSendPath() {
         // Recursion guard: a chat agent calling /api/chat/send to send
         // another chat would invoke itself. Refused regardless of method.
         var result = tool.execute(
@@ -78,7 +78,7 @@ public class JClawApiToolTest extends UnitTest {
     }
 
     @Test
-    public void blocksAuthLoginPath() {
+    void blocksAuthLoginPath() {
         var result = tool.execute(
                 "{\"method\":\"POST\",\"path\":\"/api/auth/login\"," +
                 "\"body\":{\"username\":\"admin\",\"password\":\"x\"}}", null);
@@ -87,7 +87,7 @@ public class JClawApiToolTest extends UnitTest {
     }
 
     @Test
-    public void blocksApiTokensPath() {
+    void blocksApiTokensPath() {
         // Privilege-escalation surface: a tool that can mint another
         // token could survive its own revocation. Blocked at the tool
         // boundary, with AuthCheck.requireSessionAuth as belt-and-suspenders.
@@ -99,7 +99,7 @@ public class JClawApiToolTest extends UnitTest {
     }
 
     @Test
-    public void blocksWebhookPath() {
+    void blocksWebhookPath() {
         var result = tool.execute(
                 "{\"method\":\"POST\",\"path\":\"/api/webhooks/telegram/x/y\"}", null);
         assertTrue(result.contains("/api/webhooks/"),
@@ -107,7 +107,7 @@ public class JClawApiToolTest extends UnitTest {
     }
 
     @Test
-    public void blocksEventsPath() {
+    void blocksEventsPath() {
         // SSE — full-response buffering doesn't match streaming semantics.
         var result = tool.execute(
                 "{\"method\":\"GET\",\"path\":\"/api/events\"}", null);
@@ -116,7 +116,7 @@ public class JClawApiToolTest extends UnitTest {
     }
 
     @Test
-    public void allowsSafePathsToReachUrlConstruction() {
+    void allowsSafePathsToReachUrlConstruction() {
         // /api/agents is on the curated allowlist (SKILL.md). The tool's
         // execute path proceeds past validation and into the HTTP call.
         // In the unit-test JVM there's no Play listener bound, so the
@@ -135,7 +135,7 @@ public class JClawApiToolTest extends UnitTest {
     // ==================== schema-level checks ====================
 
     @Test
-    public void parametersDeclareRequiredFields() {
+    void parametersDeclareRequiredFields() {
         @SuppressWarnings("unchecked")
         var required = (java.util.List<String>) tool.parameters().get("required");
         // The model's host validates required fields against this schema
@@ -147,7 +147,7 @@ public class JClawApiToolTest extends UnitTest {
     }
 
     @Test
-    public void nameMatchesPublicConstant() {
+    void nameMatchesPublicConstant() {
         // External callers (AgentService.create, ToolRegistrationJob)
         // reference TOOL_NAME; the instance must return the same name
         // or the lookup goes through ToolRegistry inconsistently.

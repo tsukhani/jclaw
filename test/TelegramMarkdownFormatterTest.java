@@ -9,19 +9,19 @@ import play.test.UnitTest;
  * section at the end. Each test asserts on an exact-or-contains substring so
  * the test stays robust against flexmark's internal whitespace choices.
  */
-public class TelegramMarkdownFormatterTest extends UnitTest {
+class TelegramMarkdownFormatterTest extends UnitTest {
 
     // ── Inline formatting ──
 
     @Test
-    public void boldGeneratesBTags() {
+    void boldGeneratesBTags() {
         var html = TelegramMarkdownFormatter.toHtml("This is **bold** text.");
         assertTrue(html.contains("<b>bold</b>"),
                 () -> "expected bold HTML, got: " + html);
     }
 
     @Test
-    public void italicGeneratesITags() {
+    void italicGeneratesITags() {
         var starForm = TelegramMarkdownFormatter.toHtml("An *italic* word.");
         assertTrue(starForm.contains("<i>italic</i>"),
                 () -> "expected italic HTML from *x* syntax, got: " + starForm);
@@ -32,21 +32,21 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void strikethroughGeneratesSTags() {
+    void strikethroughGeneratesSTags() {
         var html = TelegramMarkdownFormatter.toHtml("This is ~~removed~~ now.");
         assertTrue(html.contains("<s>removed</s>"),
                 () -> "expected strikethrough HTML, got: " + html);
     }
 
     @Test
-    public void inlineCodeGeneratesCodeTags() {
+    void inlineCodeGeneratesCodeTags() {
         var html = TelegramMarkdownFormatter.toHtml("Call `foo.bar()` on it.");
         assertTrue(html.contains("<code>foo.bar()</code>"),
                 () -> "expected inline code HTML, got: " + html);
     }
 
     @Test
-    public void inlineCodeEscapesHtmlSpecials() {
+    void inlineCodeEscapesHtmlSpecials() {
         var html = TelegramMarkdownFormatter.toHtml("Run `<script>alert(1)</script>` never.");
         assertTrue(html.contains("<code>&lt;script&gt;alert(1)&lt;/script&gt;</code>"),
                 () -> "inline code must escape &, <, >: " + html);
@@ -55,7 +55,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     // ── Block formatting ──
 
     @Test
-    public void headingsFlattenToBold() {
+    void headingsFlattenToBold() {
         var html = TelegramMarkdownFormatter.toHtml("# H1\n\n## H2\n\n### H3");
         assertTrue(html.contains("<b>H1</b>"),
                 () -> "h1 → <b>: " + html);
@@ -68,7 +68,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void fencedCodeBlockGeneratesPreCode() {
+    void fencedCodeBlockGeneratesPreCode() {
         var md = """
                 ```
                 hello world
@@ -84,7 +84,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void fencedCodeBlockPreservesLanguageHint() {
+    void fencedCodeBlockPreservesLanguageHint() {
         var md = """
                 ```python
                 print(1)
@@ -96,7 +96,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void fencedCodeBlockEscapesHtmlSpecials() {
+    void fencedCodeBlockEscapesHtmlSpecials() {
         var md = """
                 ```
                 a < b && c > d
@@ -108,7 +108,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void blockQuoteGeneratesBlockquoteTag() {
+    void blockQuoteGeneratesBlockquoteTag() {
         var html = TelegramMarkdownFormatter.toHtml("> A famous saying.");
         assertTrue(html.contains("<blockquote>") && html.contains("</blockquote>"),
                 () -> "blockquote renders wrapped: " + html);
@@ -117,7 +117,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void thematicBreakRendersAsEmDash() {
+    void thematicBreakRendersAsEmDash() {
         var html = TelegramMarkdownFormatter.toHtml("Before\n\n---\n\nAfter");
         // Telegram has no <hr>; we emit an em-dash visual separator.
         assertTrue(html.contains("—"),
@@ -129,7 +129,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     // ── Lists ──
 
     @Test
-    public void unorderedListRendersWithBullets() {
+    void unorderedListRendersWithBullets() {
         var md = """
                 - alpha
                 - beta
@@ -147,7 +147,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void orderedListRendersWithNumberedPrefix() {
+    void orderedListRendersWithNumberedPrefix() {
         var md = """
                 1. first
                 2. second
@@ -167,14 +167,14 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     // ── Links ──
 
     @Test
-    public void linkGeneratesATagWithHref() {
+    void linkGeneratesATagWithHref() {
         var html = TelegramMarkdownFormatter.toHtml("See [docs](https://example.com/docs).");
         assertTrue(html.contains("<a href=\"https://example.com/docs\">docs</a>"),
                 () -> "link renders with href + text: " + html);
     }
 
     @Test
-    public void linkEscapesAttributeQuotesAndAmpersands() {
+    void linkEscapesAttributeQuotesAndAmpersands() {
         var html = TelegramMarkdownFormatter.toHtml("[q](https://example.com/search?a=1&b=\"2\")");
         // The href value must not contain raw " or unescaped & — both would break
         // the attribute or the parseMode check.
@@ -187,7 +187,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     // ── Tables ──
 
     @Test
-    public void tableRendersAsBulletsByDefault() {
+    void tableRendersAsBulletsByDefault() {
         var md = """
                 | Name | Status |
                 | --- | --- |
@@ -204,7 +204,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void tableCodeModeWrapsInPreCode() {
+    void tableCodeModeWrapsInPreCode() {
         var md = """
                 | A | B |
                 | --- | --- |
@@ -218,7 +218,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void tableOffModeDropsTable() {
+    void tableOffModeDropsTable() {
         var md = """
                 before
 
@@ -238,7 +238,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     // ── Safety: raw HTML in input ──
 
     @Test
-    public void rawHtmlInInputIsEscaped() {
+    void rawHtmlInInputIsEscaped() {
         var html = TelegramMarkdownFormatter.toHtml("Plain <script>alert(1)</script> text.");
         assertFalse(html.contains("<script>"),
                 () -> "raw <script> must never pass through: " + html);
@@ -247,7 +247,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void rawTelegramSafeHtmlPassesThrough() {
+    void rawTelegramSafeHtmlPassesThrough() {
         // LLMs sometimes emit literal <b>...</b> in place of **bold**. Telegram's
         // HTML parse mode supports a small no-attribute tag subset; pass those
         // through verbatim so the user actually sees bold rather than the
@@ -262,7 +262,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void rawHtmlWithAttributesIsEscaped() {
+    void rawHtmlWithAttributesIsEscaped() {
         // Attribute parsing is a foot-gun (event handlers, javascript: URLs,
         // injection vectors). Even allowlisted tags lose pass-through when
         // they carry any attribute.
@@ -274,14 +274,14 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void plainTextIsPassedThroughEscaped() {
+    void plainTextIsPassedThroughEscaped() {
         var html = TelegramMarkdownFormatter.toHtml("just some text");
         assertTrue(html.contains("just some text"),
                 () -> "plain text preserved: " + html);
     }
 
     @Test
-    public void nullAndEmptyInputReturnEmptyString() {
+    void nullAndEmptyInputReturnEmptyString() {
         assertEquals("", TelegramMarkdownFormatter.toHtml(null));
         assertEquals("", TelegramMarkdownFormatter.toHtml(""));
     }
@@ -289,14 +289,14 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     // ── Chunker ──
 
     @Test
-    public void chunkHtmlReturnsSingleChunkWhenUnderLimit() {
+    void chunkHtmlReturnsSingleChunkWhenUnderLimit() {
         var chunks = TelegramMarkdownFormatter.chunkHtml("<b>short</b>", 4000);
         assertEquals(1, chunks.size());
         assertEquals("<b>short</b>", chunks.get(0));
     }
 
     @Test
-    public void chunkHtmlSplitsAtBlockBoundaries() {
+    void chunkHtmlSplitsAtBlockBoundaries() {
         // Three ~100-char blocks separated by \n\n; maxLen of 150 forces splits.
         var blockA = "<b>" + "A".repeat(90) + "</b>";
         var blockB = "<b>" + "B".repeat(90) + "</b>";
@@ -320,7 +320,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void chunkHtmlRewrapsOversizedCodeFence() {
+    void chunkHtmlRewrapsOversizedCodeFence() {
         // Build an HTML payload with a single oversized <pre><code> block.
         var inner = ("line " + "x".repeat(50) + "\n").repeat(40); // ~2000 chars inner
         var html = "<pre><code>" + inner + "</code></pre>";
@@ -342,7 +342,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void chunkHtmlHandlesLanguageHintedCodeFence() {
+    void chunkHtmlHandlesLanguageHintedCodeFence() {
         var inner = ("a".repeat(200) + "\n").repeat(10);
         var html = "<pre><code class=\"language-python\">" + inner + "</code></pre>";
         var chunks = TelegramMarkdownFormatter.chunkHtml(html, 600);
@@ -357,7 +357,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void chunkHtmlEmptyInputReturnsEmptyList() {
+    void chunkHtmlEmptyInputReturnsEmptyList() {
         assertTrue(TelegramMarkdownFormatter.chunkHtml(null, 100).isEmpty());
         assertTrue(TelegramMarkdownFormatter.chunkHtml("", 100).isEmpty());
     }
@@ -365,14 +365,14 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     // ── JCLAW-92: autolink, typographic, tasklist extensions ──
 
     @Test
-    public void autolinkPromotesBareUrlToAnchor() {
+    void autolinkPromotesBareUrlToAnchor() {
         var html = TelegramMarkdownFormatter.toHtml("Visit https://example.com now.");
         assertTrue(html.contains("<a href=\"https://example.com\">https://example.com</a>"),
                 () -> "bare URL should be promoted to an anchor: " + html);
     }
 
     @Test
-    public void autolinkLeavesFormattedLinksAlone() {
+    void autolinkLeavesFormattedLinksAlone() {
         // Explicit [text](url) links must still render with the author's text,
         // not get clobbered by the autolink extension.
         var html = TelegramMarkdownFormatter.toHtml("See [the docs](https://example.com).");
@@ -381,7 +381,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void typographicReplacesEmAndEnDashes() {
+    void typographicReplacesEmAndEnDashes() {
         // Two hyphens → en dash; three → em dash.
         var enDash = TelegramMarkdownFormatter.toHtml("range 1--10");
         assertTrue(enDash.contains("\u20131"),
@@ -393,14 +393,14 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void typographicReplacesEllipsis() {
+    void typographicReplacesEllipsis() {
         var html = TelegramMarkdownFormatter.toHtml("and so on...");
         assertTrue(html.contains("\u2026"),
                 () -> "... should become … (U+2026): " + html);
     }
 
     @Test
-    public void tasklistPendingRendersEmptyBox() {
+    void tasklistPendingRendersEmptyBox() {
         var html = TelegramMarkdownFormatter.toHtml("- [ ] pending item");
         assertTrue(html.contains("\u2610 pending item"),
                 () -> "empty checkbox (U+2610) expected: " + html);
@@ -409,7 +409,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void tasklistDoneRendersCheckedBox() {
+    void tasklistDoneRendersCheckedBox() {
         var html = TelegramMarkdownFormatter.toHtml("- [x] done item");
         assertTrue(html.contains("\u2611 done item"),
                 () -> "checked box (U+2611) expected: " + html);
@@ -418,7 +418,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    public void tasklistMixedStateRendersPerItem() {
+    void tasklistMixedStateRendersPerItem() {
         var md = """
                 - [x] alpha
                 - [ ] beta
@@ -433,7 +433,7 @@ public class TelegramMarkdownFormatterTest extends UnitTest {
     // ── End-to-end: the skills-table screenshot scenario ──
 
     @Test
-    public void endToEndSkillsTableRendersAsBullets() {
+    void endToEndSkillsTableRendersAsBullets() {
         // The v0.9.24 screenshot: an agent emitted a skills table that rendered
         // as raw pipes in Telegram. After JCLAW-91 it should come out as bullets.
         var md = """

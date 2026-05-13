@@ -9,10 +9,10 @@ import com.google.gson.JsonParser;
 import java.util.List;
 import java.util.Map;
 
-public class LlmClientTest extends UnitTest {
+class LlmClientTest extends UnitTest {
 
     @Test
-    public void chatMessageFactoryMethods() {
+    void chatMessageFactoryMethods() {
         var sys = ChatMessage.system("You are helpful");
         assertEquals("system", sys.role());
         assertEquals("You are helpful", sys.content());
@@ -30,7 +30,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void toolDefCreation() {
+    void toolDefCreation() {
         var tool = ToolDef.of("web_fetch", "Fetch a URL",
                 Map.of("type", "object",
                         "properties", Map.of(
@@ -44,7 +44,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void providerConfigRecord() {
+    void providerConfigRecord() {
         var config = new ProviderConfig(
                 "openrouter",
                 "https://openrouter.ai/api/v1",
@@ -60,7 +60,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void assistantMessageWithToolCalls() {
+    void assistantMessageWithToolCalls() {
         var toolCalls = List.of(
                 new ToolCall("call-1", "function", new FunctionCall("web_fetch", "{\"url\":\"https://example.com\"}"))
         );
@@ -74,7 +74,7 @@ public class LlmClientTest extends UnitTest {
     // --- Usage parser: verifies every field cache-related field flows from provider JSON ---
 
     @Test
-    public void parseUsageOpenAiShape() {
+    void parseUsageOpenAiShape() {
         // Plain OpenAI response: no caching fields at all.
         var usageObj = JsonParser.parseString("""
                 {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
@@ -89,7 +89,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void parseUsageOpenAiCacheReadHit() {
+    void parseUsageOpenAiCacheReadHit() {
         // OpenAI shape with a 95% cache hit: cached_tokens nested under prompt_tokens_details.
         var usageObj = JsonParser.parseString("""
                 {"prompt_tokens": 4891, "completion_tokens": 112, "total_tokens": 5003,
@@ -105,7 +105,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void parseUsageAnthropicCacheWriteSeed() {
+    void parseUsageAnthropicCacheWriteSeed() {
         // First turn of a new conversation on an Anthropic route: cache_creation_input_tokens
         // at the top level of usage; no cached reads yet (cache is being seeded).
         var usageObj = JsonParser.parseString("""
@@ -120,7 +120,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void parseUsageAnthropicCacheMixedReadAndWrite() {
+    void parseUsageAnthropicCacheMixedReadAndWrite() {
         // A later turn where some of the prefix is already cached (reads) AND a new
         // breakpoint was added (writes). Both subsets are disjoint and both count.
         var usageObj = JsonParser.parseString("""
@@ -138,7 +138,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void parseUsageHandlesMissingFields() {
+    void parseUsageHandlesMissingFields() {
         // Robustness: empty usage object, shouldn't NPE.
         var usage = openAiProvider().parseUsage(JsonParser.parseString("{}").getAsJsonObject());
         assertEquals(0, usage.promptTokens());
@@ -149,7 +149,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void streamAccumulatorStartsEmpty() {
+    void streamAccumulatorStartsEmpty() {
         var acc = new LlmProvider.StreamAccumulator();
         assertFalse(acc.complete);
         assertEquals("", acc.content);
@@ -158,7 +158,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void streamAccumulatorReasoningDurationIsZeroWhenNoReasoning() {
+    void streamAccumulatorReasoningDurationIsZeroWhenNoReasoning() {
         var acc = new LlmProvider.StreamAccumulator();
         assertEquals(0L, acc.reasoningDurationMs());
         assertEquals(0L, acc.reasoningStartNanos);
@@ -166,7 +166,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void streamAccumulatorCapturesReasoningSpan() throws Exception {
+    void streamAccumulatorCapturesReasoningSpan() throws Exception {
         // Simulates JCLAW-70 timing capture: first reasoning chunk stamps the
         // start, the last chunk extends the end. Duration must be positive
         // and within a sane upper bound (the ~5ms sleep plus scheduler noise).
@@ -188,7 +188,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void streamAccumulatorIgnoresNullReasoningText() {
+    void streamAccumulatorIgnoresNullReasoningText() {
         var acc = new LlmProvider.StreamAccumulator();
         acc.appendReasoningText(null);
         assertEquals(0L, acc.reasoningStartNanos);
@@ -196,7 +196,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void llmExceptionPreservesMessage() {
+    void llmExceptionPreservesMessage() {
         var ex = new LlmProvider.LlmException("Provider down");
         assertEquals("Provider down", ex.getMessage());
 
@@ -206,7 +206,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void providerRegistryLoadsFromConfig() {
+    void providerRegistryLoadsFromConfig() {
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
 
@@ -235,7 +235,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void providerRegistryPrimaryAndSecondary() {
+    void providerRegistryPrimaryAndSecondary() {
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
 
@@ -253,7 +253,7 @@ public class LlmClientTest extends UnitTest {
     // ─── mergeToolCallChunks (JCLAW-120) ─────────────────────────────
 
     @Test
-    public void mergeToolCallChunks_wellBehavedStreamingKeepsOneSlot() {
+    void mergeToolCallChunks_wellBehavedStreamingKeepsOneSlot() {
         // Streaming lifecycle of a single call: first chunk carries id+name+"",
         // subsequent chunks carry just the arguments fragments. All share
         // index=0. Must collapse into exactly one ToolCall.
@@ -276,7 +276,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void mergeToolCallChunks_parallelCallsWithDistinctIndicesStayDistinct() {
+    void mergeToolCallChunks_parallelCallsWithDistinctIndicesStayDistinct() {
         // OpenAI-compliant: parallel calls get distinct index values.
         var acc = new java.util.HashMap<Integer, LlmProvider.ToolCallBuilder>();
         LlmProvider.mergeToolCallChunks(List.of(
@@ -292,7 +292,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void mergeToolCallChunks_reusedIndexWithDistinctIdsSplitsSlots() {
+    void mergeToolCallChunks_reusedIndexWithDistinctIdsSplitsSlots() {
         // JCLAW-120 production offender: Gemini-via-Ollama sends every parallel
         // call at index=0 but with distinct ids. Must split into separate slots.
         var acc = new java.util.HashMap<Integer, LlmProvider.ToolCallBuilder>();
@@ -322,7 +322,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void mergeToolCallChunks_reusedIndexWithDifferentNamesSplitsSlots() {
+    void mergeToolCallChunks_reusedIndexWithDifferentNamesSplitsSlots() {
         // Provider sends two calls at index=0, same (null) id, different names.
         // Name mismatch alone must force a new slot.
         var acc = new java.util.HashMap<Integer, LlmProvider.ToolCallBuilder>();
@@ -339,7 +339,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void mergeToolCallChunks_sameDeltaIndexCollisionSplitsSlots() {
+    void mergeToolCallChunks_sameDeltaIndexCollisionSplitsSlots() {
         // Defensive: provider bundles two parallel calls in one delta's
         // tool_calls list, both at index=0. Must split even if id/name
         // checks happen to pass (e.g., incomplete metadata).
@@ -355,7 +355,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void mergeToolCallChunks_nullInputIsNoOp() {
+    void mergeToolCallChunks_nullInputIsNoOp() {
         var acc = new java.util.HashMap<Integer, LlmProvider.ToolCallBuilder>();
         LlmProvider.mergeToolCallChunks(null, acc);
         LlmProvider.mergeToolCallChunks(List.of(), acc);
@@ -365,7 +365,7 @@ public class LlmClientTest extends UnitTest {
     // ─── OpenRouter two-breakpoint prompt caching (JCLAW-128) ────────
 
     @Test
-    public void openrouter_cache_splitsSystemAtBoundary() {
+    void openrouter_cache_splitsSystemAtBoundary() {
         // Marker present: system message splits into two text blocks —
         // prefix with cache_control, suffix without. Marker text itself is
         // consumed by the split (never reaches the wire).
@@ -391,7 +391,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void openrouter_cache_noBoundaryMarker_fallsBackToSingleBlock() {
+    void openrouter_cache_noBoundaryMarker_fallsBackToSingleBlock() {
         // Regression guard for prompts that predate the marker convention —
         // still get cache_control, just on a single block.
         var req = chatRequest("anthropic/claude-3-7-sonnet",
@@ -406,7 +406,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void openrouter_cache_trailingUserMessageGetsBreakpoint() {
+    void openrouter_cache_trailingUserMessageGetsBreakpoint() {
         // Breakpoint B: when the last message is role=user, tag its final
         // content block with cache_control. Extends cached prefix through
         // all conversation history.
@@ -429,7 +429,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void openrouter_cache_trailingToolMessageSkipsBreakpoint() {
+    void openrouter_cache_trailingToolMessageSkipsBreakpoint() {
         // Mid-round tool loop case: last message is role=tool. No cache tag
         // on that message (would be wasted — tool_result text varies every
         // call). System breakpoint still fires.
@@ -452,7 +452,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void openrouter_cache_nonAnthropicModel_skipsBothBreakpoints() {
+    void openrouter_cache_nonAnthropicModel_skipsBothBreakpoints() {
         // Non-Anthropic route: no cache_control anywhere.
         var req = chatRequest("openai/gpt-4",
                 List.of(llm.LlmTypes.ChatMessage.system("sys with no marker"),
@@ -466,7 +466,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void openrouter_cache_nonAnthropicModel_stripsBoundaryMarker() {
+    void openrouter_cache_nonAnthropicModel_stripsBoundaryMarker() {
         // Non-caching route: the marker substring is scrubbed from the
         // system content so it doesn't reach the model.
         var marker = agents.SystemPromptAssembler.CACHE_BOUNDARY_MARKER;
@@ -484,7 +484,7 @@ public class LlmClientTest extends UnitTest {
     }
 
     @Test
-    public void openrouter_cache_breakpointCountAtMost4() {
+    void openrouter_cache_breakpointCountAtMost4() {
         // Anthropic allows ≤4 cache_control markers per request. Defensive
         // assertion: no matter what we do upstream, we must not blow past 4.
         var marker = agents.SystemPromptAssembler.CACHE_BOUNDARY_MARKER;
