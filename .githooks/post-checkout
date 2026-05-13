@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Fires on `git checkout`, `git switch`, `git clone`, and
+# `git worktree add`. We only want to act on the worktree-creation
+# case (`git worktree add`, and analogously the first checkout of a
+# fresh clone) — not on routine branch flips, which would re-run
+# init-worktree's idempotent no-op on every developer's switch.
+#
+# Git passes three positional args:
+#   $1 = previous HEAD SHA (or null SHA on fresh checkout)
+#   $2 = new HEAD SHA
+#   $3 = is-branch flag (1 for branch checkout, 0 for file checkout)
+#
+# `git worktree add` and `git clone` both set $1 to the null SHA with
+# $3=1 — that pair is the discriminator. Without it, this hook would
+# fire on every `git checkout some-branch` and spam stdout.
+#
+# Failure here is non-blocking: git proceeds with worktree creation
+# regardless of post-checkout exit status, so a broken init surfaces
+# loudly but doesn't trap the user with no working tree.
+
+set -e
+
+prev_head="$1"
+is_branch="$3"
+
+null_sha="0000000000000000000000000000000000000000"
+if [ "$prev_head" != "$null_sha" ] || [ "$is_branch" != "1" ]; then
+    exit 0
+fi
+
+# The hook runs from the new worktree's working tree (per githooks(5)),
+# so a relative ./jclaw.sh resolves to the right copy. Stay quiet if
+# it's not here — the hook ships in the repo but could in theory be
+# invoked from a tree that lacks the script (e.g. a partial checkout).
+if [ ! -x "./jclaw.sh" ]; then
+    exit 0
+fi
+
+echo "==> jclaw: initializing fresh worktree state (post-checkout)..."
+./jclaw.sh init-worktree
