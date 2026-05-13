@@ -72,7 +72,7 @@ public final class PasswordHasher {
             return skf.generateSecret(spec).getEncoded();
         }
         catch (Exception e) {
-            throw new RuntimeException("PBKDF2 unavailable — JDK install broken?", e);
+            throw new IllegalStateException("PBKDF2 unavailable — JDK install broken?", e);
         }
     }
 

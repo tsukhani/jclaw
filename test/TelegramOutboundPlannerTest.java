@@ -269,9 +269,10 @@ public class TelegramOutboundPlannerTest extends UnitTest {
         var agent = AgentService.create("planner-dedupe", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile(agent.name, "screenshot-1776748706808.png", "png-bytes");
 
-        var md = "![Screenshot](/api/agents/1/files/screenshot-1776748706808.png)\n\n"
-                + "Here is the page. You can also reference the "
-                + "[screenshot](/api/agents/1/files/screenshot-1776748706808.png) directly.";
+        var md = """
+                ![Screenshot](/api/agents/1/files/screenshot-1776748706808.png)
+
+                Here is the page. You can also reference the [screenshot](/api/agents/1/files/screenshot-1776748706808.png) directly.""";
         var segments = TelegramOutboundPlanner.plan(md, agent.name);
 
         int fileCount = (int) segments.stream()
@@ -315,14 +316,16 @@ public class TelegramOutboundPlannerTest extends UnitTest {
         var agent = AgentService.create("planner-bang", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile(agent.name, "screenshot-999.png", "png");
 
-        var md = "![Screenshot](/api/agents/1/files/screenshot-999.png)\n\n"
-                + "The page shows a dark header.";
+        var md = """
+                ![Screenshot](/api/agents/1/files/screenshot-999.png)
+
+                The page shows a dark header.""";
         var segments = TelegramOutboundPlanner.plan(md, agent.name);
 
         // No segment should be the bare "!" (possibly with whitespace).
         for (var seg : segments) {
             if (seg instanceof TelegramOutboundPlanner.TextSegment ts) {
-                assertFalse(ts.markdown().trim().equals("!"),
+                assertNotEquals("!", ts.markdown().trim(),
                         "planner must not emit a standalone '!' bubble; "
                                 + "the markdown-image prefix bang belongs to the image match: "
                                 + segments);

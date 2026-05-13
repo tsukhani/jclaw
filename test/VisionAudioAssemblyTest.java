@@ -46,7 +46,7 @@ public class VisionAudioAssemblyTest extends UnitTest {
 
     @Test
     public void audioAttachmentBecomesInputAudioContentPart() throws Exception {
-        var att = persistAttachment("clip.mp3", "audio/mpeg",
+        persistAttachment("clip.mp3", "audio/mpeg",
                 MessageAttachment.KIND_AUDIO, new byte[]{1, 2, 3, 4, 5});
 
         // Re-fetch through Hibernate so the assembler exercises the same
@@ -82,7 +82,7 @@ public class VisionAudioAssemblyTest extends UnitTest {
         // audio/wav -> wav; tests that the reverse-lookup delegates to
         // play.libs.MimeTypes + application.conf rather than a hardcoded
         // MIME string match.
-        var att = persistAttachment("voice.wav", "audio/wav",
+        persistAttachment("voice.wav", "audio/wav",
                 MessageAttachment.KIND_AUDIO, new byte[]{9, 8, 7});
 
         var fresh = Message.<Message>findById(message.id);
@@ -125,7 +125,7 @@ public class VisionAudioAssemblyTest extends UnitTest {
 
     @Test
     public void fileAttachmentStillRidesAsFilenameReference() throws Exception {
-        var att = persistAttachment("doc.pdf", "application/pdf",
+        persistAttachment("doc.pdf", "application/pdf",
                 MessageAttachment.KIND_FILE, new byte[]{'p', 'd', 'f'});
 
         var fresh = Message.<Message>findById(message.id);

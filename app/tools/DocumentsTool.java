@@ -192,6 +192,8 @@ public class DocumentsTool implements ToolRegistry.Tool {
                 case "html" -> DocumentWriter.writeHtml(target, content);
                 case "pdf" -> DocumentWriter.writePdf(target, content);
                 case "docx" -> DocumentWriter.writeDocx(target, content);
+                default -> throw new IllegalStateException(
+                        "unreachable: resolved was validated against WRITE_FORMATS: " + resolved);
             }
             long size = Files.size(target);
             var fileName = target.getFileName().toString();
@@ -301,6 +303,11 @@ public class DocumentsTool implements ToolRegistry.Tool {
      * (JCLAW-177). Public + static so {@code DocumentsToolTest} can drive the
      * Tika path without going through Agent/workspace plumbing.
      */
+    // Nested try/catch (S1141) intentional: the inner try-with-resources lets us
+    // distinguish Tika's WriteLimitReached (a SAXException subclass that signals
+    // successful truncation, not failure) from other SAX failures, while the outer
+    // catch handles the orthogonal TikaException + IOException paths.
+    @SuppressWarnings("java:S1141")
     public static String readDocument(Path path) {
         try {
             if (!Files.exists(path)) return "Error: File not found: %s".formatted(path.getFileName());

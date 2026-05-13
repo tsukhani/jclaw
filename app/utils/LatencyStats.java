@@ -39,6 +39,11 @@ public final class LatencyStats {
 
     private LatencyStats() {}
 
+    // S6213: `record` is the semantically correct verb for histogram observation
+    // (matches HdrHistogram.recordValue, Micrometer Timer.record, etc.). Renaming
+    // would force 16+ call sites across agents/, services/, tools/ to use a less
+    // idiomatic name purely to avoid Java's contextual keyword.
+    @SuppressWarnings("java:S6213")
     public static void record(String channel, String segment, long valueMs) {
         var resolved = (channel == null || channel.isBlank()) ? UNKNOWN_CHANNEL : channel;
         BY_CHANNEL
@@ -117,8 +122,10 @@ public final class LatencyStats {
         // to support sum_ms / avg downstream without a second histogram pass.
         private final AtomicLong sumMs = new AtomicLong();
 
+        // S6213: matches public LatencyStats.record API and HdrHistogram.recordValue verb.
+        @SuppressWarnings("java:S6213")
         void record(long value) {
-            long clamped = Math.max(1, Math.min(value, HIGHEST_TRACKABLE_MS));
+            long clamped = Math.clamp(value, 1, HIGHEST_TRACKABLE_MS);
             hdr.recordValue(clamped);
             sumMs.addAndGet(value);
         }

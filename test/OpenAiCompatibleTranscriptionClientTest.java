@@ -99,8 +99,9 @@ public class OpenAiCompatibleTranscriptionClientTest extends UnitTest {
         ConfigService.set("provider.openai.apiKey", "sk-openai-test");
         server.enqueue(jsonResponse(500, "{\"error\":{\"message\":\"upstream lit on fire\"}}"));
 
+        var client = new OpenAiTranscriptionClient(testClient);
         var ex = assertThrows(TranscriptionException.class,
-                () -> new OpenAiTranscriptionClient(testClient).transcribe(attachment));
+                () -> client.transcribe(attachment));
         assertTrue(ex.getMessage().contains("HTTP 500"),
                 "exception message includes status: " + ex.getMessage());
         assertTrue(ex.getMessage().toLowerCase().contains("openai"),
@@ -129,8 +130,9 @@ public class OpenAiCompatibleTranscriptionClientTest extends UnitTest {
         ConfigService.set("provider.openrouter.baseUrl", server.url("/v1").toString());
         ConfigService.delete("provider.openrouter.apiKey");
 
+        var client = new OpenRouterTranscriptionClient(testClient);
         var ex = assertThrows(TranscriptionException.class,
-                () -> new OpenRouterTranscriptionClient(testClient).transcribe(attachment));
+                () -> client.transcribe(attachment));
         assertTrue(ex.getMessage().contains("apiKey"),
                 "exception names the missing key: " + ex.getMessage());
         // Server must not have received a request — config validation runs

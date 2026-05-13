@@ -94,6 +94,7 @@ public class ToolCatalogTest extends UnitTest {
     }
 
     @Test
+    @SuppressWarnings("java:S3415") // false positive: List.of(...) IS the expected literal; the constant is the value under test.
     public void canonicalCategoryOrderMatchesFrontendTaxonomy() {
         // Keep this list in sync with frontend/composables/useToolMeta.ts:TOOL_CATEGORIES.
         // JCLAW-72 collapses the dual source of truth; until then this guards drift.

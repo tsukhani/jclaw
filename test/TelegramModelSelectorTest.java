@@ -356,6 +356,7 @@ public class TelegramModelSelectorTest extends UnitTest {
         throw new IllegalStateException("provider '" + name + "' not in registry");
     }
 
+    @SuppressWarnings("java:S1172") // modelId is a documentation parameter at call sites
     private static void seedProvider(String provider, String modelId, String modelJson) {
         services.ConfigService.set("provider." + provider + ".baseUrl",
                 "http://127.0.0.1:9999/v1");

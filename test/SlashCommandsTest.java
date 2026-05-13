@@ -38,7 +38,11 @@ public class SlashCommandsTest extends UnitTest {
      * Seed a minimal provider config so {@link llm.ProviderRegistry} returns
      * a provider with one model when queried. Used by the {@code /model} and
      * {@code /usage} tests that need {@code resolveModel} to return non-empty.
+     * The {@code modelId} parameter is retained for test-call-site clarity
+     * (it labels which model the JSON represents) even though the JSON itself
+     * already carries the id field.
      */
+    @SuppressWarnings("java:S1172") // modelId is a documentation parameter at call sites
     private static void seedProvider(String provider, String modelId, String modelJson) {
         services.ConfigService.set("provider." + provider + ".baseUrl",
                 "http://127.0.0.1:9999/v1");

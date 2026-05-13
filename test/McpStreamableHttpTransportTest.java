@@ -117,9 +117,11 @@ public class McpStreamableHttpTransportTest extends UnitTest {
     @Test
     public void sseMultiLineDataConcatenatedWithNewline() throws Exception {
         // Spec: when 'data:' appears multiple times in one event, values are joined with \n.
-        var sse = "data: {\"jsonrpc\":\"2.0\",\"id\":1,\n"
-                + "data: \"result\":{\"ok\":true}}\n"
-                + "\n";
+        var sse = """
+                data: {"jsonrpc":"2.0","id":1,
+                data: "result":{"ok":true}}
+
+                """;
         server.enqueue(new MockResponse.Builder()
                 .code(200)
                 .addHeader("Content-Type", "text/event-stream")

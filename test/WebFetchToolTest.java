@@ -59,10 +59,6 @@ public class WebFetchToolTest extends UnitTest {
         CLIENT_FIELD.set(null, originalClient);
     }
 
-    private static void setClient(OkHttpClient c) throws Exception {
-        CLIENT_FIELD.set(null, c);
-    }
-
     /** Interceptor that pops one queued response per call. Throws if an
      *  unexpected extra call arrives (keeps tests honest). Also supports
      *  enqueueing IOExceptions so the catch-all branches are exercisable. */

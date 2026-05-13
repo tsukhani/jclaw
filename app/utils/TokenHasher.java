@@ -52,7 +52,7 @@ public final class TokenHasher {
             for (var b : digest) sb.append(String.format("%02x", b));
             return sb.toString();
         } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("SHA-256 unavailable — JDK install broken?", e);
+            throw new IllegalStateException("SHA-256 unavailable — JDK install broken?", e);
         }
     }
 }

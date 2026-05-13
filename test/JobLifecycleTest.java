@@ -179,8 +179,7 @@ public class JobLifecycleTest extends UnitTest {
         // issues exactly one editMessageText with INTERRUPT_NOTE and clears
         // the checkpoint columns.
         final String botToken = "recovery-bot-token";
-        MockTelegramServer mockServer = new MockTelegramServer();
-        try {
+        try (MockTelegramServer mockServer = new MockTelegramServer()) {
             mockServer.start();
             channels.TelegramChannel.installForTest(botToken, mockServer.telegramUrl());
 
@@ -223,7 +222,6 @@ public class JobLifecycleTest extends UnitTest {
             assertNull(after.activeStreamChatId);
         } finally {
             channels.TelegramChannel.clearForTest(botToken);
-            mockServer.close();
         }
     }
 
