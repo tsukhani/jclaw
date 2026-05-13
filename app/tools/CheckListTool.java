@@ -38,7 +38,10 @@ public class CheckListTool implements ToolRegistry.Tool {
     public String description() {
         return """
                 Create and manage a structured checklist for tracking multi-step work. \
-                Submit a list of items with status (pending, in_progress, completed) and activeForm text. \
+                Submit a list of items; each item requires three fields: \
+                `content` (imperative form, e.g. "Run tests"), \
+                `status` (one of pending, in_progress, completed), and \
+                `activeForm` (present-progressive form, e.g. "Running tests"). \
                 At most one item may be in_progress at a time (zero is also valid, e.g. before starting or after finishing).""";
     }
 
@@ -72,14 +75,24 @@ public class CheckListTool implements ToolRegistry.Tool {
     @Override
     public String execute(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
+        if (!args.has("items") || !args.get("items").isJsonArray()) {
+            return "Error: `items` is required and must be an array.";
+        }
         var itemsArray = args.getAsJsonArray("items");
 
         int inProgressCount = 0;
-        for (var el : itemsArray) {
+        for (int i = 0; i < itemsArray.size(); i++) {
+            var el = itemsArray.get(i);
+            if (!el.isJsonObject()) {
+                return "Error: Item %d must be an object.".formatted(i);
+            }
             var item = el.getAsJsonObject();
-            var content = item.get("content").getAsString();
-            var status = item.get("status").getAsString();
-            var activeForm = item.get("activeForm").getAsString();
+            String content = optString(item, "content");
+            if (content == null) return "Error: Item %d is missing required field `content`.".formatted(i);
+            String status = optString(item, "status");
+            if (status == null) return "Error: Item %d is missing required field `status`.".formatted(i);
+            String activeForm = optString(item, "activeForm");
+            if (activeForm == null) return "Error: Item %d is missing required field `activeForm`.".formatted(i);
 
             if (content.isBlank()) return "Error: All items must have non-blank content.";
             if (activeForm.isBlank()) return "Error: All items must have non-blank activeForm.";
@@ -91,5 +104,11 @@ public class CheckListTool implements ToolRegistry.Tool {
         }
 
         return "Checklist updated successfully (%d items).".formatted(itemsArray.size());
+    }
+
+    private static String optString(com.google.gson.JsonObject item, String key) {
+        var el = item.get(key);
+        if (el == null || el.isJsonNull()) return null;
+        return el.getAsString();
     }
 }

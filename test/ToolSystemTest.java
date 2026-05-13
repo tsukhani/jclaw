@@ -206,6 +206,51 @@ public class ToolSystemTest extends UnitTest {
         assertTrue(result.contains("successfully"), "got: " + result);
     }
 
+    @Test
+    public void checklistRejectsMissingContent() {
+        // Regression: models occasionally omit `content` and send only activeForm+status.
+        // Must return a clean validation error rather than NPE on JsonObject.get(null).
+        var result = ToolRegistry.execute("checklist",
+                """
+                {"items": [
+                    {"activeForm": "Doing the thing", "status": "in_progress"}
+                ]}
+                """, agent);
+        assertTrue(result.startsWith("Error:"), "got: " + result);
+        assertTrue(result.contains("content"), "got: " + result);
+    }
+
+    @Test
+    public void checklistRejectsMissingStatus() {
+        var result = ToolRegistry.execute("checklist",
+                """
+                {"items": [
+                    {"content": "Step 1", "activeForm": "Doing 1"}
+                ]}
+                """, agent);
+        assertTrue(result.startsWith("Error:"), "got: " + result);
+        assertTrue(result.contains("status"), "got: " + result);
+    }
+
+    @Test
+    public void checklistRejectsMissingActiveForm() {
+        var result = ToolRegistry.execute("checklist",
+                """
+                {"items": [
+                    {"content": "Step 1", "status": "pending"}
+                ]}
+                """, agent);
+        assertTrue(result.startsWith("Error:"), "got: " + result);
+        assertTrue(result.contains("activeForm"), "got: " + result);
+    }
+
+    @Test
+    public void checklistRejectsMissingItems() {
+        var result = ToolRegistry.execute("checklist", "{}", agent);
+        assertTrue(result.startsWith("Error:"), "got: " + result);
+        assertTrue(result.contains("items"), "got: " + result);
+    }
+
     // --- FileSystemTools ---
 
     @Test
