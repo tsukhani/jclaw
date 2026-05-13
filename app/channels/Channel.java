@@ -25,6 +25,12 @@ public interface Channel {
      * correctness on virtual-thread-per-task dispatch, where the writer and
      * the reader of the hint can live on different carriers (JCLAW-137).
      */
+    // Sonar java:S1845 flags OK/FAILED constants as case-clashing with the
+    // record's `ok` component, but constant-instances-named-after-the-concept
+    // is canonical Java idiom (cf. Optional.empty(), Collections.emptyList())
+    // and is the form every call site already uses. Renaming would be net
+    // negative for readability.
+    @SuppressWarnings("java:S1845")
     record SendResult(boolean ok, long retryAfterMs) {
         public static final SendResult OK = new SendResult(true, 0L);
         public static final SendResult FAILED = new SendResult(false, 0L);

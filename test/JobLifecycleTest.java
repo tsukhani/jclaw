@@ -121,7 +121,7 @@ public class JobLifecycleTest extends UnitTest {
         // the logs. The substantive cleanup logic is covered by
         // PlaywrightToolTest.idleSessionCleanupDoesNotThrow; this test
         // locks in that the job wiring itself is sound.
-        new jobs.BrowserCleanupJob().doJob();
+        Assertions.assertDoesNotThrow(() -> new jobs.BrowserCleanupJob().doJob());
     }
 
     // === ShutdownJob ===
@@ -131,7 +131,7 @@ public class JobLifecycleTest extends UnitTest {
         // The job chains three shutdown-style calls (task poller, browser
         // sessions, telegram poller). In a unit-test context with none of
         // those running, the job must still complete cleanly.
-        new jobs.ShutdownJob().doJob();
+        Assertions.assertDoesNotThrow(() -> new jobs.ShutdownJob().doJob());
     }
 
     // === TelegramStreamingRecoveryJob (JCLAW-95) ===
@@ -140,8 +140,7 @@ public class JobLifecycleTest extends UnitTest {
     public void streamingRecoveryIsNoOpWithNoOrphans() {
         // Empty DB — nothing to recover. Must not throw; must not log any
         // "recovery: N orphaned..." line.
-        new jobs.TelegramStreamingRecoveryJob().doJob();
-        // If it threw, the test would already have failed.
+        Assertions.assertDoesNotThrow(() -> new jobs.TelegramStreamingRecoveryJob().doJob());
     }
 
     @Test
@@ -262,7 +261,7 @@ public class JobLifecycleTest extends UnitTest {
         // No bindings in DB → job must run cleanly without throwing or
         // attempting any network calls. Mirrors TelegramStreamingRecoveryJob's
         // empty-DB defensive posture.
-        new jobs.TelegramCommandsRegistrationJob().doJob();
+        Assertions.assertDoesNotThrow(() -> new jobs.TelegramCommandsRegistrationJob().doJob());
     }
 
     @Test

@@ -27,7 +27,7 @@ import java.util.ArrayList;
  */
 public class MetaDefenderCloudScanner extends ConfiguredHashScanner {
 
-    public static final String NAME = "MetaDefender";
+    private static final String NAME = "MetaDefender";
 
     private static final OneShotWarning MISSING_KEY_WARNING = new OneShotWarning();
 

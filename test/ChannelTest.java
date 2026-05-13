@@ -427,9 +427,8 @@ public class ChannelTest extends UnitTest {
         thread.start();
         thread.join(5_000);
 
-        if (thrown.get() != null) {
-            throw new AssertionError("findByType threw from a background thread: " + thrown.get().getMessage(), thrown.get());
-        }
+        assertNull(thrown.get(), () -> "findByType threw from a background thread: "
+                + (thrown.get() == null ? "" : thrown.get().getMessage()));
     }
 
     // === Channel.sendWithRetry ===
@@ -827,7 +826,7 @@ public class ChannelTest extends UnitTest {
     public void telegramEvictTokenIgnoresNull() {
         // Defensive: the binding-delete path calls evictToken unconditionally.
         // A null bot token (misconfigured binding) must not throw.
-        TelegramChannel.evictToken(null); // must not throw
+        Assertions.assertDoesNotThrow(() -> TelegramChannel.evictToken(null));
     }
 
     // === ChannelType generic dispatch (Phase 3) ===

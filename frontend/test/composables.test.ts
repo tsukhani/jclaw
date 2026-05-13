@@ -116,17 +116,21 @@ describe('useEventBus', () => {
     const { on, off } = useEventBus()
     const handler = vi.fn()
 
-    // Registration should not throw
-    on('test.event', handler)
-    off('test.event', handler)
+    // Registration + immediate removal should not throw
+    expect(() => {
+      on('test.event', handler)
+      off('test.event', handler)
+    }).not.toThrow()
   })
 
   it('removes handler via off()', () => {
     const { on, off } = useEventBus()
     const handler = vi.fn()
 
-    on('remove.test', handler)
-    off('remove.test', handler)
+    expect(() => {
+      on('remove.test', handler)
+      off('remove.test', handler)
+    }).not.toThrow()
   })
 
   it('supports multiple handlers for the same event type', () => {
@@ -134,11 +138,13 @@ describe('useEventBus', () => {
     const handler1 = vi.fn()
     const handler2 = vi.fn()
 
-    on('multi.event', handler1)
-    on('multi.event', handler2)
+    expect(() => {
+      on('multi.event', handler1)
+      on('multi.event', handler2)
 
-    off('multi.event', handler1)
-    off('multi.event', handler2)
+      off('multi.event', handler1)
+      off('multi.event', handler2)
+    }).not.toThrow()
   })
 
   it('off() is safe for unregistered handler', () => {
