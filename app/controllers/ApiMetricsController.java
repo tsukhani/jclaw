@@ -174,7 +174,7 @@ public class ApiMetricsController extends Controller {
         if (channelType != null) {
             jpql.append(" AND c.channelType = ?").append(paramIdx);
             channelParamIdx = paramIdx;
-            paramIdx++;
+            // paramIdx not incremented — no further branches consume it.
         }
         jpql.append(" ORDER BY m.createdAt ASC");
 

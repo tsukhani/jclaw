@@ -64,6 +64,10 @@ public class Message extends Model {
      * for user turns without attachments. Cascade deletes the rows and the
      * on-disk storage-path references fall out with them.
      */
+    // Hibernate PersistentBag isn't Serializable, but JClaw never serializes
+    // JPA entities off-heap (no session replication, no caching). The
+    // Serializable on GenericModel is incidental — fields are JPA-tracked.
+    @SuppressWarnings("java:S1948")
     @OneToMany(mappedBy = "message", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("id ASC")
     public List<MessageAttachment> attachments;

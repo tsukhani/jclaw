@@ -37,7 +37,8 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
      *  the connection manager — the manager supplies a Lambda at registration. */
     @FunctionalInterface
     public interface ToolInvoker {
-        CallToolResult invoke(String serverName, String toolName, JsonObject arguments) throws Exception;
+        CallToolResult invoke(String serverName, String toolName, JsonObject arguments)
+                throws java.io.IOException, McpException;
     }
 
     public McpToolAdapter(String serverName, McpToolDef def, ToolInvoker invoker) {

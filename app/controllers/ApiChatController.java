@@ -261,13 +261,7 @@ public class ApiChatController extends Controller {
                 if (ext.isEmpty()) ext = canonicalExtensionForMime(sniffedMime);
                 var onDiskName = uuid + (ext.isEmpty() ? "" : "." + ext);
 
-                java.nio.file.Path target;
-                try {
-                    target = AgentService.acquireContained(stagingDir, onDiskName);
-                } catch (SecurityException e) {
-                    error(400, "Invalid filename: " + upload.getFileName());
-                    return;
-                }
+                var target = acquireContainedOr400(stagingDir, onDiskName, upload.getFileName());
                 Files.copy(f.toPath(), target, StandardCopyOption.REPLACE_EXISTING);
 
                 var entry = new HashMap<String, Object>();
@@ -287,6 +281,22 @@ public class ApiChatController extends Controller {
         var resp = new HashMap<String, Object>();
         resp.put("files", results);
         renderJSON(gson.toJson(resp));
+    }
+
+    /**
+     * Resolve {@code leaf} against {@code stagingDir} via path containment.
+     * Translates {@link SecurityException} (escape attempt) into a 400 so the
+     * caller can stay on the IO happy-path without nesting try blocks.
+     * {@code error()} throws — this method does not return on the failure path.
+     */
+    private static java.nio.file.Path acquireContainedOr400(
+            java.nio.file.Path stagingDir, String leaf, String originalName) {
+        try {
+            return AgentService.acquireContained(stagingDir, leaf);
+        } catch (SecurityException e) {
+            error(400, "Invalid filename: " + originalName);
+            return null; // unreachable — error() throws
+        }
     }
 
     private static String extensionFromFilename(String safeName) {
