@@ -1,6 +1,8 @@
 package models;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.Cache;
+import org.hibernate.annotations.CacheConcurrencyStrategy;
 import play.db.jpa.Model;
 
 import java.time.Instant;
@@ -33,6 +35,17 @@ import java.util.List;
         @Index(name = "idx_mcp_server_enabled", columnList = "enabled"),
         @Index(name = "idx_mcp_server_status", columnList = "status")
 })
+// JCLAW-205 follow-up: Hibernate L2 cache via Caffeine. The mcp_server
+// table is operator-level config — read on every McpConnectionManager
+// reconcile (startup + after every CRUD), but mutated only via the
+// Settings → MCP Servers UI (low frequency). Every write that matters
+// goes through JPA (.save() / .delete() via McpServerService and
+// ApiMcpServersController), so READ_WRITE auto-invalidation keeps the
+// cache consistent. Status-field writes from the connection manager
+// (status, lastConnectedAt, lastDisconnectedAt, lastError) also flow
+// through .save(), so a CONNECTED → ERROR transition invalidates the
+// row and the next reader sees fresh state.
+@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 public class McpServer extends Model {
 
     public enum Transport { STDIO, HTTP }
