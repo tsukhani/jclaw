@@ -372,8 +372,8 @@ public class PerformanceFixesTest extends UnitTest {
             if (baseline >= 0) {
                 var active = activeConnectionsDuringLlm.get();
                 assertTrue(active <= baseline,
-                        "Expected no extra connections beyond test-infrastructure baseline of %d during the LLM call, " +
-                        "but found %d — run() is leaking a JDBC connection".formatted(baseline, active));
+                        ("Expected no extra connections beyond test-infrastructure baseline of %d during the LLM call, " +
+                         "but found %d — run() is leaking a JDBC connection").formatted(baseline, active));
             }
 
             llmGate.countDown();

@@ -104,9 +104,62 @@ sonar {
         // without benefit; doing it across all 90 tests would touch every file
         // with no functional change. Suppressed project-wide for the test/
         // tree only — main-source files (app/) still get flagged correctly.
-        property("sonar.issue.ignore.multicriteria", "e1")
+        //
+        // S3252 ("Use static access with GenericModel"): play1's bytecode
+        // enhancer injects the calling class at compile time, so every model
+        // query is written as `Agent.findById(123)` / `Conversation.count(...)`
+        // on the derived class. Calling `GenericModel.findById(...)` directly
+        // wouldn't have the class context and wouldn't compile. The rule
+        // can't be satisfied without abandoning the framework's idiom; ignore
+        // everywhere it could fire (app/ and test/ both invoke model statics).
+        //
+        // S2925 (Thread.sleep in tests): the rule wants Awaitility-style
+        // polling. Most of our sleeps are in tests that deliberately exercise
+        // timing-bound behavior (streaming SSE pacing, virtual-thread
+        // scheduling, MCP reconnect backoff, conversation queue eviction,
+        // per-listener notification timeouts). Swapping to Awaitility would
+        // be a 50-site rewrite with no behavioral improvement; the sleeps
+        // are the right primitive for "verify A happens before B happens
+        // before C". Test-tree scope only.
+        //
+        // S3457 (\n vs %n): JClaw's String.format calls produce text bound
+        // for LLM context windows, HTTP response bodies, and tool output —
+        // never OS-native text files. On macOS/Linux %n == \n, but on
+        // Windows %n == \r\n, which would inject \r into LLM context (the
+        // model is trained on \n), break golden-string assertions in tests,
+        // and corrupt JSON payloads downstream. Keeping \n is the right
+        // call; scope to app/ so the one real S3457 hit in test/ (an actual
+        // argument-count mismatch) still gets caught.
+        //
+        // S125 (commented-out code): JClaw's coding style uses dense `//`
+        // blocks to document non-obvious logic, design tradeoffs, and JCLAW
+        // ticket references inline. Sonar's heuristic treats multi-line `//`
+        // comments containing code-like tokens (identifiers, parens, dots)
+        // as commented-out code; a sample of 18/27 hits confirmed 100%
+        // false-positive — every flagged block is documentation. Suppressed
+        // project-wide.
+        //
+        // S108 (empty code blocks): JClaw uses Java 21's unnamed-variable
+        // syntax (`catch (IOException _) {}`, `catch (RuntimeException ignored)
+        // {}`) to express intentional exception discard at the type-system
+        // level. Sample of 14 hits across both app/ and test/ confirmed
+        // 100% intentional empty catches for best-effort cleanup (file
+        // deletes, stream closes, parse-error fallbacks). Sonar's rule
+        // pre-dates the `_` syntax convention; the unnamed variable IS the
+        // intent documentation. Suppressed project-wide.
+        property("sonar.issue.ignore.multicriteria", "e1,e2,e3,e4,e5,e6")
         property("sonar.issue.ignore.multicriteria.e1.ruleKey", "java:S1220")
         property("sonar.issue.ignore.multicriteria.e1.resourceKey", "test/*.java")
+        property("sonar.issue.ignore.multicriteria.e2.ruleKey", "java:S3252")
+        property("sonar.issue.ignore.multicriteria.e2.resourceKey", "**/*.java")
+        property("sonar.issue.ignore.multicriteria.e3.ruleKey", "java:S2925")
+        property("sonar.issue.ignore.multicriteria.e3.resourceKey", "test/*.java")
+        property("sonar.issue.ignore.multicriteria.e4.ruleKey", "java:S3457")
+        property("sonar.issue.ignore.multicriteria.e4.resourceKey", "app/**/*.java")
+        property("sonar.issue.ignore.multicriteria.e5.ruleKey", "java:S125")
+        property("sonar.issue.ignore.multicriteria.e5.resourceKey", "**/*.java")
+        property("sonar.issue.ignore.multicriteria.e6.ruleKey", "java:S108")
+        property("sonar.issue.ignore.multicriteria.e6.resourceKey", "**/*.java")
 
         // sonar.host.url is deliberately omitted; Jenkins injects it via
         // withSonarQubeEnv('SonarQube'), which reads from Manage Jenkins →

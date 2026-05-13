@@ -362,8 +362,8 @@ public class TelegramChannel implements Channel {
 
         boolean allOk = true;
         for (var segment : segments) {
-            if (segment instanceof TelegramOutboundPlanner.TextSegment ts) {
-                if (!sendTextSegment(channel, chatId, ts.markdown())) allOk = false;
+            if (segment instanceof TelegramOutboundPlanner.TextSegment(String markdown)) {
+                if (!sendTextSegment(channel, chatId, markdown)) allOk = false;
             }
             else if (segment instanceof TelegramOutboundPlanner.FileSegment fs) {
                 // JCLAW-126: the quality-duplicate document emit (same file as
@@ -507,21 +507,20 @@ public class TelegramChannel implements Channel {
                 message.attachments().size());
         for (var pending : message.attachments()) {
             var result = TelegramFileDownloader.download(sendToken, pending, sendAgent.name);
-            if (result instanceof TelegramFileDownloader.Ok ok) {
-                inputs.add(ok.input());
-            } else if (result instanceof TelegramFileDownloader.SizeExceeded se) {
+            if (result instanceof TelegramFileDownloader.Ok(var input)) {
+                inputs.add(input);
+            } else if (result instanceof TelegramFileDownloader.SizeExceeded(var actualBytes, var limit)) {
                 sendMessage(sendToken, sendChatId,
                         "That file is too large — Telegram bots can only accept up to %d MB.".formatted(
                                 TelegramFileDownloader.MAX_FILE_BYTES / (1024 * 1024)));
                 EventLogger.warn("channel", sendAgent.name, "telegram",
-                        "Rejected upload: %d bytes exceeds %d limit".formatted(
-                                se.actualBytes(), se.limit()));
+                        "Rejected upload: %d bytes exceeds %d limit".formatted(actualBytes, limit));
                 return null;
-            } else if (result instanceof TelegramFileDownloader.DownloadFailed df) {
+            } else if (result instanceof TelegramFileDownloader.DownloadFailed(var reason)) {
                 sendMessage(sendToken, sendChatId,
                         "Sorry, I couldn't download your file from Telegram.");
                 EventLogger.warn("channel", sendAgent.name, "telegram",
-                        "Download failed: %s".formatted(df.reason()));
+                        "Download failed: %s".formatted(reason));
                 return null;
             }
         }

@@ -646,17 +646,17 @@ public class FileSystemTools implements ToolRegistry.Tool {
         for (var entry : indexed) {
             var op = parsed.get(entry[0]);
             switch (op) {
-                case LineOp.Replace r -> {
-                    lines.subList(r.startLine() - 1, r.endLine()).clear();
-                    lines.addAll(r.startLine() - 1, splitContentLines(r.content()));
+                case LineOp.Replace(var startLine, var endLine, var content) -> {
+                    lines.subList(startLine - 1, endLine).clear();
+                    lines.addAll(startLine - 1, splitContentLines(content));
                     replaced++;
                 }
-                case LineOp.Insert ins -> {
-                    lines.addAll(ins.startLine() - 1, splitContentLines(ins.content()));
+                case LineOp.Insert(var startLine, var content) -> {
+                    lines.addAll(startLine - 1, splitContentLines(content));
                     inserted++;
                 }
-                case LineOp.Delete d -> {
-                    lines.subList(d.startLine() - 1, d.endLine()).clear();
+                case LineOp.Delete(var startLine, var endLine) -> {
+                    lines.subList(startLine - 1, endLine).clear();
                     deleted++;
                 }
             }
@@ -880,21 +880,21 @@ public class FileSystemTools implements ToolRegistry.Tool {
             var op = r.op;
             var opIndex = i + 1;
             switch (op) {
-                case FileOp.Add add -> {
+                case FileOp.Add(var path, var content) -> {
                     if (Files.exists(r.target)) {
-                        return "Error: op #%d Add File '%s' failed — file already exists".formatted(opIndex, add.path());
+                        return "Error: op #%d Add File '%s' failed — file already exists".formatted(opIndex, path);
                     }
-                    plans.add(new OpPlan(r, add.content(), null));
+                    plans.add(new OpPlan(r, content, null));
                 }
-                case FileOp.Delete del -> {
+                case FileOp.Delete(var path) -> {
                     if (!Files.exists(r.target)) {
-                        return "Error: op #%d Delete File '%s' failed — file does not exist".formatted(opIndex, del.path());
+                        return "Error: op #%d Delete File '%s' failed — file does not exist".formatted(opIndex, path);
                     }
                     String snapshot;
                     try {
                         snapshot = Files.readString(r.target);
                     } catch (IOException e) {
-                        return "Error: op #%d Delete File '%s' snapshot failed — %s".formatted(opIndex, del.path(), e.getMessage());
+                        return "Error: op #%d Delete File '%s' snapshot failed — %s".formatted(opIndex, path, e.getMessage());
                     }
                     plans.add(new OpPlan(r, null, snapshot));
                 }
@@ -930,13 +930,13 @@ public class FileSystemTools implements ToolRegistry.Tool {
                         }
                         committed.add(new CommittedOp.Added(r.target));
                     }
-                    case FileOp.Delete del -> {
+                    case FileOp.Delete(var path) -> {
                         try {
                             Files.deleteIfExists(r.target);
                             committed.add(new CommittedOp.Deleted(r.target, plan.preSnapshot));
                         } catch (IOException e) {
                             rollback(committed);
-                            return "Error applying Delete File '%s': %s".formatted(del.path(), e.getMessage());
+                            return "Error applying Delete File '%s': %s".formatted(path, e.getMessage());
                         }
                     }
                     case FileOp.Update upd -> {
@@ -995,9 +995,9 @@ public class FileSystemTools implements ToolRegistry.Tool {
             var c = committed.get(i);
             try {
                 switch (c) {
-                    case CommittedOp.Added a -> Files.deleteIfExists(a.path());
-                    case CommittedOp.Updated u -> Files.writeString(u.path(), u.preSnapshot());
-                    case CommittedOp.Deleted d -> Files.writeString(d.path(), d.preSnapshot());
+                    case CommittedOp.Added(var path) -> Files.deleteIfExists(path);
+                    case CommittedOp.Updated(var path, var preSnapshot) -> Files.writeString(path, preSnapshot);
+                    case CommittedOp.Deleted(var path, var preSnapshot) -> Files.writeString(path, preSnapshot);
                 }
             } catch (IOException _) {
                 // swallow — best effort.
@@ -1021,12 +1021,12 @@ public class FileSystemTools implements ToolRegistry.Tool {
             var newBlock = new StringBuilder();
             for (var line : chunk.lines()) {
                 switch (line) {
-                    case PatchLine.ContextLine ctx -> {
-                        oldBlock.append(ctx.text()).append('\n');
-                        newBlock.append(ctx.text()).append('\n');
+                    case PatchLine.ContextLine(var text) -> {
+                        oldBlock.append(text).append('\n');
+                        newBlock.append(text).append('\n');
                     }
-                    case PatchLine.RemoveLine r -> oldBlock.append(r.text()).append('\n');
-                    case PatchLine.AddLine a -> newBlock.append(a.text()).append('\n');
+                    case PatchLine.RemoveLine(var text) -> oldBlock.append(text).append('\n');
+                    case PatchLine.AddLine(var text) -> newBlock.append(text).append('\n');
                 }
             }
             var oldText = oldBlock.toString();

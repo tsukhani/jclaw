@@ -219,8 +219,8 @@ public final class TelegramOutboundPlanner {
      * in one markdown blob.
      */
     private static void appendOrMergeText(List<Segment> segments, String text) {
-        if (!segments.isEmpty() && segments.get(segments.size() - 1) instanceof TextSegment prev) {
-            segments.set(segments.size() - 1, new TextSegment(prev.markdown() + text));
+        if (!segments.isEmpty() && segments.get(segments.size() - 1) instanceof TextSegment(String markdown)) {
+            segments.set(segments.size() - 1, new TextSegment(markdown + text));
         } else {
             segments.add(new TextSegment(text));
         }
