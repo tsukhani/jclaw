@@ -82,10 +82,10 @@ public class ApiProvidersController extends Controller {
 
         var result = ModelDiscoveryService.discover(name, baseUrl, apiKey);
         switch (result) {
-            case DiscoveryResult.Ok ok ->
-                    renderJSON(gson.toJson(new DiscoverModelsResponse(ok.models(), ok.models().size())));
-            case DiscoveryResult.Error err ->
-                    error(err.statusCode(), err.message());
+            case DiscoveryResult.Ok(var models) ->
+                    renderJSON(gson.toJson(new DiscoverModelsResponse(models, models.size())));
+            case DiscoveryResult.Error(var statusCode, var message) ->
+                    error(statusCode, message);
         }
     }
 
