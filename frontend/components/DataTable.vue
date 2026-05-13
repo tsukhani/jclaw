@@ -98,6 +98,7 @@ function sortIcon(sorted: false | 'asc' | 'desc') {
 </script>
 
 <template>
+  <!-- NOSONAR(Web:S6845) — tabindex=0 is intentional: the wrapper is the keyboard focus target so arrow-key handlers (see @keydown) can drive row navigation across the semantic <Table> below. -->
   <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- focus-trap wrapper around semantic <Table>; tabindex + keydown provides arrow-key row navigation -->
   <div
     ref="tableRef"

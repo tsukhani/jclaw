@@ -13,14 +13,16 @@ const loading = ref(false)
 // Previously this page forced light mode — but once the user has set a
 // password and picked a theme, returning to /login after sign-out in dark
 // mode would flash them white. Stay consistent with whatever they chose.
+function resolveEffectiveTheme(saved: string | null, prefersDark: boolean): 'dark' | 'light' {
+  if (saved === 'dark') return 'dark'
+  if (saved === 'light') return 'light'
+  return prefersDark ? 'dark' : 'light'
+}
+
 onMounted(() => {
   const saved = localStorage.getItem('jclaw-theme')
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-  const effective = saved === 'dark'
-    ? 'dark'
-    : saved === 'light'
-      ? 'light'
-      : prefersDark ? 'dark' : 'light'
+  const effective = resolveEffectiveTheme(saved, prefersDark)
   document.documentElement.classList.toggle('dark', effective === 'dark')
 })
 
@@ -118,6 +120,7 @@ const passwordId = useId()
         >
           <span class="block text-sm font-medium text-fg-strong mb-2">Password</span>
           <div class="relative">
+            <!-- NOSONAR(Web:S6840) — autocomplete="current-password" is a valid WHATWG token; the type attribute is bound dynamically (:type) to toggle visibility between 'password' and 'text', which Sonar's static analyzer cannot resolve. -->
             <input
               :id="passwordId"
               v-model="password"

@@ -44,7 +44,7 @@ const [
   useAsyncData<number>('dashboard-conversation-count', async () => {
     const res = await $fetch.raw<unknown[]>('/api/conversations?limit=1')
     const headerTotal = res.headers.get('x-total-count')
-    return headerTotal ? parseInt(headerTotal, 10) : (res._data?.length ?? 0)
+    return headerTotal ? Number.parseInt(headerTotal, 10) : (res._data?.length ?? 0)
   }),
 ])
 

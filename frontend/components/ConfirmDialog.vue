@@ -75,6 +75,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
       leave-from-class="opacity-100"
       leave-to-class="opacity-0"
     >
+      <!-- NOSONAR(Web:S6819) — modal needs role="dialog" + aria-modal for screen readers; the HTML <dialog> element has incompatible open/close semantics with Vue Teleport + Transition. -->
       <!-- eslint-disable-next-line vuejs-accessibility/click-events-have-key-events, vuejs-accessibility/no-static-element-interactions -- modal backdrop; Escape is handled globally via document keydown listener -->
       <div
         v-if="state.open"

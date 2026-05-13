@@ -102,7 +102,7 @@ export function hydrateToolCalls(msgs: RawRow[]): void {
   if (pending.length) {
     for (let i = msgs.length - 1; i >= 0; i--) {
       const row = msgs[i]
-      if (row && row.role === 'assistant') {
+      if (row?.role === 'assistant') {
         row.toolCalls = pending
         break
       }

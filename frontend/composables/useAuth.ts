@@ -54,6 +54,8 @@ export function useAuth() {
    * deliberately cleared password). Unauthenticated endpoint — safe to
    * call from the login and setup pages.
    */
+  // NOSONAR(typescript:S7721) — composable returns this function as part of
+  // its public API; hoisting it to module scope would split the surface area.
   async function checkPasswordSet(): Promise<boolean> {
     try {
       const r = await $fetch<{ passwordSet: boolean }>('/api/auth/status')
@@ -69,6 +71,8 @@ export function useAuth() {
 
   /** Submit the first-time password. Server rejects with 409 if a password
    *  is already configured, which the caller handles as "go back to /login." */
+  // NOSONAR(typescript:S7721) — composable returns this function as part of
+  // its public API; hoisting it to module scope would split the surface area.
   async function setupPassword(pass: string): Promise<{ ok: boolean, error?: string }> {
     try {
       await $fetch('/api/auth/setup', {

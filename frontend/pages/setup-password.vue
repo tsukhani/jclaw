@@ -15,14 +15,16 @@ const loading = ref(false)
 // Respect the stored theme preference (unlike /login which forces light).
 // The setup screen is the user's first impression — if they've already
 // toggled dark mode via system preference it'd be jarring to flash light.
+function resolveEffectiveTheme(saved: string | null, prefersDark: boolean): 'dark' | 'light' {
+  if (saved === 'dark') return 'dark'
+  if (saved === 'light') return 'light'
+  return prefersDark ? 'dark' : 'light'
+}
+
 onMounted(() => {
   const saved = localStorage.getItem('jclaw-theme')
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-  const effective = saved === 'dark'
-    ? 'dark'
-    : saved === 'light'
-      ? 'light'
-      : prefersDark ? 'dark' : 'light'
+  const effective = resolveEffectiveTheme(saved, prefersDark)
   document.documentElement.classList.toggle('dark', effective === 'dark')
 })
 
@@ -126,6 +128,7 @@ const confirmPasswordId = useId()
         >
           <span class="block text-sm font-medium text-fg-strong mb-2">New password</span>
           <div class="relative">
+            <!-- NOSONAR(Web:S6840) — autocomplete="new-password" is a valid WHATWG token; the type attribute is bound dynamically (:type) to toggle visibility between 'password' and 'text', which Sonar's static analyzer cannot resolve. -->
             <input
               :id="newPasswordId"
               v-model="newPassword"
@@ -159,6 +162,7 @@ const confirmPasswordId = useId()
         >
           <span class="block text-sm font-medium text-fg-strong mb-2">Confirm password</span>
           <div class="relative">
+            <!-- NOSONAR(Web:S6840) — autocomplete="new-password" is a valid WHATWG token; the type attribute is bound dynamically (:type) to toggle visibility between 'password' and 'text', which Sonar's static analyzer cannot resolve. -->
             <input
               :id="confirmPasswordId"
               v-model="confirmPassword"

@@ -248,7 +248,7 @@ const windowDays = computed(() => {
   let earliest = Date.now()
   for (const r of allRows) {
     const t = Date.parse(r.timestamp)
-    if (!isNaN(t) && t < earliest) earliest = t
+    if (!Number.isNaN(t) && t < earliest) earliest = t
   }
   const spanMs = Math.max(0, Date.now() - earliest)
   return Math.max(1, spanMs / (24 * 60 * 60 * 1000))
@@ -582,7 +582,7 @@ function exportCsv() {
   a.download = `chat-cost_${filterTag}_${new Date().toISOString().slice(0, 10)}.csv`
   document.body.appendChild(a)
   a.click()
-  document.body.removeChild(a)
+  a.remove()
   URL.revokeObjectURL(url)
 }
 

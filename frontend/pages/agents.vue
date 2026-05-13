@@ -975,6 +975,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         class="bg-surface-elevated border border-border"
         data-tour="main-agent"
       >
+        <!-- NOSONAR(Web:S6819) — row wraps a ModelCapabilityPills child that emits its own click; a real <button> would nest interactive elements. role="button" + tabindex + keydown handlers expose the row click target without violating button-nesting rules. -->
         <div
           v-if="mainAgent"
           role="button"
@@ -1024,6 +1025,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         Additional agents you create for specific channels, peers, or workflows.
       </p>
       <div class="bg-surface-elevated border border-border">
+        <!-- NOSONAR(Web:S6819) — row contains a nested checkbox <input> and a ModelCapabilityPills child; wrapping in <button> would nest interactive elements. role="button" + tabindex + keydown handlers expose the row click target safely. -->
         <div
           v-for="agent in customAgents"
           :key="agent.id"
@@ -1744,6 +1746,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
     </div>
 
     <!-- System prompt breakdown dialog -->
+    <!-- NOSONAR(Web:S6819) — modal needs role="dialog" + aria-modal for screen readers; the HTML <dialog> element's open/close semantics conflict with v-if-driven rendering. -->
     <!-- eslint-disable-next-line vuejs-accessibility/click-events-have-key-events, vuejs-accessibility/no-static-element-interactions -- modal backdrop; Escape is handled globally via document keydown listener -->
     <div
       v-if="promptBreakdownOpen"

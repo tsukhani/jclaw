@@ -194,15 +194,17 @@ export function formatConversationCost(breakdown: ConversationCostBreakdown): st
  *   ollama-cloud/kimi-k2: $0.00 / 3 turns
  *   openrouter/google-flash-preview: $0.0149 / 4 turns
  */
+function formatPerModelCost(total: number): string {
+  if (total === 0) return '$0.00'
+  if (total < 0.0001) return '< $0.0001'
+  return '$' + total.toFixed(4)
+}
+
 export function formatConversationCostTooltip(breakdown: ConversationCostBreakdown): string {
   return breakdown.perModel
     .map((pm) => {
       const label = pm.modelProvider ? `${pm.modelProvider}/${pm.modelId}` : pm.modelId
-      const cost = pm.total === 0
-        ? '$0.00'
-        : pm.total < 0.0001
-          ? '< $0.0001'
-          : '$' + pm.total.toFixed(4)
+      const cost = formatPerModelCost(pm.total)
       return `${label}: ${cost} / ${pm.turnCount} turn${pm.turnCount === 1 ? '' : 's'}`
     })
     .join('\n')

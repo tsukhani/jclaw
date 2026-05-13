@@ -56,7 +56,9 @@ function kFormat(n: number): string {
   if (!n) return '0'
   if (n < 1000) return String(n)
   const k = n / 1000
-  return k >= 100 ? `${k.toFixed(1)}k` : `${k.toFixed(k < 10 ? 2 : 1)}k`
+  if (k >= 100) return `${k.toFixed(1)}k`
+  const digits = k < 10 ? 2 : 1
+  return `${k.toFixed(digits)}k`
 }
 
 const triggerRight = computed(() => capacity.value ? kFormat(capacity.value) : '—')

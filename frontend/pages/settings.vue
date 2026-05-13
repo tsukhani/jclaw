@@ -717,7 +717,7 @@ async function updateSearchRecencyFilter(providerId: string, value: string) {
 function searchPriority(providerId: string): number {
   const entries = configData.value?.entries ?? []
   const entry = entries.find(e => e.key === `search.${providerId}.priority`)
-  return entry ? parseInt(entry.value, 10) : 99
+  return entry ? Number.parseInt(entry.value, 10) : 99
 }
 
 /** Provider IDs sorted by their configured priority. */

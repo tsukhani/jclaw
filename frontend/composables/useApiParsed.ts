@@ -23,7 +23,8 @@ export class SchemaParseError extends Error {
   readonly issues: z.core.$ZodIssue[]
 
   constructor(url: string, issues: z.core.$ZodIssue[]) {
-    super(`Schema validation failed for ${url}: ${issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ')}`)
+    const detail = issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ')
+    super(`Schema validation failed for ${url}: ${detail}`)
     this.name = 'SchemaParseError'
     this.url = url
     this.issues = issues

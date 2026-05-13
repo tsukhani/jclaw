@@ -335,6 +335,7 @@ const plot = computed(() => {
       Not enough samples yet for this segment
     </div>
 
+    <!-- NOSONAR(Web:S6819) — role="img" on inline SVG is the WAI-ARIA-recommended way to expose decorative-but-meaningful charts to screen readers (paired with aria-label); no semantic HTML alternative for a custom data plot. -->
     <svg
       v-else
       :viewBox="`0 0 ${VIEWBOX_W} ${VIEWBOX_H}`"

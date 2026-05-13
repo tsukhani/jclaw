@@ -136,7 +136,7 @@ function exportConversation() {
   a.download = `conversation-${c.id}.md`
   document.body.appendChild(a)
   a.click()
-  document.body.removeChild(a)
+  a.remove()
   URL.revokeObjectURL(url)
 }
 </script>
