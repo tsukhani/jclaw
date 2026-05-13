@@ -99,8 +99,35 @@ public class ApiToken extends Model {
         if (revokedAt == null) revokedAt = Instant.now();
     }
 
+    /** Threshold for the throttle in {@link #markUsed}. Bearer auth fires
+     *  on every {@code /api/**} call; without throttling, each request
+     *  would UPDATE this row, which invalidates the Hibernate L2 query-
+     *  cache entry for {@link #findActiveByPlaintext} that the same
+     *  request just populated. 60 seconds keeps the "last used" Settings
+     *  UI display honest at minute granularity while letting the query
+     *  cache actually serve repeated lookups within the window.
+     *
+     *  <p>Public so the default-package test class can pin the value
+     *  without duplicating it (the test classpath isn't in the
+     *  {@code models} package, so a package-private constant would be
+     *  invisible). */
+    public static final long MARK_USED_THROTTLE_SECONDS = 60;
+
+    /** Update {@link #lastUsedAt} only if it's null or older than
+     *  {@link #MARK_USED_THROTTLE_SECONDS}. When the field doesn't
+     *  change, Hibernate's dirty-check skips the UPDATE entirely on
+     *  the next save() — preserving both the query-cache entry and the
+     *  L2 entity-cache entry for this row.
+     *
+     *  <p>The audit signal isn't lost: an operator looking at the
+     *  Settings → API Tokens page sees "last used N seconds/minutes
+     *  ago" with a worst-case staleness of one throttle interval. For
+     *  the UI's purpose ("is this token still in use?") that's plenty. */
     public void markUsed() {
-        lastUsedAt = Instant.now();
+        var now = Instant.now();
+        if (lastUsedAt == null || lastUsedAt.isBefore(now.minusSeconds(MARK_USED_THROTTLE_SECONDS))) {
+            lastUsedAt = now;
+        }
     }
 
     /** Resolve a plaintext bearer token to its row. Returns null if no
@@ -109,16 +136,30 @@ public class ApiToken extends Model {
      *  once existed). The 64-char {@code secret_hash} index makes this
      *  an O(1) hit even with many active tokens.
      *
+     *  <p>Hibernate query-cache enabled: same plaintext within the
+     *  {@link #markUsed} throttle window returns from cache without
+     *  hitting the DB at all. The query cache is opted in per-query
+     *  rather than globally — only the bearer-auth hot path needs it,
+     *  and other ApiToken queries (e.g. {@link #listForOwner}) intentionally
+     *  miss the cache so the Settings UI always sees a fresh list.
+     *
+     *  <p>Drops to {@code JPA.em().createQuery} so we can attach the
+     *  {@code org.hibernate.cacheable} hint — Play 1.x's {@code Model.find}
+     *  doesn't surface a hook for it.
+     *
      *  <p>Does NOT update {@link #lastUsedAt} on its own — that's the
      *  bearer-auth filter's job after it's decided to admit the request,
      *  so an unrelated 4xx (bad input) doesn't fake a usage record. */
     public static ApiToken findActiveByPlaintext(String plaintext) {
         if (plaintext == null || plaintext.isBlank()) return null;
         var hash = TokenHasher.hash(plaintext);
-        // Direct-return so generic inference on JPAQuery.first() picks
-        // ApiToken; assigning to a `var` would type-erase to Object and
-        // force an explicit cast.
-        return ApiToken.find("secretHash = ?1 AND revokedAt IS NULL", hash).first();
+        var query = play.db.jpa.JPA.em().createQuery(
+                "SELECT t FROM ApiToken t WHERE t.secretHash = :hash AND t.revokedAt IS NULL",
+                ApiToken.class);
+        query.setParameter("hash", hash);
+        query.setHint("org.hibernate.cacheable", true);
+        var results = query.getResultList();
+        return results.isEmpty() ? null : results.get(0);
     }
 
     /** Same as {@link #findActiveByPlaintext} but returns revoked rows

@@ -1,6 +1,9 @@
 package models;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.Cache;
+import org.hibernate.annotations.CacheConcurrencyStrategy;
+import play.db.jpa.JPA;
 import play.db.jpa.Model;
 
 import java.util.List;
@@ -29,6 +32,13 @@ import java.util.List;
         @Index(name = "idx_agent_skill_allowed_tool_unique",
                 columnList = "agent_id,skill_name,tool_name", unique = true)
 })
+// JCLAW-205 follow-up: ShellExecTool consults this table on every
+// shell command invocation to validate the allowlist union; that's
+// hot read traffic. Writes happen at skill install / removal /
+// agent deletion only. Like {@link SkillRegistryTool}, the bulk
+// JPQL DELETE sites don't invalidate the L2 entity cache on their
+// own, so each one explicitly evicts the region.
+@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 public class AgentSkillAllowedTool extends Model {
 
     @ManyToOne(optional = false)
@@ -51,9 +61,13 @@ public class AgentSkillAllowedTool extends Model {
 
     public static void deleteByAgentAndSkill(Agent agent, String skillName) {
         AgentSkillAllowedTool.delete("agent = ?1 AND skillName = ?2", agent, skillName);
+        // Bulk JPQL DELETE bypasses entity lifecycle → manually evict
+        // the L2 region so the next ShellExecTool check sees fresh data.
+        JPA.em().getEntityManagerFactory().getCache().evict(AgentSkillAllowedTool.class);
     }
 
     public static void deleteByAgent(Agent agent) {
         AgentSkillAllowedTool.delete("agent = ?1", agent);
+        JPA.em().getEntityManagerFactory().getCache().evict(AgentSkillAllowedTool.class);
     }
 }

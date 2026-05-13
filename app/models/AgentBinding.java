@@ -1,6 +1,8 @@
 package models;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.Cache;
+import org.hibernate.annotations.CacheConcurrencyStrategy;
 import play.db.jpa.Model;
 
 @Entity
@@ -8,6 +10,13 @@ import play.db.jpa.Model;
         @Index(name = "idx_binding_channel_peer", columnList = "channel_type,peer_id"),
         @Index(name = "idx_binding_agent", columnList = "agent_id")
 })
+// JCLAW-205 follow-up: routed on every inbound channel message
+// (Telegram, Slack, WhatsApp, web webhook) to resolve which agent
+// handles the peer. Mutated only via Settings → Agent Bindings
+// (operator-level, low frequency). Reads dominate writes by orders of
+// magnitude — the entity-cache pattern other operator-config rows
+// already use applies cleanly.
+@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 public class AgentBinding extends Model {
 
     @ManyToOne(optional = false)
