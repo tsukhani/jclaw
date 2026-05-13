@@ -76,6 +76,7 @@ public class ModelDiscoveryService {
         return discoverOpenAiCompat(providerName, baseUrl, apiKey);
     }
 
+    @SuppressWarnings("java:S1193") // Catches Exception broadly; instanceof InterruptedException restores interrupt status defensively
     private static DiscoveryResult discoverOpenAiCompat(String providerName, String baseUrl, String apiKey) {
         try {
             var url = baseUrl.endsWith("/") ? baseUrl + "models" : baseUrl + "/models";
@@ -475,6 +476,7 @@ public class ModelDiscoveryService {
 
     // --- Leaderboard ---
 
+    @SuppressWarnings("java:S1141") // Inner try isolates JSON-parse fallback to HTML; refactor would require returning a sentinel from a helper
     static List<String> fetchLeaderboard(String leaderboardUrl) {
         if (leaderboardUrl == null || leaderboardUrl.isBlank()) return List.of();
 
@@ -543,8 +545,9 @@ public class ModelDiscoveryService {
                 var slug = usageMatcher.group(1).toLowerCase();
                 var baseSlug = slug.contains(":") ? slug.substring(0, slug.indexOf(':')) : slug;
                 if (!baseSlug.startsWith("api/") && !baseSlug.startsWith("docs/")
-                        && !baseSlug.startsWith("_next/")) {
-                    if (seen.add(baseSlug)) result.add(baseSlug);
+                        && !baseSlug.startsWith("_next/")
+                        && seen.add(baseSlug)) {
+                    result.add(baseSlug);
                 }
             }
         }
@@ -617,6 +620,7 @@ public class ModelDiscoveryService {
      * connection refused) so the caller can fall back to the standard
      * OpenAI-compat path with the Tier 3 id heuristic.
      */
+    @SuppressWarnings("java:S1172") // providerName kept for signature parity with other discover* variants
     static DiscoveryResult discoverLmStudioNative(String providerName, String baseUrl, String apiKey) {
         try {
             var nativeBase = stripV1Suffix(baseUrl);
@@ -735,6 +739,7 @@ public class ModelDiscoveryService {
      * virtual threads so a provider with dozens of models discovers in
      * one round-trip's worth of wall time rather than N.
      */
+    @SuppressWarnings("java:S1141") // Inner try-catch handles per-future timeouts inside the executor loop; extracting would lose access to modelIds.get(i)
     static DiscoveryResult discoverOllamaNative(String providerName, String baseUrl, String apiKey) {
         try {
             var nativeBase = stripV1Suffix(baseUrl);
@@ -766,7 +771,7 @@ public class ModelDiscoveryService {
             var results = new ArrayList<Map<String, Object>>(modelIds.size());
             try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
                 var futures = modelIds.stream()
-                        .map(id -> executor.submit(() -> fetchOllamaShow(providerName, showUrl, apiKey, id)))
+                        .map(id -> executor.submit(() -> fetchOllamaShow(showUrl, apiKey, id)))
                         .toList();
                 for (int i = 0; i < futures.size(); i++) {
                     try {
@@ -811,6 +816,9 @@ public class ModelDiscoveryService {
         } catch (JsonSyntaxException e) {
             return new DiscoveryResult.Error(502, "Invalid JSON response from provider");
         } catch (Exception e) {
+            // Defensive interrupt-status restore: the broad catch is unavoidable (provider
+            // calls can surface InterruptedException wrapped or unwrapped), so the
+            // instanceof check is the simplest way to honor cooperative cancellation.
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             return new DiscoveryResult.Error(502,
                     "Failed to connect to provider: %s".formatted(e.getMessage()));
@@ -849,7 +857,8 @@ public class ModelDiscoveryService {
         return out;
     }
 
-    private static Map<String, Object> fetchOllamaShow(String providerName, String url, String apiKey, String id) {
+    @SuppressWarnings("java:S1168") // null means "drop this model from discovery"; empty map would be misread as a successful but empty result
+    private static Map<String, Object> fetchOllamaShow(String url, String apiKey, String id) {
         try {
             var body = "{\"name\":\"" + id.replace("\"", "\\\"") + "\"}";
             var jsonMediaType = okhttp3.MediaType.get("application/json");
@@ -886,6 +895,7 @@ public class ModelDiscoveryService {
      * surfaced in a minimal synthetic object, so the Ollama path shares
      * the OpenRouter/Anthropic logic.
      */
+    @SuppressWarnings("java:S1168") // null means "drop this model from discovery"; empty map would be misread as a successful but empty result
     public static Map<String, Object> parseOllamaShow(String id, JsonObject show) {
         // JCLAW-183 Tier 1: drop embedding-only models. Ollama's
         // /api/show capabilities array distinguishes "completion"

@@ -18,7 +18,6 @@ public class JpaMemoryStore implements MemoryStore {
 
     private final boolean vectorEnabled;
     private final boolean isPostgres;
-    private final String vectorProvider;
     private final String vectorModel;
     private final int vectorDimensions;
 
@@ -27,7 +26,6 @@ public class JpaMemoryStore implements MemoryStore {
         this.isPostgres = dbUrl.contains("postgresql") || dbUrl.contains("postgres");
         this.vectorEnabled = "true".equals(
                 Play.configuration.getProperty("memory.jpa.vector.enabled", "false"));
-        this.vectorProvider = Play.configuration.getProperty("memory.jpa.vector.provider", "openai");
         this.vectorModel = Play.configuration.getProperty("memory.jpa.vector.model", "text-embedding-3-small");
         this.vectorDimensions = Integer.parseInt(
                 Play.configuration.getProperty("memory.jpa.vector.dimensions", "1536"));

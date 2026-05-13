@@ -217,7 +217,7 @@ public class DocumentWriter {
             p.setSpacingBefore(HEADING_SPACING_BEFORE);
             p.setSpacingAfter(HEADING_SPACING_AFTER);
             currentParagraph = p;
-            int level = Math.min(Math.max(node.getLevel(), 1), 6);
+            int level = Math.clamp(node.getLevel(), 1, 6);
             int fontSize = switch (level) {
                 case 1 -> 22;
                 case 2 -> 18;
@@ -430,12 +430,12 @@ public class DocumentWriter {
                         emitInline(child, bold, italic, code, strike, fontSize, "0563C1");
                         addRun(" (" + l.getUrl() + ")", bold, italic, code, strike, fontSize, "888888");
                     }
-                    case SoftLineBreak _ -> {
-                        if (currentParagraph != null) currentParagraph.createRun().setText(" ");
-                    }
-                    case HardLineBreak _ -> {
-                        if (currentParagraph != null) currentParagraph.createRun().addBreak();
-                    }
+                    case SoftLineBreak _ when currentParagraph != null ->
+                            currentParagraph.createRun().setText(" ");
+                    case SoftLineBreak _ -> { /* no current paragraph */ }
+                    case HardLineBreak _ when currentParagraph != null ->
+                            currentParagraph.createRun().addBreak();
+                    case HardLineBreak _ -> { /* no current paragraph */ }
                     case HtmlInline inline ->
                             addRun(inline.getChars().toString(), bold, italic, code, strike, fontSize, color);
                     default ->

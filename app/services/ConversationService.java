@@ -15,6 +15,8 @@ import java.util.concurrent.CompletableFuture;
 
 public class ConversationService {
 
+    private ConversationService() {}
+
     public static Conversation findOrCreate(Agent agent, String channelType, String peerId) {
         var existing = Conversation.findByAgentChannelPeer(agent, channelType, peerId);
         if (existing != null) return existing;
@@ -214,7 +216,8 @@ public class ConversationService {
             try {
                 var result = service.transcribe(attachment);
                 transcript = result == null ? "" : result;
-            } catch (Throwable t) {
+            } catch (@SuppressWarnings("java:S1181") Throwable t) {
+                // Top-level guard for background transcription VT — must never propagate (JNI/native errors included)
                 EventLogger.warn("transcription",
                         "Transcription failed for attachment %d: %s"
                                 .formatted(attId, t.getMessage()));
@@ -233,7 +236,8 @@ public class ConversationService {
                             fresh.save();
                         }
                     });
-                } catch (Throwable t) {
+                } catch (@SuppressWarnings("java:S1181") Throwable t) {
+                    // Background VT — DB persistence failure must not propagate
                     EventLogger.warn("transcription",
                             "Failed to persist transcript for attachment %d: %s"
                                     .formatted(attId, t.getMessage()));

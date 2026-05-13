@@ -52,6 +52,8 @@ public final class SessionCompactor {
      */
     @FunctionalInterface
     public interface Summarizer {
+        // Production lambda calls LlmProvider.chat which surfaces provider-specific checked exceptions; broad signature avoids leaking provider exception types into the seam.
+        @SuppressWarnings("java:S112")
         String summarize(List<ChatMessage> messages) throws Exception;
     }
 

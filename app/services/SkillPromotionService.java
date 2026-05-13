@@ -114,7 +114,7 @@ public class SkillPromotionService {
                         // found, target read-only filesystem, etc.) rather than
                         // just the source path. The cause itself is preserved
                         // for stack-trace diagnostics.
-                        throw new RuntimeException(
+                        throw new java.io.UncheckedIOException(
                                 "Failed to copy " + source.toAbsolutePath() + ": " + ex,
                                 ex);
                     }

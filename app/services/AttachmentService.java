@@ -61,7 +61,7 @@ public final class AttachmentService {
             sniffedMime = TikaHolder.TIKA.detect(stagedFile);
             sizeBytes = Files.size(stagedFile);
         } catch (IOException e) {
-            throw new RuntimeException("Failed to inspect staged attachment: " + e.getMessage(), e);
+            throw new java.io.UncheckedIOException("Failed to inspect staged attachment: " + e.getMessage(), e);
         }
         // Mirror the WebM disambiguation in ApiChatController.uploadChatFiles
         // (JCLAW-165 follow-up): Tika sniffs every WebM container as video/webm
@@ -82,13 +82,13 @@ public final class AttachmentService {
         try {
             Files.createDirectories(conversationDir);
         } catch (IOException e) {
-            throw new RuntimeException("Failed to create attachments directory: " + e.getMessage(), e);
+            throw new java.io.UncheckedIOException("Failed to create attachments directory: " + e.getMessage(), e);
         }
         var finalPath = AgentService.acquireContained(conversationDir, leaf);
         try {
             Files.move(stagedFile, finalPath, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
-            throw new RuntimeException("Failed to finalize staged attachment: " + e.getMessage(), e);
+            throw new java.io.UncheckedIOException("Failed to finalize staged attachment: " + e.getMessage(), e);
         }
 
         var att = new MessageAttachment();
@@ -129,7 +129,7 @@ public final class AttachmentService {
         try {
             bytes = Files.readAllBytes(path);
         } catch (IOException e) {
-            throw new RuntimeException("Failed to read attachment bytes: " + e.getMessage(), e);
+            throw new java.io.UncheckedIOException("Failed to read attachment bytes: " + e.getMessage(), e);
         }
         return Base64.getEncoder().encodeToString(bytes);
     }
@@ -151,7 +151,7 @@ public final class AttachmentService {
                     .findFirst()
                     .orElse(null);
         } catch (IOException e) {
-            throw new RuntimeException("Failed to list staging dir: " + e.getMessage(), e);
+            throw new java.io.UncheckedIOException("Failed to list staging dir: " + e.getMessage(), e);
         }
     }
 

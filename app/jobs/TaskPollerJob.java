@@ -28,6 +28,7 @@ public class TaskPollerJob extends Job<Void> {
     private static volatile ExecutorService activeExecutor;
 
     @Override
+    @SuppressWarnings("java:S2696") // Static activeExecutor handoff is intentional: Play 1.x Job instances are short-lived; ShutdownJob's static hook needs a singleton reference
     public void doJob() {
         var pendingTasks = Task.findPendingDue();
         if (pendingTasks.isEmpty()) return;

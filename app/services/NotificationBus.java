@@ -28,6 +28,8 @@ import java.util.function.Consumer;
  */
 public class NotificationBus {
 
+    private NotificationBus() {}
+
     private static final Gson gson = INSTANCE;
     private static final CopyOnWriteArrayList<Consumer<String>> listeners = new CopyOnWriteArrayList<>();
 

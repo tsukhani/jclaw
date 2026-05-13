@@ -27,6 +27,8 @@ import java.util.stream.Stream;
 
 public class AgentService {
 
+    private AgentService() {}
+
     /**
      * Does the agent's registered model (default, not conversation override)
      * declare {@code supportsVision}? Callers use this before accepting image

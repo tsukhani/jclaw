@@ -96,7 +96,8 @@ public final class WhisperJniTranscriber {
             if (activeContext != null) {
                 try {
                     activeContext.close();
-                } catch (Throwable t) {
+                } catch (@SuppressWarnings("java:S1181") Throwable t) {
+                    // JNI close() can surface native errors (Throwable, not just Exception); shutdown must continue
                     Logger.warn(t, "WhisperJniTranscriber: error closing active context");
                 }
                 activeContext = null;
@@ -125,7 +126,8 @@ public final class WhisperJniTranscriber {
         // in the context's RAM, so without this we'd hold both during the
         // swap (potentially 1+ GB on medium models).
         if (activeContext != null) {
-            try { activeContext.close(); } catch (Throwable ignored) {}
+            // JNI close on model swap — native error must not abort the swap
+            try { activeContext.close(); } catch (@SuppressWarnings("java:S1181") Throwable ignored) {}
             activeContext = null;
             activeModel = null;
         }
@@ -202,7 +204,8 @@ public final class WhisperJniTranscriber {
     public static void resetForTest() {
         synchronized (inferenceLock) {
             if (activeContext != null) {
-                try { activeContext.close(); } catch (Throwable ignored) {}
+                // Test reset — swallow native close errors to keep tests independent
+                try { activeContext.close(); } catch (@SuppressWarnings("java:S1181") Throwable ignored) {}
             }
             jni = null;
             activeContext = null;

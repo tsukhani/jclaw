@@ -8,16 +8,20 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 
 public class EventLogger {
 
+    private EventLogger() {}
+
     /** Category for rejected webhooks that failed platform signature verification (JCLAW-16). */
     public static final String WEBHOOK_SIGNATURE_FAILURE = "WEBHOOK_SIGNATURE_FAILURE";
 
     private static final ConcurrentLinkedQueue<EventLog> pending = new ConcurrentLinkedQueue<>();
     private static final int BATCH_SIZE = 20;
 
+    @SuppressWarnings("java:S6213") // 'record' as method name predates the restricted identifier; rename would churn callers/tests with no real ambiguity
     public static void record(String level, String category, String message, String details) {
         record(level, category, null, null, message, details);
     }
 
+    @SuppressWarnings("java:S6213") // 'record' as method name predates the restricted identifier; rename would churn callers/tests with no real ambiguity
     public static void record(String level, String category, String agentId, String channel,
                               String message, String details) {
         // Log to SLF4J first (always safe)

@@ -10,6 +10,8 @@ import java.time.temporal.ChronoUnit;
  */
 public class CronParser {
 
+    private CronParser() {}
+
     public static Instant nextExecution(String cron) {
         return nextExecution(cron, Instant.now());
     }

@@ -198,7 +198,10 @@ public class AgentRunner {
 
         int promptTokens = estimateTokens(messages) + estimateToolTokens(tools);
         int headroom = modelInfo.contextWindow() - promptTokens - OUTPUT_SAFETY_MARGIN_TOKENS;
-        return Math.max(MIN_OUTPUT_TOKENS, Math.min(configured, headroom));
+        // NB: not Math.clamp — when configured < MIN_OUTPUT_TOKENS (small / mis-configured model) we still want MIN_OUTPUT_TOKENS, which clamp would reject as min>max.
+        @SuppressWarnings("java:S6885")
+        var result = Math.max(MIN_OUTPUT_TOKENS, Math.min(configured, headroom));
+        return result;
     }
 
     /**
@@ -408,6 +411,7 @@ public class AgentRunner {
      * every channel contributes to the performance histograms (JCLAW performance
      * dashboard).
      */
+    @SuppressWarnings("java:S107") // Streaming entrypoint signature retained for binary compat with channel callers
     public static void runStreaming(Agent agent, Long conversationId, String channelType, String peerId,
                                     String userMessage,
                                     AtomicBoolean isCancelled,
@@ -424,6 +428,7 @@ public class AgentRunner {
      * attachments directory and recorded as a {@link models.MessageAttachment}
      * row on the user message.
      */
+    @SuppressWarnings("java:S107") // Streaming entrypoint signature retained for binary compat with channel callers
     public static void runStreaming(Agent agent, Long conversationId, String channelType, String peerId,
                                     String userMessage,
                                     AtomicBoolean isCancelled,
@@ -983,19 +988,12 @@ public class AgentRunner {
 
     // --- Internal ---
 
-    private static String callWithToolLoop(Agent agent, Conversation conversation, Long conversationId,
-                                            List<ChatMessage> messages, List<ToolDef> tools,
-                                            LlmProvider primary, LlmProvider secondary) {
-        return callWithToolLoop(agent, conversation, conversationId, messages, tools,
-                primary, secondary, java.util.Collections.emptyList());
-    }
-
     /**
-     * JCLAW-165 overload: takes the audio-bearer side-map so the
-     * format-rejection retry path can rewrite messages to text-with-
-     * transcript and re-issue the call once. Existing callers without
-     * audio context use the no-arg overload above.
+     * JCLAW-165: takes the audio-bearer side-map so the format-rejection
+     * retry path can rewrite messages to text-with-transcript and re-issue
+     * the call once.
      */
+    @SuppressWarnings({"java:S107", "java:S127"}) // S107: internal tool-loop dispatcher; S127: round-- in body is JCLAW-165's single-use audio-format retry
     private static String callWithToolLoop(Agent agent, Conversation conversation, Long conversationId,
                                             List<ChatMessage> messages, List<ToolDef> tools,
                                             LlmProvider primary, LlmProvider secondary,
@@ -1047,7 +1045,7 @@ public class AgentRunner {
                                     .formatted(primary.config().name()));
                     currentMessages = new ArrayList<>(applyTranscriptsForCapability(
                             currentMessages, audioBearers, false));
-                    round--;  // re-issue this round with the rewritten messages
+                    round--;  // JCLAW-165: re-issue this round with the rewritten messages (gated by audioRetryAttempted)
                     continue;
                 }
                 EventLogger.error("llm", agent.name, null, "LLM call failed: %s".formatted(e.getMessage()));
@@ -1183,6 +1181,7 @@ public class AgentRunner {
                 agent != null ? agent.name : null, channel, detail);
     }
 
+    @SuppressWarnings("java:S107") // Tool-call streaming dispatcher — every parameter is required orchestration state
     private static String handleToolCallsStreaming(Agent agent, Conversation conversation, Long conversationId,
                                                     List<ChatMessage> messages, List<ToolDef> tools,
                                                     List<ToolCall> toolCalls, String priorContent,
@@ -1463,6 +1462,7 @@ public class AgentRunner {
      * inline on the caller. Cancellation is honored — in-flight tools finish
      * naturally (their results are discarded at commit time).
      */
+    @SuppressWarnings("java:S107") // Parallel tool executor — every parameter is required to schedule and surface tool results
     private static void executeToolsParallel(List<ToolCall> toolCalls,
                                               Agent agent, Long conversationId,
                                               List<ChatMessage> currentMessages,

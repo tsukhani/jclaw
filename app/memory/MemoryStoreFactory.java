@@ -9,6 +9,8 @@ import services.EventLogger;
  */
 public class MemoryStoreFactory {
 
+    private MemoryStoreFactory() {}
+
     private static volatile MemoryStore instance;
 
     public static MemoryStore get() {
