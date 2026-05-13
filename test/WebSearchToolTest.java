@@ -15,7 +15,7 @@ import tools.WebSearchTool;
  * The tool's {@code execute()} resolves the provider <em>before</em> any HTTP
  * call, so the error-string paths can be asserted without hitting the network.
  */
-public class WebSearchToolTest extends UnitTest {
+class WebSearchToolTest extends UnitTest {
 
     private WebSearchTool tool;
 
@@ -48,14 +48,14 @@ public class WebSearchToolTest extends UnitTest {
     }
 
     @Test
-    public void noProviderEnabled_autoSelectReportsError() {
+    void noProviderEnabled_autoSelectReportsError() {
         var result = tool.execute("{\"query\":\"test\"}", null);
         assertTrue(result.startsWith("Error:"));
         assertTrue(result.contains("No search provider"));
     }
 
     @Test
-    public void enabledButNoKey_autoSelectReportsError() {
+    void enabledButNoKey_autoSelectReportsError() {
         ConfigService.set("search.exa.enabled", "true");
         ConfigService.clearCache();
         var result = tool.execute("{\"query\":\"test\"}", null);
@@ -64,7 +64,7 @@ public class WebSearchToolTest extends UnitTest {
     }
 
     @Test
-    public void disabledProviderSkippedEvenWithKey() {
+    void disabledProviderSkippedEvenWithKey() {
         // Exa has a key but is disabled — should be skipped
         ConfigService.set("search.exa.apiKey", "fake-key");
         ConfigService.clearCache();
@@ -74,7 +74,7 @@ public class WebSearchToolTest extends UnitTest {
     }
 
     @Test
-    public void providerArgIgnored_usesFallbackOrder() {
+    void providerArgIgnored_usesFallbackOrder() {
         // Even if the LLM passes provider:"exa", the tool should use fallback
         // order. With exa disabled, this should report no provider.
         ConfigService.set("search.exa.apiKey", "fake-key");
@@ -85,7 +85,7 @@ public class WebSearchToolTest extends UnitTest {
     }
 
     @Test
-    public void defaultEnabledWhenKeyAbsent() {
+    void defaultEnabledWhenKeyAbsent() {
         // Delete the enabled key entirely; the provider should default to enabled.
         // Still no API key, so auto-select skips it.
         ConfigService.delete("search.tavily.enabled");

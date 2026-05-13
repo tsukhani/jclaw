@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * request-thread ambient transaction and the "opened-from-a-virtual-thread"
  * case where we must start one ourselves.
  */
-public class TxTest extends UnitTest {
+class TxTest extends UnitTest {
 
     @BeforeEach
     void setup() {
@@ -22,20 +22,20 @@ public class TxTest extends UnitTest {
     }
 
     @Test
-    public void runReturnsValueFromSupplier() {
+    void runReturnsValueFromSupplier() {
         var result = Tx.run(() -> "hello");
         assertEquals("hello", result);
     }
 
     @Test
-    public void runRunnableExecutes() {
+    void runRunnableExecutes() {
         var ran = new AtomicBoolean(false);
         Tx.run(() -> ran.set(true));
         assertTrue(ran.get());
     }
 
     @Test
-    public void runPersistsInNewTransactionWhenNoneActive() {
+    void runPersistsInNewTransactionWhenNoneActive() {
         // Test thread has no ambient transaction when starting fresh here
         // (Fixtures.deleteDatabase already returned). Tx.run must open one.
         Tx.run(() -> {
@@ -56,7 +56,7 @@ public class TxTest extends UnitTest {
     }
 
     @Test
-    public void runNestsInsideAmbientTransactionWithoutOpeningNew() {
+    void runNestsInsideAmbientTransactionWithoutOpeningNew() {
         // The fast path at Tx.java:18 — when already inside a transaction,
         // the block runs directly without invoking JPA.withTransaction.
         // We can't easily observe "did we open a new tx?", but we CAN verify
@@ -75,7 +75,7 @@ public class TxTest extends UnitTest {
     }
 
     @Test
-    public void runPropagatesRuntimeExceptionUnchanged() {
+    void runPropagatesRuntimeExceptionUnchanged() {
         // RuntimeException path at Tx.java:21-22 / 28-29 — a RuntimeException
         // from the block must re-surface AS-IS (not wrapped) so callers can
         // catch specific subtypes like IllegalStateException cleanly.
@@ -90,7 +90,7 @@ public class TxTest extends UnitTest {
     }
 
     @Test
-    public void runWrapsCheckedExceptionInRuntimeException() {
+    void runWrapsCheckedExceptionInRuntimeException() {
         // Checked Throwable path at Tx.java:22-23 / 29-30 — anything that's
         // not a RuntimeException gets wrapped so callers only need one catch.
         // Explicit F.Function0 typing disambiguates from the Runnable overload

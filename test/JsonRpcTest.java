@@ -7,12 +7,12 @@ import play.test.UnitTest;
 
 import java.util.Map;
 
-public class JsonRpcTest extends UnitTest {
+class JsonRpcTest extends UnitTest {
 
     // ==================== encode ====================
 
     @Test
-    public void encodeRequestEmitsSpecCompliantJson() {
+    void encodeRequestEmitsSpecCompliantJson() {
         var req = new JsonRpc.Request(1L, "tools/list", null);
         var wire = JsonRpc.encode(req);
         var obj = JsonParser.parseString(wire).getAsJsonObject();
@@ -23,7 +23,7 @@ public class JsonRpcTest extends UnitTest {
     }
 
     @Test
-    public void encodeRequestWithObjectParams() {
+    void encodeRequestWithObjectParams() {
         var req = new JsonRpc.Request(7L, "tools/call",
                 Map.of("name", "echo", "arguments", Map.of("text", "hi")));
         var obj = JsonParser.parseString(JsonRpc.encode(req)).getAsJsonObject();
@@ -33,7 +33,7 @@ public class JsonRpcTest extends UnitTest {
     }
 
     @Test
-    public void encodeRequestPreservesStringId() {
+    void encodeRequestPreservesStringId() {
         var req = new JsonRpc.Request("req-abc", "ping", null);
         var obj = JsonParser.parseString(JsonRpc.encode(req)).getAsJsonObject();
         assertTrue(obj.get("id").getAsJsonPrimitive().isString(), "string id must remain a JSON string");
@@ -41,7 +41,7 @@ public class JsonRpcTest extends UnitTest {
     }
 
     @Test
-    public void encodeNotificationOmitsId() {
+    void encodeNotificationOmitsId() {
         var note = new JsonRpc.Notification("notifications/initialized", null);
         var obj = JsonParser.parseString(JsonRpc.encode(note)).getAsJsonObject();
         assertEquals("notifications/initialized", obj.get("method").getAsString());
@@ -49,7 +49,7 @@ public class JsonRpcTest extends UnitTest {
     }
 
     @Test
-    public void encodeResponseSuccessSetsResultNotError() {
+    void encodeResponseSuccessSetsResultNotError() {
         var result = new JsonObject();
         result.add("tools", new JsonObject());
         var resp = new JsonRpc.Response(1L, result, null);
@@ -60,7 +60,7 @@ public class JsonRpcTest extends UnitTest {
     }
 
     @Test
-    public void encodeResponseErrorSetsErrorNotResult() {
+    void encodeResponseErrorSetsErrorNotResult() {
         var resp = new JsonRpc.Response(1L, null, new JsonRpc.Error(-32601, "Method not found"));
         var obj = JsonParser.parseString(JsonRpc.encode(resp)).getAsJsonObject();
         assertFalse(obj.has("result"));
@@ -69,7 +69,7 @@ public class JsonRpcTest extends UnitTest {
     }
 
     @Test
-    public void encodeResponseSuccessWithNullResultEmitsJsonNull() {
+    void encodeResponseSuccessWithNullResultEmitsJsonNull() {
         // ping responses carry result: null per spec.
         var resp = new JsonRpc.Response(1L, null, null);
         var obj = JsonParser.parseString(JsonRpc.encode(resp)).getAsJsonObject();
@@ -78,19 +78,19 @@ public class JsonRpcTest extends UnitTest {
     }
 
     @Test
-    public void encodeRequestRejectsNullId() {
+    void encodeRequestRejectsNullId() {
         assertThrows(IllegalArgumentException.class,
                 () -> new JsonRpc.Request(null, "tools/list", null));
     }
 
     @Test
-    public void encodeRequestRejectsBlankMethod() {
+    void encodeRequestRejectsBlankMethod() {
         assertThrows(IllegalArgumentException.class,
                 () -> new JsonRpc.Request(1L, "", null));
     }
 
     @Test
-    public void encodeNotificationRejectsBlankMethod() {
+    void encodeNotificationRejectsBlankMethod() {
         assertThrows(IllegalArgumentException.class,
                 () -> new JsonRpc.Notification("", null));
     }
@@ -98,7 +98,7 @@ public class JsonRpcTest extends UnitTest {
     // ==================== decode ====================
 
     @Test
-    public void decodeRequest() {
+    void decodeRequest() {
         var msg = JsonRpc.decode("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\",\"params\":{}}");
         assertTrue(msg instanceof JsonRpc.Request);
         var req = (JsonRpc.Request) msg;
@@ -108,7 +108,7 @@ public class JsonRpcTest extends UnitTest {
     }
 
     @Test
-    public void decodeNotificationWhenIdAbsent() {
+    void decodeNotificationWhenIdAbsent() {
         var msg = JsonRpc.decode("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
         assertTrue(msg instanceof JsonRpc.Notification);
         var note = (JsonRpc.Notification) msg;
@@ -116,7 +116,7 @@ public class JsonRpcTest extends UnitTest {
     }
 
     @Test
-    public void decodeResponseSuccess() {
+    void decodeResponseSuccess() {
         var msg = JsonRpc.decode("{\"jsonrpc\":\"2.0\",\"id\":42,\"result\":{\"tools\":[]}}");
         assertTrue(msg instanceof JsonRpc.Response);
         var resp = (JsonRpc.Response) msg;
@@ -126,7 +126,7 @@ public class JsonRpcTest extends UnitTest {
     }
 
     @Test
-    public void decodeResponseError() {
+    void decodeResponseError() {
         var wire = "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32601,\"message\":\"nope\"}}";
         var msg = JsonRpc.decode(wire);
         assertTrue(msg instanceof JsonRpc.Response);
@@ -138,14 +138,14 @@ public class JsonRpcTest extends UnitTest {
     }
 
     @Test
-    public void decodeResponseErrorWithDataPreserved() {
+    void decodeResponseErrorWithDataPreserved() {
         var wire = "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32000,\"message\":\"x\",\"data\":{\"detail\":\"trace\"}}}";
         var resp = (JsonRpc.Response) JsonRpc.decode(wire);
         assertEquals("trace", resp.error().data().getAsJsonObject().get("detail").getAsString());
     }
 
     @Test
-    public void decodeRequestWithStringId() {
+    void decodeRequestWithStringId() {
         var msg = JsonRpc.decode("{\"jsonrpc\":\"2.0\",\"id\":\"call-7\",\"method\":\"ping\"}");
         var req = (JsonRpc.Request) msg;
         assertEquals("call-7", req.id());
@@ -153,19 +153,19 @@ public class JsonRpcTest extends UnitTest {
     }
 
     @Test
-    public void decodeRejectsWrongJsonRpcVersion() {
+    void decodeRejectsWrongJsonRpcVersion() {
         assertThrows(IllegalArgumentException.class,
                 () -> JsonRpc.decode("{\"jsonrpc\":\"1.0\",\"id\":1,\"method\":\"x\"}"));
     }
 
     @Test
-    public void decodeRejectsMissingJsonRpcVersion() {
+    void decodeRejectsMissingJsonRpcVersion() {
         assertThrows(IllegalArgumentException.class,
                 () -> JsonRpc.decode("{\"id\":1,\"method\":\"x\"}"));
     }
 
     @Test
-    public void decodeRejectsUnrecognizableShape() {
+    void decodeRejectsUnrecognizableShape() {
         // No method, no result, no error.
         assertThrows(IllegalArgumentException.class,
                 () -> JsonRpc.decode("{\"jsonrpc\":\"2.0\",\"id\":1}"));
@@ -174,7 +174,7 @@ public class JsonRpcTest extends UnitTest {
     // ==================== round-trip ====================
 
     @Test
-    public void roundTripRequest() {
+    void roundTripRequest() {
         var original = new JsonRpc.Request(1L, "tools/call",
                 Map.of("name", "x", "arguments", Map.of("a", 1)));
         var wire = JsonRpc.encode(original);
@@ -187,7 +187,7 @@ public class JsonRpcTest extends UnitTest {
     }
 
     @Test
-    public void roundTripErrorResponse() {
+    void roundTripErrorResponse() {
         var original = new JsonRpc.Response(99L, null,
                 new JsonRpc.Error(-32602, "Invalid params", new JsonPrimitive("missing field foo")));
         var decoded = (JsonRpc.Response) JsonRpc.decode(JsonRpc.encode(original));

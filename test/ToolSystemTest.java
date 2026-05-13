@@ -16,7 +16,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-public class ToolSystemTest extends UnitTest {
+class ToolSystemTest extends UnitTest {
 
     private Agent agent;
 
@@ -49,19 +49,19 @@ public class ToolSystemTest extends UnitTest {
     // --- ToolRegistry ---
 
     @Test
-    public void registryListsAllTools() {
+    void registryListsAllTools() {
         assertEquals(4, ToolRegistry.listTools().size());
         assertEquals(4, ToolRegistry.getToolDefs().size());
     }
 
     @Test
-    public void executeUnknownToolReturnsError() {
+    void executeUnknownToolReturnsError() {
         var result = ToolRegistry.execute("nonexistent_tool", "{}", agent);
         assertTrue(result.startsWith("Error: Unknown tool"));
     }
 
     @Test
-    public void executeToolCatchesExceptions() {
+    void executeToolCatchesExceptions() {
         ToolRegistry.publish(java.util.List.of(new ToolRegistry.Tool() {
             public String name() { return "throwing_tool"; }
             public String description() { return "Throws"; }
@@ -82,7 +82,7 @@ public class ToolSystemTest extends UnitTest {
      * dispatching the broken call.
      */
     @Test
-    public void executeToolRejectsTruncatedArgsJson() {
+    void executeToolRejectsTruncatedArgsJson() {
         var sentinel = new boolean[]{false};
         ToolRegistry.publish(java.util.List.of(new ToolRegistry.Tool() {
             public String name() { return "never_called_tool"; }
@@ -101,7 +101,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void executeToolRejectsEmptyArgsJson() {
+    void executeToolRejectsEmptyArgsJson() {
         ToolRegistry.publish(java.util.List.of(new ToolRegistry.Tool() {
             public String name() { return "empty_args_tool"; }
             public String description() { return "stub"; }
@@ -114,7 +114,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void isTruncationFinishMatchesBothSpellings() {
+    void isTruncationFinishMatchesBothSpellings() {
         // Guard the finish_reason set. Both OpenAI-compatible "length" and
         // Anthropic-native "max_tokens" must trip the truncation path — the
         // second was added to fix OpenRouter's Bedrock route, which passes
@@ -129,7 +129,7 @@ public class ToolSystemTest extends UnitTest {
     // --- TaskTool ---
 
     @Test
-    public void taskToolCreateTask() {
+    void taskToolCreateTask() {
         var result = ToolRegistry.execute("task_manager",
                 """
                 {"action": "createTask", "name": "test-task", "description": "Do something"}
@@ -141,7 +141,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void taskToolScheduleRecurring() {
+    void taskToolScheduleRecurring() {
         var result = ToolRegistry.execute("task_manager",
                 """
                 {"action": "scheduleRecurringTask", "name": "daily-report", "description": "Generate report", "cronExpression": "0 9 * * *"}
@@ -152,7 +152,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void taskToolListRecurring() {
+    void taskToolListRecurring() {
         ToolRegistry.execute("task_manager",
                 """
                 {"action": "scheduleRecurringTask", "name": "task-1", "description": "First task", "cronExpression": "0 9 * * *"}
@@ -167,7 +167,7 @@ public class ToolSystemTest extends UnitTest {
     // --- CheckListTool ---
 
     @Test
-    public void checklistValidInput() {
+    void checklistValidInput() {
         var result = ToolRegistry.execute("checklist",
                 """
                 {"items": [
@@ -180,7 +180,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void checklistRejectsMultipleInProgress() {
+    void checklistRejectsMultipleInProgress() {
         var result = ToolRegistry.execute("checklist",
                 """
                 {"items": [
@@ -193,7 +193,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void checklistAllowsZeroInProgress() {
+    void checklistAllowsZeroInProgress() {
         // Parity with OpenClaw update_plan: at-most-one semantics, not exactly-one.
         // Needed so agents can submit initial "all pending" and final "all completed" states.
         var result = ToolRegistry.execute("checklist",
@@ -207,7 +207,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void checklistRejectsMissingContent() {
+    void checklistRejectsMissingContent() {
         // Regression: models occasionally omit `content` and send only activeForm+status.
         // Must return a clean validation error rather than NPE on JsonObject.get(null).
         var result = ToolRegistry.execute("checklist",
@@ -221,7 +221,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void checklistRejectsMissingStatus() {
+    void checklistRejectsMissingStatus() {
         var result = ToolRegistry.execute("checklist",
                 """
                 {"items": [
@@ -233,7 +233,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void checklistRejectsMissingActiveForm() {
+    void checklistRejectsMissingActiveForm() {
         var result = ToolRegistry.execute("checklist",
                 """
                 {"items": [
@@ -245,7 +245,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void checklistRejectsMissingItems() {
+    void checklistRejectsMissingItems() {
         var result = ToolRegistry.execute("checklist", "{}", agent);
         assertTrue(result.startsWith("Error:"), "got: " + result);
         assertTrue(result.contains("items"), "got: " + result);
@@ -254,7 +254,7 @@ public class ToolSystemTest extends UnitTest {
     // --- FileSystemTools ---
 
     @Test
-    public void fileSystemReadFile() {
+    void fileSystemReadFile() {
         var result = ToolRegistry.execute("filesystem",
                 """
                 {"action": "readFile", "path": "AGENT.md"}
@@ -263,7 +263,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void fileSystemWriteAndRead() {
+    void fileSystemWriteAndRead() {
         ToolRegistry.execute("filesystem",
                 """
                 {"action": "writeFile", "path": "notes.txt", "content": "Hello from tool"}
@@ -276,7 +276,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void fileSystemListFiles() {
+    void fileSystemListFiles() {
         var result = ToolRegistry.execute("filesystem",
                 """
                 {"action": "listFiles", "path": "."}
@@ -286,7 +286,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void fileSystemPathTraversalBlocked() {
+    void fileSystemPathTraversalBlocked() {
         var result = ToolRegistry.execute("filesystem",
                 """
                 {"action": "readFile", "path": "../../etc/passwd"}
@@ -296,7 +296,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void fileSystemReadFileRejectsOversizeFile() throws Exception {
+    void fileSystemReadFileRejectsOversizeFile() throws Exception {
         // readFile caps at 1 MB; larger files must be rejected with a pointer
         // to the documents tool instead of silently truncating (which would
         // feed the agent half a file and make diffs nonsensical).
@@ -324,7 +324,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void fileSystemAppendCreatesMissingFile() {
+    void fileSystemAppendCreatesMissingFile() {
         // appendFile on a non-existent path should create it, letting the LLM
         // start a chunked build without first calling writeFile.
         ToolRegistry.execute("filesystem",
@@ -339,7 +339,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void fileSystemAppendConcatenates() {
+    void fileSystemAppendConcatenates() {
         // The canonical "chunked build" flow: one writeFile, multiple appends.
         // The final readFile must return the chunks in call order with no
         // separator magic — the LLM controls newlines via the content strings.
@@ -363,7 +363,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void documentsRenderFromMarkdownSource() throws Exception {
+    void documentsRenderFromMarkdownSource() throws Exception {
         // End-to-end of the large-doc authoring pattern: draft markdown in the
         // workspace via writeFile + appendFile, then render once through the
         // documents tool. Proves the source path is read, the target is
@@ -393,7 +393,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void documentsAppendBuildsDraft() {
+    void documentsAppendBuildsDraft() {
         publishWithExtras(new tools.DocumentsTool());
         var r1 = ToolRegistry.execute("documents",
                 """
@@ -414,7 +414,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void documentsAppendRejectsBinaryExtension() {
+    void documentsAppendRejectsBinaryExtension() {
         publishWithExtras(new tools.DocumentsTool());
         var result = ToolRegistry.execute("documents",
                 """
@@ -426,7 +426,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void documentsAppendFileAliasWorks() {
+    void documentsAppendFileAliasWorks() {
         // The LLM sent "appendFile" to the documents tool in the real failure.
         // Verify the alias routes to the same appendDocument handler.
         publishWithExtras(new tools.DocumentsTool());
@@ -438,7 +438,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void documentsRenderMissingSourcePath() {
+    void documentsRenderMissingSourcePath() {
         publishWithExtras(new tools.DocumentsTool());
         var result = ToolRegistry.execute("documents",
                 """
@@ -449,7 +449,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void documentsRenderSourcePathNotFound() {
+    void documentsRenderSourcePathNotFound() {
         publishWithExtras(new tools.DocumentsTool());
         var result = ToolRegistry.execute("documents",
                 """
@@ -460,7 +460,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void fileSystemAppendRejectsSkillDefinitionFile() {
+    void fileSystemAppendRejectsSkillDefinitionFile() {
         // SKILL.md files route through SkillLoader.finalizeSkillMdWrite for
         // version bumps — appending bypasses that pipeline, so it's rejected
         // rather than silently breaking skill versioning.
@@ -480,7 +480,7 @@ public class ToolSystemTest extends UnitTest {
     //     it now. ---
 
     @Test
-    public void fileSystemSymlinkEscapeBlocked() throws Exception {
+    void fileSystemSymlinkEscapeBlocked() throws Exception {
         var workspace = AgentService.workspacePath(agent.name);
         Files.createDirectories(workspace);
         var outside = Files.createTempDirectory("jclaw-symlink-test-");
@@ -501,7 +501,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void resolveContainedRejectsObfuscatedTraversal() {
+    void resolveContainedRejectsObfuscatedTraversal() {
         // The old serveWorkspaceFile substring check let "./../../etc/passwd"
         // through because it does contain ".." but the normalized path was
         // never compared against the workspace root. Pin that down.
@@ -511,7 +511,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void acquireWorkspacePathThrowsOnEscape() {
+    void acquireWorkspacePathThrowsOnEscape() {
         assertThrows(SecurityException.class,
                 () -> AgentService.acquireWorkspacePath(agent.name, "../../etc/passwd"));
         assertThrows(SecurityException.class,
@@ -519,7 +519,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void acquireWorkspacePathAcceptsLegitimateRelativePath() throws Exception {
+    void acquireWorkspacePathAcceptsLegitimateRelativePath() throws Exception {
         var workspace = AgentService.workspacePath(agent.name);
         Files.createDirectories(workspace);
         var hello = workspace.resolve("hello.txt");
@@ -534,7 +534,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void fileSystemHardlinkAliasingBlocked() throws Exception {
+    void fileSystemHardlinkAliasingBlocked() throws Exception {
         // Hardlinks bypass the symlink check because there's no "link" to
         // follow — both names point to the same inode at the FS level. The
         // sandbox detects this via Files.getAttribute("unix:nlink") and
@@ -569,7 +569,7 @@ public class ToolSystemTest extends UnitTest {
     // --- editFile ---
 
     @Test
-    public void editFileSingleReplacement() {
+    void editFileSingleReplacement() {
         ToolRegistry.execute("filesystem",
                 """
                 {"action": "writeFile", "path": "edit.txt", "content": "hello world"}
@@ -589,7 +589,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editFileBatchAtomic() {
+    void editFileBatchAtomic() {
         ToolRegistry.execute("filesystem",
                 """
                 {"action": "writeFile", "path": "atomic.txt", "content": "alpha\\nbeta\\ngamma"}
@@ -614,7 +614,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editFileRequiresUniqueMatch() {
+    void editFileRequiresUniqueMatch() {
         ToolRegistry.execute("filesystem",
                 """
                 {"action": "writeFile", "path": "dup.txt", "content": "foo\\nfoo\\nfoo"}
@@ -629,7 +629,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editFileDiagnosticSnippetCapped() {
+    void editFileDiagnosticSnippetCapped() {
         var big = "line A\n".repeat(60);
         ToolRegistry.execute("filesystem",
                 """
@@ -646,7 +646,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editFileCrlfFallback() throws Exception {
+    void editFileCrlfFallback() throws Exception {
         var workspace = AgentService.workspacePath(agent.name);
         Files.writeString(workspace.resolve("crlf.txt"), "alpha\r\nbeta\r\ngamma\r\n");
         var result = ToolRegistry.execute("filesystem",
@@ -662,7 +662,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editFileEmptyEditsRejected() {
+    void editFileEmptyEditsRejected() {
         ToolRegistry.execute("filesystem",
                 """
                 {"action": "writeFile", "path": "empty-edits.txt", "content": "x"}
@@ -676,7 +676,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editFileRegexMode() {
+    void editFileRegexMode() {
         ToolRegistry.execute("filesystem",
                 """
                 {"action": "writeFile", "path": "regex.txt", "content": "version=1.2.3"}
@@ -697,7 +697,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editFileRegexUniquenessEnforced() {
+    void editFileRegexUniquenessEnforced() {
         ToolRegistry.execute("filesystem",
                 """
                 {"action": "writeFile", "path": "regex-dup.txt", "content": "foo 1\\nfoo 2\\nfoo 3"}
@@ -712,7 +712,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editFilePathTraversalBlocked() {
+    void editFilePathTraversalBlocked() {
         var result = ToolRegistry.execute("filesystem",
                 """
                 {"action": "editFile", "path": "../../etc/passwd",
@@ -723,7 +723,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editFileBumpsSkillMdVersionOnce() throws Exception {
+    void editFileBumpsSkillMdVersionOnce() throws Exception {
         // Create a skill via writeFile, then make a material edit via editFile, and
         // assert the version incremented by exactly one patch level.
         var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve("bump-test");
@@ -752,7 +752,7 @@ public class ToolSystemTest extends UnitTest {
     // --- Explicit version promotion (LLM-supplied version: in frontmatter) ---
 
     @Test
-    public void editFilePromotesVersionWhenLlmRequests() throws Exception {
+    void editFilePromotesVersionWhenLlmRequests() throws Exception {
         // Create a skill, then edit it with an LLM-supplied version that jumps past the
         // auto-bump target. The explicit value must win.
         var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve("promote-major");
@@ -782,7 +782,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editFileVersionOnlyPromotion() throws Exception {
+    void editFileVersionOnlyPromotion() throws Exception {
         // Edit only the version line — no body change. The auto path would reinstate the
         // old version because contentDiffersIgnoringVersion returns false. The explicit
         // LLM version must override that and land as the final value.
@@ -808,7 +808,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editFileRejectsVersionDowngrade() throws Exception {
+    void editFileRejectsVersionDowngrade() throws Exception {
         // LLM attempts to downgrade. The auto-bump must win.
         var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve("no-downgrade");
         Files.createDirectories(skillDir);
@@ -835,7 +835,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editFileRejectsEqualVersionAttempt() throws Exception {
+    void editFileRejectsEqualVersionAttempt() throws Exception {
         // LLM writes a version equal to the auto-bump target. Strict > rule means ties
         // collapse to the auto path.
         var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve("equal-version");
@@ -862,7 +862,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editFileIgnoresMalformedExplicitVersion() throws Exception {
+    void editFileIgnoresMalformedExplicitVersion() throws Exception {
         // Malformed LLM version — parseVersion coerces to 0.0.0, well below the auto
         // target, so auto wins.
         var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve("malformed-version");
@@ -887,7 +887,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void writeFileFreshSkillHonorsExplicitHigherVersion() throws Exception {
+    void writeFileFreshSkillHonorsExplicitHigherVersion() throws Exception {
         // Fresh-skill branch: LLM supplies version: 2.0.0 in the very first writeFile.
         // Should land as 2.0.0, not the 1.0.0 floor.
         var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve("fresh-high");
@@ -903,7 +903,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void writeFileFreshSkillFloorsAtOneZeroZero() throws Exception {
+    void writeFileFreshSkillFloorsAtOneZeroZero() throws Exception {
         // Fresh-skill floor: LLM writes version: 0.5.0. Must be coerced to 1.0.0.
         var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve("fresh-low");
         Files.createDirectories(skillDir);
@@ -919,7 +919,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editFileMissingFileErrors() {
+    void editFileMissingFileErrors() {
         var result = ToolRegistry.execute("filesystem",
                 """
                 {"action": "editFile", "path": "nonexistent.txt",
@@ -932,7 +932,7 @@ public class ToolSystemTest extends UnitTest {
     // --- editLines ---
 
     @Test
-    public void editLinesReplaceRange() throws Exception {
+    void editLinesReplaceRange() throws Exception {
         var workspace = AgentService.workspacePath(agent.name);
         Files.writeString(workspace.resolve("lr-replace.txt"), "one\ntwo\nthree\nfour\n");
         var result = ToolRegistry.execute("filesystem",
@@ -947,7 +947,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editLinesInsertBeforeLine() throws Exception {
+    void editLinesInsertBeforeLine() throws Exception {
         var workspace = AgentService.workspacePath(agent.name);
         Files.writeString(workspace.resolve("lr-insert.txt"), "one\ntwo\nthree\n");
         var result = ToolRegistry.execute("filesystem",
@@ -963,7 +963,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editLinesInsertAppendsAtEnd() throws Exception {
+    void editLinesInsertAppendsAtEnd() throws Exception {
         var workspace = AgentService.workspacePath(agent.name);
         Files.writeString(workspace.resolve("lr-append.txt"), "one\ntwo\n");
         // startLine = lineCount + 1 means append after the last line
@@ -979,7 +979,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editLinesDeleteRange() throws Exception {
+    void editLinesDeleteRange() throws Exception {
         var workspace = AgentService.workspacePath(agent.name);
         Files.writeString(workspace.resolve("lr-del.txt"), "alpha\nbeta\ngamma\ndelta\n");
         var result = ToolRegistry.execute("filesystem",
@@ -994,7 +994,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editLinesBottomUpOrdering() throws Exception {
+    void editLinesBottomUpOrdering() throws Exception {
         // Two operations referenced against ORIGINAL line numbers should both apply
         // cleanly — even though applying them top-to-bottom would shift later indices.
         var workspace = AgentService.workspacePath(agent.name);
@@ -1012,7 +1012,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editLinesPreservesCrlfLineEndings() throws Exception {
+    void editLinesPreservesCrlfLineEndings() throws Exception {
         var workspace = AgentService.workspacePath(agent.name);
         // Windows-authored file: CRLF everywhere.
         Files.writeString(workspace.resolve("lr-crlf.txt"), "one\r\ntwo\r\nthree\r\n");
@@ -1030,7 +1030,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editLinesValidatesOutOfBounds() throws Exception {
+    void editLinesValidatesOutOfBounds() throws Exception {
         var workspace = AgentService.workspacePath(agent.name);
         Files.writeString(workspace.resolve("lr-bounds.txt"), "only line\n");
         var result = ToolRegistry.execute("filesystem",
@@ -1047,7 +1047,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editLinesAtomicAllOrNothing() throws Exception {
+    void editLinesAtomicAllOrNothing() throws Exception {
         var workspace = AgentService.workspacePath(agent.name);
         Files.writeString(workspace.resolve("lr-atomic.txt"), "alpha\nbeta\ngamma\n");
         // Second operation has endLine < startLine → entire batch rejects, no mutation.
@@ -1066,7 +1066,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editLinesRejectsUnknownOp() {
+    void editLinesRejectsUnknownOp() {
         ToolRegistry.execute("filesystem",
                 """
                 {"action": "writeFile", "path": "lr-unknown.txt", "content": "x"}
@@ -1080,7 +1080,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editLinesEmptyOperationsRejected() {
+    void editLinesEmptyOperationsRejected() {
         ToolRegistry.execute("filesystem",
                 """
                 {"action": "writeFile", "path": "lr-empty.txt", "content": "x"}
@@ -1094,7 +1094,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void editLinesMissingFileErrors() {
+    void editLinesMissingFileErrors() {
         var result = ToolRegistry.execute("filesystem",
                 """
                 {"action": "editLines", "path": "missing-file.txt",
@@ -1107,7 +1107,7 @@ public class ToolSystemTest extends UnitTest {
     // --- applyPatch ---
 
     @Test
-    public void applyPatchAddUpdateDelete() throws Exception {
+    void applyPatchAddUpdateDelete() throws Exception {
         var workspace = AgentService.workspacePath(agent.name);
         Files.writeString(workspace.resolve("to-update.txt"), "hello world\n");
         Files.writeString(workspace.resolve("to-delete.txt"), "goodbye\n");
@@ -1137,7 +1137,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void applyPatchAtomicValidation() throws Exception {
+    void applyPatchAtomicValidation() throws Exception {
         var workspace = AgentService.workspacePath(agent.name);
         var patch = """
                 *** Begin Patch
@@ -1158,7 +1158,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void applyPatchUpdateContextMismatch() throws Exception {
+    void applyPatchUpdateContextMismatch() throws Exception {
         var workspace = AgentService.workspacePath(agent.name);
         Files.writeString(workspace.resolve("mismatch.txt"), "actual content\n");
         var patch = """
@@ -1178,7 +1178,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void applyPatchMoveFile() throws Exception {
+    void applyPatchMoveFile() throws Exception {
         var workspace = AgentService.workspacePath(agent.name);
         Files.writeString(workspace.resolve("old-name.txt"), "content here\n");
         var patch = """
@@ -1199,7 +1199,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void applyPatchMalformedFormat() {
+    void applyPatchMalformedFormat() {
         var patch = """
                 *** Begin Patch
                 *** Update File: x.txt
@@ -1213,7 +1213,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void applyPatchEmptyPatchRejected() {
+    void applyPatchEmptyPatchRejected() {
         var result = ToolRegistry.execute("filesystem",
                 """
                 {"action": "applyPatch", "patch": ""}
@@ -1224,7 +1224,7 @@ public class ToolSystemTest extends UnitTest {
     // --- Concurrency ---
 
     @Test
-    public void concurrentEditsSerialize() throws Exception {
+    void concurrentEditsSerialize() throws Exception {
         ToolRegistry.execute("filesystem",
                 """
                 {"action": "writeFile", "path": "concurrent.txt", "content": "AAA BBB"}
@@ -1289,7 +1289,7 @@ public class ToolSystemTest extends UnitTest {
     // --- WebFetchTool SSRF guard ---
 
     @Test
-    public void webFetchRejectsFileScheme() {
+    void webFetchRejectsFileScheme() {
         var result = ToolRegistry.execute("web_fetch",
                 "{\"url\": \"file:///etc/passwd\"}", agent);
         assertTrue(result.contains("rejected by SSRF guard"),
@@ -1299,7 +1299,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void webFetchRejectsLocalhost() {
+    void webFetchRejectsLocalhost() {
         var result = ToolRegistry.execute("web_fetch",
                 "{\"url\": \"http://localhost:8080/admin\"}", agent);
         // DNS-layer rejection surfaces as UnknownHostException wrapped through
@@ -1309,7 +1309,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void webFetchRejectsAwsMetadataIp() {
+    void webFetchRejectsAwsMetadataIp() {
         // The Capital One 2019 canary: 169.254.169.254 is AWS/GCP/Azure
         // instance metadata. A prompt-injected LLM could use this to exfil
         // IAM credentials. SsrfGuard must block it at the DNS layer.
@@ -1320,7 +1320,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void webFetchRejectsRfc1918Address() {
+    void webFetchRejectsRfc1918Address() {
         var result = ToolRegistry.execute("web_fetch",
                 "{\"url\": \"http://10.0.0.1/\"}", agent);
         assertTrue(result.contains("rejected"),
@@ -1328,7 +1328,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void webFetchRejectsGopherScheme() {
+    void webFetchRejectsGopherScheme() {
         // gopher:// is a classic SSRF amplifier (Redis RCE). The scheme
         // allowlist must reject it before any host lookup.
         var result = ToolRegistry.execute("web_fetch",
@@ -1349,7 +1349,7 @@ public class ToolSystemTest extends UnitTest {
     }
 
     @Test
-    public void getToolDefsForLoadtestAgentReturnsEmpty() {
+    void getToolDefsForLoadtestAgentReturnsEmpty() {
         // Sanity: a normal agent gets the full registered tool set.
         assertEquals(4, ToolRegistry.getToolDefsForAgent(agent).size(),
                 "non-loadtest agent should see every published tool");

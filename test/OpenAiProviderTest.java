@@ -19,7 +19,7 @@ import java.util.List;
  * this file pins the OpenAI-specific reasoning-param emission and the
  * OpenAI-shape reasoning-token extraction in isolation.
  */
-public class OpenAiProviderTest extends UnitTest {
+class OpenAiProviderTest extends UnitTest {
 
     private static OpenAiProvider provider() {
         return new OpenAiProvider(new ProviderConfig(
@@ -46,7 +46,7 @@ public class OpenAiProviderTest extends UnitTest {
     // =====================
 
     @Test
-    public void addReasoningParamsEmitsReasoningEffortField() throws Exception {
+    void addReasoningParamsEmitsReasoningEffortField() throws Exception {
         var body = serialize(provider(), withThinking("medium"));
         assertTrue(body.has("reasoning_effort"),
                 "reasoning_effort must be present when thinkingMode is set");
@@ -54,7 +54,7 @@ public class OpenAiProviderTest extends UnitTest {
     }
 
     @Test
-    public void addReasoningParamsThreadsExactValueThrough() throws Exception {
+    void addReasoningParamsThreadsExactValueThrough() throws Exception {
         for (var level : List.of("low", "medium", "high")) {
             var body = serialize(provider(), withThinking(level));
             assertEquals(level, body.get("reasoning_effort").getAsString(),
@@ -63,14 +63,14 @@ public class OpenAiProviderTest extends UnitTest {
     }
 
     @Test
-    public void noReasoningParamsWhenThinkingModeNull() throws Exception {
+    void noReasoningParamsWhenThinkingModeNull() throws Exception {
         var body = serialize(provider(), withThinking(null));
         assertFalse(body.has("reasoning_effort"),
                 "no reasoning_effort key when thinkingMode is null");
     }
 
     @Test
-    public void noReasoningParamsWhenThinkingModeBlank() throws Exception {
+    void noReasoningParamsWhenThinkingModeBlank() throws Exception {
         var body = serialize(provider(), withThinking("   "));
         assertFalse(body.has("reasoning_effort"),
                 "no reasoning_effort key when thinkingMode is blank");
@@ -81,7 +81,7 @@ public class OpenAiProviderTest extends UnitTest {
     // =====================
 
     @Test
-    public void extractReasoningTokensReadsNestedDetailsField() {
+    void extractReasoningTokensReadsNestedDetailsField() {
         var p = provider();
         var usage = p.parseUsage(JsonParser.parseString("""
                 {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
@@ -92,7 +92,7 @@ public class OpenAiProviderTest extends UnitTest {
     }
 
     @Test
-    public void extractReasoningTokensReturnsZeroWhenDetailsAbsent() {
+    void extractReasoningTokensReturnsZeroWhenDetailsAbsent() {
         var p = provider();
         var usage = p.parseUsage(JsonParser.parseString("""
                 {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
@@ -101,7 +101,7 @@ public class OpenAiProviderTest extends UnitTest {
     }
 
     @Test
-    public void extractReasoningTokensReturnsZeroWhenDetailsNull() {
+    void extractReasoningTokensReturnsZeroWhenDetailsNull() {
         var p = provider();
         var usage = p.parseUsage(JsonParser.parseString("""
                 {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
@@ -111,7 +111,7 @@ public class OpenAiProviderTest extends UnitTest {
     }
 
     @Test
-    public void extractReasoningTokensReturnsZeroWhenDetailsHasNoReasoningField() {
+    void extractReasoningTokensReturnsZeroWhenDetailsHasNoReasoningField() {
         var p = provider();
         var usage = p.parseUsage(JsonParser.parseString("""
                 {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,

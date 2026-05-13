@@ -13,7 +13,7 @@ import services.transcription.WhisperModelManager;
  * {@link WhisperModelManagerTest} — here we just verify the controller
  * routes to it.
  */
-public class ApiTranscriptionControllerTest extends FunctionalTest {
+class ApiTranscriptionControllerTest extends FunctionalTest {
 
     private static final String TEST_PASSWORD = "testpass-tx-164";
 
@@ -47,7 +47,7 @@ public class ApiTranscriptionControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void stateReturnsModelListAndConfigKeys() {
+    void stateReturnsModelListAndConfigKeys() {
         runInFreshTx(() -> {
             ConfigService.set("transcription.provider", "whisper-local");
             ConfigService.set("transcription.localModel", WhisperModel.DEFAULT.id());
@@ -66,7 +66,7 @@ public class ApiTranscriptionControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void stateSurfacesFfmpegProbeResult() {
+    void stateSurfacesFfmpegProbeResult() {
         FfmpegProbe.setForTest(new FfmpegProbe.ProbeResult(false, "ffmpeg not on PATH"));
         var response = GET("/api/transcription/state");
         assertIsOk(response);
@@ -77,21 +77,21 @@ public class ApiTranscriptionControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void stateRequiresAuth() {
+    void stateRequiresAuth() {
         POST("/api/auth/logout", "application/json", "{}");
         var response = GET("/api/transcription/state");
         assertEquals(401, response.status.intValue());
     }
 
     @Test
-    public void downloadRejectsUnknownModelId() {
+    void downloadRejectsUnknownModelId() {
         var response = POST("/api/transcription/models/not-a-real-id/download",
                 "application/json", "{}");
         assertEquals(400, response.status.intValue());
     }
 
     @Test
-    public void downloadAcceptsKnownModelId() {
+    void downloadAcceptsKnownModelId() {
         // Real download would hit Hugging Face — we just verify the endpoint
         // accepts the request and returns the expected ack shape. The
         // single-flight CompletableFuture in WhisperModelManager swallows

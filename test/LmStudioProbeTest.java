@@ -13,7 +13,7 @@ import java.net.ServerSocket;
  * the same connection-refused-vs-other-failures distinction to keep the
  * boot log quiet on fresh installs.
  */
-public class LmStudioProbeTest extends UnitTest {
+class LmStudioProbeTest extends UnitTest {
 
     private HttpServer server;
     private int port;
@@ -44,7 +44,7 @@ public class LmStudioProbeTest extends UnitTest {
     }
 
     @Test
-    public void probeReturnsAvailableWithModelCount() throws Exception {
+    void probeReturnsAvailableWithModelCount() throws Exception {
         startServer("""
                 {"object":"list","data":[
                   {"id":"qwen2.5-7b-instruct","object":"model"},
@@ -60,7 +60,7 @@ public class LmStudioProbeTest extends UnitTest {
     }
 
     @Test
-    public void probeFailsOnNon200WithReasonAndNotConnectionRefused() throws Exception {
+    void probeFailsOnNon200WithReasonAndNotConnectionRefused() throws Exception {
         startServer("server error", 503);
 
         var r = LmStudioProbe.probe(baseUrl());
@@ -72,7 +72,7 @@ public class LmStudioProbeTest extends UnitTest {
     }
 
     @Test
-    public void probeReportsConnectionRefusedForUnreachableHost() throws Exception {
+    void probeReportsConnectionRefusedForUnreachableHost() throws Exception {
         // Bind a socket then close it to get a port that nothing listens on —
         // the kernel returns ECONNREFUSED on a connect attempt, which is the
         // typical "LM Studio not started" failure mode (the desktop app may
@@ -91,7 +91,7 @@ public class LmStudioProbeTest extends UnitTest {
     }
 
     @Test
-    public void setForTestOverridesCachedResultWithoutNetwork() {
+    void setForTestOverridesCachedResultWithoutNetwork() {
         LmStudioProbe.setForTest(new LmStudioProbe.ProbeResult(
                 true, 4, null, false));
 

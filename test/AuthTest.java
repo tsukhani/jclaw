@@ -1,7 +1,7 @@
 import org.junit.jupiter.api.*;
 import play.test.*;
 
-public class AuthTest extends FunctionalTest {
+class AuthTest extends FunctionalTest {
 
     private static final String TEST_PASSWORD = "testpass-123";
 
@@ -16,7 +16,7 @@ public class AuthTest extends FunctionalTest {
     }
 
     @Test
-    public void loginWithValidCredentials() {
+    void loginWithValidCredentials() {
         var body = """
                 {"username": "admin", "password": "%s"}
                 """.formatted(TEST_PASSWORD);
@@ -27,7 +27,7 @@ public class AuthTest extends FunctionalTest {
     }
 
     @Test
-    public void loginWithInvalidCredentials() {
+    void loginWithInvalidCredentials() {
         var body = """
                 {"username": "admin", "password": "wrong"}
                 """;
@@ -36,7 +36,7 @@ public class AuthTest extends FunctionalTest {
     }
 
     @Test
-    public void loginFailsWhenPasswordUnset() {
+    void loginFailsWhenPasswordUnset() {
         AuthFixture.clearAdminPassword();
         var body = """
                 {"username": "admin", "password": "anything"}
@@ -46,7 +46,7 @@ public class AuthTest extends FunctionalTest {
     }
 
     @Test
-    public void statusReturnsPasswordSetWhenHashPresent() {
+    void statusReturnsPasswordSetWhenHashPresent() {
         var response = GET("/api/auth/status");
         assertIsOk(response);
         assertTrue(getContent(response).contains("\"passwordSet\":true"),
@@ -54,7 +54,7 @@ public class AuthTest extends FunctionalTest {
     }
 
     @Test
-    public void statusReturnsPasswordUnsetWhenHashAbsent() {
+    void statusReturnsPasswordUnsetWhenHashAbsent() {
         AuthFixture.clearAdminPassword();
         var response = GET("/api/auth/status");
         assertIsOk(response);
@@ -63,7 +63,7 @@ public class AuthTest extends FunctionalTest {
     }
 
     @Test
-    public void setupSucceedsWhenNoPasswordSet() {
+    void setupSucceedsWhenNoPasswordSet() {
         AuthFixture.clearAdminPassword();
         var body = "{\"password\":\"new-password-here\"}";
         var response = POST("/api/auth/setup", "application/json", body);
@@ -74,7 +74,7 @@ public class AuthTest extends FunctionalTest {
     }
 
     @Test
-    public void setupRejectsShortPassword() {
+    void setupRejectsShortPassword() {
         AuthFixture.clearAdminPassword();
         var body = "{\"password\":\"short\"}";
         var response = POST("/api/auth/setup", "application/json", body);
@@ -84,7 +84,7 @@ public class AuthTest extends FunctionalTest {
     }
 
     @Test
-    public void setupRejectedWhenPasswordAlreadySet() {
+    void setupRejectedWhenPasswordAlreadySet() {
         var body = "{\"password\":\"new-password-here\"}";
         var response = POST("/api/auth/setup", "application/json", body);
         assertEquals(409, response.status.intValue());
@@ -93,19 +93,19 @@ public class AuthTest extends FunctionalTest {
     }
 
     @Test
-    public void statusEndpointDoesNotRequireAuth() {
+    void statusEndpointDoesNotRequireAuth() {
         var response = GET("/api/status");
         assertIsOk(response);
     }
 
     @Test
-    public void protectedEndpointRequiresAuth() {
+    void protectedEndpointRequiresAuth() {
         var response = GET("/api/config");
         assertEquals(401, response.status.intValue());
     }
 
     @Test
-    public void protectedEndpointAccessibleAfterLogin() {
+    void protectedEndpointAccessibleAfterLogin() {
         var loginBody = """
                 {"username": "admin", "password": "%s"}
                 """.formatted(TEST_PASSWORD);
@@ -117,13 +117,13 @@ public class AuthTest extends FunctionalTest {
     }
 
     @Test
-    public void resetPasswordRequiresAuth() {
+    void resetPasswordRequiresAuth() {
         var response = POST("/api/auth/reset-password", "application/json", "{}");
         assertEquals(401, response.status.intValue());
     }
 
     @Test
-    public void resetPasswordWipesHashAndClearsSession() {
+    void resetPasswordWipesHashAndClearsSession() {
         // Log in
         var loginBody = """
                 {"username": "admin", "password": "%s"}
@@ -146,7 +146,7 @@ public class AuthTest extends FunctionalTest {
     }
 
     @Test
-    public void logoutClearsSession() {
+    void logoutClearsSession() {
         var loginBody = """
                 {"username": "admin", "password": "%s"}
                 """.formatted(TEST_PASSWORD);
@@ -160,7 +160,7 @@ public class AuthTest extends FunctionalTest {
     }
 
     @Test
-    public void staleSessionRejectedWhenPasswordWiped() {
+    void staleSessionRejectedWhenPasswordWiped() {
         // Reproduce the fresh-install gotcha: a session cookie from before
         // the password row was wiped (or surviving a rm-and-reclone) is
         // still cryptographically valid because Play sessions are stateless

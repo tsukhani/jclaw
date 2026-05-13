@@ -38,7 +38,7 @@ import java.util.Map;
  * <p>JCLAW-188 reshaped the 11 fixtures around OkHttp {@link Request} +
  * {@link Response} after the scanner DI moved off the JDK HttpClient.
  */
-public class ScannerDependencyInjectionTest extends UnitTest {
+class ScannerDependencyInjectionTest extends UnitTest {
 
     /** SHA-256 of the empty string — content doesn't matter, only the wire shape does. */
     private static final String SHA =
@@ -49,7 +49,7 @@ public class ScannerDependencyInjectionTest extends UnitTest {
     // =====================================================================
 
     @Test
-    public void virusTotal_buildsGetRequestWithApiKeyHeader() {
+    void virusTotal_buildsGetRequestWithApiKeyHeader() {
         // Pins the wire contract: GET to {baseUrl}files/{sha}, x-apikey header,
         // Accept: application/json. A future refactor that accidentally drops
         // the x-apikey header (e.g., switching to Authorization: Bearer) would
@@ -71,7 +71,7 @@ public class ScannerDependencyInjectionTest extends UnitTest {
     }
 
     @Test
-    public void metaDefender_buildsGetRequestWithApikeyHeader() {
+    void metaDefender_buildsGetRequestWithApikeyHeader() {
         // MetaDefender uses the lowercase header name "apikey" — distinct from
         // VirusTotal's "x-apikey". Pin that distinction so a future copy-paste
         // mistake doesn't accidentally unify them.
@@ -92,7 +92,7 @@ public class ScannerDependencyInjectionTest extends UnitTest {
     }
 
     @Test
-    public void malwareBazaar_buildsPostFormRequestWithAuthKeyHeader() throws Exception {
+    void malwareBazaar_buildsPostFormRequestWithAuthKeyHeader() throws Exception {
         // MalwareBazaar is the odd one out: POST + form-encoded body + the
         // distinctive Auth-Key header. Pin all three because each diverges
         // from the other two scanners.
@@ -122,7 +122,7 @@ public class ScannerDependencyInjectionTest extends UnitTest {
     }
 
     @Test
-    public void malwareBazaar_omitsAuthKeyHeaderWhenKeyIsBlank() {
+    void malwareBazaar_omitsAuthKeyHeaderWhenKeyIsBlank() {
         // Defensive: if a future change skips the isEnabled() gate (e.g.,
         // because the orchestrator changes), MalwareBazaar's lookup() must
         // not send a blank Auth-Key header. The branch is in the lookup body
@@ -146,7 +146,7 @@ public class ScannerDependencyInjectionTest extends UnitTest {
     // =====================================================================
 
     @Test
-    public void virusTotal_fallsBackToProductionUrlWhenConfigUnset() {
+    void virusTotal_fallsBackToProductionUrlWhenConfigUnset() {
         // The base class reads URL via config().get(key, fallback). When the
         // operator hasn't set scanner.virustotal.url, the request must still
         // go to the production endpoint. DI pins that the fallback path is
@@ -169,7 +169,7 @@ public class ScannerDependencyInjectionTest extends UnitTest {
     // =====================================================================
 
     @Test
-    public void virusTotal_logsHttp500WithStatusAndFailOpenMarker() {
+    void virusTotal_logsHttp500WithStatusAndFailOpenMarker() {
         var deps = configuredVtDeps();
         deps.responder = (req, timeoutMs) -> stubResponse(req, 500, "internal server error");
 
@@ -184,7 +184,7 @@ public class ScannerDependencyInjectionTest extends UnitTest {
     }
 
     @Test
-    public void metaDefender_logsNetworkExceptionRootCause() {
+    void metaDefender_logsNetworkExceptionRootCause() {
         // IOException thrown by the HttpClient itself (DNS failure, socket
         // reset before any HTTP response) is a distinct path from a 5xx
         // response. The DI is the only way to exercise it deterministically;
@@ -204,7 +204,7 @@ public class ScannerDependencyInjectionTest extends UnitTest {
     }
 
     @Test
-    public void malwareBazaar_logsUnknownQueryStatus() {
+    void malwareBazaar_logsUnknownQueryStatus() {
         // MalwareBazaar's lookup parses query_status; "ok" and "hash_not_found"
         // / "no_results" are the documented values. Anything else (illegal
         // auth key, rate-limited, etc.) falls through to a warning + clean.
@@ -223,7 +223,7 @@ public class ScannerDependencyInjectionTest extends UnitTest {
     }
 
     @Test
-    public void virusTotal_404IsCleanAndSilent() {
+    void virusTotal_404IsCleanAndSilent() {
         // VT/MD pass cleanOnNotFound=true to sendJsonLookup. The base class
         // returns Verdict.clean() WITHOUT logging — the absence of a warning
         // is part of the contract (404 means "hash never seen", not an error
@@ -244,7 +244,7 @@ public class ScannerDependencyInjectionTest extends UnitTest {
     // =====================================================================
 
     @Test
-    public void interruptedIoExceptionRestoresThreadInterruptStatus() {
+    void interruptedIoExceptionRestoresThreadInterruptStatus() {
         // ConfiguredHashScanner.sendJsonLookup catches InterruptedIOException
         // separately from generic IOException because Java requires the catch
         // to re-set Thread.currentThread().interrupt(). OkHttp throws
@@ -271,7 +271,7 @@ public class ScannerDependencyInjectionTest extends UnitTest {
     // =====================================================================
 
     @Test
-    public void isEnabledNeverFiresHttpRequest() {
+    void isEnabledNeverFiresHttpRequest() {
         // A subtle but important contract: isEnabled() is called by the
         // orchestrator on every scan to decide which scanners to consult. If
         // it ever became HTTP-bound (e.g., a "ping the API to check creds"

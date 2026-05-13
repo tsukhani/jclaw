@@ -2,7 +2,7 @@ import org.junit.jupiter.api.*;
 import play.test.*;
 import utils.LatencyStats;
 
-public class LatencyStatsTest extends UnitTest {
+class LatencyStatsTest extends UnitTest {
 
     @BeforeEach
     void setup() {
@@ -10,7 +10,7 @@ public class LatencyStatsTest extends UnitTest {
     }
 
     @Test
-    public void captureResetPointPreservesPriorData() {
+    void captureResetPointPreservesPriorData() {
         LatencyStats.record("web", "total", 100);
         LatencyStats.record("web", "total", 200);
 
@@ -31,7 +31,7 @@ public class LatencyStatsTest extends UnitTest {
     }
 
     @Test
-    public void captureResetPointDropsSegmentsCreatedAfterCapture() {
+    void captureResetPointDropsSegmentsCreatedAfterCapture() {
         LatencyStats.record("web", "total", 100);
 
         var resetPoint = LatencyStats.captureResetPoint();
@@ -51,7 +51,7 @@ public class LatencyStatsTest extends UnitTest {
     }
 
     @Test
-    public void captureResetPointOnEmptyStateRestoresEmptyState() {
+    void captureResetPointOnEmptyStateRestoresEmptyState() {
         var resetPoint = LatencyStats.captureResetPoint();
 
         LatencyStats.record("web", "total", 100);
@@ -64,7 +64,7 @@ public class LatencyStatsTest extends UnitTest {
     }
 
     @Test
-    public void captureResetPointSupportsMultipleRunsAccumulating() {
+    void captureResetPointSupportsMultipleRunsAccumulating() {
         // Simulate three back-to-back load-test runs, each with a warmup
         // sample that must be dropped but whose workload must accumulate.
         for (int run = 1; run <= 3; run++) {
@@ -87,7 +87,7 @@ public class LatencyStatsTest extends UnitTest {
     }
 
     @Test
-    public void channelsAreIsolated() {
+    void channelsAreIsolated() {
         // JCLAW-102: a sample recorded under "telegram" must not show up
         // under "web" and vice versa.
         LatencyStats.record("web", "total", 100);
@@ -110,7 +110,7 @@ public class LatencyStatsTest extends UnitTest {
     }
 
     @Test
-    public void nullChannelFallsBackToUnknownBucket() {
+    void nullChannelFallsBackToUnknownBucket() {
         // Data never disappears silently — a null or blank channel lands
         // in the "unknown" bucket so the operator can notice and fix.
         LatencyStats.record(null, "total", 42);
@@ -124,7 +124,7 @@ public class LatencyStatsTest extends UnitTest {
     }
 
     @Test
-    public void resetClearsAllChannels() {
+    void resetClearsAllChannels() {
         LatencyStats.record("web", "total", 100);
         LatencyStats.record("telegram", "total", 200);
         LatencyStats.record("task", "total", 300);

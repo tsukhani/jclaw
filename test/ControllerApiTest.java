@@ -12,7 +12,7 @@ import play.mvc.Http.*;
  * seed data does NOT survive Fixtures.deleteDatabase(), so tests that need an agent
  * create one via the API.
  */
-public class ControllerApiTest extends FunctionalTest {
+class ControllerApiTest extends FunctionalTest {
 
     @BeforeEach
     void setup() {
@@ -69,7 +69,7 @@ public class ControllerApiTest extends FunctionalTest {
     // --- Unauthenticated access is rejected ---
 
     @Test
-    public void allEndpointsReject401WithoutAuth() {
+    void allEndpointsReject401WithoutAuth() {
         assertEquals(401, GET("/api/agents").status.intValue());
         assertEquals(401, GET("/api/tasks").status.intValue());
         assertEquals(401, GET("/api/channels").status.intValue());
@@ -83,7 +83,7 @@ public class ControllerApiTest extends FunctionalTest {
     // =====================
 
     @Test
-    public void agentsListReturnsJsonArray() {
+    void agentsListReturnsJsonArray() {
         login();
         var response = GET("/api/agents");
         assertIsOk(response);
@@ -93,7 +93,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsListContainsCreatedAgent() {
+    void agentsListContainsCreatedAgent() {
         login();
         createAgent("listed-agent");
         var response = GET("/api/agents");
@@ -102,7 +102,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsCrud() {
+    void agentsCrud() {
         login();
 
         // CREATE
@@ -144,7 +144,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsCreateRejectsReservedMainName() {
+    void agentsCreateRejectsReservedMainName() {
         login();
         var body = """
                 {"name": "main", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
@@ -156,7 +156,7 @@ public class ControllerApiTest extends FunctionalTest {
     // JCLAW-115: agent-name slug validation rejects traversal-shaped input.
 
     @Test
-    public void agentsCreateRejectsPathTraversalName() {
+    void agentsCreateRejectsPathTraversalName() {
         login();
         var body = """
                 {"name": "../etc", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
@@ -166,7 +166,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsCreateRejectsAbsolutePathName() {
+    void agentsCreateRejectsAbsolutePathName() {
         login();
         var body = """
                 {"name": "/etc/passwd", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
@@ -176,7 +176,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsCreateRejectsSlashedName() {
+    void agentsCreateRejectsSlashedName() {
         login();
         var body = """
                 {"name": "foo/bar", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
@@ -186,7 +186,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsCreateRejectsEmptyName() {
+    void agentsCreateRejectsEmptyName() {
         login();
         var body = """
                 {"name": "", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
@@ -196,7 +196,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsCreateRejectsDotNames() {
+    void agentsCreateRejectsDotNames() {
         login();
         var dotBody = """
                 {"name": ".", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
@@ -209,7 +209,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsCreateRejectsWhitespaceInName() {
+    void agentsCreateRejectsWhitespaceInName() {
         login();
         var body = """
                 {"name": "has space", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
@@ -219,7 +219,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsCreateRejectsOverlongName() {
+    void agentsCreateRejectsOverlongName() {
         login();
         // 65 chars — one over the limit.
         var longName = "a".repeat(65);
@@ -231,7 +231,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsCreateAcceptsValidSlugNames() {
+    void agentsCreateAcceptsValidSlugNames() {
         login();
         // Happy-path sanity: the regex allows typical names operators use.
         var body = """
@@ -242,7 +242,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsUpdateRejectsRenameToTraversalName() {
+    void agentsUpdateRejectsRenameToTraversalName() {
         login();
         var id = createAgent("rename-src-115");
         var body = """
@@ -253,7 +253,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsUpdateAllowsUnchangedName() {
+    void agentsUpdateAllowsUnchangedName() {
         // JCLAW-115 grandfather clause: update requests that don't modify
         // the name must pass regardless of whether the existing name meets
         // the new regex (e.g. legacy agents). Here we flip thinkingMode
@@ -268,7 +268,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsCreateRejectsReservedLoadtestName() {
+    void agentsCreateRejectsReservedLoadtestName() {
         login();
         var body = """
                 {"name": "__loadtest__", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
@@ -278,7 +278,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsUpdateRejectsRenameToReservedLoadtestName() {
+    void agentsUpdateRejectsRenameToReservedLoadtestName() {
         login();
         var id = createAgent("rename-src");
         var body = """
@@ -289,14 +289,14 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsGetNonExistentReturns404() {
+    void agentsGetNonExistentReturns404() {
         login();
         var response = GET("/api/agents/999999");
         assertEquals(404, response.status.intValue());
     }
 
     @Test
-    public void agentsPromptBreakdown() {
+    void agentsPromptBreakdown() {
         login();
         var id = createTestAgent();
         var response = GET("/api/agents/" + id + "/prompt-breakdown?channelType=web");
@@ -305,7 +305,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsPromptBreakdownRejectsMissingChannel() {
+    void agentsPromptBreakdownRejectsMissingChannel() {
         login();
         var id = createTestAgent();
         assertEquals(400, GET("/api/agents/" + id + "/prompt-breakdown").status.intValue());
@@ -318,7 +318,7 @@ public class ControllerApiTest extends FunctionalTest {
     // =====================
 
     @Test
-    public void providersDiscoverModelsRequiresConfig() {
+    void providersDiscoverModelsRequiresConfig() {
         login();
         // Provider "nonexistent" has no base URL configured, so should return 400
         var response = POST("/api/providers/nonexistent/discover-models", "application/json", "{}");
@@ -330,7 +330,7 @@ public class ControllerApiTest extends FunctionalTest {
     // =====================
 
     @Test
-    public void tasksList() {
+    void tasksList() {
         login();
         var response = GET("/api/tasks");
         assertIsOk(response);
@@ -339,7 +339,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void tasksListWithFilters() {
+    void tasksListWithFilters() {
         login();
         var response = GET("/api/tasks?status=PENDING&limit=10&offset=0");
         assertIsOk(response);
@@ -347,14 +347,14 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void tasksCancelNonExistentReturns404() {
+    void tasksCancelNonExistentReturns404() {
         login();
         var response = POST("/api/tasks/999999/cancel", "application/json", "{}");
         assertEquals(404, response.status.intValue());
     }
 
     @Test
-    public void tasksRetryNonExistentReturns404() {
+    void tasksRetryNonExistentReturns404() {
         login();
         var response = POST("/api/tasks/999999/retry", "application/json", "{}");
         assertEquals(404, response.status.intValue());
@@ -365,7 +365,7 @@ public class ControllerApiTest extends FunctionalTest {
     // =====================
 
     @Test
-    public void channelsList() {
+    void channelsList() {
         login();
         var response = GET("/api/channels");
         assertIsOk(response);
@@ -374,7 +374,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void channelsCrud() {
+    void channelsCrud() {
         login();
 
         // SAVE (create) a channel config
@@ -409,7 +409,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void channelsGetNonExistentReturns404() {
+    void channelsGetNonExistentReturns404() {
         login();
         var response = GET("/api/channels/nonexistent");
         assertEquals(404, response.status.intValue());
@@ -420,7 +420,7 @@ public class ControllerApiTest extends FunctionalTest {
     // =====================
 
     @Test
-    public void logsList() {
+    void logsList() {
         login();
         var response = GET("/api/logs");
         assertIsOk(response);
@@ -432,7 +432,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void logsListWithFilters() {
+    void logsListWithFilters() {
         login();
         var response = GET("/api/logs?category=system&level=INFO&limit=10&offset=0");
         assertIsOk(response);
@@ -440,7 +440,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void logsListWithSearchFilter() {
+    void logsListWithSearchFilter() {
         login();
         var response = GET("/api/logs?search=test&limit=5");
         assertIsOk(response);
@@ -452,7 +452,7 @@ public class ControllerApiTest extends FunctionalTest {
     // =====================
 
     @Test
-    public void skillsList() {
+    void skillsList() {
         login();
         var response = GET("/api/skills");
         assertIsOk(response);
@@ -461,14 +461,14 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void skillsGetNonExistentReturns404() {
+    void skillsGetNonExistentReturns404() {
         login();
         var response = GET("/api/skills/nonexistent-skill-xyz");
         assertEquals(404, response.status.intValue());
     }
 
     @Test
-    public void skillsListForAgent() {
+    void skillsListForAgent() {
         login();
         var id = createTestAgent();
         var response = GET("/api/agents/" + id + "/skills");
@@ -477,14 +477,14 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void skillsListForNonExistentAgentReturns404() {
+    void skillsListForNonExistentAgentReturns404() {
         login();
         var response = GET("/api/agents/999999/skills");
         assertEquals(404, response.status.intValue());
     }
 
     @Test
-    public void skillsDeleteNonExistentReturns404() {
+    void skillsDeleteNonExistentReturns404() {
         login();
         var response = DELETE("/api/skills/nonexistent-skill-xyz");
         assertEquals(404, response.status.intValue());
@@ -495,7 +495,7 @@ public class ControllerApiTest extends FunctionalTest {
     // =====================
 
     @Test
-    public void toolsList() {
+    void toolsList() {
         login();
         var response = GET("/api/tools");
         assertIsOk(response);
@@ -505,7 +505,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void toolsMetaReturnsRichShape() {
+    void toolsMetaReturnsRichShape() {
         // Publish a known tool set so this test is independent of whatever
         // the DefaultConfigJob did (or didn't) register in the test JVM.
         var originalTools = agents.ToolRegistry.listTools();
@@ -547,12 +547,12 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void toolsMetaRequiresAuth() {
+    void toolsMetaRequiresAuth() {
         assertEquals(401, GET("/api/tools/meta").status.intValue());
     }
 
     @Test
-    public void toolsListForAgent() {
+    void toolsListForAgent() {
         login();
         var id = createTestAgent();
         var response = GET("/api/agents/" + id + "/tools");
@@ -562,14 +562,14 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void toolsListForNonExistentAgentReturns404() {
+    void toolsListForNonExistentAgentReturns404() {
         login();
         var response = GET("/api/agents/999999/tools");
         assertEquals(404, response.status.intValue());
     }
 
     @Test
-    public void toolsUpdateForAgent() {
+    void toolsUpdateForAgent() {
         login();
         var id = createTestAgent();
 
@@ -605,7 +605,7 @@ public class ControllerApiTest extends FunctionalTest {
      * and that the route is wired by confirming the 401 comes from AuthCheck, not a 404.
      */
     @Test
-    public void eventsStreamRouteIsWired() {
+    void eventsStreamRouteIsWired() {
         // Without auth, AuthCheck returns 401 — proving the route exists and
         // reaches the controller (a missing route would give 404).
         var response = GET("/api/events");
@@ -617,7 +617,7 @@ public class ControllerApiTest extends FunctionalTest {
     // =====================
 
     @Test
-    public void configSaveOnLoadtestMockKeyReturns409() {
+    void configSaveOnLoadtestMockKeyReturns409() {
         login();
         var body = """
                 {"key":"provider.loadtest-mock.baseUrl","value":"http://localhost:19999/v1"}
@@ -627,7 +627,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void configDeleteOnLoadtestMockKeyReturns409() {
+    void configDeleteOnLoadtestMockKeyReturns409() {
         login();
         services.ConfigService.set("provider.loadtest-mock.baseUrl", "http://127.0.0.1:19999/v1");
         try {
@@ -639,7 +639,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void configListHidesLoadtestMockProviderKeys() {
+    void configListHidesLoadtestMockProviderKeys() {
         login();
         services.ConfigService.set("provider.loadtest-mock.baseUrl", "http://127.0.0.1:19999/v1");
         var response = GET("/api/config");
@@ -650,7 +650,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void configSaveProviderEnabledFlagRoundTrips() {
+    void configSaveProviderEnabledFlagRoundTrips() {
         // JCLAW-110: the Settings toggle writes provider.NAME.enabled via the
         // standard config API. The reserved-key guard is namespaced to the
         // loadtest-mock prefix, so this POST must succeed for normal providers
@@ -677,7 +677,7 @@ public class ControllerApiTest extends FunctionalTest {
     // =====================
 
     @Test
-    public void chatSendRoutesModelStatusThroughFullDetailPath() {
+    void chatSendRoutesModelStatusThroughFullDetailPath() {
         // JCLAW-111: the sync REST chat handler used to call the no-args
         // Commands.execute overload, which dropped the "status" argument
         // and fell into the no-args summary branch. This test proves the
@@ -711,7 +711,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void chatSendRoutesModelNameWriteThroughOverride() {
+    void chatSendRoutesModelNameWriteThroughOverride() {
         // JCLAW-111: /model openrouter/gpt-4.1 must reach the write-path
         // branch (performModelSwitch) rather than being ignored as a no-args
         // summary. We verify by inspecting the confirmation text — the
@@ -741,7 +741,7 @@ public class ControllerApiTest extends FunctionalTest {
     }
 
     @Test
-    public void agentsListHidesLoadtestAgent() {
+    void agentsListHidesLoadtestAgent() {
         login();
         services.Tx.run(() -> {
             var a = new models.Agent();

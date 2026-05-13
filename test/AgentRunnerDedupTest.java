@@ -14,12 +14,12 @@ import java.util.List;
  * chat — the runner prepends rendered images to the assistant message, but
  * only if the LLM reply doesn't already reference them by filename.
  */
-public class AgentRunnerDedupTest extends UnitTest {
+class AgentRunnerDedupTest extends UnitTest {
 
     // ==================== extractImageUrls ====================
 
     @Test
-    public void extractImageUrlsPicksUpScreenshotMarkdown() {
+    void extractImageUrlsPicksUpScreenshotMarkdown() {
         var collected = new ArrayList<String>();
         MessageDeduplicator.extractImageUrls(
                 "![Screenshot](/api/agents/1/files/screenshot-1713100000000.png)\n"
@@ -31,7 +31,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void extractImageUrlsPicksUpMultipleMarkdownImages() {
+    void extractImageUrlsPicksUpMultipleMarkdownImages() {
         var collected = new ArrayList<String>();
         MessageDeduplicator.extractImageUrls(
                 "Here: ![QR Code](/api/agents/1/files/terminal-image-1.png) "
@@ -41,7 +41,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void extractImageUrlsIgnoresNonApiMarkdownImages() {
+    void extractImageUrlsIgnoresNonApiMarkdownImages() {
         // The regex is intentionally limited to /api/ URLs — external images
         // the LLM references should not be collected as "rendered by a tool."
         var collected = new ArrayList<String>();
@@ -52,7 +52,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void extractImageUrlsHandlesNullAndEmpty() {
+    void extractImageUrlsHandlesNullAndEmpty() {
         var collected = new ArrayList<String>();
         MessageDeduplicator.extractImageUrls(null, collected);
         MessageDeduplicator.extractImageUrls("", collected);
@@ -63,7 +63,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     // ==================== buildImagePrefix: dedup paths ====================
 
     @Test
-    public void dedupsWhenUrlIsExactMatch() {
+    void dedupsWhenUrlIsExactMatch() {
         // The LLM echoed the exact same markdown image tag — no prefix needed.
         List<String> collected = List.of(
                 "![Screenshot](/api/agents/1/files/screenshot-1000.png)");
@@ -72,7 +72,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void dedupsWhenOnlyFilenameMatches() {
+    void dedupsWhenOnlyFilenameMatches() {
         // The LLM rewrote the URL (e.g., stripped the /api/agents/1/files/ prefix)
         // but kept the filename. Filename-based dedup must still catch this.
         List<String> collected = List.of(
@@ -83,7 +83,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void prependsWhenFilenameIsMentionedAsPlainTextOnly() {
+    void prependsWhenFilenameIsMentionedAsPlainTextOnly() {
         // Intentional behavior change: a plain-text mention of the filename is
         // NOT an image embed — the user expects both the inline image AND the
         // textual link reference, so the prepend still fires. Previously this
@@ -99,7 +99,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void prependsWhenUrlIsMentionedAsMarkdownLinkOnly() {
+    void prependsWhenUrlIsMentionedAsMarkdownLinkOnly() {
         // A markdown link (not an image embed) — same rule as plain text.
         // User sees both: the prepended inline image AND the LLM's clickable link.
         List<String> collected = List.of(
@@ -114,7 +114,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void dedupsWhenLlmReembedsAsHtmlImgTag() {
+    void dedupsWhenLlmReembedsAsHtmlImgTag() {
         // LLMs occasionally emit HTML <img src="..."> instead of markdown.
         // The dedup must catch both forms — otherwise the prepend fires AND the
         // LLM's HTML <img> renders, producing a duplicate.
@@ -126,7 +126,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void dedupsWhenLlmReembedsAsHtmlImgTagWithSingleQuotes() {
+    void dedupsWhenLlmReembedsAsHtmlImgTagWithSingleQuotes() {
         // Single-quoted src attribute — same contract.
         List<String> collected = List.of(
                 "![Screenshot](/api/agents/1/files/screenshot-1000.png)");
@@ -138,7 +138,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     // ==================== buildImagePrefix: prepend paths ====================
 
     @Test
-    public void prependsWhenFilenameDiffers() {
+    void prependsWhenFilenameDiffers() {
         // LLM hallucinated a different filename — prepend the correct one so
         // the user still sees the image.
         List<String> collected = List.of(
@@ -152,7 +152,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void prependsWhenContentIsEmpty() {
+    void prependsWhenContentIsEmpty() {
         // LLM returned no text at all — the image is the entire assistant message.
         List<String> collected = List.of(
                 "![Screenshot](/api/agents/1/files/screenshot-1000.png)");
@@ -161,7 +161,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void prependsWhenContentIsNull() {
+    void prependsWhenContentIsNull() {
         // Defensive: null content must not throw and must produce the prefix.
         List<String> collected = List.of(
                 "![Screenshot](/api/agents/1/files/screenshot-1000.png)");
@@ -170,13 +170,13 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void returnsEmptyWhenCollectedListIsEmpty() {
+    void returnsEmptyWhenCollectedListIsEmpty() {
         assertEquals("", MessageDeduplicator.buildImagePrefix(List.of(), "some content"));
         assertEquals("", MessageDeduplicator.buildImagePrefix(null, "some content"));
     }
 
     @Test
-    public void prependsOnlyTheMissingImagesFromAMixedList() {
+    void prependsOnlyTheMissingImagesFromAMixedList() {
         // One image is referenced by the LLM (should be skipped) and another is not
         // (should be prepended).
         List<String> collected = List.of(
@@ -194,7 +194,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     // ==================== JCLAW-104: buildDownloadSuffix ====================
 
     @Test
-    public void buildDownloadSuffixAppendsDownloadLinkOnWeb() {
+    void buildDownloadSuffixAppendsDownloadLinkOnWeb() {
         // Web-channel turns get a markdown download link — the frontend
         // renders [text](url) as clickable against the same-origin API.
         List<String> collected = List.of(
@@ -208,7 +208,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void buildDownloadSuffixSkipsOnTelegram() {
+    void buildDownloadSuffixSkipsOnTelegram() {
         // Telegram's HTML parser drops relative hrefs — a "[download](url)"
         // would render as plain text, confusing users whose real download
         // affordance is Telegram's native Save-Image on the uploaded photo.
@@ -226,7 +226,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void buildDownloadSuffixSkipsWhenLlmAlreadyIncludedLink() {
+    void buildDownloadSuffixSkipsWhenLlmAlreadyIncludedLink() {
         List<String> collected = List.of(
                 "![Screenshot](/api/agents/1/files/screenshot-A.png)");
         var content = "Here's the page [screenshot](/api/agents/1/files/screenshot-A.png).";
@@ -236,7 +236,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void buildDownloadSuffixSkipsWhenLlmReembeddedAsImage() {
+    void buildDownloadSuffixSkipsWhenLlmReembeddedAsImage() {
         List<String> collected = List.of(
                 "![Screenshot](/api/agents/1/files/screenshot-A.png)");
         var content = "![Here you go](/api/agents/1/files/screenshot-A.png)";
@@ -246,7 +246,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void buildDownloadSuffixSkipsWhenLlmUsedHtmlAnchor() {
+    void buildDownloadSuffixSkipsWhenLlmUsedHtmlAnchor() {
         List<String> collected = List.of(
                 "![Screenshot](/api/agents/1/files/screenshot-A.png)");
         var content = "<a href=\"/api/agents/1/files/screenshot-A.png\">here</a>";
@@ -256,7 +256,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void buildDownloadSuffixFallsBackToPlainDownloadWhenAltMissing() {
+    void buildDownloadSuffixFallsBackToPlainDownloadWhenAltMissing() {
         List<String> collected = List.of("![](/api/agents/1/files/screenshot-A.png)");
         var content = "No image here in text.";
         var suffix = MessageDeduplicator.buildDownloadSuffix(collected, content, "web");
@@ -265,12 +265,12 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void buildDownloadSuffixReturnsEmptyWhenNoImagesCollected() {
+    void buildDownloadSuffixReturnsEmptyWhenNoImagesCollected() {
         assertEquals("", MessageDeduplicator.buildDownloadSuffix(new ArrayList<>(), "some content", "web"));
     }
 
     @Test
-    public void buildDownloadSuffixHandlesNullInputsGracefully() {
+    void buildDownloadSuffixHandlesNullInputsGracefully() {
         // Null collected list → empty suffix.
         assertEquals("", MessageDeduplicator.buildDownloadSuffix(null, "content", "web"));
         // Null content on web → treated as empty content, suffix fires.
@@ -283,7 +283,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     // ==================== JCLAW-104: accumulating across rounds ====================
 
     @Test
-    public void collectedImagesAccumulateAcrossSimulatedToolRounds() {
+    void collectedImagesAccumulateAcrossSimulatedToolRounds() {
         // JCLAW-104 sub-bug #1: pre-fix, handleToolCallsStreaming declared a
         // fresh collectedImages at every recursion depth, so images captured
         // in round 1 never reached the round-N buildImagePrefix call when
@@ -323,7 +323,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     // ==================== JCLAW-125: angle-bracket markdown URL form ====================
 
     @Test
-    public void buildImagePrefixDedupsAgainstAngleBracketImageForm() {
+    void buildImagePrefixDedupsAgainstAngleBracketImageForm() {
         // CommonMark accepts [text](<url>) as a valid link form; marked parses
         // it identically to [text](url). The LLM sometimes emits the angle-
         // bracket form (observed with gemini-3-flash-preview). Pre-JCLAW-125
@@ -341,7 +341,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void buildDownloadSuffixDedupsAgainstAngleBracketLinkForm() {
+    void buildDownloadSuffixDedupsAgainstAngleBracketLinkForm() {
         // The production reproduction: LLM emits a plain markdown link with
         // angle-bracket URL around a bare filename. The collected image has
         // the canonical /api/agents/... URL. Both filename roots are
@@ -358,7 +358,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void buildDownloadSuffixDedupsAgainstAngleBracketAbsoluteUrl() {
+    void buildDownloadSuffixDedupsAgainstAngleBracketAbsoluteUrl() {
         // Same test but with the full /api/agents/... URL inside the angle
         // brackets. Tests the extraction path for both relative and
         // absolute URLs wrapped in <>.
@@ -372,7 +372,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void buildDownloadSuffixStillFiresWhenLlmDidNotLinkTheFile() {
+    void buildDownloadSuffixStillFiresWhenLlmDidNotLinkTheFile() {
         // Regression guard: dedup should NOT fire on plain prose with no
         // file links. The suffix is the only affordance the user has in
         // that case, so the runtime must still emit it.
@@ -387,7 +387,7 @@ public class AgentRunnerDedupTest extends UnitTest {
     }
 
     @Test
-    public void extractFilenameStripsAngleBrackets() {
+    void extractFilenameStripsAngleBrackets() {
         // Direct test of the extraction helper so the contract is pinned.
         assertEquals("foo.png", MessageDeduplicator.extractFilename("<foo.png>"));
         assertEquals("foo.png", MessageDeduplicator.extractFilename("</path/to/foo.png>"));

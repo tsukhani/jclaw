@@ -13,12 +13,12 @@ import llm.LlmTypes.Usage;
  * {@link LlmProvider.TurnUsage} built up via {@link LlmProvider.TurnUsage#addRound}
  * so no streaming harness is needed.
  */
-public class AgentRunnerUsageTest extends UnitTest {
+class AgentRunnerUsageTest extends UnitTest {
 
     // --- TurnUsage folding ---
 
     @Test
-    public void turnUsageSumsTokensAcrossRounds() {
+    void turnUsageSumsTokensAcrossRounds() {
         var t = new LlmProvider.TurnUsage();
         t.addRound(roundWithUsage(new Usage(100, 10, 110, 5, 20, 0)));
         t.addRound(roundWithUsage(new Usage(200, 50, 250, 15, 30, 2)));
@@ -34,7 +34,7 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
-    public void turnUsageIsEmptyWhenNoRoundsReportUsage() {
+    void turnUsageIsEmptyWhenNoRoundsReportUsage() {
         var t = new LlmProvider.TurnUsage();
         t.addRound(roundWithUsage(null));                 // provider returned no usage
         t.addRound(roundWithUsage(null));
@@ -45,7 +45,7 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
-    public void turnUsageAccumulatesReasoningCharsAndDetectedFlagAcrossRounds() {
+    void turnUsageAccumulatesReasoningCharsAndDetectedFlagAcrossRounds() {
         var t = new LlmProvider.TurnUsage();
         var round1 = new LlmProvider.StreamAccumulator();
         round1.reasoningDetected = true;
@@ -64,7 +64,7 @@ public class AgentRunnerUsageTest extends UnitTest {
     // --- buildUsageJson output ---
 
     @Test
-    public void buildUsageJsonSumsAllDimensionsAcrossRounds() {
+    void buildUsageJsonSumsAllDimensionsAcrossRounds() {
         // Simulates a two-round tool-using turn on Claude 3.7 Sonnet where
         // round 1 was the brief "call the tool" thinking and round 2 was
         // the 800-token synthesis. Pre-JCLAW-76 the emitted JSON reported
@@ -83,7 +83,7 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
-    public void buildUsageJsonSingleRoundIsUnchangedFromPreFixBehaviour() {
+    void buildUsageJsonSingleRoundIsUnchangedFromPreFixBehaviour() {
         // AC5 regression guard: a turn with zero tool rounds must produce
         // byte-equivalent numbers to pre-fix behaviour. Everything lines up
         // with round 1's numbers because there are no later rounds to fold.
@@ -101,7 +101,7 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
-    public void buildUsageJsonOmitsTokenFieldsWhenNoProviderUsage() {
+    void buildUsageJsonOmitsTokenFieldsWhenNoProviderUsage() {
         // When no round returned Usage (e.g. cancelled pre-first-chunk), the
         // emitted JSON drops to a compact durationMs-only shape so the
         // frontend stats pills stay in a valid "no usage info" state instead
@@ -116,7 +116,7 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
-    public void buildUsageJsonFallsBackToReasoningCharsWhenReasoningTokensZero() {
+    void buildUsageJsonFallsBackToReasoningCharsWhenReasoningTokensZero() {
         // Several providers (Ollama Cloud on glm-5.1, some OpenRouter routes)
         // stream reasoning text but omit reasoning_tokens in the usage block.
         // The helper falls back to a char-count estimate (~4 chars per token)
@@ -144,7 +144,7 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
-    public void reasoningDurationMatchesFrontendLiveSemantics_singleRound() {
+    void reasoningDurationMatchesFrontendLiveSemantics_singleRound() {
         // The persisted "Thought for X seconds" must equal what the user saw
         // streaming live — first reasoning chunk → first content chunk of the
         // turn. For a single-round turn that's just the round's own
@@ -167,7 +167,7 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
-    public void reasoningDurationSpansToolGapBetweenRounds() {
+    void reasoningDurationSpansToolGapBetweenRounds() {
         // The actual bug: tool-using turns showed 1.23s persisted vs 9.60s
         // live because the persisted value was anchored to round 1's
         // reasoning span only, missing the tool-execution gap and any
@@ -207,7 +207,7 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
-    public void reasoningDurationFallsBackToTurnEndWhenNoContentEverStreams() {
+    void reasoningDurationFallsBackToTurnEndWhenNoContentEverStreams() {
         // Reasoning-only response (some providers, or tool-only turns where
         // no content ever streams). Per-frontend convention the timer stops
         // at stream completion; backend equivalent uses the turnEndNanos
@@ -227,7 +227,7 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
-    public void noteFirstContentChunkIsIdempotentSoEmptyContentChunksDontCollapseDuration() {
+    void noteFirstContentChunkIsIdempotentSoEmptyContentChunksDontCollapseDuration() {
         // Regression for the v0.10.30 bug: OpenAI-compatible providers emit
         // chunks where the `content` field is always present in the schema
         // and defaults to "" when the chunk only carries reasoning. The
@@ -252,7 +252,7 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
-    public void roundLocalReasoningDurationStillUsesLastReasoningChunkForMultiChunk() {
+    void roundLocalReasoningDurationStillUsesLastReasoningChunkForMultiChunk() {
         // Defensive: the per-round reasoningDurationMs (kept for diagnostic
         // use) anchors to the last appendReasoningText call. noteFirstContentChunk
         // must not push reasoningEndNanos forward when reasoning was already
@@ -272,7 +272,7 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
-    public void buildUsageJsonIncludesModelPricingWhenProvided() {
+    void buildUsageJsonIncludesModelPricingWhenProvided() {
         // ModelInfo carries per-token pricing that the frontend multiplies
         // against token counts to render the $ badge. Pricing fields ride
         // into the same usage JSON object so the frontend gets everything
@@ -291,7 +291,7 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
-    public void buildUsageJsonPersistsModelIdentityAndContextWindow() {
+    void buildUsageJsonPersistsModelIdentityAndContextWindow() {
         // JCLAW-107: each emitted message carries the agent's modelProvider +
         // modelId plus the model's contextWindow so JCLAW-108's per-conversation
         // cost aggregator can attribute every turn's cost to the model that
@@ -316,7 +316,7 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
-    public void buildUsageJsonWritesResolvedOverrideValuesWhenConversationOverridesSet() {
+    void buildUsageJsonWritesResolvedOverrideValuesWhenConversationOverridesSet() {
         // JCLAW-108: when the conversation has a model override, the emitted
         // usageJson must attribute the turn to the OVERRIDE's modelProvider +
         // modelId, not the agent's underlying fields. This is what makes
@@ -344,7 +344,7 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
-    public void buildUsageJsonFallsBackToAgentWhenOverrideIsHalfSet() {
+    void buildUsageJsonFallsBackToAgentWhenOverrideIsHalfSet() {
         // Defensive: if only one of the two override columns is non-null,
         // treat it as no-override (writing a half-override is undefined per
         // ConversationService.setModelOverride). The resolved identity comes
@@ -368,7 +368,7 @@ public class AgentRunnerUsageTest extends UnitTest {
     }
 
     @Test
-    public void buildUsageJsonOmitsIdentityFieldsWhenAgentIsNull() {
+    void buildUsageJsonOmitsIdentityFieldsWhenAgentIsNull() {
         // Defensive: AgentRunner passes a non-null agent in practice, but the
         // helper must tolerate a null agent (e.g. pure-logic tests) without
         // NPE. Missing modelProvider/modelId in the output is a clearer

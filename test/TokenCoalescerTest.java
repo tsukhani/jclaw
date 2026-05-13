@@ -10,7 +10,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * Unit tests for the JCLAW-200 SSE token coalescer.
  */
-public class TokenCoalescerTest extends UnitTest {
+class TokenCoalescerTest extends UnitTest {
 
     @Test
     void thresholdZero_passesEveryTokenStraightThrough() {

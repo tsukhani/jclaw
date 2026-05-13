@@ -20,7 +20,7 @@ import java.net.ServerSocket;
  *       overrides the cached result without touching the network.</li>
  * </ol>
  */
-public class OllamaLocalProbeTest extends UnitTest {
+class OllamaLocalProbeTest extends UnitTest {
 
     private HttpServer server;
     private int port;
@@ -51,7 +51,7 @@ public class OllamaLocalProbeTest extends UnitTest {
     }
 
     @Test
-    public void probeReturnsAvailableWithModelCount() throws Exception {
+    void probeReturnsAvailableWithModelCount() throws Exception {
         startServer("""
                 {"object":"list","data":[
                   {"id":"llama3.1:8b","object":"model"},
@@ -68,7 +68,7 @@ public class OllamaLocalProbeTest extends UnitTest {
     }
 
     @Test
-    public void probeReturnsZeroCountWhenDataArrayMissing() throws Exception {
+    void probeReturnsZeroCountWhenDataArrayMissing() throws Exception {
         startServer("{\"object\":\"list\"}", 200);
 
         var r = OllamaLocalProbe.probe(baseUrl());
@@ -78,7 +78,7 @@ public class OllamaLocalProbeTest extends UnitTest {
     }
 
     @Test
-    public void probeFailsOnNon200WithReasonAndNotConnectionRefused() throws Exception {
+    void probeFailsOnNon200WithReasonAndNotConnectionRefused() throws Exception {
         startServer("internal server error", 500);
 
         var r = OllamaLocalProbe.probe(baseUrl());
@@ -91,7 +91,7 @@ public class OllamaLocalProbeTest extends UnitTest {
     }
 
     @Test
-    public void probeReportsConnectionRefusedForUnreachableHost() throws Exception {
+    void probeReportsConnectionRefusedForUnreachableHost() throws Exception {
         // Bind a socket then close it to get a port that nothing listens on.
         // The kernel returns ECONNREFUSED on a connect attempt — exactly the
         // "Ollama not installed" failure mode AC #6 cares about.
@@ -109,7 +109,7 @@ public class OllamaLocalProbeTest extends UnitTest {
     }
 
     @Test
-    public void lastResultReflectsMostRecentProbe() throws Exception {
+    void lastResultReflectsMostRecentProbe() throws Exception {
         startServer("{\"data\":[{\"id\":\"only-model\"}]}", 200);
 
         OllamaLocalProbe.probe(baseUrl());
@@ -119,7 +119,7 @@ public class OllamaLocalProbeTest extends UnitTest {
     }
 
     @Test
-    public void setForTestOverridesCachedResultWithoutNetwork() {
+    void setForTestOverridesCachedResultWithoutNetwork() {
         OllamaLocalProbe.setForTest(new OllamaLocalProbe.ProbeResult(
                 true, 7, null, false));
 

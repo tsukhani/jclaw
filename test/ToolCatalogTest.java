@@ -12,7 +12,7 @@ import java.util.Set;
  * category in canonical order (System → Files → Web → Utilities), excludes
  * system tools, and respects the per-agent disabled set.
  */
-public class ToolCatalogTest extends UnitTest {
+class ToolCatalogTest extends UnitTest {
 
     private List<ToolRegistry.Tool> originalTools;
 
@@ -27,7 +27,7 @@ public class ToolCatalogTest extends UnitTest {
     }
 
     @Test
-    public void catalogGroupsToolsByCanonicalCategoryOrder() {
+    void catalogGroupsToolsByCanonicalCategoryOrder() {
         ToolRegistry.publish(List.of(
                 stubTool("notes",   "Utilities", "Keep notes"),
                 stubTool("grep",    "Files",     "Search files"),
@@ -57,7 +57,7 @@ public class ToolCatalogTest extends UnitTest {
     }
 
     @Test
-    public void catalogExcludesGroupedToolsBecauseTheyOwnTheirOwnSection() {
+    void catalogExcludesGroupedToolsBecauseTheyOwnTheirOwnSection() {
         // JCLAW-281: MCP servers (and any other grouped tool source) render
         // in their own ## MCP Servers section via McpServerCatalog, so the
         // ## Tool Catalog is native-only.
@@ -73,7 +73,7 @@ public class ToolCatalogTest extends UnitTest {
     }
 
     @Test
-    public void catalogSkipsDisabledTools() {
+    void catalogSkipsDisabledTools() {
         ToolRegistry.publish(List.of(
                 stubTool("allowed",  "Utilities", "Allowed tool"),
                 stubTool("disabled", "Utilities", "Disabled tool")
@@ -86,7 +86,7 @@ public class ToolCatalogTest extends UnitTest {
     }
 
     @Test
-    public void catalogIsEmptyStringWhenOnlyGroupedToolsAreRegistered() {
+    void catalogIsEmptyStringWhenOnlyGroupedToolsAreRegistered() {
         ToolRegistry.publish(List.of(
                 stubMcpTool("mcp_jira_get_issue", "jira", "Look up an issue")
         ));
@@ -95,7 +95,7 @@ public class ToolCatalogTest extends UnitTest {
 
     @Test
     @SuppressWarnings("java:S3415") // false positive: List.of(...) IS the expected literal; the constant is the value under test.
-    public void canonicalCategoryOrderMatchesFrontendTaxonomy() {
+    void canonicalCategoryOrderMatchesFrontendTaxonomy() {
         // Keep this list in sync with frontend/composables/useToolMeta.ts:TOOL_CATEGORIES.
         // JCLAW-72 collapses the dual source of truth; until then this guards drift.
         // "MCP" added by JCLAW-33 — every McpToolAdapter reports that category.
@@ -104,7 +104,7 @@ public class ToolCatalogTest extends UnitTest {
     }
 
     @Test
-    public void defaultCategoryOnToolInterfaceIsUtilities() {
+    void defaultCategoryOnToolInterfaceIsUtilities() {
         var anonymous = new ToolRegistry.Tool() {
             @Override public String name() { return "anon"; }
             @Override public String description() { return "no override"; }
@@ -115,7 +115,7 @@ public class ToolCatalogTest extends UnitTest {
     }
 
     @Test
-    public void groupedToolsAreFullyExcludedFromNativeCatalog() {
+    void groupedToolsAreFullyExcludedFromNativeCatalog() {
         // JCLAW-281: MCP-style grouped tools no longer collapse into a
         // wildcard row in this catalog — they render in their own ## MCP
         // Servers section via McpServerCatalog. Native tools render here

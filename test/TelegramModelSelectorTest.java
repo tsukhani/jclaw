@@ -19,7 +19,7 @@ import services.ConversationService;
  * on the wire for each step of the drill-down flow (summary → browse →
  * provider → select).
  */
-public class TelegramModelSelectorTest extends UnitTest {
+class TelegramModelSelectorTest extends UnitTest {
 
     private static final String BOT_TOKEN = "mock-bot-token";
     private static final String CHAT_ID = "77777";
@@ -66,7 +66,7 @@ public class TelegramModelSelectorTest extends UnitTest {
     // ── /model summary send path ──────────────────────────────────────
 
     @Test
-    public void sendSummaryEmitsMessageWithInlineKeyboard() {
+    void sendSummaryEmitsMessageWithInlineKeyboard() {
         boolean ok = TelegramModelSelector.sendSummary(agent, conversation);
         assertTrue(ok, "summary send should succeed against the mock");
         assertEquals(1, server.countRequests("sendMessage"),
@@ -87,7 +87,7 @@ public class TelegramModelSelectorTest extends UnitTest {
     // ── Browse flow ───────────────────────────────────────────────────
 
     @Test
-    public void browseCallbackEditsToProvidersList() {
+    void browseCallbackEditsToProvidersList() {
         var payload = TelegramModelCallback.encodeBrowse(conversation.id);
         var cb = new InboundCallback("cbid-1", CHAT_ID, "private", "tg-user-1", 100, payload);
 
@@ -107,7 +107,7 @@ public class TelegramModelSelectorTest extends UnitTest {
     }
 
     @Test
-    public void providerPageCallbackEditsToModelsList() {
+    void providerPageCallbackEditsToModelsList() {
         int openrouterIdx = providerIndex("openrouter");
         var payload = TelegramModelCallback.encodeProviderPage(conversation.id, openrouterIdx, 0);
         var cb = new InboundCallback("cbid-2", CHAT_ID, "private", "tg-user-1", 101, payload);
@@ -124,7 +124,7 @@ public class TelegramModelSelectorTest extends UnitTest {
     // ── Select + write override ───────────────────────────────────────
 
     @Test
-    public void selectCallbackWritesOverrideAndConfirms() {
+    void selectCallbackWritesOverrideAndConfirms() {
         // ConfigService insertion order is not guaranteed across providers, so
         // look up the current index for the target provider. Model index 0 =
         // kimi-k2 (the only model seeded for ollama-cloud).
@@ -151,7 +151,7 @@ public class TelegramModelSelectorTest extends UnitTest {
     // ── Validation and stale-index alerts ─────────────────────────────
 
     @Test
-    public void selectWithStaleProviderIndexShowsAlertAndSkipsWrite() {
+    void selectWithStaleProviderIndexShowsAlertAndSkipsWrite() {
         // Provider index 99 doesn't exist — the registry has only two.
         var payload = TelegramModelCallback.encodeSelect(conversation.id, 99, 0);
         var cb = new InboundCallback("cbid-4", CHAT_ID, "private", "tg-user-1", 103, payload);
@@ -170,7 +170,7 @@ public class TelegramModelSelectorTest extends UnitTest {
     }
 
     @Test
-    public void callbackForDeletedConversationShowsAlert() {
+    void callbackForDeletedConversationShowsAlert() {
         // Encode a callback for a conversation id that doesn't exist.
         var payload = TelegramModelCallback.encodeSelect(99_999L, 0, 0);
         var cb = new InboundCallback("cbid-5", CHAT_ID, "private", "tg-user-1", 104, payload);
@@ -185,7 +185,7 @@ public class TelegramModelSelectorTest extends UnitTest {
     }
 
     @Test
-    public void malformedCallbackDataShowsGenericAlert() {
+    void malformedCallbackDataShowsGenericAlert() {
         var cb = new InboundCallback("cbid-6", CHAT_ID, "private", "tg-user-1", 105, "m:garbage");
 
         TelegramCallbackDispatcher.dispatch(BOT_TOKEN, agent, cb);
@@ -198,7 +198,7 @@ public class TelegramModelSelectorTest extends UnitTest {
     // ── Details + Back loop ───────────────────────────────────────────
 
     @Test
-    public void detailsCallbackEditsToFullMetadata() {
+    void detailsCallbackEditsToFullMetadata() {
         var payload = TelegramModelCallback.encodeDetails(conversation.id);
         var cb = new InboundCallback("cbid-7", CHAT_ID, "private", "tg-user-1", 106, payload);
 
@@ -212,7 +212,7 @@ public class TelegramModelSelectorTest extends UnitTest {
     }
 
     @Test
-    public void backCallbackReturnsToProvidersList() {
+    void backCallbackReturnsToProvidersList() {
         // BACK is now an alias for BROWSE — old buttons in chat history
         // bridge to the new providers-list state instead of the dead
         // "summary with Browse providers button" UI.
@@ -227,7 +227,7 @@ public class TelegramModelSelectorTest extends UnitTest {
     }
 
     @Test
-    public void cancelCallbackClearsKeyboardAndShowsCancelledText() {
+    void cancelCallbackClearsKeyboardAndShowsCancelledText() {
         var payload = TelegramModelCallback.encodeCancel(conversation.id);
         var cb = new InboundCallback("cbid-9", CHAT_ID, "private", "tg-user-1", 108, payload);
 
@@ -245,7 +245,7 @@ public class TelegramModelSelectorTest extends UnitTest {
     // ── Keyboard layout sanity ────────────────────────────────────────
 
     @Test
-    public void providersKeyboardHidesDisabledProviders() {
+    void providersKeyboardHidesDisabledProviders() {
         // The load-test harness ships loadtest-mock with its enabled flag
         // flipped off when idle; it only turns on for the duration of a
         // run. The user-visible filter keys off that flag, so a disabled
@@ -268,7 +268,7 @@ public class TelegramModelSelectorTest extends UnitTest {
     }
 
     @Test
-    public void providersKeyboardHidesNormalProviderWhenOperatorDisablesIt() {
+    void providersKeyboardHidesNormalProviderWhenOperatorDisablesIt() {
         // JCLAW-110: the enable/disable toggle extends the existing filter
         // to user-configured providers. When an operator toggles a normal
         // provider off from Settings, it disappears from /model just like
@@ -286,7 +286,7 @@ public class TelegramModelSelectorTest extends UnitTest {
     }
 
     @Test
-    public void providersKeyboardShowsExplicitlyEnabledProvider() {
+    void providersKeyboardShowsExplicitlyEnabledProvider() {
         // Inverse: if loadtest-mock is flipped on (e.g. during an active
         // run), it IS visible. The filter is driven by the enabled flag,
         // not a hardcoded name block-list, so operators can deliberately
@@ -309,7 +309,7 @@ public class TelegramModelSelectorTest extends UnitTest {
     }
 
     @Test
-    public void modelsKeyboardPaginatesWhenMultiPage() {
+    void modelsKeyboardPaginatesWhenMultiPage() {
         // 15 models with the new MODELS_PER_PAGE=8, 2-col grid:
         // page 0 = 8 models in 4 grid rows + 1 pagination row + 1 back/cancel
         // row = 6 rows total.

@@ -18,7 +18,7 @@ import services.ConfigService;
  * the missing-baseUrl path against an unconfigured provider; this file adds
  * the remaining error contracts and guards the auth boundary directly.
  */
-public class ApiProvidersControllerTest extends FunctionalTest {
+class ApiProvidersControllerTest extends FunctionalTest {
 
     @BeforeEach
     void setup() {
@@ -46,14 +46,14 @@ public class ApiProvidersControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void discoverModelsRequiresAuth() {
+    void discoverModelsRequiresAuth() {
         var response = POST("/api/providers/openrouter/discover-models",
                 "application/json", "{}");
         assertEquals(401, response.status.intValue());
     }
 
     @Test
-    public void discoverModelsReturns400WhenBaseUrlMissing() {
+    void discoverModelsReturns400WhenBaseUrlMissing() {
         login();
         var response = POST("/api/providers/test-provider/discover-models",
                 "application/json", "{}");
@@ -63,7 +63,7 @@ public class ApiProvidersControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void discoverModelsReturns400WhenBaseUrlIsBlank() {
+    void discoverModelsReturns400WhenBaseUrlIsBlank() {
         login();
         ConfigService.set("provider.test-provider.baseUrl", "   ");
         var response = POST("/api/providers/test-provider/discover-models",
@@ -72,7 +72,7 @@ public class ApiProvidersControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void discoverModelsReturns400WhenApiKeyMissing() {
+    void discoverModelsReturns400WhenApiKeyMissing() {
         login();
         ConfigService.set("provider.test-provider.baseUrl", "https://example.invalid/v1");
         // No apiKey set → second guard fires.
@@ -84,7 +84,7 @@ public class ApiProvidersControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void discoverModelsReturns400WhenApiKeyIsBlank() {
+    void discoverModelsReturns400WhenApiKeyIsBlank() {
         login();
         ConfigService.set("provider.test-provider.baseUrl", "https://example.invalid/v1");
         ConfigService.set("provider.test-provider.apiKey", "");

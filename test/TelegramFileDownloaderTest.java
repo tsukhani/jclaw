@@ -19,7 +19,7 @@ import java.nio.file.Path;
  * Covers the happy path, size-limit rejection, and the {@code file_path}
  * resolution error.
  */
-public class TelegramFileDownloaderTest extends UnitTest {
+class TelegramFileDownloaderTest extends UnitTest {
 
     private HttpServer server;
     private int port;
@@ -41,7 +41,7 @@ public class TelegramFileDownloaderTest extends UnitTest {
     }
 
     @Test
-    public void downloadsFileIntoStagingOnHappyPath() throws Exception {
+    void downloadsFileIntoStagingOnHappyPath() throws Exception {
         var agent = AgentService.create("tg-downloader-ok", "openrouter", "gpt-4.1");
         var payload = "fake-image-bytes".getBytes();
 
@@ -82,7 +82,7 @@ public class TelegramFileDownloaderTest extends UnitTest {
     }
 
     @Test
-    public void rejectsOversizeFilePerReportedSize() throws Exception {
+    void rejectsOversizeFilePerReportedSize() throws Exception {
         var agent = AgentService.create("tg-downloader-size", "openrouter", "gpt-4.1");
 
         server.createContext("/botTOKEN/getFile", exchange -> {
@@ -109,7 +109,7 @@ public class TelegramFileDownloaderTest extends UnitTest {
     }
 
     @Test
-    public void surfacesDownloadFailedWhenGetFileErrors() throws Exception {
+    void surfacesDownloadFailedWhenGetFileErrors() throws Exception {
         var agent = AgentService.create("tg-downloader-err", "openrouter", "gpt-4.1");
 
         server.createContext("/botTOKEN/getFile", exchange -> {

@@ -24,7 +24,7 @@ import java.time.Instant;
  * (cascade-delete reach, three-layer path validation, file cache behavior)
  * live here.
  */
-public class AgentServiceTest extends UnitTest {
+class AgentServiceTest extends UnitTest {
 
     @BeforeEach
     void setup() {
@@ -37,7 +37,7 @@ public class AgentServiceTest extends UnitTest {
     // =====================
 
     @Test
-    public void createPersistsAgentWithProvidedFields() {
+    void createPersistsAgentWithProvidedFields() {
         var agent = AgentService.create("svc-create-1", "openrouter", "gpt-4.1");
         assertNotNull(agent.id, "id must be assigned by JPA");
         assertEquals("svc-create-1", agent.name);
@@ -48,21 +48,21 @@ public class AgentServiceTest extends UnitTest {
     }
 
     @Test
-    public void createWithThinkingModeNullStoresNull() {
+    void createWithThinkingModeNullStoresNull() {
         var agent = AgentService.create("svc-thinking-null", "openrouter", "gpt-4.1", null);
         assertNull(agent.thinkingMode,
                 "explicit null thinkingMode must persist as null");
     }
 
     @Test
-    public void createOverloadDefaultsThinkingModeToNull() {
+    void createOverloadDefaultsThinkingModeToNull() {
         var agent = AgentService.create("svc-thinking-default", "openrouter", "gpt-4.1");
         assertNull(agent.thinkingMode,
                 "the 3-arg overload must delegate with null thinkingMode");
     }
 
     @Test
-    public void createSeedsWorkspaceFilesWithoutOverwriting() {
+    void createSeedsWorkspaceFilesWithoutOverwriting() {
         var agent = AgentService.create("svc-workspace-seed", "openrouter", "gpt-4.1");
         var dir = AgentService.workspacePath(agent.name);
         assertTrue(Files.exists(dir.resolve("AGENT.md")));
@@ -75,7 +75,7 @@ public class AgentServiceTest extends UnitTest {
     }
 
     @Test
-    public void createDisablesBrowserToolForNonMainAgent() {
+    void createDisablesBrowserToolForNonMainAgent() {
         var agent = AgentService.create("svc-browser-non-main", "openrouter", "gpt-4.1");
         AgentToolConfig browser = AgentToolConfig.find("agent.id = ?1 AND toolName = ?2",
                 agent.id, "browser").first();
@@ -85,7 +85,7 @@ public class AgentServiceTest extends UnitTest {
     }
 
     @Test
-    public void createDoesNotAutoDisableBrowserForMainAgent() {
+    void createDoesNotAutoDisableBrowserForMainAgent() {
         // Main agent must NOT receive the auto-disable row — it owns the
         // browser session lifecycle for support workflows.
         var main = new Agent();
@@ -102,7 +102,7 @@ public class AgentServiceTest extends UnitTest {
     }
 
     @Test
-    public void createSetsMainAgentEnabledTrueRegardlessOfProviderState() {
+    void createSetsMainAgentEnabledTrueRegardlessOfProviderState() {
         // Main is a structural singleton that must always be enabled — even
         // if its model isn't currently in any registered provider's catalog.
         var main = new Agent();
@@ -122,7 +122,7 @@ public class AgentServiceTest extends UnitTest {
     // =====================
 
 @Test
-    public void updateForcesMainAgentEnabledTrueRegardlessOfArgument() {
+    void updateForcesMainAgentEnabledTrueRegardlessOfArgument() {
         var main = new Agent();
         main.name = Agent.MAIN_AGENT_NAME;
         main.modelProvider = "openrouter";
@@ -143,21 +143,21 @@ public class AgentServiceTest extends UnitTest {
     // =====================
 
     @Test
-    public void findByIdReturnsAgentOrNull() {
+    void findByIdReturnsAgentOrNull() {
         var agent = AgentService.create("svc-find-id", "openrouter", "gpt-4.1");
         assertNotNull(AgentService.findById(agent.id));
         assertNull(AgentService.findById(99_999_999L));
     }
 
     @Test
-    public void findByNameReturnsAgentOrNull() {
+    void findByNameReturnsAgentOrNull() {
         AgentService.create("svc-find-name", "openrouter", "gpt-4.1");
         assertNotNull(AgentService.findByName("svc-find-name"));
         assertNull(AgentService.findByName("nonexistent-agent-xyz"));
     }
 
     @Test
-    public void listAllReturnsEveryAgent() {
+    void listAllReturnsEveryAgent() {
         AgentService.create("svc-list-1", "openrouter", "gpt-4.1");
         AgentService.create("svc-list-2", "openrouter", "gpt-4.1");
         var all = AgentService.listAll();
@@ -165,7 +165,7 @@ public class AgentServiceTest extends UnitTest {
     }
 
     @Test
-    public void listEnabledFiltersOutDisabledAgents() {
+    void listEnabledFiltersOutDisabledAgents() {
         var a = AgentService.create("svc-enabled-true", "openrouter", "gpt-4.1");
         a.enabled = true;
         a.save();
@@ -183,7 +183,7 @@ public class AgentServiceTest extends UnitTest {
     // =====================
 
     @Test
-    public void deleteCascadesThroughChildRowsAndRemovesWorkspace() {
+    void deleteCascadesThroughChildRowsAndRemovesWorkspace() {
         var agent = AgentService.create("svc-delete-cascade", "openrouter", "gpt-4.1");
         var agentId = agent.id;
         var agentName = agent.name;
@@ -247,7 +247,7 @@ public class AgentServiceTest extends UnitTest {
     }
 
     @Test
-    public void deletePurgesAgentScopedConfigKeysAndCache() {
+    void deletePurgesAgentScopedConfigKeysAndCache() {
         var agent = AgentService.create("svc-delete-config", "openrouter", "gpt-4.1");
         ConfigService.set("agent.svc-delete-config.shell.bypassAllowlist", "false");
         // Sanity: the row landed.
@@ -264,7 +264,7 @@ public class AgentServiceTest extends UnitTest {
     // =====================
 
     @Test
-    public void isProviderConfiguredFalseWhenProviderUnknown() {
+    void isProviderConfiguredFalseWhenProviderUnknown() {
         assertFalse(AgentService.isProviderConfigured("nonexistent-provider", "anything"));
     }
 
@@ -273,7 +273,7 @@ public class AgentServiceTest extends UnitTest {
     // =====================
 
     @Test
-    public void workspacePathReturnsCanonicalPathForValidName() {
+    void workspacePathReturnsCanonicalPathForValidName() {
         var path = AgentService.workspacePath("svc-path-valid");
         assertNotNull(path);
         assertTrue(path.toString().endsWith("svc-path-valid"),
@@ -281,7 +281,7 @@ public class AgentServiceTest extends UnitTest {
     }
 
     @Test
-    public void workspacePathThrowsOnTraversalShapedName() {
+    void workspacePathThrowsOnTraversalShapedName() {
         var ex = assertThrows(SecurityException.class,
                 () -> AgentService.workspacePath("../escape-attempt"));
         assertTrue(ex.getMessage().toLowerCase().contains("workspace"),
@@ -289,14 +289,14 @@ public class AgentServiceTest extends UnitTest {
     }
 
     @Test
-    public void resolveContainedReturnsNullForDotDotEscape() {
+    void resolveContainedReturnsNullForDotDotEscape() {
         var root = AgentService.workspaceRoot().toAbsolutePath();
         assertNull(AgentService.resolveContained(root, "../../../etc/passwd"),
                 "resolveContained must return null on lexical escape");
     }
 
     @Test
-    public void resolveContainedReturnsPathForLegalRelative() {
+    void resolveContainedReturnsPathForLegalRelative() {
         var root = AgentService.workspaceRoot().toAbsolutePath();
         var resolved = AgentService.resolveContained(root, "svc-path-legal/AGENT.md");
         assertNotNull(resolved);
@@ -304,21 +304,21 @@ public class AgentServiceTest extends UnitTest {
     }
 
     @Test
-    public void acquireContainedThrowsOnDotDotEscape() {
+    void acquireContainedThrowsOnDotDotEscape() {
         var root = AgentService.workspaceRoot().toAbsolutePath();
         assertThrows(SecurityException.class,
                 () -> AgentService.acquireContained(root, "../../../etc/passwd"));
     }
 
     @Test
-    public void acquireWorkspacePathThrowsOnTraversal() {
+    void acquireWorkspacePathThrowsOnTraversal() {
         AgentService.create("svc-acquire-traversal", "openrouter", "gpt-4.1");
         assertThrows(SecurityException.class,
                 () -> AgentService.acquireWorkspacePath("svc-acquire-traversal", "../../etc/passwd"));
     }
 
     @Test
-    public void resolveWorkspacePathReturnsNullOnTraversal() {
+    void resolveWorkspacePathReturnsNullOnTraversal() {
         AgentService.create("svc-resolve-traversal", "openrouter", "gpt-4.1");
         assertNull(AgentService.resolveWorkspacePath("svc-resolve-traversal", "../../../etc/passwd"));
     }
@@ -328,7 +328,7 @@ public class AgentServiceTest extends UnitTest {
     // =====================
 
     @Test
-    public void readWorkspaceFileReturnsSeededContent() {
+    void readWorkspaceFileReturnsSeededContent() {
         AgentService.create("svc-read-seeded", "openrouter", "gpt-4.1");
         var content = AgentService.readWorkspaceFile("svc-read-seeded", "AGENT.md");
         assertNotNull(content);
@@ -337,20 +337,20 @@ public class AgentServiceTest extends UnitTest {
     }
 
     @Test
-    public void readWorkspaceFileReturnsNullForMissingFile() {
+    void readWorkspaceFileReturnsNullForMissingFile() {
         AgentService.create("svc-read-missing", "openrouter", "gpt-4.1");
         assertNull(AgentService.readWorkspaceFile("svc-read-missing", "does-not-exist.md"));
     }
 
     @Test
-    public void readWorkspaceFileReturnsNullForTraversal() {
+    void readWorkspaceFileReturnsNullForTraversal() {
         AgentService.create("svc-read-traversal", "openrouter", "gpt-4.1");
         // The catch in readWorkspaceFile swallows SecurityException and returns null.
         assertNull(AgentService.readWorkspaceFile("svc-read-traversal", "../../../etc/passwd"));
     }
 
     @Test
-    public void writeWorkspaceFileRoundTripsAndInvalidatesCache() {
+    void writeWorkspaceFileRoundTripsAndInvalidatesCache() {
         AgentService.create("svc-write-roundtrip", "openrouter", "gpt-4.1");
 
         // Prime the cache with a read.
@@ -369,7 +369,7 @@ public class AgentServiceTest extends UnitTest {
     }
 
     @Test
-    public void writeWorkspaceFileCreatesMissingParentDirectories() {
+    void writeWorkspaceFileCreatesMissingParentDirectories() {
         AgentService.create("svc-write-nested", "openrouter", "gpt-4.1");
         AgentService.writeWorkspaceFile("svc-write-nested", "deep/nested/file.txt",
                 "nested-content");
@@ -383,7 +383,7 @@ public class AgentServiceTest extends UnitTest {
     // =====================
 
     @Test
-    public void createWorkspaceDoesNotOverwriteExistingFiles() {
+    void createWorkspaceDoesNotOverwriteExistingFiles() {
         var dir = AgentService.workspacePath("svc-create-no-overwrite");
         // First create — seeds a default AGENT.md.
         AgentService.createWorkspace("svc-create-no-overwrite");
@@ -406,7 +406,7 @@ public class AgentServiceTest extends UnitTest {
     }
 
     @Test
-    public void resetWorkspaceOverwritesExistingFiles() {
+    void resetWorkspaceOverwritesExistingFiles() {
         var dir = AgentService.workspacePath("svc-reset-overwrite");
         AgentService.createWorkspace("svc-reset-overwrite");
 

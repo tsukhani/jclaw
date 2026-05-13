@@ -3,7 +3,7 @@ import play.test.*;
 import models.EventLog;
 import services.EventLogger;
 
-public class EventLoggerTest extends UnitTest {
+class EventLoggerTest extends UnitTest {
 
     @BeforeEach
     void setup() {
@@ -12,7 +12,7 @@ public class EventLoggerTest extends UnitTest {
     }
 
     @Test
-    public void recordCreatesEventLog() {
+    void recordCreatesEventLog() {
         EventLogger.record("INFO", "system", "Test message", "{\"key\":\"value\"}");
         EventLogger.flush();
 
@@ -25,7 +25,7 @@ public class EventLoggerTest extends UnitTest {
     }
 
     @Test
-    public void recordWithAgentAndChannel() {
+    void recordWithAgentAndChannel() {
         EventLogger.record("WARN", "channel", "agent-1", "telegram", "Delivery failed", null);
         EventLogger.flush();
 
@@ -36,7 +36,7 @@ public class EventLoggerTest extends UnitTest {
     }
 
     @Test
-    public void infoConvenienceMethod() {
+    void infoConvenienceMethod() {
         EventLogger.info("llm", "Request sent");
         EventLogger.flush();
 
@@ -47,7 +47,7 @@ public class EventLoggerTest extends UnitTest {
     }
 
     @Test
-    public void warnConvenienceMethod() {
+    void warnConvenienceMethod() {
         EventLogger.warn("channel", "Retry triggered", "attempt 2");
         EventLogger.flush();
 
@@ -58,7 +58,7 @@ public class EventLoggerTest extends UnitTest {
     }
 
     @Test
-    public void errorConvenienceMethod() {
+    void errorConvenienceMethod() {
         EventLogger.error("tool", "Tool execution failed");
         EventLogger.flush();
 
@@ -68,7 +68,7 @@ public class EventLoggerTest extends UnitTest {
     }
 
     @Test
-    public void errorWithThrowable() {
+    void errorWithThrowable() {
         EventLogger.error("system", "Unhandled exception", new RuntimeException("test error"));
         EventLogger.flush();
 

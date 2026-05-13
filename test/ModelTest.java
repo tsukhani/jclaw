@@ -4,10 +4,10 @@ import models.*;
 
 import java.time.Instant;
 
-public class ModelTest extends UnitTest {
+class ModelTest extends UnitTest {
 
     @Test
-    public void canCreateAndFindAgent() {
+    void canCreateAndFindAgent() {
         Fixtures.deleteDatabase();
         var agent = new Agent();
         agent.name = "test-agent";
@@ -26,7 +26,7 @@ public class ModelTest extends UnitTest {
     }
 
     @Test
-    public void mainAgentIdentityByName() {
+    void mainAgentIdentityByName() {
         Fixtures.deleteDatabase();
         var agent = new Agent();
         agent.name = "main";
@@ -40,7 +40,7 @@ public class ModelTest extends UnitTest {
     }
 
     @Test
-    public void canCreateAgentBinding() {
+    void canCreateAgentBinding() {
         Fixtures.deleteDatabase();
         var agent = new Agent();
         agent.name = "bound-agent";
@@ -63,7 +63,7 @@ public class ModelTest extends UnitTest {
     }
 
     @Test
-    public void canCreateConversationWithMessages() {
+    void canCreateConversationWithMessages() {
         Fixtures.deleteDatabase();
         var agent = new Agent();
         agent.name = "chat-agent";
@@ -97,7 +97,7 @@ public class ModelTest extends UnitTest {
     }
 
     @Test
-    public void canCreateChannelConfig() {
+    void canCreateChannelConfig() {
         Fixtures.deleteDatabase();
         var config = new ChannelConfig();
         config.channelType = "telegram";
@@ -114,7 +114,7 @@ public class ModelTest extends UnitTest {
     }
 
     @Test
-    public void canCreateTask() {
+    void canCreateTask() {
         Fixtures.deleteDatabase();
         var task = new Task();
         task.name = "test-task";
@@ -130,7 +130,7 @@ public class ModelTest extends UnitTest {
     }
 
     @Test
-    public void canUpsertConfig() {
+    void canUpsertConfig() {
         Fixtures.deleteDatabase();
         Config.upsert("provider.openrouter.apiKey", "sk-test-123");
         var found = Config.findByKey("provider.openrouter.apiKey");
@@ -143,7 +143,7 @@ public class ModelTest extends UnitTest {
     }
 
     @Test
-    public void canCreateEventLog() {
+    void canCreateEventLog() {
         Fixtures.deleteDatabase();
         var log = new EventLog();
         log.level = "INFO";
@@ -157,7 +157,7 @@ public class ModelTest extends UnitTest {
     }
 
     @Test
-    public void canCreateMemory() {
+    void canCreateMemory() {
         Fixtures.deleteDatabase();
         var mem = new Memory();
         mem.agentId = "main";
@@ -176,7 +176,7 @@ public class ModelTest extends UnitTest {
     }
 
     @Test
-    public void canDeleteOldEventLogs() {
+    void canDeleteOldEventLogs() {
         Fixtures.deleteDatabase();
         var old = new EventLog();
         old.level = "INFO";

@@ -26,14 +26,14 @@ import java.util.concurrent.CompletableFuture;
  * is covered indirectly by {@code play autotest} runs that touch the
  * pipeline end-to-end.
  */
-public class TranscriptionPipelineTest extends UnitTest {
+class TranscriptionPipelineTest extends UnitTest {
 
     private Agent agent;
     private Conversation conversation;
     private Message message;
 
     @BeforeEach
-    public void setUp() {
+    void setUp() {
         Fixtures.deleteDatabase();
         PendingTranscripts.clearForTest();
         agent = new Agent();
@@ -56,14 +56,14 @@ public class TranscriptionPipelineTest extends UnitTest {
     }
 
     @AfterEach
-    public void tearDown() {
+    void tearDown() {
         PendingTranscripts.clearForTest();
     }
 
     // ── userMessageFor capability routing ────────────────────────────
 
     @Test
-    public void userMessageForSupportsAudioTrueEmitsInputAudioPart() throws Exception {
+    void userMessageForSupportsAudioTrueEmitsInputAudioPart() throws Exception {
         // Audio-capable model still gets the native input_audio part.
         // Default overload (single-arg) routes here too — back-compat
         // with all pre-JCLAW-165 callers.
@@ -81,7 +81,7 @@ public class TranscriptionPipelineTest extends UnitTest {
     }
 
     @Test
-    public void userMessageForSupportsAudioFalseEmitsTranscriptInTextPart() throws Exception {
+    void userMessageForSupportsAudioFalseEmitsTranscriptInTextPart() throws Exception {
         // Text-only model: persisted transcript becomes a [Voice note transcription:]
         // block inside the text part. No input_audio part is emitted.
         persistAudioAttachment("clip.mp3", "audio/mpeg", new byte[]{1, 2, 3},
@@ -103,7 +103,7 @@ public class TranscriptionPipelineTest extends UnitTest {
     }
 
     @Test
-    public void userMessageForSupportsAudioFalseFallsBackWhenTranscriptMissing() throws Exception {
+    void userMessageForSupportsAudioFalseFallsBackWhenTranscriptMissing() throws Exception {
         // Whisper failure = NULL transcript → fallback note carries the
         // user's original filename so the LLM has SOME context about what
         // the voice note was, even if it can't read the contents.
@@ -123,7 +123,7 @@ public class TranscriptionPipelineTest extends UnitTest {
     }
 
     @Test
-    public void userMessageForDefaultOverloadStillEmitsInputAudio() throws Exception {
+    void userMessageForDefaultOverloadStillEmitsInputAudio() throws Exception {
         // Back-compat: the no-supportsAudio-arg overload (existing callers
         // like buildMessages-inside-Tx and VisionAudioAssemblyTest) keeps
         // pre-JCLAW-165 behaviour. Without this guarantee the streaming
@@ -140,7 +140,7 @@ public class TranscriptionPipelineTest extends UnitTest {
     // ── isAudioFormatRejection heuristic ─────────────────────────────
 
     @Test
-    public void isAudioFormatRejectionDetectsKnownProviderShapes() {
+    void isAudioFormatRejectionDetectsKnownProviderShapes() {
         // OpenAI-style unsupported_format
         assertTrue(AgentRunner.isAudioFormatRejection(
                 new RuntimeException("HTTP 400 from openai: unsupported_format webm")));
@@ -156,7 +156,7 @@ public class TranscriptionPipelineTest extends UnitTest {
     }
 
     @Test
-    public void isAudioFormatRejectionIgnoresUnrelated400s() {
+    void isAudioFormatRejectionIgnoresUnrelated400s() {
         // 400 with no audio/format hints — unrelated client error.
         assertFalse(AgentRunner.isAudioFormatRejection(
                 new RuntimeException("HTTP 400 from openai: model not found")));
@@ -171,7 +171,7 @@ public class TranscriptionPipelineTest extends UnitTest {
     // ── PendingTranscripts state ─────────────────────────────────────
 
     @Test
-    public void pendingTranscriptsRoundTripWithCompletedFuture() {
+    void pendingTranscriptsRoundTripWithCompletedFuture() {
         var future = CompletableFuture.completedFuture("transcript text");
         PendingTranscripts.register(42L, future);
 
@@ -183,7 +183,7 @@ public class TranscriptionPipelineTest extends UnitTest {
     }
 
     @Test
-    public void pendingTranscriptsLookupReturnsEmptyForUnknownAttachment() {
+    void pendingTranscriptsLookupReturnsEmptyForUnknownAttachment() {
         assertTrue(PendingTranscripts.lookup(99999L).isEmpty(),
                 "unknown attachment id returns empty");
         assertTrue(PendingTranscripts.lookup(null).isEmpty(),

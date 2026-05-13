@@ -16,14 +16,14 @@ import java.util.UUID;
  * which is why the assembler is exposed as {@code public} rather than
  * package-private.
  */
-public class VisionAudioAssemblyTest extends UnitTest {
+class VisionAudioAssemblyTest extends UnitTest {
 
     private Agent agent;
     private Conversation conversation;
     private Message message;
 
     @BeforeEach
-    public void setUp() {
+    void setUp() {
         Fixtures.deleteDatabase();
         agent = new Agent();
         agent.name = "assembly-agent-" + UUID.randomUUID().toString().substring(0, 6);
@@ -45,7 +45,7 @@ public class VisionAudioAssemblyTest extends UnitTest {
     }
 
     @Test
-    public void audioAttachmentBecomesInputAudioContentPart() throws Exception {
+    void audioAttachmentBecomesInputAudioContentPart() throws Exception {
         persistAttachment("clip.mp3", "audio/mpeg",
                 MessageAttachment.KIND_AUDIO, new byte[]{1, 2, 3, 4, 5});
 
@@ -78,7 +78,7 @@ public class VisionAudioAssemblyTest extends UnitTest {
     }
 
     @Test
-    public void audioFormatDerivesFromSniffedMime() throws Exception {
+    void audioFormatDerivesFromSniffedMime() throws Exception {
         // audio/wav -> wav; tests that the reverse-lookup delegates to
         // play.libs.MimeTypes + application.conf rather than a hardcoded
         // MIME string match.
@@ -96,7 +96,7 @@ public class VisionAudioAssemblyTest extends UnitTest {
     }
 
     @Test
-    public void audioFormatResolvesTikaRegisteredWavAliases() throws Exception {
+    void audioFormatResolvesTikaRegisteredWavAliases() throws Exception {
         // Tika sniffs WAV files as audio/vnd.wave (RFC 2361) or the legacy
         // audio/x-wav, never the de-facto audio/wav that Play's bundled
         // mime-types.properties uses. MimeExtensions.forMime must resolve
@@ -124,7 +124,7 @@ public class VisionAudioAssemblyTest extends UnitTest {
     }
 
     @Test
-    public void fileAttachmentStillRidesAsFilenameReference() throws Exception {
+    void fileAttachmentStillRidesAsFilenameReference() throws Exception {
         persistAttachment("doc.pdf", "application/pdf",
                 MessageAttachment.KIND_FILE, new byte[]{'p', 'd', 'f'});
 
@@ -147,7 +147,7 @@ public class VisionAudioAssemblyTest extends UnitTest {
     }
 
     @Test
-    public void mixedAttachmentsEmitOrderedContentParts() throws Exception {
+    void mixedAttachmentsEmitOrderedContentParts() throws Exception {
         // One of each kind. The text part must come first and must carry
         // the filename marker for the FILE-kind attachment but NOT for the
         // image or audio (those ride as their own structured parts).

@@ -12,7 +12,7 @@ import play.test.FunctionalTest;
  * Covers auth gating, CRUD round-trips, the test endpoint, and the
  * delete path's downstream cleanup (allowlist + tool registry).
  */
-public class ApiMcpServersControllerTest extends FunctionalTest {
+class ApiMcpServersControllerTest extends FunctionalTest {
 
     @BeforeEach
     void setUp() {
@@ -29,13 +29,13 @@ public class ApiMcpServersControllerTest extends FunctionalTest {
     // ==================== auth ====================
 
     @Test
-    public void listRequiresAuth() {
+    void listRequiresAuth() {
         var response = GET("/api/mcp-servers");
         assertEquals(401, response.status.intValue());
     }
 
     @Test
-    public void createRequiresAuth() {
+    void createRequiresAuth() {
         var response = POST("/api/mcp-servers", "application/json",
                 "{\"name\":\"x\",\"transport\":\"HTTP\",\"url\":\"http://x\"}");
         assertEquals(401, response.status.intValue());
@@ -44,7 +44,7 @@ public class ApiMcpServersControllerTest extends FunctionalTest {
     // ==================== list ====================
 
     @Test
-    public void listReturnsEmptyArrayWithNoServers() {
+    void listReturnsEmptyArrayWithNoServers() {
         login();
         var response = GET("/api/mcp-servers");
         assertIsOk(response);
@@ -52,7 +52,7 @@ public class ApiMcpServersControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void listReturnsCreatedServerWithRuntimeStatus() {
+    void listReturnsCreatedServerWithRuntimeStatus() {
         login();
         createHttpServer("remote", "http://127.0.0.1:1/mcp", false);
         var response = GET("/api/mcp-servers");
@@ -65,7 +65,7 @@ public class ApiMcpServersControllerTest extends FunctionalTest {
     // ==================== create ====================
 
     @Test
-    public void createPersistsHttpServer() {
+    void createPersistsHttpServer() {
         login();
         var resp = POST("/api/mcp-servers", "application/json", """
                 {"name":"remote","enabled":false,"transport":"HTTP",
@@ -80,7 +80,7 @@ public class ApiMcpServersControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void createPersistsStdioServer() {
+    void createPersistsStdioServer() {
         login();
         var resp = POST("/api/mcp-servers", "application/json", """
                 {"name":"local","enabled":false,"transport":"STDIO",
@@ -95,7 +95,7 @@ public class ApiMcpServersControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void createRejectsDuplicateName() {
+    void createRejectsDuplicateName() {
         login();
         createHttpServer("dup", "http://127.0.0.1:1/mcp", false);
         var resp = POST("/api/mcp-servers", "application/json", """
@@ -105,7 +105,7 @@ public class ApiMcpServersControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void createRejectsBadName() {
+    void createRejectsBadName() {
         login();
         var resp = POST("/api/mcp-servers", "application/json", """
                 {"name":"bad name","enabled":false,"transport":"HTTP","url":"http://x/mcp"}
@@ -114,7 +114,7 @@ public class ApiMcpServersControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void createRejectsHttpWithoutUrl() {
+    void createRejectsHttpWithoutUrl() {
         login();
         var resp = POST("/api/mcp-servers", "application/json", """
                 {"name":"noUrl","enabled":false,"transport":"HTTP"}
@@ -123,7 +123,7 @@ public class ApiMcpServersControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void createRejectsStdioWithoutCommand() {
+    void createRejectsStdioWithoutCommand() {
         login();
         var resp = POST("/api/mcp-servers", "application/json", """
                 {"name":"noCmd","enabled":false,"transport":"STDIO"}
@@ -134,7 +134,7 @@ public class ApiMcpServersControllerTest extends FunctionalTest {
     // ==================== update ====================
 
     @Test
-    public void updateTogglesEnabled() {
+    void updateTogglesEnabled() {
         login();
         var id = createHttpServer("toggle", "http://127.0.0.1:1/mcp", false);
         var resp = PUT("/api/mcp-servers/" + id, "application/json", "{\"enabled\":true}");
@@ -144,7 +144,7 @@ public class ApiMcpServersControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void updateChangesTransportRebuildsConfig() {
+    void updateChangesTransportRebuildsConfig() {
         login();
         var id = createHttpServer("morph", "http://127.0.0.1:1/mcp", false);
         var resp = PUT("/api/mcp-servers/" + id, "application/json", """
@@ -159,7 +159,7 @@ public class ApiMcpServersControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void updateRejectsRenameToExistingName() {
+    void updateRejectsRenameToExistingName() {
         login();
         createHttpServer("a", "http://x/mcp", false);
         var idB = createHttpServer("b", "http://y/mcp", false);
@@ -168,7 +168,7 @@ public class ApiMcpServersControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void updateUnknownIdReturns404() {
+    void updateUnknownIdReturns404() {
         login();
         var resp = PUT("/api/mcp-servers/999999", "application/json", "{\"enabled\":true}");
         assertEquals(404, resp.status.intValue());
@@ -177,7 +177,7 @@ public class ApiMcpServersControllerTest extends FunctionalTest {
     // ==================== delete ====================
 
     @Test
-    public void deleteRemovesRowAndCallsStop() {
+    void deleteRemovesRowAndCallsStop() {
         login();
         var id = createHttpServer("doomed", "http://127.0.0.1:1/mcp", false);
         var resp = DELETE("/api/mcp-servers/" + id);
@@ -190,7 +190,7 @@ public class ApiMcpServersControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void deleteAlsoClearsAllowlistRows() {
+    void deleteAlsoClearsAllowlistRows() {
         login();
         var id = createHttpServer("clean", "http://127.0.0.1:1/mcp", false);
         // Seed a stray allowlist row in a fresh VT so it actually commits
@@ -223,7 +223,7 @@ public class ApiMcpServersControllerTest extends FunctionalTest {
     // ==================== test connection ====================
 
     @Test
-    public void testConnectionReturnsErrorOnUnreachableServer() {
+    void testConnectionReturnsErrorOnUnreachableServer() {
         login();
         var id = createHttpServer("dead", "http://127.0.0.1:1/mcp", false);
         var resp = POST("/api/mcp-servers/" + id + "/test", "application/json", "{}");

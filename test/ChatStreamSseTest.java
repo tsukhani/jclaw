@@ -29,13 +29,13 @@ import java.util.concurrent.atomic.AtomicReference;
  * {@link CountDownLatch} counted down by either {@code onComplete} or
  * {@code onError}.
  */
-public class ChatStreamSseTest extends UnitTest {
+class ChatStreamSseTest extends UnitTest {
 
     private MockWebServer server;
     private LlmProvider provider;
 
     @BeforeEach
-    public void setUp() throws Exception {
+    void setUp() throws Exception {
         server = new MockWebServer();
         server.start();
         var baseUrl = server.url("/v1").toString();
@@ -44,12 +44,12 @@ public class ChatStreamSseTest extends UnitTest {
     }
 
     @AfterEach
-    public void tearDown() throws Exception {
+    void tearDown() throws Exception {
         server.close();
     }
 
     @Test
-    public void chatStream_emitsOneChunkPerDataLine_thenCompletes() throws Exception {
+    void chatStream_emitsOneChunkPerDataLine_thenCompletes() throws Exception {
         server.enqueue(threeChunkSseResponse());
         var collected = streamAndCollect();
         assertEquals(3, collected.chunks.size(),

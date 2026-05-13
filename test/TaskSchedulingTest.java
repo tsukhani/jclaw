@@ -8,7 +8,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 
-public class TaskSchedulingTest extends UnitTest {
+class TaskSchedulingTest extends UnitTest {
 
     @BeforeEach
     void setup() {
@@ -18,14 +18,14 @@ public class TaskSchedulingTest extends UnitTest {
     // --- CronParser tests ---
 
     @Test
-    public void cronEveryMinute() {
+    void cronEveryMinute() {
         var next = CronParser.nextExecution("* * * * *");
         assertNotNull(next);
         assertTrue(next.isAfter(Instant.now()));
     }
 
     @Test
-    public void cronSpecificTime() {
+    void cronSpecificTime() {
         // Every day at noon
         var after = LocalDateTime.of(2026, 4, 7, 11, 0)
                 .atZone(ZoneId.systemDefault()).toInstant();
@@ -37,7 +37,7 @@ public class TaskSchedulingTest extends UnitTest {
     }
 
     @Test
-    public void cronWithStep() {
+    void cronWithStep() {
         // Every 15 minutes
         var after = LocalDateTime.of(2026, 4, 7, 10, 0)
                 .atZone(ZoneId.systemDefault()).toInstant();
@@ -48,7 +48,7 @@ public class TaskSchedulingTest extends UnitTest {
     }
 
     @Test
-    public void cronInvalidReturnsNull() {
+    void cronInvalidReturnsNull() {
         var next = CronParser.nextExecution("bad");
         assertNull(next);
     }
@@ -56,7 +56,7 @@ public class TaskSchedulingTest extends UnitTest {
     // --- Task retry with backoff ---
 
     @Test
-    public void taskRetryIncrements() {
+    void taskRetryIncrements() {
         var agent = createAgent();
         var task = new Task();
         task.agent = agent;
@@ -78,7 +78,7 @@ public class TaskSchedulingTest extends UnitTest {
     }
 
     @Test
-    public void taskMaxRetriesExceeded() {
+    void taskMaxRetriesExceeded() {
         var agent = createAgent();
         var task = new Task();
         task.agent = agent;
@@ -100,7 +100,7 @@ public class TaskSchedulingTest extends UnitTest {
     }
 
     @Test
-    public void cancelPendingTask() {
+    void cancelPendingTask() {
         var agent = createAgent();
         var task = new Task();
         task.agent = agent;
@@ -118,7 +118,7 @@ public class TaskSchedulingTest extends UnitTest {
     }
 
     @Test
-    public void findPendingDueReturnsOnlyDueTasks() {
+    void findPendingDueReturnsOnlyDueTasks() {
         var agent = createAgent();
 
         // Due now

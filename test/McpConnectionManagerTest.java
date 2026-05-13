@@ -36,7 +36,7 @@ import java.util.concurrent.TimeUnit;
  * <p>Skipped when {@code node} is not on PATH (same gate as
  * {@link McpStdioTransportTest}).
  */
-public class McpConnectionManagerTest extends UnitTest {
+class McpConnectionManagerTest extends UnitTest {
 
     private static final String FIXTURE_SCRIPT = """
             const readline = require('readline');
@@ -66,7 +66,7 @@ public class McpConnectionManagerTest extends UnitTest {
     private Path fixturePath;
 
     @BeforeEach
-    public void setUp() throws Exception {
+    void setUp() throws Exception {
         Assumptions.assumeTrue(nodeAvailable(), "node not on PATH; skipping");
         Fixtures.deleteDatabase();
         EventLogger.clear();
@@ -79,7 +79,7 @@ public class McpConnectionManagerTest extends UnitTest {
     }
 
     @AfterEach
-    public void tearDown() throws Exception {
+    void tearDown() throws Exception {
         McpConnectionManager.shutdown();
         EventLogger.clear();
         // Restore the production backoff numbers so any later test isn't perturbed.
@@ -92,7 +92,7 @@ public class McpConnectionManagerTest extends UnitTest {
     // ==================== happy path ====================
 
     @Test
-    public void connectsAndRegistersToolsWithRegistry() throws Exception {
+    void connectsAndRegistersToolsWithRegistry() throws Exception {
         var server = seedStdioServer("fixture", FIXTURE_SCRIPT);
         McpConnectionManager.connect(server);
 
@@ -103,7 +103,7 @@ public class McpConnectionManagerTest extends UnitTest {
     }
 
     @Test
-    public void callToolDispatchesThroughAdapter() throws Exception {
+    void callToolDispatchesThroughAdapter() throws Exception {
         var server = seedStdioServer("fixture", FIXTURE_SCRIPT);
         McpConnectionManager.connect(server);
         awaitState("fixture", McpServer.Status.CONNECTED, 10);
@@ -116,7 +116,7 @@ public class McpConnectionManagerTest extends UnitTest {
     }
 
     @Test
-    public void connectEmitsMcpConnectEventLog() throws Exception {
+    void connectEmitsMcpConnectEventLog() throws Exception {
         var server = seedStdioServer("fixture", FIXTURE_SCRIPT);
         McpConnectionManager.connect(server);
         awaitState("fixture", McpServer.Status.CONNECTED, 10);
@@ -133,7 +133,7 @@ public class McpConnectionManagerTest extends UnitTest {
     // ==================== unhappy paths ====================
 
     @Test
-    public void unreachableHttpServerSurfacesErrorAndRetriesWithBackoff() throws Exception {
+    void unreachableHttpServerSurfacesErrorAndRetriesWithBackoff() throws Exception {
         // Point at a port that is almost certainly not listening.
         var cfg = new JsonObject();
         cfg.addProperty("url", "http://127.0.0.1:1/mcp");
@@ -154,7 +154,7 @@ public class McpConnectionManagerTest extends UnitTest {
     }
 
     @Test
-    public void stopRemovesToolsAndCancelsRetry() throws Exception {
+    void stopRemovesToolsAndCancelsRetry() throws Exception {
         var server = seedStdioServer("fixture", FIXTURE_SCRIPT);
         McpConnectionManager.connect(server);
         awaitState("fixture", McpServer.Status.CONNECTED, 10);
@@ -171,7 +171,7 @@ public class McpConnectionManagerTest extends UnitTest {
     // ==================== JCLAW-32: allowlist + MCP_TOOL_UNREGISTER ====================
 
     @Test
-    public void connectWritesAllowlistRowsForExistingAgents() throws Exception {
+    void connectWritesAllowlistRowsForExistingAgents() throws Exception {
         var agentId = commitInFreshTx(() -> seedAgent("alpha").id);
         var server = seedStdioServer("fixture", FIXTURE_SCRIPT);
 
@@ -189,7 +189,7 @@ public class McpConnectionManagerTest extends UnitTest {
     }
 
     @Test
-    public void stopClearsAllowlistAndEmitsMcpToolUnregisterEvent() throws Exception {
+    void stopClearsAllowlistAndEmitsMcpToolUnregisterEvent() throws Exception {
         commitInFreshTx(() -> { seedAgent("alpha"); return null; });
         var server = seedStdioServer("fixture", FIXTURE_SCRIPT);
         McpConnectionManager.connect(server);
@@ -217,7 +217,7 @@ public class McpConnectionManagerTest extends UnitTest {
     // ==================== JCLAW-32: agent-creation backfill ====================
 
     @Test
-    public void agentCreatedAfterConnectGetsBackfilledGrants() throws Exception {
+    void agentCreatedAfterConnectGetsBackfilledGrants() throws Exception {
         // 1. Connect with NO agents in the DB.
         var server = seedStdioServer("fixture", FIXTURE_SCRIPT);
         McpConnectionManager.connect(server);
@@ -244,7 +244,7 @@ public class McpConnectionManagerTest extends UnitTest {
     // ==================== JCLAW-32: gated invocation + MCP_TOOL_INVOKE ====================
 
     @Test
-    public void invokeViaToolRegistrySucceedsWhenAgentIsAllowed() throws Exception {
+    void invokeViaToolRegistrySucceedsWhenAgentIsAllowed() throws Exception {
         var agentId = commitInFreshTx(() -> seedAgent("alpha").id);
         var server = seedStdioServer("fixture", FIXTURE_SCRIPT);
         McpConnectionManager.connect(server);
@@ -269,7 +269,7 @@ public class McpConnectionManagerTest extends UnitTest {
     }
 
     @Test
-    public void invokeViaToolRegistryDeniesWhenAllowlistRowMissing() throws Exception {
+    void invokeViaToolRegistryDeniesWhenAllowlistRowMissing() throws Exception {
         // Seed agent BEFORE connect so connect's broadcast grants it,
         // then DELETE the row to simulate an admin-denied scenario.
         var agentId = commitInFreshTx(() -> seedAgent("alpha").id);
@@ -302,7 +302,7 @@ public class McpConnectionManagerTest extends UnitTest {
     }
 
     @Test
-    public void shutdownTearsDownAllConnections() throws Exception {
+    void shutdownTearsDownAllConnections() throws Exception {
         var s1 = seedStdioServer("fix1", FIXTURE_SCRIPT);
         var s2 = seedStdioServer("fix2", FIXTURE_SCRIPT);
         McpConnectionManager.connect(s1);

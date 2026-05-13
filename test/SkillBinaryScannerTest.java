@@ -24,7 +24,7 @@ import java.util.List;
  * file name {@code jew.m68k}) for the positive case. The hash alone is safe to
  * commit; no malware bytes ever touch the repo.
  */
-public class SkillBinaryScannerTest extends UnitTest {
+class SkillBinaryScannerTest extends UnitTest {
 
     /**
      * SHA-256 of a real Mirai sample indexed by MalwareBazaar. Looked up once
@@ -82,7 +82,7 @@ public class SkillBinaryScannerTest extends UnitTest {
     }
 
     @Test
-    public void malwareBazaarLookupFlagsKnownMalwareHash() {
+    void malwareBazaarLookupFlagsKnownMalwareHash() {
         // Proves the HTTP integration end-to-end: hashing, Auth-Key header,
         // POST body encoding, and JSON parsing all work against the real API.
         Assumptions.assumeTrue(hasMalwareBazaarKey(), "Skipping: MALWAREBAZAAR_AUTH_KEY not configured");
@@ -98,7 +98,7 @@ public class SkillBinaryScannerTest extends UnitTest {
     }
 
     @Test
-    public void malwareBazaarLookupReturnsCleanForUnknownHash() {
+    void malwareBazaarLookupReturnsCleanForUnknownHash() {
         // Any random SHA-256 (e.g. hash of the empty string) should come back clean.
         Assumptions.assumeTrue(hasMalwareBazaarKey(), "Skipping: MALWAREBAZAAR_AUTH_KEY not configured");
 
@@ -110,7 +110,7 @@ public class SkillBinaryScannerTest extends UnitTest {
     }
 
     @Test
-    public void scanWalksBinariesAndSkipsTextFiles() throws Exception {
+    void scanWalksBinariesAndSkipsTextFiles() throws Exception {
         // Verifies the SkillBinaryScanner plumbing: directory walk, text/binary
         // classification, and per-file hashing. Uses a fake binary whose SHA-256
         // is NOT in MalwareBazaar — so violations should be empty, but the audit
@@ -134,7 +134,7 @@ public class SkillBinaryScannerTest extends UnitTest {
     }
 
     @Test
-    public void scanIgnoresCleanTextOnlySkill() throws Exception {
+    void scanIgnoresCleanTextOnlySkill() throws Exception {
         // Pure text skill — no binaries at all. Scanner should short-circuit cleanly.
         Files.writeString(tmpSkill.resolve("SKILL.md"), "---\nname: clean\n---\nbody");
         Files.writeString(tmpSkill.resolve("README.md"), "hello");
@@ -144,13 +144,13 @@ public class SkillBinaryScannerTest extends UnitTest {
     }
 
     @Test
-    public void scanHandlesNonExistentDirectoryGracefully() {
+    void scanHandlesNonExistentDirectoryGracefully() {
         var violations = SkillBinaryScanner.scan(Path.of("/nonexistent/path/does/not/exist"));
         assertEquals(0, violations.size());
     }
 
     @Test
-    public void scanAcceptsInjectedScannerList() throws Exception {
+    void scanAcceptsInjectedScannerList() throws Exception {
         var tools = tmpSkill.resolve("tools");
         Files.createDirectories(tools);
         Files.write(tools.resolve("flagged.bin"), new byte[] {9, 8, 7, 6});
@@ -172,7 +172,7 @@ public class SkillBinaryScannerTest extends UnitTest {
     // ==================== MetaDefender Cloud Scanner ====================
 
     @Test
-    public void metaDefenderLookupFlagsKnownMalwareHash() {
+    void metaDefenderLookupFlagsKnownMalwareHash() {
         // Live lookup: confirms HTTP integration, apikey header, JSON parsing,
         // and scan_all_result_i → Verdict translation against the real API.
         Assumptions.assumeTrue(hasMetaDefenderKey(), "Skipping: METADEFENDER_API_KEY not configured");
@@ -187,7 +187,7 @@ public class SkillBinaryScannerTest extends UnitTest {
     }
 
     @Test
-    public void metaDefenderLookupReturnsCleanForUnknownHash() {
+    void metaDefenderLookupReturnsCleanForUnknownHash() {
         Assumptions.assumeTrue(hasMetaDefenderKey(), "Skipping: METADEFENDER_API_KEY not configured");
 
         // SHA-256 of the empty string — MetaDefender returns 404 for hashes it has never seen
@@ -199,7 +199,7 @@ public class SkillBinaryScannerTest extends UnitTest {
     // ==================== VirusTotal Scanner ====================
 
     @Test
-    public void virusTotalLookupFlagsKnownMalwareHash() {
+    void virusTotalLookupFlagsKnownMalwareHash() {
         // Live lookup: confirms HTTP integration, x-apikey header, JSON parsing,
         // and last_analysis_stats.malicious → Verdict translation against the real API.
         Assumptions.assumeTrue(hasVirusTotalKey(), "Skipping: VIRUSTOTAL_API_KEY not configured");
@@ -214,7 +214,7 @@ public class SkillBinaryScannerTest extends UnitTest {
     }
 
     @Test
-    public void virusTotalLookupReturnsCleanForUnknownHash() {
+    void virusTotalLookupReturnsCleanForUnknownHash() {
         Assumptions.assumeTrue(hasVirusTotalKey(), "Skipping: VIRUSTOTAL_API_KEY not configured");
 
         // SHA-256 of the empty string — VirusTotal returns 404 for hashes it has never seen
@@ -236,7 +236,7 @@ public class SkillBinaryScannerTest extends UnitTest {
      * reads ConfigService state and does not contact any API.
      */
     @Test
-    public void compositionMatrixPerKeyIndependence() {
+    void compositionMatrixPerKeyIndependence() {
         var mbScanner = new MalwareBazaarScanner();
         var mdScanner = new MetaDefenderCloudScanner();
         var vtScanner = new VirusTotalScanner();
@@ -312,7 +312,7 @@ public class SkillBinaryScannerTest extends UnitTest {
      * and virtually certain to be flagged by MetaDefender's commercial engines.
      */
     @Test
-    public void scanAggregatesViolationsFromBothScannersForSameFile() throws Exception {
+    void scanAggregatesViolationsFromBothScannersForSameFile() throws Exception {
         Assumptions.assumeTrue(hasMalwareBazaarKey() && hasMetaDefenderKey(),
                 "Skipping: both MALWAREBAZAAR_AUTH_KEY and METADEFENDER_API_KEY required");
 

@@ -9,7 +9,7 @@ import services.ConversationService;
 import java.io.IOException;
 import java.nio.file.Files;
 
-public class WebChatTest extends UnitTest {
+class WebChatTest extends UnitTest {
 
     private Agent agent;
 
@@ -26,7 +26,7 @@ public class WebChatTest extends UnitTest {
     }
 
     @Test
-    public void createConversationAndAppendMessages() {
+    void createConversationAndAppendMessages() {
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
         assertNotNull(convo);
         assertEquals("web", convo.channelType);
@@ -42,21 +42,21 @@ public class WebChatTest extends UnitTest {
     }
 
     @Test
-    public void conversationLinkedToAgent() {
+    void conversationLinkedToAgent() {
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
         assertNotNull(convo.agent);
         assertEquals(agent.id, convo.agent.id);
     }
 
     @Test
-    public void multipleConversationsPerChannel() {
+    void multipleConversationsPerChannel() {
         var convo1 = ConversationService.findOrCreate(agent, "web", "user1");
         var convo2 = ConversationService.findOrCreate(agent, "web", "user2");
         assertNotEquals(convo1.id, convo2.id);
     }
 
     @Test
-    public void loadRecentMessagesRespectLimit() {
+    void loadRecentMessagesRespectLimit() {
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
         for (int i = 0; i < 60; i++) {
             ConversationService.appendUserMessage(convo, "Message %d".formatted(i));
@@ -68,7 +68,7 @@ public class WebChatTest extends UnitTest {
     }
 
     @Test
-    public void toolResultMessagesStored() {
+    void toolResultMessagesStored() {
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
         ConversationService.appendUserMessage(convo, "Create a task");
         ConversationService.appendAssistantMessage(convo, null,
@@ -84,7 +84,7 @@ public class WebChatTest extends UnitTest {
     }
 
     @Test
-    public void messageCountQueryWorks() {
+    void messageCountQueryWorks() {
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
         ConversationService.appendUserMessage(convo, "Hello");
         ConversationService.appendAssistantMessage(convo, "Hi", null);

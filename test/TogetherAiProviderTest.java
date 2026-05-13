@@ -18,7 +18,7 @@ import java.util.List;
  * {@code serializeRequest} machinery is exercised in {@code LlmClientTest};
  * this file pins only the Together-specific overrides.
  */
-public class TogetherAiProviderTest extends UnitTest {
+class TogetherAiProviderTest extends UnitTest {
 
     private static TogetherAiProvider provider() {
         return new TogetherAiProvider(new ProviderConfig(
@@ -42,7 +42,7 @@ public class TogetherAiProviderTest extends UnitTest {
     // =====================
 
     @Test
-    public void addReasoningParamsEmitsReasoningEnabledTrue() throws Exception {
+    void addReasoningParamsEmitsReasoningEnabledTrue() throws Exception {
         var body = serialize(provider(), withThinking("medium"));
         assertTrue(body.has("reasoning"),
                 "reasoning object must be present when thinkingMode is set");
@@ -53,7 +53,7 @@ public class TogetherAiProviderTest extends UnitTest {
     }
 
     @Test
-    public void addReasoningParamsCollapsesEffortLevelsToOnSwitch() throws Exception {
+    void addReasoningParamsCollapsesEffortLevelsToOnSwitch() throws Exception {
         // Together has no per-effort gradient — any non-blank thinkingMode
         // collapses to enabled:true. The JClaw-side level string is intentionally
         // ignored; this test pins that behavior so a future change that starts
@@ -69,7 +69,7 @@ public class TogetherAiProviderTest extends UnitTest {
     }
 
     @Test
-    public void disableReasoningEmitsReasoningEnabledFalseWhenThinkingNull() throws Exception {
+    void disableReasoningEmitsReasoningEnabledFalseWhenThinkingNull() throws Exception {
         var body = serialize(provider(), withThinking(null));
         assertTrue(body.has("reasoning"),
                 "reasoning object must be present even when thinking is off — explicit disable");
@@ -78,7 +78,7 @@ public class TogetherAiProviderTest extends UnitTest {
     }
 
     @Test
-    public void disableReasoningEmitsReasoningEnabledFalseWhenThinkingBlank() throws Exception {
+    void disableReasoningEmitsReasoningEnabledFalseWhenThinkingBlank() throws Exception {
         var body = serialize(provider(), withThinking("   "));
         assertFalse(body.getAsJsonObject("reasoning").get("enabled").getAsBoolean(),
                 "blank thinkingMode must produce explicit reasoning.enabled=false");
@@ -89,7 +89,7 @@ public class TogetherAiProviderTest extends UnitTest {
     // =====================
 
     @Test
-    public void extractReasoningTokensReadsTopLevelField() {
+    void extractReasoningTokensReadsTopLevelField() {
         var p = provider();
         var usage = p.parseUsage(JsonParser.parseString("""
                 {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
@@ -100,7 +100,7 @@ public class TogetherAiProviderTest extends UnitTest {
     }
 
     @Test
-    public void extractReasoningTokensFallsBackToOpenAiNestedField() {
+    void extractReasoningTokensFallsBackToOpenAiNestedField() {
         // Defensive: if Together starts proxying OpenAI-style usage shapes
         // for some models, we still surface the count rather than reporting 0.
         var p = provider();
@@ -113,7 +113,7 @@ public class TogetherAiProviderTest extends UnitTest {
     }
 
     @Test
-    public void extractReasoningTokensReturnsZeroWhenBothFieldsAbsent() {
+    void extractReasoningTokensReturnsZeroWhenBothFieldsAbsent() {
         var p = provider();
         var usage = p.parseUsage(JsonParser.parseString("""
                 {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
@@ -122,7 +122,7 @@ public class TogetherAiProviderTest extends UnitTest {
     }
 
     @Test
-    public void extractReasoningTokensReturnsZeroWhenTopLevelNull() {
+    void extractReasoningTokensReturnsZeroWhenTopLevelNull() {
         var p = provider();
         var usage = p.parseUsage(JsonParser.parseString("""
                 {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,

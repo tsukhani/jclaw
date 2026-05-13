@@ -13,10 +13,10 @@ import java.util.concurrent.atomic.AtomicInteger;
  * backs the ShutdownJob wiring for TelegramPollingRunner, TelegramStreamingSink,
  * and ApiChatController.
  */
-public class VirtualThreadsTest extends UnitTest {
+class VirtualThreadsTest extends UnitTest {
 
     @Test
-    public void gracefulShutdown_drainsIdleExecutorImmediately() {
+    void gracefulShutdown_drainsIdleExecutorImmediately() {
         // Empty queue → shutdown should complete well inside the 5s budget.
         ScheduledExecutorService exec = VirtualThreads.newSingleThreadScheduledExecutor();
         long start = System.nanoTime();
@@ -30,7 +30,7 @@ public class VirtualThreadsTest extends UnitTest {
     }
 
     @Test
-    public void gracefulShutdown_waitsForInFlightTaskToComplete() {
+    void gracefulShutdown_waitsForInFlightTaskToComplete() {
         // Submit a task that completes quickly; shutdown must wait for it, not
         // force-terminate. Confirms the happy path of awaitTermination.
         ScheduledExecutorService exec = VirtualThreads.newSingleThreadScheduledExecutor();
@@ -55,7 +55,7 @@ public class VirtualThreadsTest extends UnitTest {
     }
 
     @Test
-    public void gracefulShutdown_handlesAlreadyShutdownExecutor() {
+    void gracefulShutdown_handlesAlreadyShutdownExecutor() {
         // Defensive: calling shutdown twice must not throw or hang. ShutdownJob
         // may run after a test or hook has already shut an executor down.
         ScheduledExecutorService exec = VirtualThreads.newSingleThreadScheduledExecutor();
@@ -69,7 +69,7 @@ public class VirtualThreadsTest extends UnitTest {
     }
 
     @Test
-    public void gracefulShutdown_worksForPlainExecutorNotOnlyScheduled() {
+    void gracefulShutdown_worksForPlainExecutorNotOnlyScheduled() {
         // Helper is typed on ExecutorService to accept plain thread-pools too.
         // Regression guard: if someone later swaps a call site from scheduled
         // to plain, the helper signature must still fit.

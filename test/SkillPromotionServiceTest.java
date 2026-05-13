@@ -8,7 +8,7 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 
-public class SkillPromotionServiceTest extends UnitTest {
+class SkillPromotionServiceTest extends UnitTest {
 
     private Path tmpDir;
 
@@ -27,7 +27,7 @@ public class SkillPromotionServiceTest extends UnitTest {
     // ==================== deleteRecursive ====================
 
     @Test
-    public void deleteRecursiveRemovesNestedStructure() throws Exception {
+    void deleteRecursiveRemovesNestedStructure() throws Exception {
         var sub = tmpDir.resolve("a/b/c");
         Files.createDirectories(sub);
         Files.writeString(sub.resolve("file.txt"), "hello");
@@ -39,7 +39,7 @@ public class SkillPromotionServiceTest extends UnitTest {
     }
 
     @Test
-    public void deleteRecursiveHandlesEmptyDirectory() throws Exception {
+    void deleteRecursiveHandlesEmptyDirectory() throws Exception {
         var empty = tmpDir.resolve("empty");
         Files.createDirectories(empty);
 
@@ -50,13 +50,13 @@ public class SkillPromotionServiceTest extends UnitTest {
     }
 
     @Test
-    public void deleteRecursiveNoopOnNonExistentPath() {
+    void deleteRecursiveNoopOnNonExistentPath() {
         var ghost = tmpDir.resolve("does-not-exist");
         Assertions.assertDoesNotThrow(() -> SkillPromotionService.deleteRecursive(ghost));
     }
 
     @Test
-    public void deleteRecursiveRemovesMultipleFiles() throws Exception {
+    void deleteRecursiveRemovesMultipleFiles() throws Exception {
         Files.writeString(tmpDir.resolve("a.txt"), "a");
         Files.writeString(tmpDir.resolve("b.txt"), "b");
         Files.writeString(tmpDir.resolve("c.txt"), "c");
@@ -69,64 +69,64 @@ public class SkillPromotionServiceTest extends UnitTest {
     // ==================== enforceTextFilePath ====================
 
     @Test
-    public void skillMdStaysAtRoot() {
+    void skillMdStaysAtRoot() {
         assertEquals("SKILL.md", SkillPromotionService.enforceTextFilePath("SKILL.md"));
     }
 
     @Test
-    public void toolsSubdirStaysUnchanged() {
+    void toolsSubdirStaysUnchanged() {
         assertEquals("tools/helper.sh", SkillPromotionService.enforceTextFilePath("tools/helper.sh"));
     }
 
     @Test
-    public void credentialsSubdirStaysUnchanged() {
+    void credentialsSubdirStaysUnchanged() {
         assertEquals("credentials/config.json", SkillPromotionService.enforceTextFilePath("credentials/config.json"));
     }
 
     @Test
-    public void jsonFileRelocatedToCredentials() {
+    void jsonFileRelocatedToCredentials() {
         assertEquals("credentials/config.json", SkillPromotionService.enforceTextFilePath("config.json"));
     }
 
     @Test
-    public void yamlFileRelocatedToCredentials() {
+    void yamlFileRelocatedToCredentials() {
         assertEquals("credentials/settings.yaml", SkillPromotionService.enforceTextFilePath("settings.yaml"));
     }
 
     @Test
-    public void ymlFileRelocatedToCredentials() {
+    void ymlFileRelocatedToCredentials() {
         assertEquals("credentials/secrets.yml", SkillPromotionService.enforceTextFilePath("secrets.yml"));
     }
 
     @Test
-    public void envFileRelocatedToCredentials() {
+    void envFileRelocatedToCredentials() {
         assertEquals("credentials/.env", SkillPromotionService.enforceTextFilePath(".env"));
     }
 
     @Test
-    public void propertiesFileRelocatedToCredentials() {
+    void propertiesFileRelocatedToCredentials() {
         assertEquals("credentials/app.properties", SkillPromotionService.enforceTextFilePath("app.properties"));
     }
 
     @Test
-    public void txtFileRelocatedToCredentials() {
+    void txtFileRelocatedToCredentials() {
         assertEquals("credentials/notes.txt", SkillPromotionService.enforceTextFilePath("notes.txt"));
     }
 
     @Test
-    public void nonCredentialFileStaysAtRoot() {
+    void nonCredentialFileStaysAtRoot() {
         assertEquals("README.md", SkillPromotionService.enforceTextFilePath("README.md"));
     }
 
     @Test
-    public void nonCredentialPyFileStaysAtRoot() {
+    void nonCredentialPyFileStaysAtRoot() {
         assertEquals("script.py", SkillPromotionService.enforceTextFilePath("script.py"));
     }
 
     // ==================== stripCredentialsJson ====================
 
     @Test
-    public void stripCredentialsReplacesValues() {
+    void stripCredentialsReplacesValues() {
         var input = """
                 {"apiKey": "sk-secret-123", "baseUrl": "https://api.example.com"}""";
         var result = SkillPromotionService.stripCredentialsJson(input);
@@ -139,19 +139,19 @@ public class SkillPromotionServiceTest extends UnitTest {
     }
 
     @Test
-    public void stripCredentialsEmptyObjectReturnsEmpty() {
+    void stripCredentialsEmptyObjectReturnsEmpty() {
         var result = SkillPromotionService.stripCredentialsJson("{}");
         assertEquals("{}", result);
     }
 
     @Test
-    public void stripCredentialsInvalidJsonReturnsFallback() {
+    void stripCredentialsInvalidJsonReturnsFallback() {
         var result = SkillPromotionService.stripCredentialsJson("not json at all");
         assertEquals("{}", result);
     }
 
     @Test
-    public void stripCredentialsArrayFallsBackToEmpty() {
+    void stripCredentialsArrayFallsBackToEmpty() {
         // Arrays are not JsonObjects, so getAsJsonObject() throws
         var result = SkillPromotionService.stripCredentialsJson("[1, 2, 3]");
         assertEquals("{}", result);
@@ -160,7 +160,7 @@ public class SkillPromotionServiceTest extends UnitTest {
     // ==================== atomicSwap ====================
 
     @Test
-    public void atomicSwapMovesStaging() throws Exception {
+    void atomicSwapMovesStaging() throws Exception {
         var staging = tmpDir.resolve("staging");
         var target = tmpDir.resolve("target");
         var backup = tmpDir.resolve("backup");
@@ -175,7 +175,7 @@ public class SkillPromotionServiceTest extends UnitTest {
     }
 
     @Test
-    public void atomicSwapReplacesExisting() throws Exception {
+    void atomicSwapReplacesExisting() throws Exception {
         var staging = tmpDir.resolve("staging");
         var target = tmpDir.resolve("target");
         var backup = tmpDir.resolve("backup");
@@ -195,7 +195,7 @@ public class SkillPromotionServiceTest extends UnitTest {
     // ==================== formatViolations ====================
 
     @Test
-    public void formatViolationsJoinsWithSemicolon() {
+    void formatViolationsJoinsWithSemicolon() {
         var violations = java.util.List.of(
                 new services.SkillBinaryScanner.Violation("tools/bad.bin", "abc123", "MalwareBazaar", "Mirai"),
                 new services.SkillBinaryScanner.Violation("tools/evil.exe", "def456", "MetaDefender", "Trojan")
@@ -207,7 +207,7 @@ public class SkillPromotionServiceTest extends UnitTest {
     }
 
     @Test
-    public void formatViolationsEmptyList() {
+    void formatViolationsEmptyList() {
         var formatted = SkillPromotionService.formatViolations(java.util.List.of());
         assertEquals("", formatted);
     }

@@ -12,7 +12,7 @@ import java.nio.file.Files;
 /**
  * Integration tests verifying the full pipeline from inbound message to outbound response.
  */
-public class IntegrationTest extends UnitTest {
+class IntegrationTest extends UnitTest {
 
     private static final String[] TEST_AGENTS = {
             "telegram-bot", "slack-bot", "wa-bot", "web-agent", "tool-agent",
@@ -35,7 +35,7 @@ public class IntegrationTest extends UnitTest {
     // --- Full pipeline: webhook → routing → agent → conversation ---
 
     @Test
-    public void telegramWebhookParsesAndRoutes() {
+    void telegramWebhookParsesAndRoutes() {
         // Setup: agent + binding
         var agent = AgentService.create("telegram-bot", "openrouter", "gpt-4.1");
         agent.enabled = true; agent.save();
@@ -83,7 +83,7 @@ public class IntegrationTest extends UnitTest {
     }
 
     @Test
-    public void slackWebhookVerifiesAndRoutes() {
+    void slackWebhookVerifiesAndRoutes() {
         var agent = AgentService.create("slack-bot", "openrouter", "gpt-4.1");
         agent.enabled = true; agent.save();
         var binding = new AgentBinding();
@@ -118,7 +118,7 @@ public class IntegrationTest extends UnitTest {
     }
 
     @Test
-    public void whatsappWebhookParsesAndRoutes() {
+    void whatsappWebhookParsesAndRoutes() {
         var agent = AgentService.create("wa-bot", "ollama-cloud", "qwen3.5");
         agent.enabled = true; agent.save();
         var binding = new AgentBinding();
@@ -159,7 +159,7 @@ public class IntegrationTest extends UnitTest {
     // --- Web chat pipeline ---
 
     @Test
-    public void webChatCreatesConversationAndStoresMessages() {
+    void webChatCreatesConversationAndStoresMessages() {
         var agent = AgentService.create("web-agent", "openrouter", "gpt-4.1");
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
 
@@ -186,7 +186,7 @@ public class IntegrationTest extends UnitTest {
     // --- Tool execution in pipeline ---
 
     @Test
-    public void toolExecutionInAgentPipeline() {
+    void toolExecutionInAgentPipeline() {
         var agent = AgentService.create("tool-agent", "openrouter", "gpt-4.1");
 
         // Test TaskTool creates a task
@@ -212,7 +212,7 @@ public class IntegrationTest extends UnitTest {
     // --- Memory in prompt assembly ---
 
     @Test
-    public void memoryRecalledDuringPromptAssembly() {
+    void memoryRecalledDuringPromptAssembly() {
         var agent = AgentService.create("memory-agent", "openrouter", "gpt-4.1");
 
         // Store a memory
@@ -228,7 +228,7 @@ public class IntegrationTest extends UnitTest {
     // --- Skill loading in prompt assembly ---
 
     @Test
-    public void skillsLoadedDuringPromptAssembly() {
+    void skillsLoadedDuringPromptAssembly() {
         var agent = AgentService.create("skill-agent", "openrouter", "gpt-4.1");
 
         // Create a skill file in the agent's workspace
@@ -255,7 +255,7 @@ public class IntegrationTest extends UnitTest {
     // --- Multi-agent routing ---
 
     @Test
-    public void multiAgentRoutingFullPipeline() {
+    void multiAgentRoutingFullPipeline() {
         var mainAgent = AgentService.create("main", "openrouter", "gpt-4.1");
         mainAgent.enabled = true; mainAgent.save();
         var supportAgent = AgentService.create("test-support", "ollama-cloud", "qwen3.5");
@@ -291,7 +291,7 @@ public class IntegrationTest extends UnitTest {
     // --- Event logging across pipeline ---
 
     @Test
-    public void eventLogCapturesActivity() {
+    void eventLogCapturesActivity() {
         EventLogger.clear();
         Fixtures.deleteDatabase();
         EventLogger.info("system", "Application started");

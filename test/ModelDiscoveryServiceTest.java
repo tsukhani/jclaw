@@ -8,44 +8,44 @@ import com.google.gson.JsonParser;
  * Tests for ModelDiscoveryService static parsing and inference methods.
  * No network calls — exercises the pure-logic helpers only.
  */
-public class ModelDiscoveryServiceTest extends UnitTest {
+class ModelDiscoveryServiceTest extends UnitTest {
 
     // --- stripVariant ---
 
     @Test
-    public void stripVariantRemovesSuffix() {
+    void stripVariantRemovesSuffix() {
         assertEquals("openai/gpt-4", ModelDiscoveryService.stripVariant("openai/gpt-4:extended"));
     }
 
     @Test
-    public void stripVariantPreservesIdWithoutVariant() {
+    void stripVariantPreservesIdWithoutVariant() {
         assertEquals("openai/gpt-4", ModelDiscoveryService.stripVariant("openai/gpt-4"));
     }
 
     @Test
-    public void stripVariantHandlesMultipleColons() {
+    void stripVariantHandlesMultipleColons() {
         assertEquals("vendor/model", ModelDiscoveryService.stripVariant("vendor/model:v1:extra"));
     }
 
     // --- stripVersionSuffix ---
 
     @Test
-    public void stripVersionSuffixRemovesDateSuffix() {
+    void stripVersionSuffixRemovesDateSuffix() {
         assertEquals("openai/gpt-4", ModelDiscoveryService.stripVersionSuffix("openai/gpt-4-20250101"));
     }
 
     @Test
-    public void stripVersionSuffixRemovesShortSuffix() {
+    void stripVersionSuffixRemovesShortSuffix() {
         assertEquals("openai/gpt-4", ModelDiscoveryService.stripVersionSuffix("openai/gpt-4-0125"));
     }
 
     @Test
-    public void stripVersionSuffixPreservesCleanId() {
+    void stripVersionSuffixPreservesCleanId() {
         assertEquals("openai/gpt-4", ModelDiscoveryService.stripVersionSuffix("openai/gpt-4"));
     }
 
     @Test
-    public void stripVersionSuffixRemovesDashSeparatedDate() {
+    void stripVersionSuffixRemovesDashSeparatedDate() {
         // OpenAI's checkpoint format like gpt-4o-2024-08-06; the prior
         // regex only handled contiguous dates and 3-4 digit version pins,
         // missing this shape entirely. Required for LiteLLM id lookups
@@ -58,7 +58,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     // --- detectThinkingSupport ---
 
     @Test
-    public void detectThinkingSupportFromProviderParams() {
+    void detectThinkingSupportFromProviderParams() {
         var obj = JsonParser.parseString("""
                 {"id": "some-model", "supported_parameters": ["reasoning", "temperature"]}
                 """).getAsJsonObject();
@@ -68,7 +68,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectThinkingSupportFromProviderParamsNegative() {
+    void detectThinkingSupportFromProviderParamsNegative() {
         var obj = JsonParser.parseString("""
                 {"id": "some-model", "supported_parameters": ["temperature", "top_p"]}
                 """).getAsJsonObject();
@@ -78,7 +78,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectThinkingSupportFallbackO1() {
+    void detectThinkingSupportFallbackO1() {
         var obj = JsonParser.parseString("""
                 {"id": "openai/o1-preview"}
                 """).getAsJsonObject();
@@ -88,7 +88,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectThinkingSupportFallbackDeepseekR1() {
+    void detectThinkingSupportFallbackDeepseekR1() {
         var obj = JsonParser.parseString("""
                 {"id": "deepseek/deepseek-r1"}
                 """).getAsJsonObject();
@@ -98,7 +98,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectThinkingSupportUnknownModel() {
+    void detectThinkingSupportUnknownModel() {
         var obj = JsonParser.parseString("""
                 {"id": "vendor/some-regular-model"}
                 """).getAsJsonObject();
@@ -113,7 +113,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     // else we rely on tight id-pattern matching.
 
     @Test
-    public void detectAlwaysThinksFromOpenRouterInstructType() {
+    void detectAlwaysThinksFromOpenRouterInstructType() {
         // The single provider-surfaced signal we get for "always thinks."
         var obj = JsonParser.parseString("""
                 {"id": "deepseek/deepseek-r1",
@@ -125,7 +125,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectAlwaysThinksInstructTypeIsCaseInsensitive() {
+    void detectAlwaysThinksInstructTypeIsCaseInsensitive() {
         var obj = JsonParser.parseString("""
                 {"id": "deepseek/deepseek-r1",
                  "architecture": {"instruct_type": "DeepSeek-R1"}}
@@ -134,7 +134,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectAlwaysThinksMatchesO1Family() {
+    void detectAlwaysThinksMatchesO1Family() {
         for (var id : java.util.List.of(
                 "o1", "o1-mini", "o1-pro", "o1-preview",
                 "openai/o1", "openai/o1-mini", "openai/o1-preview"
@@ -147,7 +147,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectAlwaysThinksMatchesO3Family() {
+    void detectAlwaysThinksMatchesO3Family() {
         for (var id : java.util.List.of("o3", "o3-mini", "o3-pro", "openai/o3-mini")) {
             var obj = JsonParser.parseString("{\"id\": \"" + id + "\"}").getAsJsonObject();
             assertTrue(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed(),
@@ -156,13 +156,13 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectAlwaysThinksMatchesO4Mini() {
+    void detectAlwaysThinksMatchesO4Mini() {
         var obj = JsonParser.parseString("{\"id\": \"openai/o4-mini\"}").getAsJsonObject();
         assertTrue(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed());
     }
 
     @Test
-    public void detectAlwaysThinksMatchesDeepseekR1Variants() {
+    void detectAlwaysThinksMatchesDeepseekR1Variants() {
         for (var id : java.util.List.of(
                 "deepseek-r1", "deepseek-ai/deepseek-r1",
                 "deepseek-r1:latest", "deepseek-r1-distill-llama-70b"
@@ -174,7 +174,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectAlwaysThinksMatchesQwq() {
+    void detectAlwaysThinksMatchesQwq() {
         for (var id : java.util.List.of("qwq", "qwen/qwq-32b", "qwq:latest")) {
             var obj = JsonParser.parseString("{\"id\": \"" + id + "\"}").getAsJsonObject();
             assertTrue(ModelDiscoveryService.detectAlwaysThinks(obj).confirmed(),
@@ -183,7 +183,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectAlwaysThinksRejectsClaudeOpus() {
+    void detectAlwaysThinksRejectsClaudeOpus() {
         // Critical regression guard: "claude-opus-4-1" contains "o" and a
         // digit, but must NOT match the o-series pattern. The tight regex
         // requires the o-token to start the id-component.
@@ -198,7 +198,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectAlwaysThinksRejectsGpt4o() {
+    void detectAlwaysThinksRejectsGpt4o() {
         // gpt-4o contains "o" but is hybrid (and uses GPT-4o-style audio,
         // not o-series reasoning architecture).
         for (var id : java.util.List.of("gpt-4o", "gpt-4o-mini", "openai/gpt-4o")) {
@@ -209,7 +209,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectAlwaysThinksRejectsHybridReasoners() {
+    void detectAlwaysThinksRejectsHybridReasoners() {
         // Hybrid models that DO support thinking but can be turned off —
         // the toggle is real for these, so they must NOT be locked.
         for (var id : java.util.List.of(
@@ -226,7 +226,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectAlwaysThinksUnknownModel() {
+    void detectAlwaysThinksUnknownModel() {
         var obj = JsonParser.parseString("""
                 {"id": "vendor/some-regular-model"}
                 """).getAsJsonObject();
@@ -238,7 +238,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     // --- detectVisionSupport ---
 
     @Test
-    public void detectVisionFromOpenRouterModalities() {
+    void detectVisionFromOpenRouterModalities() {
         // OpenRouter's /api/v1/models puts input modalities under
         // architecture.input_modalities as an array of tokens.
         var obj = JsonParser.parseString("""
@@ -251,7 +251,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectVisionFromOpenRouterModalitiesNegative() {
+    void detectVisionFromOpenRouterModalitiesNegative() {
         // Provider explicitly reports text-only input — confirmed absence.
         var obj = JsonParser.parseString("""
                 {"id": "vendor/text-only-model",
@@ -263,7 +263,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectVisionFromLegacyModalityString() {
+    void detectVisionFromLegacyModalityString() {
         // OpenRouter's older shape: a single modality string like "text+image->text".
         var obj = JsonParser.parseString("""
                 {"id": "vendor/legacy",
@@ -275,7 +275,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectVisionFromOllamaCapabilities() {
+    void detectVisionFromOllamaCapabilities() {
         // Ollama surfaces capabilities via /api/show; some /api/tags variants
         // merge them in. "vision" is the canonical token.
         var obj = JsonParser.parseString("""
@@ -287,7 +287,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectVisionFallbackGpt4o() {
+    void detectVisionFallbackGpt4o() {
         // No architecture, no capabilities — ID heuristic kicks in.
         var obj = JsonParser.parseString("""
                 {"id": "openai/gpt-4o"}
@@ -298,7 +298,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectVisionFallbackClaudeSonnet() {
+    void detectVisionFallbackClaudeSonnet() {
         var obj = JsonParser.parseString("""
                 {"id": "anthropic/claude-sonnet-4-6"}
                 """).getAsJsonObject();
@@ -308,7 +308,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectVisionUnknownModel() {
+    void detectVisionUnknownModel() {
         var obj = JsonParser.parseString("""
                 {"id": "vendor/plain-text-model"}
                 """).getAsJsonObject();
@@ -320,7 +320,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     // --- detectAudioSupport ---
 
     @Test
-    public void detectAudioFromOpenRouterModalities() {
+    void detectAudioFromOpenRouterModalities() {
         var obj = JsonParser.parseString("""
                 {"id": "openai/gpt-4o-audio-preview",
                  "architecture": {"input_modalities": ["text", "audio"]}}
@@ -331,7 +331,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectAudioFallbackGpt4oAudio() {
+    void detectAudioFallbackGpt4oAudio() {
         var obj = JsonParser.parseString("""
                 {"id": "openai/gpt-4o-audio-preview"}
                 """).getAsJsonObject();
@@ -341,7 +341,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectAudioFromOllamaCapabilities() {
+    void detectAudioFromOllamaCapabilities() {
         var obj = JsonParser.parseString("""
                 {"id": "qwen2-audio:7b", "capabilities": ["completion", "audio"]}
                 """).getAsJsonObject();
@@ -351,7 +351,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectAudioUnknownModel() {
+    void detectAudioUnknownModel() {
         var obj = JsonParser.parseString("""
                 {"id": "vendor/text-only"}
                 """).getAsJsonObject();
@@ -361,7 +361,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectAudioFallbackAudioPreviewSuffix() {
+    void detectAudioFallbackAudioPreviewSuffix() {
         // JCLAW-160: OpenAI's /v1/models endpoint returns plain entries
         // without modality metadata, so the id heuristic is the only
         // signal. The "-audio-preview" suffix is OpenAI's stable naming
@@ -378,7 +378,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectAudioPreviewMatchRequiresLeadingDash() {
+    void detectAudioPreviewMatchRequiresLeadingDash() {
         // JCLAW-160 review follow-up: the audio-preview match must be
         // anchored on a leading dash. A hypothetical model whose id
         // begins with "audio-preview" (no preceding dash) — e.g. an
@@ -397,7 +397,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     // --- inferPrice ---
 
     @Test
-    public void inferPriceWithValidPricing() {
+    void inferPriceWithValidPricing() {
         var obj = JsonParser.parseString("""
                 {"pricing": {"prompt": "0.000003", "completion": "0.000015"}}
                 """).getAsJsonObject();
@@ -406,7 +406,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void inferPriceWithMissingField() {
+    void inferPriceWithMissingField() {
         var obj = JsonParser.parseString("""
                 {"pricing": {"prompt": "0.000003"}}
                 """).getAsJsonObject();
@@ -415,7 +415,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void inferPriceWithNoPricingObject() {
+    void inferPriceWithNoPricingObject() {
         var obj = JsonParser.parseString("""
                 {"id": "some-model"}
                 """).getAsJsonObject();
@@ -424,7 +424,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void inferPriceWithNullField() {
+    void inferPriceWithNullField() {
         var obj = JsonParser.parseString("""
                 {"pricing": {"prompt": null}}
                 """).getAsJsonObject();
@@ -435,7 +435,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     // --- parseModels ---
 
     @Test
-    public void parseModelsWithDataArray() {
+    void parseModelsWithDataArray() {
         var json = JsonParser.parseString("""
                 {"data": [
                     {"id": "model-1", "name": "Model One", "context_length": 128000},
@@ -450,7 +450,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void parseModelsWithModelsArray() {
+    void parseModelsWithModelsArray() {
         var json = JsonParser.parseString("""
                 {"models": [
                     {"id": "alt-model", "context_window": 8000}
@@ -463,7 +463,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void parseModelsSkipsBlankIds() {
+    void parseModelsSkipsBlankIds() {
         var json = JsonParser.parseString("""
                 {"data": [
                     {"id": "", "name": "No ID"},
@@ -476,7 +476,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void parseModelsHandlesEmptyResponse() {
+    void parseModelsHandlesEmptyResponse() {
         var json = JsonParser.parseString("""
                 {"data": []}
                 """).getAsJsonObject();
@@ -492,7 +492,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     // code in this file would still get flagged.
     @SuppressWarnings("java:S125")
     @Test
-    public void parseModelsHandlesBareJsonArray() {
+    void parseModelsHandlesBareJsonArray() {
         // Together AI returns /v1/models as a bare array (no {data: ...}
         // wrapper). The OpenAI-compat discovery path used to throw
         // IllegalStateException on .getAsJsonObject() and surface as a
@@ -511,7 +511,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void parseModelsHandlesNullInput() {
+    void parseModelsHandlesNullInput() {
         // Defensive: parseModels never throws on null/JsonNull, just returns
         // empty so callers see "0 models" rather than crashing through a NPE.
         assertTrue(ModelDiscoveryService.parseModels(null).isEmpty());
@@ -519,7 +519,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void parseModelsHandlesMissingDataAndModels() {
+    void parseModelsHandlesMissingDataAndModels() {
         var json = JsonParser.parseString("""
                 {"status": "ok"}
                 """).getAsJsonObject();
@@ -528,7 +528,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void parseModelsInfersNameFromId() {
+    void parseModelsInfersNameFromId() {
         var json = JsonParser.parseString("""
                 {"data": [{"id": "vendor/model-name"}]}
                 """).getAsJsonObject();
@@ -540,21 +540,21 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     // ─── Ollama native discovery (JCLAW-118) ─────────────────────────
 
     @Test
-    public void stripV1SuffixRemovesTrailingV1() {
+    void stripV1SuffixRemovesTrailingV1() {
         assertEquals("https://ollama.com", ModelDiscoveryService.stripV1Suffix("https://ollama.com/v1"));
         assertEquals("https://ollama.com", ModelDiscoveryService.stripV1Suffix("https://ollama.com/v1/"));
         assertEquals("http://localhost:11434", ModelDiscoveryService.stripV1Suffix("http://localhost:11434/v1"));
     }
 
     @Test
-    public void stripV1SuffixLeavesUrlsWithoutV1Untouched() {
+    void stripV1SuffixLeavesUrlsWithoutV1Untouched() {
         assertEquals("https://ollama.com", ModelDiscoveryService.stripV1Suffix("https://ollama.com"));
         assertEquals("https://example.com/api", ModelDiscoveryService.stripV1Suffix("https://example.com/api"));
         assertEquals("", ModelDiscoveryService.stripV1Suffix(null));
     }
 
     @Test
-    public void extractTagIdsPullsNamesFromModelsArray() {
+    void extractTagIdsPullsNamesFromModelsArray() {
         var json = JsonParser.parseString("""
                 {"models":[
                   {"name":"kimi-k2.5","model":"kimi-k2.5"},
@@ -570,7 +570,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void extractTagIdsFallsBackToModelKey() {
+    void extractTagIdsFallsBackToModelKey() {
         // Malformed entry with only "model" and not "name" — still usable.
         var json = JsonParser.parseString("""
                 {"models":[{"model":"qwen3-next:80b"}]}
@@ -581,13 +581,13 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void extractTagIdsReturnsEmptyWhenModelsKeyMissing() {
+    void extractTagIdsReturnsEmptyWhenModelsKeyMissing() {
         var json = JsonParser.parseString("{}").getAsJsonObject();
         assertTrue(ModelDiscoveryService.extractTagIds(json).isEmpty());
     }
 
     @Test
-    public void extractOllamaContextLengthScansForFamilyPrefixedKey() {
+    void extractOllamaContextLengthScansForFamilyPrefixedKey() {
         // Real /api/show shape: family is "kimi-k2", context_length lives under "kimi-k2.context_length".
         var json = JsonParser.parseString("""
                 {
@@ -603,7 +603,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void extractOllamaContextLengthHandlesDifferentFamilies() {
+    void extractOllamaContextLengthHandlesDifferentFamilies() {
         // Make sure the scan isn't hardcoded to kimi — any family prefix works.
         var json = JsonParser.parseString("""
                 {"model_info": {"glm.context_length": 202752}}
@@ -612,7 +612,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void extractOllamaContextLengthReturnsZeroWhenMissing() {
+    void extractOllamaContextLengthReturnsZeroWhenMissing() {
         var json = JsonParser.parseString("""
                 {"model_info": {"general.architecture": "mystery"}}
                 """).getAsJsonObject();
@@ -620,12 +620,12 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void extractOllamaContextLengthReturnsZeroWhenNoModelInfo() {
+    void extractOllamaContextLengthReturnsZeroWhenNoModelInfo() {
         assertEquals(0, ModelDiscoveryService.extractOllamaContextLength(JsonParser.parseString("{}").getAsJsonObject()));
     }
 
     @Test
-    public void parseOllamaShowPopulatesContextAndCapabilities() {
+    void parseOllamaShowPopulatesContextAndCapabilities() {
         // Mirrors the live /api/show response for kimi-k2.5 as of 2026-04-22.
         var json = JsonParser.parseString("""
                 {
@@ -651,7 +651,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void parseOllamaShowHandlesAbsentCapabilities() {
+    void parseOllamaShowHandlesAbsentCapabilities() {
         // A model with no capabilities array — all flags fall back to
         // detector defaults (id-based heuristic, or absent).
         var json = JsonParser.parseString("""
@@ -664,7 +664,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void parseOllamaShowReportsUnknownContextAsZero() {
+    void parseOllamaShowReportsUnknownContextAsZero() {
         var json = JsonParser.parseString("""
                 {"capabilities": ["completion"]}
                 """).getAsJsonObject();
@@ -673,7 +673,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void detectThinkingSupportPicksUpOllamaCapabilities() {
+    void detectThinkingSupportPicksUpOllamaCapabilities() {
         // Regression guard: the Ollama capabilities path has to live
         // alongside the OpenRouter supported_parameters path without
         // stealing precedence.
@@ -688,7 +688,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     // --- JCLAW-183: Ollama embedding-only filter via parseOllamaShow ---
 
     @Test
-    public void parseOllamaShowReturnsNullForEmbeddingOnlyModel() {
+    void parseOllamaShowReturnsNullForEmbeddingOnlyModel() {
         // Capabilities array contains "embedding" but not "completion" —
         // the model can't serve chat. parseOllamaShow returns null so
         // discoverOllamaNative drops the entry.
@@ -703,7 +703,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void parseOllamaShowKeepsModelWithEmptyCapabilitiesArray() {
+    void parseOllamaShowKeepsModelWithEmptyCapabilitiesArray() {
         // Empty capabilities array = no signal. Treat as unknown and let
         // the model through; downstream UI / id-heuristic decides what
         // capabilities to mark.
@@ -718,7 +718,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     // --- JCLAW-183: LM Studio native /api/v0/models parsing ---
 
     @Test
-    public void parseLmStudioNativeResponseFiltersOutNonChatTypes() {
+    void parseLmStudioNativeResponseFiltersOutNonChatTypes() {
         // Mirrors the live /api/v0/models response shape. type field is
         // authoritative — keep llm and vlm, drop embeddings/tts/stt.
         var json = JsonParser.parseString("""
@@ -747,7 +747,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void parseLmStudioNativeResponseMarksVlmAsVisionFromProvider() {
+    void parseLmStudioNativeResponseMarksVlmAsVisionFromProvider() {
         // type "vlm" is authoritative for vision support — both the boolean
         // flag and the from-provider marker must reflect it so the UI can
         // lock the vision checkbox without falling through to id heuristics.
@@ -765,7 +765,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void parseLmStudioNativeResponseLeavesThinkingAndAudioToHeuristic() {
+    void parseLmStudioNativeResponseLeavesThinkingAndAudioToHeuristic() {
         // type "llm" tells us nothing about thinking or audio — leave
         // fromProvider=false so the existing id-based heuristic in
         // detectThinkingSupport / detectAudioSupport can still kick in
@@ -785,7 +785,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void parseLmStudioNativeResponseSkipsEntriesWithBlankId() {
+    void parseLmStudioNativeResponseSkipsEntriesWithBlankId() {
         var json = JsonParser.parseString("""
                 {"data": [{"id": "", "type": "llm"}, {"type": "llm"}, {"id": "valid", "type": "llm"}]}
                 """).getAsJsonObject();
@@ -795,7 +795,7 @@ public class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
-    public void parseLmStudioNativeResponseHandlesMissingDataArray() {
+    void parseLmStudioNativeResponseHandlesMissingDataArray() {
         var json = JsonParser.parseString("{}").getAsJsonObject();
         var models = ModelDiscoveryService.parseLmStudioNativeResponse(json);
         assertTrue(models.isEmpty());

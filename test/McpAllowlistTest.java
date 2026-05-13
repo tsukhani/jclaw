@@ -16,17 +16,17 @@ import java.util.List;
  * the agent_skill_allowed_tool table and the isAllowed() gate. Wraps every
  * call in {@link Tx#run} since McpAllowlist is intentionally tx-agnostic.
  */
-public class McpAllowlistTest extends UnitTest {
+class McpAllowlistTest extends UnitTest {
 
     @BeforeEach
-    public void setUp() {
+    void setUp() {
         Fixtures.deleteDatabase();
     }
 
     // ==================== registerForAllAgents ====================
 
     @Test
-    public void registerForAllAgentsWritesOneRowPerAgentPerTool() {
+    void registerForAllAgentsWritesOneRowPerAgentPerTool() {
         var agentIds = Tx.run(() -> {
             var a1 = newAgent("alpha");
             var a2 = newAgent("beta");
@@ -48,7 +48,7 @@ public class McpAllowlistTest extends UnitTest {
     }
 
     @Test
-    public void registerIsIdempotentAndRefreshesShrinkingToolList() {
+    void registerIsIdempotentAndRefreshesShrinkingToolList() {
         Tx.run(() -> newAgent("alpha"));
         // First publish: 3 tools.
         Tx.run(() -> McpAllowlist.registerForAllAgents("svc",
@@ -62,7 +62,7 @@ public class McpAllowlistTest extends UnitTest {
     }
 
     @Test
-    public void registerWithEmptyListClearsRows() {
+    void registerWithEmptyListClearsRows() {
         Tx.run(() -> newAgent("alpha"));
         Tx.run(() -> McpAllowlist.registerForAllAgents("svc",
                 List.of(toolDef("x"), toolDef("y"))));
@@ -73,7 +73,7 @@ public class McpAllowlistTest extends UnitTest {
     // ==================== unregister ====================
 
     @Test
-    public void unregisterRemovesAllRowsForServerOnly() {
+    void unregisterRemovesAllRowsForServerOnly() {
         Tx.run(() -> newAgent("alpha"));
         Tx.run(() -> McpAllowlist.registerForAllAgents("svc1", List.of(toolDef("a"))));
         Tx.run(() -> McpAllowlist.registerForAllAgents("svc2", List.of(toolDef("b"))));
@@ -89,7 +89,7 @@ public class McpAllowlistTest extends UnitTest {
     // ==================== isAllowed ====================
 
     @Test
-    public void isAllowedReturnsFalseForUnknownAgent() {
+    void isAllowedReturnsFalseForUnknownAgent() {
         Tx.run(() -> {
             var agent = newAgent("alpha");
             McpAllowlist.registerForAllAgents("svc", List.of(toolDef("a")));
@@ -102,7 +102,7 @@ public class McpAllowlistTest extends UnitTest {
     }
 
     @Test
-    public void isAllowedReturnsFalseAfterUnregister() {
+    void isAllowedReturnsFalseAfterUnregister() {
         var agentId = Tx.run(() -> newAgent("alpha").id);
         Tx.run(() -> McpAllowlist.registerForAllAgents("svc", List.of(toolDef("a"))));
         assertTrue(Tx.run(() -> allowed(agentId, "svc", "a")));
@@ -111,7 +111,7 @@ public class McpAllowlistTest extends UnitTest {
     }
 
     @Test
-    public void isAllowedFalseForToolNotAdvertised() {
+    void isAllowedFalseForToolNotAdvertised() {
         var agentId = Tx.run(() -> newAgent("alpha").id);
         Tx.run(() -> McpAllowlist.registerForAllAgents("svc", List.of(toolDef("a"))));
         assertFalse(Tx.run(() -> allowed(agentId, "svc", "not_advertised")));
@@ -120,7 +120,7 @@ public class McpAllowlistTest extends UnitTest {
     // ==================== backfillForAgent ====================
 
     @Test
-    public void backfillForAgentSkippedWhenNoConnectedServers() {
+    void backfillForAgentSkippedWhenNoConnectedServers() {
         var agent = Tx.run(() -> newAgent("late"));
         var written = Tx.run(() -> McpAllowlist.backfillForAgent(agent));
         assertEquals(0, written);

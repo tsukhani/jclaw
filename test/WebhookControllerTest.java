@@ -23,7 +23,7 @@ import java.util.function.Supplier;
  * headers (not supported by the FunctionalTest {@code POST} helper
  * without boilerplate), so it's deferred to a follow-up phase.
  */
-public class WebhookControllerTest extends FunctionalTest {
+class WebhookControllerTest extends FunctionalTest {
 
     @BeforeEach
     void setup() {
@@ -38,14 +38,14 @@ public class WebhookControllerTest extends FunctionalTest {
     // ===== Telegram =====
 
     @Test
-    public void telegramWebhookReturns404ForUnknownBinding() {
+    void telegramWebhookReturns404ForUnknownBinding() {
         var response = POST("/api/webhooks/telegram/99999/any-secret",
                 "application/json", "{}");
         assertEquals(404, response.status.intValue());
     }
 
     @Test
-    public void telegramWebhookReturns401OnBadPathSecret() {
+    void telegramWebhookReturns401OnBadPathSecret() {
         var bindingId = seedTelegramBinding("correct-secret", true);
         var response = POST("/api/webhooks/telegram/" + bindingId + "/wrong-secret",
                 "application/json", "{}");
@@ -54,7 +54,7 @@ public class WebhookControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void telegramWebhookReturns401OnMissingHeader() {
+    void telegramWebhookReturns401OnMissingHeader() {
         // Path secret matches, but x-telegram-bot-api-secret-token header is
         // absent. JCLAW-16 tightened this from "optional" to "required" —
         // setWebhook registers the secret_token, so legit traffic always
@@ -67,7 +67,7 @@ public class WebhookControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void telegramWebhookDisabledBindingReturns200WithoutProcessing() {
+    void telegramWebhookDisabledBindingReturns200WithoutProcessing() {
         // Disabled bindings short-circuit with 200 (Telegram stops retrying)
         // but must NOT reach agent code. We can't easily assert "agent didn't
         // run" without mocking, so assert the response code + that no agent-
@@ -81,7 +81,7 @@ public class WebhookControllerTest extends FunctionalTest {
     // ===== Slack =====
 
     @Test
-    public void slackWebhookReturns401WhenUnconfigured() {
+    void slackWebhookReturns401WhenUnconfigured() {
         // No ChannelConfig row — SlackConfig.load() returns null, the JCLAW-16
         // guard rejects before any body parse.
         var response = POST("/api/webhooks/slack", "application/json", "{}");
@@ -90,7 +90,7 @@ public class WebhookControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void slackWebhookReturns401WhenConfigDisabled() {
+    void slackWebhookReturns401WhenConfigDisabled() {
         // Row exists but enabled=false — SlackConfig.load() returns null, same
         // rejection path as fully unconfigured.
         commitInFreshTx(() -> {
@@ -108,7 +108,7 @@ public class WebhookControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void slackWebhookReturns401WhenSignatureHeadersMissing() {
+    void slackWebhookReturns401WhenSignatureHeadersMissing() {
         // Config is valid, but the inbound POST omits both x-slack-signature
         // and x-slack-request-timestamp — controller must reject before any
         // signature compute.
@@ -122,14 +122,14 @@ public class WebhookControllerTest extends FunctionalTest {
     // ===== WhatsApp =====
 
     @Test
-    public void whatsappWebhookReturns401WhenUnconfigured() {
+    void whatsappWebhookReturns401WhenUnconfigured() {
         var response = POST("/api/webhooks/whatsapp", "application/json", "{}");
         assertEquals(401, response.status.intValue());
         assertSignatureFailureLogged("whatsapp");
     }
 
     @Test
-    public void whatsappWebhookReturns401WhenAppSecretAbsentInConfig() {
+    void whatsappWebhookReturns401WhenAppSecretAbsentInConfig() {
         // The critical JCLAW-16 fix: the controller used to skip verification
         // when appSecret was null, silently passing through to agent code.
         // Now an absent appSecret is an explicit 401.
@@ -149,7 +149,7 @@ public class WebhookControllerTest extends FunctionalTest {
     }
 
     @Test
-    public void whatsappWebhookReturns401WhenSignatureHeaderMissing() {
+    void whatsappWebhookReturns401WhenSignatureHeaderMissing() {
         seedWhatsAppConfig();
         var response = POST("/api/webhooks/whatsapp", "application/json", "{}");
         assertEquals(401, response.status.intValue());

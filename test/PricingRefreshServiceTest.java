@@ -13,7 +13,7 @@ import services.PricingRefreshService;
  * touching the network — tests pass a hand-built JsonObject mimicking
  * LiteLLM's shape to {@link PricingRefreshService#applyCatalog(JsonObject)}.
  */
-public class PricingRefreshServiceTest extends UnitTest {
+class PricingRefreshServiceTest extends UnitTest {
 
     @BeforeEach
     void setup() {
@@ -46,46 +46,46 @@ public class PricingRefreshServiceTest extends UnitTest {
     // ─── lookupCatalog: id-matching strategy ──────────────────────────
 
     @Test
-    public void lookupMatchesBareId() {
+    void lookupMatchesBareId() {
         var c = catalog("gpt-4o", pricesJson(2.5e-6, 1.0e-5));
         assertNotNull(PricingRefreshService.lookupCatalog(c, "gpt-4o"));
     }
 
     @Test
-    public void lookupStripsProviderPrefix() {
+    void lookupStripsProviderPrefix() {
         // OpenRouter ids look like "openai/gpt-4o" — match the bare form.
         var c = catalog("gpt-4o", pricesJson(2.5e-6, 1.0e-5));
         assertNotNull(PricingRefreshService.lookupCatalog(c, "openai/gpt-4o"));
     }
 
     @Test
-    public void lookupStripsVersionSuffix() {
+    void lookupStripsVersionSuffix() {
         // Date-pinned ids like "gpt-4o-2024-08-06" should match "gpt-4o".
         var c = catalog("gpt-4o", pricesJson(2.5e-6, 1.0e-5));
         assertNotNull(PricingRefreshService.lookupCatalog(c, "gpt-4o-2024-08-06"));
     }
 
     @Test
-    public void lookupStripsBothPrefixAndSuffix() {
+    void lookupStripsBothPrefixAndSuffix() {
         var c = catalog("gpt-4o", pricesJson(2.5e-6, 1.0e-5));
         assertNotNull(PricingRefreshService.lookupCatalog(c, "openai/gpt-4o-2024-08-06"));
     }
 
     @Test
-    public void lookupStripsOllamaTag() {
+    void lookupStripsOllamaTag() {
         // Local Ollama ids carry :tag suffix — should fall through to bare.
         var c = catalog("kimi-k2.5", pricesJson(0.0, 0.0));
         assertNotNull(PricingRefreshService.lookupCatalog(c, "kimi-k2.5:latest"));
     }
 
     @Test
-    public void lookupReturnsNullForUnknownModel() {
+    void lookupReturnsNullForUnknownModel() {
         var c = catalog("gpt-4o", pricesJson(2.5e-6, 1.0e-5));
         assertNull(PricingRefreshService.lookupCatalog(c, "imaginary-model-9000"));
     }
 
     @Test
-    public void lookupPrefersExactMatchOverNormalizedFallback() {
+    void lookupPrefersExactMatchOverNormalizedFallback() {
         // Both keys exist; the as-is candidate wins so the more specific
         // entry is used over the bare form.
         var c = catalog(
@@ -99,7 +99,7 @@ public class PricingRefreshServiceTest extends UnitTest {
     // ─── applyCatalog: filling missing prices ────────────────────────
 
     @Test
-    public void applyFillsMissingPromptAndCompletionPrices() {
+    void applyFillsMissingPromptAndCompletionPrices() {
         seedProviderModels("openai", """
                 [{"id":"gpt-4o","name":"GPT-4o","supportsThinking":false}]""");
         var c = catalog("gpt-4o", pricesJson(2.5e-6, 1.0e-5));
@@ -116,7 +116,7 @@ public class PricingRefreshServiceTest extends UnitTest {
     }
 
     @Test
-    public void applyFillsCacheReadAndCacheWritePrices() {
+    void applyFillsCacheReadAndCacheWritePrices() {
         seedProviderModels("openai", """
                 [{"id":"gpt-4o","name":"GPT-4o"}]""");
         var c = catalog("gpt-4o",
@@ -133,7 +133,7 @@ public class PricingRefreshServiceTest extends UnitTest {
     }
 
     @Test
-    public void applyDoesNotOverwriteOperatorSetPrices() {
+    void applyDoesNotOverwriteOperatorSetPrices() {
         // Operator manually set prompt price to 99.99; the refresh must
         // leave it alone even when LiteLLM has a different value.
         seedProviderModels("openai", """
@@ -149,7 +149,7 @@ public class PricingRefreshServiceTest extends UnitTest {
     }
 
     @Test
-    public void applyTreatsExplicitMinusOneAsMissing() {
+    void applyTreatsExplicitMinusOneAsMissing() {
         // -1 means "unset" in JClaw's price convention; refresh should
         // treat it the same as field-absent and fill it.
         seedProviderModels("openai", """
@@ -165,7 +165,7 @@ public class PricingRefreshServiceTest extends UnitTest {
     }
 
     @Test
-    public void applyPreservesOperatorSetZeroAsKnownFree() {
+    void applyPreservesOperatorSetZeroAsKnownFree() {
         // Operator sets 0 deliberately for a known-free model. The refresh
         // must NOT overwrite that with a non-zero LiteLLM value (LiteLLM
         // can be wrong about free tiers, especially for new model IDs).
@@ -182,7 +182,7 @@ public class PricingRefreshServiceTest extends UnitTest {
     }
 
     @Test
-    public void applySkipsFreeAndLocalProviders() {
+    void applySkipsFreeAndLocalProviders() {
         // ollama-cloud, ollama-local, lm-studio, and loadtest-mock are in
         // the SKIPPED_PROVIDERS set — they're free / local / synthetic and
         // shouldn't appear in LiteLLM lookups.
@@ -208,7 +208,7 @@ public class PricingRefreshServiceTest extends UnitTest {
     }
 
     @Test
-    public void applyHandlesProviderWithNoModels() {
+    void applyHandlesProviderWithNoModels() {
         seedProviderModels("openai", "[]");
         var c = catalog("gpt-4o", pricesJson(2.5e-6, 1.0e-5));
 
@@ -218,7 +218,7 @@ public class PricingRefreshServiceTest extends UnitTest {
     }
 
     @Test
-    public void applyHandlesProviderWithCorruptModelsJson() {
+    void applyHandlesProviderWithCorruptModelsJson() {
         // Defensive: malformed JSON in provider.X.models shouldn't crash the
         // refresh — that provider is skipped and the others still process.
         seedProviderModels("openai", "this-is-not-valid-json");
@@ -232,7 +232,7 @@ public class PricingRefreshServiceTest extends UnitTest {
     }
 
     @Test
-    public void applyDoesNotMatchModelAbsentFromCatalog() {
+    void applyDoesNotMatchModelAbsentFromCatalog() {
         seedProviderModels("openai", """
                 [{"id":"unknown-future-model"}]""");
         var c = catalog("gpt-4o", pricesJson(2.5e-6, 1.0e-5));
@@ -249,7 +249,7 @@ public class PricingRefreshServiceTest extends UnitTest {
     // ─── refresh: toggle gating ──────────────────────────────────────
 
     @Test
-    public void refreshSkippedWhenToggleDisabled() {
+    void refreshSkippedWhenToggleDisabled() {
         ConfigService.set("pricing.refresh.enabled", "false");
         var result = PricingRefreshService.refresh();
         assertTrue(result.skipped());
@@ -258,7 +258,7 @@ public class PricingRefreshServiceTest extends UnitTest {
     }
 
     @Test
-    public void refreshSkippedWhenToggleAbsent() {
+    void refreshSkippedWhenToggleAbsent() {
         // Default state: key isn't set at all. Should also skip.
         new Config(); // ensure model class loads under JPA
         ConfigService.set("pricing.refresh.enabled", null);

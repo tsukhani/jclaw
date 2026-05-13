@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * literal-IP checks), which is what the first scenario exercises: the initial
  * URL is accepted but the 302-pointed-to-AWS-metadata URL is rejected on hop 2.
  */
-public class WebFetchToolTest extends UnitTest {
+class WebFetchToolTest extends UnitTest {
 
     private static final Field CLIENT_FIELD;
     static {
@@ -104,7 +104,7 @@ public class WebFetchToolTest extends UnitTest {
     // =====================
 
     @Test
-    public void redirectToMetadataEndpointRejected() {
+    void redirectToMetadataEndpointRejected() {
         queue.enqueue(redirect("http://169.254.169.254/latest/meta-data/"));
         var tool = new WebFetchTool();
         var result = tool.execute("{\"url\":\"http://example.test/\"}", null);
@@ -119,7 +119,7 @@ public class WebFetchToolTest extends UnitTest {
     // =====================
 
     @Test
-    public void tooManyRedirectsReturnsError() {
+    void tooManyRedirectsReturnsError() {
         // Enqueue 7 consecutive redirects so the MAX_REDIRECTS (5) cap trips.
         for (int i = 0; i < 7; i++) {
             queue.enqueue(redirect("http://example.test/hop" + (i + 1)));
@@ -135,7 +135,7 @@ public class WebFetchToolTest extends UnitTest {
     // =====================
 
     @Test
-    public void missingLocationHeaderReturnsError() {
+    void missingLocationHeaderReturnsError() {
         queue.enqueue(redirect(null)); // no Location header
         var tool = new WebFetchTool();
         var result = tool.execute("{\"url\":\"http://example.test/\"}", null);
@@ -144,7 +144,7 @@ public class WebFetchToolTest extends UnitTest {
     }
 
     @Test
-    public void blankLocationHeaderReturnsError() {
+    void blankLocationHeaderReturnsError() {
         queue.enqueue(redirect("")); // explicit blank Location
         var tool = new WebFetchTool();
         var result = tool.execute("{\"url\":\"http://example.test/\"}", null);
@@ -157,7 +157,7 @@ public class WebFetchToolTest extends UnitTest {
     // =====================
 
     @Test
-    public void sslExceptionReturnsCertificateError() {
+    void sslExceptionReturnsCertificateError() {
         queue.enqueueThrow(new javax.net.ssl.SSLHandshakeException(
                 "test-injected certificate failure"));
         var tool = new WebFetchTool();
@@ -169,7 +169,7 @@ public class WebFetchToolTest extends UnitTest {
     }
 
     @Test
-    public void sslExceptionWrappedAsCauseReturnsCertificateError() {
+    void sslExceptionWrappedAsCauseReturnsCertificateError() {
         // The second branch (lines 108–110) handles SSLException wrapped
         // inside a generic Exception — OkHttp sometimes surfaces it that way.
         queue.enqueueThrow(new IOException("wrapper",
@@ -185,7 +185,7 @@ public class WebFetchToolTest extends UnitTest {
     // =====================
 
     @Test
-    public void textModeBodyOverCapIsTruncated() {
+    void textModeBodyOverCapIsTruncated() {
         // Non-HTML body over MAX_TEXT_LENGTH (50,000) triggers truncation.
         var body = "x".repeat(60_000);
         queue.enqueue(ok(body, "text/plain"));
@@ -197,7 +197,7 @@ public class WebFetchToolTest extends UnitTest {
     }
 
     @Test
-    public void htmlModeBodyOverCapWithoutAgentIsTruncated() {
+    void htmlModeBodyOverCapWithoutAgentIsTruncated() {
         // html mode + body > MAX_HTML_LENGTH + no agent → plain truncation
         // (the auto-save branch requires agent != null).
         var body = "<html><body>" + "y".repeat(110_000) + "</body></html>";
@@ -214,7 +214,7 @@ public class WebFetchToolTest extends UnitTest {
     // =====================
 
     @Test
-    public void htmlModeOverTextLengthAutoSavesWithHostFilename() {
+    void htmlModeOverTextLengthAutoSavesWithHostFilename() {
         // Body between MAX_TEXT_LENGTH (50k) and MAX_HTML_LENGTH (100k)
         // triggers the auto-save branch when agent is present. Verifies the
         // branch fires and the filename is derived from the URL host.

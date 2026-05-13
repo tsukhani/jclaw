@@ -7,17 +7,17 @@ import services.EmbeddingModelFilter;
  * fixtures named in the ticket's acceptance criteria so a future regex
  * tweak can't silently regress them.
  */
-public class EmbeddingModelFilterTest extends UnitTest {
+class EmbeddingModelFilterTest extends UnitTest {
 
     @Test
-    public void filtersOpenAiTextEmbeddingPrefix() {
+    void filtersOpenAiTextEmbeddingPrefix() {
         assertTrue(EmbeddingModelFilter.isLikelyNonChat("text-embedding-nomic-embed-text-v1.5"));
         assertTrue(EmbeddingModelFilter.isLikelyNonChat("openai/text-embedding-3-large"));
         assertTrue(EmbeddingModelFilter.isLikelyNonChat("openai/text-embedding-ada-002"));
     }
 
     @Test
-    public void filtersHuggingFaceEmbeddingFamilies() {
+    void filtersHuggingFaceEmbeddingFamilies() {
         assertTrue(EmbeddingModelFilter.isLikelyNonChat("BAAI/bge-m3"));
         assertTrue(EmbeddingModelFilter.isLikelyNonChat("BAAI/bge-large-en-v1.5"));
         assertTrue(EmbeddingModelFilter.isLikelyNonChat("intfloat/e5-large-v2"));
@@ -27,7 +27,7 @@ public class EmbeddingModelFilterTest extends UnitTest {
     }
 
     @Test
-    public void filtersAudioAndImageGenerationModels() {
+    void filtersAudioAndImageGenerationModels() {
         // OpenAI hosts these alongside chat models in /v1/models — they would
         // otherwise show up in the discover panel as bind-able for chat
         // and fail at the first request.
@@ -38,7 +38,7 @@ public class EmbeddingModelFilterTest extends UnitTest {
     }
 
     @Test
-    public void keepsChatModels() {
+    void keepsChatModels() {
         assertFalse(EmbeddingModelFilter.isLikelyNonChat("openai/gpt-oss-20b"));
         assertFalse(EmbeddingModelFilter.isLikelyNonChat("kimi-k2.5"));
         assertFalse(EmbeddingModelFilter.isLikelyNonChat("google/gemma-4-e4b"));
@@ -50,7 +50,7 @@ public class EmbeddingModelFilterTest extends UnitTest {
     }
 
     @Test
-    public void caseInsensitiveMatching() {
+    void caseInsensitiveMatching() {
         // Provider casing is inconsistent; the filter must not be fooled by
         // upper-case prefixes or mixed casing on family names.
         assertTrue(EmbeddingModelFilter.isLikelyNonChat("OpenAI/Text-Embedding-3-Large"));
@@ -59,14 +59,14 @@ public class EmbeddingModelFilterTest extends UnitTest {
     }
 
     @Test
-    public void handlesNullAndBlankInputs() {
+    void handlesNullAndBlankInputs() {
         assertFalse(EmbeddingModelFilter.isLikelyNonChat(null));
         assertFalse(EmbeddingModelFilter.isLikelyNonChat(""));
         assertFalse(EmbeddingModelFilter.isLikelyNonChat("   "));
     }
 
     @Test
-    public void doesNotFalsePositiveOnEmbeddedSubstring() {
+    void doesNotFalsePositiveOnEmbeddedSubstring() {
         // A chat model id that contains the substring "embed" but not at a
         // word boundary should NOT be filtered. Crafted to verify the
         // boundary anchoring in the regex.

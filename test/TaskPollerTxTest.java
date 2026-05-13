@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Tests that Tx.run() provides JPA transaction context on virtual threads.
  */
-public class TaskPollerTxTest extends UnitTest {
+class TaskPollerTxTest extends UnitTest {
 
     @BeforeEach
     void setup() {
@@ -20,7 +20,7 @@ public class TaskPollerTxTest extends UnitTest {
     }
 
     @Test
-    public void txRunWorksOnMainThread() {
+    void txRunWorksOnMainThread() {
         // Verify Tx.run works in the test's existing JPA context
         var result = Tx.run(() -> {
             var agent = new Agent();
@@ -34,7 +34,7 @@ public class TaskPollerTxTest extends UnitTest {
     }
 
     @Test
-    public void txRunCreatesAndQueriesInSameTransaction() {
+    void txRunCreatesAndQueriesInSameTransaction() {
         // Verify Tx.run can create and query entities
         var agent = new Agent();
         agent.name = "tx-query-test";
@@ -59,7 +59,7 @@ public class TaskPollerTxTest extends UnitTest {
     }
 
     @Test
-    public void txRunHandlesNestedCalls() {
+    void txRunHandlesNestedCalls() {
         // Verify nested Tx.run calls work (inner reuses outer's transaction)
         var agent = new Agent();
         agent.name = "tx-nested-test";
@@ -87,7 +87,7 @@ public class TaskPollerTxTest extends UnitTest {
     }
 
     @Test
-    public void taskStatusTransitions() {
+    void taskStatusTransitions() {
         var agent = new Agent();
         agent.name = "status-transition";
         agent.modelProvider = "openrouter";
@@ -114,7 +114,7 @@ public class TaskPollerTxTest extends UnitTest {
     }
 
     @Test
-    public void taskRetryWithTxRun() {
+    void taskRetryWithTxRun() {
         var agent = new Agent();
         agent.name = "retry-tx-test";
         agent.modelProvider = "openrouter";

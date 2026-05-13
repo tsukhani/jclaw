@@ -13,7 +13,7 @@ import java.time.Duration;
  * lifecycle — but does NOT drive the full load-test flow (no JClaw loopback,
  * no agent creation). See LoadTestRunner for end-to-end exercise.
  */
-public class LoadTestHarnessTest extends UnitTest {
+class LoadTestHarnessTest extends UnitTest {
 
     @AfterEach
     void stopHarness() {
@@ -21,7 +21,7 @@ public class LoadTestHarnessTest extends UnitTest {
     }
 
     @Test
-    public void startAndStopBindAndReleasePort() throws Exception {
+    void startAndStopBindAndReleasePort() throws Exception {
         int port = LoadTestHarness.start(0); // 0 → ephemeral
         assertTrue(port > 0);
         assertTrue(LoadTestHarness.isRunning());
@@ -30,14 +30,14 @@ public class LoadTestHarnessTest extends UnitTest {
     }
 
     @Test
-    public void startIsIdempotent() throws Exception {
+    void startIsIdempotent() throws Exception {
         int first = LoadTestHarness.start(0);
         int second = LoadTestHarness.start(0);
         assertEquals(first, second);
     }
 
     @Test
-    public void mockServerStreamsOpenAiCompatibleSse() throws Exception {
+    void mockServerStreamsOpenAiCompatibleSse() throws Exception {
         int port = LoadTestHarness.start(0);
         LoadTestHarness.setScenario(new LoadTestHarness.Scenario(10, 1000, 3));
 
@@ -61,7 +61,7 @@ public class LoadTestHarnessTest extends UnitTest {
     }
 
     @Test
-    public void emitsToolCallsWhenScenarioRequests() throws Exception {
+    void emitsToolCallsWhenScenarioRequests() throws Exception {
         int port = LoadTestHarness.start(0);
         LoadTestHarness.setScenario(new LoadTestHarness.Scenario(5, 1000, 5, 3, 150));
 
@@ -103,7 +103,7 @@ public class LoadTestHarnessTest extends UnitTest {
     }
 
     @Test
-    public void ttftDelayIsHonored() throws Exception {
+    void ttftDelayIsHonored() throws Exception {
         int port = LoadTestHarness.start(0);
         LoadTestHarness.setScenario(new LoadTestHarness.Scenario(150, 1000, 1));
 

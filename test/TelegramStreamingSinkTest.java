@@ -10,12 +10,12 @@ import play.test.*;
  * network seams here are thin enough that unit-level tests give us most of
  * the confidence with none of the flakiness.
  */
-public class TelegramStreamingSinkTest extends UnitTest {
+class TelegramStreamingSinkTest extends UnitTest {
 
     // === stripImageRefs — the live-preview image filter ===
 
     @Test
-    public void stripImageRefsRemovesMarkdownImages() {
+    void stripImageRefsRemovesMarkdownImages() {
         // Note: surrounding whitespace is preserved (single-pass regex over
         // the image token). Matches OpenClaw's behavior — the live preview
         // gets the text minus the image markup; seal-time delivery via the
@@ -27,14 +27,14 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void stripImageRefsRemovesMultipleImages() {
+    void stripImageRefsRemovesMultipleImages() {
         var input = "One ![a](1.png) two ![b](2.png) three";
         assertEquals("One  two  three",
                 TelegramStreamingSink.stripImageRefs(input));
     }
 
     @Test
-    public void stripImageRefsLeavesRegularLinksAlone() {
+    void stripImageRefsLeavesRegularLinksAlone() {
         // Plain markdown links ([text](url)) — not images — must pass through
         // so the seal-time planner can see them.
         var input = "See [the docs](https://example.com/docs) for more.";
@@ -42,7 +42,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void stripImageRefsLeavesFileReferencesAlone() {
+    void stripImageRefsLeavesFileReferencesAlone() {
         // JClaw workspace-file convention is [label](<path>) — the angle
         // brackets mean this isn't an image and must survive streaming so
         // the seal path's TelegramOutboundPlanner can still handle it.
@@ -51,13 +51,13 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void stripImageRefsHandlesNullAndEmpty() {
+    void stripImageRefsHandlesNullAndEmpty() {
         assertEquals("", TelegramStreamingSink.stripImageRefs(null));
         assertEquals("", TelegramStreamingSink.stripImageRefs(""));
     }
 
     @Test
-    public void stripImageRefsPreservesContentWithoutImages() {
+    void stripImageRefsPreservesContentWithoutImages() {
         var input = "Plain text with **bold** and _italic_ and a `code` block.";
         assertEquals(input, TelegramStreamingSink.stripImageRefs(input));
     }
@@ -65,7 +65,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     // === update / state transitions ===
 
     @Test
-    public void updateWithNullOrEmptyIsNoOp() {
+    void updateWithNullOrEmptyIsNoOp() {
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.update(null);
         sink.update("");
@@ -76,7 +76,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void updateBeyond4096CharsTripsStreamCap() {
+    void updateBeyond4096CharsTripsStreamCap() {
         // Accumulating past the Telegram message cap stops live streaming.
         // seal() will then fall back to the planner path regardless of how
         // the final formatted response looks. This is the JCLAW-94 AC: "If
@@ -88,7 +88,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void updateExactlyAtCapDoesNotTripFlag() {
+    void updateExactlyAtCapDoesNotTripFlag() {
         // Boundary: 4096 chars is the hard cap; at-or-below is fine.
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.update("x".repeat(4096));
@@ -97,7 +97,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void updateIgnoredAfterCapReached() {
+    void updateIgnoredAfterCapReached() {
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.update("x".repeat(4097));
         assertTrue(sink.streamCapReachedForTest());
@@ -111,7 +111,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     // === seal lifecycle ===
 
     @Test
-    public void sealMarksSinkSealedEvenWhenNoFinalResponse() {
+    void sealMarksSinkSealedEvenWhenNoFinalResponse() {
         // Defensive: a null/empty final text still has to terminate the
         // sink cleanly (otherwise a later update would still try to flush).
         var sink = new TelegramStreamingSink("tok", "chat", null);
@@ -121,7 +121,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void sealIsIdempotent() {
+    void sealIsIdempotent() {
         // Two completion callbacks firing shouldn't double-send the error
         // message. The CAS-gated sealed flag guarantees at-most-once seal.
         var sink = new TelegramStreamingSink("tok", "chat", null);
@@ -132,7 +132,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void sealAfterCapGoesThroughPlannerPath() {
+    void sealAfterCapGoesThroughPlannerPath() {
         // Preparation: trip the cap first. This sink never sent a
         // placeholder (messageId stayed null), so the planner path won't
         // try to delete anything — it'll just send the final response as
@@ -153,7 +153,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     // === errorFallback lifecycle ===
 
     @Test
-    public void errorFallbackIsIdempotent() {
+    void errorFallbackIsIdempotent() {
         // Two error callbacks shouldn't double-delete a placeholder or
         // double-send the user-facing error. Same CAS guarantee as seal.
         var sink = new TelegramStreamingSink("tok", "chat", null);
@@ -167,7 +167,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void sealAndErrorFallbackAreMutuallyExclusive() {
+    void sealAndErrorFallbackAreMutuallyExclusive() {
         // If seal wins the CAS, a subsequent error callback is a no-op
         // (and vice versa). Prevents duplicate error messages to the user
         // when the LLM layer fires both onComplete and onError (which
@@ -193,7 +193,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     // calls and the assertion would fail.
 
     @Test
-    public void awaitInFlightFlushWakesImmediatelyOnFutureCompletion() throws Exception {
+    void awaitInFlightFlushWakesImmediatelyOnFutureCompletion() throws Exception {
         // JCLAW-100: the old awaitInFlightFlush polled flushInFlight in a
         // 20 ms sleep loop. Replaced with a CompletableFuture the flush
         // completes on exit, so seal() wakes the instant the flush returns.
@@ -230,7 +230,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     // === JCLAW-106: delivery-failure notifier rate limiter ===
 
     @Test
-    public void tryFireNotifierReturnsFalseForNullConversationId() {
+    void tryFireNotifierReturnsFalseForNullConversationId() {
         // Test sinks constructed without a conversation (the two
         // non-full constructors) pass null. We have no key to rate-limit
         // against, so the notifier must decline to fire rather than
@@ -242,7 +242,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void tryFireNotifierFiresOnceThenRateLimits() {
+    void tryFireNotifierFiresOnceThenRateLimits() {
         TelegramStreamingSink.clearNotifierRateLimiterForTest();
         // First call within the window: fires.
         assertTrue(TelegramStreamingSink.tryFireNotifier(12345L),
@@ -253,7 +253,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void tryFireNotifierIsolatedPerConversation() {
+    void tryFireNotifierIsolatedPerConversation() {
         // One conversation's rate limit shouldn't block another's. This
         // matters during a Telegram outage: every affected chat should
         // still get its first notification, even if they fail
@@ -265,7 +265,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void tryFireNotifierReFiresAfterRateWindow() throws Exception {
+    void tryFireNotifierReFiresAfterRateWindow() throws Exception {
         // Simulate time passing: we can't actually wait 61s in a unit
         // test, so we backdate the last-fired timestamp via reflection.
         // A genuine concern this guards against: a bug that sets the
@@ -296,21 +296,21 @@ public class TelegramStreamingSinkTest extends UnitTest {
     // auto-expires. These tests now pin the "always EDIT_IN_PLACE" contract.
 
     @Test
-    public void transportIsEditInPlaceWhenChatTypeOmitted() {
+    void transportIsEditInPlaceWhenChatTypeOmitted() {
         var sink = new TelegramStreamingSink("tok", "chat", null);
         assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
                 sink.transportForTest());
     }
 
     @Test
-    public void transportIsEditInPlaceForPrivateChats() {
+    void transportIsEditInPlaceForPrivateChats() {
         var sink = new TelegramStreamingSink("tok", "12345", null, null, "private");
         assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
                 sink.transportForTest());
     }
 
     @Test
-    public void transportIsEditInPlaceForGroupSupergroupAndChannel() {
+    void transportIsEditInPlaceForGroupSupergroupAndChannel() {
         for (String type : new String[] { "group", "supergroup", "channel" }) {
             var sink = new TelegramStreamingSink("tok", "chat", null, null, type);
             assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
@@ -320,7 +320,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void transportIsEditInPlaceForNullOrBlankChatType() {
+    void transportIsEditInPlaceForNullOrBlankChatType() {
         // Null / blank chatType still produces EDIT_IN_PLACE — same contract
         // as when DRAFT was active, just now universal.
         assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
@@ -335,14 +335,14 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void draftWasSentIsFalseOnFreshSink() {
+    void draftWasSentIsFalseOnFreshSink() {
         var sink = new TelegramStreamingSink("tok", "chat", null, null, "private");
         assertFalse(sink.draftWasSentForTest(),
                 "a fresh DRAFT sink has not yet saved a draft");
     }
 
     @Test
-    public void draftUnsupportedClassifierRecognizesExpectedPatterns() throws Exception {
+    void draftUnsupportedClassifierRecognizesExpectedPatterns() throws Exception {
         // JCLAW-103: when sendMessageDraft returns a 400 matching either
         // DRAFT_METHOD_UNAVAILABLE_RE or DRAFT_CHAT_UNSUPPORTED_RE, the sink
         // must transition to EDIT_IN_PLACE. Verify the classifier directly
@@ -384,14 +384,14 @@ public class TelegramStreamingSinkTest extends UnitTest {
     // === JCLAW-100: adaptive throttle ratchet ===
 
     @Test
-    public void throttleStartsAtMinimum() {
+    void throttleStartsAtMinimum() {
         var sink = new TelegramStreamingSink("tok", "chat", null);
         assertEquals(250L, sink.currentThrottleMsForTest(),
                 "fresh sink should start at the 250 ms minimum");
     }
 
     @Test
-    public void throttleRatchetsUpOn429RetryAfter() {
+    void throttleRatchetsUpOn429RetryAfter() {
         var sink = new TelegramStreamingSink("tok", "chat", null);
         // 250 → 500 → 750 → 1000 → 1000 (capped).
         long[] expected = { 500, 750, 1000, 1000 };
@@ -403,7 +403,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void throttleStaysUnchangedOnNon429Failure() {
+    void throttleStaysUnchangedOnNon429Failure() {
         var sink = new TelegramStreamingSink("tok", "chat", null);
         sink.recordFlushFailure(new RuntimeException("connection reset"));
         assertEquals(250L, sink.currentThrottleMsForTest(),
@@ -411,7 +411,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void throttleStaysUnchangedOn429WithoutRetryAfter() {
+    void throttleStaysUnchangedOn429WithoutRetryAfter() {
         // A TelegramApiRequestException without parameters (or with a
         // zero/missing retry_after) is not a trustworthy rate-limit signal —
         // treat it as a generic failure and leave the cadence alone.
@@ -439,7 +439,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void awaitInFlightFlushReturnsImmediatelyWhenIdle() throws Exception {
+    void awaitInFlightFlushReturnsImmediatelyWhenIdle() throws Exception {
         // When no flush is in progress (flushInFlight == null), seal() must
         // fall through without any wait at all.
         var sink = new TelegramStreamingSink("tok", "chat", null);
@@ -459,7 +459,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     // === JCLAW-98: typing heartbeat lifecycle ===
 
     @Test
-    public void typingHeartbeatStartsAndIsCancelledBySeal() {
+    void typingHeartbeatStartsAndIsCancelledBySeal() {
         // startTypingHeartbeat must schedule the indicator; seal() must
         // cancel it so no further sendChatAction calls fire after the
         // response is delivered.
@@ -474,7 +474,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void typingHeartbeatCancelledByCancel() {
+    void typingHeartbeatCancelledByCancel() {
         // /stop fires ConversationQueue.cancellationFlag, the streaming thread
         // early-returns out of runStreaming, and runStreaming routes through
         // sink.cancel() (wired as onCancel). cancel() must stop the heartbeat
@@ -491,7 +491,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void cancelIsIdempotent() {
+    void cancelIsIdempotent() {
         // Multiple checkCancelled checkpoints fire onCancel each time; cancel()
         // must therefore tolerate repeated invocation without exploding or
         // re-arming any state.
@@ -504,7 +504,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void cancelAfterSealIsNoOp() {
+    void cancelAfterSealIsNoOp() {
         // A sink that finished naturally (seal) and then gets a late
         // cancel signal must not be re-sealed or otherwise disturbed.
         var sink = new TelegramStreamingSink("tok", "chat", null);
@@ -518,7 +518,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void typingHeartbeatCancelledByErrorFallback() {
+    void typingHeartbeatCancelledByErrorFallback() {
         // Error path must also cancel — the error message send will
         // replace the typing indicator, so leaving the heartbeat running
         // would produce stale "typing" pulses after the user already sees
@@ -533,7 +533,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void typingHeartbeatCancelledByFirstUpdate() {
+    void typingHeartbeatCancelledByFirstUpdate() {
         // The first visible-content update means the placeholder is about
         // to land and replace the indicator. Stop the heartbeat so we
         // don't waste API calls during the subsequent edit-loop.
@@ -547,7 +547,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void typingHeartbeatDoubleStartIsNoOp() {
+    void typingHeartbeatDoubleStartIsNoOp() {
         // Idempotence: calling startTypingHeartbeat twice must not
         // orphan the first scheduled future or produce two competing
         // heartbeats.
@@ -562,7 +562,7 @@ public class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    public void typingHeartbeatNotStartedAfterSeal() {
+    void typingHeartbeatNotStartedAfterSeal() {
         // If something triggers startTypingHeartbeat after seal has
         // completed, it must be a no-op — the conversation is already
         // over, no need to show "typing".

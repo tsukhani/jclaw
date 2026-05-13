@@ -2,7 +2,7 @@ import org.junit.jupiter.api.*;
 import play.test.*;
 import memory.*;
 
-public class MemoryStoreTest extends UnitTest {
+class MemoryStoreTest extends UnitTest {
 
     @BeforeEach
     void setup() {
@@ -11,14 +11,14 @@ public class MemoryStoreTest extends UnitTest {
     }
 
     @Test
-    public void factoryReturnsJpaByDefault() {
+    void factoryReturnsJpaByDefault() {
         var store = MemoryStoreFactory.get();
         assertNotNull(store);
         assertInstanceOf(JpaMemoryStore.class, store);
     }
 
     @Test
-    public void storeAndList() {
+    void storeAndList() {
         var store = MemoryStoreFactory.get();
         store.store("agent-1", "User prefers dark mode", "preference");
         store.store("agent-1", "User works at Acme Corp", "fact");
@@ -28,7 +28,7 @@ public class MemoryStoreTest extends UnitTest {
     }
 
     @Test
-    public void storeAndSearch() {
+    void storeAndSearch() {
         var store = MemoryStoreFactory.get();
         store.store("agent-1", "User prefers concise responses", "preference");
         store.store("agent-1", "User lives in Berlin", "fact");
@@ -40,7 +40,7 @@ public class MemoryStoreTest extends UnitTest {
     }
 
     @Test
-    public void searchIsCaseInsensitive() {
+    void searchIsCaseInsensitive() {
         var store = MemoryStoreFactory.get();
         store.store("agent-1", "User prefers DARK MODE", "preference");
 
@@ -49,7 +49,7 @@ public class MemoryStoreTest extends UnitTest {
     }
 
     @Test
-    public void searchFiltersByAgent() {
+    void searchFiltersByAgent() {
         var store = MemoryStoreFactory.get();
         store.store("agent-1", "Shared fact", "fact");
         store.store("agent-2", "Other agent fact", "fact");
@@ -62,7 +62,7 @@ public class MemoryStoreTest extends UnitTest {
     }
 
     @Test
-    public void deleteRemovesMemory() {
+    void deleteRemovesMemory() {
         var store = MemoryStoreFactory.get();
         var id = store.store("agent-1", "Temporary memory", "fact");
 
@@ -76,7 +76,7 @@ public class MemoryStoreTest extends UnitTest {
     }
 
     @Test
-    public void searchRespectsLimit() {
+    void searchRespectsLimit() {
         var store = MemoryStoreFactory.get();
         for (int i = 0; i < 10; i++) {
             store.store("agent-1", "Memory item %d about testing".formatted(i), "fact");
@@ -87,7 +87,7 @@ public class MemoryStoreTest extends UnitTest {
     }
 
     @Test
-    public void memoryEntryRecordFields() {
+    void memoryEntryRecordFields() {
         var store = MemoryStoreFactory.get();
         var id = store.store("agent-1", "Important fact", "core");
 
@@ -101,14 +101,14 @@ public class MemoryStoreTest extends UnitTest {
     }
 
     @Test
-    public void listReturnsEmptyForUnknownAgent() {
+    void listReturnsEmptyForUnknownAgent() {
         var store = MemoryStoreFactory.get();
         var results = store.list("nonexistent-agent");
         assertTrue(results.isEmpty());
     }
 
     @Test
-    public void searchReturnsEmptyForNoMatch() {
+    void searchReturnsEmptyForNoMatch() {
         var store = MemoryStoreFactory.get();
         store.store("agent-1", "Something about cats", "fact");
 
@@ -117,7 +117,7 @@ public class MemoryStoreTest extends UnitTest {
     }
 
     @Test
-    public void deleteAllRemovesOnlyTargetAgent() {
+    void deleteAllRemovesOnlyTargetAgent() {
         // Guards the primitive that AgentService.delete() calls during agent cascade.
         // Must wipe every memory for the target agent while leaving other agents untouched.
         var store = MemoryStoreFactory.get();

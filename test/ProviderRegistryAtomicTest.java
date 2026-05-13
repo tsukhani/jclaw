@@ -11,7 +11,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * Tests that ProviderRegistry refresh is atomic — concurrent reads never see an empty cache.
  */
-public class ProviderRegistryAtomicTest extends UnitTest {
+class ProviderRegistryAtomicTest extends UnitTest {
 
     @BeforeEach
     void setup() {
@@ -20,7 +20,7 @@ public class ProviderRegistryAtomicTest extends UnitTest {
     }
 
     @Test
-    public void refreshProducesImmutableSnapshot() {
+    void refreshProducesImmutableSnapshot() {
         ConfigService.set("provider.test-provider.baseUrl", "https://test.ai/v1");
         ConfigService.set("provider.test-provider.apiKey", "sk-test");
         ConfigService.set("provider.test-provider.models",
@@ -35,7 +35,7 @@ public class ProviderRegistryAtomicTest extends UnitTest {
     }
 
     @Test
-    public void concurrentReadsNeverSeeEmptyCache() throws Exception {
+    void concurrentReadsNeverSeeEmptyCache() throws Exception {
         // Set up a valid provider and ensure cache is warm
         ConfigService.set("provider.concurrent-test.baseUrl", "https://test.ai/v1");
         ConfigService.set("provider.concurrent-test.apiKey", "sk-test");
@@ -89,7 +89,7 @@ public class ProviderRegistryAtomicTest extends UnitTest {
     }
 
     @Test
-    public void registersOllamaLocalAsOllamaProvider() {
+    void registersOllamaLocalAsOllamaProvider() {
         // JCLAW-178 AC #2: seeding the ollama-local config keys and refreshing
         // the registry must yield an OllamaProvider instance — no new Java
         // provider code, just substring routing through LlmProvider.forConfig.
@@ -107,7 +107,7 @@ public class ProviderRegistryAtomicTest extends UnitTest {
     }
 
     @Test
-    public void getOpenaiReturnsNullWhenApiKeyBlank() {
+    void getOpenaiReturnsNullWhenApiKeyBlank() {
         // JCLAW-160 AC #3: a baseUrl-only row (apiKey blank) must not
         // register, so `get("openai")` returns null until the operator
         // pastes a key in Settings.
@@ -120,7 +120,7 @@ public class ProviderRegistryAtomicTest extends UnitTest {
     }
 
     @Test
-    public void getOpenaiReturnsOpenAiProviderWhenKeyed() {
+    void getOpenaiReturnsOpenAiProviderWhenKeyed() {
         // JCLAW-160 AC #3: with both keys populated the registry produces
         // an OpenAiProvider via the factory's openai entry (not the
         // fallback path).
@@ -136,7 +136,7 @@ public class ProviderRegistryAtomicTest extends UnitTest {
     }
 
     @Test
-    public void refreshAfterProviderRemoved() {
+    void refreshAfterProviderRemoved() {
         ConfigService.set("provider.removable.baseUrl", "https://test.ai/v1");
         ConfigService.set("provider.removable.apiKey", "sk-test");
         ProviderRegistry.refresh();
@@ -152,7 +152,7 @@ public class ProviderRegistryAtomicTest extends UnitTest {
     }
 
     @Test
-    public void doubleCheckedLockingPreventsStampede() throws Exception {
+    void doubleCheckedLockingPreventsStampede() throws Exception {
         ConfigService.set("provider.stampede-test.baseUrl", "https://test.ai/v1");
         ConfigService.set("provider.stampede-test.apiKey", "sk-test");
         ProviderRegistry.refresh();

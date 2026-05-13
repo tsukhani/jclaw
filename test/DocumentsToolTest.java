@@ -16,7 +16,7 @@ import javax.imageio.ImageIO;
  * Exercises the pure path logic against a real tmp dir — no Agent, workspace, or
  * DocumentWriter plumbing needed. Rendering paths are validated in manual UAT.
  */
-public class DocumentsToolTest extends UnitTest {
+class DocumentsToolTest extends UnitTest {
 
     private Path tmp;
 
@@ -37,14 +37,14 @@ public class DocumentsToolTest extends UnitTest {
     }
 
     @Test
-    public void noConflict_returnsDesiredPath() {
+    void noConflict_returnsDesiredPath() {
         var desired = tmp.resolve("fresh.docx");
         var out = DocumentsTool.resolveNonConflicting(desired);
         assertEquals(desired, out);
     }
 
     @Test
-    public void existingFile_picksFirstFreeSuffix() throws Exception {
+    void existingFile_picksFirstFreeSuffix() throws Exception {
         var desired = tmp.resolve("report.docx");
         Files.writeString(desired, "x");
         var out = DocumentsTool.resolveNonConflicting(desired);
@@ -52,7 +52,7 @@ public class DocumentsToolTest extends UnitTest {
     }
 
     @Test
-    public void multipleExisting_skipsToNextFree() throws Exception {
+    void multipleExisting_skipsToNextFree() throws Exception {
         Files.writeString(tmp.resolve("report.docx"), "x");
         Files.writeString(tmp.resolve("report-1.docx"), "x");
         Files.writeString(tmp.resolve("report-2.docx"), "x");
@@ -61,7 +61,7 @@ public class DocumentsToolTest extends UnitTest {
     }
 
     @Test
-    public void nameWithSpacesAndHyphens_suffixesBeforeExtension() throws Exception {
+    void nameWithSpacesAndHyphens_suffixesBeforeExtension() throws Exception {
         var desired = tmp.resolve("Shiva Play - ENHANCED VERSION.docx");
         Files.writeString(desired, "x");
         var out = DocumentsTool.resolveNonConflicting(desired);
@@ -69,7 +69,7 @@ public class DocumentsToolTest extends UnitTest {
     }
 
     @Test
-    public void noExtension_suffixesAtEnd() throws Exception {
+    void noExtension_suffixesAtEnd() throws Exception {
         var desired = tmp.resolve("README");
         Files.writeString(desired, "x");
         var out = DocumentsTool.resolveNonConflicting(desired);
@@ -77,7 +77,7 @@ public class DocumentsToolTest extends UnitTest {
     }
 
     @Test
-    public void hiddenDotFile_treatsLeadingDotAsPartOfBase() throws Exception {
+    void hiddenDotFile_treatsLeadingDotAsPartOfBase() throws Exception {
         // ".hidden" has no extension; the leading dot belongs to the base name.
         // A naive lastIndexOf('.') would produce " (1).hidden" — wrong.
         var desired = tmp.resolve(".hidden");
@@ -89,7 +89,7 @@ public class DocumentsToolTest extends UnitTest {
     // ----- JCLAW-177: Tika TesseractOCRParser integration ---------------------
 
     @Test
-    public void readDocument_imageWithText_extractsTextViaTesseract() throws Exception {
+    void readDocument_imageWithText_extractsTextViaTesseract() throws Exception {
         // Skip when the binary isn't installed — the assertion below would
         // otherwise spuriously fail on hosts that haven't run apt-get install
         // tesseract-ocr / brew install tesseract. The companion test below
@@ -113,7 +113,7 @@ public class DocumentsToolTest extends UnitTest {
     }
 
     @Test
-    public void readDocument_imageWithNoText_andProbeUnavailable_returnsClearHint() throws Exception {
+    void readDocument_imageWithNoText_andProbeUnavailable_returnsClearHint() throws Exception {
         // Render a blank PNG so Tika legitimately returns empty text, then
         // force the probe into the "unavailable" state so the diagnostic
         // appends. This exercises the JCLAW-177 error-surfacing path on hosts
@@ -145,7 +145,7 @@ public class DocumentsToolTest extends UnitTest {
     }
 
     @Test
-    public void readDocument_pdfWithEmbeddedImage_doesNotThrowOnInlineImageExtraction() throws Exception {
+    void readDocument_pdfWithEmbeddedImage_doesNotThrowOnInlineImageExtraction() throws Exception {
         // Regression for the JCLAW-177 follow-up: extractInlineImages=true
         // routes embedded PDF images through Tika's ImageGraphicsEngine, which
         // calls org.apache.pdfbox.tools.imageio.ImageIOUtil. That class lives
@@ -180,7 +180,7 @@ public class DocumentsToolTest extends UnitTest {
     }
 
     @Test
-    public void readDocument_scannedPdf_whenOcrToggleOff_returnsHardErrorAndSkipsTesseract() throws Exception {
+    void readDocument_scannedPdf_whenOcrToggleOff_returnsHardErrorAndSkipsTesseract() throws Exception {
         // Regression: with ocr.tesseract.enabled=false the documents tool was
         // still hitting Tesseract on scanned PDFs. Tika's AutoDetectParser
         // service-loads TesseractOCRParser by default whenever the binary is
@@ -223,7 +223,7 @@ public class DocumentsToolTest extends UnitTest {
     }
 
     @Test
-    public void readDocument_blankImage_andProbeAvailable_omitsDiagnostic() throws Exception {
+    void readDocument_blankImage_andProbeAvailable_omitsDiagnostic() throws Exception {
         // Mirror image of the above: when probe says tesseract is fine, an
         // empty extraction is a real "no text in this document" — don't
         // muddy the response with a misleading install hint.
@@ -269,13 +269,13 @@ public class DocumentsToolTest extends UnitTest {
     // ----- pre-existing collision-helper coverage -----------------------------
 
     @Test
-    public void replaceFinalSegment_flatPath() {
+    void replaceFinalSegment_flatPath() {
         assertEquals("new.docx",
                 DocumentsTool.replaceFinalSegment("old.docx", "new.docx"));
     }
 
     @Test
-    public void replaceFinalSegment_nestedPath() {
+    void replaceFinalSegment_nestedPath() {
         assertEquals("reports/q4/new.docx",
                 DocumentsTool.replaceFinalSegment("reports/q4/old.docx", "new.docx"));
     }
