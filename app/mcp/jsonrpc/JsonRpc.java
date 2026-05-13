@@ -24,6 +24,14 @@ public final class JsonRpc {
 
     public static final String VERSION = "2.0";
 
+    private static final String KEY_JSONRPC = "jsonrpc";
+    private static final String KEY_METHOD = "method";
+    private static final String KEY_PARAMS = "params";
+    private static final String KEY_ID = "id";
+    private static final String KEY_RESULT = "result";
+    private static final String KEY_ERROR = "error";
+    private static final String KEY_DATA = "data";
+
     private JsonRpc() {}
 
     public sealed interface Message permits Request, Response, Notification {}
@@ -59,64 +67,64 @@ public final class JsonRpc {
 
     private static String encodeRequest(Request req) {
         var obj = new JsonObject();
-        obj.addProperty("jsonrpc", VERSION);
-        obj.add("id", idJson(req.id()));
-        obj.addProperty("method", req.method());
-        if (req.params() != null) obj.add("params", paramsJson(req.params()));
+        obj.addProperty(KEY_JSONRPC, VERSION);
+        obj.add(KEY_ID, idJson(req.id()));
+        obj.addProperty(KEY_METHOD, req.method());
+        if (req.params() != null) obj.add(KEY_PARAMS, paramsJson(req.params()));
         return obj.toString();
     }
 
     private static String encodeResponse(Response resp) {
         var obj = new JsonObject();
-        obj.addProperty("jsonrpc", VERSION);
-        obj.add("id", idJson(resp.id()));
+        obj.addProperty(KEY_JSONRPC, VERSION);
+        obj.add(KEY_ID, idJson(resp.id()));
         if (resp.error() != null) {
             var err = new JsonObject();
             err.addProperty("code", resp.error().code());
             err.addProperty("message", resp.error().message());
-            if (resp.error().data() != null) err.add("data", resp.error().data());
-            obj.add("error", err);
+            if (resp.error().data() != null) err.add(KEY_DATA, resp.error().data());
+            obj.add(KEY_ERROR, err);
         } else {
-            obj.add("result", resp.result() != null ? resp.result() : JsonNull.INSTANCE);
+            obj.add(KEY_RESULT, resp.result() != null ? resp.result() : JsonNull.INSTANCE);
         }
         return obj.toString();
     }
 
     private static String encodeNotification(Notification note) {
         var obj = new JsonObject();
-        obj.addProperty("jsonrpc", VERSION);
-        obj.addProperty("method", note.method());
-        if (note.params() != null) obj.add("params", paramsJson(note.params()));
+        obj.addProperty(KEY_JSONRPC, VERSION);
+        obj.addProperty(KEY_METHOD, note.method());
+        if (note.params() != null) obj.add(KEY_PARAMS, paramsJson(note.params()));
         return obj.toString();
     }
 
     public static Message decode(String wire) {
         var root = JsonParser.parseString(wire).getAsJsonObject();
-        var version = root.has("jsonrpc") ? root.get("jsonrpc").getAsString() : null;
+        var version = root.has(KEY_JSONRPC) ? root.get(KEY_JSONRPC).getAsString() : null;
         if (!VERSION.equals(version)) {
             throw new IllegalArgumentException("Not a JSON-RPC 2.0 message: jsonrpc=" + version);
         }
-        boolean hasId = root.has("id");
-        boolean hasMethod = root.has("method");
-        boolean hasResult = root.has("result");
-        boolean hasError = root.has("error");
+        boolean hasId = root.has(KEY_ID);
+        boolean hasMethod = root.has(KEY_METHOD);
+        boolean hasResult = root.has(KEY_RESULT);
+        boolean hasError = root.has(KEY_ERROR);
 
         if (hasMethod && hasId) {
-            return new Request(decodeId(root.get("id")), root.get("method").getAsString(),
-                    root.has("params") ? root.get("params") : null);
+            return new Request(decodeId(root.get(KEY_ID)), root.get(KEY_METHOD).getAsString(),
+                    root.has(KEY_PARAMS) ? root.get(KEY_PARAMS) : null);
         }
         if (hasMethod) {
-            return new Notification(root.get("method").getAsString(),
-                    root.has("params") ? root.get("params") : null);
+            return new Notification(root.get(KEY_METHOD).getAsString(),
+                    root.has(KEY_PARAMS) ? root.get(KEY_PARAMS) : null);
         }
         if (hasResult || hasError) {
-            Object id = hasId ? decodeId(root.get("id")) : null;
-            JsonElement result = hasResult ? root.get("result") : null;
+            Object id = hasId ? decodeId(root.get(KEY_ID)) : null;
+            JsonElement result = hasResult ? root.get(KEY_RESULT) : null;
             Error err = null;
             if (hasError) {
-                var e = root.getAsJsonObject("error");
+                var e = root.getAsJsonObject(KEY_ERROR);
                 err = new Error(e.get("code").getAsInt(), e.get("message").getAsString(),
-                        e.has("data") ? e.get("data") : null);
+                        e.has(KEY_DATA) ? e.get(KEY_DATA) : null);
             }
             return new Response(id, result, err);
         }

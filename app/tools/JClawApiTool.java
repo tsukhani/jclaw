@@ -52,6 +52,15 @@ public class JClawApiTool implements ToolRegistry.Tool {
 
     public static final String TOOL_NAME = "jclaw_api";
 
+    private static final String KEY_TYPE = "type";
+    private static final String KEY_OBJECT = "object";
+    private static final String KEY_STRING = "string";
+    private static final String KEY_DESCRIPTION = "description";
+    private static final String KEY_METHOD = "method";
+    private static final String KEY_PATH = "path";
+    private static final String KEY_BODY = "body";
+    private static final String KEY_QUERY = "query";
+
     /** Path prefixes refused at the tool layer. Each one corresponds
      *  to a category of operation the in-process tool must never
      *  invoke regardless of the model's intent or the SKILL.md's
@@ -92,25 +101,25 @@ public class JClawApiTool implements ToolRegistry.Tool {
     @Override
     public Map<String, Object> parameters() {
         return Map.of(
-                "type", "object",
+                KEY_TYPE, KEY_OBJECT,
                 "properties", Map.of(
-                        "method", Map.of(
-                                "type", "string",
+                        KEY_METHOD, Map.of(
+                                KEY_TYPE, KEY_STRING,
                                 "enum", ALLOWED_METHODS,
-                                "description", "HTTP method"),
-                        "path", Map.of(
-                                "type", "string",
-                                "description", "JClaw API path starting with /api/ (e.g. /api/agents)"),
-                        "body", Map.of(
-                                "type", "object",
-                                "description", "JSON request body for POST/PUT/PATCH; omit for GET/DELETE",
+                                KEY_DESCRIPTION, "HTTP method"),
+                        KEY_PATH, Map.of(
+                                KEY_TYPE, KEY_STRING,
+                                KEY_DESCRIPTION, "JClaw API path starting with /api/ (e.g. /api/agents)"),
+                        KEY_BODY, Map.of(
+                                KEY_TYPE, KEY_OBJECT,
+                                KEY_DESCRIPTION, "JSON request body for POST/PUT/PATCH; omit for GET/DELETE",
                                 "additionalProperties", true),
-                        "query", Map.of(
-                                "type", "object",
-                                "description", "Query parameters as key→string-value pairs",
-                                "additionalProperties", Map.of("type", "string"))
+                        KEY_QUERY, Map.of(
+                                KEY_TYPE, KEY_OBJECT,
+                                KEY_DESCRIPTION, "Query parameters as key→string-value pairs",
+                                "additionalProperties", Map.of(KEY_TYPE, KEY_STRING))
                 ),
-                "required", List.of("method", "path")
+                "required", List.of(KEY_METHOD, KEY_PATH)
         );
     }
 
@@ -129,8 +138,8 @@ public class JClawApiTool implements ToolRegistry.Tool {
             return "Error: arguments are not valid JSON: " + e.getMessage();
         }
 
-        var methodRaw = stringField(args, "method");
-        var path = stringField(args, "path");
+        var methodRaw = stringField(args, KEY_METHOD);
+        var path = stringField(args, KEY_PATH);
         if (methodRaw == null || path == null) {
             return "Error: both 'method' and 'path' are required";
         }
@@ -182,8 +191,8 @@ public class JClawApiTool implements ToolRegistry.Tool {
         var parsed = HttpUrl.parse(base);
         if (parsed == null) return null;
         var builder = parsed.newBuilder();
-        if (args.has("query") && args.get("query").isJsonObject()) {
-            for (var entry : args.getAsJsonObject("query").entrySet()) {
+        if (args.has(KEY_QUERY) && args.get(KEY_QUERY).isJsonObject()) {
+            for (var entry : args.getAsJsonObject(KEY_QUERY).entrySet()) {
                 var v = entry.getValue();
                 if (v == null || v.isJsonNull()) continue;
                 builder.addQueryParameter(entry.getKey(),
@@ -199,8 +208,8 @@ public class JClawApiTool implements ToolRegistry.Tool {
      *  alternative would force the model to coordinate verb + body
      *  shape perfectly, which it sometimes doesn't. */
     private static RequestBody requestBodyFor(String method, JsonObject args) {
-        var bodyJson = args.has("body") && args.get("body").isJsonObject()
-                ? args.getAsJsonObject("body") : null;
+        var bodyJson = args.has(KEY_BODY) && args.get(KEY_BODY).isJsonObject()
+                ? args.getAsJsonObject(KEY_BODY) : null;
         if ("GET".equals(method)) return null;
         var serialized = bodyJson == null ? "{}" : bodyJson.toString();
         return RequestBody.create(serialized, JSON);
