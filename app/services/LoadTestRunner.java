@@ -606,9 +606,10 @@ public final class LoadTestRunner {
                         reasonSum += internal;
                         tokCount++;
                         if (visible > 0) {
-                            long denomMs = obj.has("streamBodyMs") ? obj.get("streamBodyMs").getAsLong()
-                                          : obj.has("durationMs")  ? obj.get("durationMs").getAsLong()
-                                          : 0L;
+                            long denomMs;
+                            if (obj.has("streamBodyMs")) denomMs = obj.get("streamBodyMs").getAsLong();
+                            else if (obj.has("durationMs")) denomMs = obj.get("durationMs").getAsLong();
+                            else denomMs = 0L;
                             if (denomMs > 0) {
                                 rateSum += (visible * 1000.0) / denomMs;
                                 rateCount++;
@@ -637,7 +638,7 @@ public final class LoadTestRunner {
             var call = client.newCall(builder.build());
             call.timeout().timeout(60, java.util.concurrent.TimeUnit.SECONDS);
             try (var resp = call.execute()) {
-                if (resp.body() != null) resp.body().bytes();  // drain
+                resp.body().bytes();  // drain
             }
             // The warmup response populates all the caches but does not count
             // in the result set. Histograms recorded during warmup will show
@@ -744,6 +745,7 @@ public final class LoadTestRunner {
      * jclaw, so {@link play.mvc.CookieSessionStore} doesn't enforce a
      * timestamp and won't reject a cookie that lacks one.
      */
+    @SuppressWarnings("java:S112") // Play's CookieDataCodec.encode declares throws Exception; rewrapping is noise for a test-only helper
     private static String mintAdminSessionCookie() throws Exception {
         var data = new java.util.LinkedHashMap<String, String>();
         data.put("authenticated", "true");

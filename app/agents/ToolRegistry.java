@@ -331,6 +331,7 @@ public class ToolRegistry {
      * adapters on a history scan for {@code list_mcp_tools} calls; the
      * new design folds that bootstrap into every server's own surface.
      */
+    @SuppressWarnings("java:S1172") // conv retained for binary compatibility per Javadoc (JCLAW-281)
     public static List<ToolDef> getToolDefsForAgent(Agent agent, models.Conversation conv) {
         // JCLAW-281: discoveredMcpServers no longer drives filtering, but
         // the overload is kept so callers don't need to track which
@@ -343,6 +344,7 @@ public class ToolRegistry {
      * for binary compatibility with tests but no longer used as a filter
      * input — JCLAW-281 made the server-level handle always-emitted.
      */
+    @SuppressWarnings("java:S1172") // discoveredMcpServers retained for binary/test compatibility per Javadoc (JCLAW-281)
     public static List<ToolDef> getToolDefsForAgent(Agent agent, Set<String> discoveredMcpServers) {
         // Loadtest agent: ship zero tools so cross-provider tokens-per-second
         // benchmarks measure pure model speed. Sending a populated tools

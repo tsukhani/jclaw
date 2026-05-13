@@ -12,6 +12,8 @@ import java.util.Set;
 
 public class ConfigService {
 
+    private ConfigService() {}
+
     // The cache stores Optional<String> rather than String so we can distinguish
     // "key absent in DB" (empty Optional, cached) from "key not yet fetched"
     // (cache miss, triggers a DB lookup). The previous hand-rolled cache

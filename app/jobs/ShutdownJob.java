@@ -56,7 +56,8 @@ public class ShutdownJob extends Job<Void> {
             Thread.ofVirtual().name("shutdown-component").start(() -> {
                 try {
                     component.run();
-                } catch (Throwable t) {
+                } catch (@SuppressWarnings("java:S1181") Throwable t) {
+                    // Top-level guard for shutdown VT — one component's failure must never break the latch
                     EventLogger.warn("shutdown",
                             "Shutdown component failed: %s".formatted(t.getMessage()));
                 } finally {

@@ -228,6 +228,7 @@ public final class McpServerService {
     /** Throws {@link IllegalArgumentException} on any structural problem
      *  the form ought to have caught client-side. Server-side defense so
      *  an API client (or a future admin UI bug) can't insert garbage rows. */
+    @SuppressWarnings("java:S6916") // Enum switch (not pattern switch): replacing `if` inside an arm with `when` would change exhaustiveness semantics
     public static void validate(McpServer row) {
         if (row.name == null || !NAME_RE.matcher(row.name).matches()) {
             throw new IllegalArgumentException("name must match " + NAME_RE.pattern());

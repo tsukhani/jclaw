@@ -114,7 +114,7 @@ public final class PricingRefreshService {
             var call = HttpFactories.general().newCall(req);
             call.timeout().timeout(FETCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
             try (var response = call.execute()) {
-                if (response.code() != 200 || response.body() == null) {
+                if (response.code() != 200) {
                     Logger.warn("LiteLLM pricing fetch failed: HTTP %s", response.code());
                     return null;
                 }

@@ -128,7 +128,8 @@ public final class WhisperModelManager {
                 try {
                     var path = doDownload(model, onProgress);
                     future.complete(path);
-                } catch (Throwable t) {
+                } catch (@SuppressWarnings("java:S1181") Throwable t) {
+                    // Top-level VT — any failure (incl. native/Error) must reach the future as completeExceptionally
                     Logger.warn(t, "WhisperModelManager: download failed for %s", model.id());
                     statuses.put(model.id(), new ModelStatus(
                             State.ERROR, 0, 0, t.getMessage() == null ? t.toString() : t.getMessage()));
@@ -192,7 +193,7 @@ public final class WhisperModelManager {
         long downloaded = 0;
         try (Response resp = client.newCall(new Request.Builder().url(url).build()).execute();
              var sink = Files.newOutputStream(tmp)) {
-            if (!resp.isSuccessful() || resp.body() == null) {
+            if (!resp.isSuccessful()) {
                 throw new IOException("GET %s failed: %d %s".formatted(url, resp.code(), resp.message()));
             }
             BufferedSource src = resp.body().source();

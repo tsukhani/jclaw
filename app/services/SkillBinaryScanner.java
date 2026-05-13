@@ -53,6 +53,7 @@ public class SkillBinaryScanner {
         return scan(skillDir, ScannerRegistry.createDefaultScanners());
     }
 
+    @SuppressWarnings("java:S1141") // Per-file hash-failure is logged + continue; extracting the inner try splits a tight per-file loop with no readability win
     public static List<Violation> scan(Path skillDir, List<Scanner> scanners) {
         var violations = new ArrayList<Violation>();
         if (skillDir == null || !Files.isDirectory(skillDir)) return violations;

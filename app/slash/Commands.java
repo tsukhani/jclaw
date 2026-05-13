@@ -496,22 +496,11 @@ public final class Commands {
         return new Result(current, responseText, Command.USAGE);
     }
 
-    private static void persistCannedResponse(Conversation current, String responseText) {
-        if (current == null) return;
-        final Long convId = current.id;
-        Tx.run(() -> {
-            var conv = (Conversation) Conversation.findById(convId);
-            if (conv != null) {
-                ConversationService.appendAssistantMessage(conv, responseText, null);
-            }
-        });
-    }
-
     /**
-     * Same as {@link #persistCannedResponse} but assumes the caller has
-     * already opened a transaction. Avoids a redundant Tx.run() nesting
-     * when the handler body is itself wrapped in one (the {@code /usage}
-     * case, which reads message history).
+     * Persist a canned (slash-command) assistant reply when the caller has
+     * already opened a transaction. Avoids a redundant Tx.run() nesting when
+     * the handler body is itself wrapped in one (the {@code /usage} case,
+     * which reads message history).
      */
     private static void persistCannedResponseInTx(Conversation current, String responseText) {
         if (current == null) return;
@@ -762,6 +751,7 @@ public final class Commands {
      * usage, slash-command acks). Returns {@code null} when no such turn
      * exists — callers render zeros in that case.
      */
+    @SuppressWarnings("java:S1168") // null is a documented sentinel meaning "no usage data found"; callers render zeros
     private static int[] findLatestAssistantUsage(List<Message> messages) {
         if (messages == null || messages.isEmpty()) return null;
         for (int i = messages.size() - 1; i >= 0; i--) {

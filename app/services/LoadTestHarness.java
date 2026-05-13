@@ -222,10 +222,12 @@ public final class LoadTestHarness {
                     out.write(chunk.getBytes(StandardCharsets.UTF_8));
                     out.flush();
                 }
-                var finalChunk = "data: {\"id\":\"mock\",\"object\":\"chat.completion.chunk\","
-                        + "\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],"
-                        + "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5,\"total_tokens\":15}}\n\n"
-                        + "data: [DONE]\n\n";
+                var finalChunk = """
+                        data: {"id":"mock","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}
+
+                        data: [DONE]
+
+                        """;
                 out.write(finalChunk.getBytes(StandardCharsets.UTF_8));
                 out.flush();
                 done.complete(null);

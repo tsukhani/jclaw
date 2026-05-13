@@ -11,9 +11,12 @@ import play.libs.F;
  */
 public class Tx {
 
+    private Tx() {}
+
     /**
      * Run a block that returns a value, ensuring a JPA transaction is active.
      */
+    @SuppressWarnings("java:S112") // Generic RuntimeException is the correct wrapper for the type-erased Throwable from F.Function0
     public static <T> T run(F.Function0<T> block) {
         if (JPA.isInsideTransaction()) {
             try {

@@ -116,7 +116,7 @@ public final class SkillVersionManager {
 
             var oldContent = Files.readString(targetPath);
             var oldInfo = parseFrontmatterStringForVersion(oldContent);
-            var oldVersion = oldInfo != null && oldInfo.length > 0 ? oldInfo[0] : "0.0.0";
+            var oldVersion = oldInfo[0];
 
             var autoVersion = contentDiffersIgnoringVersion(oldContent, newContent)
                     ? bumpPatch(oldVersion)

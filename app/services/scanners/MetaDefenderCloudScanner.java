@@ -68,7 +68,7 @@ public class MetaDefenderCloudScanner extends ConfiguredHashScanner {
                 .header("Accept", "application/json")
                 .get()
                 .build();
-        return sendJsonLookup(sha256, request, timeoutMs, true, json -> parseVerdict(json, sha256));
+        return sendJsonLookup(sha256, request, timeoutMs, true, this::parseVerdict);
     }
 
     /**
@@ -89,7 +89,7 @@ public class MetaDefenderCloudScanner extends ConfiguredHashScanner {
      * string is built by joining the first few per-engine threat names so
      * operators can see which engines flagged the sample.
      */
-    private Verdict parseVerdict(JsonObject json, String sha256) {
+    private Verdict parseVerdict(JsonObject json) {
         if (!json.has("scan_results") || !json.get("scan_results").isJsonObject()) {
             // MetaDefender sometimes returns a sparse record with no scan_results
             // when a hash has been indexed but never actually scanned. Treat as clean.

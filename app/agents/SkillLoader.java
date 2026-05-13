@@ -306,12 +306,10 @@ public class SkillLoader {
         sb.append("<available_skills>\n");
 
         int totalChars = 0;
-        boolean compact = false;
 
         for (var skill : skills) {
-            var entry = formatSkillEntry(skill, !compact);
-            if (totalChars + entry.length() > MAX_SKILLS_CHARS && !compact) {
-                compact = true;
+            var entry = formatSkillEntry(skill, true);
+            if (totalChars + entry.length() > MAX_SKILLS_CHARS) {
                 sb.setLength(0);
                 sb.append("<available_skills>\n");
                 totalChars = 0;
@@ -363,10 +361,10 @@ public class SkillLoader {
     private static final Pattern VERSION_VALUE = Pattern.compile("^version:\\s*[\"']?(.*?)[\"']?\\s*$", Pattern.MULTILINE);
     // S5998: possessive `++` prevents catastrophic backtracking on pathological YAML
     // input. Equivalent for any valid frontmatter; just refuses to backtrack.
-    private static final Pattern NAME_MULTI = Pattern.compile("^name:\\s*[|>]\\s*\\n((?:  .*\\n?)++)", Pattern.MULTILINE);
-    private static final Pattern DESCRIPTION_MULTI = Pattern.compile("^description:\\s*[|>]\\s*\\n((?:  .*\\n?)++)", Pattern.MULTILINE);
-    private static final Pattern TOOLS_MULTI = Pattern.compile("^tools:\\s*[|>]\\s*\\n((?:  .*\\n?)++)", Pattern.MULTILINE);
-    private static final Pattern VERSION_MULTI = Pattern.compile("^version:\\s*[|>]\\s*\\n((?:  .*\\n?)++)", Pattern.MULTILINE);
+    private static final Pattern NAME_MULTI = Pattern.compile("^name:\\s*[|>]\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
+    private static final Pattern DESCRIPTION_MULTI = Pattern.compile("^description:\\s*[|>]\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
+    private static final Pattern TOOLS_MULTI = Pattern.compile("^tools:\\s*[|>]\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
+    private static final Pattern VERSION_MULTI = Pattern.compile("^version:\\s*[|>]\\s*\\n((?: {2}.*\\n?)++)", Pattern.MULTILINE);
     private static final Pattern TOOLS_INLINE_LIST = Pattern.compile("^tools:\\s*\\[(.*?)\\]\\s*$", Pattern.MULTILINE);
     private static final Pattern TOOLS_BLOCK_LIST = Pattern.compile("^tools:\\s*\\n((?:\\s*-\\s*.*\\n?)++)", Pattern.MULTILINE);
 
@@ -433,7 +431,7 @@ public class SkillLoader {
             if (items.isEmpty()) return List.of();
             var result = new ArrayList<String>();
             for (var part : items.split(",")) {
-                var cleaned = part.strip().replaceAll("(?:^[\"'])|(?:[\"']$)", "");
+                var cleaned = part.strip().replaceAll("^[\"']|[\"']$", "");
                 if (!cleaned.isEmpty()) result.add(cleaned);
             }
             return result;
@@ -449,7 +447,7 @@ public class SkillLoader {
             for (var line : body.split("\\n")) {
                 var trimmed = line.strip();
                 if (trimmed.startsWith("-")) {
-                    var item = trimmed.substring(1).strip().replaceAll("(?:^[\"'])|(?:[\"']$)", "");
+                    var item = trimmed.substring(1).strip().replaceAll("^[\"']|[\"']$", "");
                     if (!item.isEmpty()) result.add(item);
                 }
             }
@@ -524,7 +522,7 @@ public class SkillLoader {
             case "description" -> DESCRIPTION_MULTI;
             case "tools" -> TOOLS_MULTI;
             case "version" -> VERSION_MULTI;
-            default -> Pattern.compile("^" + Pattern.quote(key) + ":\\s*[|>]\\s*\\n((?:  .*\\n?)+)", Pattern.MULTILINE);
+            default -> Pattern.compile("^" + Pattern.quote(key) + ":\\s*[|>]\\s*\\n((?: {2}.*\\n?)+)", Pattern.MULTILINE);
         };
         var multiMatcher = multiPattern.matcher(yaml);
         if (multiMatcher.find()) {
