@@ -77,12 +77,14 @@ public class NotificationBus {
             } catch (TimeoutException _) {
                 future.cancel(true);
                 failed.add(pair.getKey());
-            } catch (ExecutionException | InterruptedException _) {
+            } catch (ExecutionException _) {
                 failed.add(pair.getKey());
-                if (Thread.currentThread().isInterrupted()) {
-                    // Preserve interrupt status; stop processing further futures.
-                    break;
-                }
+            } catch (InterruptedException _) {
+                // Re-set the flag the catch cleared, then stop processing further
+                // futures so the interrupt actually propagates up the call stack.
+                Thread.currentThread().interrupt();
+                failed.add(pair.getKey());
+                break;
             }
         }
         if (!failed.isEmpty()) listeners.removeAll(failed);
