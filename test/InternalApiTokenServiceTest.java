@@ -51,7 +51,6 @@ public class InternalApiTokenServiceTest extends UnitTest {
         // ApiToken row carries the hash for AuthCheck to validate against.
         var row = ApiToken.findActiveByPlaintext(token);
         assertNotNull(row);
-        assertEquals(ApiToken.Scope.FULL, row.scope);
         assertEquals(InternalApiTokenService.SYSTEM_OWNER, row.ownerUsername);
     }
 

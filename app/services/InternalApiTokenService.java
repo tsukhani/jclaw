@@ -44,13 +44,11 @@ public final class InternalApiTokenService {
      *  directly — same posture as the password hash. */
     public static final String INTERNAL_KEY_PREFIX = "auth.internal.";
 
-    /** Token owner reserved for auto-managed system tokens. The
-     *  {@code ApiTokensController.list} path filters to the configured
-     *  admin username, so {@code system}-owned tokens stay invisible
-     *  in the Settings UI. */
+    /** Token owner reserved for auto-managed system tokens. Stashed on
+     *  the {@link ApiToken} row so the bearer-auth filter can stamp
+     *  {@code session.username} with a stable value when admitting
+     *  internal requests. */
     public static final String SYSTEM_OWNER = "system";
-
-    private static final String INTERNAL_TOKEN_NAME = "jclaw-internal-api";
 
     private static volatile String cachedToken;
 
@@ -102,16 +100,12 @@ public final class InternalApiTokenService {
         Tx.run(() -> {
             ConfigService.set(INTERNAL_TOKEN_CONFIG_KEY, plaintext);
             var row = new ApiToken();
-            row.name = INTERNAL_TOKEN_NAME;
-            row.scope = ApiToken.Scope.FULL;
             row.ownerUsername = SYSTEM_OWNER;
             row.secretHash = TokenHasher.hash(plaintext);
-            row.displayPrefix = TokenHasher.prefix(plaintext);
             row.save();
         });
         EventLogger.info("auth",
-                "Bootstrapped internal jclaw_api token (owner=%s, scope=FULL)"
-                        .formatted(SYSTEM_OWNER));
+                "Bootstrapped internal jclaw_api token (owner=%s)".formatted(SYSTEM_OWNER));
         return plaintext;
     }
 }
