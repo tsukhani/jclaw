@@ -31,7 +31,7 @@ is_developer_clone() {
 usage() {
     if is_developer_clone; then
         cat <<EOF
-Usage: jclaw.sh [options] <https|no-https|secret|setup|reset|start|stop|restart|status|logs|loadtest|test|dist|help>
+Usage: jclaw.sh [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist|help>
 
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
@@ -39,6 +39,12 @@ Commands:
             generates certs/.env (with a fresh application secret) if missing,
             and verifies both 'origin' and 'github' remotes exist. Run once
             after every fresh clone. Idempotent — safe to re-run.
+  init-worktree
+            Slim per-worktree bootstrap: ensures certs/.env carries a fresh
+            application secret (if missing) and a deterministic PLAY_TEST_PORT
+            so parallel \`play autotest\` runs across git worktrees don't
+            /@kill each other. Invoked automatically by .githooks/post-checkout
+            on \`git worktree add\`; run by hand to back-fill pre-hook worktrees.
   secret    Generate (or rotate) the application secret in certs/.env (delegates
             to 'play secret', which writes the variable named in
             application.conf's \${...} placeholder). Run after a suspected
@@ -212,7 +218,7 @@ EOF
 # distinguish the per-command help path from the bare-help path.
 is_known_command() {
     case "$1" in
-        https|no-https|secret|setup|reset|start|stop|restart|status|logs|loadtest|test|dist)
+        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|test|dist)
             return 0
             ;;
         *)
@@ -228,9 +234,10 @@ usage_for() {
     case "$1" in
         https)    usage_https    ;;
         no-https) usage_no_https ;;
-        secret)   usage_secret   ;;
-        setup)    usage_setup    ;;
-        reset)    usage_reset    ;;
+        secret)        usage_secret         ;;
+        setup)         usage_setup          ;;
+        init-worktree) usage_init_worktree  ;;
+        reset)         usage_reset          ;;
         start)    usage_start    ;;
         stop)     usage_stop     ;;
         restart)  usage_restart  ;;
@@ -337,6 +344,39 @@ Not available in this distribution. The 'setup' command is part of
 the developer flow (run after a fresh git clone — wires git hooks,
 installs frontend deps, etc.). End-user 'play dist' installs don't
 need it: start the app directly with ./jclaw.sh start.
+
+For the full list of commands in this distribution: ./jclaw.sh help
+EOF
+    fi
+}
+
+usage_init_worktree() {
+    if is_developer_clone; then
+        cat <<EOF
+Usage: jclaw.sh init-worktree
+
+Slim per-worktree bootstrap (developer flow). Ensures certs/.env exists
+with a fresh application secret (only if missing — never rotates) and
+appends a deterministic PLAY_TEST_PORT so parallel \`play autotest\`
+runs across git worktrees don't /@kill each other on a shared port.
+
+Invoked automatically by .githooks/post-checkout when \`git worktree add\`
+fires, so a fresh worktree is immediately safe for parallel testing.
+Run by hand to back-fill a worktree created before the hook landed.
+
+Idempotent — safe to re-run; preserves any existing PLAY_SECRET and
+PLAY_TEST_PORT values.
+
+Example:
+  ./jclaw.sh init-worktree
+EOF
+    else
+        cat <<EOF
+Usage: jclaw.sh init-worktree
+
+Not available in this distribution. The 'init-worktree' command is part
+of the developer flow (used by the post-checkout hook to prep fresh git
+worktrees for parallel \`play autotest\`).
 
 For the full list of commands in this distribution: ./jclaw.sh help
 EOF
@@ -874,7 +914,7 @@ while [[ $# -gt 0 ]]; do
             COMMAND="$1"
             shift
             ;;
-        setup|loadtest|test|dist)
+        setup|init-worktree|loadtest|test|dist)
             # Developer-only commands. Available on a `git clone` because
             # they touch repo state (hooks, fixtures, frontend deps); not
             # available on a `play dist` install where there's no .git
@@ -1388,6 +1428,71 @@ do_secret() {
     echo "      $0 ${dev_flag}restart"
 }
 
+# Per-worktree HTTP port for `play autotest`, derived deterministically
+# from this worktree's path. Parallel `play autotest` runs across git
+# worktrees would otherwise collide on the conf default (%test.http.port
+# = 9100): PlayAutotestTask.runAutotest() HTTP-POSTs /@kill to whatever
+# is listening on its target port before spawning its own server, so two
+# worktrees sharing 9100 alternately murder each other's test JVMs
+# mid-run. The patched plugin reads PLAY_TEST_PORT from certs/.env, so
+# pinning a stable port per worktree here makes `play autotest` safe
+# under parallelism without any per-invocation flag-juggling.
+#
+# Idempotent: re-runs preserve any value already in certs/.env so the
+# operator can override the derived port by hand.
+ensure_play_test_port() {
+    local env_file="$SCRIPT_DIR/certs/.env"
+    if [[ ! -f "$env_file" ]]; then
+        echo "    Skipped: certs/.env missing (do_secret should have created it)."
+        return
+    fi
+    if grep -q "^PLAY_TEST_PORT=" "$env_file"; then
+        local existing
+        existing=$(grep "^PLAY_TEST_PORT=" "$env_file" | head -1 | cut -d= -f2)
+        echo "    PLAY_TEST_PORT already set to $existing — leaving it untouched."
+        return
+    fi
+    # cksum (POSIX) over the worktree's canonical path, modulo 800,
+    # offset to 9100-9899. 9000 is the dev server's default; 9100 is the
+    # conf default for %test.http.port; >=9900 leaves headroom for other
+    # local tooling. Collision probability with N worktrees is
+    # ~N(N-1)/1600 — negligible at typical use (under 1% for 4 worktrees).
+    # Collisions are recoverable by editing certs/.env manually.
+    local worktree_path
+    worktree_path=$(/usr/bin/git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "$SCRIPT_DIR")
+    local port
+    port=$(printf '%s' "$worktree_path" | cksum | awk '{print 9100 + ($1 % 800)}')
+    {
+        echo ""
+        echo "# Per-worktree HTTP port for \`play autotest\`. Derived from this"
+        echo "# worktree's path so parallel test runs across git worktrees bind"
+        echo "# distinct ports and don't /@kill each other. Read by the patched"
+        echo "# play1 plugin (PlayAutotestTask) and forwarded into the test JVM."
+        echo "PLAY_TEST_PORT=$port"
+    } >> "$env_file"
+    echo "    PLAY_TEST_PORT=$port (derived from $worktree_path)"
+}
+
+# Slim worktree-state init: PLAY_SECRET + PLAY_TEST_PORT in certs/.env,
+# nothing else. Called by .githooks/post-checkout on `git worktree add`
+# so a fresh worktree can immediately run `play autotest` in parallel
+# with siblings, AND by do_setup as the first step of the full bootstrap.
+# Centralizing here means the secret-generation guard and the test-port
+# derivation live in exactly one place — neither caller can drift.
+#
+# Idempotent: preserves an existing PLAY_SECRET (rotate via `$0 secret`)
+# and an existing PLAY_TEST_PORT (override by editing certs/.env).
+do_init_worktree() {
+    cd "$SCRIPT_DIR"
+    if [[ -f "$SCRIPT_DIR/certs/.env" ]]; then
+        echo "    certs/.env already exists — leaving secret untouched."
+        echo "    Rotate with: $0 secret"
+    else
+        do_secret
+    fi
+    ensure_play_test_port
+}
+
 # Locate the H2 jar shipped with the Play framework, falling back to a
 # bundled copy in the dist's framework/lib/. Used by do_reset to invoke
 # the H2 Shell tool standalone — no JVM-side classpath assembly needed.
@@ -1773,15 +1878,9 @@ do_setup() {
     echo "    core.hooksPath = $(/usr/bin/git config --local core.hooksPath)"
 
     echo ""
-    echo "==> Generating certs/.env (per-clone secret store)..."
-    # Skip if certs/.env already exists — the operator may have populated
-    # it with prod-tuned values. Rotate explicitly via `$0 secret` instead.
-    if [[ -f "$SCRIPT_DIR/certs/.env" ]]; then
-        echo "    certs/.env already exists — leaving it untouched."
-        echo "    Rotate with: $0 secret"
-    else
-        do_secret
-    fi
+    echo "==> Initializing worktree state (certs/.env, PLAY_TEST_PORT)..."
+    # Shared with .githooks/post-checkout — see do_init_worktree comment.
+    do_init_worktree
 
     echo ""
     echo "==> Pinning pnpm via corepack (with integrity hash)..."
@@ -2938,6 +3037,9 @@ case "$COMMAND" in
         ;;
     setup)
         do_setup
+        ;;
+    init-worktree)
+        do_init_worktree
         ;;
     reset)
         do_reset
