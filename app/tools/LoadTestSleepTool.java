@@ -63,7 +63,7 @@ public class LoadTestSleepTool implements ToolRegistry.Tool {
         } catch (Exception _) {
             // Fall back to default on malformed args — harness caller only.
         }
-        int clamped = Math.max(0, Math.min(ms, MAX_MS));
+        int clamped = Math.clamp(ms, 0, MAX_MS);
         try {
             Thread.sleep(clamped);
         } catch (InterruptedException _) {

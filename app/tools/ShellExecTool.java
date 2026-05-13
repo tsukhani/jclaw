@@ -390,7 +390,6 @@ public class ShellExecTool implements ToolRegistry.Tool {
             var out = new StringBuilder();
             int totalRead = 0;
             boolean truncated = false;
-            boolean foundTerminalImage = false;
 
             // Watchdog: destroy the process after the configured timeout.
             // When destroyed, is.read() in the main loop returns -1 or throws,
@@ -429,8 +428,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 }
 
                 // Check for terminal image — if found, return early but keep process alive
-                if (!foundTerminalImage && hasTerminalImage(out.toString())) {
-                    foundTerminalImage = true;
+                if (hasTerminalImage(out.toString())) {
                     var processedOutput = replaceTerminalImagesInOutput(out.toString(), agent);
                     long durationMs = System.currentTimeMillis() - startTime;
 
@@ -491,15 +489,12 @@ public class ShellExecTool implements ToolRegistry.Tool {
         var lines = output.split("\n");
         var result = new StringBuilder();
         var qrLines = new java.util.ArrayList<String>();
-        var qrStartIdx = -1;
         boolean inQrBlock = false;
 
-        for (int i = 0; i < lines.length; i++) {
-            var line = lines[i];
+        for (var line : lines) {
             boolean isBlockLine = isBlockArtLine(line);
 
             if (isBlockLine) {
-                if (!inQrBlock) qrStartIdx = i;
                 inQrBlock = true;
                 qrLines.add(line);
             } else {
@@ -614,11 +609,10 @@ public class ShellExecTool implements ToolRegistry.Tool {
                             topBlack = true; bottomBlack = true; break;
                         case '\u2593': // ▓ dark shade
                             topBlack = true; bottomBlack = true; break;
-                        case '\u2592': // ▒ medium shade
-                        case '\u2591': // ░ light shade
-                            break; // leave white
-                        case ' ':
-                            break; // white
+                        case '\u2592': // ▒ medium shade — treat as white
+                        case '\u2591': // ░ light shade — treat as white
+                        case ' ':       // literal whitespace
+                            break;
                         default:
                             // Unknown char — treat as black if it's a block-range char
                             if (c >= '\u2580' && c <= '\u259F') {

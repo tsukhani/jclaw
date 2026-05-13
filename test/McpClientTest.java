@@ -135,8 +135,9 @@ public class McpClientTest extends UnitTest {
             } catch (InterruptedException ignored) {}
         });
 
+        var args = new JsonObject();
         var ex = assertThrows(McpException.class,
-                () -> client.callTool("echo", new JsonObject()));
+                () -> client.callTool("echo", args));
         assertTrue(ex.getMessage().contains("tool crashed"));
     }
 
@@ -145,7 +146,8 @@ public class McpClientTest extends UnitTest {
         transport = new FakeTransport();
         client = new McpClient("test", transport, "0.0.1");
         // No connect() — state remains DISCONNECTED.
-        assertThrows(McpException.class, () -> client.callTool("echo", new JsonObject()));
+        var args = new JsonObject();
+        assertThrows(McpException.class, () -> client.callTool("echo", args));
     }
 
     // ==================== notifications ====================

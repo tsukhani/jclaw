@@ -23,19 +23,17 @@ import utils.TokenHasher;
  */
 public class InternalApiTokenServiceTest extends UnitTest {
 
-    @BeforeEach
-    void clearState() {
+    private void resetState() {
         ApiToken.deleteAll();
         ConfigService.delete(InternalApiTokenService.INTERNAL_TOKEN_CONFIG_KEY);
         InternalApiTokenService.invalidateCache();
     }
 
+    @BeforeEach
+    void clearState() { resetState(); }
+
     @AfterEach
-    void cleanup() {
-        ApiToken.deleteAll();
-        ConfigService.delete(InternalApiTokenService.INTERNAL_TOKEN_CONFIG_KEY);
-        InternalApiTokenService.invalidateCache();
-    }
+    void cleanup() { resetState(); }
 
     @Test
     public void firstCallMintsTokenAndPersists() {

@@ -871,6 +871,11 @@ public class FileSystemTools implements ToolRegistry.Tool {
         }
     }
 
+    // Nested try/catch (S1141) intentional: each per-op IOException needs its own
+    // context-specific error message (which file op failed and which path) and a
+    // rollback of already-committed ops before returning; a single outer catch
+    // would lose that per-op context.
+    @SuppressWarnings("java:S1141")
     private String applyPatchLocked(List<ResolvedOp> resolved) {
         // === Phase 1: validate every op and compute the post-patch content for Add/Update ops. ===
         // We also snapshot pre-edit content for Update/Delete ops so rollback on IO error can restore.

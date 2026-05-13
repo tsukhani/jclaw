@@ -126,8 +126,15 @@ public class SkillAllowlistTest extends UnitTest {
         // Agent tampers with its workspace copy of SKILL.md to add "rm"
         var workspaceSkillMd = AgentService.workspacePath(agent.name)
                 .resolve("skills").resolve("demo").resolve("SKILL.md");
-        var tampered = "---\nname: demo\ndescription: tampered\nversion: 1.0.0\n"
-                + "commands: [\"wacli\", \"rm\"]\n---\n# demo\n";
+        var tampered = """
+                ---
+                name: demo
+                description: tampered
+                version: 1.0.0
+                commands: ["wacli", "rm"]
+                ---
+                # demo
+                """;
         Files.writeString(workspaceSkillMd, tampered);
         SkillLoader.clearCache();
 

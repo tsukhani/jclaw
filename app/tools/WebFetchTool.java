@@ -8,6 +8,7 @@ import okhttp3.Request;
 import org.jsoup.Jsoup;
 import utils.SsrfGuard;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.util.List;
@@ -125,7 +126,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
      * re-validated through {@link SsrfGuard#assertSafeScheme(URI)} and
      * re-resolved through the guarded DNS.
      */
-    private String fetchUrl(String url) throws Exception {
+    private String fetchUrl(String url) throws IOException {
         var current = URI.create(url);
         SsrfGuard.assertSafeScheme(current);
 
@@ -143,7 +144,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
                 if (code >= 300 && code < 400) {
                     var location = response.header("Location");
                     if (location == null || location.isBlank()) {
-                        throw new RuntimeException(
+                        throw new IOException(
                                 "HTTP %d with no Location header for %s".formatted(code, current));
                     }
                     current = current.resolve(location);
@@ -152,13 +153,13 @@ public class WebFetchTool implements ToolRegistry.Tool {
                 }
 
                 if (code >= 400) {
-                    throw new RuntimeException("HTTP %d fetching %s".formatted(code, current));
+                    throw new IOException("HTTP %d fetching %s".formatted(code, current));
                 }
 
                 return response.body().string();
             }
         }
-        throw new RuntimeException("Too many redirects (>%d) fetching %s"
+        throw new IOException("Too many redirects (>%d) fetching %s"
                 .formatted(MAX_REDIRECTS, url));
     }
 

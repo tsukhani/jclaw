@@ -38,6 +38,10 @@ public final class RetryScheduler {
      * caller can {@code get()} on; a virtual-thread caller will unmount during
      * the wait.
      */
+    // S1181: catch(Throwable) is intentional — this is a generic retry boundary
+    // that must surface Errors (OOM, StackOverflow, etc.) to the caller's get()
+    // rather than let them die silently on the daemon scheduler thread.
+    @SuppressWarnings("java:S1181")
     public static <T> CompletableFuture<T> schedule(Callable<T> task, long delayMs) {
         var future = new CompletableFuture<T>();
         SCHEDULER.schedule(() -> {

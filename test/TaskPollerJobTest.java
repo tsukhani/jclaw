@@ -43,7 +43,7 @@ public class TaskPollerJobTest extends UnitTest {
         futureTask.save();
 
         // Already running task — should NOT be found
-        var runningTask = createTask(agent, "Running task", Task.Type.IMMEDIATE, Task.Status.RUNNING);
+        createTask(agent, "Running task", Task.Type.IMMEDIATE, Task.Status.RUNNING);
 
         var pending = Task.findPendingDue();
         assertEquals(1, pending.size(), "Only past-due PENDING tasks should be returned");
@@ -232,7 +232,4 @@ public class TaskPollerJobTest extends UnitTest {
         return task;
     }
 
-    private void sleep(long ms) {
-        try { Thread.sleep(ms); } catch (InterruptedException _) {}
-    }
 }

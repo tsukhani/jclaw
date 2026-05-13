@@ -54,7 +54,7 @@ public class ApiMcpServersControllerTest extends FunctionalTest {
     @Test
     public void listReturnsCreatedServerWithRuntimeStatus() {
         login();
-        var id = createHttpServer("remote", "http://127.0.0.1:1/mcp", false);
+        createHttpServer("remote", "http://127.0.0.1:1/mcp", false);
         var response = GET("/api/mcp-servers");
         var content = getContent(response);
         assertTrue(content.contains("\"name\":\"remote\""));

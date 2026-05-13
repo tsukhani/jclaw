@@ -89,8 +89,9 @@ public class SsrfGuardTest extends UnitTest {
 
     @Test
     public void assertSafeSchemeRejectsFileScheme() {
+        var uri = URI.create("file:///etc/passwd");
         var ex = assertThrows(SecurityException.class,
-                () -> SsrfGuard.assertSafeScheme(URI.create("file:///etc/passwd")));
+                () -> SsrfGuard.assertSafeScheme(uri));
         assertTrue(ex.getMessage().contains("scheme not allowed"),
                 "exception must explain: " + ex.getMessage());
     }
@@ -100,16 +101,18 @@ public class SsrfGuardTest extends UnitTest {
         // gopher is a classic SSRF-amplifier (Redis RCE via gopher://),
         // data: can embed payloads, ftp: is legacy and widely forbidden.
         for (var scheme : new String[] {"gopher", "ftp", "data", "jar", "ldap"}) {
+            var uri = URI.create(scheme + "://evil/");
             assertThrows(SecurityException.class,
-                    () -> SsrfGuard.assertSafeScheme(URI.create(scheme + "://evil/")),
+                    () -> SsrfGuard.assertSafeScheme(uri),
                     "scheme " + scheme + " must be rejected");
         }
     }
 
     @Test
     public void assertSafeSchemeRejectsHostlessUri() {
+        var uri = URI.create("http:///no-host");
         var ex = assertThrows(SecurityException.class,
-                () -> SsrfGuard.assertSafeScheme(URI.create("http:///no-host")));
+                () -> SsrfGuard.assertSafeScheme(uri));
         assertTrue(ex.getMessage().contains("no host"),
                 "exception must identify the missing host: " + ex.getMessage());
     }

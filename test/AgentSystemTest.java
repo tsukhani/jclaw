@@ -216,7 +216,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void loadSkillsFromFilesystem() {
-        var agent = AgentService.create("skill-agent", "openrouter", "gpt-4.1");
+        AgentService.create("skill-agent", "openrouter", "gpt-4.1");
 
         // Create a skill file in the agent's workspace
         var skillDir = AgentService.workspacePath("skill-agent").resolve("skills").resolve("coding");
@@ -249,7 +249,7 @@ public class AgentSystemTest extends UnitTest {
 
     @Test
     public void formatSkillsXmlContainsSkillData() {
-        var agent = AgentService.create("xml-agent", "openrouter", "gpt-4.1");
+        AgentService.create("xml-agent", "openrouter", "gpt-4.1");
 
         // Create a skill file in the agent's workspace
         var skillDir = AgentService.workspacePath("xml-agent").resolve("skills").resolve("research");
