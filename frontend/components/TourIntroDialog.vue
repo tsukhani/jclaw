@@ -53,13 +53,10 @@ function onSkip() {
         >
         <DialogTitle>Welcome to JClaw</DialogTitle>
         <DialogDescription class="pt-2">
-          Hi, I'm Clawdia — your JClaw sidekick. I help you wire up AI agents to chat, skills,
-          and channels, all from one place. Want me to show you around? This quick tour walks
-          through the four things you need before your first real conversation — an LLM
-          provider, your Main Agent, the model it'll use, and the chat composer — plus two
-          optional stops for adding skills and connecting a channel. If you'd rather poke
-          around on your own, no worries — I'll be waving from the sidebar any time you want
-          a refresher.
+          Hi, I'm Clawdia — your JClaw sidekick. This quick tour covers the four things you
+          need before your first conversation: an LLM provider, your Main Agent, the model
+          it'll use, and the chat composer. Prefer to explore on your own? No worries —
+          I'll be waving from the sidebar whenever you want a refresher.
         </DialogDescription>
       </DialogHeader>
       <DialogFooter class="gap-2 sm:gap-2">
