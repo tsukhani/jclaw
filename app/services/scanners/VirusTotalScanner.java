@@ -26,7 +26,7 @@ import java.util.ArrayList;
  */
 public class VirusTotalScanner extends ConfiguredHashScanner {
 
-    public static final String NAME = "VirusTotal";
+    private static final String NAME = "VirusTotal";
 
     private static final OneShotWarning MISSING_KEY_WARNING = new OneShotWarning();
 

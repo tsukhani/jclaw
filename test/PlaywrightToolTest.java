@@ -147,7 +147,7 @@ public class PlaywrightToolTest extends UnitTest {
     @Test
     public void idleSessionCleanupDoesNotThrow() {
         // Just verify the cleanup method runs without error even with no sessions
-        PlaywrightBrowserTool.cleanupIdleSessions();
+        Assertions.assertDoesNotThrow(PlaywrightBrowserTool::cleanupIdleSessions);
     }
 
     @Test
@@ -349,8 +349,10 @@ public class PlaywrightToolTest extends UnitTest {
         // ConcurrentHashMap returns null for a missing key, and the close
         // helper short-circuits in that branch. Calling it twice in a row
         // for an agent that never had a session must not throw.
-        PlaywrightBrowserTool.closeSession("agent-that-never-existed");
-        PlaywrightBrowserTool.closeSession("agent-that-never-existed");
+        Assertions.assertDoesNotThrow(() -> {
+            PlaywrightBrowserTool.closeSession("agent-that-never-existed");
+            PlaywrightBrowserTool.closeSession("agent-that-never-existed");
+        });
     }
 
     // ─── Pure-unit coverage (no Chromium needed) ──────────────────────────

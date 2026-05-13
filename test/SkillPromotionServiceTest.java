@@ -50,10 +50,9 @@ public class SkillPromotionServiceTest extends UnitTest {
     }
 
     @Test
-    public void deleteRecursiveNoopOnNonExistentPath() throws Exception {
+    public void deleteRecursiveNoopOnNonExistentPath() {
         var ghost = tmpDir.resolve("does-not-exist");
-        // Should not throw
-        SkillPromotionService.deleteRecursive(ghost);
+        Assertions.assertDoesNotThrow(() -> SkillPromotionService.deleteRecursive(ghost));
     }
 
     @Test

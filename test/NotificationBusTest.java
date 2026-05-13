@@ -127,7 +127,7 @@ public class NotificationBusTest extends UnitTest {
     @Test
     public void publishWithNoSubscribersDoesNotThrow() {
         // Should complete without error even if no subscribers exist
-        NotificationBus.publish("orphan.event", Map.of("lonely", "true"));
+        Assertions.assertDoesNotThrow(() -> NotificationBus.publish("orphan.event", Map.of("lonely", "true")));
     }
 
     // --- per-listener timeout: slow listener is auto-removed, fast listener still receives ---
