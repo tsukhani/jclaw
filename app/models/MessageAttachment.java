@@ -1,6 +1,8 @@
 package models;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.Cache;
+import org.hibernate.annotations.CacheConcurrencyStrategy;
 import play.db.jpa.Model;
 
 import java.time.Instant;
@@ -19,6 +21,14 @@ import java.util.List;
         @Index(name = "idx_attachment_message", columnList = "message_id"),
         @Index(name = "idx_attachment_uuid", columnList = "uuid", unique = true)
 })
+// JCLAW-205 follow-up: read on attachment download (findByUuid) and
+// every chat-history render that contains attachments (findByMessage).
+// Rows are immutable after create (operator can't edit an attachment;
+// they're recreated by re-upload), so the cache hit rate approaches
+// 100% once warm. The transcript column can be sizeable for audio
+// attachments but is still bounded; no @Lob/blob bytes live in the
+// row itself (storagePath points at the on-disk file).
+@Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 public class MessageAttachment extends Model {
 
     public static final String KIND_IMAGE = "IMAGE";

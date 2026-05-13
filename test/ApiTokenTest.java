@@ -144,6 +144,43 @@ public class ApiTokenTest extends UnitTest {
     }
 
     @Test
+    public void markUsedIsThrottledWithinWindow() {
+        // Bearer auth fires markUsed() on every /api/** call. Without
+        // throttling, every request would UPDATE this row and invalidate
+        // the query-cache entry that the same request just populated.
+        // The throttle is what keeps the cache effective.
+        var row = freshRow("throttled", TokenHasher.mint(), ApiToken.Scope.READ_ONLY);
+        row.save();
+
+        row.markUsed();
+        var firstUseAt = row.lastUsedAt;
+        assertNotNull(firstUseAt);
+
+        // Immediate second call inside the window must be a no-op so
+        // Hibernate's dirty-check skips the UPDATE on save().
+        row.markUsed();
+        assertEquals(firstUseAt, row.lastUsedAt,
+                "second markUsed() within the throttle window must not advance lastUsedAt");
+    }
+
+    @Test
+    public void markUsedUpdatesAfterThrottleExpires() {
+        var row = freshRow("expired", TokenHasher.mint(), ApiToken.Scope.READ_ONLY);
+        row.save();
+
+        // Simulate a prior call that landed before the throttle window.
+        // Subtracting 2× the throttle ensures we're past it regardless of
+        // clock drift between this line and the markUsed() call.
+        row.lastUsedAt = java.time.Instant.now()
+                .minusSeconds(ApiToken.MARK_USED_THROTTLE_SECONDS * 2);
+        var staleUseAt = row.lastUsedAt;
+
+        row.markUsed();
+        assertTrue(row.lastUsedAt.isAfter(staleUseAt),
+                "markUsed() outside the throttle window must update lastUsedAt");
+    }
+
+    @Test
     public void listForOwnerReturnsActiveBeforeRevoked() {
         var active = freshRow("active", TokenHasher.mint(), ApiToken.Scope.FULL);
         active.save();
