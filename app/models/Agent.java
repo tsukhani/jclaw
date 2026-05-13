@@ -59,6 +59,10 @@ public class Agent extends Model {
     @Column(name = "updated_at", nullable = false)
     public Instant updatedAt;
 
+    // Hibernate PersistentBag isn't Serializable, but JClaw never serializes
+    // JPA entities off-heap (no session replication, no caching). The
+    // Serializable on GenericModel is incidental — fields are JPA-tracked.
+    @SuppressWarnings("java:S1948")
     @OneToMany(mappedBy = "agent", cascade = CascadeType.ALL, orphanRemoval = true)
     public List<AgentBinding> bindings;
 

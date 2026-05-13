@@ -110,6 +110,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      * Extract reasoning text from a streaming chunk delta.
      * Called for each chunk during streaming. Return null if no reasoning in this chunk.
      */
+    @SuppressWarnings("java:S1172") // template method — subclasses use the delta
     protected String extractReasoningFromDelta(ChunkDelta delta) {
         return null;
     }
@@ -147,6 +148,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
      * Extract reasoning token count from a usage JSON object.
      * Called when parsing the usage block in responses.
      */
+    @SuppressWarnings("java:S1172") // template method — subclasses use the usage object
     protected int extractReasoningTokens(JsonObject usageObj) {
         return 0;
     }
@@ -259,6 +261,12 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
     // ─── Streaming chat ──────────────────────────────────────────────────
 
+    // S107: streaming chat needs the conversation shape (model, messages, tools,
+    // tuning) AND a triplet of callback consumers — the chunk/complete/error
+    // split mirrors the SSE event surface and reactive callers want them
+    // independent. Bundling into a Callbacks DTO would lose the lambda-literal
+    // call-site ergonomics every caller depends on.
+    @SuppressWarnings("java:S107")
     public void chatStream(String model, List<ChatMessage> messages, List<ToolDef> tools,
                            Consumer<ChatCompletionChunk> onChunk,
                            Runnable onComplete, Consumer<Exception> onError,
@@ -268,7 +276,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                 var request = new ChatRequest(model, messages, tools, true, maxTokens, thinkingMode);
                 var json = serializeRequest(request);
                 OkHttpLlmHttpDriver.streamSse(buildUri("/chat/completions"),
-                        "Bearer " + config.apiKey(), json, Duration.ofSeconds(180),
+                        "Bearer " + config.apiKey(), json,
                         data -> {
                             // The server closes the stream right after the [DONE]
                             // sentinel, so we skip parsing it here.
@@ -298,6 +306,10 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
     // ─── Streaming with accumulation ─────────────────────────────────────
 
+    // S107: same shape as chatStream, minus chunk/complete/error consumers
+    // (accumulator owns those), plus onToken/onReasoning split because the
+    // frontend renders thinking and content tokens through different paths.
+    @SuppressWarnings("java:S107")
     public StreamAccumulator chatStreamAccumulate(String model, List<ChatMessage> messages,
                                                    List<ToolDef> tools, Consumer<String> onToken,
                                                    Consumer<String> onReasoning,
@@ -383,6 +395,10 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
     // ─── Failover (static utility) ───────────────────────────────────────
 
+    // S107: failover wraps two providers around the standard 6-arg chat call;
+    // pushing the chat tuple into a DTO would force every caller of the
+    // primary {@link #chat} path to pre-build one, which they don't.
+    @SuppressWarnings("java:S107")
     public static ChatResponse chatWithFailover(LlmProvider primary, LlmProvider secondary,
                                                  String model, List<ChatMessage> messages,
                                                  List<ToolDef> tools, Integer maxTokens,

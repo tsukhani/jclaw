@@ -224,7 +224,7 @@ public class TelegramChannel implements Channel {
      * whether to retry or log-and-continue.
      */
     public static void editMessageText(String botToken, String chatId,
-                                       Integer messageId, String text) throws Exception {
+                                       Integer messageId, String text) throws TelegramApiException {
         forToken(botToken).client.execute(
                 org.telegram.telegrambots.meta.api.methods.updatingmessages.EditMessageText.builder()
                         .chatId(chatId)
@@ -375,25 +375,35 @@ public class TelegramChannel implements Channel {
                 // has already been delivered by the time the background upload
                 // might fail, so a late error can't retroactively fail the turn.
                 if (fs.isBackground()) {
-                    Thread.ofVirtual().name("telegram-bg-send").start(() -> {
-                        try {
-                            if (!sendFileSegment(channel, chatId, fs)) {
-                                EventLogger.warn("channel", null, "telegram",
-                                        "Background file send failed (non-blocking): %s"
-                                                .formatted(fs.displayName()));
-                            }
-                        } catch (Throwable t) {
-                            EventLogger.warn("channel", null, "telegram",
-                                    "Background file send threw (non-blocking) for %s: %s"
-                                            .formatted(fs.displayName(), t.getMessage()));
-                        }
-                    });
+                    Thread.ofVirtual().name("telegram-bg-send")
+                            .start(() -> backgroundSendFile(channel, chatId, fs));
                 } else {
                     if (!sendFileSegment(channel, chatId, fs)) allOk = false;
                 }
             }
         }
         return allOk;
+    }
+
+    // Catches Throwable on purpose: this runs at a virtual-thread root, so an
+    // unhandled Error (OOM in SDK, AssertionError, etc.) would kill the worker
+    // silently and leak the chat's outbound queue. The reply text has already
+    // been delivered by the time this fires, so late failures cannot regress
+    // the turn's success — we just log and drop.
+    @SuppressWarnings("java:S1181")
+    private static void backgroundSendFile(TelegramChannel channel, String chatId,
+                                            TelegramOutboundPlanner.FileSegment fs) {
+        try {
+            if (!sendFileSegment(channel, chatId, fs)) {
+                EventLogger.warn("channel", null, "telegram",
+                        "Background file send failed (non-blocking): %s"
+                                .formatted(fs.displayName()));
+            }
+        } catch (Throwable t) {
+            EventLogger.warn("channel", null, "telegram",
+                    "Background file send threw (non-blocking) for %s: %s"
+                            .formatted(fs.displayName(), t.getMessage()));
+        }
     }
 
     /**
@@ -484,14 +494,17 @@ public class TelegramChannel implements Channel {
      * whose shape is identical to what the web upload path produces — the
      * runner handles both origins uniformly.
      */
+    // S1168: null is the deliberate "rejected, helper already replied + logged"
+    // sentinel — callers explicitly `if (inputs == null) return` to abort the
+    // turn. An empty list, by contrast, means "no attachments to process,
+    // continue with text only" — they are semantically distinct outcomes.
+    @SuppressWarnings("java:S1168")
     public static java.util.List<services.AttachmentService.Input> prepareInboundAttachments(
             String sendToken, String sendChatId, Agent sendAgent, InboundMessage message) {
         if (message.attachments().isEmpty()) return java.util.List.of();
 
         boolean hasImage = message.attachments().stream().anyMatch(
                 a -> models.MessageAttachment.KIND_IMAGE.equalsIgnoreCase(a.kind()));
-        boolean hasAudio = message.attachments().stream().anyMatch(
-                a -> models.MessageAttachment.KIND_AUDIO.equalsIgnoreCase(a.kind()));
         if (hasImage && !services.AgentService.supportsVision(sendAgent)) {
             sendMessage(sendToken, sendChatId,
                     "I can't handle images with the current model. Try a vision-capable model.");

@@ -136,7 +136,7 @@ public final class TelegramModelKeyboard {
         LlmProvider provider = providers.get(providerIdx);
         List<ModelInfo> models = provider.config().models();
         int totalPages = Math.max(1, (models.size() + MODELS_PER_PAGE - 1) / MODELS_PER_PAGE);
-        int clampedPage = Math.max(0, Math.min(page, totalPages - 1));
+        int clampedPage = Math.clamp(page, 0, totalPages - 1);
         int start = clampedPage * MODELS_PER_PAGE;
         int end = Math.min(start + MODELS_PER_PAGE, models.size());
 

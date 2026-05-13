@@ -69,8 +69,15 @@ final class OkHttpLlmHttpDriver {
      *
      * <p>The {@code [DONE]} sentinel is NOT filtered out here — the caller in
      * {@link LlmProvider#chatStream} skips it before parsing.
+     *
+     * <p>Per-call timeout is intentionally absent: the streaming client uses
+     * {@code callTimeout(0)} + a 180s {@code readTimeout} (see {@link utils.HttpFactories#llmStreaming()})
+     * which is what every caller wants — bound individual stalls, not the
+     * overall stream. The {@link okhttp3.Call#timeout()} per-call override
+     * doesn't compose with EventSource the way it does with single-shot
+     * {@code execute()}.
      */
-    static void streamSse(URI uri, String authHeader, String jsonBody, Duration timeout,
+    static void streamSse(URI uri, String authHeader, String jsonBody,
                           Consumer<String> onEvent, Runnable onComplete, Consumer<Throwable> onError,
                           String channel) {
         var builder = new Request.Builder()

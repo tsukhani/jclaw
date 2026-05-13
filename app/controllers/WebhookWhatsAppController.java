@@ -86,14 +86,13 @@ public class WebhookWhatsAppController extends Controller {
             if (finalConfig != null) {
                 WhatsAppChannel.markAsRead(finalConfig, message.messageId());
             }
-            processMessage(finalConfig, message);
+            processMessage(message);
         });
 
         ok();
     }
 
-    private static void processMessage(WhatsAppChannel.WhatsAppConfig config,
-                                        WhatsAppChannel.InboundMessage message) {
+    private static void processMessage(WhatsAppChannel.InboundMessage message) {
         try {
             AgentRunner.processWebhookMessage("whatsapp", message.from(), message.text(),
                     (peerId, response) -> WhatsAppChannel.sendMessage(peerId, response),

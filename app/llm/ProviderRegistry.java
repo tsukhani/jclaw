@@ -27,7 +27,9 @@ import java.util.Map;
  *   "openai"     → {@link OpenAiProvider}
  *   anything else → {@link OpenAiProvider}  (lm-studio, groq, azure, …)
  */
-public class ProviderRegistry {
+public final class ProviderRegistry {
+
+    private ProviderRegistry() { /* static-only utility */ }
 
     private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
     private static volatile Map<String, LlmProvider> cache = Map.of();

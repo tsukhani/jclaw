@@ -94,6 +94,10 @@ public final class TelegramMediaGroupBuffer {
      * the scheduler after the idle window; exposed package-private for
      * tests via {@link #flushForTest(String)}.
      */
+    // Catches Throwable on purpose: this runs on the scheduler thread, so an
+    // unhandled Error from the dispatcher would kill the timer's worker and
+    // permanently stop media-group flushes for the JVM lifetime.
+    @SuppressWarnings("java:S1181")
     private static void flush(String groupId) {
         var bucket = buffers.remove(groupId);
         if (bucket == null || bucket.firstMessage == null || bucket.dispatcher == null) return;

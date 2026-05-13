@@ -24,6 +24,11 @@ public class ApiLogsController extends Controller {
 
     public record LogListResponse(List<LogEntry> events, int limit, int offset) {}
 
+    // S107: nine @QueryParam args is the Play 1.x action-method convention —
+    // each maps 1:1 to a request query parameter the operator may set
+    // independently. Bundling into a DTO would force callers (and OpenAPI
+    // generation) to flatten on the wire anyway.
+    @SuppressWarnings("java:S107")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LogListResponse.class)))
     public static void list(String category, String level, String agentId, String channel,
                             String since, String until, String search,

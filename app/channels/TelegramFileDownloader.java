@@ -76,6 +76,10 @@ public final class TelegramFileDownloader {
      * Public because jclaw tests live in the default package and can't see
      * package-private channel methods.
      */
+    // S1172: botToken is part of the public test seam — keeping the parameter
+    // mirrors the production 3-arg signature so tests don't need to fork
+    // unrelated logic when toggling between real and mocked HTTP base URLs.
+    @SuppressWarnings("java:S1172")
     public static Result download(String botToken,
                                   TelegramChannel.PendingAttachment pending,
                                   String agentName,
@@ -140,11 +144,11 @@ public final class TelegramFileDownloader {
             }
             long actualSize = Files.size(stagedPath);
             if (actualSize > MAX_FILE_BYTES) {
-                try { Files.deleteIfExists(stagedPath); } catch (IOException _) {}
+                bestEffortDelete(stagedPath);
                 return new SizeExceeded(actualSize, MAX_FILE_BYTES);
             }
         } catch (Exception e) {
-            try { Files.deleteIfExists(stagedPath); } catch (IOException _) {}
+            bestEffortDelete(stagedPath);
             return new DownloadFailed("download: " + e.getMessage());
         }
 
@@ -153,6 +157,11 @@ public final class TelegramFileDownloader {
                 : "telegram-" + pending.telegramFileId() + extension;
         return new Ok(new AttachmentService.Input(
                 uuid, originalFilename, pending.mimeType(), reportedSize, pending.kind()));
+    }
+
+    /** Best-effort delete used during download cleanup — swallows IO errors. */
+    private static void bestEffortDelete(Path path) {
+        try { Files.deleteIfExists(path); } catch (IOException _) { /* best-effort */ }
     }
 
 }

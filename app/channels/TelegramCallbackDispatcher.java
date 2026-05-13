@@ -110,7 +110,7 @@ public final class TelegramCallbackDispatcher {
             int totalPages = Math.max(1,
                     (modelCount + TelegramModelKeyboard.MODELS_PER_PAGE - 1)
                             / TelegramModelKeyboard.MODELS_PER_PAGE);
-            int clampedPage = Math.max(0, Math.min(payload.page(), totalPages - 1));
+            int clampedPage = Math.clamp(payload.page(), 0, totalPages - 1);
             int start = clampedPage * TelegramModelKeyboard.MODELS_PER_PAGE + 1;
             int end = Math.min(start + TelegramModelKeyboard.MODELS_PER_PAGE - 1, modelCount);
             header.append("Provider: <b>").append(escape(providerLabel))

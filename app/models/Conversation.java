@@ -110,6 +110,10 @@ public class Conversation extends Model {
     @Column(name = "updated_at", nullable = false)
     public Instant updatedAt;
 
+    // Hibernate PersistentBag isn't Serializable, but JClaw never serializes
+    // JPA entities off-heap (no session replication, no caching). The
+    // Serializable on GenericModel is incidental — fields are JPA-tracked.
+    @SuppressWarnings("java:S1948")
     @OneToMany(mappedBy = "conversation")
     @OrderBy("createdAt ASC")
     public List<Message> messages;

@@ -11,7 +11,9 @@ import java.nio.charset.StandardCharsets;
  * Shared JSON body parsing for API controllers. Previously duplicated as a
  * private static {@code readJsonBody()} in every {@code Api*Controller}.
  */
-public class JsonBodyReader {
+public final class JsonBodyReader {
+
+    private JsonBodyReader() { /* static-only utility */ }
 
     /**
      * Parse the current request body as a {@link JsonObject}. Returns

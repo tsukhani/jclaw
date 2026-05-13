@@ -138,13 +138,18 @@ public final class McpConnectionManager {
 
     /** Invoke an MCP tool on a connected server. Used by {@link McpToolAdapter}. */
     public static CallToolResult callTool(String serverName, String toolName, JsonObject arguments)
-            throws Exception {
+            throws java.io.IOException, McpException {
         var entry = connections.get(serverName);
         if (entry == null || entry.client == null
                 || entry.client.state() != McpClient.State.READY) {
             throw new McpException("MCP server '" + serverName + "' not ready");
         }
         return entry.client.callTool(toolName, arguments);
+    }
+
+    /** Close an MCP client, swallowing any runtime error — used in race-recovery paths. */
+    private static void bestEffortClose(McpClient client) {
+        try { client.close(); } catch (RuntimeException ignored) { /* best effort */ }
     }
 
     // ==================== test hooks ====================
@@ -207,7 +212,7 @@ public final class McpConnectionManager {
             // allowlist, and persist status=CONNECTED for a server the
             // user just disabled.
             if (connections.get(server.name) != entry) {
-                try { client.close(); } catch (RuntimeException ignored) { /* best effort */ }
+                bestEffortClose(client);
                 return;
             }
             entry.client = client;

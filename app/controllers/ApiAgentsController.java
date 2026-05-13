@@ -217,18 +217,6 @@ public class ApiAgentsController extends Controller {
         return (s == null || s.isBlank()) ? null : s;
     }
 
-    /**
-     * Read a JSON boolean field that may be missing or explicit {@code null},
-     * returning {@code null} in both cases so the caller can distinguish
-     * "operator cleared the override" from "operator picked false".
-     */
-    private static Boolean readOptionalBoolean(com.google.gson.JsonObject body, String key) {
-        if (!body.has(key)) return null;
-        var el = body.get(key);
-        if (el.isJsonNull()) return null;
-        return el.getAsBoolean();
-    }
-
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = Agent.class)))
     public static void update(Long id) {

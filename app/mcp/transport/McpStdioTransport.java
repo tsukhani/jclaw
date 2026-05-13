@@ -90,6 +90,10 @@ public final class McpStdioTransport implements McpTransport {
         if (errReaderThread != null) errReaderThread.interrupt();
     }
 
+    // S1141: outer try catches IOException (terminates the loop); inner try
+    // catches RuntimeException (per-line parse failure, loop continues). They
+    // are not collapsible — one bad line shouldn't kill the stdio reader.
+    @SuppressWarnings("java:S1141")
     private void readLoop() {
         try {
             String line;

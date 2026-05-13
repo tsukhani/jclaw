@@ -74,13 +74,12 @@ public class WebhookSlackController extends Controller {
                 "Message received from %s in %s".formatted(message.userId(), message.channelId()));
 
         // Process async
-        Thread.ofVirtual().name("webhook-slack").start(() -> processMessage(config, message));
+        Thread.ofVirtual().name("webhook-slack").start(() -> processMessage(message));
 
         ok();
     }
 
-    private static void processMessage(SlackChannel.SlackConfig config,
-                                        SlackChannel.InboundMessage message) {
+    private static void processMessage(SlackChannel.InboundMessage message) {
         try {
             AgentRunner.processWebhookMessage("slack", message.channelId(), message.text(),
                     (peerId, response) -> SlackChannel.sendMessage(peerId, response),
