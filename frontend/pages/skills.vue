@@ -218,8 +218,8 @@ function globalVersionOf(folderName: string): string | null {
 
 // Simple semver compare: returns negative/0/positive
 function compareVersions(a: string, b: string): number {
-  const pa = (a || '0.0.0').split('.').map(n => parseInt(n) || 0)
-  const pb = (b || '0.0.0').split('.').map(n => parseInt(n) || 0)
+  const pa = (a || '0.0.0').split('.').map(n => Number.parseInt(n) || 0)
+  const pb = (b || '0.0.0').split('.').map(n => Number.parseInt(n) || 0)
   for (let i = 0; i < 3; i++) {
     const x = pa[i] || 0
     const y = pb[i] || 0

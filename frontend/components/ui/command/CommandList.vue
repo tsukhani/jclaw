@@ -18,6 +18,7 @@ const forwarded = useForwardProps(delegatedProps)
     v-bind="forwarded"
     :class="cn('max-h-[300px] scroll-py-1 overflow-x-hidden overflow-y-auto', props.class)"
   >
+    <!-- NOSONAR(Web:S6819) — role="presentation" intentionally strips implicit semantics from the slot wrapper so the parent ListboxContent's listbox role is the only one assistive tech sees; no native HTML element provides this behavior. -->
     <div role="presentation">
       <slot />
     </div>

@@ -62,6 +62,7 @@ function onResizeStart(e: MouseEvent) {
       :style="{ width: `${panelWidth}px` }"
     >
       <!-- Resize handle -->
+      <!-- NOSONAR(Web:S6819) — role="separator" has no native HTML equivalent; it is the WAI-ARIA-recommended role for a resizable divider. -->
       <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- pointer-only resize affordance; panel width also has sensible default and can be adjusted by dragging -->
       <div
         class="absolute inset-y-0 left-0 w-1.5 cursor-col-resize hover:bg-emerald-500/30 active:bg-emerald-500/50 transition-colors z-10"

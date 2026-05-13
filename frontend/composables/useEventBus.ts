@@ -63,11 +63,15 @@ export function useEventBus() {
   // Connect on first use
   connect()
 
+  // NOSONAR(typescript:S7721) — `on`/`off` are returned as part of the
+  // composable's public API; hoisting them to module scope would fragment
+  // the surface area users consume.
   function on(type: string, handler: EventHandler) {
     if (!handlers.has(type)) handlers.set(type, new Set())
     handlers.get(type)!.add(handler)
   }
 
+  // NOSONAR(typescript:S7721) — see note on `on` above.
   function off(type: string, handler: EventHandler) {
     handlers.get(type)?.delete(handler)
   }

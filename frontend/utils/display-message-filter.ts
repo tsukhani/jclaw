@@ -27,7 +27,7 @@ export interface DisplayMessageCandidate {
    *  placeholder that has at least one tool call landed — even before the
    *  first content/reasoning token — should render so the user sees
    *  live tool activity instead of a blank gap. */
-  toolCalls?: { length?: number } | null | undefined
+  toolCalls?: { length?: number } | null
 }
 
 function hasToolCalls(m: DisplayMessageCandidate): boolean {

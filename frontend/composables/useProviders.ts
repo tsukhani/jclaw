@@ -28,7 +28,7 @@ export const DEFAULT_THINKING_LEVELS = ['low', 'medium', 'high'] as const
 /** Resolve the effective thinking levels for a model, applying the default fallback. */
 export function effectiveThinkingLevels(model: ProviderModel | null | undefined): string[] {
   if (!model) return []
-  if (model.thinkingLevels && model.thinkingLevels.length) return model.thinkingLevels
+  if (model.thinkingLevels?.length) return model.thinkingLevels
   return model.supportsThinking ? [...DEFAULT_THINKING_LEVELS] : []
 }
 

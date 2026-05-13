@@ -112,6 +112,10 @@ export function useGuidedTour() {
   // on mount) can both toggle it, and so components can v-bind to it.
   const introOpen = useState<boolean>('jclaw-guided-tour-intro', () => false)
 
+  // NOSONAR(typescript:S7721) — kept inside the composable so all sibling
+  // helpers (advance, back, complete, end) share a single closure and the
+  // public API surfaces as a unit; hoisting would require re-exporting the
+  // module-level state piecemeal.
   function destroy() {
     if (driverInstance) {
       driverInstance.destroy()

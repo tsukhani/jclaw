@@ -35,7 +35,7 @@ export default defineNuxtPlugin(async (nuxtApp) => {
   const sanitizeVueAxeStylesheet = (style: HTMLStyleElement) => {
     if (style.dataset.jclawVaxePatched === '1') return
     const txt = style.textContent
-    if (!txt || !txt.includes('.va-shadow-lg')) return
+    if (!txt?.includes('.va-shadow-lg')) return
     style.textContent = txt.replace(/\*\s*\{\s*--tw-[^}]*\}/g, '')
     style.dataset.jclawVaxePatched = '1'
   }

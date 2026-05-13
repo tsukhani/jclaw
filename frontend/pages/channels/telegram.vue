@@ -290,6 +290,7 @@ async function remove(binding: TelegramBindingSummary) {
             >
               disabling {{ cooldownSecondsLeft(b) }}s
             </span>
+            <!-- NOSONAR(Web:S6807) — aria-checked is bound dynamically (:aria-checked); Sonar's static analyzer does not resolve Vue's `:`-prefixed bindings, but the required ARIA property is in fact present. -->
             <button
               type="button"
               role="switch"

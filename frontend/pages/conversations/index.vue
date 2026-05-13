@@ -47,7 +47,7 @@ async function load() {
     const res = await $fetch.raw<Conversation[]>(`/api/conversations?${params.toString()}`)
     conversations.value = res._data ?? []
     const headerTotal = res.headers.get('x-total-count')
-    total.value = headerTotal ? parseInt(headerTotal, 10) : conversations.value.length
+    total.value = headerTotal ? Number.parseInt(headerTotal, 10) : conversations.value.length
   }
   finally {
     loading.value = false
@@ -77,7 +77,7 @@ function exportAllConversations() {
   a.download = 'conversations.csv'
   document.body.appendChild(a)
   a.click()
-  document.body.removeChild(a)
+  a.remove()
   URL.revokeObjectURL(url)
 }
 

@@ -198,6 +198,7 @@ function handleInputKeydown(e: KeyboardEvent) {
         >
           No saved views
         </div>
+        <!-- NOSONAR(Web:S6819) — row contains a nested <button> for delete, so wrapping in <button> would nest interactive controls; role="button" on the div exposes the row click target to assistive tech without violating button-nesting rules. -->
         <div
           v-for="(view, i) in savedViews"
           :key="view.name"
