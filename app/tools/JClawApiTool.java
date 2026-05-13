@@ -164,7 +164,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
 
         try (var response = HttpFactories.general().newCall(requestBuilder.build()).execute()) {
             var status = response.code();
-            var text = response.body() == null ? "" : response.body().string();
+            var text = response.body().string();
             if (text.length() > MAX_RESPONSE_CHARS) {
                 text = text.substring(0, MAX_RESPONSE_CHARS)
                         + "\n\n[Truncated: response exceeds %d characters]"
