@@ -431,7 +431,7 @@ public class SkillLoader {
             if (items.isEmpty()) return List.of();
             var result = new ArrayList<String>();
             for (var part : items.split(",")) {
-                var cleaned = part.strip().replaceAll("^[\"']|[\"']$", "");
+                var cleaned = part.strip().replaceAll("(^[\"'])|([\"']$)", "");
                 if (!cleaned.isEmpty()) result.add(cleaned);
             }
             return result;
@@ -447,7 +447,7 @@ public class SkillLoader {
             for (var line : body.split("\\n")) {
                 var trimmed = line.strip();
                 if (trimmed.startsWith("-")) {
-                    var item = trimmed.substring(1).strip().replaceAll("^[\"']|[\"']$", "");
+                    var item = trimmed.substring(1).strip().replaceAll("(^[\"'])|([\"']$)", "");
                     if (!item.isEmpty()) result.add(item);
                 }
             }
