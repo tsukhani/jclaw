@@ -65,12 +65,27 @@ const agentFilter = ref('')
 // mixed-case names without surprising ASCII-order placements (e.g. "Z" before "a").
 const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' })
 
-// `skill-creator` is the seed skill — every other global skill arrives via
-// promotion from an agent that ran skill-creator. Pinning it to the top
-// mirrors the main-agent rule on the right panel: "the structural one is
-// special, the rest are alphabetical." Single source of truth for the check
-// so the sort and the divider's v-if can't drift apart.
-const isSkillCreator = (s?: Skill) => !!s && (s.folderName || s.name) === 'skill-creator'
+// Structural skills are pre-installed and undeletable — they ship with JClaw
+// rather than arriving via promotion. They pin to the top of the global list
+// (above the "CUSTOM SKILLS" divider) in a fixed canonical order: skill-creator
+// is the seed every other skill promotes through, jclaw-api wraps the in-process
+// JClaw-API tool that's main-agent-only by backend policy (AgentService disables
+// the embedded tool on non-main agents at creation time). Single source of truth
+// for the check + ordering so the sort, the trash-hide, and the divider's v-if
+// can't drift apart. Lower number sorts first; Infinity falls into the
+// alphabetical tail.
+const STRUCTURAL_SKILL_ORDER: Record<string, number> = {
+  'skill-creator': 0,
+  'jclaw-api': 1,
+}
+// Duck-typed param so the same predicate covers Skill (global list), AgentSkill
+// (per-agent cards), and the edit modal's union of both. AgentSkill's
+// `[key: string]: unknown` index signature would otherwise force the call sites
+// to narrow before passing — only `folderName || name` is needed and both shapes
+// supply (or are willing to default) those.
+type SkillNameRef = { folderName?: string, name?: string } | null
+const structuralOrder = (s?: SkillNameRef) => STRUCTURAL_SKILL_ORDER[(s?.folderName || s?.name) ?? ''] ?? Infinity
+const isStructuralSkill = (s?: SkillNameRef) => structuralOrder(s) !== Infinity
 
 const filteredSkills = computed(() => {
   const q = globalFilter.value.trim().toLowerCase()
@@ -78,7 +93,9 @@ const filteredSkills = computed(() => {
     ? (skills.value ?? []).filter(s => (s.folderName || s.name).toLowerCase().includes(q))
     : (skills.value ?? [])
   return [...matched].sort((a, b) => {
-    if (isSkillCreator(a) !== isSkillCreator(b)) return isSkillCreator(a) ? -1 : 1
+    const oa = structuralOrder(a)
+    const ob = structuralOrder(b)
+    if (oa !== ob) return oa - ob
     return byName(a.folderName || a.name, b.folderName || b.name)
   })
 })
@@ -793,7 +810,7 @@ function totalSkillCount(agentId: number) {
                 draggable="true"
                 :class="[
                   'group flex items-start gap-2 px-3 py-2 cursor-grab active:cursor-grabbing select-none transition-colors',
-                  index > 0 && !isSkillCreator(filteredSkills[index - 1]) ? 'border-t border-border' : '',
+                  index > 0 && !isStructuralSkill(filteredSkills[index - 1]) ? 'border-t border-border' : '',
                   dragging?.name === skill.name && dragSource === 'global' ? 'opacity-50' : 'hover:bg-muted',
                 ]"
                 @dragstart="onGlobalDragStart($event, skill)"
@@ -854,7 +871,7 @@ function totalSkillCount(agentId: number) {
                     />
                   </button>
                   <button
-                    v-if="!isSkillCreator(skill)"
+                    v-if="!isStructuralSkill(skill)"
                     class="p-1 text-fg-muted hover:text-red-400 transition-colors"
                     title="Delete skill"
                     @click.stop="deleteSkill(skill)"
@@ -877,14 +894,17 @@ function totalSkillCount(agentId: number) {
                 </div>
               </div>
 
-              <!-- Section divider after skill-creator: same labeled-rule
-                   pattern as the agents panel ("CUSTOM AGENTS"), here naming
-                   the alphabetical group below "CUSTOM SKILLS". Decorative
-                   only — `aria-hidden` keeps it out of the accessibility
-                   tree since the order is already conveyed by the rendered
-                   list. -->
+              <!-- Section divider after the last structural skill: same
+                   labeled-rule pattern as the agents panel ("CUSTOM AGENTS"),
+                   here naming the alphabetical group below "CUSTOM SKILLS".
+                   Renders once, after the boundary between the pinned
+                   structural skills and the user-promoted ones — i.e. when
+                   the current row is structural and the next one isn't.
+                   Decorative only — `aria-hidden` keeps it out of the
+                   accessibility tree since the order is already conveyed
+                   by the rendered list. -->
               <div
-                v-if="isSkillCreator(skill) && index < filteredSkills.length - 1"
+                v-if="isStructuralSkill(skill) && index < filteredSkills.length - 1 && !isStructuralSkill(filteredSkills[index + 1])"
                 class="flex items-center gap-3 px-3 py-2.5 select-none"
                 aria-hidden="true"
               >
@@ -1109,7 +1129,7 @@ function totalSkillCount(agentId: number) {
           &larr; Back to skills
         </button>
         <button
-          v-if="(editing.folderName || editing.name) !== 'skill-creator'"
+          v-if="!isStructuralSkill(editing)"
           class="p-1.5 text-red-400/70 hover:text-red-400 transition-colors"
           title="Delete skill"
           @click="editingAgentId != null ? deleteAgentSkill(editingAgentId, editing) : deleteSkill(editing)"
