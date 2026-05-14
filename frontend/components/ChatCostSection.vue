@@ -1248,13 +1248,17 @@ defineExpose({ refresh })
            below). The "Combined total" label lives in the first cell
            rather than a separate header strip above, so the grand total
            reads as one row that lines up vertically with the section
-           Total rows above. A regular top border + mt-6 breathing room
-           keep this row visually separate without overweighting it. -->
+           Total rows above. Visually demarcated as a *zone* (tinted bg
+           + pt-6 breathing room) rather than a bordered row — the wrapper's
+           bg flood-fills the gap above the row plus the row itself, so the
+           operator reads "everything below the per-token table is the
+           combined-total summary" without a hard line stitched between
+           the gap and the row. -->
       <div
         v-if="hasPaidData || hasSubscriptionSection"
-        class="overflow-x-auto mt-6"
+        class="overflow-x-auto pt-6 bg-muted/30"
       >
-        <table class="w-full text-xs table-fixed border-t border-border">
+        <table class="w-full text-xs table-fixed">
           <!-- Explicit colgroup so table-fixed has a column-width source
                independent of any row. The sr-only thead below applies
                position:absolute (Tailwind's sr-only is width:1px height:1px
