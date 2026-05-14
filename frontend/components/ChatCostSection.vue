@@ -584,7 +584,8 @@ const chartMaxCost = computed(() => {
 // might use multiple subscription providers), so a per-model view is the
 // only attribution that holds up. Honors the chip filter via
 // subscriptionPerModelAllocated, so clicking Ollama Cloud collapses the
-// chart to that provider's models with their share of $100.
+// chart to that provider's models with their share of $100. Keeps
+// modelProvider on each row so the swatch helper can color-key the bar.
 const subscriptionChartRows = computed(() =>
   subscriptionPerModelAllocated.value
     .filter(m => m.turnCount > 0)
@@ -592,6 +593,7 @@ const subscriptionChartRows = computed(() =>
       label: m.modelProvider ? `${m.modelProvider}/${m.modelId}` : m.modelId,
       cost: m.allocatedCost,
       turnCount: m.turnCount,
+      modelProvider: m.modelProvider,
     })),
 )
 
@@ -599,6 +601,48 @@ const subscriptionChartMaxCost = computed(() => {
   const max = subscriptionChartRows.value.reduce((m, r) => Math.max(m, r.cost), 0)
   return max === 0 ? 1 : max
 })
+
+// Palette for the per-provider color swatch on each Subscription chart
+// bar. Listed as literal class strings so Tailwind's JIT can find every
+// possible value the helper might return; building them by string
+// concatenation would silently render as transparent. Kept off-emerald
+// (and off-lime/teal) so the swatch can never be mistaken for the
+// emerald cost fill on the bar itself — "emerald = cost" stays a global
+// convention; the swatch is purely a provider-identity tag.
+const PROVIDER_SWATCH_PALETTE = [
+  'bg-sky-500',
+  'bg-amber-500',
+  'bg-fuchsia-500',
+  'bg-rose-500',
+  'bg-indigo-500',
+  'bg-orange-500',
+] as const
+
+/**
+ * Map a subscription provider name to a stable swatch color class.
+ * Indexed by alphabetical position within configuredSubscriptionProviders
+ * rather than by name-hash — the user-facing guarantee is that any two
+ * distinct providers in *the operator's actual setup* get different
+ * colors (which a hash can't guarantee: real-world strings like
+ * "ollama-cloud" and "openai" collide on small palettes). Alphabetical
+ * sort makes the assignment deterministic regardless of /api/providers
+ * response order. Adding a new provider can shift colors of providers
+ * alphabetically after it; acceptable for a setup that changes rarely.
+ */
+const providerSwatchColorByName = computed<Map<string, string>>(() => {
+  const map = new Map<string, string>()
+  const sorted = [...configuredSubscriptionProviders.value]
+    .sort((a, b) => a.name.localeCompare(b.name))
+  sorted.forEach((p, i) => {
+    map.set(p.name, PROVIDER_SWATCH_PALETTE[i % PROVIDER_SWATCH_PALETTE.length]!)
+  })
+  return map
+})
+
+function providerSwatchColor(provider: string | undefined): string {
+  if (!provider) return 'bg-fg-muted'
+  return providerSwatchColorByName.value.get(provider) ?? 'bg-fg-muted'
+}
 
 // CSV export. Generates per-model breakdown (one row per model with cost
 // and token totals) since that's the most actionable view; the operator
@@ -1070,11 +1114,24 @@ defineExpose({ refresh })
             >
               {{ r.label }}
             </div>
-            <div class="relative h-5 bg-muted/30 border border-border overflow-hidden">
+            <div class="relative h-5 bg-muted/30 border border-border overflow-hidden flex">
+              <!-- Per-provider color swatch — a thin band glued to the
+                   bar's leading edge, color-keyed via providerSwatchColor.
+                   Sized fixed (w-1.5) so even a tiny bar reads as
+                   "from provider X, small allocation"; the emerald
+                   fill to the right is unchanged so "emerald = cost"
+                   still holds. -->
               <div
-                class="h-full bg-emerald-500/30"
-                :style="{ width: ((r.cost / subscriptionChartMaxCost) * 100).toFixed(2) + '%' }"
+                class="h-full w-1.5 shrink-0"
+                :class="providerSwatchColor(r.modelProvider)"
+                :title="r.modelProvider ?? ''"
               />
+              <div class="relative h-full grow">
+                <div
+                  class="h-full bg-emerald-500/30"
+                  :style="{ width: ((r.cost / subscriptionChartMaxCost) * 100).toFixed(2) + '%' }"
+                />
+              </div>
             </div>
             <div class="font-mono text-emerald-700 dark:text-emerald-400 tabular-nums shrink-0">
               {{ formatCostUsd(r.cost) }}

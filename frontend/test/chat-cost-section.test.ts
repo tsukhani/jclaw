@@ -735,4 +735,56 @@ describe('ChatCostSection (JCLAW-28)', () => {
     // surface the "TOTAL" string from the table tbody/tfoot).
     expect(wrapper.findAll('tfoot').length).toBe(0)
   })
+
+  it('color-keys subscription chart bars by provider via a leading swatch', async () => {
+    // Two different providers → their swatch elements pick up two
+    // different bg-* classes from the palette. We assert distinctness
+    // rather than exact color, so the palette can be reordered without
+    // breaking the test.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+        { name: 'openai', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 20 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 500, completion: 250, promptPrice: 0, completionPrice: 0,
+        } },
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'gpt-5', modelProvider: 'openai',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await flushPromises()
+    const chartBtn = wrapper.findAll('button')
+      .find(b => b.attributes('title') === 'Bar chart view')!
+    await chartBtn.trigger('click')
+    await flushPromises()
+
+    // Each swatch div carries title=<provider-name>; we use that to
+    // pick out the two swatch divs and read their class attributes.
+    // The two providers should resolve to two different bg-* tokens
+    // from the palette.
+    const swatches = wrapper.findAll('div')
+      .filter(d => d.attributes('title') === 'ollama-cloud'
+        || d.attributes('title') === 'openai')
+    expect(swatches.length).toBeGreaterThanOrEqual(2)
+    const classByProvider = new Map<string, string>()
+    for (const s of swatches) {
+      const provider = s.attributes('title')!
+      const klass = s.attributes('class') ?? ''
+      const bgToken = klass.split(/\s+/).find(t => t.startsWith('bg-'))
+      if (bgToken) classByProvider.set(provider, bgToken)
+    }
+    expect(classByProvider.get('ollama-cloud')).toBeDefined()
+    expect(classByProvider.get('openai')).toBeDefined()
+    expect(classByProvider.get('ollama-cloud')).not.toBe(classByProvider.get('openai'))
+  })
 })
