@@ -787,4 +787,65 @@ describe('ChatCostSection (JCLAW-28)', () => {
     expect(classByProvider.get('openai')).toBeDefined()
     expect(classByProvider.get('ollama-cloud')).not.toBe(classByProvider.get('openai'))
   })
+
+  it('chip cards share the same swatch color as their chart bars', async () => {
+    // For each provider, the chip's leading swatch band and the
+    // corresponding chart bar's swatch overlay should resolve to the
+    // exact same bg-* token, so operators can match chip ↔ bar by
+    // color. Asserted in chart view because that's where the bars
+    // are rendered.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+        { name: 'openai', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 20 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 500, completion: 250, promptPrice: 0, completionPrice: 0,
+        } },
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'gpt-5', modelProvider: 'openai',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await flushPromises()
+    const chartBtn = wrapper.findAll('button')
+      .find(b => b.attributes('title') === 'Bar chart view')!
+    await chartBtn.trigger('click')
+    await flushPromises()
+
+    function extractBg(klass: string | undefined): string | undefined {
+      return klass?.split(/\s+/).find(t => t.startsWith('bg-'))
+    }
+
+    // Chip's leading swatch is the first child div of its button.
+    const ollamaChip = wrapper.findAll('button')
+      .find(b => b.attributes('aria-pressed') !== undefined
+        && b.text().includes('Ollama Cloud'))!
+    const openaiChip = wrapper.findAll('button')
+      .find(b => b.attributes('aria-pressed') !== undefined
+        && b.text().includes('OpenAI'))!
+    const ollamaChipColor = extractBg(ollamaChip.find('div').attributes('class'))
+    const openaiChipColor = extractBg(openaiChip.find('div').attributes('class'))
+
+    // Bar swatches are findable by title=<provider name>.
+    const ollamaBarSwatch = wrapper.findAll('div')
+      .find(d => d.attributes('title') === 'ollama-cloud')!
+    const openaiBarSwatch = wrapper.findAll('div')
+      .find(d => d.attributes('title') === 'openai')!
+    const ollamaBarColor = extractBg(ollamaBarSwatch.attributes('class'))
+    const openaiBarColor = extractBg(openaiBarSwatch.attributes('class'))
+
+    expect(ollamaChipColor).toBeDefined()
+    expect(openaiChipColor).toBeDefined()
+    expect(ollamaChipColor).toBe(ollamaBarColor)
+    expect(openaiChipColor).toBe(openaiBarColor)
+  })
 })

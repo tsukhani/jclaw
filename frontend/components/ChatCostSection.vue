@@ -930,7 +930,7 @@ defineExpose({ refresh })
               :aria-pressed="selectedSubscriptionProvider === p.name"
               :disabled="selectedSubscriptionProvider !== p.name
                 && !subscriptionProvidersWithUsage.has(p.name)"
-              class="border px-3 py-2 min-w-[9rem] text-left transition-colors"
+              class="border min-w-[9rem] text-left transition-colors flex items-stretch"
               :class="selectedSubscriptionProvider === p.name
                 ? 'border-emerald-600 dark:border-emerald-400 bg-muted/40'
                 : subscriptionProvidersWithUsage.has(p.name)
@@ -938,16 +938,27 @@ defineExpose({ refresh })
                   : 'border-border bg-muted/10 opacity-50 cursor-not-allowed'"
               @click="onSubscriptionChipClick(p.name)"
             >
-              <div class="text-[10px] text-fg-muted uppercase tracking-wide">
-                {{ p.displayName }}
-              </div>
+              <!-- Same per-provider swatch as the chart bar below — the
+                   chip and the bar share a single color per provider so
+                   the operator can match chip ↔ bar at a glance. Sits
+                   on the chip's leading edge as a 6px band, stretched
+                   to the chip's full height via items-stretch. -->
               <div
-                class="mt-0.5 font-mono text-sm"
-                :class="selectedSubscriptionProvider === p.name
-                  ? 'text-emerald-700 dark:text-emerald-400'
-                  : 'text-fg-primary'"
-              >
-                {{ formatStatCurrency(p.proRatedFee) }}
+                class="w-1.5 shrink-0"
+                :class="providerSwatchColor(p.name)"
+              />
+              <div class="px-3 py-2 flex-1">
+                <div class="text-[10px] text-fg-muted uppercase tracking-wide">
+                  {{ p.displayName }}
+                </div>
+                <div
+                  class="mt-0.5 font-mono text-sm"
+                  :class="selectedSubscriptionProvider === p.name
+                    ? 'text-emerald-700 dark:text-emerald-400'
+                    : 'text-fg-primary'"
+                >
+                  {{ formatStatCurrency(p.proRatedFee) }}
+                </div>
               </div>
             </button>
           </div>
@@ -1114,24 +1125,25 @@ defineExpose({ refresh })
             >
               {{ r.label }}
             </div>
-            <div class="relative h-5 bg-muted/30 border border-border overflow-hidden flex">
-              <!-- Per-provider color swatch — a thin band glued to the
-                   bar's leading edge, color-keyed via providerSwatchColor.
-                   Sized fixed (w-1.5) so even a tiny bar reads as
-                   "from provider X, small allocation"; the emerald
-                   fill to the right is unchanged so "emerald = cost"
-                   still holds. -->
+            <div class="relative h-5 bg-muted/30 border border-border overflow-hidden">
+              <!-- Emerald fill in normal flow so it starts at the bar's
+                   left edge (x=0) and its right edge sits at the
+                   proportional position — same logical alignment as the
+                   per-token chart bars above, which carry no swatch. -->
               <div
-                class="h-full w-1.5 shrink-0"
+                class="h-full bg-emerald-500/30"
+                :style="{ width: ((r.cost / subscriptionChartMaxCost) * 100).toFixed(2) + '%' }"
+              />
+              <!-- Per-provider color swatch overlays the leftmost 6px on
+                   top of the emerald — the fill's logical left edge
+                   stays at x=0, the swatch is a colored badge that
+                   identifies the provider without displacing the bar.
+                   Keeps "emerald = cost" intact across the dashboard. -->
+              <div
+                class="absolute inset-y-0 left-0 w-1.5"
                 :class="providerSwatchColor(r.modelProvider)"
                 :title="r.modelProvider ?? ''"
               />
-              <div class="relative h-full grow">
-                <div
-                  class="h-full bg-emerald-500/30"
-                  :style="{ width: ((r.cost / subscriptionChartMaxCost) * 100).toFixed(2) + '%' }"
-                />
-              </div>
             </div>
             <div class="font-mono text-emerald-700 dark:text-emerald-400 tabular-nums shrink-0">
               {{ formatCostUsd(r.cost) }}
