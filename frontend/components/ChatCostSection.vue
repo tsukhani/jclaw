@@ -118,6 +118,23 @@ const { data: costData, refresh, pending } = useFetch<CostResponse>('/api/metric
   watch: [sinceParam],
 })
 
+// JCLAW-289: poll on the same 5 s tick the parent dashboard uses for
+// Chat Performance and Recent Activity. Owning the timer here (instead
+// of letting the parent drive refresh via defineExpose) keeps the fetch
+// and its refresh cadence in one file, and makes the component
+// self-contained — useful for the rare consumer that mounts ChatCostSection
+// outside the dashboard. useFetch keeps prior data visible while the
+// next request is in flight, so the tick is silent — no loading flicker.
+let pollTimer: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  pollTimer = setInterval(() => {
+    refresh()
+  }, 5000)
+})
+onBeforeUnmount(() => {
+  if (pollTimer) clearInterval(pollTimer)
+})
+
 const rows = computed<FleetCostRow[]>(() => costData.value?.rows ?? [])
 
 // JCLAW-280: provider modality + monthly subscription price. Drives the
