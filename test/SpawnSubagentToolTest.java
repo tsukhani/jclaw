@@ -837,6 +837,311 @@ class SpawnSubagentToolTest extends UnitTest {
                 "no SUBAGENT_LIMIT_EXCEEDED event on the happy path");
     }
 
+    // ─── JCLAW-270: async spawn via announce flow ────────────────────────
+
+    @Test
+    void asyncSpawnReturnsImmediatelyAndAnnouncesOnCompletion() throws Exception {
+        // JCLAW-270 happy path: async=true returns {run_id, conversation_id,
+        // status: RUNNING} immediately; the background VT runs AgentRunner.run,
+        // posts a system-role announce Message into the parent Conversation
+        // carrying messageKind=subagent_announce and the structured metadata
+        // payload, updates the SubagentRun to COMPLETED, and emits
+        // SUBAGENT_SPAWN (immediate) + SUBAGENT_COMPLETE (terminal).
+        startLlmServer(simpleResponse("Subagent reply: async done."));
+        configureProvider();
+
+        var parent = createAgent("p-async-ok", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-async-ok");
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id,
+                "{\"task\":\"async work\",\"label\":\"async-task\",\"async\":true}");
+
+        var parsed = JsonParser.parseString(reply).getAsJsonObject();
+        assertEquals("RUNNING", parsed.get("status").getAsString(),
+                "async spawn must return status=RUNNING immediately, got: " + reply);
+        assertNotNull(parsed.get("run_id").getAsString());
+        assertNotNull(parsed.get("conversation_id").getAsString());
+        // Reply field is NOT in the async return — that's the announce's job.
+        assertFalse(parsed.has("reply"),
+                "async return must not carry a 'reply' field — that arrives via the announce");
+
+        var runId = Long.parseLong(parsed.get("run_id").getAsString());
+
+        // Await the background VT's terminal state. Poll for the COMPLETED
+        // status; bounded by a generous 10s budget so a slow test runner
+        // doesn't flake.
+        awaitTerminalStatus(runId, SubagentRun.Status.COMPLETED, 10_000);
+        EventLogger.flush();
+
+        JPA.em().clear();
+        SubagentRun run = SubagentRun.findById(runId);
+        assertNotNull(run);
+        assertEquals(SubagentRun.Status.COMPLETED, run.status);
+        assertEquals("Subagent reply: async done.", run.outcome);
+        assertNotNull(run.endedAt);
+
+        // Announce Message landed in the PARENT Conversation with the
+        // discriminator + payload.
+        java.util.List<Message> announces = Message.find(
+                "conversation = ?1 AND messageKind = ?2 ORDER BY createdAt ASC",
+                Conversation.findById(parentConv.id), SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE).fetch();
+        assertEquals(1, announces.size(),
+                "exactly one announce Message must land in the parent conversation");
+        var announce = announces.getFirst();
+        assertEquals("system", announce.role,
+                "announce Message must use SYSTEM role so it doesn't impersonate the LLM or trigger a response cycle");
+        assertNotNull(announce.metadata, "announce Message must carry a structured metadata payload");
+        var payload = JsonParser.parseString(announce.metadata).getAsJsonObject();
+        assertEquals(runId, payload.get("runId").getAsLong());
+        assertEquals("async-task", payload.get("label").getAsString());
+        assertEquals("COMPLETED", payload.get("status").getAsString());
+        assertEquals("Subagent reply: async done.", payload.get("reply").getAsString());
+        assertEquals(run.childConversation.id, (Long) payload.get("childConversationId").getAsLong());
+
+        // Lifecycle events: SPAWN immediate + COMPLETE on terminal. No ERROR.
+        java.util.List<EventLog> spawnEvents = EventLog.find(
+                "category = ?1 AND agentId = ?2",
+                EventLogger.SUBAGENT_SPAWN, parent.name).fetch();
+        assertEquals(1, spawnEvents.size(), "exactly one SUBAGENT_SPAWN event");
+        java.util.List<EventLog> completeEvents = EventLog.find(
+                "category = ?1 AND agentId = ?2",
+                EventLogger.SUBAGENT_COMPLETE, parent.name).fetch();
+        assertEquals(1, completeEvents.size(), "exactly one SUBAGENT_COMPLETE event");
+        java.util.List<EventLog> errorEvents = EventLog.find(
+                "category = ?1 AND agentId = ?2",
+                EventLogger.SUBAGENT_ERROR, parent.name).fetch();
+        assertTrue(errorEvents.isEmpty(),
+                "async happy path must not emit SUBAGENT_ERROR");
+    }
+
+    @Test
+    void asyncSpawnFailureAnnouncesError() throws Exception {
+        // JCLAW-270 failure path: drive the runAsyncAndAnnounce VT body
+        // directly with a bogus childAgentId so the IllegalStateException
+        // ("Subagent rows vanished before AgentRunner.run") fires inside the
+        // wrapped Future. The catch block must mark the SubagentRun FAILED,
+        // post an announce Message with status=FAILED, and emit
+        // SUBAGENT_ERROR. Calling the static helper directly avoids racing
+        // the production VT (which would either win and produce COMPLETED
+        // before we could clobber inputs, or hang the test).
+        //
+        // We still bootstrap a real SubagentRun row + parent Conversation so
+        // the announce path has a real target to write into.
+        var parent = createAgent("p-async-fail", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-async-fail");
+        var childAgent = createAgent("p-async-fail-child", "test-provider", "test-model");
+        childAgent.parentAgent = parent;
+        childAgent.save();
+        var childConv = ConversationService.create(childAgent,
+                SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+        childConv.parentConversation = parentConv;
+        childConv.save();
+        var run = new SubagentRun();
+        run.parentAgent = parent;
+        run.childAgent = childAgent;
+        run.parentConversation = parentConv;
+        run.childConversation = childConv;
+        run.status = SubagentRun.Status.RUNNING;
+        run.save();
+        var runId = run.id;
+        var childConvId = childConv.id;
+        var parentConvId = parentConv.id;
+        var parentName = parent.name;
+
+        commitAndReopen();
+
+        // Use a deliberately non-existent childAgentId so the VT's
+        // Agent.findById returns null and runAsyncAndAnnounce's wrapped
+        // Future throws IllegalStateException. No delete required — the
+        // bogus id bypasses the Hibernate cascade that previously fired
+        // TransientPropertyValueException on AgentToolConfig flushes.
+        long bogusChildAgentId = 999_999_999L;
+        SpawnSubagentTool.runAsyncAndAnnounce(
+                runId, bogusChildAgentId, childConvId, parentConvId,
+                parentName, "session", "fresh", "will-fail",
+                30, "async-fail-task");
+        EventLogger.flush();
+
+        JPA.em().clear();
+        SubagentRun fresh = SubagentRun.findById(runId);
+        assertNotNull(fresh);
+        assertEquals(SubagentRun.Status.FAILED, fresh.status,
+                "FAILED async spawn must stamp the audit row FAILED");
+        assertNotNull(fresh.outcome, "FAILED run must record the error reason");
+
+        java.util.List<Message> announces = Message.find(
+                "conversation = ?1 AND messageKind = ?2",
+                Conversation.findById(parentConvId),
+                SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE).fetch();
+        assertEquals(1, announces.size(),
+                "FAILED async spawn must post an announce Message");
+        var payload = JsonParser.parseString(((Message) announces.getFirst()).metadata).getAsJsonObject();
+        assertEquals("FAILED", payload.get("status").getAsString());
+        assertEquals(childConvId, (Long) payload.get("childConversationId").getAsLong());
+
+        java.util.List<EventLog> errorEvents = EventLog.find(
+                "category = ?1 AND agentId = ?2",
+                EventLogger.SUBAGENT_ERROR, parentName).fetch();
+        assertEquals(1, errorEvents.size(),
+                "FAILED async spawn must emit exactly one SUBAGENT_ERROR");
+    }
+
+    @Test
+    void asyncSpawnTimeoutAnnouncesTimeout() throws Exception {
+        // JCLAW-270 timeout path: long-running mock + short timeout. The VT's
+        // Future.get(1s) trips, the announce records TIMEOUT, the SubagentRun
+        // is stamped TIMEOUT, and SUBAGENT_TIMEOUT fires.
+        var llmGate = new java.util.concurrent.CountDownLatch(1);
+        startLlmServer(exchange -> {
+            try { llmGate.await(15, java.util.concurrent.TimeUnit.SECONDS); }
+            catch (InterruptedException _) { Thread.currentThread().interrupt(); }
+            var body = simpleResponse("late");
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.getBytes().length);
+            exchange.getResponseBody().write(body.getBytes());
+            exchange.close();
+        });
+        configureProvider();
+
+        var parent = createAgent("p-async-timeout", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-async-timeout");
+
+        commitAndReopen();
+
+        try {
+            var reply = invokeOnVirtualThread(parent.id,
+                    "{\"task\":\"slow\",\"async\":true,\"runTimeoutSeconds\":1}");
+            var parsed = JsonParser.parseString(reply).getAsJsonObject();
+            assertEquals("RUNNING", parsed.get("status").getAsString(), reply);
+            var runId = Long.parseLong(parsed.get("run_id").getAsString());
+
+            awaitTerminalStatus(runId, SubagentRun.Status.TIMEOUT, 10_000);
+            EventLogger.flush();
+
+            JPA.em().clear();
+            SubagentRun run = SubagentRun.findById(runId);
+            assertEquals(SubagentRun.Status.TIMEOUT, run.status);
+            assertNotNull(run.endedAt);
+
+            java.util.List<Message> announces = Message.find(
+                    "conversation = ?1 AND messageKind = ?2",
+                    Conversation.findById(parentConv.id),
+                    SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE).fetch();
+            assertEquals(1, announces.size(),
+                    "TIMEOUT path must still post an announce");
+            var payload = JsonParser.parseString(((Message) announces.getFirst()).metadata).getAsJsonObject();
+            assertEquals("TIMEOUT", payload.get("status").getAsString());
+            assertTrue(payload.get("reply").getAsString().contains("exceeded"),
+                    "TIMEOUT reply must surface the budget-exceeded reason, got: " + payload.get("reply").getAsString());
+
+            java.util.List<EventLog> timeoutEvents = EventLog.find(
+                    "category = ?1", EventLogger.SUBAGENT_TIMEOUT).fetch();
+            assertEquals(1, timeoutEvents.size(),
+                    "TIMEOUT path must emit exactly one SUBAGENT_TIMEOUT event");
+        } finally {
+            llmGate.countDown();
+        }
+    }
+
+    @Test
+    void asyncWithInlineModeIsRejected() throws Exception {
+        // JCLAW-270 design constraint: async + inline doesn't fit semantically
+        // (inline embeds child messages mid-parent-transcript; returning
+        // before the child finishes leaves a half-written nested block).
+        // The tool rejects this combination up-front with a clear error and
+        // does not insert a SubagentRun row.
+        var parent = createAgent("p-async-inline", "test-provider", "test-model");
+        ConversationService.create(parent, "web", "u-async-inline");
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id,
+                "{\"task\":\"x\",\"async\":true,\"mode\":\"inline\"}");
+        assertTrue(reply.startsWith("Error: 'async' is only compatible with mode=\"session\""),
+                "async+inline must produce a plain-text rejection, got: " + reply);
+
+        JPA.em().clear();
+        assertEquals(0, SubagentRun.count(),
+                "async+inline rejection must not insert a SubagentRun row");
+    }
+
+    @Test
+    void asyncReplyTruncationAt4000Chars() throws Exception {
+        // JCLAW-270 truncation invariant: the announce Message's reply field
+        // is hard-capped at 4000 characters with an ellipsis marker. The full
+        // reply remains accessible via the announce card's "View full" link
+        // to the child Conversation (which still has the untruncated final
+        // Message persisted).
+        var longReply = "x".repeat(5000);
+        startLlmServer(simpleResponse(longReply));
+        configureProvider();
+
+        var parent = createAgent("p-async-truncate", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-async-truncate");
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id,
+                "{\"task\":\"big\",\"async\":true}");
+        var parsed = JsonParser.parseString(reply).getAsJsonObject();
+        var runId = Long.parseLong(parsed.get("run_id").getAsString());
+
+        awaitTerminalStatus(runId, SubagentRun.Status.COMPLETED, 10_000);
+
+        JPA.em().clear();
+        java.util.List<Message> announces = Message.find(
+                "conversation = ?1 AND messageKind = ?2",
+                Conversation.findById(parentConv.id),
+                SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE).fetch();
+        assertEquals(1, announces.size());
+        var payload = JsonParser.parseString(((Message) announces.getFirst()).metadata).getAsJsonObject();
+        var announceReply = payload.get("reply").getAsString();
+        assertEquals(4000, announceReply.length(),
+                "truncated reply must be exactly 4000 chars, got: " + announceReply.length());
+        assertTrue(announceReply.endsWith("..."),
+                "truncated reply must end with the ellipsis marker");
+
+        // The child Conversation still carries the full reply on its
+        // assistant Message — operator can click "View full" to see it.
+        SubagentRun run = SubagentRun.findById(runId);
+        var childMessages = Message.find(
+                "conversation = ?1 AND role = ?2 ORDER BY createdAt DESC",
+                Conversation.findById(run.childConversation.id), "assistant").fetch();
+        assertFalse(childMessages.isEmpty(),
+                "child conversation must have at least one assistant message");
+        assertEquals(5000, ((Message) childMessages.getFirst()).content.length(),
+                "child conversation's assistant message must retain the untruncated reply");
+    }
+
+    @Test
+    void asyncAnnounceMessageIsExcludedFromLlmContext() throws Exception {
+        // JCLAW-270 regression: announce messages must NOT feed into a future
+        // turn's LLM context (they're UI-only structured cards; surfacing them
+        // would risk the model re-acknowledging an already-delivered result).
+        // {@link ConversationService#loadRecentMessages} filters by
+        // messageKind == null.
+        startLlmServer(simpleResponse("Subagent reply: async."));
+        configureProvider();
+
+        var parent = createAgent("p-async-llm-filter", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-async-llm-filter");
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id, "{\"task\":\"go\",\"async\":true}");
+        var parsed = JsonParser.parseString(reply).getAsJsonObject();
+        var runId = Long.parseLong(parsed.get("run_id").getAsString());
+        awaitTerminalStatus(runId, SubagentRun.Status.COMPLETED, 10_000);
+
+        JPA.em().clear();
+        var conv = (Conversation) Conversation.findById(parentConv.id);
+        var llmHistory = Tx.run(() -> ConversationService.loadRecentMessages(conv));
+        assertTrue(llmHistory.stream().noneMatch(m -> SpawnSubagentTool.MESSAGE_KIND_ANNOUNCE.equals(m.messageKind)),
+                "announce-kind messages must be filtered out of LLM context assembly");
+    }
+
     // ---- helpers ----
 
     private Agent createAgent(String name, String provider, String model) {
@@ -887,6 +1192,27 @@ class SpawnSubagentToolTest extends UnitTest {
             {"choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"finish_reason":"stop"}],
              "usage":{"prompt_tokens":10,"completion_tokens":5}}""".formatted(
                 content.replace("\"", "\\\""));
+    }
+
+    /**
+     * JCLAW-270: poll SubagentRun.status until it reaches the expected
+     * terminal state, or fail the assertion when the deadline is exceeded.
+     * Each poll runs in its own short Tx + em.clear so the read sees the
+     * VT's committed terminal update rather than a stale snapshot.
+     */
+    private static void awaitTerminalStatus(Long runId, SubagentRun.Status expected, long timeoutMillis) {
+        var deadline = System.currentTimeMillis() + timeoutMillis;
+        SubagentRun.Status seen = null;
+        while (System.currentTimeMillis() < deadline) {
+            JPA.em().clear();
+            var run = (SubagentRun) SubagentRun.findById(runId);
+            seen = run != null ? run.status : null;
+            if (seen == expected) return;
+            try { Thread.sleep(50); }
+            catch (InterruptedException _) { Thread.currentThread().interrupt(); return; }
+        }
+        fail("SubagentRun " + runId + " did not reach " + expected
+                + " within " + timeoutMillis + "ms (last seen: " + seen + ")");
     }
 
     /** Commit pending parent setup rows so the VT-dispatched child run can

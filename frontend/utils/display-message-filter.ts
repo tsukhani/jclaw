@@ -28,6 +28,10 @@ export interface DisplayMessageCandidate {
    *  first content/reasoning token — should render so the user sees
    *  live tool activity instead of a blank gap. */
   toolCalls?: { length?: number } | null
+  /** JCLAW-270: structured-card discriminator. Async-spawn completion
+   *  rows (system-role with messageKind="subagent_announce") must render
+   *  even though they have no LLM-shaped content. */
+  messageKind?: string | null
 }
 
 function hasToolCalls(m: DisplayMessageCandidate): boolean {
@@ -39,6 +43,9 @@ export function shouldDisplayMessage(
   streaming: boolean,
 ): boolean {
   if (m.role === 'tool') return false
+  // JCLAW-270: structured-card rows render based on messageKind, not on
+  // content shape — their metadata payload carries the visual data.
+  if (m.messageKind) return true
   if (m._key && !m.id && streaming && !m.content && !m.reasoning && !hasToolCalls(m)) return false
   return !!(m.content || m.reasoning || m.usage || hasToolCalls(m))
 }

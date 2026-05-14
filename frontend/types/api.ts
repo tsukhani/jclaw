@@ -118,6 +118,26 @@ export interface MessageAttachment {
   kind: 'IMAGE' | 'AUDIO' | 'FILE'
 }
 
+/**
+ * JCLAW-270: structured payload carried in {@link Message.metadata} when
+ * {@code messageKind === 'subagent_announce'}. Surfaced by the backend
+ * from the persisted async-spawn completion card.
+ */
+export interface SubagentAnnounceMetadata {
+  /** The id of the SubagentRun audit row this announce closes. */
+  runId: number
+  /** Short display name the parent supplied at spawn time (may be empty). */
+  label: string
+  /** Terminal status — one of COMPLETED, FAILED, TIMEOUT. */
+  status: 'COMPLETED' | 'FAILED' | 'TIMEOUT' | string
+  /** Child's final reply (or error message), truncated to 4000 chars
+   *  with an ellipsis marker. Full reply available at
+   *  /conversations/{childConversationId}. */
+  reply: string
+  /** Id of the child Conversation row — drives the "View full" link. */
+  childConversationId: number
+}
+
 /** A single message within a conversation. */
 export interface Message {
   /** Server-assigned id. Absent on optimistic/streaming placeholders until the backend persists the row. */
@@ -139,6 +159,13 @@ export interface Message {
    *  (the dominant case) — top-level turns and session-mode subagent
    *  children render normally. */
   subagentRunId?: number | null
+  /** JCLAW-270: discriminator for structured non-LLM-confusing messages
+   *  (e.g. async-spawn completion cards). When set, the chat view picks
+   *  a kind-specific render path instead of the assistant/user bubble. */
+  messageKind?: string | null
+  /** JCLAW-270: kind-specific JSON metadata. For {@code messageKind ===
+   *  'subagent_announce'} the shape is {@link SubagentAnnounceMetadata}. */
+  metadata?: SubagentAnnounceMetadata | Record<string, unknown> | null
   /** Frontend-only key assigned to optimistic/streaming placeholders. */
   _key?: string
   /** Client-only: whether the thinking/reasoning bubble is collapsed for this message. */

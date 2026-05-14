@@ -50,6 +50,8 @@ public class ApiConversationsController extends Controller {
                               String reasoning, String createdAt,
                               JsonElement usage,
                               Long subagentRunId,
+                              String messageKind,
+                              JsonElement metadata,
                               List<MessageAttachmentView> attachments) {}
 
     /** Per-attachment metadata surfaced to the frontend in /messages. The
@@ -191,6 +193,19 @@ public class ApiConversationsController extends Controller {
             // shape so the frontend's `m.subagentRunId` test stays falsy.
             if (m.subagentRunId != null) {
                 map.put("subagentRunId", m.subagentRunId);
+            }
+            // JCLAW-270: surface async-spawn announce metadata. The chat UI
+            // switches to the structured-card render path whenever
+            // {@code messageKind} is set; {@code metadata} carries the
+            // kind-specific JSON payload (e.g. {runId, label, status,
+            // reply, childConversationId} for "subagent_announce"). Both
+            // fields are omitted entirely when null so the dominant
+            // non-announce path stays small on the wire.
+            if (m.messageKind != null) {
+                map.put("messageKind", m.messageKind);
+                if (m.metadata != null) {
+                    map.put("metadata", jsonParser.parse(m.metadata));
+                }
             }
             // JCLAW-279: surface attachment metadata so the chat UI can render
             // download chips on conversation reload. Empty list rather than

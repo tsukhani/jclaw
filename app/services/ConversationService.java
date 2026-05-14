@@ -292,7 +292,16 @@ public class ConversationService {
         var floor = latestOf(conversation.contextSince, conversation.compactionSince);
         // findRecent returns DESC order; reversed() returns a read-only ASC view
         // without copying — uses JDK 21 SequencedCollection.
-        return Message.findRecent(conversation, maxMessages, floor).reversed();
+        var recent = Message.findRecent(conversation, maxMessages, floor).reversed();
+        // JCLAW-270: drop subagent-announce rows from LLM context assembly.
+        // They're UI-only structured cards; surfacing them to the model would
+        // both feed a system prompt the model didn't author and risk it
+        // re-acknowledging an already-delivered subagent result on the next
+        // turn. The Message row stays visible in the chat scrollback and
+        // sidebar — only the LLM view filters it out.
+        return recent.stream()
+                .filter(m -> m.messageKind == null)
+                .toList();
     }
 
     private static java.time.Instant latestOf(java.time.Instant a, java.time.Instant b) {

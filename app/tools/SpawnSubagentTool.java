@@ -9,6 +9,8 @@ import models.Agent;
 import models.AgentToolConfig;
 import models.Conversation;
 import models.SubagentRun;
+import models.Message;
+import models.MessageRole;
 import services.AgentService;
 import services.ConfigService;
 import services.ConversationService;
@@ -100,6 +102,18 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
     static final int DEFAULT_TIMEOUT_SECONDS = 300;
 
     /**
+     * JCLAW-270: hard cap on the reply-field length in async-spawn announce
+     * messages. The full reply is always available by navigating to the
+     * child conversation (the announce card surfaces a "View full" link);
+     * the inline preview is bounded so a runaway child can't blow up the
+     * parent's transcript or the chat UI's render budget.
+     */
+    static final int ANNOUNCE_REPLY_MAX_CHARS = 4000;
+
+    /** {@link Message#messageKind} value stamped on async-spawn announce rows. */
+    public static final String MESSAGE_KIND_ANNOUNCE = "subagent_announce";
+
+    /**
      * JCLAW-266: recursion caps. Defaults match Personal Edition posture —
      * single level of delegation (top-level Agent spawns one tier of
      * subagents, no grandchildren) and a small fan-out so one parent can't
@@ -165,6 +179,9 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                 `context` ("fresh" — default — gives the child an empty history; "inherit" \
                 injects a summary of your recent turns into the child's system prompt and \
                 grants it the union of your enabled tools and its own), \
+                `async` (false — default — blocks until the child finishes; true returns the \
+                run id immediately and posts a completion card to your conversation when \
+                the child terminates. Only compatible with mode="session"), \
                 `runTimeoutSeconds` (wall-clock budget, default 300).""";
     }
 
@@ -203,6 +220,11 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         props.put("runTimeoutSeconds", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
                 SchemaKeys.DESCRIPTION,
                 "Wall-clock budget for the synchronous run (default 300)"));
+        props.put("async", Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
+                SchemaKeys.DESCRIPTION,
+                "When true (default false), return the child's run id immediately and "
+                        + "post a structured completion card to your conversation when the "
+                        + "child terminates. Only compatible with mode=\"session\"."));
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, props,
@@ -249,6 +271,20 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                 : requestedContext.toLowerCase();
         if (!ALLOWED_CONTEXTS.contains(context)) {
             return "Error: 'context' must be one of " + ALLOWED_CONTEXTS + " (got '" + requestedContext + "').";
+        }
+
+        // JCLAW-270: async parameter — false (default) preserves the synchronous
+        // JCLAW-265 flow; true dispatches the child run to a background VT and
+        // returns the run id immediately. Async + inline is rejected because
+        // inline mode embeds the child's messages directly into the parent
+        // transcript; returning control to the LLM before the child finishes
+        // would leave a half-written nested block dangling. The completion-card
+        // post-flow (announce Message into the parent conversation) is the
+        // async equivalent of inline's inline-rendering — they're alternatives
+        // for surfacing child output, not complements.
+        var asyncRequested = optBool(args, "async");
+        if (asyncRequested && MODE_INLINE.equals(mode)) {
+            return "Error: 'async' is only compatible with mode=\"session\" (inline mode embeds child messages directly into the parent transcript, which has no meaningful semantics before the child finishes).";
         }
 
         // JCLAW-266: enforce recursion caps before touching the DB. Both checks
@@ -375,6 +411,31 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                     return null;
                 });
             });
+        }
+
+        // JCLAW-270: async branch — dispatch the run to a background VT and
+        // return immediately with {run_id, conversation_id, status: RUNNING}.
+        // The VT runs the same AgentRunner.run as the synchronous path and
+        // posts a structured announce Message into the parent conversation
+        // on terminal state (completion / failure / timeout). Async + inline
+        // was already rejected up top so this branch can hard-assume session
+        // mode (inlineMode == false, runIdForMarker == null).
+        if (asyncRequested) {
+            final var parentAgentName = parentAgent.name;
+            final var asyncMode = mode;
+            final var asyncContext = context;
+            final var asyncLabel = label;
+            final var asyncTimeoutSeconds = timeoutSeconds;
+            final var asyncTask = task;
+            Thread.ofVirtual().name("subagent-async-" + runId).start(() ->
+                    runAsyncAndAnnounce(runId, childAgentId, childConvId, parentConvIdFinal,
+                            parentAgentName, asyncMode, asyncContext, asyncLabel,
+                            asyncTimeoutSeconds, asyncTask));
+            var asyncPayload = new LinkedHashMap<String, Object>();
+            asyncPayload.put("run_id", runIdStr);
+            asyncPayload.put("conversation_id", String.valueOf(childConvId));
+            asyncPayload.put("status", SubagentRun.Status.RUNNING.name());
+            return utils.GsonHolder.INSTANCE.toJson(asyncPayload, Map.class);
         }
 
         // Step 4: synchronous AgentRunner.run on a VT so we can enforce the
@@ -818,5 +879,181 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         var el = obj.get(key);
         if (el == null || el.isJsonNull()) return fallback;
         try { return el.getAsInt(); } catch (RuntimeException e) { return fallback; }
+    }
+
+    private static boolean optBool(JsonObject obj, String key) {
+        var el = obj.get(key);
+        if (el == null || el.isJsonNull()) return false;
+        try { return el.getAsBoolean(); } catch (RuntimeException e) { return false; }
+    }
+
+    /**
+     * JCLAW-270: async-spawn body. Runs on a dedicated virtual thread
+     * (name {@code subagent-async-<runId>}) so the parent's tool-call return
+     * doesn't wait on the child's wall clock. The shape mirrors the
+     * synchronous flow (AgentRunner.run with a Future.get timeout) — when it
+     * terminates, this method writes the announce Message into the parent
+     * Conversation, updates the SubagentRun audit row, and fires the
+     * terminal lifecycle event (SUBAGENT_COMPLETE / SUBAGENT_ERROR /
+     * SUBAGENT_TIMEOUT).
+     *
+     * <p>Restart resilience: in-flight VTs do not survive a JVM restart.
+     * {@link jobs.SubagentOrphanRecoveryJob} marks any RUNNING SubagentRun
+     * older than a small window FAILED at boot so the audit log reflects
+     * truth; no announce Message is posted for orphans (the parent
+     * conversation may have moved on, surfacing a stale completion card
+     * would be more disruptive than helpful).
+     */
+    @SuppressWarnings("java:S1181")
+    public static void runAsyncAndAnnounce(Long runId, Long childAgentId, Long childConvId,
+                                            Long parentConvId, String parentAgentName,
+                                            String mode, String context, String label,
+                                            int timeoutSeconds, String task) {
+        SubagentRun.Status terminalStatus;
+        String reply;
+        String errorReason = null;
+
+        var future = CompletableFuture.supplyAsync(() -> {
+            var childAgent = Tx.run(() -> (Agent) Agent.findById(childAgentId));
+            var childConv = Tx.run(() -> (Conversation) Conversation.findById(childConvId));
+            if (childAgent == null || childConv == null) {
+                throw new IllegalStateException(
+                        "Subagent rows vanished before AgentRunner.run");
+            }
+            return AgentRunner.run(childAgent, childConv, task);
+        }, runnable -> Thread.ofVirtual().name("subagent-async-runner-" + runId).start(runnable));
+
+        try {
+            var result = future.get(timeoutSeconds, TimeUnit.SECONDS);
+            reply = result == null ? "" : result.response();
+            terminalStatus = SubagentRun.Status.COMPLETED;
+        } catch (TimeoutException te) {
+            future.cancel(true);
+            terminalStatus = SubagentRun.Status.TIMEOUT;
+            errorReason = "Subagent run exceeded %d-second budget".formatted(timeoutSeconds);
+            reply = "";
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            terminalStatus = SubagentRun.Status.FAILED;
+            errorReason = "Async subagent VT interrupted";
+            reply = "";
+        } catch (ExecutionException ee) {
+            var cause = ee.getCause() != null ? ee.getCause() : ee;
+            terminalStatus = SubagentRun.Status.FAILED;
+            errorReason = cause.getMessage() != null ? cause.getMessage() : cause.toString();
+            reply = "";
+        } catch (Throwable t) {
+            // Top-level guard: this is a background VT — must never let an
+            // unchecked failure escape (it would lose the announce + terminal
+            // event entirely). Stamp the audit row + announce as FAILED with
+            // the throwable's string form.
+            terminalStatus = SubagentRun.Status.FAILED;
+            errorReason = t.getMessage() != null ? t.getMessage() : t.toString();
+            reply = "";
+        }
+
+        // Update the SubagentRun audit row (terminal status + outcome).
+        final var finalStatus = terminalStatus;
+        final var finalReply = reply;
+        final var finalErrorReason = errorReason;
+        try {
+            Tx.run(() -> {
+                var fresh = (SubagentRun) SubagentRun.findById(runId);
+                if (fresh != null) {
+                    fresh.status = finalStatus;
+                    fresh.endedAt = Instant.now();
+                    fresh.outcome = finalStatus == SubagentRun.Status.COMPLETED
+                            ? finalReply
+                            : finalErrorReason;
+                    fresh.save();
+                }
+            });
+        } catch (Throwable t) {
+            EventLogger.warn("subagent",
+                    "Failed to persist terminal SubagentRun update for run " + runId
+                            + ": " + t.getMessage());
+        }
+
+        // Build + post the announce Message into the parent Conversation.
+        var announceBody = finalStatus == SubagentRun.Status.COMPLETED
+                ? finalReply
+                : (finalErrorReason != null ? finalErrorReason : "");
+        var truncated = truncateForAnnounce(announceBody);
+        try {
+            Tx.run(() -> postAnnounceMessage(
+                    parentConvId, runId, label, finalStatus, truncated, childConvId));
+        } catch (Throwable t) {
+            EventLogger.warn("subagent",
+                    "Failed to post announce Message for run " + runId
+                            + ": " + t.getMessage());
+        }
+
+        // Emit the terminal lifecycle event. The childName lookup runs in its
+        // own tx to dodge detached-entity issues on the VT.
+        var childName = lookupAgentName(childAgentId);
+        var runIdStr = String.valueOf(runId);
+        switch (finalStatus) {
+            case COMPLETED -> EventLogger.recordSubagentComplete(
+                    parentAgentName, childName, runIdStr, mode, context, "ok");
+            case TIMEOUT -> EventLogger.recordSubagentTimeout(parentAgentName, runIdStr);
+            default -> EventLogger.recordSubagentError(
+                    parentAgentName, childName, runIdStr,
+                    mode, context, finalErrorReason);
+        }
+        EventLogger.flush();
+    }
+
+    /**
+     * Hard-truncate to {@link #ANNOUNCE_REPLY_MAX_CHARS} with an ellipsis
+     * marker so the reader can tell the preview is bounded. The full reply
+     * stays accessible via the announce card's "View full" link to the
+     * child Conversation.
+     */
+    static String truncateForAnnounce(String s) {
+        if (s == null) return "";
+        if (s.length() <= ANNOUNCE_REPLY_MAX_CHARS) return s;
+        // Reserve 3 chars for the ellipsis so the visible char count
+        // including the marker matches ANNOUNCE_REPLY_MAX_CHARS exactly.
+        return s.substring(0, ANNOUNCE_REPLY_MAX_CHARS - 3) + "...";
+    }
+
+    /**
+     * Persist the announce Message into the parent Conversation. SYSTEM role
+     * with {@link #MESSAGE_KIND_ANNOUNCE} keeps the row out of the LLM context
+     * (see {@code ConversationService.loadRecentMessages}) while the chat UI
+     * picks it up via the {@code messageKind} discriminator and renders a
+     * structured card with the run id, label, status, truncated reply, and a
+     * "View full" link to the child Conversation. {@code content} carries a
+     * plain-text fallback for transports that don't understand the card.
+     */
+    private static void postAnnounceMessage(Long parentConvId, Long runId, String label,
+                                            SubagentRun.Status status, String truncatedReply,
+                                            Long childConvId) {
+        var parentConv = (Conversation) Conversation.findById(parentConvId);
+        if (parentConv == null) return;
+
+        var payload = new LinkedHashMap<String, Object>();
+        payload.put("runId", runId);
+        payload.put("label", label != null ? label : "");
+        payload.put("status", status.name());
+        payload.put("reply", truncatedReply != null ? truncatedReply : "");
+        payload.put("childConversationId", childConvId);
+
+        var fallbackLabel = label != null && !label.isBlank() ? label : "subagent run";
+        var fallback = "Subagent " + status.name().toLowerCase() + " (" + fallbackLabel + ")"
+                + (truncatedReply != null && !truncatedReply.isBlank()
+                        ? ": " + truncatedReply
+                        : "");
+
+        var msg = new Message();
+        msg.conversation = parentConv;
+        msg.role = MessageRole.SYSTEM.value;
+        msg.content = fallback;
+        msg.messageKind = MESSAGE_KIND_ANNOUNCE;
+        msg.metadata = utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+        msg.save();
+
+        parentConv.messageCount++;
+        parentConv.save();
     }
 }

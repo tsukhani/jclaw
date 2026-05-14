@@ -69,6 +69,30 @@ public class Message extends Model {
     @Column(columnDefinition = "TEXT")
     public String reasoning;
 
+    /**
+     * JCLAW-270: discriminator for non-LLM-confusing system-role messages that
+     * the chat UI should render as a structured card rather than as an opaque
+     * system prompt. Currently {@code "subagent_announce"} for async-spawn
+     * completion announcements. Null for every other row — the dominant case.
+     *
+     * <p>The chat view inspects this field and, when set, switches the message
+     * to a kind-specific render path (the subagent announce card) instead of
+     * the assistant-or-user bubble. The LLM's view of history excludes these
+     * rows entirely so they never feed back into a future turn's context.
+     */
+    @Column(name = "message_kind")
+    public String messageKind;
+
+    /**
+     * JCLAW-270: kind-specific JSON payload for rows whose {@link #messageKind}
+     * is set. For {@code "subagent_announce"} the payload carries
+     * {@code {runId, label, status, reply, childConversationId}}. Frontend
+     * parses this and renders the announce card; LLM history assembly ignores
+     * the column. Null when {@link #messageKind} is null.
+     */
+    @Column(name = "metadata", columnDefinition = "TEXT")
+    public String metadata;
+
     /** JSON-serialized usage metrics (tokens, cost, duration) from the LLM response. */
     @Column(name = "usage_json", columnDefinition = "TEXT")
     public String usageJson;

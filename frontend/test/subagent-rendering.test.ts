@@ -127,6 +127,91 @@ describe('Chat page — inline-subagent rendering (JCLAW-267)', () => {
   })
 })
 
+describe('Chat page — async-spawn announce card (JCLAW-270)', () => {
+  it('renders the announce card with label, status, truncated reply, and view-full link', async () => {
+    setupBaseAgents()
+    registerEndpoint('/api/conversations', () => [
+      { id: 50, agentId: 1, agentName: 'main-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 3, preview: 'async demo',
+        createdAt: '2026-05-14T10:00:00Z', updatedAt: '2026-05-14T10:00:00Z' },
+    ])
+    // Fixture: parent prompt → assistant tool-call → SYSTEM announce row
+    // with structured metadata. The announce row carries no content beyond
+    // its plain-text fallback; the chat view's render path picks the card
+    // off the messageKind discriminator and reads the metadata payload.
+    registerEndpoint('/api/conversations/50/messages', () => [
+      { id: 1, role: 'user', content: 'do the thing async',
+        createdAt: '2026-05-14T10:00:00Z' },
+      { id: 2, role: 'assistant',
+        content: 'Spawning the work in the background.',
+        createdAt: '2026-05-14T10:00:01Z' },
+      { id: 3, role: 'system',
+        content: 'Subagent completed (research-x): result body...',
+        messageKind: 'subagent_announce',
+        metadata: {
+          runId: 77,
+          label: 'research-x',
+          status: 'COMPLETED',
+          reply: 'I researched X and found the following...',
+          childConversationId: 101,
+        },
+        createdAt: '2026-05-14T10:01:00Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(50)
+    await flushPromises()
+
+    const card = component.find('[data-testid="subagent-announce-card"]')
+    expect(card.exists()).toBe(true)
+    const cardText = card.text()
+    expect(cardText).toContain('research-x')
+    expect(cardText).toContain('COMPLETED')
+    expect(cardText).toContain('I researched X and found the following')
+
+    const viewFull = component.find('[data-testid="subagent-announce-view-full"]')
+    expect(viewFull.exists()).toBe(true)
+    // NuxtLink renders an <a> when SPA-routing; the href targets the child
+    // conversation via the chat page's deep-link query param.
+    expect(viewFull.attributes('href')).toContain('conversation=101')
+  })
+
+  it('renders a FAILED status pill when the announce reports failure', async () => {
+    setupBaseAgents()
+    registerEndpoint('/api/conversations', () => [
+      { id: 51, agentId: 1, agentName: 'main-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 1, preview: 'failed async',
+        createdAt: '2026-05-14T10:00:00Z', updatedAt: '2026-05-14T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/51/messages', () => [
+      { id: 10, role: 'system',
+        content: 'Subagent failed: provider 503',
+        messageKind: 'subagent_announce',
+        metadata: {
+          runId: 88,
+          label: 'flaky-task',
+          status: 'FAILED',
+          reply: 'provider 503',
+          childConversationId: 110,
+        },
+        createdAt: '2026-05-14T10:01:00Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(51)
+    await flushPromises()
+
+    const card = component.find('[data-testid="subagent-announce-card"]')
+    expect(card.exists()).toBe(true)
+    expect(card.text()).toContain('FAILED')
+    expect(card.text()).toContain('flaky-task')
+  })
+})
+
 describe('Conversations sidebar — subagent badge (JCLAW-267)', () => {
   it('renders the subagent badge for rows with a parentConversationId', async () => {
     registerEndpoint('/api/agents', () => [
