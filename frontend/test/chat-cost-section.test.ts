@@ -848,4 +848,44 @@ describe('ChatCostSection (JCLAW-28)', () => {
     expect(ollamaChipColor).toBe(ollamaBarColor)
     expect(openaiChipColor).toBe(openaiBarColor)
   })
+
+  it('renders the per-provider swatch on subscription table rows too', async () => {
+    // The swatch should appear in the model name cell in both table
+    // and chart views so the operator's color memory carries over
+    // when they flip between them. Asserted in table view (the
+    // default) because that's the case the user flagged as missing.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+        { name: 'openai', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 20 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 500, completion: 250, promptPrice: 0, completionPrice: 0,
+        } },
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'gpt-5', modelProvider: 'openai',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await flushPromises()
+
+    // Each provider should have at least one swatch element in the
+    // rendered DOM whose title attribute points to it — the swatch in
+    // the table row's model cell. (Chip swatches don't carry a title
+    // since the chip label already names the provider next to them.)
+    const ollamaSwatches = wrapper.findAll('span, div')
+      .filter(el => el.attributes('title') === 'ollama-cloud')
+    const openaiSwatches = wrapper.findAll('span, div')
+      .filter(el => el.attributes('title') === 'openai')
+    expect(ollamaSwatches.length).toBeGreaterThanOrEqual(1)
+    expect(openaiSwatches.length).toBeGreaterThanOrEqual(1)
+  })
 })

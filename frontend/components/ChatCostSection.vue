@@ -1039,10 +1039,24 @@ defineExpose({ refresh })
                 class="border-t border-border"
               >
                 <td class="px-4 py-2 font-mono text-fg-primary">
-                  <span
-                    v-if="m.modelProvider"
-                    class="text-fg-muted"
-                  >{{ m.modelProvider }}/</span>{{ m.modelId }}
+                  <!-- Same per-provider swatch as the chart view's
+                       label tag — kept here so the table and chart
+                       share one visual identity per provider; the
+                       operator's color memory carries over between
+                       the two views. -->
+                  <span class="inline-flex items-center gap-2 align-middle">
+                    <span
+                      class="inline-block w-2 h-2 shrink-0 rounded-sm"
+                      :class="providerSwatchColor(m.modelProvider)"
+                      :title="m.modelProvider ?? ''"
+                    />
+                    <span>
+                      <span
+                        v-if="m.modelProvider"
+                        class="text-fg-muted"
+                      >{{ m.modelProvider }}/</span>{{ m.modelId }}
+                    </span>
+                  </span>
                 </td>
                 <td class="px-3 py-2 text-right font-mono text-fg-primary">
                   {{ m.turnCount.toLocaleString() }}
