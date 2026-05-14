@@ -104,6 +104,17 @@ public class Conversation extends Model {
     @Column(name = "model_id_override")
     public String modelIdOverride;
 
+    /**
+     * Optional parent conversation (JCLAW-264). Set when this Conversation
+     * belongs to a subagent spawned from another conversation; null for
+     * top-level conversations, which is the default for every row created
+     * before JCLAW-264. Subagent spawning logic lives in JCLAW-265 — this
+     * column only carries the hierarchy.
+     */
+    @ManyToOne
+    @JoinColumn(name = "parent_conversation_id")
+    public Conversation parentConversation;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 

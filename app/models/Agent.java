@@ -53,6 +53,17 @@ public class Agent extends Model {
     @Column(name = "thinking_mode")
     public String thinkingMode;
 
+    /**
+     * Optional parent agent (JCLAW-264). Set when this Agent was spawned as a
+     * subagent of another Agent; null for top-level (operator-owned) agents,
+     * which is the default for every row created before JCLAW-264. Subagent
+     * spawning logic lives in JCLAW-265 — this column only carries the
+     * hierarchy.
+     */
+    @ManyToOne
+    @JoinColumn(name = "parent_agent_id")
+    public Agent parentAgent;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 
