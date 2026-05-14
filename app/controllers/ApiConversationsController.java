@@ -35,7 +35,8 @@ public class ApiConversationsController extends Controller {
     public record ConversationView(Long id, Long agentId, String agentName, String channelType,
                                    String peerId, String createdAt, String updatedAt,
                                    long messageCount, String preview,
-                                   String modelProviderOverride, String modelIdOverride) {}
+                                   String modelProviderOverride, String modelIdOverride,
+                                   Long parentConversationId) {}
 
     /** Documents the {@code GET /messages} response shape. The actual emission
      *  uses a HashMap because several fields are conditionally absent (only
@@ -48,6 +49,7 @@ public class ApiConversationsController extends Controller {
                               JsonElement toolResultStructured,
                               String reasoning, String createdAt,
                               JsonElement usage,
+                              Long subagentRunId,
                               List<MessageAttachmentView> attachments) {}
 
     /** Per-attachment metadata surfaced to the frontend in /messages. The
@@ -181,6 +183,14 @@ public class ApiConversationsController extends Controller {
             map.put("createdAt", m.createdAt.toString());
             if (m.usageJson != null) {
                 map.put("usage", jsonParser.parse(m.usageJson));
+            }
+            // JCLAW-267: marker for inline-mode subagent runs. The chat UI
+            // folds consecutive messages sharing this id into a single
+            // collapsible nested-turn block. Null for every non-inline-
+            // subagent row (the dominant case) and omitted from the wire
+            // shape so the frontend's `m.subagentRunId` test stays falsy.
+            if (m.subagentRunId != null) {
+                map.put("subagentRunId", m.subagentRunId);
             }
             // JCLAW-279: surface attachment metadata so the chat UI can render
             // download chips on conversation reload. Empty list rather than
@@ -410,6 +420,14 @@ public class ApiConversationsController extends Controller {
         // a persisted override.
         map.put("modelProviderOverride", c.modelProviderOverride);
         map.put("modelIdOverride", c.modelIdOverride);
+        // JCLAW-267: surface the parent-conversation FK so the sidebar can
+        // render a "child of parent X" badge for session-mode subagent
+        // conversations (they live as their own rows alongside top-level
+        // chats; the badge tells the operator at a glance which ones are
+        // delegated runs vs. user-initiated). Null for top-level convos.
+        if (c.parentConversation != null) {
+            map.put("parentConversationId", c.parentConversation.id);
+        }
         return map;
     }
 

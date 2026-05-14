@@ -19,6 +19,7 @@ import {
   PhotoIcon,
   SpeakerWaveIcon,
   TrashIcon,
+  UsersIcon,
   WrenchIcon,
   WrenchScrewdriverIcon,
   XMarkIcon,
@@ -1026,6 +1027,119 @@ const displayMessages = computed(() =>
   messages.value.filter(m => shouldDisplayMessage(m, streaming.value)),
 )
 
+/**
+ * JCLAW-267: state for the inline-subagent collapsible blocks. Each unique
+ * subagentRunId in {@link displayMessages} becomes one fold-able block; the
+ * Set tracks which blocks are currently collapsed. Default is "collapsed
+ * unless the run failed" — see {@link initSubagentCollapsedState} below.
+ */
+const collapsedSubagentRuns = ref<Set<number>>(new Set())
+
+/**
+ * Per-position grouping hints derived from {@link displayMessages}: for each
+ * message index, returns whether that message opens / continues / closes an
+ * inline-subagent run, and whether the surrounding run should be collapsed.
+ * Computed once per render so the template doesn't re-walk the list inside
+ * v-if guards.
+ */
+interface SubagentRunSlice {
+  runId: number
+  position: 'first' | 'middle' | 'last'
+  collapsed: boolean
+}
+const subagentRunSlices = computed<Array<SubagentRunSlice | null>>(() => {
+  const msgs = displayMessages.value
+  const out: Array<SubagentRunSlice | null> = []
+  for (let i = 0; i < msgs.length; i++) {
+    const runId = msgs[i]?.subagentRunId ?? null
+    if (!runId) {
+      out.push(null)
+      continue
+    }
+    const prevRunId = i > 0 ? (msgs[i - 1]?.subagentRunId ?? null) : null
+    const nextRunId = i < msgs.length - 1 ? (msgs[i + 1]?.subagentRunId ?? null) : null
+    const isFirst = prevRunId !== runId
+    const isLast = nextRunId !== runId
+    out.push({
+      runId,
+      position: isFirst ? 'first' : isLast ? 'last' : 'middle',
+      collapsed: collapsedSubagentRuns.value.has(runId),
+    })
+  }
+  return out
+})
+
+/**
+ * Initialize the collapsed state: every run in {@link displayMessages} starts
+ * collapsed UNLESS its boundary-end marker indicates a non-completed terminal
+ * status (failed / timed out) — operators want failed runs expanded by
+ * default so the error is visible without a click. Idempotent: re-running
+ * preserves the operator's per-run toggle state for runs already in the set.
+ */
+function initSubagentCollapsedState(msgs: Message[]): void {
+  const seen = new Set<number>()
+  const next = new Set<number>(collapsedSubagentRuns.value)
+  for (const m of msgs) {
+    const runId = m.subagentRunId ?? null
+    if (!runId || seen.has(runId)) continue
+    seen.add(runId)
+    if (next.has(runId)) continue // operator already toggled this run
+    // Walk forward to find the boundary-end marker for this run; expand the
+    // block by default on a failed terminal status so the error is visible.
+    let collapse = true
+    for (const m2 of msgs) {
+      if (m2.subagentRunId !== runId) continue
+      const c = m2.content ?? ''
+      if (c.startsWith('Subagent failed') || c.startsWith('Subagent timeout')) {
+        collapse = false
+        break
+      }
+    }
+    if (collapse) next.add(runId)
+  }
+  collapsedSubagentRuns.value = next
+}
+
+function toggleSubagentRun(runId: number): void {
+  const next = new Set(collapsedSubagentRuns.value)
+  if (next.has(runId)) next.delete(runId)
+  else next.add(runId)
+  collapsedSubagentRuns.value = next
+}
+
+/**
+ * Build the header label for an inline-subagent collapsible block. Derived
+ * from the boundary-start marker's content (set by SpawnSubagentTool); falls
+ * back to a neutral "Subagent run" label when the marker is absent (shouldn't
+ * happen in practice but defensive).
+ */
+function subagentBlockLabel(runId: number, msgs: Message[]): string {
+  for (const m of msgs) {
+    if (m.subagentRunId !== runId) continue
+    const c = m.content ?? ''
+    if (c.startsWith('Spawning subagent:')) {
+      return c.replace(/^Spawning subagent:\s*/, '').trim() || 'Subagent run'
+    }
+  }
+  return 'Subagent run'
+}
+
+/**
+ * Extract a short terminal-status hint ("Completed" / "Failed" / "Timed out" /
+ * "Running") for the run header from its boundary-end marker. Empty string
+ * while the block has no end marker yet (streaming case).
+ */
+function subagentBlockStatus(runId: number, msgs: Message[]): string {
+  for (const m of msgs) {
+    if (m.subagentRunId !== runId) continue
+    const c = m.content ?? ''
+    if (c.startsWith('Subagent completed')) return 'Completed'
+    if (c.startsWith('Subagent failed')) return 'Failed'
+    if (c.startsWith('Subagent timeout')) return 'Timed out'
+  }
+  return 'Running'
+}
+
 // Recompute the cost meter only when streaming is idle — usage lands at
 // end-of-turn, so any recompute mid-stream would walk every message and call
 // computeConversationCost for an unchanged value. The shallowRef migration
@@ -1149,6 +1263,7 @@ async function loadConversation(id: number) {
   }
   messages.value = loaded
   initCollapsedState(messages.value)
+  initSubagentCollapsedState(messages.value)
   scrollToBottom()
   focusInput()
 }
@@ -2053,6 +2168,49 @@ function exportConversation() {
               v-for="(msg, msgIdx) in displayMessages"
               :key="msg.id ?? msg._key"
             >
+              <!--
+                JCLAW-267: inline-subagent block header. Renders before the
+                FIRST message of each collapsible nested-turn block; clicking
+                it toggles the run's collapsed state. The header label is
+                derived from the boundary-start marker's content (set by
+                SpawnSubagentTool); the status pill comes from the boundary-
+                end marker.
+              -->
+              <div
+                v-if="subagentRunSlices[msgIdx]?.position === 'first'"
+                class="flex items-center gap-2 -mb-2 select-none"
+              >
+                <button
+                  type="button"
+                  class="flex items-center gap-2 px-3 py-1.5 text-xs text-fg-muted hover:text-fg-strong border border-neutral-200 dark:border-neutral-700 rounded-full bg-surface-elevated transition-colors"
+                  :title="subagentRunSlices[msgIdx]?.collapsed ? 'Expand subagent run' : 'Collapse subagent run'"
+                  @click="toggleSubagentRun(subagentRunSlices[msgIdx]!.runId)"
+                >
+                  <UsersIcon
+                    class="w-3.5 h-3.5 shrink-0"
+                    aria-hidden="true"
+                  />
+                  <span class="font-medium truncate max-w-xs">
+                    Subagent: {{ subagentBlockLabel(subagentRunSlices[msgIdx]!.runId, displayMessages) }}
+                  </span>
+                  <span
+                    class="px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wide rounded"
+                    :class="{
+                      'bg-muted text-fg-muted': subagentBlockStatus(subagentRunSlices[msgIdx]!.runId, displayMessages) === 'Running',
+                      'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300': subagentBlockStatus(subagentRunSlices[msgIdx]!.runId, displayMessages) === 'Completed',
+                      'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300': subagentBlockStatus(subagentRunSlices[msgIdx]!.runId, displayMessages) === 'Failed' || subagentBlockStatus(subagentRunSlices[msgIdx]!.runId, displayMessages) === 'Timed out',
+                    }"
+                  >
+                    {{ subagentBlockStatus(subagentRunSlices[msgIdx]!.runId, displayMessages) }}
+                  </span>
+                  <ChevronDownIcon
+                    class="w-3.5 h-3.5 transition-transform"
+                    :class="subagentRunSlices[msgIdx]?.collapsed ? '-rotate-90' : ''"
+                    aria-hidden="true"
+                  />
+                </button>
+                <span class="flex-1 border-t border-dashed border-neutral-200 dark:border-neutral-700" />
+              </div>
               <!-- JCLAW-108: divider when two adjacent assistant messages ran on
                  different models. Helps make mid-conversation /model switches
                  visible in the scrollback. -->
@@ -2065,6 +2223,7 @@ function exportConversation() {
                 <span class="flex-1 border-t border-border-subtle" />
               </div>
               <div
+                v-show="!subagentRunSlices[msgIdx] || !subagentRunSlices[msgIdx]?.collapsed"
                 :class="msg.role === 'user' ? 'flex justify-end' : 'flex justify-start'"
               >
                 <div

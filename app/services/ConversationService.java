@@ -17,6 +17,40 @@ public class ConversationService {
 
     private ConversationService() {}
 
+    /**
+     * JCLAW-267: per-thread inline-subagent-run marker. When non-null, every
+     * Message persisted via {@link #appendMessage} on the current (virtual)
+     * thread is stamped with this id so the chat UI can fold the nested-turn
+     * trace into a collapsible block. Set by
+     * {@link tools.SpawnSubagentTool} around its inline branch's
+     * {@code AgentRunner.run} call; cleared in a finally so unrelated traffic
+     * on the same carrier thread never inherits a stale marker.
+     *
+     * <p>Plain {@link ThreadLocal} (not {@link ScopedValue}) so virtual threads
+     * spawned by the inline run inherit nothing — the inline marker only
+     * applies to messages the parent's spawn thread persists, and AgentRunner
+     * runs everything on the calling thread anyway (its internal VTs are for
+     * outbound LLM HTTP, not message persistence).
+     */
+    private static final ThreadLocal<Long> INLINE_SUBAGENT_RUN_ID = new ThreadLocal<>();
+
+    /**
+     * Run {@code body} with {@link #INLINE_SUBAGENT_RUN_ID} bound to
+     * {@code runId} so every {@link #appendMessage} call made on the current
+     * thread stamps that id on the persisted Message. Always clears in a
+     * finally — never leak the marker back to the caller.
+     */
+    public static <T> T withSubagentRunIdMarker(Long runId, java.util.function.Supplier<T> body) {
+        var prev = INLINE_SUBAGENT_RUN_ID.get();
+        INLINE_SUBAGENT_RUN_ID.set(runId);
+        try {
+            return body.get();
+        } finally {
+            if (prev == null) INLINE_SUBAGENT_RUN_ID.remove();
+            else INLINE_SUBAGENT_RUN_ID.set(prev);
+        }
+    }
+
     public static Conversation findOrCreate(Agent agent, String channelType, String peerId) {
         var existing = Conversation.findByAgentChannelPeer(agent, channelType, peerId);
         if (existing != null) return existing;
@@ -72,6 +106,12 @@ public class ConversationService {
         msg.toolResults = toolResults;
         msg.usageJson = usageJson;
         msg.reasoning = reasoning;
+        // JCLAW-267: stamp the inline-subagent-run marker on every message
+        // persisted during an inline-mode child run so the chat UI can fold
+        // the nested-turn trace into a collapsible block. ThreadLocal is null
+        // (cleared) for every other call path — top-level turns and
+        // session-mode children alike.
+        msg.subagentRunId = INLINE_SUBAGENT_RUN_ID.get();
         msg.save();
 
         conversation.messageCount++;

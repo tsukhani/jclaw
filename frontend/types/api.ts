@@ -56,6 +56,12 @@ export interface Conversation {
   modelProviderOverride?: string | null
   /** Companion to modelProviderOverride — see type docs above. */
   modelIdOverride?: string | null
+  /** JCLAW-267: parent Conversation id when this row is the child end of a
+   *  session-mode subagent spawn. The sidebar uses this to render a
+   *  "subagent of parent N" hint so operators can distinguish delegated
+   *  runs from user-initiated chats at a glance. Null/absent for top-level
+   *  conversations. */
+  parentConversationId?: number | null
 }
 
 /**
@@ -127,6 +133,12 @@ export interface Message {
   /** JCLAW-279: persisted attachments on a user turn. Absent for assistant
    *  and tool rows. */
   attachments?: MessageAttachment[]
+  /** JCLAW-267: inline-subagent-run marker. When set, the chat view folds
+   *  consecutive messages sharing this id into a single collapsible
+   *  nested-turn block. Null/absent for every non-inline-subagent message
+   *  (the dominant case) — top-level turns and session-mode subagent
+   *  children render normally. */
+  subagentRunId?: number | null
   /** Frontend-only key assigned to optimistic/streaming placeholders. */
   _key?: string
   /** Client-only: whether the thinking/reasoning bubble is collapsed for this message. */

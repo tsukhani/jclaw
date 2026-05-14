@@ -247,11 +247,27 @@ const columns: ColumnDef<Conversation, unknown>[] = [
   {
     accessorKey: 'preview',
     header: 'Name',
-    cell: ({ getValue }) => {
+    cell: ({ row, getValue }) => {
       const v = getValue() as string | null
-      return v
-        ? h('span', { class: 'text-fg-primary truncate max-w-xs block', title: v }, v)
-        : h('span', { class: 'text-fg-muted' }, '—')
+      // JCLAW-267: session-mode subagent conversations carry a
+      // parentConversationId — render an inline "subagent" pill alongside
+      // the preview so operators can distinguish delegated runs from
+      // user-initiated chats at a glance. Top-level rows have no badge.
+      const parentId = row.original.parentConversationId
+      const children = [
+        v
+          ? h('span', { class: 'text-fg-primary truncate max-w-xs block', title: v }, v)
+          : h('span', { class: 'text-fg-muted' }, '—'),
+      ]
+      if (parentId != null) {
+        children.push(
+          h('span', {
+            class: 'inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wide rounded bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300',
+            title: `Subagent run spawned from conversation #${parentId}`,
+          }, 'subagent'),
+        )
+      }
+      return h('span', { class: 'inline-flex items-center gap-1.5' }, children)
     },
   },
   {

@@ -9,13 +9,31 @@ import java.util.List;
 @Entity
 @Table(name = "message", indexes = {
         @Index(name = "idx_message_conversation", columnList = "conversation_id"),
-        @Index(name = "idx_message_conversation_created", columnList = "conversation_id,created_at")
+        @Index(name = "idx_message_conversation_created", columnList = "conversation_id,created_at"),
+        @Index(name = "idx_message_subagent_run", columnList = "subagent_run_id")
 })
 public class Message extends Model {
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "conversation_id", nullable = false)
     public Conversation conversation;
+
+    /**
+     * JCLAW-267: marker for messages produced during an inline-mode subagent run.
+     * Set on (a) the spawn-boundary start/end markers the parent emits around
+     * the nested call, and (b) every Message AgentRunner persists while executing
+     * the child run (threaded in via the ThreadLocal in
+     * {@link services.ConversationService#withSubagentRunIdMarker}). The chat
+     * UI folds runs of adjacent messages sharing this id into a single
+     * collapsible block so the operator can read the parent log linearly.
+     *
+     * <p>Null for every non-inline-subagent message (the dominant case) — both
+     * top-level turns and session-mode subagent children leave this column
+     * empty. Session-mode children render as their own Conversation via the
+     * Conversation FK; nested-turn folding doesn't apply.
+     */
+    @Column(name = "subagent_run_id")
+    public Long subagentRunId;
 
     @Column(nullable = false)
     public String role;

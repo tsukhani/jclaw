@@ -5,6 +5,7 @@ import models.Agent;
 import models.AgentToolConfig;
 import models.Conversation;
 import models.EventLog;
+import models.Message;
 import models.SubagentRun;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -683,6 +684,131 @@ class SpawnSubagentToolTest extends UnitTest {
         JPA.em().clear();
         assertEquals(0, SubagentRun.count(),
                 "invalid-context rejection must not insert a SubagentRun row");
+    }
+
+    // ─── JCLAW-267: spawn modes (session vs inline) ──────────────────────
+
+    @Test
+    void inlineModeRunsInParentConversationAndStampsMessages() throws Exception {
+        // JCLAW-267 happy path: mode="inline" reuses the parent Conversation
+        // as the SubagentRun's child end (childConversation == parentConversation),
+        // emits boundary-start and boundary-end Message rows in the parent
+        // conversation carrying the SubagentRun id marker, and stamps every
+        // Message AgentRunner persists during the child run with the same id
+        // so the chat UI can fold them into a collapsible nested-turn block.
+        startLlmServer(simpleResponse("Subagent reply: inline."));
+        configureProvider();
+
+        var parent = createAgent("p-inline", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-inline");
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id,
+                "{\"task\":\"do inline work\",\"label\":\"inline-task\",\"mode\":\"inline\"}");
+        EventLogger.flush();
+
+        var parsed = JsonParser.parseString(reply).getAsJsonObject();
+        assertEquals("COMPLETED", parsed.get("status").getAsString(),
+                "inline-mode happy path must complete cleanly, got: " + reply);
+        assertEquals("Subagent reply: inline.", parsed.get("reply").getAsString());
+
+        JPA.em().clear();
+        var runId = Long.parseLong(parsed.get("run_id").getAsString());
+        SubagentRun run = SubagentRun.findById(runId);
+        assertNotNull(run);
+        // Inline mode's structural invariant: child Conversation FK points at
+        // the parent Conversation row, not a freshly-created sidebar row.
+        assertEquals(parentConv.id, run.childConversation.id,
+                "inline-mode child Conversation must equal the parent Conversation");
+        assertEquals(parentConv.id, run.parentConversation.id);
+
+        // SPAWN event records mode="inline".
+        java.util.List<EventLog> spawnEvents = EventLog.find(
+                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_SPAWN, parent.name).fetch();
+        assertEquals(1, spawnEvents.size());
+        assertTrue(spawnEvents.getFirst().details.contains("\"mode\":\"inline\""),
+                "inline-mode SPAWN must record mode=\"inline\", got: "
+                        + spawnEvents.getFirst().details);
+        // COMPLETE event also carries the inline mode.
+        java.util.List<EventLog> completeEvents = EventLog.find(
+                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_COMPLETE, parent.name).fetch();
+        assertEquals(1, completeEvents.size());
+        assertTrue(completeEvents.getFirst().details.contains("\"mode\":\"inline\""),
+                "inline-mode COMPLETE must record mode=\"inline\"");
+
+        // All messages persisted under the parent Conversation that belong to
+        // the run must carry subagentRunId == runId. The list includes the
+        // boundary-start marker, AgentRunner's appended user message (the
+        // child's task), the assistant reply, and the boundary-end marker.
+        var stamped = Message.find(
+                "conversation = ?1 AND subagentRunId = ?2 ORDER BY createdAt ASC",
+                Conversation.findById(parentConv.id), runId).fetch();
+        assertFalse(stamped.isEmpty(),
+                "inline-mode run must produce at least one Message stamped with subagentRunId");
+        // Boundary-start marker is the first row, with "Spawning subagent:" prefix.
+        assertTrue(((Message) stamped.getFirst()).content.startsWith("Spawning subagent:"),
+                "first stamped message must be the boundary-start marker, got: "
+                        + ((Message) stamped.getFirst()).content);
+        // Boundary-end marker is the last row, carrying the terminal status.
+        assertTrue(((Message) stamped.getLast()).content.startsWith("Subagent completed"),
+                "last stamped message must be the boundary-end marker, got: "
+                        + ((Message) stamped.getLast()).content);
+    }
+
+    @Test
+    void invalidModeValueIsRejectedWithClearError() throws Exception {
+        // Defensive: any mode value other than "session" or "inline" must be
+        // rejected up-front rather than silently defaulting.
+        var parent = createAgent("p-bad-mode", "test-provider", "test-model");
+        ConversationService.create(parent, "web", "u-bad-mode");
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id,
+                "{\"task\":\"x\",\"mode\":\"detached\"}");
+        assertTrue(reply.startsWith("Error: 'mode' must be one of"),
+                "invalid mode value must produce a plain-text rejection, got: " + reply);
+
+        JPA.em().clear();
+        assertEquals(0, SubagentRun.count(),
+                "invalid-mode rejection must not insert a SubagentRun row");
+    }
+
+    @Test
+    void sessionModeUnchangedRegressionAfterInlineAddition() throws Exception {
+        // Regression guard for JCLAW-267: omitting `mode` defaults to "session",
+        // which keeps the JCLAW-265 behavior verbatim — fresh child Conversation
+        // (distinct row), parent FK wired, no subagentRunId marker on any
+        // message in the parent Conversation.
+        startLlmServer(simpleResponse("Subagent reply: session default."));
+        configureProvider();
+
+        var parent = createAgent("p-session-default", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-session-default");
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id, "{\"task\":\"go\"}");
+        EventLogger.flush();
+
+        var parsed = JsonParser.parseString(reply).getAsJsonObject();
+        assertEquals("COMPLETED", parsed.get("status").getAsString());
+
+        JPA.em().clear();
+        var runId = Long.parseLong(parsed.get("run_id").getAsString());
+        SubagentRun run = SubagentRun.findById(runId);
+        assertNotNull(run);
+        assertNotEquals(parentConv.id, run.childConversation.id,
+                "session-mode child Conversation must be a distinct row");
+
+        // Parent Conversation has no stamped messages — the child runs in its
+        // own conversation under session-mode.
+        long stampedInParent = Message.count(
+                "conversation = ?1 AND subagentRunId IS NOT NULL",
+                Conversation.findById(parentConv.id));
+        assertEquals(0, stampedInParent,
+                "session-mode must not stamp any parent-Conversation messages");
     }
 
     @Test

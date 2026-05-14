@@ -39,8 +39,14 @@ import java.util.concurrent.TimeoutException;
  * the payload is real); {@link EventLogger#recordSubagentComplete} or
  * {@link EventLogger#recordSubagentError} fires on terminal outcomes.
  *
- * <p>Scope: mode is implicitly {@code "session"} (the child runs in its own
- * conversation; the {@code mode} alternative branch is JCLAW-267 territory).
+ * <p>Scope: the {@code mode} parameter selects the run shape (JCLAW-267).
+ * Session mode (default) creates a fresh child Conversation and runs the
+ * child there — its history persists independently and renders as a separate
+ * row in the operator's sidebar. Inline mode reuses the parent Conversation
+ * as the child's run target; AgentRunner persists the child's messages back
+ * into the parent transcript stamped with the SubagentRun id so the chat UI
+ * folds them into a nested-turn collapsible block. Both modes return the
+ * child's final reply to the calling LLM identically.
  * The {@code context} parameter accepts {@code "fresh"} (default) or
  * {@code "inherit"} (JCLAW-268). Fresh gives the child only its configured
  * system prompt and an empty history. Inherit additionally (a) summarizes the
@@ -77,6 +83,9 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
     public static final String TOOL_NAME = "spawn_subagent";
 
     static final String DEFAULT_MODE = "session";
+    static final String MODE_SESSION = "session";
+    static final String MODE_INLINE = "inline";
+    private static final Set<String> ALLOWED_MODES = Set.of(MODE_SESSION, MODE_INLINE);
     static final String DEFAULT_CONTEXT = "fresh";
     static final String CONTEXT_FRESH = "fresh";
     static final String CONTEXT_INHERIT = "inherit";
@@ -149,6 +158,9 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                 Required: `task` (the instruction the child should execute). \
                 Optional: `label` (short display name), `agentId` (numeric id of an existing \
                 agent to run as the child; defaults to a fresh clone of the current agent), \
+                `mode` ("session" — default — runs the child in a fresh sidebar conversation; \
+                "inline" runs the child within your own conversation as a collapsible \
+                nested-turn block), \
                 `modelProvider` and `modelId` (override the child's model), \
                 `context` ("fresh" — default — gives the child an empty history; "inherit" \
                 injects a summary of your recent turns into the child's system prompt and \
@@ -172,6 +184,12 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                 SchemaKeys.DESCRIPTION,
                 "Optional id of an existing Agent row to run as the child; "
                         + "defaults to a fresh clone of the calling agent"));
+        props.put("mode", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                SchemaKeys.DESCRIPTION,
+                "Spawn mode: \"session\" (default) creates a child Conversation that "
+                        + "renders as a separate row in the operator's sidebar, or "
+                        + "\"inline\" to run the child within the parent's conversation "
+                        + "as a collapsible nested-turn block."));
         props.put("modelProvider", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION, "Optional provider override for the child"));
         props.put("modelId", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
@@ -211,6 +229,16 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         var modelIdOverride = optString(args, "modelId");
         var timeoutSeconds = optInt(args, "runTimeoutSeconds", DEFAULT_TIMEOUT_SECONDS);
         if (timeoutSeconds <= 0) timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
+        // JCLAW-267: mode parameter — "session" (default) materializes a fresh
+        // child Conversation; "inline" runs the child in the parent's
+        // Conversation with messages tagged so the chat UI folds them.
+        var requestedMode = optString(args, "mode");
+        var mode = requestedMode == null || requestedMode.isBlank()
+                ? DEFAULT_MODE
+                : requestedMode.toLowerCase();
+        if (!ALLOWED_MODES.contains(mode)) {
+            return "Error: 'mode' must be one of " + ALLOWED_MODES + " (got '" + requestedMode + "').";
+        }
         // JCLAW-268: context parameter — "fresh" (default) is the JCLAW-265
         // behavior; "inherit" summarizes the parent's recent turns and unions
         // tool grants. Validate strictly so an LLM typo produces a clear
@@ -282,10 +310,11 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         final Long resolvedAgentIdParam = requestedAgentId;
         final boolean applyInheritGrants = inheritRequested && parentContextSummary != null;
         final String resolvedParentContext = parentContextSummary;
+        final boolean inlineMode = MODE_INLINE.equals(mode);
         var bootstrap = Tx.run(() -> bootstrapChild(
                 parentAgent, parentConv, resolvedAgentIdParam,
                 resolvedLabel, resolvedModelProvider, resolvedModelId,
-                applyInheritGrants, resolvedParentContext));
+                applyInheritGrants, resolvedParentContext, inlineMode));
         if (bootstrap.error() != null) {
             return bootstrap.error();
         }
@@ -310,7 +339,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         var runIdStr = String.valueOf(runId);
         EventLogger.recordSubagentSpawn(
                 parentAgent.name, lookupAgentName(childAgentId),
-                runIdStr, DEFAULT_MODE, context);
+                runIdStr, mode, context);
 
         // JCLAW-268: surface inherit-mode summarization failure as a SUBAGENT_ERROR
         // immediately after spawn. The child still runs (degraded to fresh-mode
@@ -321,13 +350,45 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         if (summaryErrorReason != null) {
             EventLogger.recordSubagentError(
                     parentAgent.name, lookupAgentName(childAgentId),
-                    runIdStr, DEFAULT_MODE, context, summaryErrorReason);
+                    runIdStr, mode, context, summaryErrorReason);
+        }
+
+        // JCLAW-267: inline-mode boundary-start marker. Written into the
+        // parent Conversation BEFORE the child reasons so the chat UI's
+        // collapsible block can fold from this marker forward. The marker is
+        // an assistant-role row carrying the task instruction and stamped
+        // with the SubagentRun id so it groups with the child's own messages.
+        // The start marker's content becomes the header label on the
+        // collapsed block.
+        final String resolvedTaskForMarker = task;
+        final String resolvedSpawnLabel = label;
+        if (inlineMode) {
+            Tx.run(() -> {
+                var conv = Conversation.<Conversation>findById(parentConvIdFinal);
+                ConversationService.withSubagentRunIdMarker(runId, () -> {
+                    var startContent = "Spawning subagent: "
+                            + (resolvedSpawnLabel != null && !resolvedSpawnLabel.isBlank()
+                                    ? resolvedSpawnLabel + " — "
+                                    : "")
+                            + resolvedTaskForMarker;
+                    ConversationService.appendAssistantMessage(conv, startContent, null);
+                    return null;
+                });
+            });
         }
 
         // Step 4: synchronous AgentRunner.run on a VT so we can enforce the
         // wall-clock budget via Future.get(timeout). The child Agent +
         // Conversation are re-fetched inside the VT so they're managed in a
         // fresh persistence context.
+        //
+        // JCLAW-267: inline mode wraps the runner in
+        // {@link ConversationService#withSubagentRunIdMarker} so every Message
+        // AgentRunner persists during the child run carries the SubagentRun id
+        // for the chat UI's nested-turn folding. Session mode passes the null
+        // marker through, leaving Message.subagentRunId null on child rows
+        // (they're in their own Conversation row anyway).
+        final Long runIdForMarker = inlineMode ? runId : null;
         var future = CompletableFuture.supplyAsync(
                 () -> {
                     var childAgent = Tx.run(() -> (Agent) Agent.findById(childAgentId));
@@ -336,7 +397,17 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                         throw new IllegalStateException(
                                 "Subagent rows vanished before AgentRunner.run");
                     }
-                    return AgentRunner.run(childAgent, childConv, task);
+                    if (runIdForMarker == null) {
+                        return AgentRunner.run(childAgent, childConv, task);
+                    }
+                    // JCLAW-267: inline mode runs in the parent Conversation,
+                    // whose queue the parent already owns. Use runWithOwnedQueue
+                    // to bypass the redundant tryAcquire (which would queue the
+                    // child's "user message" behind the parent's still-running
+                    // turn). The ThreadLocal marker stamps every Message
+                    // AgentRunner persists during the child run.
+                    return ConversationService.withSubagentRunIdMarker(runIdForMarker,
+                            () -> AgentRunner.runWithOwnedQueue(childAgent, childConv, task));
                 },
                 runnable -> Thread.ofVirtual().name("subagent-" + runId).start(runnable));
 
@@ -383,15 +454,39 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
             }
         });
 
+        // JCLAW-267: inline-mode boundary-end marker. Written into the parent
+        // Conversation AFTER the child run terminates so the chat UI's
+        // collapsible block has a clear end. The marker carries the terminal
+        // status in its content so the collapsed header can render
+        // "Completed / Failed / Timed out" without a separate join to
+        // SubagentRun. Stamped with the same SubagentRun id as the start
+        // marker and the runner-produced rows in between so they all fold
+        // together.
+        if (inlineMode) {
+            final var statusForMarker = terminalStatus;
+            final var replyForMarker = reply;
+            Tx.run(() -> {
+                var conv = Conversation.<Conversation>findById(parentConvIdFinal);
+                ConversationService.withSubagentRunIdMarker(runId, () -> {
+                    var endContent = "Subagent " + statusForMarker.name().toLowerCase()
+                            + (replyForMarker != null && !replyForMarker.isBlank()
+                                    ? ": " + replyForMarker
+                                    : "");
+                    ConversationService.appendAssistantMessage(conv, endContent, null);
+                    return null;
+                });
+            });
+        }
+
         // Step 6: emit the terminal lifecycle event.
         var childName = lookupAgentName(childAgentId);
         switch (terminalStatus) {
             case COMPLETED -> EventLogger.recordSubagentComplete(
-                    parentAgent.name, childName, runIdStr, DEFAULT_MODE, context, "ok");
+                    parentAgent.name, childName, runIdStr, mode, context, "ok");
             case TIMEOUT -> EventLogger.recordSubagentTimeout(parentAgent.name, runIdStr);
             default -> EventLogger.recordSubagentError(
                     parentAgent.name, childName, runIdStr,
-                    DEFAULT_MODE, context, errorReason);
+                    mode, context, errorReason);
         }
 
         // Tool return — the LLM will see this JSON string.
@@ -484,7 +579,8 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                                             String modelProviderOverride,
                                             String modelIdOverride,
                                             boolean applyInheritGrants,
-                                            String parentContextSummary) {
+                                            String parentContextSummary,
+                                            boolean inlineMode) {
         Agent childAgent;
         if (requestedAgentId != null) {
             childAgent = Agent.findById(requestedAgentId);
@@ -532,29 +628,51 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
             unionParentToolGrants(parentAgent, childAgent);
         }
 
-        var childConv = ConversationService.create(childAgent, SUBAGENT_CHANNEL, null);
-        childConv.parentConversation = parentConv;
-        // JCLAW-269: persist the per-spawn override on the child Conversation so
-        // AgentRunner's ModelOverrideResolver picks it up for this run, and so
-        // the JCLAW-28 cost dashboard's
-        // COALESCE(c.modelProviderOverride, c.agent.modelProvider) attributes
-        // spend to the actually-used model. Both columns are set together or
-        // neither — half-set is undefined per Conversation.java's contract.
-        if (modelProviderOverride != null && !modelProviderOverride.isBlank()
-                && modelIdOverride != null && !modelIdOverride.isBlank()) {
-            childConv.modelProviderOverride = modelProviderOverride;
-            childConv.modelIdOverride = modelIdOverride;
+        // JCLAW-267: inline mode reuses the parent Conversation as the child's
+        // run target — the SubagentRun row points its childConversation FK at
+        // the same row as parentConversation, and AgentRunner persists the
+        // child's messages back into the parent transcript stamped with the
+        // SubagentRun id (via the ConversationService ThreadLocal marker).
+        // No new Conversation row is created. Session mode keeps the existing
+        // JCLAW-265 behavior: fresh child Conversation, separate transcript,
+        // visible as its own row in the sidebar.
+        //
+        // Per-spawn model override + inherited parent-context blob only apply
+        // to session mode: they live on the *child* Conversation row, and in
+        // inline mode that "child" is the parent itself — writing them there
+        // would clobber the parent's effective model and context for the rest
+        // of the parent's turns. Inline-mode children effectively run with the
+        // parent's settings (same model, same prompt assembly); the model
+        // override and parent-context summary parameters are no-ops in this
+        // mode by design.
+        final Conversation childConv;
+        if (inlineMode) {
+            childConv = parentConv;
+        } else {
+            childConv = ConversationService.create(childAgent, SUBAGENT_CHANNEL, null);
+            childConv.parentConversation = parentConv;
+            // JCLAW-269: persist the per-spawn override on the child Conversation so
+            // AgentRunner's ModelOverrideResolver picks it up for this run, and so
+            // the JCLAW-28 cost dashboard's
+            // COALESCE(c.modelProviderOverride, c.agent.modelProvider) attributes
+            // spend to the actually-used model. Both columns are set together or
+            // neither — half-set is undefined per Conversation.java's contract.
+            if (modelProviderOverride != null && !modelProviderOverride.isBlank()
+                    && modelIdOverride != null && !modelIdOverride.isBlank()) {
+                childConv.modelProviderOverride = modelProviderOverride;
+                childConv.modelIdOverride = modelIdOverride;
+            }
+            // JCLAW-268: stamp the inherited parent-context summary on the child
+            // Conversation. AgentRunner re-injects this into the child's system
+            // prompt every turn via SessionCompactor.appendParentContextToPrompt.
+            // Null in fresh mode, in the summarization-failure degradation path,
+            // and when the parent had no usable history — all of which leave
+            // the column null and turn the injection into a no-op.
+            if (applyInheritGrants && parentContextSummary != null && !parentContextSummary.isBlank()) {
+                childConv.parentContext = parentContextSummary;
+            }
+            childConv.save();
         }
-        // JCLAW-268: stamp the inherited parent-context summary on the child
-        // Conversation. AgentRunner re-injects this into the child's system
-        // prompt every turn via SessionCompactor.appendParentContextToPrompt.
-        // Null in fresh mode, in the summarization-failure degradation path,
-        // and when the parent had no usable history — all of which leave
-        // the column null and turn the injection into a no-op.
-        if (applyInheritGrants && parentContextSummary != null && !parentContextSummary.isBlank()) {
-            childConv.parentContext = parentContextSummary;
-        }
-        childConv.save();
 
         return Bootstrap.ok(childAgent.id, childConv.id);
     }
