@@ -7,6 +7,7 @@ import models.Config;
 import play.Logger;
 import utils.GsonHolder;
 import utils.HttpFactories;
+import utils.HttpKeys;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -108,7 +109,7 @@ public final class PricingRefreshService {
         try {
             var req = new okhttp3.Request.Builder()
                     .url(LITELLM_URL)
-                    .header("Accept", "application/json")
+                    .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
                     .get()
                     .build();
             var call = HttpFactories.general().newCall(req);

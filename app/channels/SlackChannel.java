@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.ChannelConfig;
 import services.EventLogger;
+import utils.HttpKeys;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -54,10 +55,10 @@ public class SlackChannel implements Channel {
 
     private SendResult trySend(SlackConfig config, String channelId, String text) {
         var jsonBody = gson.toJson(Map.of("channel", channelId, "text", text));
-        var jsonMediaType = okhttp3.MediaType.get("application/json");
+        var jsonMediaType = okhttp3.MediaType.get(HttpKeys.APPLICATION_JSON);
         var request = new okhttp3.Request.Builder()
                 .url("https://slack.com/api/chat.postMessage")
-                .header("Authorization", "Bearer " + config.botToken())
+                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + config.botToken())
                 .post(okhttp3.RequestBody.create(jsonBody, jsonMediaType))
                 .build();
         try (var response = utils.HttpFactories.general().newCall(request).execute()) {

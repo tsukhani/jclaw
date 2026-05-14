@@ -21,6 +21,7 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 import services.EventLogger;
+import utils.HttpKeys;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -276,7 +277,7 @@ public class TelegramChannel implements Channel {
         var body = "{\"chat_id\":%s,\"draft_id\":%d,\"text\":\"\"}".formatted(chatId, draftId);
         var req = new okhttp3.Request.Builder()
                 .url(url)
-                .post(okhttp3.RequestBody.create(body, okhttp3.MediaType.get("application/json")))
+                .post(okhttp3.RequestBody.create(body, okhttp3.MediaType.get(HttpKeys.APPLICATION_JSON)))
                 .build();
         try (var resp = utils.HttpFactories.general().newCall(req).execute()) {
             if (resp.code() != 200) {

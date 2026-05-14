@@ -2,6 +2,7 @@ package services;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import utils.HttpKeys;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -148,7 +149,7 @@ public final class LoadTestHarness {
             var scn = scenario;
             boolean continuation = isToolResultContinuation(body);
 
-            ex.getResponseHeaders().add("Content-Type", "text/event-stream");
+            ex.getResponseHeaders().add(HttpKeys.CONTENT_TYPE, "text/event-stream");
             ex.getResponseHeaders().add("Cache-Control", "no-cache");
             ex.sendResponseHeaders(200, 0);
             try (var out = ex.getResponseBody()) {

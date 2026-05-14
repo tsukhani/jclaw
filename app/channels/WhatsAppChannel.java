@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.ChannelConfig;
 import services.EventLogger;
+import utils.HttpKeys;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -19,7 +20,7 @@ public class WhatsAppChannel implements Channel {
 
     private static final com.google.gson.Gson gson = utils.GsonHolder.INSTANCE;
     private static final String API_BASE = "https://graph.facebook.com/v21.0/";
-    private static final okhttp3.MediaType JSON_MEDIA_TYPE = okhttp3.MediaType.get("application/json");
+    private static final okhttp3.MediaType JSON_MEDIA_TYPE = okhttp3.MediaType.get(HttpKeys.APPLICATION_JSON);
 
     public record WhatsAppConfig(String phoneNumberId, String accessToken, String appSecret, String verifyToken) {
         public static WhatsAppConfig load() {
@@ -60,7 +61,7 @@ public class WhatsAppChannel implements Channel {
         ));
         var request = new okhttp3.Request.Builder()
                 .url(url)
-                .header("Authorization", "Bearer " + config.accessToken())
+                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + config.accessToken())
                 .post(okhttp3.RequestBody.create(body, JSON_MEDIA_TYPE))
                 .build();
         try (var response = utils.HttpFactories.general().newCall(request).execute()) {
@@ -91,7 +92,7 @@ public class WhatsAppChannel implements Channel {
 
         var request = new okhttp3.Request.Builder()
                 .url(url)
-                .header("Authorization", "Bearer " + config.accessToken())
+                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + config.accessToken())
                 .post(okhttp3.RequestBody.create(body, JSON_MEDIA_TYPE))
                 .build();
         try (var resp = utils.HttpFactories.general().newCall(request).execute()) {

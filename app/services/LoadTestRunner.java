@@ -3,6 +3,7 @@ package services;
 import models.Agent;
 import okhttp3.MediaType;
 import play.db.jpa.JPA;
+import utils.HttpKeys;
 
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
@@ -37,7 +38,7 @@ public final class LoadTestRunner {
      */
     public static final String LOADTEST_PROVIDER = "loadtest-mock";
     private static final String LOADTEST_MODEL = "mock-model";
-    private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json");
+    private static final MediaType JSON_MEDIA_TYPE = MediaType.get(HttpKeys.APPLICATION_JSON);
 
     /**
      * Default real-provider name when {@link Request#realProvider} is true and

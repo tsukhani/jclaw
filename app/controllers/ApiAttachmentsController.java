@@ -4,6 +4,7 @@ import models.MessageAttachment;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
+import utils.HttpKeys;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -48,7 +49,7 @@ public class ApiAttachmentsController extends Controller {
         // attachment otherwise so the user gets a download prompt. Matches
         // the convention used by ApiAgentsController.serveWorkspaceFile.
         var disposition = (att.isImage() || att.isAudio()) ? "inline" : "attachment";
-        response.setHeader("Content-Type", att.mimeType);
+        response.setHeader(HttpKeys.CONTENT_TYPE, att.mimeType);
         response.setHeader("Content-Disposition",
                 disposition + "; filename=\"" + asciiSafeFilename(att.originalFilename) + "\""
                 + "; filename*=UTF-8''" + percentEncodeFilename(att.originalFilename));
