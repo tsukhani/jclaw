@@ -40,13 +40,13 @@ public class LoadTestSleepTool implements ToolRegistry.Tool {
 
     @Override public Map<String, Object> parameters() {
         return Map.of(
-                "type", "object",
-                "properties", Map.of(
+                SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                SchemaKeys.PROPERTIES, Map.of(
                         "ms", Map.of(
-                                "type", "integer",
-                                "description", "Sleep duration in milliseconds (clamped to [0, " + MAX_MS + "])")
+                                SchemaKeys.TYPE, SchemaKeys.INTEGER,
+                                SchemaKeys.DESCRIPTION, "Sleep duration in milliseconds (clamped to [0, " + MAX_MS + "])")
                 ),
-                "required", List.of()
+                SchemaKeys.REQUIRED, List.of()
         );
     }
 

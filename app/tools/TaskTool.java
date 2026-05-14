@@ -62,20 +62,20 @@ public class TaskTool implements ToolRegistry.Tool {
     @Override
     public Map<String, Object> parameters() {
         return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "action", Map.of("type", "string",
-                                "enum", List.of("createTask", "scheduleTask", "scheduleRecurringTask",
+                SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                SchemaKeys.PROPERTIES, Map.of(
+                        "action", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.ENUM, List.of("createTask", "scheduleTask", "scheduleRecurringTask",
                                         "deleteRecurringTask", "listRecurringTasks"),
-                                "description", "The action to perform"),
-                        "name", Map.of("type", "string", "description", "Task name (short identifier)"),
-                        "description", Map.of("type", "string", "description", "Task description/instructions"),
-                        "executionTime", Map.of("type", "string",
-                                "description", "ISO datetime for scheduled tasks: YYYY-MM-ddTHH:mm:ss"),
-                        "cronExpression", Map.of("type", "string",
-                                "description", "Cron expression for recurring tasks (e.g. '0 12 * * *')")
+                                SchemaKeys.DESCRIPTION, "The action to perform"),
+                        "name", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING, SchemaKeys.DESCRIPTION, "Task name (short identifier)"),
+                        SchemaKeys.DESCRIPTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING, SchemaKeys.DESCRIPTION, "Task description/instructions"),
+                        "executionTime", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "ISO datetime for scheduled tasks: YYYY-MM-ddTHH:mm:ss"),
+                        "cronExpression", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "Cron expression for recurring tasks (e.g. '0 12 * * *')")
                 ),
-                "required", List.of("action")
+                SchemaKeys.REQUIRED, List.of("action")
         );
     }
 
@@ -98,7 +98,7 @@ public class TaskTool implements ToolRegistry.Tool {
         var task = new Task();
         task.agent = agent;
         task.name = args.get("name").getAsString();
-        task.description = args.has("description") ? args.get("description").getAsString() : "";
+        task.description = args.has(SchemaKeys.DESCRIPTION) ? args.get(SchemaKeys.DESCRIPTION).getAsString() : "";
         task.type = Task.Type.IMMEDIATE;
         task.nextRunAt = Instant.now();
         task.save();
@@ -110,7 +110,7 @@ public class TaskTool implements ToolRegistry.Tool {
         var task = new Task();
         task.agent = agent;
         task.name = args.get("name").getAsString();
-        task.description = args.has("description") ? args.get("description").getAsString() : "";
+        task.description = args.has(SchemaKeys.DESCRIPTION) ? args.get(SchemaKeys.DESCRIPTION).getAsString() : "";
         task.type = Task.Type.SCHEDULED;
         var ldt = LocalDateTime.parse(args.get("executionTime").getAsString());
         task.scheduledAt = ldt.atZone(ZoneId.systemDefault()).toInstant();
@@ -124,7 +124,7 @@ public class TaskTool implements ToolRegistry.Tool {
         var task = new Task();
         task.agent = agent;
         task.name = args.get("name").getAsString();
-        task.description = args.has("description") ? args.get("description").getAsString() : "";
+        task.description = args.has(SchemaKeys.DESCRIPTION) ? args.get(SchemaKeys.DESCRIPTION).getAsString() : "";
         task.type = Task.Type.CRON;
         task.cronExpression = args.get("cronExpression").getAsString();
         task.nextRunAt = Instant.now(); // Will be computed properly by poller

@@ -80,47 +80,47 @@ public class FileSystemTools implements ToolRegistry.Tool {
         // and `edits`/`content`/`patch` are action-specific. JSON Schema's polymorphism is awkward across
         // providers, so we keep `required` minimal and validate action-specific fields inside execute().
         return Map.of(
-                "type", "object",
-                "properties", Map.ofEntries(
-                        Map.entry("action", Map.of("type", "string",
-                                "enum", List.of("readFile", "writeFile", "appendFile", "listFiles", "editFile", "editLines", "applyPatch"),
-                                "description", "The file operation to perform")),
-                        Map.entry("path", Map.of("type", "string",
-                                "description", "File or directory path relative to workspace (required for all actions except applyPatch)")),
-                        Map.entry("content", Map.of("type", "string",
-                                "description", "Content to write (for writeFile and appendFile actions)")),
-                        Map.entry("edits", Map.of("type", "array",
-                                "description", "List of {oldText, newText, regex?} replacements for editFile action",
-                                "items", Map.of(
-                                        "type", "object",
-                                        "properties", Map.of(
-                                                "oldText", Map.of("type", "string"),
-                                                "newText", Map.of("type", "string"),
-                                                "regex", Map.of("type", "boolean",
-                                                        "description", "If true, treat oldText as a Java regex with $N backreferences in newText. Default false.")
+                SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                SchemaKeys.PROPERTIES, Map.ofEntries(
+                        Map.entry("action", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.ENUM, List.of("readFile", "writeFile", "appendFile", "listFiles", "editFile", "editLines", "applyPatch"),
+                                SchemaKeys.DESCRIPTION, "The file operation to perform")),
+                        Map.entry("path", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "File or directory path relative to workspace (required for all actions except applyPatch)")),
+                        Map.entry("content", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "Content to write (for writeFile and appendFile actions)")),
+                        Map.entry("edits", Map.of(SchemaKeys.TYPE, SchemaKeys.ARRAY,
+                                SchemaKeys.DESCRIPTION, "List of {oldText, newText, regex?} replacements for editFile action",
+                                SchemaKeys.ITEMS, Map.of(
+                                        SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                                        SchemaKeys.PROPERTIES, Map.of(
+                                                "oldText", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING),
+                                                "newText", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING),
+                                                "regex", Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
+                                                        SchemaKeys.DESCRIPTION, "If true, treat oldText as a Java regex with $N backreferences in newText. Default false.")
                                         ),
-                                        "required", List.of("oldText", "newText")
+                                        SchemaKeys.REQUIRED, List.of("oldText", "newText")
                                 ))),
-                        Map.entry("operations", Map.of("type", "array",
-                                "description", "Ordered list of line-range operations for editLines action. 1-indexed, inclusive endLine.",
-                                "items", Map.of(
-                                        "type", "object",
-                                        "properties", Map.of(
-                                                "op", Map.of("type", "string",
-                                                        "enum", List.of("replace", "insert", "delete")),
-                                                "startLine", Map.of("type", "integer", "minimum", 1,
-                                                        "description", "1-indexed line number. For insert, content is placed before this line; use lineCount+1 to append."),
-                                                "endLine", Map.of("type", "integer", "minimum", 1,
-                                                        "description", "Inclusive end line. Required for replace/delete; ignored for insert."),
-                                                "content", Map.of("type", "string",
-                                                        "description", "New text for replace/insert. Trailing newline is added automatically if missing. Ignored for delete.")
+                        Map.entry("operations", Map.of(SchemaKeys.TYPE, SchemaKeys.ARRAY,
+                                SchemaKeys.DESCRIPTION, "Ordered list of line-range operations for editLines action. 1-indexed, inclusive endLine.",
+                                SchemaKeys.ITEMS, Map.of(
+                                        SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                                        SchemaKeys.PROPERTIES, Map.of(
+                                                "op", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                                        SchemaKeys.ENUM, List.of("replace", "insert", "delete")),
+                                                "startLine", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER, "minimum", 1,
+                                                        SchemaKeys.DESCRIPTION, "1-indexed line number. For insert, content is placed before this line; use lineCount+1 to append."),
+                                                "endLine", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER, "minimum", 1,
+                                                        SchemaKeys.DESCRIPTION, "Inclusive end line. Required for replace/delete; ignored for insert."),
+                                                "content", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                                        SchemaKeys.DESCRIPTION, "New text for replace/insert. Trailing newline is added automatically if missing. Ignored for delete.")
                                         ),
-                                        "required", List.of("op", "startLine")
+                                        SchemaKeys.REQUIRED, List.of("op", "startLine")
                                 ))),
-                        Map.entry("patch", Map.of("type", "string",
-                                "description", "Patch body for applyPatch action, wrapped in *** Begin Patch / *** End Patch"))
+                        Map.entry("patch", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "Patch body for applyPatch action, wrapped in *** Begin Patch / *** End Patch"))
                 ),
-                "required", List.of("action")
+                SchemaKeys.REQUIRED, List.of("action")
         );
     }
 

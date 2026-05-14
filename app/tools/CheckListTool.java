@@ -48,23 +48,23 @@ public class CheckListTool implements ToolRegistry.Tool {
     @Override
     public Map<String, Object> parameters() {
         return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "items", Map.of(
-                                "type", "array",
-                                "items", Map.of(
-                                        "type", "object",
-                                        "properties", Map.of(
-                                                "content", Map.of("type", "string"),
-                                                "status", Map.of("type", "string",
-                                                        "enum", List.of("pending", "in_progress", "completed")),
-                                                "activeForm", Map.of("type", "string")
+                SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                SchemaKeys.PROPERTIES, Map.of(
+                        SchemaKeys.ITEMS, Map.of(
+                                SchemaKeys.TYPE, SchemaKeys.ARRAY,
+                                SchemaKeys.ITEMS, Map.of(
+                                        SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                                        SchemaKeys.PROPERTIES, Map.of(
+                                                "content", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING),
+                                                "status", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                                        SchemaKeys.ENUM, List.of("pending", "in_progress", "completed")),
+                                                "activeForm", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING)
                                         ),
-                                        "required", List.of("content", "status", "activeForm")
+                                        SchemaKeys.REQUIRED, List.of("content", "status", "activeForm")
                                 )
                         )
                 ),
-                "required", List.of("items")
+                SchemaKeys.REQUIRED, List.of(SchemaKeys.ITEMS)
         );
     }
 
@@ -75,10 +75,10 @@ public class CheckListTool implements ToolRegistry.Tool {
     @Override
     public String execute(String argsJson, Agent agent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
-        if (!args.has("items") || !args.get("items").isJsonArray()) {
+        if (!args.has(SchemaKeys.ITEMS) || !args.get(SchemaKeys.ITEMS).isJsonArray()) {
             return "Error: `items` is required and must be an array.";
         }
-        var itemsArray = args.getAsJsonArray("items");
+        var itemsArray = args.getAsJsonArray(SchemaKeys.ITEMS);
 
         int inProgressCount = 0;
         for (int i = 0; i < itemsArray.size(); i++) {
