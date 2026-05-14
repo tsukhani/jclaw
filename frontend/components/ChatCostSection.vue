@@ -792,7 +792,6 @@ defineExpose({ refresh })
               </div>
               <div class="mt-0.5 font-mono text-sm text-fg-primary">
                 {{ formatStatCurrency(p.proRatedFee) }}
-                <span class="text-[10px] text-fg-muted">this window</span>
               </div>
             </div>
             <div
@@ -804,7 +803,6 @@ defineExpose({ refresh })
               </div>
               <div class="mt-0.5 font-mono text-sm text-emerald-700 dark:text-emerald-400">
                 {{ formatStatCurrency(subscriptionFee) }}
-                <span class="text-[10px] text-fg-muted">this window</span>
               </div>
             </div>
           </div>
