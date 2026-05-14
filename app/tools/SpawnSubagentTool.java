@@ -67,6 +67,31 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
     /** Default wall-clock budget for a synchronous spawn, per AC. */
     static final int DEFAULT_TIMEOUT_SECONDS = 300;
 
+    /**
+     * JCLAW-266: recursion caps. Defaults match Personal Edition posture —
+     * single level of delegation (top-level Agent spawns one tier of
+     * subagents, no grandchildren) and a small fan-out so one parent can't
+     * saturate the executor with concurrent children.
+     *
+     * <p>Depth = count of {@link Agent#parentAgent} links walking from the
+     * spawning agent back to a root. {@code depthLimit=1} means
+     * "only top-level agents (parentAgent == null) can spawn"; a child
+     * would itself be at depth 1, hit the limit, and be refused.
+     *
+     * <p>Breadth = count of {@link SubagentRun} rows whose
+     * {@code parentAgent} is the spawning agent and {@code status = RUNNING}.
+     * Per direct parent — not the whole subtree.
+     */
+    static final int DEFAULT_DEPTH_LIMIT = 1;
+    static final int DEFAULT_BREADTH_LIMIT = 5;
+    static final String DEPTH_LIMIT_KEY = "subagents.depth.limit";
+    static final String BREADTH_LIMIT_KEY = "subagents.breadth.limit";
+
+    /** Soft cap on how far we walk the parent chain when computing depth,
+     *  so a cycle (shouldn't happen, but defense-in-depth) can't spin
+     *  forever. Far above any plausible depth limit. */
+    private static final int MAX_DEPTH_WALK = 64;
+
     @Override
     public String name() { return TOOL_NAME; }
 
@@ -151,6 +176,17 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         var modelIdOverride = optString(args, "modelId");
         var timeoutSeconds = optInt(args, "runTimeoutSeconds", DEFAULT_TIMEOUT_SECONDS);
         if (timeoutSeconds <= 0) timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
+
+        // JCLAW-266: enforce recursion caps before touching the DB. Both checks
+        // run inside a Tx so the ancestor walk and the RUNNING-row count see a
+        // consistent snapshot. On refusal we emit SUBAGENT_LIMIT_EXCEEDED and
+        // return a plain-text error — no SubagentRun row, no child Agent, no
+        // child Conversation gets written.
+        var refusal = Tx.run(() -> enforceRecursionLimits(parentAgent));
+        if (refusal != null) {
+            EventLogger.recordSubagentLimitExceeded(parentAgent.name, refusal);
+            return "Subagent spawn refused: " + refusal;
+        }
 
         // Resolve the parent conversation. AgentRunner does not pass it into
         // tools — by convention the most-recent conversation for this agent
@@ -289,6 +325,74 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
     private record Bootstrap(Long childAgentId, Long childConvId, String error) {
         static Bootstrap ok(Long agentId, Long convId) { return new Bootstrap(agentId, convId, null); }
         static Bootstrap fail(String msg) { return new Bootstrap(null, null, msg); }
+    }
+
+    /**
+     * Returns a refusal reason string when the spawn would violate either
+     * recursion cap, or {@code null} when the spawn may proceed. Must be
+     * called inside a {@link Tx#run} block: it touches the persisted
+     * {@code parentAgent} chain and queries {@link SubagentRun}.
+     *
+     * <p>Race note: two concurrent spawns from the same parent could both
+     * see "N-1 RUNNING" and both proceed, transiently exceeding the breadth
+     * cap by one. Personal Edition rarely runs into this (the parent LLM
+     * issues tool calls sequentially within a turn); accepted as an
+     * advisory limit for now. A {@code SELECT ... FOR UPDATE} on the parent
+     * Agent row would close the window if/when it matters.
+     */
+    static String enforceRecursionLimits(Agent parentAgent) {
+        var depthLimit = positiveIntOrDefault(DEPTH_LIMIT_KEY, DEFAULT_DEPTH_LIMIT);
+        var breadthLimit = positiveIntOrDefault(BREADTH_LIMIT_KEY, DEFAULT_BREADTH_LIMIT);
+
+        var currentDepth = depthOf(parentAgent);
+        // currentDepth is the spawning agent's depth. Spawning would create
+        // a child at depth currentDepth+1; refuse when currentDepth+1 exceeds
+        // the limit, i.e. currentDepth >= limit.
+        if (currentDepth >= depthLimit) {
+            return "depth limit %d exceeded (current depth: %d)."
+                    .formatted(depthLimit, currentDepth);
+        }
+
+        // Re-fetch the parent inside this tx for a managed reference. The
+        // count query takes the managed instance to keep Hibernate happy.
+        var managed = (Agent) Agent.findById(parentAgent.id);
+        if (managed == null) {
+            // The spawning agent vanished between the controller and here.
+            // Surface a clear refusal rather than spinning into bootstrap.
+            return "parent agent %d not found.".formatted(parentAgent.id);
+        }
+        long running = SubagentRun.count(
+                "parentAgent = ?1 AND status = ?2",
+                managed, SubagentRun.Status.RUNNING);
+        if (running >= breadthLimit) {
+            return "breadth limit %d exceeded (running children: %d).".formatted(
+                    breadthLimit, running);
+        }
+        return null;
+    }
+
+    /** Count of parentAgent links from {@code start} back to a root.
+     *  Capped by {@link #MAX_DEPTH_WALK} as a cycle guard. */
+    private static int depthOf(Agent start) {
+        int depth = 0;
+        var cursor = start != null ? start.parentAgent : null;
+        while (cursor != null && depth < MAX_DEPTH_WALK) {
+            depth++;
+            cursor = cursor.parentAgent;
+        }
+        return depth;
+    }
+
+    private static int positiveIntOrDefault(String key, int fallback) {
+        var raw = play.Play.configuration != null
+                ? play.Play.configuration.getProperty(key) : null;
+        if (raw == null || raw.isBlank()) return fallback;
+        try {
+            int n = Integer.parseInt(raw.trim());
+            return n > 0 ? n : fallback;
+        } catch (NumberFormatException _) {
+            return fallback;
+        }
     }
 
     private static Bootstrap bootstrapChild(Agent parentAgent, Conversation parentConv,

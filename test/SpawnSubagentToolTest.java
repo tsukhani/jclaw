@@ -227,6 +227,115 @@ class SpawnSubagentToolTest extends UnitTest {
         }
     }
 
+    @Test
+    void depthLimitRefusesSpawnAndEmitsLimitEvent() throws Exception {
+        // Default subagents.depth.limit=1: a top-level Agent (parentAgent==null)
+        // is at depth 0 and may spawn; its child is at depth 1 and may not.
+        // Set up a parent whose parentAgent chain already has length 1 so it
+        // sits at the cap.
+        var root = createAgent("p-depth-root", "test-provider", "test-model");
+        var child = createAgent("p-depth-child", "test-provider", "test-model");
+        child.parentAgent = root;
+        child.save();
+        ConversationService.create(child, "web", "u-depth");
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(child.id, "{\"task\":\"nope\"}");
+        EventLogger.flush();
+
+        assertTrue(reply.startsWith("Subagent spawn refused: depth limit"),
+                "depth refusal must surface plain-text error, got: " + reply);
+        assertTrue(reply.contains("current depth: 1"),
+                "refusal message must report the offending depth, got: " + reply);
+
+        JPA.em().clear();
+        assertEquals(0, SubagentRun.count(),
+                "depth refusal must not insert a SubagentRun row");
+
+        java.util.List<EventLog> limitEvents = EventLog.find(
+                "category = ?1 AND agentId = ?2",
+                EventLogger.SUBAGENT_LIMIT_EXCEEDED, child.name).fetch();
+        assertEquals(1, limitEvents.size(),
+                "exactly one SUBAGENT_LIMIT_EXCEEDED event on depth refusal");
+        assertTrue(limitEvents.getFirst().details.contains("depth limit"),
+                "event details must include the depth-refusal reason");
+    }
+
+    @Test
+    void breadthLimitRefusesSpawnAndEmitsLimitEvent() throws Exception {
+        // Default subagents.breadth.limit=5. Seed five RUNNING SubagentRun
+        // rows for the parent and verify the sixth spawn attempt is refused.
+        var parent = createAgent("p-breadth", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-breadth");
+        // Seed RUNNING rows. Each needs a distinct child Agent + Conversation
+        // because of the not-null FKs; use cheap clones via AgentService.create.
+        for (int i = 0; i < 5; i++) {
+            var childAgent = createAgent("p-breadth-c" + i, "test-provider", "test-model");
+            childAgent.parentAgent = parent;
+            childAgent.save();
+            var childConv = ConversationService.create(childAgent,
+                    SpawnSubagentTool.SUBAGENT_CHANNEL, null);
+            childConv.parentConversation = parentConv;
+            childConv.save();
+            var run = new SubagentRun();
+            run.parentAgent = parent;
+            run.childAgent = childAgent;
+            run.parentConversation = parentConv;
+            run.childConversation = childConv;
+            run.status = SubagentRun.Status.RUNNING;
+            run.save();
+        }
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id, "{\"task\":\"one too many\"}");
+        EventLogger.flush();
+
+        assertTrue(reply.startsWith("Subagent spawn refused: breadth limit"),
+                "breadth refusal must surface plain-text error, got: " + reply);
+        assertTrue(reply.contains("running children: 5"),
+                "refusal message must report the running-children count, got: " + reply);
+
+        JPA.em().clear();
+        assertEquals(5, SubagentRun.count(),
+                "breadth refusal must not insert a new SubagentRun row");
+
+        java.util.List<EventLog> limitEvents = EventLog.find(
+                "category = ?1 AND agentId = ?2",
+                EventLogger.SUBAGENT_LIMIT_EXCEEDED, parent.name).fetch();
+        assertEquals(1, limitEvents.size(),
+                "exactly one SUBAGENT_LIMIT_EXCEEDED event on breadth refusal");
+        assertTrue(limitEvents.getFirst().details.contains("breadth limit"),
+                "event details must include the breadth-refusal reason");
+    }
+
+    @Test
+    void limitsNotTriggeredAllowsSpawnNormally() throws Exception {
+        // Regression guard for JCLAW-266: a top-level agent with no RUNNING
+        // children must still spawn successfully (no false-positive refusal).
+        startLlmServer(simpleResponse("Subagent reply: ok."));
+        configureProvider();
+
+        var parent = createAgent("p-ok", "test-provider", "test-model");
+        ConversationService.create(parent, "web", "u-ok");
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id, "{\"task\":\"ok\"}");
+        EventLogger.flush();
+
+        assertFalse(reply.startsWith("Subagent spawn refused"),
+                "happy path must not be refused, got: " + reply);
+        var parsed = JsonParser.parseString(reply).getAsJsonObject();
+        assertEquals("COMPLETED", parsed.get("status").getAsString());
+
+        java.util.List<EventLog> limitEvents = EventLog.find(
+                "category = ?1", EventLogger.SUBAGENT_LIMIT_EXCEEDED).fetch();
+        assertTrue(limitEvents.isEmpty(),
+                "no SUBAGENT_LIMIT_EXCEEDED event on the happy path");
+    }
+
     // ---- helpers ----
 
     private Agent createAgent(String name, String provider, String model) {
