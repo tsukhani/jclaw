@@ -129,13 +129,19 @@ async function resetLatency() {
   await refreshLatency()
 }
 
-// Both panels poll on the same 5s tick — Recent Activity refreshes silently
-// alongside the latency histograms, no age caption or manual refresh button.
+// All three dashboard panels (Chat Performance, Recent Activity, Chat Cost)
+// refresh on the same 5 s tick. ChatCostSection owns its own useFetch but
+// exposes refresh() via defineExpose so we can drive it from here. Keeping
+// the single timer in one place is what guarantees the panels never drift
+// out of phase — staggered timers produced a per-panel pending flicker
+// that looked like the dashboard flashing on every refresh.
+const chatCostRef = ref<{ refresh: () => Promise<void> } | null>(null)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 onMounted(() => {
   pollTimer = setInterval(() => {
     refreshLatency()
     refreshLogs()
+    chatCostRef.value?.refresh()
   }, 5000)
 })
 onBeforeUnmount(() => {
@@ -185,8 +191,11 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- Chat Cost (JCLAW-28): persisted aggregated token usage and cost. -->
-    <ChatCostSection :agents="agents" />
+    <!-- Chat Cost (JCLAW-28): persisted aggregated token usage and cost.
+         Driven on the parent's 5 s tick (see pollTimer below) so all three
+         dashboard panels refresh in lockstep — avoids the per-panel pending
+         flicker that staggered timers caused. -->
+    <ChatCostSection ref="chatCostRef" :agents="agents" />
 
     <!-- Chat Performance -->
     <div class="bg-surface-elevated border border-border mb-8">

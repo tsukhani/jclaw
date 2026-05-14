@@ -118,22 +118,22 @@ const { data: costData, refresh, pending } = useFetch<CostResponse>('/api/metric
   watch: [sinceParam],
 })
 
-// JCLAW-289: poll on the same 5 s tick the parent dashboard uses for
-// Chat Performance and Recent Activity. Owning the timer here (instead
-// of letting the parent drive refresh via defineExpose) keeps the fetch
-// and its refresh cadence in one file, and makes the component
-// self-contained — useful for the rare consumer that mounts ChatCostSection
-// outside the dashboard. useFetch keeps prior data visible while the
-// next request is in flight, so the tick is silent — no loading flicker.
-let pollTimer: ReturnType<typeof setInterval> | null = null
-onMounted(() => {
-  pollTimer = setInterval(() => {
-    refresh()
-  }, 5000)
+// Track whether the first fetch has resolved so we can suppress the
+// "Loading cost data…" skeleton on subsequent refreshes. useFetch keeps
+// the prior `data` populated during a refresh, but `pending` still flips
+// true → false each tick — naively binding the skeleton to `pending`
+// causes the panel to flash on every parent poll.
+const hasLoadedOnce = ref(false)
+watch(pending, (p) => {
+  if (!p) hasLoadedOnce.value = true
 })
-onBeforeUnmount(() => {
-  if (pollTimer) clearInterval(pollTimer)
-})
+
+// JCLAW-289 update: the parent dashboard (pages/index.vue) owns the single
+// 5 s tick and drives our refresh() via a template ref, so this component
+// no longer keeps its own setInterval. Centralising the timer aligns all
+// three panels' refreshes on the same tick and eliminates the per-panel
+// pending flicker that staggered timers caused. defineExpose at the
+// bottom keeps refresh() callable from outside.
 
 const rows = computed<FleetCostRow[]>(() => costData.value?.rows ?? [])
 
@@ -902,7 +902,7 @@ defineExpose({ refresh })
 
     <!-- Body: pending / empty / table / chart -->
     <div
-      v-if="pending"
+      v-if="pending && !hasLoadedOnce"
       class="px-4 py-8 text-center text-sm text-fg-muted"
     >
       Loading cost data…
