@@ -763,30 +763,50 @@ defineExpose({ refresh })
            per-model table or chart below. -->
       <div
         v-if="hasSubscriptionSection"
-        class="border-b border-border mt-6 mb-6"
+        class="border-b border-border mt-6"
       >
         <div class="px-4 pt-3 pb-3">
           <div class="text-xs font-medium text-fg-muted uppercase tracking-wide">
             Subscription
           </div>
-          <!-- Per-provider bill breakdown for the active window. Pulled
-               above the table so the operator sees the standing fees as
-               a header summary, not as row-shaped data masquerading as
-               usage stats. Plural-vs-singular phrasing keeps a single
-               provider from reading awkwardly. -->
+          <!-- Per-provider bill breakdown for the active window. Rendered
+               as a flex-wrap chip grid so 1 provider reads cleanly as a
+               single card and 5+ providers wrap across multiple rows
+               without turning into a wall of comma-separated text. Each
+               chip carries the provider name above its pro-rated fee. The
+               trailing Total card is shown only when 2+ providers exist —
+               with one provider it would duplicate the single chip; with
+               many it surfaces the grand window figure in the emerald
+               cost accent so the eye lands there last. -->
           <div
             v-if="subscriptionProviderBreakdown.length > 0"
-            class="mt-1 text-[11px] text-fg-muted"
+            class="mt-3 flex flex-wrap gap-2"
           >
-            <span class="font-mono text-fg-primary">{{ formatStatCurrency(subscriptionFee) }}</span>
-            this window —
-            <template
-              v-for="(p, idx) in subscriptionProviderBreakdown"
+            <div
+              v-for="p in subscriptionProviderBreakdown"
               :key="p.name"
+              class="border border-border bg-muted/20 px-3 py-2 min-w-[9rem]"
             >
-              <span v-if="idx > 0">, </span>{{ p.displayName }}
-              <span class="font-mono text-fg-primary">{{ formatStatCurrency(p.proRatedFee) }}</span>
-            </template>
+              <div class="text-[10px] text-fg-muted uppercase tracking-wide">
+                {{ p.displayName }}
+              </div>
+              <div class="mt-0.5 font-mono text-sm text-fg-primary">
+                {{ formatStatCurrency(p.proRatedFee) }}
+                <span class="text-[10px] text-fg-muted">this window</span>
+              </div>
+            </div>
+            <div
+              v-if="subscriptionProviderBreakdown.length > 1"
+              class="border border-border bg-muted/40 px-3 py-2 min-w-[9rem]"
+            >
+              <div class="text-[10px] text-fg-muted uppercase tracking-wide">
+                Total
+              </div>
+              <div class="mt-0.5 font-mono text-sm text-emerald-700 dark:text-emerald-400">
+                {{ formatStatCurrency(subscriptionFee) }}
+                <span class="text-[10px] text-fg-muted">this window</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1149,12 +1169,15 @@ defineExpose({ refresh })
            (table-fixed + w-1/4 Model column). The "Combined total"
            label lives in the first cell rather than a separate header
            strip above, so the whole grand-total reads as one row that
-           lines up vertically with the section Total rows above. -->
+           lines up vertically with the section Total rows above.
+           Flush against the per-token border-b (no mt-) and a 2px top
+           border + darker bg make this row read as the grand "footer of
+           footers" stacking onto the per-modality Total rows. -->
       <div
         v-if="hasPaidData || hasSubscriptionSection"
-        class="overflow-x-auto mt-6"
+        class="overflow-x-auto"
       >
-        <table class="w-full text-xs table-fixed">
+        <table class="w-full text-xs table-fixed border-t-2 border-border bg-muted/40">
           <!-- Visually-hidden header so screen readers can announce each
                cell's column. The per-modality tables above already render
                their column headers visibly, and this footer mirrors their
