@@ -1125,30 +1125,29 @@ defineExpose({ refresh })
             v-for="(r, i) in subscriptionChartRows"
             :key="i"
           >
-            <div
-              class="font-mono text-fg-primary truncate"
-              :title="r.label"
-            >
-              {{ r.label }}
+            <!-- Provider color swatch sits as a small legend-style square
+                 immediately before the model name, so the bar stays a
+                 pure emerald cost signal and the per-provider identity
+                 lives in the label column. min-w-0 lets the truncated
+                 model name shrink within the flex container without
+                 pushing past its grid column. -->
+            <div class="flex items-center gap-2 min-w-0">
+              <div
+                class="w-2 h-2 shrink-0 rounded-sm"
+                :class="providerSwatchColor(r.modelProvider)"
+                :title="r.modelProvider ?? ''"
+              />
+              <span
+                class="font-mono text-fg-primary truncate"
+                :title="r.label"
+              >
+                {{ r.label }}
+              </span>
             </div>
             <div class="relative h-5 bg-muted/30 border border-border overflow-hidden">
-              <!-- Emerald fill in normal flow so it starts at the bar's
-                   left edge (x=0) and its right edge sits at the
-                   proportional position — same logical alignment as the
-                   per-token chart bars above, which carry no swatch. -->
               <div
                 class="h-full bg-emerald-500/30"
                 :style="{ width: ((r.cost / subscriptionChartMaxCost) * 100).toFixed(2) + '%' }"
-              />
-              <!-- Per-provider color swatch overlays the leftmost 6px on
-                   top of the emerald — the fill's logical left edge
-                   stays at x=0, the swatch is a colored badge that
-                   identifies the provider without displacing the bar.
-                   Keeps "emerald = cost" intact across the dashboard. -->
-              <div
-                class="absolute inset-y-0 left-0 w-1.5"
-                :class="providerSwatchColor(r.modelProvider)"
-                :title="r.modelProvider ?? ''"
               />
             </div>
             <div class="font-mono text-emerald-700 dark:text-emerald-400 tabular-nums shrink-0">
