@@ -8,6 +8,7 @@ import okhttp3.Response;
 import okio.BufferedSource;
 import play.Logger;
 import utils.HttpFactories;
+import utils.HttpKeys;
 
 import java.io.IOException;
 import java.net.URI;
@@ -50,7 +51,7 @@ import java.util.function.Consumer;
  */
 public final class McpStreamableHttpTransport implements McpTransport {
 
-    private static final MediaType JSON = MediaType.get("application/json");
+    private static final MediaType JSON = MediaType.get(HttpKeys.APPLICATION_JSON);
 
     private final String name;
     private final URI endpoint;
@@ -82,7 +83,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
         var body = RequestBody.create(JsonRpc.encode(msg), JSON);
         var builder = new Request.Builder()
                 .url(endpoint.toString())
-                .header("Accept", "application/json, text/event-stream")
+                .header(HttpKeys.ACCEPT, "application/json, text/event-stream")
                 .post(body);
         for (var entry : headers.entrySet()) builder.header(entry.getKey(), entry.getValue());
         var call = HttpFactories.llmStreaming().newCall(builder.build());
@@ -117,7 +118,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
         }
         if (resp.code() == 202) return;  // notification accepted, no body
 
-        var contentType = resp.header("Content-Type", "");
+        var contentType = resp.header(HttpKeys.CONTENT_TYPE, "");
         if (contentType.contains("text/event-stream")) {
             consumeSseStream(resp.body().source());
             return;

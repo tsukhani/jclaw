@@ -7,6 +7,7 @@ import okhttp3.Response;
 import okhttp3.sse.EventSource;
 import okhttp3.sse.EventSourceListener;
 import okhttp3.sse.EventSources;
+import utils.HttpKeys;
 
 import java.io.IOException;
 import java.net.URI;
@@ -30,7 +31,7 @@ import java.util.function.Consumer;
  */
 final class OkHttpLlmHttpDriver {
 
-    private static final MediaType JSON = MediaType.get("application/json");
+    private static final MediaType JSON = MediaType.get(HttpKeys.APPLICATION_JSON);
 
     /** Single-shot HTTP response. */
     record HttpReply(int statusCode, String body, Optional<Long> retryAfterSeconds) { }
@@ -46,7 +47,7 @@ final class OkHttpLlmHttpDriver {
             throws IOException, InterruptedException {
         var builder = new Request.Builder()
                 .url(uri.toString())
-                .header("Authorization", authHeader)
+                .header(HttpKeys.AUTHORIZATION, authHeader)
                 .post(RequestBody.create(jsonBody, JSON));
         if (channel != null) builder.tag(String.class, channel);
         var req = builder.build();
@@ -82,8 +83,8 @@ final class OkHttpLlmHttpDriver {
                           String channel) {
         var builder = new Request.Builder()
                 .url(uri.toString())
-                .header("Authorization", authHeader)
-                .header("Accept", "text/event-stream")
+                .header(HttpKeys.AUTHORIZATION, authHeader)
+                .header(HttpKeys.ACCEPT, "text/event-stream")
                 .post(RequestBody.create(jsonBody, JSON));
         if (channel != null) builder.tag(String.class, channel);
         var req = builder.build();

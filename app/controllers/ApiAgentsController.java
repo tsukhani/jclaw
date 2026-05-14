@@ -11,6 +11,7 @@ import models.Agent;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
+import utils.HttpKeys;
 
 import java.util.regex.Pattern;
 
@@ -311,7 +312,7 @@ public class ApiAgentsController extends Controller {
         response.setHeader("Cache-Control", "private, max-age=300");
 
         var inline = contentType.startsWith("image/") || contentType.startsWith("application/pdf");
-        response.setHeader("Content-Type", contentType);
+        response.setHeader(HttpKeys.CONTENT_TYPE, contentType);
         if (inline) {
             response.setHeader("Content-Disposition", "inline; filename=\"%s\"".formatted(file.getName()));
         }

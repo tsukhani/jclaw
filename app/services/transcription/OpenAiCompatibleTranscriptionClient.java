@@ -12,6 +12,7 @@ import play.Logger;
 import services.AgentService;
 import services.ConfigService;
 import utils.HttpFactories;
+import utils.HttpKeys;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -96,7 +97,7 @@ public class OpenAiCompatibleTranscriptionClient implements TranscriptionService
         var url = trimTrailingSlash(baseUrl) + "/audio/transcriptions";
         var request = new Request.Builder()
                 .url(url)
-                .header("Authorization", "Bearer " + apiKey)
+                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
                 .post(multipart)
                 .build();
 

@@ -1,6 +1,7 @@
 package services;
 
 import com.google.gson.*;
+import utils.HttpKeys;
 import utils.Strings;
 
 import java.util.*;
@@ -82,8 +83,8 @@ public class ModelDiscoveryService {
             var url = baseUrl.endsWith("/") ? baseUrl + "models" : baseUrl + "/models";
             var req = new okhttp3.Request.Builder()
                     .url(url)
-                    .header("Authorization", "Bearer " + apiKey)
-                    .header("Accept", "application/json")
+                    .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
+                    .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
                     .get()
                     .build();
             var call = utils.HttpFactories.llmSingleShot().newCall(req);
@@ -483,7 +484,7 @@ public class ModelDiscoveryService {
         try {
             var req = new okhttp3.Request.Builder()
                     .url(leaderboardUrl)
-                    .header("Accept", "text/html,application/json")
+                    .header(HttpKeys.ACCEPT, "text/html,application/json")
                     .get()
                     .build();
             var call = utils.HttpFactories.general().newCall(req);
@@ -627,8 +628,8 @@ public class ModelDiscoveryService {
             var url = nativeBase + "/api/v0/models";
             var req = new okhttp3.Request.Builder()
                     .url(url)
-                    .header("Authorization", "Bearer " + (apiKey != null ? apiKey : ""))
-                    .header("Accept", "application/json")
+                    .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + (apiKey != null ? apiKey : ""))
+                    .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
                     .get()
                     .build();
             var call = utils.HttpFactories.llmSingleShot().newCall(req);
@@ -745,8 +746,8 @@ public class ModelDiscoveryService {
             var nativeBase = stripV1Suffix(baseUrl);
             var tagsReq = new okhttp3.Request.Builder()
                     .url(nativeBase + "/api/tags")
-                    .header("Authorization", "Bearer " + (apiKey != null ? apiKey : ""))
-                    .header("Accept", "application/json")
+                    .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + (apiKey != null ? apiKey : ""))
+                    .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
                     .get()
                     .build();
             var tagsCall = utils.HttpFactories.llmSingleShot().newCall(tagsReq);
@@ -861,11 +862,11 @@ public class ModelDiscoveryService {
     private static Map<String, Object> fetchOllamaShow(String url, String apiKey, String id) {
         try {
             var body = "{\"name\":\"" + id.replace("\"", "\\\"") + "\"}";
-            var jsonMediaType = okhttp3.MediaType.get("application/json");
+            var jsonMediaType = okhttp3.MediaType.get(HttpKeys.APPLICATION_JSON);
             var req = new okhttp3.Request.Builder()
                     .url(url)
-                    .header("Authorization", "Bearer " + (apiKey != null ? apiKey : ""))
-                    .header("Accept", "application/json")
+                    .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + (apiKey != null ? apiKey : ""))
+                    .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
                     .post(okhttp3.RequestBody.create(body, jsonMediaType))
                     .build();
             var call = utils.HttpFactories.llmSingleShot().newCall(req);

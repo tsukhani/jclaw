@@ -2,6 +2,7 @@ package services.scanners;
 
 import com.google.gson.JsonObject;
 import okhttp3.Request;
+import utils.HttpKeys;
 
 import java.util.ArrayList;
 
@@ -60,7 +61,7 @@ public class VirusTotalScanner extends ConfiguredHashScanner {
         var request = new Request.Builder()
                 .url(baseUrl + "files/" + sha256)
                 .header("x-apikey", apiKey)
-                .header("Accept", "application/json")
+                .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
                 .get()
                 .build();
         return sendJsonLookup(sha256, request, timeoutMs, true, this::parseVerdict);

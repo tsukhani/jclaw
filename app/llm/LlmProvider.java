@@ -3,6 +3,7 @@ package llm;
 import com.google.gson.*;
 import llm.LlmTypes.*;
 import services.EventLogger;
+import utils.HttpKeys;
 
 import java.net.URI;
 import java.time.Duration;
@@ -276,7 +277,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
                 var request = new ChatRequest(model, messages, tools, true, maxTokens, thinkingMode);
                 var json = serializeRequest(request);
                 OkHttpLlmHttpDriver.streamSse(buildUri("/chat/completions"),
-                        "Bearer " + config.apiKey(), json,
+                        HttpKeys.BEARER_PREFIX + config.apiKey(), json,
                         data -> {
                             // The server closes the stream right after the [DONE]
                             // sentinel, so we skip parsing it here.
@@ -535,7 +536,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
     protected String executeWithRetry(String path, String json, Integer timeoutSeconds, String channel) {
         var uri = buildUri(path);
-        var auth = "Bearer " + config.apiKey();
+        var auth = HttpKeys.BEARER_PREFIX + config.apiKey();
         var timeout = Duration.ofSeconds(timeoutSeconds != null ? timeoutSeconds : 180);
         Exception lastException = null;
 
