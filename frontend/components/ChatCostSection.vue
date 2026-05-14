@@ -1176,6 +1176,28 @@ defineExpose({ refresh })
         class="overflow-x-auto"
       >
         <table class="w-full text-xs table-fixed border-t-2 border-border bg-muted/40">
+          <!-- Explicit colgroup so table-fixed has a column-width source
+               independent of any row. The sr-only thead below applies
+               position:absolute (Tailwind's sr-only is width:1px height:1px
+               position:absolute), which yanks its cells out of the table
+               box tree. Without colgroup, table-fixed loses the w-1/4
+               Model-column cue from the absent thead and distributes 7
+               equal columns ≈ 14.3% each, leaving the Model column too
+               narrow and shifting every stat column left of the per-token
+               table's columns above. Colgroup widths sit above row-based
+               inference in the table-fixed algorithm, so they apply
+               regardless of thead positioning — and they mirror the
+               implicit 25% / 12.5%×6 widths the per-modality tables
+               above get from their visible thead row. -->
+          <colgroup>
+            <col class="w-1/4">
+            <col>
+            <col>
+            <col>
+            <col>
+            <col>
+            <col>
+          </colgroup>
           <!-- Visually-hidden header so screen readers can announce each
                cell's column. The per-modality tables above already render
                their column headers visibly, and this footer mirrors their
