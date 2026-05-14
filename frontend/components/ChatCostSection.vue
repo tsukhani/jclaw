@@ -1110,14 +1110,20 @@ defineExpose({ refresh })
              the bars to that provider's range). Suppressed when there
              are no usage rows — the empty-state info lives in the
              unallocated footnote below. -->
+        <!-- One grid container for all chart rows (not one grid per row)
+             so the auto cost column resolves to a single width across
+             rows and every bar's left edge sits at the same x. The
+             minmax(0,_1fr) / minmax(0,_3fr) widths override the default
+             min-width:auto behavior — without them, the 1fr label
+             column would expand to fit the longest label even though
+             `truncate` is set, leaving bars at inconsistent positions. -->
         <div
           v-else-if="subscriptionChartRows.length > 0"
-          class="px-4 py-3 space-y-1.5 border-t border-border"
+          class="px-4 py-3 border-t border-border grid items-center gap-x-3 gap-y-1.5 text-xs grid-cols-[minmax(0,1fr)_minmax(0,3fr)_auto]"
         >
-          <div
+          <template
             v-for="(r, i) in subscriptionChartRows"
             :key="i"
-            class="grid grid-cols-[1fr_3fr_auto] items-center gap-3 text-xs"
           >
             <div
               class="font-mono text-fg-primary truncate"
@@ -1149,7 +1155,7 @@ defineExpose({ refresh })
               {{ formatCostUsd(r.cost) }}
               <span class="text-fg-muted">· {{ r.turnCount }}t</span>
             </div>
-          </div>
+          </template>
         </div>
 
         <!-- Footnote: clarifies the allocation, and flags any
@@ -1334,14 +1340,16 @@ defineExpose({ refresh })
           fleet view); switches to per-agent when an agent filter narrows
           the scope. Inline SVG with relative widths.
         -->
+        <!-- Unified grid for all rows so the auto cost column resolves
+             to a single width and bars left-align across rows. Same
+             pattern as the Subscription chart above. -->
         <div
           v-else
-          class="px-4 py-3 space-y-1.5 border-t border-border"
+          class="px-4 py-3 border-t border-border grid items-center gap-x-3 gap-y-1.5 text-xs grid-cols-[minmax(0,1fr)_minmax(0,3fr)_auto]"
         >
-          <div
+          <template
             v-for="(r, i) in chartRows"
             :key="i"
-            class="grid grid-cols-[1fr_3fr_auto] items-center gap-3 text-xs"
           >
             <div
               class="font-mono text-fg-primary truncate"
@@ -1359,7 +1367,7 @@ defineExpose({ refresh })
               {{ formatCostUsd(r.cost) }}
               <span class="text-fg-muted">· {{ r.turnCount }}t</span>
             </div>
-          </div>
+          </template>
         </div>
       </div>
 
