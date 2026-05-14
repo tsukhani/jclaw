@@ -67,6 +67,24 @@ public class SubagentRun extends Model {
     @Column(columnDefinition = "TEXT")
     public String outcome;
 
+    /**
+     * JCLAW-273: yield-resume flag for async spawns. When the parent agent
+     * invokes {@code yield_to_subagent} mid-turn with this run id, the tool
+     * flips this column to {@code true} and the parent's {@code AgentRunner}
+     * loop exits without emitting a final assistant reply. The async-spawn
+     * announce VT reads this column after the child terminates and switches
+     * the announce-message role from {@code SYSTEM} (the default JCLAW-270
+     * fire-and-forget shape) to {@code USER}, then re-invokes
+     * {@code AgentRunner.run} on the parent conversation so the parent's
+     * logical turn resumes with the child's reply as its next user input.
+     *
+     * <p>Defaults to {@code false} for every plain async spawn that the
+     * parent never yields into; that branch keeps the JCLAW-270 semantics
+     * verbatim (system-role announce, no resume call).
+     */
+    @Column(nullable = false)
+    public boolean yielded = false;
+
     @PrePersist
     void onCreate() {
         if (startedAt == null) startedAt = Instant.now();

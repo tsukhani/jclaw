@@ -44,6 +44,11 @@ public class ToolRegistrationJob extends Job<Void> {
         // JCLAW-265: spawn_subagent. Recursion limits and async path land
         // later (JCLAW-266, JCLAW-270) — this is the synchronous primitive.
         toolList.add(new SpawnSubagentTool());
+        // JCLAW-273: yield_to_subagent. Companion tool to async spawn —
+        // flips SubagentRun.yielded so the announce VT posts a USER-role
+        // resume Message and re-invokes AgentRunner.run on the parent
+        // conversation when the child terminates.
+        toolList.add(new YieldToSubagentTool());
         // JCLAW-281: list_mcp_tools is gone. Discovery is folded into each
         // MCP server's own surface — the model calls mcp_<server> with
         // empty args to enumerate that server's actions, registered by

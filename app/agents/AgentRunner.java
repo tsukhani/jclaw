@@ -53,6 +53,17 @@ public class AgentRunner {
     public record RunResult(String response, Conversation conversation) {}
 
     /**
+     * JCLAW-273: sentinel content the tool loop returns when the parent
+     * agent has yielded into an async subagent. {@link #runAfterAcquire}
+     * and {@link #runYieldResume} check {@code response.equals(YIELDED_RESPONSE)}
+     * to skip the final-assistant-message persist (no reply to emit;
+     * the resume re-invocation comes from
+     * {@link tools.SpawnSubagentTool#runAsyncAndAnnounce} once the child
+     * terminates).
+     */
+    public static final String YIELDED_RESPONSE = "__JCLAW_273_YIELDED__";
+
+    /**
      * JCLAW-170: granular tool-invocation event, fired from the agent loop
      * once each tool call completes. Carries enough metadata for the UI to
      * render a per-call row (icon, name, arguments) plus the optional
@@ -277,11 +288,49 @@ public class AgentRunner {
      * deque is empty (or transfers it to the next drained message).
      */
     public static RunResult runWithOwnedQueue(Agent agent, Conversation conversation, String userMessage) {
-        return runAfterAcquire(agent, conversation, userMessage, null);
+        return runAfterAcquire(agent, conversation, userMessage, null, false);
+    }
+
+    /**
+     * JCLAW-273: resume entrypoint used by
+     * {@link tools.SpawnSubagentTool#runAsyncAndAnnounce} after a yielded
+     * async child terminates. The yield-resume announce Message has already
+     * been persisted into the parent conversation as a USER-role row (with
+     * {@code messageKind=subagent_announce}); this entrypoint acquires the
+     * conversation queue (so it serialises against any concurrent inbound
+     * turn) and then runs the standard {@link #runAfterAcquire} pipeline
+     * with {@code skipUserAppend=true} so the announce isn't duplicated.
+     * The LLM sees the announce verbatim via
+     * {@link ConversationService#loadRecentMessages} (whose filter keeps
+     * USER-role announces in context).
+     *
+     * <p>If the queue is busy (a Telegram message or web turn arrived in the
+     * gap between the child's terminal state and this call), the resume is
+     * queued just like any other inbound turn would be — the queued-canned-
+     * response path returns a {@link RunResult} but the actual resume work
+     * runs after the current owner finishes.
+     */
+    public static RunResult runYieldResume(Agent agent, Conversation conversation) {
+        // Empty user message because the actual input — the child's reply —
+        // is already in the persisted USER-role announce row. The
+        // skipUserAppend flag suppresses appendUserMessage so we don't
+        // double-append.
+        var queueMsg = new services.ConversationQueue.QueuedMessage(
+                "", conversation.channelType, conversation.peerId, agent);
+        if (!services.ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
+            return new RunResult("Your message has been queued and will be processed shortly.", conversation);
+        }
+        return runAfterAcquire(agent, conversation, "", null, true);
     }
 
     private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,
                                               java.util.List<services.AttachmentService.Input> attachments) {
+        return runAfterAcquire(agent, conversation, userMessage, attachments, false);
+    }
+
+    private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,
+                                              java.util.List<services.AttachmentService.Input> attachments,
+                                              boolean skipUserAppend) {
         final Long conversationId = conversation.id;
         // Non-streaming callers (TaskPollerJob, background) have no pre-runner
         // queue-accept timestamp, so queue_wait is naturally skipped. Every other
@@ -298,7 +347,13 @@ public class AgentRunner {
             // would throw PersistentObjectException on save().
             var prepared = services.Tx.run(() -> {
                 var conv = ConversationService.findById(conversationId);
-                ConversationService.appendUserMessage(conv, userMessage, attachments);
+                // JCLAW-273: skipUserAppend=true comes from runYieldResume — the
+                // yield-resume announce was already persisted as a USER-role
+                // Message before this call, so re-appending would duplicate the
+                // row in both the chat scrollback and the LLM context.
+                if (!skipUserAppend) {
+                    ConversationService.appendUserMessage(conv, userMessage, attachments);
+                }
                 trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
 
                 var assembled = SystemPromptAssembler.assemble(agent, userMessage, null, conv.channelType);
@@ -369,6 +424,19 @@ public class AgentRunner {
                     prepared.messages(), prepared.tools(), prepared.primary(), prepared.secondary(),
                     prepared.audioBearers());
             trace.mark(LatencyTrace.STREAM_BODY_END);
+
+            // JCLAW-273: yielded response — no final assistant message to
+            // persist. The parent agent's turn ended cleanly after the
+            // yield_to_subagent tool call; the resume re-invocation will
+            // arrive from tools.SpawnSubagentTool#runAsyncAndAnnounce once
+            // the child terminates. Return immediately so the caller sees
+            // YIELDED_RESPONSE on the RunResult.
+            if (YIELDED_RESPONSE.equals(response)) {
+                EventLogger.info("agent", agent.name, conversation.channelType,
+                        "Parent turn suspended via yield_to_subagent");
+                var updatedConv = services.Tx.run(() -> ConversationService.findById(conversationId));
+                return new RunResult(response, updatedConv);
+            }
 
             // Short persistence transaction: final assistant message.
             // Conversation may have been deleted between LLM call and persist
@@ -802,6 +870,22 @@ public class AgentRunner {
 
         if (checkCancelled(isCancelled, agent, channelType, cb)) return;
 
+        // JCLAW-273: parent agent yielded into an async subagent. No final
+        // assistant message to persist or emit; the parent's logical turn
+        // resumes later from tools.SpawnSubagentTool#runAsyncAndAnnounce
+        // once the child terminates. Fire cb.onComplete with empty content
+        // so transports release their per-turn resources cleanly (the SSE
+        // wrapper's onComplete drains the conversation queue + closes the
+        // terminal frame; without it, web turns would dangle waiting for a
+        // completion that's coming from a different VT in a different turn).
+        if (YIELDED_RESPONSE.equals(content)) {
+            EventLogger.info("agent", agent.name, channelType,
+                    "Streaming parent turn suspended via yield_to_subagent");
+            trace.mark(LatencyTrace.STREAM_BODY_END);
+            cb.onComplete().accept("");
+            return;
+        }
+
         trace.mark(LatencyTrace.STREAM_BODY_END);
 
         // Build usage JSON before persisting so it can be stored alongside the message.
@@ -1087,14 +1171,53 @@ public class AgentRunner {
 
             // Tool calls — execute (in parallel when multiple) and continue
             currentMessages.add(assistantMsg);
+            int toolResultsAnchor = currentMessages.size();
             EventLogger.info("tool", agent.name, null,
                     "Round %d: executing %d tool call(s)".formatted(round + 1, assistantMsg.toolCalls().size()));
 
             executeToolsParallel(assistantMsg.toolCalls(), agent, conversationId,
                     currentMessages, null, null, null, null);
+
+            // JCLAW-273: detect a successful yield_to_subagent call and bail
+            // out of the tool-call loop without continuing to the next LLM
+            // round. The runner returns YIELDED_RESPONSE so the caller skips
+            // its final-assistant-message persist; the parent's logical
+            // turn resumes later from tools.SpawnSubagentTool#runAsyncAndAnnounce
+            // once the child terminates.
+            if (yieldRequestedInLastRound(currentMessages, toolResultsAnchor)) {
+                EventLogger.info("tool", agent.name, null,
+                        "Round %d: yield_to_subagent invoked — suspending parent turn".formatted(round + 1));
+                return YIELDED_RESPONSE;
+            }
         }
 
         return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
+    }
+
+    /**
+     * JCLAW-273: scan the just-appended tool-result entries (those at index
+     * {@code >= fromIndex}) for the
+     * {@link tools.YieldToSubagentTool#YIELD_SENTINEL_PREFIX} marker that the
+     * yield companion tool returns on success. Returns {@code true} if any
+     * tool-result content starts with the marker, meaning the parent's loop
+     * should exit without emitting a final assistant reply.
+     *
+     * <p>String-prefix scan rather than parsing JSON because the AC sentinel
+     * shape is closed (the tool always returns the same shape) and a prefix
+     * compare is robust against any future field reordering.
+     */
+    private static boolean yieldRequestedInLastRound(List<ChatMessage> currentMessages, int fromIndex) {
+        for (int i = fromIndex; i < currentMessages.size(); i++) {
+            var m = currentMessages.get(i);
+            if (m == null) continue;
+            if (!MessageRole.TOOL.value.equals(m.role())) continue;
+            var content = m.content();
+            if (content instanceof String s
+                    && s.startsWith(tools.YieldToSubagentTool.YIELD_SENTINEL_PREFIX)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -1206,12 +1329,26 @@ public class AgentRunner {
         var currentMessages = new ArrayList<>(messages);
         currentMessages.add(ChatMessage.assistant(priorContent, toolCalls));
 
+        int streamingToolResultsAnchor = currentMessages.size();
         var toolRoundStartNs = System.nanoTime();
         executeToolsParallel(toolCalls, agent, conversationId, currentMessages,
                 cb.onStatus(), cb.onToolCall(), collectedImages, isCancelled);
         trace.addToolRound((System.nanoTime() - toolRoundStartNs) / 1_000_000L);
 
         if (isCancelled.get()) return cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+
+        // JCLAW-273: yield_to_subagent detected in this round — exit the
+        // streaming loop without continuing to the next LLM round and
+        // without emitting a final assistant payload. Returning the
+        // YIELDED_RESPONSE sentinel lets streamLlmLoop short-circuit its
+        // persistence + terminal-callback path; the parent's logical turn
+        // resumes later from tools.SpawnSubagentTool#runAsyncAndAnnounce.
+        if (yieldRequestedInLastRound(currentMessages, streamingToolResultsAnchor)) {
+            EventLogger.info("tool", agent.name, null,
+                    "Streaming round %d: yield_to_subagent invoked — suspending parent turn"
+                            .formatted(round + 1));
+            return YIELDED_RESPONSE;
+        }
 
         cb.onStatus().accept("Processing results (round %d)...".formatted(round + 1));
         EventLogger.info("llm", agent.name, null,

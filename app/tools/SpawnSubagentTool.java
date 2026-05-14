@@ -979,13 +979,28 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                 ? finalReply
                 : (finalErrorReason != null ? finalErrorReason : "");
         var truncated = truncateForAnnounce(announceBody);
+
+        // JCLAW-273: read the yield flag inside the same Tx that persists the
+        // announce so the role-decision and the message insert see a
+        // consistent snapshot of SubagentRun.yielded. A parent that called
+        // yield_to_subagent expects USER-role delivery (the announce IS its
+        // next user message); a fire-and-forget async caller expects
+        // SYSTEM-role (the JCLAW-270 semantics — visible card, never feeds
+        // back into LLM context).
+        Boolean yieldedFlag;
         try {
-            Tx.run(() -> postAnnounceMessage(
-                    parentConvId, runId, label, finalStatus, truncated, childConvId));
+            yieldedFlag = Tx.run(() -> {
+                var run = (SubagentRun) SubagentRun.findById(runId);
+                boolean isYielded = run != null && run.yielded;
+                postAnnounceMessage(parentConvId, runId, label, finalStatus,
+                        truncated, childConvId, isYielded);
+                return isYielded;
+            });
         } catch (Throwable t) {
             EventLogger.warn("subagent",
                     "Failed to post announce Message for run " + runId
                             + ": " + t.getMessage());
+            yieldedFlag = Boolean.FALSE;
         }
 
         // Emit the terminal lifecycle event. The childName lookup runs in its
@@ -1001,6 +1016,63 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                     mode, context, finalErrorReason);
         }
         EventLogger.flush();
+
+        // JCLAW-273: resume the parent agent's logical turn. The announce
+        // Message we just posted is the parent's next user input; calling
+        // AgentRunner.run kicks off a fresh turn that picks up the announce
+        // via ConversationService.loadRecentMessages (which keeps USER-role
+        // announce rows visible to the LLM) and produces a final assistant
+        // reply. Matches the inbound-trigger shape used by
+        // jobs.TaskPollerJob#executeTask — a background context calling
+        // AgentRunner.run on a conversation with the new prompt as the
+        // user message. The Tx re-fetch dodges detached-entity issues on
+        // the async VT carrier thread.
+        if (Boolean.TRUE.equals(yieldedFlag)) {
+            try {
+                resumeParentAfterYield(parentConvId, runId);
+            } catch (Throwable t) {
+                EventLogger.warn("subagent",
+                        "Failed to resume parent for yielded run " + runId
+                                + ": " + t.getMessage());
+            }
+        }
+    }
+
+    /**
+     * JCLAW-273: re-invoke {@link AgentRunner#runYieldResume} on the parent
+     * conversation after a yielded async run terminates. The announce
+     * Message has already been persisted as a USER-role row (see
+     * {@link #postAnnounceMessage}); the resume entrypoint runs the
+     * standard prompt-assembly + LLM pipeline against the now-extended
+     * conversation history WITHOUT re-appending a user message (which
+     * would duplicate the announce). The LLM picks up the announce via
+     * {@link services.ConversationService#loadRecentMessages}, whose
+     * JCLAW-273 filter keeps USER-role announces in LLM context.
+     *
+     * <p>Runs in the announce VT (so the call is naturally outside any
+     * other turn's queue acquisition). Failures are caught + logged at the
+     * caller — losing the resume must not lose the audit row or the
+     * announce.
+     */
+    private static void resumeParentAfterYield(Long parentConvId, Long runId) {
+        var conv = Tx.run(() -> (Conversation) Conversation.findById(parentConvId));
+        if (conv == null) {
+            EventLogger.warn("subagent",
+                    "Yielded resume skipped: parent conversation " + parentConvId
+                            + " not found for run " + runId);
+            return;
+        }
+        var parentAgent = Tx.run(() -> {
+            var c = (Conversation) Conversation.findById(parentConvId);
+            return c != null ? c.agent : null;
+        });
+        if (parentAgent == null) {
+            EventLogger.warn("subagent",
+                    "Yielded resume skipped: no agent on parent conversation " + parentConvId
+                            + " for run " + runId);
+            return;
+        }
+        AgentRunner.runYieldResume(parentAgent, conv);
     }
 
     /**
@@ -1018,17 +1090,26 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
     }
 
     /**
-     * Persist the announce Message into the parent Conversation. SYSTEM role
-     * with {@link #MESSAGE_KIND_ANNOUNCE} keeps the row out of the LLM context
-     * (see {@code ConversationService.loadRecentMessages}) while the chat UI
-     * picks it up via the {@code messageKind} discriminator and renders a
-     * structured card with the run id, label, status, truncated reply, and a
-     * "View full" link to the child Conversation. {@code content} carries a
-     * plain-text fallback for transports that don't understand the card.
+     * Persist the announce Message into the parent Conversation. The role
+     * depends on whether the parent yielded into this run (JCLAW-273): a
+     * fire-and-forget async caller gets a {@link MessageRole#SYSTEM}-role
+     * row (kept out of the LLM's view by
+     * {@link services.ConversationService#loadRecentMessages}), while a
+     * yielded caller gets a {@link MessageRole#USER}-role row that the LLM
+     * sees as its next user-role input on resume. Either way the row is
+     * stamped with {@link #MESSAGE_KIND_ANNOUNCE} so the chat UI renders
+     * the same structured card (run id, label, status, truncated reply,
+     * "View full" link to the child Conversation).
+     *
+     * <p>{@code content} carries a plain-text fallback for transports that
+     * don't understand the card. For yielded rows the plain text is what
+     * the LLM sees in the rebuilt context — keep it the rich-prose form
+     * (status + reply) so a model that doesn't understand the metadata
+     * still gets a coherent user turn.
      */
     private static void postAnnounceMessage(Long parentConvId, Long runId, String label,
                                             SubagentRun.Status status, String truncatedReply,
-                                            Long childConvId) {
+                                            Long childConvId, boolean yielded) {
         var parentConv = (Conversation) Conversation.findById(parentConvId);
         if (parentConv == null) return;
 
@@ -1038,6 +1119,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         payload.put("status", status.name());
         payload.put("reply", truncatedReply != null ? truncatedReply : "");
         payload.put("childConversationId", childConvId);
+        payload.put("yielded", yielded);
 
         var fallbackLabel = label != null && !label.isBlank() ? label : "subagent run";
         var fallback = "Subagent " + status.name().toLowerCase() + " (" + fallbackLabel + ")"
@@ -1047,7 +1129,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
 
         var msg = new Message();
         msg.conversation = parentConv;
-        msg.role = MessageRole.SYSTEM.value;
+        msg.role = yielded ? MessageRole.USER.value : MessageRole.SYSTEM.value;
         msg.content = fallback;
         msg.messageKind = MESSAGE_KIND_ANNOUNCE;
         msg.metadata = utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
