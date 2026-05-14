@@ -569,4 +569,126 @@ describe('ChatCostSection (JCLAW-28)', () => {
     const fiftyMatches = text.match(/\$50(?!\d)/g) ?? []
     expect(fiftyMatches.length).toBeGreaterThanOrEqual(2)
   })
+
+  // ==================== Chip-click filter ====================
+  //
+  // Each provider chip in the Subscription header acts as a toggle
+  // filter: clicking scopes the per-model table + tfoot Total to that
+  // provider; clicking again clears. Chips for providers with no usage
+  // are disabled so the operator can't trap themselves in an empty view.
+
+  it('filters subscription table to one provider when its chip is clicked', async () => {
+    // Two providers configured ($100 + $20 = $120 total bill). Both used.
+    // Click Ollama Cloud → only its models render, tfoot Total = $100.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+        { name: 'openai', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 20 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'gpt-5', modelProvider: 'openai',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await flushPromises()
+
+    // Before filter: both models render, Total = $120.
+    expect(wrapper.text()).toContain('kimi-k2.5')
+    expect(wrapper.text()).toContain('gpt-5')
+    expect(wrapper.text()).toContain('$120')
+
+    // Click the Ollama Cloud chip.
+    const ollamaChip = wrapper.findAll('button')
+      .find(b => b.attributes('aria-pressed') !== undefined
+        && b.text().includes('Ollama Cloud'))!
+    expect(ollamaChip).toBeDefined()
+    await ollamaChip.trigger('click')
+    await flushPromises()
+
+    const filteredText = wrapper.text()
+    // After filter: only Ollama Cloud's model renders, gpt-5 is hidden.
+    expect(filteredText).toContain('kimi-k2.5')
+    expect(filteredText).not.toContain('gpt-5')
+    // Chip itself reports its pressed state to assistive tech.
+    expect(ollamaChip.attributes('aria-pressed')).toBe('true')
+  })
+
+  it('disables click on chips for providers with no usage this window', async () => {
+    // OpenAI configured at $20/mo but with no rows — its chip is muted
+    // and the disabled attribute is set so the operator can't select an
+    // empty view.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+        { name: 'openai', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 20 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+
+    const openaiChip = wrapper.findAll('button')
+      .find(b => b.attributes('aria-pressed') !== undefined
+        && b.text().includes('OpenAI'))!
+    expect(openaiChip).toBeDefined()
+    expect(openaiChip.attributes('disabled')).toBeDefined()
+  })
+
+  it('clears the filter when the active chip is clicked a second time', async () => {
+    // Toggle semantics — click once to filter, click again to clear.
+    // After the second click both models reappear and aria-pressed is
+    // back to "false".
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+        { name: 'openai', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 20 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'gpt-5', modelProvider: 'openai',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+
+    const ollamaChip = wrapper.findAll('button')
+      .find(b => b.attributes('aria-pressed') !== undefined
+        && b.text().includes('Ollama Cloud'))!
+    await ollamaChip.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('gpt-5')
+
+    await ollamaChip.trigger('click')
+    await flushPromises()
+    // Both models back in view; chip aria-pressed flips to false.
+    expect(wrapper.text()).toContain('kimi-k2.5')
+    expect(wrapper.text()).toContain('gpt-5')
+    expect(ollamaChip.attributes('aria-pressed')).toBe('false')
+  })
 })

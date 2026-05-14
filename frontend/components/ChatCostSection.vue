@@ -57,6 +57,11 @@ const selectedWindow = ref<WindowKey>('30d')
 const selectedAgentId = ref<number | null>(null)
 const selectedChannel = ref<string | null>(null)
 const view = ref<CostView>('table')
+// Provider-chip filter for the Subscription subsection. When set, the
+// subscription per-model table + tfoot Total + Combined Total all narrow
+// to that provider's models and prorated bill. Click the same chip again
+// to clear. Persisted alongside the other filter dropdowns.
+const selectedSubscriptionProvider = ref<string | null>(null)
 
 // Persist filter choices across page reloads — same convention as Chat
 // Performance's channel selector. Failure-tolerant for SSR / privacy-mode.
@@ -69,11 +74,13 @@ onMounted(() => {
       agentId: number | null
       channel: string | null
       view: CostView
+      subscriptionProvider: string | null
     }>
     if (parsed.window && (parsed.window in WINDOW_LABELS)) selectedWindow.value = parsed.window
     if (parsed.agentId !== undefined) selectedAgentId.value = parsed.agentId
     if (parsed.channel !== undefined) selectedChannel.value = parsed.channel
     if (parsed.view === 'chart' || parsed.view === 'table') view.value = parsed.view
+    if (parsed.subscriptionProvider !== undefined) selectedSubscriptionProvider.value = parsed.subscriptionProvider
   }
   catch { /* ignore */ }
 })
@@ -85,12 +92,13 @@ function persistSettings() {
       agentId: selectedAgentId.value,
       channel: selectedChannel.value,
       view: view.value,
+      subscriptionProvider: selectedSubscriptionProvider.value,
     }))
   }
   catch { /* ignore */ }
 }
 
-watch([selectedWindow, selectedAgentId, selectedChannel, view], persistSettings)
+watch([selectedWindow, selectedAgentId, selectedChannel, view, selectedSubscriptionProvider], persistSettings)
 
 // Compute the ISO `since` param for the current window. "all" sends a
 // far-past date so the server returns everything; cleaner than special-
@@ -212,6 +220,16 @@ watchEffect(() => {
     selectedChannel.value = null
   }
 })
+// Clear the subscription-chip filter if the operator removes that
+// provider from configuration (e.g., toggles modality on Settings).
+// Mirror the channel reset above so the chip can't get stuck pointing
+// at a provider that no longer renders.
+watchEffect(() => {
+  if (selectedSubscriptionProvider.value !== null
+    && !configuredSubscriptionProviders.value.some(p => p.name === selectedSubscriptionProvider.value)) {
+    selectedSubscriptionProvider.value = null
+  }
+})
 
 const filter = computed<FleetCostFilter>(() => ({
   agentId: selectedAgentId.value,
@@ -222,6 +240,18 @@ const breakdown = computed<FleetCostBreakdown>(() =>
   computeFleetCost(rows.value, filter.value),
 )
 
+// Subscription rows narrowed by the chip filter. When no chip is
+// selected this just re-exports subscriptionRows. The unfiltered version
+// (subscriptionRows) is still needed for has-usage checks on the chips
+// themselves — otherwise selecting one chip would make every other chip
+// look like "no usage" and become un-clickable, trapping the operator
+// in the current selection.
+const filteredSubscriptionRows = computed<FleetCostRow[]>(() => {
+  const sel = selectedSubscriptionProvider.value
+  if (sel === null) return subscriptionRows.value
+  return subscriptionRows.value.filter(r => rowBillingProvider(r) === sel)
+})
+
 // JCLAW-280: per-modality breakdowns. The original `breakdown` stays as the
 // whole-fleet aggregate (still used by the agent/channel filter availability
 // logic and as the source of `hasData`); the partitioned breakdowns drive
@@ -230,8 +260,22 @@ const perTokenBreakdown = computed<FleetCostBreakdown>(() =>
   computeFleetCost(perTokenRows.value, filter.value),
 )
 const subscriptionBreakdown = computed<FleetCostBreakdown>(() =>
+  computeFleetCost(filteredSubscriptionRows.value, filter.value),
+)
+// Unfiltered subscription breakdown — drives the chip-disabled state.
+// A chip is clickable only if its provider had at least one turn in the
+// window under the active agent/channel filters; the chip's "has usage"
+// check has to consult this, not the chip-filtered version above.
+const unfilteredSubscriptionBreakdown = computed<FleetCostBreakdown>(() =>
   computeFleetCost(subscriptionRows.value, filter.value),
 )
+const subscriptionProvidersWithUsage = computed<Set<string>>(() => {
+  const set = new Set<string>()
+  for (const m of unfilteredSubscriptionBreakdown.value.perModel) {
+    if (m.turnCount > 0 && m.modelProvider) set.add(m.modelProvider)
+  }
+  return set
+})
 
 // Window length in days — used to pro-rate the subscription monthly fee.
 // For the "all time" window we fall back to the full row set's earliest
@@ -257,14 +301,39 @@ const windowDays = computed(() => {
 // Pro-rated subscription accrual = sum of monthly fees across every
 // configured subscription provider × (window_days / 30). Independent of
 // in-window activity — the operator is paying the monthly fee whether
-// they used the provider this week or not.
+// they used the provider this week or not. When a chip filter is
+// active, this narrows to the selected provider's bill only, so the
+// Subscription tfoot Total and the Combined Total flow naturally to
+// that provider's number (e.g., $100 for Ollama Cloud rather than
+// $120 for the full configured stack).
 const subscriptionFee = computed(() => {
+  const sel = selectedSubscriptionProvider.value
+  if (sel !== null) {
+    const p = configuredSubscriptionProviders.value.find(p => p.name === sel)
+    return p ? (Number(p.subscriptionMonthlyUsd) || 0) * (windowDays.value / 30) : 0
+  }
   let sumMonthly = 0
   for (const p of configuredSubscriptionProviders.value) {
     sumMonthly += Number(p.subscriptionMonthlyUsd) || 0
   }
   return sumMonthly * (windowDays.value / 30)
 })
+
+/**
+ * Toggle the subscription chip filter — click a chip to scope the
+ * subscription table to that provider; click the same chip again to
+ * clear back to the all-providers view. Routed through a helper so the
+ * disabled-chip case (non-selected + no-usage) can short-circuit
+ * without trying to set state.
+ */
+function onSubscriptionChipClick(name: string) {
+  if (selectedSubscriptionProvider.value === name) {
+    selectedSubscriptionProvider.value = null
+    return
+  }
+  if (!subscriptionProvidersWithUsage.value.has(name)) return
+  selectedSubscriptionProvider.value = name
+}
 
 // Subscription subsection visibility — render whenever the operator has
 // at least one subscription provider configured, so the standing fee
@@ -457,6 +526,11 @@ const subscriptionPerModelAllocated = computed<(FleetCostPerModel & { allocatedC
 // allocated cost, so `unallocatedSubscriptions` is what makes up the gap
 // between the table Total and the bill subtotal.
 const unallocatedSubscriptions = computed(() => {
+  // When a chip filter is active, every other provider's bill is hidden
+  // by design, not unallocated — surfacing them in the footnote would
+  // misrepresent the view. The footnote re-appears once the filter is
+  // cleared.
+  if (selectedSubscriptionProvider.value !== null) return []
   const usedProviders = new Set(
     subscriptionPerModel.value.map(m => m.modelProvider).filter(Boolean),
   )
@@ -763,48 +837,54 @@ defineExpose({ refresh })
            per-model table or chart below. -->
       <div
         v-if="hasSubscriptionSection"
-        class="border-b border-border mt-6"
+        class="border-b border-border mt-6 mb-6"
       >
         <div class="px-4 pt-3 pb-3">
           <div class="text-xs font-medium text-fg-muted uppercase tracking-wide">
             Subscription
           </div>
           <!-- Per-provider bill breakdown for the active window. Rendered
-               as a flex-wrap chip grid so 1 provider reads cleanly as a
-               single card and 5+ providers wrap across multiple rows
-               without turning into a wall of comma-separated text. Each
-               chip carries the provider name above its pro-rated fee. The
-               trailing Total card is shown only when 2+ providers exist —
-               with one provider it would duplicate the single chip; with
-               many it surfaces the grand window figure in the emerald
-               cost accent so the eye lands there last. -->
+               as a flex-wrap grid of clickable chips: clicking a chip
+               scopes the table below to that provider's models with the
+               tfoot Total summing to that provider's bill; clicking the
+               same chip again clears the filter. The aggregate of all
+               chips already shows up in the table's tfoot Total row, so
+               we deliberately omit a "Total" chip — it would duplicate
+               information that the table footer already carries. Chips
+               for providers with zero usage this window are visually
+               muted and not clickable (selecting one would render an
+               empty table). -->
           <div
             v-if="subscriptionProviderBreakdown.length > 0"
             class="mt-3 flex flex-wrap gap-2"
           >
-            <div
+            <button
               v-for="p in subscriptionProviderBreakdown"
               :key="p.name"
-              class="border border-border bg-muted/20 px-3 py-2 min-w-[9rem]"
+              type="button"
+              :aria-pressed="selectedSubscriptionProvider === p.name"
+              :disabled="selectedSubscriptionProvider !== p.name
+                && !subscriptionProvidersWithUsage.has(p.name)"
+              class="border px-3 py-2 min-w-[9rem] text-left transition-colors"
+              :class="selectedSubscriptionProvider === p.name
+                ? 'border-emerald-600 dark:border-emerald-400 bg-muted/40'
+                : subscriptionProvidersWithUsage.has(p.name)
+                  ? 'border-border bg-muted/20 hover:bg-muted/30 cursor-pointer'
+                  : 'border-border bg-muted/10 opacity-50 cursor-not-allowed'"
+              @click="onSubscriptionChipClick(p.name)"
             >
               <div class="text-[10px] text-fg-muted uppercase tracking-wide">
                 {{ p.displayName }}
               </div>
-              <div class="mt-0.5 font-mono text-sm text-fg-primary">
+              <div
+                class="mt-0.5 font-mono text-sm"
+                :class="selectedSubscriptionProvider === p.name
+                  ? 'text-emerald-700 dark:text-emerald-400'
+                  : 'text-fg-primary'"
+              >
                 {{ formatStatCurrency(p.proRatedFee) }}
               </div>
-            </div>
-            <div
-              v-if="subscriptionProviderBreakdown.length > 1"
-              class="border border-border bg-muted/40 px-3 py-2 min-w-[9rem]"
-            >
-              <div class="text-[10px] text-fg-muted uppercase tracking-wide">
-                Total
-              </div>
-              <div class="mt-0.5 font-mono text-sm text-emerald-700 dark:text-emerald-400">
-                {{ formatStatCurrency(subscriptionFee) }}
-              </div>
-            </div>
+            </button>
           </div>
         </div>
 
@@ -1164,18 +1244,17 @@ defineExpose({ refresh })
 
       <!-- JCLAW-280: combined total — rendered at the very bottom as a
            single table row sharing the per-model tables' column widths
-           (table-fixed + w-1/4 Model column). The "Combined total"
-           label lives in the first cell rather than a separate header
-           strip above, so the whole grand-total reads as one row that
-           lines up vertically with the section Total rows above.
-           Flush against the per-token border-b (no mt-) and a 2px top
-           border + darker bg make this row read as the grand "footer of
-           footers" stacking onto the per-modality Total rows. -->
+           (table-fixed + w-1/4 Model column via the explicit colgroup
+           below). The "Combined total" label lives in the first cell
+           rather than a separate header strip above, so the grand total
+           reads as one row that lines up vertically with the section
+           Total rows above. A regular top border + mt-6 breathing room
+           keep this row visually separate without overweighting it. -->
       <div
         v-if="hasPaidData || hasSubscriptionSection"
-        class="overflow-x-auto"
+        class="overflow-x-auto mt-6"
       >
-        <table class="w-full text-xs table-fixed border-t-2 border-border bg-muted/40">
+        <table class="w-full text-xs table-fixed border-t border-border">
           <!-- Explicit colgroup so table-fixed has a column-width source
                independent of any row. The sr-only thead below applies
                position:absolute (Tailwind's sr-only is width:1px height:1px
