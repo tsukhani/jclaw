@@ -888,4 +888,51 @@ describe('ChatCostSection (JCLAW-28)', () => {
     expect(ollamaSwatches.length).toBeGreaterThanOrEqual(1)
     expect(openaiSwatches.length).toBeGreaterThanOrEqual(1)
   })
+
+  it('selected chip border matches its swatch color', async () => {
+    // Selection cue is the provider's own color, used as the chip
+    // border — so the chip and its swatch share one color identity in
+    // both states (the swatch is always shown; the border switches
+    // from neutral to that color when active). Assertion: for a given
+    // provider, the chip's border-<color>-500 token shares its color
+    // stem with the swatch's bg-<color>-500 token.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+        { name: 'openai', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 20 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+
+    const ollamaChip = wrapper.findAll('button')
+      .find(b => b.attributes('aria-pressed') !== undefined
+        && b.text().includes('Ollama Cloud'))!
+    await ollamaChip.trigger('click')
+    await flushPromises()
+
+    // After click, the chip carries the active provider's border token.
+    const chipClasses = (ollamaChip.attributes('class') ?? '').split(/\s+/)
+    const borderToken = chipClasses.find(t => /^border-[a-z]+-500$/.test(t))
+    expect(borderToken).toBeDefined()
+
+    // Same color stem as the swatch on the table row's model cell.
+    const swatchEl = wrapper.findAll('span, div')
+      .find(el => el.attributes('title') === 'ollama-cloud')!
+    const swatchClasses = (swatchEl.attributes('class') ?? '').split(/\s+/)
+    const swatchToken = swatchClasses.find(t => /^bg-[a-z]+-500$/.test(t))
+    expect(swatchToken).toBeDefined()
+
+    const borderStem = borderToken!.replace(/^border-/, '').replace(/-500$/, '')
+    const swatchStem = swatchToken!.replace(/^bg-/, '').replace(/-500$/, '')
+    expect(borderStem).toBe(swatchStem)
+  })
 })

@@ -602,24 +602,26 @@ const subscriptionChartMaxCost = computed(() => {
   return max === 0 ? 1 : max
 })
 
-// Palette for the per-provider color swatch on each Subscription chart
-// bar. Listed as literal class strings so Tailwind's JIT can find every
-// possible value the helper might return; building them by string
-// concatenation would silently render as transparent. Kept off-emerald
-// (and off-lime/teal) so the swatch can never be mistaken for the
-// emerald cost fill on the bar itself — "emerald = cost" stays a global
-// convention; the swatch is purely a provider-identity tag.
-const PROVIDER_SWATCH_PALETTE = [
-  'bg-sky-500',
-  'bg-amber-500',
-  'bg-fuchsia-500',
-  'bg-rose-500',
-  'bg-indigo-500',
-  'bg-orange-500',
+// Palette for per-provider color identity. Each slot pairs a bg utility
+// (for the swatch fill) with the matching border utility (for the
+// selected-chip outline) so the two stay coupled — adding/reordering a
+// slot can't accidentally desync swatch and border colors. Listed as
+// literal class strings so Tailwind's JIT can find every possible
+// value; concatenating from a color stem (e.g., `bg-${color}-500`)
+// would silently render as transparent. Kept off-emerald (and
+// off-lime/teal) so the colors can never be mistaken for the emerald
+// cost fill on the bar — "emerald = cost" stays a global convention.
+const PROVIDER_PALETTE = [
+  { swatch: 'bg-sky-500', border: 'border-sky-500' },
+  { swatch: 'bg-amber-500', border: 'border-amber-500' },
+  { swatch: 'bg-fuchsia-500', border: 'border-fuchsia-500' },
+  { swatch: 'bg-rose-500', border: 'border-rose-500' },
+  { swatch: 'bg-indigo-500', border: 'border-indigo-500' },
+  { swatch: 'bg-orange-500', border: 'border-orange-500' },
 ] as const
 
 /**
- * Map a subscription provider name to a stable swatch color class.
+ * Map a subscription provider name to a stable palette slot.
  * Indexed by alphabetical position within configuredSubscriptionProviders
  * rather than by name-hash — the user-facing guarantee is that any two
  * distinct providers in *the operator's actual setup* get different
@@ -629,19 +631,24 @@ const PROVIDER_SWATCH_PALETTE = [
  * response order. Adding a new provider can shift colors of providers
  * alphabetically after it; acceptable for a setup that changes rarely.
  */
-const providerSwatchColorByName = computed<Map<string, string>>(() => {
-  const map = new Map<string, string>()
+const providerPaletteByName = computed<Map<string, typeof PROVIDER_PALETTE[number]>>(() => {
+  const map = new Map<string, typeof PROVIDER_PALETTE[number]>()
   const sorted = [...configuredSubscriptionProviders.value]
     .sort((a, b) => a.name.localeCompare(b.name))
   sorted.forEach((p, i) => {
-    map.set(p.name, PROVIDER_SWATCH_PALETTE[i % PROVIDER_SWATCH_PALETTE.length]!)
+    map.set(p.name, PROVIDER_PALETTE[i % PROVIDER_PALETTE.length]!)
   })
   return map
 })
 
 function providerSwatchColor(provider: string | undefined): string {
   if (!provider) return 'bg-fg-muted'
-  return providerSwatchColorByName.value.get(provider) ?? 'bg-fg-muted'
+  return providerPaletteByName.value.get(provider)?.swatch ?? 'bg-fg-muted'
+}
+
+function providerBorderColor(provider: string | undefined): string {
+  if (!provider) return 'border-border'
+  return providerPaletteByName.value.get(provider)?.border ?? 'border-border'
 }
 
 // CSV export. Generates per-model breakdown (one row per model with cost
@@ -930,12 +937,12 @@ defineExpose({ refresh })
               :aria-pressed="selectedSubscriptionProvider === p.name"
               :disabled="selectedSubscriptionProvider !== p.name
                 && !subscriptionProvidersWithUsage.has(p.name)"
-              class="border border-border min-w-[9rem] text-left transition-colors flex items-stretch"
+              class="border min-w-[9rem] text-left transition-colors flex items-stretch"
               :class="selectedSubscriptionProvider === p.name
-                ? 'bg-emerald-500/10'
+                ? `${providerBorderColor(p.name)} bg-muted/40`
                 : subscriptionProvidersWithUsage.has(p.name)
-                  ? 'bg-muted/20 hover:bg-muted/30 cursor-pointer'
-                  : 'bg-muted/10 opacity-50 cursor-not-allowed'"
+                  ? 'border-border bg-muted/20 hover:bg-muted/30 cursor-pointer'
+                  : 'border-border bg-muted/10 opacity-50 cursor-not-allowed'"
               @click="onSubscriptionChipClick(p.name)"
             >
               <!-- Same per-provider swatch as the chart bar below — the
@@ -951,12 +958,7 @@ defineExpose({ refresh })
                 <div class="text-[10px] text-fg-muted uppercase tracking-wide">
                   {{ p.displayName }}
                 </div>
-                <div
-                  class="mt-0.5 font-mono text-sm"
-                  :class="selectedSubscriptionProvider === p.name
-                    ? 'text-emerald-700 dark:text-emerald-400'
-                    : 'text-fg-primary'"
-                >
+                <div class="mt-0.5 font-mono text-sm text-fg-primary">
                   {{ formatStatCurrency(p.proRatedFee) }}
                 </div>
               </div>
