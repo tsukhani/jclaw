@@ -18,6 +18,8 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Service helpers for the MCP server admin surface (JCLAW-33).
@@ -43,6 +45,15 @@ import java.util.Map;
 public final class McpServerService {
 
     private static final Duration TEST_TIMEOUT = Duration.ofSeconds(10);
+
+    /** JCLAW-288: ceiling on how long {@link #syncRuntime} blocks the caller
+     *  (an admin API request) while the first connect attempt resolves. Set
+     *  slightly above {@code McpConnectionManager.firstAttemptRequestTimeout}
+     *  so we always observe the manager's own timeout fire first; if the
+     *  await still trips this cap the manager's watchdog continues the
+     *  reconnect loop in the background and the row's status keeps
+     *  evolving — the API response just reports CONNECTING in that case. */
+    private static volatile Duration syncRuntimeAwait = Duration.ofSeconds(130);
 
     private McpServerService() {}
 
@@ -73,12 +84,19 @@ public final class McpServerService {
             // returns DISCONNECTED naturally. The persisted column remains
             // useful for post-restart display before the connector reports.
             var liveStatus = McpConnectionManager.status(row.name).name();
+            // JCLAW-288: same live-preferred read for lastError so admin
+            // endpoints that just blocked on the first connect attempt
+            // (syncRuntime → connectAndAwait) see the error reason on the
+            // same response. Fall back to the persisted column when the
+            // manager has no entry (e.g. disabled rows after restart).
+            var liveLastError = McpConnectionManager.lastError(row.name);
+            var effectiveLastError = liveLastError != null ? liveLastError : row.lastError;
             return new View(
                     row.id, row.name, row.enabled, row.transport.name(),
                     cfg.command, cfg.args, cfg.env,
                     cfg.url, cfg.headers,
                     liveStatus,
-                    row.lastError,
+                    effectiveLastError,
                     row.lastConnectedAt != null ? row.lastConnectedAt.toString() : null,
                     row.lastDisconnectedAt != null ? row.lastDisconnectedAt.toString() : null,
                     tools,
@@ -176,7 +194,39 @@ public final class McpServerService {
      */
     public static void syncRuntime(McpServer row) {
         if (row.enabled) {
-            McpConnectionManager.connect(row);
+            // JCLAW-288: block the caller until the first connect attempt
+            // resolves so admin endpoints (POST/PUT /api/mcp-servers) can
+            // report the actual outcome on the same network roundtrip.
+            // Steady-state reconnect behaviour after this point is
+            // unchanged — watchdog + backoff continue to handle the long
+            // tail of transient failures asynchronously. The row is not
+            // mutated here; {@link View#of} already reads liveStatus from
+            // the manager, and JCLAW-288 extends that to lastError so the
+            // response reflects the just-completed first attempt without
+            // risking Hibernate flushing stale fields (e.g. lastConnectedAt)
+            // back over what persistConnectedAt just wrote in its own tx.
+            var future = McpConnectionManager.connectAndAwait(row);
+            try {
+                future.get(syncRuntimeAwait.toMillis(), TimeUnit.MILLISECONDS);
+            } catch (TimeoutException te) {
+                // Should be unreachable under normal config — the manager's
+                // own first-attempt timeout fires first. Falls through so
+                // the response still reflects whatever transient state the
+                // manager has at this instant (typically CONNECTING).
+                play.Logger.warn(
+                        "MCP server '%s' first connect did not resolve within %s; live status: %s",
+                        row.name, syncRuntimeAwait, McpConnectionManager.status(row.name));
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+            } catch (java.util.concurrent.CancellationException
+                    | java.util.concurrent.ExecutionException ignored) {
+                // Cancellation: a concurrent stop()/connect() replaced our
+                // entry. Execution: the connect attempt failed at the JVM
+                // level — the manager already wrote the failure into the
+                // entry's status + lastError before completing the future.
+                // Either way the live manager state queried by View.of is
+                // authoritative.
+            }
         } else {
             McpConnectionManager.stop(row.name);
             row.status = McpServer.Status.DISCONNECTED;
@@ -184,6 +234,14 @@ public final class McpServerService {
             row.lastDisconnectedAt = java.time.Instant.now();
             row.save();
         }
+    }
+
+    /** JCLAW-288: test hook to shrink the await cap. Production code never
+     *  calls this; tests that exercise the cold-start timeout path use
+     *  this together with
+     *  {@link McpConnectionManager#setFirstAttemptRequestTimeout}. */
+    public static void setSyncRuntimeAwait(Duration await) {
+        syncRuntimeAwait = await;
     }
 
     // ==================== test connection ====================

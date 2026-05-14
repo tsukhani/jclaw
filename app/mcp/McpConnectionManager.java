@@ -13,11 +13,13 @@ import services.EventLogger;
 import services.Tx;
 
 import java.net.URI;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -58,6 +60,18 @@ public final class McpConnectionManager {
     private static volatile long backoffInitialMillis = 1_000L;
     private static volatile long backoffCeilingMillis = 30_000L;
 
+    /** JCLAW-288: per-request timeout used on the very first connect attempt
+     *  for an entry. Cold-cache uvx / npx / pipx subprocesses typically need
+     *  30–60 s to install + bootstrap before they can respond to
+     *  {@code initialize}; the steady-state 30 s {@link McpClient} default
+     *  is too tight and races the install. After the first attempt resolves
+     *  (success or failure), subsequent retries fall back to
+     *  {@link #DEFAULT_REQUEST_TIMEOUT}. Volatile + setter so tests can
+     *  shrink it without waiting two minutes per failure case. */
+    @SuppressWarnings("java:S3008") // mutable test hook deliberately not final
+    private static volatile Duration firstAttemptRequestTimeout = Duration.ofSeconds(120);
+    private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(30);
+
     private static final ConcurrentHashMap<String, Entry> connections = new ConcurrentHashMap<>();
     // Reference is reassigned under synchronized ensureScheduler(); the held
     // executor is itself thread-safe, so volatile-on-reference is sufficient.
@@ -76,12 +90,37 @@ public final class McpConnectionManager {
     }
 
     /** Connect (or restart) one configured server. Idempotent: replaces
-     *  any prior entry for the same name. */
+     *  any prior entry for the same name. Fire-and-forget: returns once the
+     *  first attempt has been scheduled, not when it resolves. Used by
+     *  {@link #startAll()} on boot, where waiting per-server would serialize
+     *  startup. Callers that need to know the first-attempt outcome (the
+     *  admin API on registration) should use {@link #connectAndAwait}. */
     public static void connect(McpServer server) {
+        connectInternal(server, null);
+    }
+
+    /** JCLAW-288: variant that returns a future completing when the first
+     *  attempt resolves (success OR failure). The returned future is
+     *  signal-only — callers read live state via {@link #status} and
+     *  {@link #lastError} after it completes. Cancellation completes with
+     *  {@link java.util.concurrent.CancellationException} (e.g. when a
+     *  concurrent {@link #stop} or {@link #connect} replaces the entry
+     *  while the first attempt is still in flight). Subsequent retries
+     *  after this future completes are unaffected: the watchdog and the
+     *  exponential backoff schedule continue to drive reconnects with the
+     *  steady-state {@link #DEFAULT_REQUEST_TIMEOUT}. */
+    public static CompletableFuture<Void> connectAndAwait(McpServer server) {
+        var future = new CompletableFuture<Void>();
+        connectInternal(server, future);
+        return future;
+    }
+
+    private static void connectInternal(McpServer server, CompletableFuture<Void> firstAttemptFuture) {
         ensureScheduler();
         // Tear down any prior entry for this name first.
         stop(server.name);
         var entry = new Entry(server.name);
+        entry.firstAttemptFuture = firstAttemptFuture;
         connections.put(server.name, entry);
         scheduleConnect(entry, server, 0);
     }
@@ -101,6 +140,13 @@ public final class McpConnectionManager {
             if (client != null) {
                 try { client.close(); } catch (RuntimeException ignored) { /* best effort */ }
             }
+            // JCLAW-288: unblock any caller awaiting the first-attempt future
+            // for this entry. Replacing the entry (via a subsequent connect)
+            // or explicitly stopping mid-handshake counts as "first attempt
+            // resolved" for the awaiter — they'll read DISCONNECTED status
+            // and decide what to do.
+            var pending = entry.firstAttemptFuture;
+            if (pending != null && !pending.isDone()) pending.cancel(false);
             ToolRegistry.unpublishExternal(serverName);
         }
         clearAllowlistAndAudit(serverName);
@@ -159,6 +205,13 @@ public final class McpConnectionManager {
         backoffCeilingMillis = ceilingMillis;
     }
 
+    /** JCLAW-288: shrink (or restore) the first-attempt handshake timeout
+     *  for tests that need to exercise the cold-cache failure path without
+     *  waiting the production 120 s. Production code never calls this. */
+    public static void setFirstAttemptRequestTimeout(Duration timeout) {
+        firstAttemptRequestTimeout = timeout;
+    }
+
     public static int connectionCount() { return connections.size(); }
 
     /** Names of every server with an in-memory connection entry, regardless
@@ -197,10 +250,18 @@ public final class McpConnectionManager {
             transport = buildTransport(server);
         } catch (RuntimeException e) {
             handleFailure(entry, server, attempt, "transport build failed: " + e.getMessage());
+            signalFirstAttemptResolved(entry, attempt);
             return;
         }
 
-        var client = new McpClient(server.name, transport, clientVersion());
+        // JCLAW-288: extended request timeout on the first attempt so
+        // cold-cache uvx / npx / pipx subprocesses have headroom to install
+        // + bootstrap before the initialize handshake. Steady-state retries
+        // keep the snappier default — by the second attempt the cache is
+        // warm (or there's a real problem) and a long timeout would only
+        // delay the failure signal.
+        var requestTimeout = (attempt == 0) ? firstAttemptRequestTimeout : DEFAULT_REQUEST_TIMEOUT;
+        var client = new McpClient(server.name, transport, clientVersion(), requestTimeout);
         client.onToolsChanged(tools -> republishTools(server.name, tools));
         try {
             client.connect();
@@ -210,7 +271,8 @@ public final class McpConnectionManager {
             // roll back the just-finished handshake — without this, the
             // orphaned doConnect would re-publish tools, re-write the
             // allowlist, and persist status=CONNECTED for a server the
-            // user just disabled.
+            // user just disabled. (The first-attempt future on the orphan
+            // entry was already cancelled by the stop() that replaced us.)
             if (connections.get(server.name) != entry) {
                 bestEffortClose(client);
                 return;
@@ -233,10 +295,22 @@ public final class McpConnectionManager {
             // error trips it back to DISCONNECTED. Spawn a tiny watchdog VT
             // that polls the state and reconnects when it changes.
             startWatchdog(entry, server);
+            signalFirstAttemptResolved(entry, attempt);
         } catch (Exception e) {
             try { client.close(); } catch (RuntimeException ignored) {}
             handleFailure(entry, server, attempt, e.getMessage());
+            signalFirstAttemptResolved(entry, attempt);
         }
+    }
+
+    /** JCLAW-288: complete the awaiter's future on the FIRST attempt's
+     *  resolution (success or failure). Subsequent attempts don't touch
+     *  the future — the awaiter only ever waits one cycle, and the
+     *  watchdog/backoff loop handles long-running reconnects. */
+    private static void signalFirstAttemptResolved(Entry entry, int attempt) {
+        if (attempt != 0) return;
+        var future = entry.firstAttemptFuture;
+        if (future != null && !future.isDone()) future.complete(null);
     }
 
     private static void startWatchdog(Entry entry, McpServer server) {
@@ -469,6 +543,13 @@ public final class McpConnectionManager {
         volatile int attempts;
         @SuppressWarnings("java:S3077")
         volatile ScheduledFuture<?> scheduledRetry;
+        /** JCLAW-288: when non-null, completed on the FIRST attempt's
+         *  resolution (success or failure). Populated by
+         *  {@link #connectAndAwait}; left null for fire-and-forget
+         *  {@link #connect}. CompletableFuture is itself thread-safe;
+         *  this volatile only publishes the reference. */
+        @SuppressWarnings("java:S3077")
+        volatile CompletableFuture<Void> firstAttemptFuture;
 
         Entry(String name) { this.name = name; }
     }

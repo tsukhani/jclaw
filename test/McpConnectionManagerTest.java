@@ -20,7 +20,9 @@ import services.Tx;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -82,8 +84,10 @@ class McpConnectionManagerTest extends UnitTest {
     void tearDown() throws Exception {
         McpConnectionManager.shutdown();
         EventLogger.clear();
-        // Restore the production backoff numbers so any later test isn't perturbed.
+        // Restore the production backoff + first-attempt-timeout numbers so
+        // any later test isn't perturbed (JCLAW-288 added the timeout knob).
         McpConnectionManager.setBackoff(1_000, 30_000);
+        McpConnectionManager.setFirstAttemptRequestTimeout(Duration.ofSeconds(120));
         if (fixturePath != null) Files.deleteIfExists(fixturePath);
         // Re-run native tool registration so the next test sees the canonical set.
         ToolRegistrationJob.registerAll();
@@ -318,7 +322,144 @@ class McpConnectionManagerTest extends UnitTest {
         assertFalse(toolRegistered("mcp_fix2_echo"));
     }
 
+    // ==================== JCLAW-288: synchronous first-attempt connect ====================
+
+    /** Variant of {@link #FIXTURE_SCRIPT} that sleeps {@code DELAY_MS} ms
+     *  before responding to {@code initialize}. Stands in for a cold-cache
+     *  uvx/npx subprocess whose package install is still running when the
+     *  client sends initialize. */
+    private static final String SLOW_HANDSHAKE_FIXTURE = """
+            const readline = require('readline');
+            const DELAY_MS = parseInt(process.env.SLOW_HANDSHAKE_MS || '0', 10);
+            const rl = readline.createInterface({ input: process.stdin, terminal: false });
+            rl.on('line', (line) => {
+              if (!line.trim()) return;
+              let m;
+              try { m = JSON.parse(line); } catch (e) { return; }
+              if (m.method === 'initialize') {
+                setTimeout(() => send({ jsonrpc: '2.0', id: m.id,
+                  result: { protocolVersion: '2025-06-18', capabilities: { tools: {} },
+                            serverInfo: { name: 'slow', version: '0.0.1' } } }), DELAY_MS);
+              } else if (m.method === 'tools/list') {
+                send({ jsonrpc: '2.0', id: m.id, result: { tools: [] } });
+              }
+            });
+            function send(obj) { process.stdout.write(JSON.stringify(obj) + '\\n'); }
+            """;
+
+    /** Subprocess that exits with code 0 immediately after spawn, without
+     *  writing anything to stdout. Triggers the "stdio EOF" failure mode
+     *  observed for cold-cache uvx subprocesses whose package install
+     *  failed before initialize could be answered. */
+    private static final String EXIT_IMMEDIATELY_FIXTURE = """
+            process.exit(0);
+            """;
+
+    @Test
+    void connectAndAwaitCompletesOnSuccessfulHandshake() throws Exception {
+        var server = seedStdioServer("await-ok", FIXTURE_SCRIPT);
+        var future = McpConnectionManager.connectAndAwait(server);
+        // Should complete in well under 5 s on a warm Node fixture.
+        future.get(5, TimeUnit.SECONDS);
+        assertEquals(McpServer.Status.CONNECTED,
+                McpConnectionManager.status("await-ok"),
+                "future must complete only after first attempt resolves to CONNECTED");
+    }
+
+    @Test
+    void connectAndAwaitTakesLongerThanDefaultTimeoutWhenInitializeIsSlow() throws Exception {
+        // The McpClient steady-state timeout is 30 s; the first-attempt knob
+        // is what JCLAW-288 extends. Pin the knob to a small value here so
+        // we exercise the long-timeout branch without waiting 120 s, and
+        // give the fixture enough delay (1.5 s) to prove the test isn't
+        // accidentally passing at the default.
+        McpConnectionManager.setFirstAttemptRequestTimeout(Duration.ofSeconds(5));
+        var path = writeFixture("slow-handshake", SLOW_HANDSHAKE_FIXTURE);
+        var cfg = new JsonObject();
+        cfg.addProperty("command", "node");
+        var args = new com.google.gson.JsonArray();
+        args.add(path.toString());
+        cfg.add("args", args);
+        var env = new JsonObject();
+        env.addProperty("SLOW_HANDSHAKE_MS", "1500");
+        cfg.add("env", env);
+        var server = seedServer("await-slow", McpServer.Transport.STDIO, cfg.toString());
+
+        var future = McpConnectionManager.connectAndAwait(server);
+        future.get(8, TimeUnit.SECONDS);
+        assertEquals(McpServer.Status.CONNECTED,
+                McpConnectionManager.status("await-slow"),
+                "1.5 s handshake must succeed under a 5 s first-attempt timeout");
+    }
+
+    @Test
+    void connectAndAwaitCompletesOnSubprocessExitedBeforeInitialize() throws Exception {
+        var server = seedStdioServer("await-eof", EXIT_IMMEDIATELY_FIXTURE);
+        var future = McpConnectionManager.connectAndAwait(server);
+        // Subprocess exit should surface within a second or so; the future
+        // completes (successfully — it's a signal, not a status) and the
+        // entry's live state reports ERROR with the stdio EOF message that
+        // matches what production logs.
+        future.get(5, TimeUnit.SECONDS);
+        assertEquals(McpServer.Status.ERROR,
+                McpConnectionManager.status("await-eof"),
+                "subprocess exit must surface as ERROR");
+        var lastError = McpConnectionManager.lastError("await-eof");
+        assertNotNull(lastError, "lastError must be set on failure");
+        assertTrue(lastError.contains("EOF") || lastError.contains("stdio"),
+                "lastError must point at the EOF, got: " + lastError);
+    }
+
+    @Test
+    void stopCancelsPendingFirstAttemptFuture() throws Exception {
+        // Slow fixture that won't respond within our shrunken window —
+        // we just need the future to be pending when stop() runs.
+        McpConnectionManager.setFirstAttemptRequestTimeout(Duration.ofSeconds(30));
+        var path = writeFixture("slow-cancel", SLOW_HANDSHAKE_FIXTURE);
+        var cfg = new JsonObject();
+        cfg.addProperty("command", "node");
+        var args = new com.google.gson.JsonArray();
+        args.add(path.toString());
+        cfg.add("args", args);
+        var env = new JsonObject();
+        env.addProperty("SLOW_HANDSHAKE_MS", "20000");
+        cfg.add("env", env);
+        var server = seedServer("await-cancel", McpServer.Transport.STDIO, cfg.toString());
+
+        var future = McpConnectionManager.connectAndAwait(server);
+        // Give the connector VT a moment to actually start the subprocess.
+        Thread.sleep(200);
+        McpConnectionManager.stop("await-cancel");
+        try {
+            future.get(2, TimeUnit.SECONDS);
+            fail("future must complete with cancellation, not normally");
+        } catch (CancellationException expected) {
+            // good
+        }
+    }
+
+    @Test
+    void plainConnectStaysFireAndForget() throws Exception {
+        // The bootless connect() path (used by startAll on JVM boot) does
+        // NOT populate firstAttemptFuture; the entry's volatile field stays
+        // null and signalFirstAttemptResolved is a no-op. We can only assert
+        // this indirectly: connect() returns without blocking, then we wait
+        // for CONNECTED the same way the older tests do.
+        var server = seedStdioServer("await-none", FIXTURE_SCRIPT);
+        McpConnectionManager.connect(server);
+        awaitState("await-none", McpServer.Status.CONNECTED, 5);
+    }
+
     // ==================== fixtures ====================
+
+    /** JCLAW-288: shared fixture-file writer used by the synchronous-first-attempt
+     *  tests so the body of each test only carries the env vars + script. */
+    private Path writeFixture(String name, String script) throws IOException {
+        var path = Files.createTempFile("mcp-cm-" + name + "-", ".js");
+        Files.writeString(path, script);
+        path.toFile().deleteOnExit();
+        return path;
+    }
 
     private McpServer seedStdioServer(String name, String script) throws IOException {
         var path = Files.createTempFile("mcp-srv-" + name + "-", ".js");
