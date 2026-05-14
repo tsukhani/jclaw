@@ -82,6 +82,36 @@ describe('Subagents admin page', () => {
     expect(killButtons.length).toBe(1)
   })
 
+  it('renders a "View transcript" link per row with the right href (JCLAW-274)', async () => {
+    registerEndpoint('/api/subagent-runs', () => [
+      { id: 31, parentAgentId: 1, parentAgentName: 'main',
+        childAgentId: 2, childAgentName: 'main-sub-running',
+        parentConversationId: 5, childConversationId: 42,
+        mode: 'session', status: 'RUNNING',
+        startedAt: '2026-05-14T10:00:00Z', endedAt: null, outcome: null },
+      { id: 32, parentAgentId: 1, parentAgentName: 'main',
+        childAgentId: 3, childAgentName: 'main-sub-done',
+        parentConversationId: 5, childConversationId: 43,
+        mode: 'session', status: 'COMPLETED',
+        startedAt: '2026-05-14T09:00:00Z',
+        endedAt: '2026-05-14T09:00:30Z', outcome: 'ok' },
+    ])
+
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    // One transcript link per row, regardless of status. The href shape
+    // matches the JCLAW-270 announce card's "View full" link
+    // (/chat?conversation=ID) so both surfaces converge on the standard
+    // conversation viewer.
+    const links = component.findAll('a')
+      .filter(a => a.text().toLowerCase().includes('view transcript'))
+    expect(links.length).toBe(2)
+    const hrefs = links.map(a => a.attributes('href'))
+    expect(hrefs).toContain('/chat?conversation=42')
+    expect(hrefs).toContain('/chat?conversation=43')
+  })
+
   it('calls the kill endpoint when the Kill button is clicked', async () => {
     // Use a distinct row id so the registerEndpoint registry state from
     // earlier tests in this file (vitest reuses the in-process Nuxt

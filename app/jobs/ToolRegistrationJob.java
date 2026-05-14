@@ -49,6 +49,10 @@ public class ToolRegistrationJob extends Job<Void> {
         // resume Message and re-invokes AgentRunner.run on the parent
         // conversation when the child terminates.
         toolList.add(new YieldToSubagentTool());
+        // JCLAW-274: sessions_history. Read a subagent run's child
+        // conversation transcript (role, content, tool calls/results,
+        // timestamps). Parent-owned access only.
+        toolList.add(new SessionsHistoryTool());
         // JCLAW-281: list_mcp_tools is gone. Discovery is folded into each
         // MCP server's own surface — the model calls mcp_<server> with
         // empty args to enumerate that server's actions, registered by

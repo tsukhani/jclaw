@@ -318,6 +318,86 @@ class SubagentSlashCommandsTest extends UnitTest {
                 "usage hint: " + result.responseText());
     }
 
+    // ── /subagent history ─────────────────────────────────────────────
+
+    @Test
+    void historyReturnsFormattedTranscriptForOwnedRun() {
+        var run = seedRun(SubagentRun.Status.COMPLETED);
+        // Seed three messages on the child conversation in chronological order.
+        Tx.run(() -> {
+            var fresh = (models.Conversation) models.Conversation.findById(childConv.id);
+            var m1 = new models.Message();
+            m1.conversation = fresh;
+            m1.role = "user";
+            m1.content = "what is 2+2?";
+            m1.save();
+            var m2 = new models.Message();
+            m2.conversation = fresh;
+            m2.role = "assistant";
+            m2.content = "4";
+            m2.save();
+            var m3 = new models.Message();
+            m3.conversation = fresh;
+            m3.role = "user";
+            m3.content = "thanks";
+            m3.save();
+        });
+
+        var result = Commands.handle("/subagent history " + run.id,
+                parentAgent, "web", "u", parentConv).orElseThrow();
+        var text = result.responseText();
+        assertTrue(text.contains("Transcript for subagent run #" + run.id),
+                "heading: " + text);
+        assertTrue(text.contains("user:"), "role-prefixed lines present: " + text);
+        assertTrue(text.contains("assistant:"), "assistant line present: " + text);
+        assertTrue(text.contains("what is 2+2?"), "content present: " + text);
+        assertTrue(text.contains("assistant: 4"), "assistant reply present: " + text);
+        assertTrue(text.contains("thanks"), "third message present: " + text);
+        // Chronological order — user before assistant before thanks.
+        assertTrue(text.indexOf("what is 2+2?") < text.indexOf("assistant: 4"),
+                "messages must appear in chronological order: " + text);
+        assertTrue(text.indexOf("assistant: 4") < text.indexOf("thanks"),
+                "third message comes last: " + text);
+    }
+
+    @Test
+    void historyRefusesUnownedRun() {
+        var run = seedRun(SubagentRun.Status.COMPLETED);
+        Tx.run(() -> {
+            var fresh = (models.Conversation) models.Conversation.findById(childConv.id);
+            var msg = new models.Message();
+            msg.conversation = fresh;
+            msg.role = "user";
+            msg.content = "secret content";
+            msg.save();
+        });
+
+        var stranger = services.AgentService.create("stranger", "openrouter", "gpt-4.1");
+        var result = Commands.handle("/subagent history " + run.id,
+                stranger, "web", "u", parentConv).orElseThrow();
+        var text = result.responseText();
+        assertTrue(text.contains("not owned by the calling agent"),
+                "permission rejection: " + text);
+        assertFalse(text.contains("secret content"),
+                "rejection must not leak child-message content: " + text);
+    }
+
+    @Test
+    void historyOnUnknownIdReturnsNotFound() {
+        var result = Commands.handle("/subagent history 99999",
+                parentAgent, "web", "u", parentConv).orElseThrow();
+        assertTrue(result.responseText().contains("not found"),
+                "missing-id 404: " + result.responseText());
+    }
+
+    @Test
+    void historyWithoutIdReturnsUsageHint() {
+        var result = Commands.handle("/subagent history",
+                parentAgent, "web", "u", parentConv).orElseThrow();
+        assertTrue(result.responseText().contains("Missing run id"),
+                "usage hint: " + result.responseText());
+    }
+
     // ── argument parsing ──────────────────────────────────────────────
 
     @Test
@@ -328,6 +408,8 @@ class SubagentSlashCommandsTest extends UnitTest {
                 "unknown sub: " + result.responseText());
         assertTrue(result.responseText().contains("list, info"),
                 "lists available subcommands: " + result.responseText());
+        assertTrue(result.responseText().contains("history"),
+                "history sub appears in available list: " + result.responseText());
     }
 
     @Test

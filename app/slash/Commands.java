@@ -60,7 +60,7 @@ public final class Commands {
         MODEL("/model", "Show current model and its capabilities"),
         USAGE("/usage", "Show context usage for this conversation"),
         STOP("/stop", "Interrupt the current generation"),
-        SUBAGENT("/subagent", "Inspect or kill subagent runs");
+        SUBAGENT("/subagent", "Inspect, kill, or read transcripts of subagent runs");
 
         public final String literal;
         public final String shortDescription;
@@ -83,7 +83,7 @@ public final class Commands {
             • /model — show current model and its capabilities
             • /usage — show context usage for this conversation
             • /stop — interrupt the current generation
-            • /subagent — inspect or kill subagent runs (list, info ID, log ID, kill ID)""";
+            • /subagent — inspect, kill, or read transcripts (list, info ID, log ID, kill ID, history ID)""";
 
     /**
      * Canned response for {@link Command#NEW}. The leading {@code >} line
@@ -806,20 +806,36 @@ public final class Commands {
     // ── /subagent ─────────────────────────────────────────────────────────
     //
     // JCLAW-271: operator-facing introspection + kill surface for subagent
-    // runs spawned by the current parent conversation. The four subcommands
+    // runs spawned by the current parent conversation. The five subcommands
     // map 1:1 to the AC:
     //   list           — RUNNING + recently-terminal rows scoped to current
     //   info <id>      — full metadata for a single run
     //   log <id>       — chronological EventLog rows matching run id
     //   kill <id>      — flip RUNNING → KILLED, interrupt the VT, emit event
+    //   history <id>   — JCLAW-274: child conversation transcript (role,
+    //                    content, tool calls/results, timestamps), formatted
+    //                    as plain text for chat-bubble display
     // Output is plain text suitable for a chat bubble; the SubagentRuns
     // admin page (separate Vue route) gets the same data via the new
-    // /api/subagent-runs REST endpoint.
+    // /api/subagent-runs REST endpoint, and full transcripts via the
+    // "View transcript" per-row link that opens the child conversation in
+    // the standard chat viewer.
 
     /** Max EventLog rows returned by {@code /subagent log}. Chosen so the
      *  output stays readable in a chat bubble while still covering a
      *  multi-turn child run's typical event-rate. */
     private static final int SUBAGENT_LOG_LIMIT = 50;
+
+    /** JCLAW-274: max messages rendered inline by {@code /subagent history}.
+     *  Long transcripts get the first N + a footer pointing at the admin
+     *  page's "View transcript" link. Lower than {@link #SUBAGENT_LOG_LIMIT}
+     *  because per-message content is far chunkier than per-event lines. */
+    private static final int SUBAGENT_HISTORY_LIMIT = 20;
+
+    /** JCLAW-274: per-message content hard cap when rendering inline. The
+     *  full content stays accessible via the conversation viewer; this just
+     *  keeps a runaway LLM essay from monopolising a chat bubble. */
+    private static final int SUBAGENT_HISTORY_CONTENT_CAP = 500;
 
     private static Result executeSubagent(Agent agent, String channelType,
                                            Conversation current, String args) {
@@ -851,7 +867,7 @@ public final class Commands {
             case "list" -> {
                 return new SubagentArgs("list", null, null);
             }
-            case "info", "log", "kill" -> {
+            case "info", "log", "kill", "history" -> {
                 if (rest.isEmpty()) {
                     return new SubagentArgs(head, null,
                             "Missing run id. Usage: /subagent " + head + " <run-id>");
@@ -866,7 +882,7 @@ public final class Commands {
             default -> {
                 return new SubagentArgs(null, null,
                         "Unknown subcommand '" + head + "'. "
-                                + "Available: list, info <id>, log <id>, kill <id>.");
+                                + "Available: list, info <id>, log <id>, kill <id>, history <id>.");
             }
         }
     }
@@ -882,6 +898,7 @@ public final class Commands {
             case "info" -> renderSubagentInfo(sub.id());
             case "log" -> renderSubagentLog(sub.id());
             case "kill" -> renderSubagentKill(agent, sub.id());
+            case "history" -> renderSubagentHistory(agent, sub.id());
             default -> "Unknown /subagent subcommand.";
         };
     }
@@ -993,6 +1010,101 @@ public final class Commands {
                 : "Killed by operator via /subagent kill";
         var result = services.SubagentRegistry.kill(runId, reason);
         return result.message();
+    }
+
+    /**
+     * JCLAW-274: {@code /subagent history <id>} — render the child
+     * conversation's transcript inline as plain text. Permission mirrors
+     * the {@link tools.SessionsHistoryTool} tool path: the calling agent
+     * must own the run. JClaw is single-tenant Personal Edition (no
+     * operator-role concept in the codebase), so the AC's "operators can
+     * read any" is documented as a future enhancement once auth lands —
+     * the slash command stays parent-owned today.
+     *
+     * <p>Renders up to {@link #SUBAGENT_HISTORY_LIMIT} messages with each
+     * one's content capped at {@link #SUBAGENT_HISTORY_CONTENT_CAP} chars.
+     * For longer transcripts the footer points at {@code /subagents}'s
+     * "View transcript" link so the operator gets the full thing in the
+     * standard conversation viewer.
+     */
+    private static String renderSubagentHistory(Agent agent, Long runId) {
+        if (runId == null) return "Missing run id.";
+        var run = (models.SubagentRun) models.SubagentRun.findById(runId);
+        if (run == null) return "Run " + runId + " not found.";
+        // Same parent-owned gate as SessionsHistoryTool.
+        if (agent == null
+                || run.parentAgent == null
+                || !agent.id.equals(run.parentAgent.id)) {
+            return "Run " + runId + " is not owned by the calling agent.";
+        }
+        var childConv = run.childConversation;
+        if (childConv == null) {
+            return "Run " + runId + " has no child conversation (audit row is malformed).";
+        }
+
+        // Fetch one beyond the limit so we know whether to render the
+        // "more available" footer without a separate count query.
+        int fetchLimit = SUBAGENT_HISTORY_LIMIT + 1;
+        List<Message> rows = Message.<Message>find(
+                "conversation = ?1 ORDER BY createdAt ASC", childConv).fetch(fetchLimit);
+        if (rows.isEmpty()) {
+            return "Subagent run #" + runId + " transcript: (no messages yet)";
+        }
+        boolean hasMore = rows.size() > SUBAGENT_HISTORY_LIMIT;
+        var rendered = hasMore ? rows.subList(0, SUBAGENT_HISTORY_LIMIT) : rows;
+
+        var sb = new StringBuilder();
+        sb.append("Transcript for subagent run #").append(runId)
+                .append(" (child conversation ").append(childConv.id).append("):");
+        for (var msg : rendered) {
+            sb.append("\n\n").append(formatHistoryMessage(msg));
+        }
+        if (hasMore) {
+            int total = (int) Message.count("conversation = ?1", childConv);
+            int remaining = total - SUBAGENT_HISTORY_LIMIT;
+            sb.append("\n\n(... ").append(remaining)
+                    .append(" more messages — view full at /subagents → View transcript)");
+        }
+        return sb.toString();
+    }
+
+    /** Compact plain-text rendering of a single transcript Message. Tool
+     *  calls/results are summarized rather than printed verbatim (they're
+     *  often JSON walls that drown out the actual reasoning). */
+    private static String formatHistoryMessage(Message msg) {
+        var sb = new StringBuilder();
+        sb.append('[')
+                .append(msg.createdAt != null ? msg.createdAt.toString() : "?")
+                .append("] ")
+                .append(msg.role != null ? msg.role : "?")
+                .append(':');
+        if (msg.content != null && !msg.content.isBlank()) {
+            sb.append(' ').append(truncateContent(msg.content));
+        }
+        if (msg.toolCalls != null && !msg.toolCalls.isBlank()) {
+            sb.append("\n  tool_calls: ").append(summarizeToolField(msg.toolCalls));
+        }
+        if (msg.toolResults != null && !msg.toolResults.isBlank()) {
+            sb.append("\n  tool_results: ").append(summarizeToolField(msg.toolResults));
+        }
+        return sb.toString();
+    }
+
+    private static String truncateContent(String s) {
+        if (s.length() <= SUBAGENT_HISTORY_CONTENT_CAP) return s;
+        return s.substring(0, SUBAGENT_HISTORY_CONTENT_CAP - 3) + "...";
+    }
+
+    /** Tool-call / tool-result fields are JSON. For chat-bubble display we
+     *  only want a compact length-and-prefix marker so the operator can
+     *  tell *that* a tool ran without dumping its full payload. */
+    private static String summarizeToolField(String s) {
+        var len = s.length();
+        var preview = s.length() > 120 ? s.substring(0, 117) + "..." : s;
+        // Collapse whitespace so a pretty-printed JSON blob stays on a
+        // single line in the bubble.
+        preview = preview.replaceAll("\\s+", " ").trim();
+        return "(" + len + " chars) " + preview;
     }
 
     /** Compact one-line summary of a SubagentRun for the {@code list} view. */

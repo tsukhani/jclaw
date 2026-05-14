@@ -247,6 +247,21 @@ const sinceInputId = useId()
               </template>
             </td>
             <td class="px-4 py-2.5 text-right">
+              <!--
+                JCLAW-274: "View transcript" link per row opens the child
+                conversation in the standard chat viewer (same shape as the
+                JCLAW-270 announce card's "View full" link). Inline-mode
+                runs share parentConversationId == childConversationId — the
+                link still works there (it just lands back at the parent),
+                no special-casing needed.
+              -->
+              <NuxtLink
+                v-if="run.childConversationId !== null"
+                :to="`/chat?conversation=${run.childConversationId}`"
+                class="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors mr-3"
+              >
+                View transcript
+              </NuxtLink>
               <button
                 v-if="run.status === 'RUNNING'"
                 :disabled="killing.has(run.id)"
