@@ -299,6 +299,18 @@ public class DefaultConfigJob extends Job<Void> {
         for (var entry : ScannerRegistry.defaultConfig()) {
             seedIfAbsent(entry.key(), entry.value());
         }
+
+        // JCLAW-266: subagent recursion caps. Personal Edition defaults —
+        // single level of delegation (top-level agents may spawn one tier of
+        // subagents; grandchildren are refused) and a small fan-out so one
+        // parent can't saturate the executor with concurrent children. Both
+        // keys are editable from the Settings page's Subagents section
+        // (DB-backed so changes take effect without a restart). Read path
+        // lives in tools.SpawnSubagentTool#enforceRecursionLimits.
+        seedIfAbsent(tools.SpawnSubagentTool.DEPTH_LIMIT_KEY,
+                String.valueOf(tools.SpawnSubagentTool.DEFAULT_DEPTH_LIMIT));
+        seedIfAbsent(tools.SpawnSubagentTool.BREADTH_LIMIT_KEY,
+                String.valueOf(tools.SpawnSubagentTool.DEFAULT_BREADTH_LIMIT));
     }
 
     private void seedDefaultAgent() {

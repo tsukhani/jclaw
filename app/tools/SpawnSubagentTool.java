@@ -8,6 +8,7 @@ import models.Agent;
 import models.Conversation;
 import models.SubagentRun;
 import services.AgentService;
+import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
@@ -82,10 +83,13 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
      * {@code parentAgent} is the spawning agent and {@code status = RUNNING}.
      * Per direct parent — not the whole subtree.
      */
-    static final int DEFAULT_DEPTH_LIMIT = 1;
-    static final int DEFAULT_BREADTH_LIMIT = 5;
-    static final String DEPTH_LIMIT_KEY = "subagents.depth.limit";
-    static final String BREADTH_LIMIT_KEY = "subagents.breadth.limit";
+    public static final int DEFAULT_DEPTH_LIMIT = 1;
+    public static final int DEFAULT_BREADTH_LIMIT = 5;
+    /** Config-DB keys (seeded by {@link jobs.DefaultConfigJob}, editable from
+     *  the Settings page's Subagents section). Names match the JCLAW-266 AC
+     *  verbatim. */
+    public static final String DEPTH_LIMIT_KEY = "subagent.maxDepth";
+    public static final String BREADTH_LIMIT_KEY = "subagent.maxChildrenPerParent";
 
     /** Soft cap on how far we walk the parent chain when computing depth,
      *  so a cycle (shouldn't happen, but defense-in-depth) can't spin
@@ -341,8 +345,13 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
      * Agent row would close the window if/when it matters.
      */
     static String enforceRecursionLimits(Agent parentAgent) {
-        var depthLimit = positiveIntOrDefault(DEPTH_LIMIT_KEY, DEFAULT_DEPTH_LIMIT);
-        var breadthLimit = positiveIntOrDefault(BREADTH_LIMIT_KEY, DEFAULT_BREADTH_LIMIT);
+        // Read from the runtime Config table so the Settings page can edit
+        // these without a restart. ConfigService.getInt falls back to the
+        // hard-coded default when the row is absent or unparseable; values
+        // <= 0 are also coerced to the default so an operator typo can't
+        // silently disable the cap.
+        var depthLimit = readPositiveIntConfig(DEPTH_LIMIT_KEY, DEFAULT_DEPTH_LIMIT);
+        var breadthLimit = readPositiveIntConfig(BREADTH_LIMIT_KEY, DEFAULT_BREADTH_LIMIT);
 
         var currentDepth = depthOf(parentAgent);
         // currentDepth is the spawning agent's depth. Spawning would create
@@ -383,16 +392,9 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         return depth;
     }
 
-    private static int positiveIntOrDefault(String key, int fallback) {
-        var raw = play.Play.configuration != null
-                ? play.Play.configuration.getProperty(key) : null;
-        if (raw == null || raw.isBlank()) return fallback;
-        try {
-            int n = Integer.parseInt(raw.trim());
-            return n > 0 ? n : fallback;
-        } catch (NumberFormatException _) {
-            return fallback;
-        }
+    private static int readPositiveIntConfig(String key, int fallback) {
+        int n = ConfigService.getInt(key, fallback);
+        return n > 0 ? n : fallback;
     }
 
     private static Bootstrap bootstrapChild(Agent parentAgent, Conversation parentConv,

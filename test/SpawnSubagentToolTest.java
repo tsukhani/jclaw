@@ -229,10 +229,12 @@ class SpawnSubagentToolTest extends UnitTest {
 
     @Test
     void depthLimitRefusesSpawnAndEmitsLimitEvent() throws Exception {
-        // Default subagents.depth.limit=1: a top-level Agent (parentAgent==null)
+        // JCLAW-266: depth cap is read from Config row subagent.maxDepth via
+        // ConfigService.getInt (default 1). A top-level Agent (parentAgent==null)
         // is at depth 0 and may spawn; its child is at depth 1 and may not.
-        // Set up a parent whose parentAgent chain already has length 1 so it
-        // sits at the cap.
+        // We set the Config row explicitly so the test exercises the
+        // DB-backed read path rather than relying on the in-code fallback.
+        ConfigService.set(SpawnSubagentTool.DEPTH_LIMIT_KEY, "1");
         var root = createAgent("p-depth-root", "test-provider", "test-model");
         var child = createAgent("p-depth-child", "test-provider", "test-model");
         child.parentAgent = root;
@@ -264,8 +266,12 @@ class SpawnSubagentToolTest extends UnitTest {
 
     @Test
     void breadthLimitRefusesSpawnAndEmitsLimitEvent() throws Exception {
-        // Default subagents.breadth.limit=5. Seed five RUNNING SubagentRun
-        // rows for the parent and verify the sixth spawn attempt is refused.
+        // JCLAW-266: breadth cap is read from Config row
+        // subagent.maxChildrenPerParent via ConfigService.getInt (default 5).
+        // Seed five RUNNING SubagentRun rows for the parent and verify the
+        // sixth spawn attempt is refused. Sets the Config row explicitly so
+        // the test exercises the DB-backed read path.
+        ConfigService.set(SpawnSubagentTool.BREADTH_LIMIT_KEY, "5");
         var parent = createAgent("p-breadth", "test-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-breadth");
         // Seed RUNNING rows. Each needs a distinct child Agent + Conversation

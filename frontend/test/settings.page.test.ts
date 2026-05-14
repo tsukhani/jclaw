@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
+import { readBody } from 'h3'
 import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 
@@ -327,6 +328,117 @@ describe('Settings page — OCR section', () => {
     // Vue normalizes :disabled="true" to the disabled attribute being present
     // (value is the empty string in the rendered DOM).
     expect(toggle.attributes('disabled')).toBeDefined()
+  })
+})
+
+describe('Settings page — Subagents section (JCLAW-266)', () => {
+  // JCLAW-266 AC: Settings page exposes subagent.maxDepth and
+  // subagent.maxChildrenPerParent as numeric inputs under a Subagents
+  // section. The values come from /api/config (DB-backed) so the operator
+  // can tune them at runtime; saves go through POST /api/config like the
+  // rest of the page. Pin both the read path (rendered values reflect the
+  // config payload) and the save path (clicking save POSTs the new value).
+  beforeEach(() => {
+    clearNuxtData()
+  })
+
+  function subagentConfigPayload(maxDepth: string, maxChildren: string) {
+    return {
+      entries: [
+        { key: 'subagent.maxDepth', value: maxDepth,
+          updatedAt: '2026-05-14T10:00:00Z' },
+        { key: 'subagent.maxChildrenPerParent', value: maxChildren,
+          updatedAt: '2026-05-14T10:00:00Z' },
+      ],
+    }
+  }
+
+  it('renders a Subagents section with both numeric values from /api/config', async () => {
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    registerEndpoint('/api/config', () => subagentConfigPayload('3', '7'))
+    registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
+    registerEndpoint('/api/transcription/state', () => transcriptionStatePayload)
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    const html = component.html()
+    // Heading is unique enough to anchor the section.
+    expect(html).toMatch(/<h2[^>]*>\s*Subagents\s*</)
+    // Both config key labels render as monospace row labels.
+    const text = component.text()
+    expect(text).toContain('maxDepth')
+    expect(text).toContain('maxChildrenPerParent')
+    // Persisted values from /api/config surface in the read-only rows.
+    expect(text).toContain('3')
+    expect(text).toContain('7')
+  })
+
+  it('POSTs subagent.maxDepth to /api/config when the operator saves the field', async () => {
+    let postedBody: { key?: string, value?: string } | null = null
+    registerEndpoint('/api/agents', () => [])
+    registerEndpoint('/api/channels', () => [])
+    // Use the method-specific overload so GET vs POST handlers stay separate.
+    // GET returns the seeded payload; POST captures the body the page sent.
+    registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => subagentConfigPayload('1', '5'),
+    })
+    registerEndpoint('/api/config', {
+      method: 'POST',
+      handler: async (event) => {
+        postedBody = await readBody(event) as { key?: string, value?: string }
+        return { ok: true }
+      },
+    })
+    registerEndpoint('/api/ocr/status', () => ocrStatusPayload)
+    registerEndpoint('/api/transcription/state', () => transcriptionStatePayload)
+
+    const component = await mountSuspended(Settings)
+    await flushPromises()
+
+    // Promote the maxDepth row to edit mode via its Edit button. The
+    // aria-labelled input "Max recursion depth" only renders after editing
+    // starts, so we find the row by its read-only label first.
+    const editButtons = component.findAll('button[title="Edit"]')
+    let depthEditButton: typeof editButtons[number] | null = null
+    for (const btn of editButtons) {
+      const rowText = btn.element.parentElement?.textContent ?? ''
+      // "maxDepth" appears as a substring of "maxDepthPerParent" if such a
+      // key existed; the actual sibling key is maxChildrenPerParent so a
+      // plain substring match is unambiguous, but we still anchor on the
+      // exact label to be defensive.
+      if (rowText.includes('maxDepth') && !rowText.includes('maxChildrenPerParent')) {
+        depthEditButton = btn
+        break
+      }
+    }
+    expect(depthEditButton).not.toBeNull()
+    await depthEditButton!.trigger('click')
+    await flushPromises()
+
+    const input = component.find('input[aria-label="Max recursion depth"]')
+    expect(input.exists()).toBe(true)
+    await input.setValue('4')
+
+    // The Save button sits in the same row as the aria-labelled input.
+    const saveButtons = component.findAll('button[title="Save"]')
+    let depthSaveButton: typeof saveButtons[number] | null = null
+    for (const btn of saveButtons) {
+      if (btn.element.parentElement?.querySelector('input[aria-label="Max recursion depth"]')) {
+        depthSaveButton = btn
+        break
+      }
+    }
+    expect(depthSaveButton).not.toBeNull()
+    await depthSaveButton!.trigger('click')
+    await flushPromises()
+
+    expect(postedBody).not.toBeNull()
+    expect(postedBody!.key).toBe('subagent.maxDepth')
+    // happy-dom round-trips type="number" input values as JS numbers through
+    // JSON.stringify, so accept either '4' or 4 — the backend coerces both.
+    expect(String(postedBody!.value)).toBe('4')
   })
 })
 
