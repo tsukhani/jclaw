@@ -171,6 +171,26 @@ describe('Logs page', () => {
     const selects = component.findAll('select')
     expect(selects.length).toBeGreaterThanOrEqual(2)
   })
+
+  // JCLAW-272: subagent lifecycle filter group exposes the six categories
+  // so operators can scope the events page to subagent activity once the
+  // emission stories (JCLAW-265/266/270/273) wire it up.
+  it('exposes subagent lifecycle categories in the filter', async () => {
+    setupMockApi()
+    const component = await mountSuspended(Logs)
+
+    const optgroup = component.find('optgroup[label="Subagents"]')
+    expect(optgroup.exists()).toBe(true)
+    const values = optgroup.findAll('option').map(o => o.attributes('value'))
+    expect(values).toEqual([
+      'SUBAGENT_SPAWN',
+      'SUBAGENT_COMPLETE',
+      'SUBAGENT_ERROR',
+      'SUBAGENT_KILL',
+      'SUBAGENT_LIMIT_EXCEEDED',
+      'SUBAGENT_TIMEOUT',
+    ])
+  })
 })
 
 describe('Conversations page', () => {

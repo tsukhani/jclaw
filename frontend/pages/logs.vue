@@ -44,6 +44,18 @@ const levelColors: Record<string, string> = {
 
 const categories = ['llm', 'channel', 'tool', 'task', 'agent', 'auth', 'system']
 
+// JCLAW-272: subagent lifecycle taxonomy. Emission lands later (JCLAW-265
+// spawn, JCLAW-266 limit exceeded, JCLAW-270/273 completion); the filter
+// exposes the categories now so they're recognized as soon as events flow.
+const subagentCategories = [
+  'SUBAGENT_SPAWN',
+  'SUBAGENT_COMPLETE',
+  'SUBAGENT_ERROR',
+  'SUBAGENT_KILL',
+  'SUBAGENT_LIMIT_EXCEEDED',
+  'SUBAGENT_TIMEOUT',
+]
+
 // A11y: stable ids for label/control association
 const autoRefreshId = useId()
 const categorySelectId = useId()
@@ -90,6 +102,15 @@ const searchInputId = useId()
           >
             {{ c }}
           </option>
+          <optgroup label="Subagents">
+            <option
+              v-for="c in subagentCategories"
+              :key="c"
+              :value="c"
+            >
+              {{ c }}
+            </option>
+          </optgroup>
         </select>
       </label>
       <label :for="levelSelectId">

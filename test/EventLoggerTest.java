@@ -76,4 +76,40 @@ class EventLoggerTest extends UnitTest {
         assertEquals(1, events.size());
         assertTrue(events.getFirst().details.contains("test error"));
     }
+
+    // ----- JCLAW-272: subagent lifecycle taxonomy ----------------------------
+
+    @Test
+    void recordSubagentSpawnPersistsCategoryAndMetadata() {
+        EventLogger.recordSubagentSpawn("parent-1", "child-9", "run-abc", "session", "fresh");
+        EventLogger.flush();
+
+        var events = EventLog.findRecent(10);
+        assertEquals(1, events.size());
+        var e = events.getFirst();
+        assertEquals("INFO", e.level);
+        assertEquals(EventLogger.SUBAGENT_SPAWN, e.category);
+        assertEquals("parent-1", e.agentId);
+        assertTrue(e.details.contains("\"parent_agent_id\":\"parent-1\""));
+        assertTrue(e.details.contains("\"child_agent_id\":\"child-9\""));
+        assertTrue(e.details.contains("\"run_id\":\"run-abc\""));
+        assertTrue(e.details.contains("\"mode\":\"session\""));
+        assertTrue(e.details.contains("\"context\":\"fresh\""));
+    }
+
+    @Test
+    void recordSubagentLimitExceededOmitsChild() {
+        EventLogger.recordSubagentLimitExceeded("parent-2", "max depth 3 reached");
+        EventLogger.flush();
+
+        var events = EventLog.findRecent(10);
+        assertEquals(1, events.size());
+        var e = events.getFirst();
+        assertEquals("WARN", e.level);
+        assertEquals(EventLogger.SUBAGENT_LIMIT_EXCEEDED, e.category);
+        assertEquals("parent-2", e.agentId);
+        assertTrue(e.details.contains("\"parent_agent_id\":\"parent-2\""));
+        assertTrue(e.details.contains("\"child_agent_id\":null"));
+        assertTrue(e.details.contains("\"reason\":\"max depth 3 reached\""));
+    }
 }
