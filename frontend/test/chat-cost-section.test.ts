@@ -691,4 +691,48 @@ describe('ChatCostSection (JCLAW-28)', () => {
     expect(wrapper.text()).toContain('gpt-5')
     expect(ollamaChip.attributes('aria-pressed')).toBe('false')
   })
+
+  it('renders subscription bars when view is switched to chart', async () => {
+    // Chart view should show a horizontal bar per subscription model
+    // with usage, just like the per-token chart. Two models split a
+    // $100 bill 75/25 → both labels visible, both with allocated cost
+    // formatted to the chart's $0.0000 precision.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 500, completion: 250, promptPrice: 0, completionPrice: 0,
+        } },
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'gemini-3-flash', modelProvider: 'ollama-cloud',
+          prompt: 200, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await flushPromises()
+
+    // Flip to chart view. The toggle is in the header; the bar-chart
+    // button has title="Bar chart view".
+    const chartBtn = wrapper.findAll('button')
+      .find(b => b.attributes('title') === 'Bar chart view')!
+    expect(chartBtn).toBeDefined()
+    await chartBtn.trigger('click')
+    await flushPromises()
+
+    const text = wrapper.text()
+    // Both subscription models render as chart rows.
+    expect(text).toContain('kimi-k2.5')
+    expect(text).toContain('gemini-3-flash')
+    // No tfoot Total row should be present in chart view (which would
+    // surface the "TOTAL" string from the table tbody/tfoot).
+    expect(wrapper.findAll('tfoot').length).toBe(0)
+  })
 })

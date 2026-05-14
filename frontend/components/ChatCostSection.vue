@@ -579,6 +579,27 @@ const chartMaxCost = computed(() => {
   return max === 0 ? 1 : max
 })
 
+// Subscription chart counterpart of chartRows. Always per-model — flat
+// monthly bills don't decompose meaningfully by agent (the same agent
+// might use multiple subscription providers), so a per-model view is the
+// only attribution that holds up. Honors the chip filter via
+// subscriptionPerModelAllocated, so clicking Ollama Cloud collapses the
+// chart to that provider's models with their share of $100.
+const subscriptionChartRows = computed(() =>
+  subscriptionPerModelAllocated.value
+    .filter(m => m.turnCount > 0)
+    .map(m => ({
+      label: m.modelProvider ? `${m.modelProvider}/${m.modelId}` : m.modelId,
+      cost: m.allocatedCost,
+      turnCount: m.turnCount,
+    })),
+)
+
+const subscriptionChartMaxCost = computed(() => {
+  const max = subscriptionChartRows.value.reduce((m, r) => Math.max(m, r.cost), 0)
+  return max === 0 ? 1 : max
+})
+
 // CSV export. Generates per-model breakdown (one row per model with cost
 // and token totals) since that's the most actionable view; the operator
 // can pivot externally if they need agent or channel cuts. Honors the
@@ -685,7 +706,7 @@ defineExpose({ refresh })
           Chat Cost
         </h2>
         <div
-          v-if="hasPaidData"
+          v-if="hasPaidData || subscriptionChartRows.length > 0"
           class="inline-flex items-center border border-border overflow-hidden"
           role="tablist"
           aria-label="Chat cost view"
@@ -896,7 +917,10 @@ defineExpose({ refresh })
              on what's usually a 1-2 model set per subscription provider.
              Always rendered when a subscription is configured so the
              Total row shows the fee even on weeks with no activity. -->
-        <div class="overflow-x-auto border-t border-border">
+        <div
+          v-if="view === 'table'"
+          class="overflow-x-auto border-t border-border"
+        >
           <table class="w-full text-xs table-fixed">
             <thead class="text-fg-muted bg-muted/20">
               <tr>
@@ -1022,26 +1046,65 @@ defineExpose({ refresh })
               </tr>
             </tfoot>
           </table>
-          <!-- Footnote: clarifies the allocation, and flags any
-               subscription bill that couldn't be allocated because the
-               provider had zero usage this window. The Total above
-               equals the bill iff this footnote shows no unallocated
-               entries; otherwise the gap is exactly the sum of the
-               listed amounts. -->
-          <div class="px-4 py-2 text-[11px] text-fg-muted border-t border-border">
-            *Subscription cost allocated across models by total tokens (prompt + completion + reasoning + cached).
+        </div>
+
+        <!-- Subscription chart view: horizontal bars of allocated cost,
+             one bar per model that contributed usage this window. Bar
+             widths are relative to the largest allocated cost in the
+             current view (so a chip filter to one provider re-scales
+             the bars to that provider's range). Suppressed when there
+             are no usage rows — the empty-state info lives in the
+             unallocated footnote below. -->
+        <div
+          v-else-if="subscriptionChartRows.length > 0"
+          class="px-4 py-3 space-y-1.5 border-t border-border"
+        >
+          <div
+            v-for="(r, i) in subscriptionChartRows"
+            :key="i"
+            class="grid grid-cols-[1fr_3fr_auto] items-center gap-3 text-xs"
+          >
             <div
-              v-if="unallocatedSubscriptions.length > 0"
-              class="mt-1"
+              class="font-mono text-fg-primary truncate"
+              :title="r.label"
             >
-              <template
-                v-for="(p, idx) in unallocatedSubscriptions"
-                :key="p.name"
-              >
-                <span v-if="idx > 0">; </span><span class="font-mono text-fg-primary">{{ formatStatCurrency(p.proRatedFee) }}</span>
-                unallocated — {{ p.displayName }} has no usage this window
-              </template>
+              {{ r.label }}
             </div>
+            <div class="relative h-5 bg-muted/30 border border-border overflow-hidden">
+              <div
+                class="h-full bg-emerald-500/30"
+                :style="{ width: ((r.cost / subscriptionChartMaxCost) * 100).toFixed(2) + '%' }"
+              />
+            </div>
+            <div class="font-mono text-emerald-700 dark:text-emerald-400 tabular-nums shrink-0">
+              {{ formatCostUsd(r.cost) }}
+              <span class="text-fg-muted">· {{ r.turnCount }}t</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footnote: clarifies the allocation, and flags any
+             subscription bill that couldn't be allocated because the
+             provider had zero usage this window. The Total in the table
+             above (or the bars in the chart) equals the bill iff this
+             footnote shows no unallocated entries; otherwise the gap is
+             exactly the sum of the listed amounts. Rendered in both
+             views because the methodology disclaimer applies regardless
+             of whether the operator is looking at the table or the
+             chart. -->
+        <div class="px-4 py-2 text-[11px] text-fg-muted border-t border-border">
+          *Subscription cost allocated across models by total tokens (prompt + completion + reasoning + cached).
+          <div
+            v-if="unallocatedSubscriptions.length > 0"
+            class="mt-1"
+          >
+            <template
+              v-for="(p, idx) in unallocatedSubscriptions"
+              :key="p.name"
+            >
+              <span v-if="idx > 0">; </span><span class="font-mono text-fg-primary">{{ formatStatCurrency(p.proRatedFee) }}</span>
+              unallocated — {{ p.displayName }} has no usage this window
+            </template>
           </div>
         </div>
       </div>
