@@ -115,6 +115,21 @@ public class Conversation extends Model {
     @JoinColumn(name = "parent_conversation_id")
     public Conversation parentConversation;
 
+    /**
+     * Inherited parent-conversation summary stamped at spawn time when the
+     * parent calls {@code spawn_subagent} with {@code context="inherit"}
+     * (JCLAW-268). Hard-capped at 8000 characters by the spawn path.
+     * Re-injected into the child's system prompt on every turn by
+     * {@link services.SessionCompactor#appendParentContextToPrompt} so the
+     * child carries continuity with the parent's recent turns without having
+     * to re-summarize each turn.
+     *
+     * <p>Null for fresh-mode spawns and every non-subagent conversation —
+     * which is the default for every row created before JCLAW-268.
+     */
+    @Column(name = "parent_context", columnDefinition = "TEXT")
+    public String parentContext;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 

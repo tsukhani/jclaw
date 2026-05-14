@@ -306,6 +306,10 @@ public class AgentRunner {
                 // into the system prompt so the LLM keeps continuity with
                 // turns that have since been dropped from the raw history.
                 var sysPrompt = services.SessionCompactor.appendSummaryToPrompt(assembled.systemPrompt(), conv);
+                // JCLAW-268: re-inject the spawn-time parent-conversation context
+                // for inherit-mode subagents. No-op for fresh-mode and non-subagent
+                // conversations (parentContext is null).
+                sysPrompt = services.SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);
                 var audioBearers = new ArrayList<AudioBearer>();
                 var messages = buildMessages(sysPrompt, conv, audioBearers);
 
@@ -639,6 +643,8 @@ public class AgentRunner {
             var assembled0 = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, convo.channelType);
             // JCLAW-38: re-inject latest compaction summary (if any)
             var sysPrompt = services.SessionCompactor.appendSummaryToPrompt(assembled0.systemPrompt(), convo);
+            // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
+            sysPrompt = services.SessionCompactor.appendParentContextToPrompt(sysPrompt, convo);
             var audioBearers = new ArrayList<AudioBearer>();
             var msgs = buildMessages(sysPrompt, convo, audioBearers);
             // Conversation-aware overload: applies the loadtest-agent
@@ -1935,6 +1941,8 @@ public class AgentRunner {
             if (conv == null) return current;
             var assembled = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, conv.channelType);
             var sysPrompt = services.SessionCompactor.appendSummaryToPrompt(assembled.systemPrompt(), conv);
+            // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
+            sysPrompt = services.SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);
             return buildMessages(sysPrompt, conv);
         });
     }

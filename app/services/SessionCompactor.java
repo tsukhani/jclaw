@@ -194,6 +194,20 @@ public final class SessionCompactor {
         return basePrompt + "\n\n" + PRIOR_SUMMARY_HEADER + "\n\n" + latest.summary;
     }
 
+    /**
+     * Append the spawn-time inherited parent context (JCLAW-268) to
+     * {@code basePrompt} as a labeled section. Returns {@code basePrompt}
+     * unchanged when the conversation has no parent context (fresh-mode
+     * spawn or a top-level conversation). Stamped once at spawn time and
+     * re-injected on every turn so the child carries continuity with the
+     * parent's recent turns without re-summarizing per turn.
+     */
+    public static String appendParentContextToPrompt(String basePrompt, Conversation conversation) {
+        if (conversation == null) return basePrompt;
+        if (conversation.parentContext == null || conversation.parentContext.isBlank()) return basePrompt;
+        return basePrompt + "\n\n" + PARENT_CONTEXT_HEADER + "\n\n" + conversation.parentContext;
+    }
+
     // ─── Internals ──────────────────────────────────────────────────────
 
     /** Snapshot of a persisted {@link Message} taken under a Tx, usable after the Tx closes. */
@@ -334,4 +348,96 @@ public final class SessionCompactor {
 
     public static final String PRIOR_SUMMARY_HEADER =
             "[Prior conversation summary — earlier turns were compacted to fit the context window]";
+
+    /**
+     * Header used by {@link #appendParentContextToPrompt} when a subagent was
+     * spawned with {@code context="inherit"}. Lets the child distinguish the
+     * inherited parent narrative from its own compaction summary (which can
+     * appear alongside on long-running children).
+     */
+    public static final String PARENT_CONTEXT_HEADER =
+            "[Parent conversation context — summary of the spawning parent's recent turns at the time this subagent was spawned]";
+
+    /**
+     * Hard cap on the inherited-parent summary length (JCLAW-268). The
+     * summarization prompt asks for a summary within this budget, then the
+     * spawn path truncates anything longer with an ellipsis. Belt-and-
+     * suspenders against an over-eager model.
+     */
+    public static final int PARENT_CONTEXT_MAX_CHARS = 8_000;
+
+    /**
+     * Bounded summary of a parent conversation for inherit-mode subagent
+     * spawning (JCLAW-268). Returns {@code null} when the conversation has
+     * no usable history (the caller treats that as "skip summary cleanly").
+     * Calls the supplied {@code summarizer} synchronously — must run
+     * OUTSIDE a Tx since the LLM call may take seconds. The result is
+     * stripped and hard-truncated to {@link #PARENT_CONTEXT_MAX_CHARS}
+     * with an ellipsis suffix when the model overshoots; the prompt asks
+     * for a summary within the budget but the truncation is the load-
+     * bearing guarantee.
+     *
+     * @param parentMessages an ASC-ordered snapshot of the parent's recent
+     *                       message rows (read inside a Tx by the caller,
+     *                       so this method has no DB dependency)
+     * @param summarizer     same functional seam {@link #compact} uses;
+     *                       production passes a lambda over LlmProvider.chat
+     * @throws Exception if the summarizer raises — the caller degrades
+     *                   to fresh and emits SUBAGENT_ERROR.
+     */
+    @SuppressWarnings("java:S112") // mirrors Summarizer.summarize: broad signature avoids leaking provider exception types
+    public static String summarizeParentForSubagent(List<MessageSnapshot> parentMessages, Summarizer summarizer)
+            throws Exception {
+        if (parentMessages == null || parentMessages.isEmpty()) return null;
+        var sumMessages = List.<ChatMessage>of(
+                ChatMessage.system(PARENT_CONTEXT_SUMMARIZATION_INSTRUCTIONS),
+                ChatMessage.user(renderTurns(parentMessages))
+        );
+        var raw = summarizer.summarize(sumMessages);
+        if (raw == null || raw.isBlank()) return null;
+        var trimmed = raw.strip();
+        if (trimmed.length() <= PARENT_CONTEXT_MAX_CHARS) return trimmed;
+        // Hard cap with ellipsis — never trust the model alone to honor the budget.
+        return trimmed.substring(0, PARENT_CONTEXT_MAX_CHARS - 1).stripTrailing() + "…";
+    }
+
+    /**
+     * Snapshot the parent's recent messages for {@link #summarizeParentForSubagent}.
+     * Must be called inside a {@link Tx#run} block — uses
+     * {@link ConversationService#loadRecentMessages} which is JPA-bound. The
+     * returned {@link MessageSnapshot} list is detached from the
+     * persistence context and safe to consume outside the Tx.
+     */
+    public static List<MessageSnapshot> snapshotParentMessages(Conversation parentConv) {
+        if (parentConv == null) return List.of();
+        var recent = ConversationService.loadRecentMessages(parentConv);
+        var out = new ArrayList<MessageSnapshot>(recent.size());
+        for (var m : recent) {
+            out.add(new MessageSnapshot(m.role, m.content, m.toolCalls, m.toolResults, m.createdAt));
+        }
+        return out;
+    }
+
+    /**
+     * Summarization instructions for the inherit-mode parent-context snapshot
+     * (JCLAW-268). Scoped tighter than {@link #SUMMARIZATION_INSTRUCTIONS} —
+     * the child only needs enough background to continue the parent's task,
+     * not a faithful compression of the entire conversation. The 7500-char
+     * target leaves slack inside the 8000 hard cap for the model's
+     * occasional overshoot.
+     */
+    private static final String PARENT_CONTEXT_SUMMARIZATION_INSTRUCTIONS = """
+            You are summarizing a parent agent's conversation so a child subagent can pick up its task with enough context to do useful work. Produce a single prose summary — no preamble, no meta-commentary — under 7500 characters. The child will see this as background context, not as the conversation itself.
+
+            Focus on:
+            1. The most recent task or request the parent was working on.
+            2. Key decisions, constraints, and any user preferences already established.
+            3. Exact values the child may need: names, file paths, IDs, URLs, configuration values. Preserve identifiers verbatim.
+            4. Tool state — any in-flight operations, file edits, or external system interactions.
+            5. What the child still needs to do, if explicit instructions were already given to the parent.
+
+            De-prioritize greetings, resolved errors, and completed side-quests. Do not invent facts; if a detail is ambiguous, summarize it as ambiguous.
+
+            Output only the summary itself — no "Here is the summary:" preface, no markdown headers, no sign-off.
+            """;
 }

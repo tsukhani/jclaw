@@ -4,19 +4,23 @@ import agents.AgentRunner;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import llm.ProviderRegistry;
 import models.Agent;
+import models.AgentToolConfig;
 import models.Conversation;
 import models.SubagentRun;
 import services.AgentService;
 import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
+import services.SessionCompactor;
 import services.Tx;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -35,10 +39,25 @@ import java.util.concurrent.TimeoutException;
  * the payload is real); {@link EventLogger#recordSubagentComplete} or
  * {@link EventLogger#recordSubagentError} fires on terminal outcomes.
  *
- * <p>Scope (initial; see JCLAW-257 epic): mode is implicitly {@code "session"}
- * (the child runs in its own conversation) and context is implicitly
- * {@code "fresh"} (no parent history is copied in). The {@code mode} /
- * {@code context} alternative branches are JCLAW-267 / JCLAW-268.
+ * <p>Scope: mode is implicitly {@code "session"} (the child runs in its own
+ * conversation; the {@code mode} alternative branch is JCLAW-267 territory).
+ * The {@code context} parameter accepts {@code "fresh"} (default) or
+ * {@code "inherit"} (JCLAW-268). Fresh gives the child only its configured
+ * system prompt and an empty history. Inherit additionally (a) summarizes the
+ * parent's recent turns via a synchronous LLM call (hard-capped at
+ * {@link SessionCompactor#PARENT_CONTEXT_MAX_CHARS} characters), stamps the
+ * result on the child Conversation, and re-injects it into the child's system
+ * prompt each turn via
+ * {@link SessionCompactor#appendParentContextToPrompt}, and (b) unions the
+ * parent's enabled tools into the child Agent's tool config so the child can
+ * use the same tool surface the parent had — at-spawn snapshot, matching the
+ * per-spawn child Agent lifetime JCLAW-265 established.
+ *
+ * <p>If the inherit-mode summarization LLM call fails or returns blank, the
+ * spawn degrades silently to fresh-mode behavior and emits a
+ * {@code SUBAGENT_ERROR} event capturing the reason; the child still spawns,
+ * still gets the tool-union grant, and still runs. The reverse (skip the
+ * spawn outright) would be a worse failure mode for resilience.
  *
  * <p>The parent's tool registration provides the child's tool surface: the
  * child Agent row is cloned from the parent so it inherits the same provider,
@@ -59,6 +78,9 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
 
     static final String DEFAULT_MODE = "session";
     static final String DEFAULT_CONTEXT = "fresh";
+    static final String CONTEXT_FRESH = "fresh";
+    static final String CONTEXT_INHERIT = "inherit";
+    private static final Set<String> ALLOWED_CONTEXTS = Set.of(CONTEXT_FRESH, CONTEXT_INHERIT);
 
     /** Channel value stamped on subagent conversations. Not a real transport —
      *  {@link models.ChannelType#fromValue} returns null, so dispatchers no-op
@@ -128,6 +150,9 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                 Optional: `label` (short display name), `agentId` (numeric id of an existing \
                 agent to run as the child; defaults to a fresh clone of the current agent), \
                 `modelProvider` and `modelId` (override the child's model), \
+                `context` ("fresh" — default — gives the child an empty history; "inherit" \
+                injects a summary of your recent turns into the child's system prompt and \
+                grants it the union of your enabled tools and its own), \
                 `runTimeoutSeconds` (wall-clock budget, default 300).""";
     }
 
@@ -138,25 +163,31 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
 
     @Override
     public Map<String, Object> parameters() {
+        var props = new LinkedHashMap<String, Object>();
+        props.put("task", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                SchemaKeys.DESCRIPTION, "Instruction for the child subagent (required)"));
+        props.put("label", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                SchemaKeys.DESCRIPTION, "Optional short display name for the spawn"));
+        props.put("agentId", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
+                SchemaKeys.DESCRIPTION,
+                "Optional id of an existing Agent row to run as the child; "
+                        + "defaults to a fresh clone of the calling agent"));
+        props.put("modelProvider", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                SchemaKeys.DESCRIPTION, "Optional provider override for the child"));
+        props.put("modelId", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                SchemaKeys.DESCRIPTION, "Optional model id override for the child"));
+        props.put("context", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                SchemaKeys.DESCRIPTION,
+                "Context inheritance mode: \"fresh\" (default) for an empty child history, "
+                        + "or \"inherit\" to summarize the parent's recent turns into the "
+                        + "child's system prompt and grant the child the union of the parent's "
+                        + "enabled tools and its own."));
+        props.put("runTimeoutSeconds", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
+                SchemaKeys.DESCRIPTION,
+                "Wall-clock budget for the synchronous run (default 300)"));
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
-                SchemaKeys.PROPERTIES, Map.of(
-                        "task", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.DESCRIPTION, "Instruction for the child subagent (required)"),
-                        "label", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.DESCRIPTION, "Optional short display name for the spawn"),
-                        "agentId", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
-                                SchemaKeys.DESCRIPTION,
-                                "Optional id of an existing Agent row to run as the child; "
-                                        + "defaults to a fresh clone of the calling agent"),
-                        "modelProvider", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.DESCRIPTION, "Optional provider override for the child"),
-                        "modelId", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.DESCRIPTION, "Optional model id override for the child"),
-                        "runTimeoutSeconds", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
-                                SchemaKeys.DESCRIPTION,
-                                "Wall-clock budget for the synchronous run (default 300)")
-                ),
+                SchemaKeys.PROPERTIES, props,
                 SchemaKeys.REQUIRED, List.of("task")
         );
     }
@@ -180,6 +211,17 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         var modelIdOverride = optString(args, "modelId");
         var timeoutSeconds = optInt(args, "runTimeoutSeconds", DEFAULT_TIMEOUT_SECONDS);
         if (timeoutSeconds <= 0) timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
+        // JCLAW-268: context parameter — "fresh" (default) is the JCLAW-265
+        // behavior; "inherit" summarizes the parent's recent turns and unions
+        // tool grants. Validate strictly so an LLM typo produces a clear
+        // error rather than silently degrading.
+        var requestedContext = optString(args, "context");
+        var context = requestedContext == null || requestedContext.isBlank()
+                ? DEFAULT_CONTEXT
+                : requestedContext.toLowerCase();
+        if (!ALLOWED_CONTEXTS.contains(context)) {
+            return "Error: 'context' must be one of " + ALLOWED_CONTEXTS + " (got '" + requestedContext + "').";
+        }
 
         // JCLAW-266: enforce recursion caps before touching the DB. Both checks
         // run inside a Tx so the ancestor walk and the RUNNING-row count see a
@@ -205,6 +247,30 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                     .formatted(parentAgent.name);
         }
 
+        // JCLAW-268: inherit-mode pre-step. We do two things outside the
+        // bootstrap Tx so the LLM-bound summarize call doesn't hold a DB
+        // connection:
+        //   1. Snapshot the parent's recent messages inside a short Tx
+        //      (the snapshot is detached from JPA and safe to consume).
+        //   2. Call the LLM synchronously to produce the parent-context
+        //      summary. On failure we degrade to fresh and emit
+        //      SUBAGENT_ERROR (no run_id yet — that's deliberate; the
+        //      reason field carries the failure cause).
+        // Result feeds bootstrapChild as the parent-context blob to stamp
+        // on the child Conversation. For fresh-mode and for failure
+        // degradation, parentContextSummary stays null and bootstrap
+        // skips the stamping + union grant.
+        String parentContextSummary = null;
+        String summaryErrorReason = null;
+        boolean inheritRequested = CONTEXT_INHERIT.equals(context);
+        if (inheritRequested) {
+            try {
+                parentContextSummary = buildParentContextSummary(parentAgent, parentConv.id);
+            } catch (Exception e) {
+                summaryErrorReason = "Parent-context summarization failed: " + e.getMessage();
+            }
+        }
+
         // Step 1+2: materialize child Agent + Conversation in one short Tx so
         // both rows commit before we open SubagentRun. AgentService.create
         // already runs its own internal sub-work (workspace seed, default
@@ -214,9 +280,12 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         final String resolvedModelProvider = modelProviderOverride;
         final String resolvedModelId = modelIdOverride;
         final Long resolvedAgentIdParam = requestedAgentId;
+        final boolean applyInheritGrants = inheritRequested && parentContextSummary != null;
+        final String resolvedParentContext = parentContextSummary;
         var bootstrap = Tx.run(() -> bootstrapChild(
                 parentAgent, parentConv, resolvedAgentIdParam,
-                resolvedLabel, resolvedModelProvider, resolvedModelId));
+                resolvedLabel, resolvedModelProvider, resolvedModelId,
+                applyInheritGrants, resolvedParentContext));
         if (bootstrap.error() != null) {
             return bootstrap.error();
         }
@@ -241,7 +310,19 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         var runIdStr = String.valueOf(runId);
         EventLogger.recordSubagentSpawn(
                 parentAgent.name, lookupAgentName(childAgentId),
-                runIdStr, DEFAULT_MODE, DEFAULT_CONTEXT);
+                runIdStr, DEFAULT_MODE, context);
+
+        // JCLAW-268: surface inherit-mode summarization failure as a SUBAGENT_ERROR
+        // immediately after spawn. The child still runs (degraded to fresh-mode
+        // semantics for the parent-context blob; tool-union grant is also
+        // skipped, see bootstrapChild). The spawn-time event makes the
+        // degradation auditable; the terminal event below covers the run
+        // itself once it finishes.
+        if (summaryErrorReason != null) {
+            EventLogger.recordSubagentError(
+                    parentAgent.name, lookupAgentName(childAgentId),
+                    runIdStr, DEFAULT_MODE, context, summaryErrorReason);
+        }
 
         // Step 4: synchronous AgentRunner.run on a VT so we can enforce the
         // wall-clock budget via Future.get(timeout). The child Agent +
@@ -306,11 +387,11 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         var childName = lookupAgentName(childAgentId);
         switch (terminalStatus) {
             case COMPLETED -> EventLogger.recordSubagentComplete(
-                    parentAgent.name, childName, runIdStr, DEFAULT_MODE, DEFAULT_CONTEXT, "ok");
+                    parentAgent.name, childName, runIdStr, DEFAULT_MODE, context, "ok");
             case TIMEOUT -> EventLogger.recordSubagentTimeout(parentAgent.name, runIdStr);
             default -> EventLogger.recordSubagentError(
                     parentAgent.name, childName, runIdStr,
-                    DEFAULT_MODE, DEFAULT_CONTEXT, errorReason);
+                    DEFAULT_MODE, context, errorReason);
         }
 
         // Tool return — the LLM will see this JSON string.
@@ -401,7 +482,9 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                                             Long requestedAgentId,
                                             String label,
                                             String modelProviderOverride,
-                                            String modelIdOverride) {
+                                            String modelIdOverride,
+                                            boolean applyInheritGrants,
+                                            String parentContextSummary) {
         Agent childAgent;
         if (requestedAgentId != null) {
             childAgent = Agent.findById(requestedAgentId);
@@ -437,6 +520,18 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
             childAgent.save();
         }
 
+        // JCLAW-268: inherit-mode tool union. Snapshot the parent's enabled
+        // tool set and flip every tool the parent has enabled but the child
+        // currently has disabled (via AgentService.create's default-disabled
+        // rows for browser / jclaw_api on non-main agents) to enabled. The
+        // child's already-enabled tools stay enabled; "union" means the child
+        // gets the broader of the two surfaces. Skipped in fresh mode AND in
+        // the inherit-mode summarization-failure degradation path so the
+        // failure-degraded spawn is also tool-conservative.
+        if (applyInheritGrants) {
+            unionParentToolGrants(parentAgent, childAgent);
+        }
+
         var childConv = ConversationService.create(childAgent, SUBAGENT_CHANNEL, null);
         childConv.parentConversation = parentConv;
         // JCLAW-269: persist the per-spawn override on the child Conversation so
@@ -450,9 +545,115 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
             childConv.modelProviderOverride = modelProviderOverride;
             childConv.modelIdOverride = modelIdOverride;
         }
+        // JCLAW-268: stamp the inherited parent-context summary on the child
+        // Conversation. AgentRunner re-injects this into the child's system
+        // prompt every turn via SessionCompactor.appendParentContextToPrompt.
+        // Null in fresh mode, in the summarization-failure degradation path,
+        // and when the parent had no usable history — all of which leave
+        // the column null and turn the injection into a no-op.
+        if (applyInheritGrants && parentContextSummary != null && !parentContextSummary.isBlank()) {
+            childConv.parentContext = parentContextSummary;
+        }
         childConv.save();
 
         return Bootstrap.ok(childAgent.id, childConv.id);
+    }
+
+    /**
+     * JCLAW-268: snapshot-into-child-Agent's-tool-config implementation of the
+     * "union of parent's enabled tools and child's configured tools" AC.
+     *
+     * <p>Picks the snapshot approach over a per-Conversation overlay because
+     * (a) the child Agent is already per-spawn under JCLAW-265's create-or-
+     * reuse flow, so there's no risk of stale grants leaking into an
+     * unrelated future spawn, and (b) the existing
+     * {@link ToolRegistry#loadDisabledTools} fast path already reads from
+     * {@code AgentToolConfig} on every turn — no new overlay codepath to
+     * teach.
+     *
+     * <p>Mechanics:
+     * <ol>
+     *   <li>Compute the parent's effective enabled-tool set (every registered
+     *       tool minus the parent's disabled set).</li>
+     *   <li>Walk the child's existing {@code AgentToolConfig} rows. For any
+     *       row whose {@code toolName} is in the parent's enabled set and
+     *       currently has {@code enabled=false} on the child (the
+     *       {@link AgentService#create} default-disables for {@code browser}
+     *       and {@code jclaw_api} on non-main agents), flip it to
+     *       {@code enabled=true}.</li>
+     * </ol>
+     *
+     * <p>Tools the child doesn't have an explicit row for are already
+     * enabled by default — no row needed. We never write a brand-new
+     * {@code enabled=true} row for a tool that's already default-enabled;
+     * that would only bloat the table.
+     *
+     * <p>Toolset-restriction caveat: the AC references "JCLAW-252 patterns"
+     * for an additional restriction layer on top of the union. That ticket
+     * does not exist in this codebase. There is no explicit allowlist /
+     * deny-list mechanism beyond {@code AgentToolConfig} itself, so the
+     * union IS the full grant — the child only sees tools the parent had
+     * enabled OR the child default-allowed.
+     */
+    private static void unionParentToolGrants(Agent parentAgent, Agent childAgent) {
+        var parentDisabled = ToolRegistry.loadDisabledTools(parentAgent);
+        var allRegistered = ToolRegistry.listTools();
+        // Parent's enabled set: every registered tool not in the parent's
+        // disabled set. Avoids materializing the full registry as a set just
+        // to negate the disabled set.
+        var childRows = AgentToolConfig.findByAgent(childAgent);
+        boolean anyFlipped = false;
+        for (var row : childRows) {
+            if (row.enabled) continue;
+            if (parentDisabled.contains(row.toolName)) continue; // parent also has it off
+            // Sanity check: tool actually exists. If a stale row references a
+            // removed tool, we leave it alone — flipping it would be lying.
+            boolean stillRegistered = false;
+            for (var t : allRegistered) {
+                if (t.name().equals(row.toolName)) { stillRegistered = true; break; }
+            }
+            if (!stillRegistered) continue;
+            row.enabled = true;
+            row.save();
+            anyFlipped = true;
+        }
+        if (anyFlipped) {
+            // Mirror the existing {@link controllers.ApiToolsController} write
+            // path: cached disabled-set is invalidated after every toggle so
+            // the very next AgentRunner turn for this child sees the freshly
+            // flipped grants.
+            ToolRegistry.invalidateDisabledToolsCache(childAgent);
+        }
+    }
+
+    /**
+     * JCLAW-268: synchronously build the parent-context summary. Snapshots
+     * the parent's recent messages inside a Tx, then calls the LLM outside
+     * any Tx so the chat round-trip doesn't hold a DB connection. Returns
+     * {@code null} when there's nothing useful to summarize (no recent
+     * messages, model returned blank) — the caller treats that as "skip
+     * silently, no error". Any other failure (provider unconfigured, LLM
+     * error, network) throws and the caller emits SUBAGENT_ERROR.
+     */
+    private static String buildParentContextSummary(Agent parentAgent, Long parentConvId) throws Exception {
+        var snapshot = Tx.run(() -> {
+            var conv = Conversation.<Conversation>findById(parentConvId);
+            return SessionCompactor.snapshotParentMessages(conv);
+        });
+        if (snapshot == null || snapshot.isEmpty()) return null;
+
+        var provider = ProviderRegistry.get(parentAgent.modelProvider);
+        if (provider == null) {
+            throw new IllegalStateException(
+                    "Parent provider '" + parentAgent.modelProvider + "' is not configured");
+        }
+        final var maxOutput = ConfigService.getInt("subagent.parentContextMaxTokens", 4096);
+        final var modelId = parentAgent.modelId;
+        SessionCompactor.Summarizer summarizer = sumMsgs -> {
+            var resp = provider.chat(modelId, sumMsgs, List.of(), maxOutput, null, null);
+            return SessionCompactor.firstChoiceText(resp);
+        };
+        return SessionCompactor.summarizeParentForSubagent(snapshot, summarizer);
     }
 
     /** Unique child agent name: parent + short token. Agent.name has a unique

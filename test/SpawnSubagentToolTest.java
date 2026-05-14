@@ -2,6 +2,7 @@ import agents.AgentRunner;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
+import models.AgentToolConfig;
 import models.Conversation;
 import models.EventLog;
 import models.SubagentRun;
@@ -15,6 +16,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
+import services.SessionCompactor;
 import services.Tx;
 import tools.SpawnSubagentTool;
 
@@ -393,6 +395,294 @@ class SpawnSubagentToolTest extends UnitTest {
         Agent childAgent = Agent.findById(run.childAgent.id);
         assertEquals("test-provider", childAgent.modelProvider);
         assertEquals("test-model", childAgent.modelId);
+    }
+
+    // ─── JCLAW-268: context modes (fresh vs inherit) ─────────────────────
+
+    @Test
+    void freshModeIsDefaultAndProducesEmptyChildHistoryAndNoUnion() throws Exception {
+        // JCLAW-268 regression: omitting `context` defaults to "fresh". Verify:
+        //   - SUBAGENT_SPAWN event records context="fresh"
+        //   - child Conversation has no parent-context blob
+        //   - child Agent's tool config still default-disables browser
+        //     (i.e. NO union with the parent's enabled set was applied)
+        startLlmServer(simpleResponse("Subagent reply: fresh."));
+        configureProvider();
+
+        var parent = createAgent("p-fresh", "test-provider", "test-model");
+        ConversationService.create(parent, "web", "u-fresh");
+        // Parent has browser explicitly enabled — this is what we DON'T want
+        // the fresh-mode child to inherit. The default for non-main agents is
+        // browser disabled (per AgentService.create).
+        var parentBrowser = AgentToolConfig.findByAgentAndTool(parent, "browser");
+        parentBrowser.enabled = true;
+        parentBrowser.save();
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id, "{\"task\":\"plain\"}");
+        EventLogger.flush();
+
+        var parsed = JsonParser.parseString(reply).getAsJsonObject();
+        assertEquals("COMPLETED", parsed.get("status").getAsString());
+
+        JPA.em().clear();
+        var runId = Long.parseLong(parsed.get("run_id").getAsString());
+        SubagentRun run = SubagentRun.findById(runId);
+        Conversation childConv = Conversation.findById(run.childConversation.id);
+        assertNull(childConv.parentContext,
+                "fresh-mode (default) child must not have a parent-context blob");
+
+        // Child Agent: browser stays disabled (no union applied).
+        Agent child = Agent.findById(run.childAgent.id);
+        var childBrowser = AgentToolConfig.findByAgentAndTool(child, "browser");
+        assertNotNull(childBrowser);
+        assertFalse(childBrowser.enabled,
+                "fresh-mode child must keep AgentService.create's default-disabled browser row");
+
+        // SPAWN event records context="fresh".
+        java.util.List<EventLog> spawnEvents = EventLog.find(
+                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_SPAWN, parent.name).fetch();
+        assertEquals(1, spawnEvents.size());
+        assertTrue(spawnEvents.getFirst().details.contains("\"context\":\"fresh\""),
+                "fresh-mode SPAWN must record context=\"fresh\"");
+    }
+
+    @Test
+    void inheritModeStampsParentSummaryAndUnionsToolGrants() throws Exception {
+        // JCLAW-268 happy path: context="inherit" with parent history present.
+        //   - first LLM call is the summarize pass → returns canned summary
+        //   - second LLM call is the child run → returns "Subagent reply"
+        // Verify:
+        //   - child Conversation.parentContext == canned summary
+        //   - child Agent has browser enabled (UNION with parent's enabled set)
+        //   - SUBAGENT_SPAWN event records context="inherit"
+        //   - effective system prompt for the child contains the summary
+        //     (via SessionCompactor.appendParentContextToPrompt, smoke-tested
+        //     against the helper directly since intercepting AgentRunner's
+        //     prompt assembly mid-flight is more invasive than necessary).
+        var calls = new AtomicInteger(0);
+        startLlmServer(exchange -> {
+            int n = calls.incrementAndGet();
+            String body = n == 1
+                    ? simpleResponse("Canned summary of parent turns.")
+                    : simpleResponse("Subagent reply: inherited.");
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.getBytes().length);
+            exchange.getResponseBody().write(body.getBytes());
+            exchange.close();
+        });
+        configureProvider();
+
+        var parent = createAgent("p-inherit", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-inherit");
+        // Seed three prior turns so SessionCompactor.snapshotParentMessages
+        // returns a non-empty list — summarization is otherwise skipped.
+        ConversationService.appendUserMessage(parentConv, "first user message");
+        ConversationService.appendAssistantMessage(parentConv, "first assistant reply", null);
+        ConversationService.appendUserMessage(parentConv, "second user message");
+        // Parent has browser explicitly enabled — child should pick this up
+        // via the union grant.
+        var parentBrowser = AgentToolConfig.findByAgentAndTool(parent, "browser");
+        parentBrowser.enabled = true;
+        parentBrowser.save();
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id,
+                "{\"task\":\"continue work\",\"context\":\"inherit\"}");
+        EventLogger.flush();
+
+        var parsed = JsonParser.parseString(reply).getAsJsonObject();
+        assertEquals("COMPLETED", parsed.get("status").getAsString(),
+                "inherit-mode happy path must complete cleanly, got: " + reply);
+
+        JPA.em().clear();
+        var runId = Long.parseLong(parsed.get("run_id").getAsString());
+        SubagentRun run = SubagentRun.findById(runId);
+        Conversation childConv = Conversation.findById(run.childConversation.id);
+
+        assertEquals("Canned summary of parent turns.", childConv.parentContext,
+                "child Conversation must carry the parent-context summary");
+
+        // Smoke-test the system-prompt injection helper end-to-end. The
+        // value AgentRunner re-injects each turn is what this returns.
+        var injected = SessionCompactor.appendParentContextToPrompt("BASE", childConv);
+        assertTrue(injected.contains(SessionCompactor.PARENT_CONTEXT_HEADER),
+                "injection helper must emit the PARENT_CONTEXT_HEADER label");
+        assertTrue(injected.contains("Canned summary of parent turns."),
+                "injection helper must include the summary body");
+
+        // Tool union: child has browser enabled now, NOT default-disabled.
+        Agent child = Agent.findById(run.childAgent.id);
+        var childBrowser = AgentToolConfig.findByAgentAndTool(child, "browser");
+        assertNotNull(childBrowser);
+        assertTrue(childBrowser.enabled,
+                "inherit-mode child must have browser enabled (UNION with parent's enabled set)");
+
+        // SPAWN event records context="inherit".
+        java.util.List<EventLog> spawnEvents = EventLog.find(
+                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_SPAWN, parent.name).fetch();
+        assertEquals(1, spawnEvents.size());
+        assertTrue(spawnEvents.getFirst().details.contains("\"context\":\"inherit\""),
+                "inherit-mode SPAWN must record context=\"inherit\"");
+
+        // No SUBAGENT_ERROR on the happy path.
+        java.util.List<EventLog> errorEvents = EventLog.find(
+                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_ERROR, parent.name).fetch();
+        assertTrue(errorEvents.isEmpty(),
+                "inherit-mode happy path must not emit SUBAGENT_ERROR");
+
+        // Both calls were made (summarize + child run).
+        assertEquals(2, calls.get(),
+                "inherit mode must make two LLM calls: summarize + child run");
+    }
+
+    @Test
+    void inheritModeDegradesToFreshWhenSummarizationFails() throws Exception {
+        // JCLAW-268 failure path: summarize LLM call returns blank, which the
+        // tool treats as "summary unusable" — null is returned from
+        // summarizeParentForSubagent, the spawn proceeds (child runs with no
+        // parent-context blob; tool union grant is also skipped — failure
+        // should not silently broaden the child's tool surface). The summary
+        // path emits SUBAGENT_ERROR; the child run terminates COMPLETED on
+        // its own reply.
+        //
+        // We use the "blank response" failure rather than "5xx" because the
+        // LlmProvider retry path (MAX_RETRIES=3 with 1s+2s+4s backoffs) makes
+        // 5xx-driven failures cost up to 7s per test. Blank summary is the
+        // semantically equivalent failure mode the tool also has to handle.
+        var calls = new AtomicInteger(0);
+        startLlmServer(exchange -> {
+            int n = calls.incrementAndGet();
+            if (n == 1) {
+                // First call (summarize): return 400 so LlmProvider throws
+                // an LlmException immediately (4xx is non-retryable per the
+                // retry policy — 5xx would retry 3x with 1s+2s+4s backoffs
+                // and slow the test by ~7s). The exception bubbles up
+                // through the summarizer lambda and the tool catches it
+                // as a summarization failure, emitting SUBAGENT_ERROR.
+                exchange.sendResponseHeaders(400, 0);
+                exchange.close();
+                return;
+            }
+            String body = simpleResponse("Subagent reply: degraded.");
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.getBytes().length);
+            exchange.getResponseBody().write(body.getBytes());
+            exchange.close();
+        });
+        configureProvider();
+
+        var parent = createAgent("p-degrade", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-degrade");
+        // Need at least one prior turn so the summarize call is attempted at
+        // all (snapshotParentMessages returns empty for a brand-new conv).
+        ConversationService.appendUserMessage(parentConv, "some prior context");
+        var parentBrowser = AgentToolConfig.findByAgentAndTool(parent, "browser");
+        parentBrowser.enabled = true;
+        parentBrowser.save();
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id,
+                "{\"task\":\"continue\",\"context\":\"inherit\"}");
+        EventLogger.flush();
+
+        var parsed = JsonParser.parseString(reply).getAsJsonObject();
+        // Child still runs even when the summary failed.
+        assertEquals("COMPLETED", parsed.get("status").getAsString(),
+                "summarization failure must not prevent the child from running, got: " + reply);
+
+        JPA.em().clear();
+        var runId = Long.parseLong(parsed.get("run_id").getAsString());
+        SubagentRun run = SubagentRun.findById(runId);
+        Conversation childConv = Conversation.findById(run.childConversation.id);
+
+        assertNull(childConv.parentContext,
+                "summarization failure must leave child Conversation.parentContext null");
+
+        // Failure also skips the tool union grant — failure-degraded spawn
+        // must not silently broaden the child's tool surface.
+        Agent child = Agent.findById(run.childAgent.id);
+        var childBrowser = AgentToolConfig.findByAgentAndTool(child, "browser");
+        assertNotNull(childBrowser);
+        assertFalse(childBrowser.enabled,
+                "summarization-degraded child must keep default-disabled browser");
+
+        // SUBAGENT_ERROR event records the failure reason.
+        java.util.List<EventLog> errorEvents = EventLog.find(
+                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_ERROR, parent.name).fetch();
+        assertEquals(1, errorEvents.size(),
+                "exactly one SUBAGENT_ERROR event on summarization failure");
+        assertTrue(errorEvents.getFirst().details.contains("Parent-context summarization failed"),
+                "SUBAGENT_ERROR details must include the summarization-failure reason, got: "
+                        + errorEvents.getFirst().details);
+
+        // SPAWN event still records context="inherit" (the request was for
+        // inherit; failure didn't rewrite the request).
+        java.util.List<EventLog> spawnEvents = EventLog.find(
+                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_SPAWN, parent.name).fetch();
+        assertEquals(1, spawnEvents.size());
+        assertTrue(spawnEvents.getFirst().details.contains("\"context\":\"inherit\""));
+    }
+
+    @Test
+    void inheritModeWithNoParentTurnsSkipsSummaryCleanly() throws Exception {
+        // JCLAW-268: when the parent conversation has zero messages,
+        // snapshotParentMessages returns empty and summarizeParentForSubagent
+        // returns null — no LLM call made, no error, child spawns clean.
+        startLlmServer(simpleResponse("Subagent reply: empty parent."));
+        configureProvider();
+
+        var parent = createAgent("p-empty", "test-provider", "test-model");
+        ConversationService.create(parent, "web", "u-empty");
+        // Deliberately NO appendUserMessage — parent conversation is empty.
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id,
+                "{\"task\":\"first time\",\"context\":\"inherit\"}");
+        EventLogger.flush();
+
+        var parsed = JsonParser.parseString(reply).getAsJsonObject();
+        assertEquals("COMPLETED", parsed.get("status").getAsString(),
+                "empty-parent inherit-mode must complete cleanly, got: " + reply);
+
+        JPA.em().clear();
+        var runId = Long.parseLong(parsed.get("run_id").getAsString());
+        SubagentRun run = SubagentRun.findById(runId);
+        Conversation childConv = Conversation.findById(run.childConversation.id);
+
+        assertNull(childConv.parentContext,
+                "no parent turns must leave child Conversation.parentContext null");
+
+        // No SUBAGENT_ERROR — empty-parent is a clean-skip path, not a failure.
+        java.util.List<EventLog> errorEvents = EventLog.find(
+                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_ERROR, parent.name).fetch();
+        assertTrue(errorEvents.isEmpty(),
+                "empty-parent inherit-mode must not emit SUBAGENT_ERROR");
+    }
+
+    @Test
+    void invalidContextValueIsRejectedWithClearError() throws Exception {
+        // Defensive: any context value other than "fresh" or "inherit" must
+        // be rejected up-front rather than silently defaulting.
+        startLlmServer(simpleResponse("never called"));
+        configureProvider();
+        var parent = createAgent("p-bad-ctx", "test-provider", "test-model");
+        ConversationService.create(parent, "web", "u-bad-ctx");
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id,
+                "{\"task\":\"x\",\"context\":\"shared\"}");
+        assertTrue(reply.startsWith("Error: 'context' must be one of"),
+                "invalid context value must produce a plain-text rejection, got: " + reply);
+
+        JPA.em().clear();
+        assertEquals(0, SubagentRun.count(),
+                "invalid-context rejection must not insert a SubagentRun row");
     }
 
     @Test
