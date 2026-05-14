@@ -650,6 +650,18 @@ function skillDisabledTools(skill: AgentSkill): string[] {
   return skill.tools.filter(name => toolMap.has(name) && !toolMap.get(name))
 }
 
+// Alphabetical display order. The API returns skills in agent-config insertion
+// order (whatever sequence the operator promoted/added them in), but the list
+// is much easier to scan if names are sorted — matches the cross-agent skills
+// matrix at pages/skills.vue's `sortedAgentSkillsMap`. Locale-aware,
+// case-insensitive comparator so mixed-case names land where a human would
+// expect them, not where ASCII order would.
+const sortedAgentSkills = computed(() =>
+  [...agentSkills.value].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }),
+  ),
+)
+
 // Skills with no missing tool dependencies — these are the ones the per-skill
 // toggle would actually flip. Bulk toggle must filter the same way so we never
 // silently re-enable a skill that's structurally non-functional (its enabled
@@ -1417,7 +1429,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         </div>
         <div class="divide-y divide-border">
           <div
-            v-for="skill in agentSkills"
+            v-for="skill in sortedAgentSkills"
             :key="skill.name"
             class="px-4 py-2.5 flex items-start justify-between gap-3 transition-opacity"
             :class="skillDisabledTools(skill).length ? 'opacity-45' : ''"

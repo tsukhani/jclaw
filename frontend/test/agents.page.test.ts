@@ -156,6 +156,47 @@ describe('Agents page — bulk select mode', () => {
   })
 })
 
+describe('Agents page — agent skills list', () => {
+  it('renders the helper agent\'s skills in alphabetical order regardless of API response order', async () => {
+    setupAgentsApi()
+    // Override only the helper agent's skills with a deliberately-shuffled
+    // response. If the page renders insertion order, the indexOf assertions
+    // below will fail.
+    registerEndpoint('/api/agents/2/skills', () => [
+      { name: 'whatsapp-wacli-mac', enabled: true, isGlobal: true, tools: [] },
+      { name: 'restaurant-recommender', enabled: true, isGlobal: true, tools: [] },
+      { name: 'daily-briefing', enabled: true, isGlobal: true, tools: [] },
+      { name: 'jclaw-api', enabled: true, isGlobal: true, tools: [] },
+      { name: 'skill-creator', enabled: true, isGlobal: true, tools: [] },
+    ])
+
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+
+    // Open the helper agent's detail panel. The card is keyboard-interactive
+    // via @keydown.enter, so a synthetic Enter on the matching role="button"
+    // is the most robust trigger across icon-only / text-only layouts.
+    const targets = component.findAll('[role="button"], button')
+    const helperCard = targets.find(t => t.text().includes('helper'))
+    expect(helperCard, 'helper agent card should be reachable').toBeTruthy()
+    await helperCard!.trigger('click')
+    await flushPromises()
+
+    const text = component.text()
+    const idxDaily = text.indexOf('daily-briefing')
+    const idxJclaw = text.indexOf('jclaw-api')
+    const idxRestaurant = text.indexOf('restaurant-recommender')
+    const idxSkillCreator = text.indexOf('skill-creator')
+    const idxWhatsApp = text.indexOf('whatsapp-wacli-mac')
+
+    expect(idxDaily).toBeGreaterThanOrEqual(0)
+    expect(idxJclaw).toBeGreaterThan(idxDaily)
+    expect(idxRestaurant).toBeGreaterThan(idxJclaw)
+    expect(idxSkillCreator).toBeGreaterThan(idxRestaurant)
+    expect(idxWhatsApp).toBeGreaterThan(idxSkillCreator)
+  })
+})
+
 describe('Agents page — empty state', () => {
   it('renders the page shell when no agents exist', async () => {
     registerEndpoint('/api/agents', () => [])
