@@ -1008,12 +1008,137 @@ onMounted(() => {
   focusInput()
 })
 
+/**
+ * JCLAW-270 async-spawn announce poller. After the parent's streaming turn
+ * ends, the {@code subagent_announce} Message that closes an async spawn can
+ * arrive seconds (or minutes) later — the SSE stream is already closed by
+ * then, so the chat view has no reactive path to learn about it. Without a
+ * refresh the announce sits in the DB and the user has to manually reload.
+ *
+ * Mirror {@code /subagents}'s "auto-refresh while RUNNING" pattern: while
+ * the open conversation has at least one tool result reporting
+ * {@code status:RUNNING} for a {@code run_id} that no {@code subagent_announce}
+ * row has closed yet, poll {@code /api/conversations/{id}/messages} every
+ * {@link ANNOUNCE_POLL_INTERVAL_MS}. Merge any newer rows by server id —
+ * never clobber in-flight optimistic placeholders. Stops as soon as the
+ * announce arrives or the page unmounts.
+ *
+ * Deliberately silent during streaming — the SSE path already keeps the
+ * messages list reactive, so polling on top of it would race and risk
+ * stomping the in-flight assistant bubble. The check runs every 5s
+ * regardless, so within one cadence of stream end the loop kicks in.
+ */
+const ANNOUNCE_POLL_INTERVAL_MS = 5000
+let announcePollTimer: ReturnType<typeof setInterval> | undefined
+
+/**
+ * Returns the {@code run_id} string carried in a tool message's JSON content
+ * when the result reported {@code status:RUNNING}. Returns null for
+ * non-pending tool results, non-tool rows, or malformed JSON — every "not
+ * an async-pending row" branch falls through harmlessly.
+ */
+function pendingAsyncRunId(m: Message): string | null {
+  if (m.role !== 'tool' || !m.content) return null
+  // Cheap pre-check: skip the parse on tool results that obviously aren't
+  // async-spawn payloads. Avoids JSON.parse on every other tool result body
+  // (web_search responses, file reads, etc.) on every poll tick.
+  if (!m.content.includes('"status"') || !m.content.includes('RUNNING')) return null
+  try {
+    const parsed = JSON.parse(m.content) as { run_id?: unknown, status?: unknown }
+    if (parsed?.status !== 'RUNNING') return null
+    const runId = parsed.run_id
+    return typeof runId === 'string' ? runId : (typeof runId === 'number' ? String(runId) : null)
+  }
+  catch {
+    return null
+  }
+}
+
+/**
+ * True when the open conversation has at least one async-spawn tool result
+ * whose announce hasn't landed. Drives the poll-tick decision: if false we
+ * skip the network call entirely and let the interval idle until either a
+ * new spawn fires or the page unmounts.
+ */
+function hasPendingAsyncAnnounce(): boolean {
+  const msgs = messages.value
+  if (!msgs.length) return false
+  const announcedRunIds = new Set<string>()
+  for (const m of msgs) {
+    if (m.messageKind !== 'subagent_announce') continue
+    const meta = (m as Message & { metadata?: { runId?: number | string } }).metadata
+    const rid = meta?.runId
+    if (rid != null) announcedRunIds.add(String(rid))
+  }
+  for (const m of msgs) {
+    const pending = pendingAsyncRunId(m)
+    if (pending && !announcedRunIds.has(pending)) return true
+  }
+  return false
+}
+
+/**
+ * Refetch the open conversation's messages and append any rows whose server
+ * id isn't already present locally. Preserves client-only state on existing
+ * rows (toolCallsCollapsed, _key on optimistic placeholders, etc.) by
+ * never mutating or replacing them.
+ */
+async function pollForAnnounce() {
+  const convoId = selectedConvoId.value
+  if (!convoId) return
+  let fresh: Message[]
+  try {
+    fresh = await $fetch<Message[]>(`/api/conversations/${convoId}/messages`) ?? []
+  }
+  catch (e) {
+    console.error('Failed to poll for announce:', e)
+    return
+  }
+  if (!fresh.length) return
+  const knownIds = new Set<number>()
+  for (const m of messages.value) {
+    if (typeof m.id === 'number') knownIds.add(m.id)
+  }
+  const additions = fresh.filter(m => typeof m.id === 'number' && !knownIds.has(m.id))
+  if (!additions.length) return
+  // Hydrate tool-role rows into the preceding assistant message's toolCalls
+  // array on the additions before pushing (mirrors loadConversation). Pass
+  // the full fresh list so hydrateToolCalls can match tool rows against
+  // their owning assistant turn, then drop everything but additions.
+  hydrateToolCalls(fresh as unknown as Array<Record<string, unknown>>)
+  for (const m of additions) {
+    if (!m.toolCalls?.length) continue
+    (m as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed = true
+    for (let i = 0; i < m.toolCalls.length; i++) {
+      m.toolCalls[i]!._expanded = i === m.toolCalls.length - 1
+    }
+  }
+  messages.value = [...messages.value, ...additions]
+  initCollapsedState(messages.value)
+  initSubagentCollapsedState(messages.value)
+  triggerRef(messages)
+}
+
+function announcePollTick() {
+  // Don't fight the streaming path — SSE already keeps the messages list
+  // reactive during the parent's own turn. Resume on the next tick after
+  // streaming ends.
+  if (streaming.value) return
+  if (!hasPendingAsyncAnnounce()) return
+  void pollForAnnounce()
+}
+
+onMounted(() => {
+  announcePollTimer = setInterval(announcePollTick, ANNOUNCE_POLL_INTERVAL_MS)
+})
+
 onUnmounted(() => {
   abortController.value?.abort()
   if (scrollRaf) cancelAnimationFrame(scrollRaf)
   if (reasoningScrollRaf) cancelAnimationFrame(reasoningScrollRaf)
   if (streamRenderTimer != null) clearTimeout(streamRenderTimer)
   if (streamReasoningTimer != null) clearTimeout(streamReasoningTimer)
+  if (announcePollTimer != null) clearInterval(announcePollTimer)
 })
 
 function stopStreaming() {
@@ -1987,7 +2112,7 @@ async function uploadAttachments(agentId: number): Promise<UploadedAttachment[]>
 // mountSuspended wait before calling the exposed method, so the async
 // gap doesn't manifest in practice.
 // eslint-disable-next-line vue/no-expose-after-await
-defineExpose({ addAttachments, attachedFiles, attachError, loadConversation, messages })
+defineExpose({ addAttachments, attachedFiles, attachError, loadConversation, messages, hasPendingAsyncAnnounce, pollForAnnounce })
 
 function exportConversation() {
   if (!displayMessages.value.length) return

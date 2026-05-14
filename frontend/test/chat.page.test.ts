@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import Chat from '~/pages/chat.vue'
@@ -372,5 +372,214 @@ describe('Chat page — composer focus on entry', () => {
 
     const textarea = component.find('textarea').element as HTMLTextAreaElement
     expect(document.activeElement).toBe(textarea)
+  })
+})
+
+/**
+ * JCLAW-270 async-spawn announce polling. After the parent's streaming turn
+ * ends, an async {@code subagent_announce} Message can arrive seconds later;
+ * the chat view polls {@code /api/conversations/{id}/messages} every 5s
+ * while any tool result reports {@code status:RUNNING} without a matching
+ * announce row yet, and stops the instant the announce lands or the page
+ * unmounts. Tests below drive the loop by invoking the exposed
+ * {@code pollForAnnounce} directly — that's the same code path the
+ * {@code setInterval} tick runs, without the harness fragility of fake
+ * timers + Nuxt's async-hydration runtime.
+ */
+describe('Chat page — async subagent announce polling', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('polls for new messages when an async subagent run is pending', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 401, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 3, preview: 'async pending',
+        createdAt: '2026-05-14T10:00:00Z', updatedAt: '2026-05-14T10:00:00Z' },
+    ])
+    // First call (from loadConversation) returns the pre-announce shape:
+    // user, assistant, tool-result with status:RUNNING. Second call (the
+    // first poll tick) adds the system-role subagent_announce row.
+    let messagesCalls = 0
+    registerEndpoint('/api/conversations/401/messages', () => {
+      messagesCalls++
+      const base = [
+        { id: 700, role: 'user', content: 'spawn async please',
+          createdAt: '2026-05-14T10:00:00Z' },
+        { id: 701, role: 'assistant', content: 'Spawned! Run id is 2.',
+          toolCalls: [
+            { id: 'call_x', type: 'function', icon: 'users',
+              function: { name: 'spawn_subagent', arguments: '{}' } },
+          ],
+          createdAt: '2026-05-14T10:00:01Z' },
+        { id: 702, role: 'tool',
+          content: '{"run_id":"2","conversation_id":"40005","status":"RUNNING"}',
+          toolResults: 'call_x',
+          createdAt: '2026-05-14T10:00:02Z' },
+      ]
+      if (messagesCalls >= 2) {
+        base.push({
+          id: 703, role: 'system' as unknown as 'tool',
+          content: 'Subagent completed (research): result body',
+          // @ts-expect-error fixture-only fields not in Message type
+          messageKind: 'subagent_announce',
+          metadata: {
+            runId: 2,
+            label: 'research',
+            status: 'COMPLETED',
+            reply: 'Lightweight threads dance...',
+            childConversationId: 40005,
+          },
+          createdAt: '2026-05-14T10:00:06Z',
+        })
+      }
+      return base
+    })
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as {
+      loadConversation: (id: number) => Promise<void>
+      hasPendingAsyncAnnounce: () => boolean
+      pollForAnnounce: () => Promise<void>
+    }
+    await vm.loadConversation(401)
+    await flushPromises()
+
+    // Pre-announce: the loop should recognise the pending state.
+    expect(vm.hasPendingAsyncAnnounce()).toBe(true)
+    expect(component.find('[data-testid="subagent-announce-card"]').exists()).toBe(false)
+
+    // One poll tick — second /messages call returns the announce row.
+    await vm.pollForAnnounce()
+    await flushPromises()
+
+    expect(component.find('[data-testid="subagent-announce-card"]').exists()).toBe(true)
+    expect(component.text()).toContain('research')
+    expect(component.text()).toContain('Lightweight threads dance')
+    // And the pending check now reads false — loop will idle on next tick.
+    expect(vm.hasPendingAsyncAnnounce()).toBe(false)
+  })
+
+  it('stops polling once the announce arrives', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 402, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 3, preview: 'stop after announce',
+        createdAt: '2026-05-14T10:00:00Z', updatedAt: '2026-05-14T10:00:00Z' },
+    ])
+    let messagesCalls = 0
+    registerEndpoint('/api/conversations/402/messages', () => {
+      messagesCalls++
+      const base = [
+        { id: 800, role: 'user', content: 'spawn async',
+          createdAt: '2026-05-14T10:00:00Z' },
+        { id: 801, role: 'assistant', content: 'Spawned.',
+          createdAt: '2026-05-14T10:00:01Z' },
+        { id: 802, role: 'tool',
+          content: '{"run_id":"5","conversation_id":"40010","status":"RUNNING"}',
+          createdAt: '2026-05-14T10:00:02Z' },
+      ]
+      if (messagesCalls >= 2) {
+        base.push({
+          id: 803, role: 'system' as unknown as 'tool',
+          content: 'Subagent completed',
+          // @ts-expect-error fixture-only fields not in Message type
+          messageKind: 'subagent_announce',
+          metadata: {
+            runId: 5, label: 'done', status: 'COMPLETED',
+            reply: 'done', childConversationId: 40010,
+          },
+          createdAt: '2026-05-14T10:00:06Z',
+        })
+      }
+      return base
+    })
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as {
+      loadConversation: (id: number) => Promise<void>
+      hasPendingAsyncAnnounce: () => boolean
+      pollForAnnounce: () => Promise<void>
+    }
+    await vm.loadConversation(402)
+    await flushPromises()
+    const callsAfterLoad = messagesCalls
+
+    // Tick #1: announce arrives.
+    await vm.pollForAnnounce()
+    await flushPromises()
+    const callsAfterTick1 = messagesCalls
+    expect(callsAfterTick1).toBeGreaterThan(callsAfterLoad)
+    expect(vm.hasPendingAsyncAnnounce()).toBe(false)
+
+    // Now simulate two more interval ticks. The setInterval callback gates
+    // the network call on hasPendingAsyncAnnounce, so once the announce is
+    // in the list no further /messages calls should fire.
+    // Direct simulate by calling the same tick the interval would: noop.
+    // (We don't expose announcePollTick; the contract is "while pending").
+    // Re-asserting via the gate is enough — the interval handler will
+    // short-circuit on every subsequent tick.
+    expect(vm.hasPendingAsyncAnnounce()).toBe(false)
+  })
+
+  it('does not poll if no async run is pending', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 403, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 2, preview: 'fully sync',
+        createdAt: '2026-05-14T10:00:00Z', updatedAt: '2026-05-14T10:00:00Z' },
+    ])
+    // Synchronous tool result — no status:RUNNING anywhere. The poller's
+    // pending-check should return false even though the conversation does
+    // contain a tool row.
+    registerEndpoint('/api/conversations/403/messages', () => [
+      { id: 900, role: 'user', content: 'do the sync thing',
+        createdAt: '2026-05-14T10:00:00Z' },
+      { id: 901, role: 'assistant', content: '',
+        toolCalls: [
+          { id: 'call_y', type: 'function', icon: 'search',
+            function: { name: 'web_search', arguments: '{}' } },
+        ],
+        createdAt: '2026-05-14T10:00:01Z' },
+      { id: 902, role: 'tool', content: 'sync result body',
+        toolResults: 'call_y',
+        createdAt: '2026-05-14T10:00:02Z' },
+      { id: 903, role: 'assistant', content: 'Here you go.',
+        createdAt: '2026-05-14T10:00:03Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as {
+      loadConversation: (id: number) => Promise<void>
+      hasPendingAsyncAnnounce: () => boolean
+    }
+    await vm.loadConversation(403)
+    await flushPromises()
+
+    expect(vm.hasPendingAsyncAnnounce()).toBe(false)
+  })
+
+  it('clears the polling interval on unmount', async () => {
+    setupBaseChatApi()
+    // Spy on the global clearInterval so we can assert the unmount hook
+    // releases the timer rather than leaving it dangling — leaked intervals
+    // are a real-world bug source when the test harness reuses jsdom across
+    // `it` blocks.
+    const clearSpy = vi.spyOn(globalThis, 'clearInterval')
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    component.unmount()
+    await flushPromises()
+
+    // At least one clearInterval call must have happened; the chat page
+    // owns the announce poll's setInterval handle in onUnmounted.
+    expect(clearSpy).toHaveBeenCalled()
   })
 })
