@@ -16,9 +16,6 @@ import services.Tx;
 import slash.Commands;
 
 import java.time.Instant;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * JCLAW-271: per-subcommand coverage for {@code /subagent list/info/log/kill}.
@@ -217,36 +214,25 @@ class SubagentSlashCommandsTest extends UnitTest {
     // ── /subagent kill ────────────────────────────────────────────────
 
     @Test
-    void killTransitionsRunningRowToKilledAndEmitsEvent() throws Exception {
+    void killTransitionsRunningRowToKilledAndEmitsEvent() {
         var run = seedRun(SubagentRun.Status.RUNNING);
 
-        // Synthesize an in-flight VT so the kill primitive has a real
-        // thread to interrupt. The VT body registers itself with the
-        // registry via registerWithThread (mirroring the production
-        // spawn-tool path) and parks in a loop until interrupted.
-        var cancelLatch = new CountDownLatch(1);
-        var cancelled = new AtomicBoolean(false);
-        var stopFlag = new AtomicBoolean(false);
+        // JCLAW-291: register a Future against the run id (as the production
+        // spawn path does at start). The kill primitive flips the
+        // cooperative-cancel flag and cancels the Future; it must NOT
+        // interrupt any thread. We assert the flag is set + the Future is
+        // cancelled, but make no claim about thread state — the H2
+        // FileChannel-close bug we're fixing was caused by interrupting the
+        // carrier thread mid-blocking-I/O, so the production code MUST NOT
+        // do that and this test MUST NOT assert it.
         var fut = new java.util.concurrent.CompletableFuture<Void>();
-        var started = new CountDownLatch(1);
-        Thread.ofVirtual().name("test-fake-runner-" + run.id).start(() -> {
-            SubagentRegistry.registerWithThread(run.id, fut, Thread.currentThread());
-            started.countDown();
-            try {
-                while (!stopFlag.get() && !Thread.currentThread().isInterrupted()) {
-                    Thread.sleep(50);
-                }
-            } catch (InterruptedException _) {
-                cancelled.set(true);
-                cancelLatch.countDown();
-                Thread.currentThread().interrupt();
-            }
-            fut.complete(null);
-        });
-        // Wait for the VT to register before driving the kill — otherwise
-        // a near-instant kill would find an empty slot and skip the
-        // thread interrupt.
-        started.await(2, TimeUnit.SECONDS);
+        SubagentRegistry.register(run.id, fut);
+
+        // Sanity: registry observes the entry as active and not yet cancelled.
+        assertTrue(SubagentRegistry.isActive(run.id),
+                "register must place the entry in the active map");
+        assertFalse(SubagentRegistry.isCancelled(run.id),
+                "isCancelled must be false before kill");
 
         var result = Commands.handle("/subagent kill " + run.id,
                 parentAgent, "web", "u", parentConv).orElseThrow();
@@ -271,13 +257,15 @@ class SubagentSlashCommandsTest extends UnitTest {
         assertEquals(1, killEvents.size(),
                 "exactly one SUBAGENT_KILL event after kill");
 
-        // Fake future was cancelled. The VT body sets `cancelled` when its
-        // sleep is interrupted; wait briefly for the cancel signal to land.
-        var observed = cancelLatch.await(2, TimeUnit.SECONDS);
-        assertTrue(observed && cancelled.get(),
-                "registered Future must observe the interrupt within 2s");
+        // Future was cancelled (so awaiting callers unblock with
+        // CancellationException instead of waiting to the full timeout).
+        assertTrue(fut.isCancelled(),
+                "registered Future must be cancelled after kill");
 
-        stopFlag.set(true);
+        // JCLAW-291: entry stays in the active map after kill — the running
+        // VT's finally block (unregister) is the canonical cleanup path.
+        assertTrue(SubagentRegistry.isCancelled(run.id),
+                "isCancelled must return true after kill, so AgentRunner's checkpoint observes it");
     }
 
     @Test

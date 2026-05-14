@@ -7,13 +7,15 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * JCLAW-271: in-memory mapping from {@link SubagentRun} id to the
  * {@link Future} carrying the child run's virtual thread, so the operator-
  * facing {@code /subagent kill} slash command (and the SubagentRuns admin
- * page's kill button) can interrupt the in-flight VT and flip the audit row
- * to {@link SubagentRun.Status#KILLED}.
+ * page's kill button) can flip a cooperative-cancellation flag the running
+ * {@link agents.AgentRunner} checks at safe points, then transition the
+ * audit row to {@link SubagentRun.Status#KILLED}.
  *
  * <p>Both spawn paths in {@link tools.SpawnSubagentTool} register their
  * Future here at start and unregister when the run terminates (success,
@@ -22,42 +24,53 @@ import java.util.concurrent.Future;
  * by {@link jobs.SubagentOrphanRecoveryJob} and the cancelled VTs are gone
  * anyway. No persistence required.
  *
+ * <p><b>Cooperative cancellation (JCLAW-291).</b> {@link #kill(Long, String)}
+ * does NOT call {@link Thread#interrupt()} on the running VT. Doing so
+ * brought down the entire JVM in production: the JDK's
+ * {@code java.nio.channels.FileChannel} contract treats a thread interrupt
+ * during a blocked I/O as "close the channel," and H2's MVStore was mid-
+ * write on that channel — every subsequent JPA call then threw
+ * {@code The database has been closed [90098-232]} until restart. Instead,
+ * we flip a {@code volatile} flag on the entry and let
+ * {@link agents.AgentRunner}'s checkpoints throw
+ * {@link agents.RunCancelledException} at the next safe point (between LLM
+ * rounds, between tool calls, at the top of a queue drain). The cost is
+ * losing the "instant break a hung HTTP read" property — the
+ * {@code runTimeoutSeconds} budget remains the ceiling for that pathological
+ * case.
+ *
  * <p>{@code kill} is idempotent: calling it on an id that's already terminal
  * (or never registered) returns a {@link KillResult} carrying a clear
  * "nothing to do" reason rather than throwing.
+ *
+ * <p><b>Test gap (intentional).</b> The original H2-corruption bug cannot be
+ * reproduced under {@code play autotest}: the test profile uses H2's in-memory
+ * mode, which has no FileChannel, so {@code Thread.interrupt()} on the
+ * carrier thread is harmless there. The flag-based design is what we ship;
+ * future maintainers MUST NOT reintroduce {@code Thread.interrupt()} on the
+ * carrier thread — it works fine in tests and detonates in production.
  */
 public final class SubagentRegistry {
 
     private SubagentRegistry() {}
 
-    /** Per-run handle paired with {@link #ACTIVE}. We track both the
-     *  {@link Future} (so awaiting callers see CANCELLED on kill) and the
-     *  carrier {@link Thread} (so {@link Thread#interrupt} actually
-     *  propagates into the running task — JDK's CompletableFuture.cancel
-     *  doesn't, by design). The thread is captured lazily on registration
-     *  via {@link #registerWithThread} from inside the VT body. */
-    private record Entry(Future<?> future, Thread thread) {}
+    /** Per-run handle. {@link #cancelRequested} is the cooperative
+     *  cancellation flag {@link agents.AgentRunner}'s checkpoints poll;
+     *  {@link #future} is kept around so awaiting callers (the spawn-tool's
+     *  {@code future.get(timeout)}) see CANCELLED on kill rather than blocking
+     *  to the full timeout. We deliberately do NOT capture the carrier
+     *  Thread — see the class-level comment for why interrupts are forbidden. */
+    private record Entry(Future<?> future, AtomicBoolean cancelRequested) {}
 
     private static final Map<Long, Entry> ACTIVE = new ConcurrentHashMap<>();
 
     /** Register the VT-bearing Future under {@code runId}. Called by the
-     *  spawn path right after dispatching the VT. Thread is captured lazily
-     *  via {@link #registerWithThread} from inside the VT body. */
+     *  spawn path right after dispatching the VT. The cancellation flag is
+     *  allocated here so {@link #isCancelled} works the instant the entry
+     *  is in the map, even before the VT body has done any work. */
     public static void register(Long runId, Future<?> future) {
         if (runId == null || future == null) return;
-        ACTIVE.put(runId, new Entry(future, null));
-    }
-
-    /** Like {@link #register} but also stores a reference to the carrier
-     *  thread. The spawn path's outer await thread can't capture the
-     *  inner VT's Thread object directly — only the inner VT body knows
-     *  about itself. Called from inside the VT body before any blocking
-     *  work begins; subsequent kills observe both the Future and the
-     *  Thread, and call interrupt() on the thread to break out of
-     *  socket reads / LLM HTTP calls in the runner. */
-    public static void registerWithThread(Long runId, Future<?> future, Thread thread) {
-        if (runId == null || future == null) return;
-        ACTIVE.put(runId, new Entry(future, thread));
+        ACTIVE.put(runId, new Entry(future, new AtomicBoolean(false)));
     }
 
     /** Unregister the entry for {@code runId}. Called from a {@code finally}
@@ -80,18 +93,37 @@ public final class SubagentRegistry {
         return java.util.Set.copyOf(ACTIVE.keySet());
     }
 
+    /**
+     * JCLAW-291: cooperative-cancellation check used by
+     * {@link agents.AgentRunner}'s checkpoints. Returns {@code true} iff a
+     * registry entry exists for {@code runId} and its cancel flag has been
+     * flipped by {@link #kill}. Cheap — single hash lookup, single volatile
+     * read.
+     */
+    public static boolean isCancelled(Long runId) {
+        if (runId == null) return false;
+        var entry = ACTIVE.get(runId);
+        return entry != null && entry.cancelRequested().get();
+    }
+
     /** Outcome of a {@link #kill(Long, String)} call. */
     public record KillResult(boolean killed, SubagentRun.Status finalStatus, String message) {}
 
     /**
-     * Cancel the registered Future (if any) for {@code runId}, transition the
-     * audit row to {@link SubagentRun.Status#KILLED} with the given
-     * {@code reason} as the outcome, and emit {@link EventLogger#recordSubagentKill}.
+     * Flip the cooperative-cancellation flag for {@code runId}, cancel the
+     * registered Future (so awaiting callers unblock with a CancellationException),
+     * transition the audit row to {@link SubagentRun.Status#KILLED} with the
+     * given {@code reason} as the outcome, and emit
+     * {@link EventLogger#recordSubagentKill}.
      *
      * <p>Idempotent: if the run is already terminal (any status other than
      * RUNNING), this is a no-op aside from returning a {@code KillResult}
      * carrying the existing status. If the row doesn't exist at all, returns
      * a {@code KillResult} with {@code killed=false} and a not-found message.
+     *
+     * <p>JCLAW-291: does NOT call {@link Thread#interrupt()}. See the class
+     * comment for why — interrupting the carrier thread closed H2's FileChannel
+     * mid-write and brought down the JVM.
      *
      * @param runId the SubagentRun primary key
      * @param reason short human description recorded as the run's outcome and
@@ -110,28 +142,41 @@ public final class SubagentRegistry {
         // dodge race with a near-simultaneous terminal write from the spawn
         // VT itself.
         if (existing.status != SubagentRun.Status.RUNNING) {
-            // Still attempt to cancel + clean up the registry slot in case
-            // unregister hasn't fired yet, but don't touch the DB row.
-            var stale = ACTIVE.remove(runId);
+            // Idempotent terminal case: still flip the flag + cancel the
+            // Future in case unregister hasn't fired yet, but DO NOT remove
+            // the entry — the running VT's own finally block calls
+            // unregister(), which is the canonical cleanup path. Removing
+            // here would race the AgentRunner checkpoint into reading
+            // isCancelled()=false and continuing the round.
+            var stale = ACTIVE.get(runId);
             if (stale != null) {
-                stale.future().cancel(true);
-                if (stale.thread() != null) stale.thread().interrupt();
+                stale.cancelRequested().set(true);
+                // mayInterruptIfRunning=false: the cooperative flag is the
+                // signal; we never want the JDK to interrupt the carrier
+                // thread (see class comment for the H2 corruption story).
+                stale.future().cancel(false);
             }
             return new KillResult(false, existing.status,
                     "Run " + runId + " is already " + existing.status.name().toLowerCase() + ".");
         }
 
-        // Cancel the Future + interrupt the carrier thread. CompletableFuture#cancel
-        // alone doesn't propagate to the running task (the boolean is a no-op
-        // per the JDK javadoc), so we hand-interrupt the captured Thread to
-        // break out of socket reads + tool-execution loops inside AgentRunner.
-        // The VT body's post-AgentRunner Tx will still attempt its terminal
-        // write — but our KILLED stamp below races, and spawn-path commits
-        // check `status != KILLED` before overwriting.
-        var entry = ACTIVE.remove(runId);
+        // JCLAW-291: flip the cooperative-cancellation flag BEFORE the DB
+        // write so AgentRunner's next checkpoint observes
+        // isCancelled(runId)=true and throws RunCancelledException. The
+        // spawn-tool's catch then leaves our KILLED stamp untouched. We
+        // also cancel the Future so any awaiting caller (sync spawn's
+        // future.get(timeout)) unblocks with CancellationException rather
+        // than waiting to the full timeout.
+        //
+        // We deliberately DO NOT remove the entry from the active map here.
+        // The VT body's finally block (unregister()) is the canonical
+        // cleanup path; removing here would let the runner's checkpoint
+        // miss the flag (it would see no entry → isCancelled returns false
+        // → the round continues to LLM call).
+        var entry = ACTIVE.get(runId);
         if (entry != null) {
-            entry.future().cancel(true);
-            if (entry.thread() != null) entry.thread().interrupt();
+            entry.cancelRequested().set(true);
+            entry.future().cancel(false);
         }
 
         var updatedStatus = Tx.run(() -> {

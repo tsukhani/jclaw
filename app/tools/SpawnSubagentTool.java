@@ -450,15 +450,15 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         // marker through, leaving Message.subagentRunId null on child rows
         // (they're in their own Conversation row anyway).
         final Long runIdForMarker = inlineMode ? runId : null;
-        // JCLAW-271: capture the carrier thread so /subagent kill can
-        // hand-interrupt it (CompletableFuture.cancel doesn't propagate
-        // interrupts on its own — the boolean is a no-op per the JDK
-        // javadoc). Lambda stashes its own Thread in the registry as
-        // its first act so a kill firing the instant after register()
-        // observes both halves of the handle.
+        // JCLAW-291: cooperative-cancel registration. The /subagent kill
+        // path flips a flag on this registry entry; AgentRunner's
+        // checkpoints poll it at safe boundaries and throw
+        // RunCancelledException. We deliberately do NOT capture the
+        // carrier Thread — see services.SubagentRegistry's class comment
+        // for the H2 FileChannel post-mortem.
         var future = new java.util.concurrent.CompletableFuture<AgentRunner.RunResult>();
+        services.SubagentRegistry.register(runId, future);
         Thread.ofVirtual().name("subagent-" + runId).start(() -> {
-            services.SubagentRegistry.registerWithThread(runId, future, Thread.currentThread());
             try {
                 var childAgent = Tx.run(() -> (Agent) Agent.findById(childAgentId));
                 var childConv = Tx.run(() -> (Conversation) Conversation.findById(childConvId));
@@ -489,6 +489,11 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         SubagentRun.Status terminalStatus;
         String terminalOutcome;
         String errorReason = null;
+        // JCLAW-291: set when the runner bailed via RunCancelledException.
+        // Causes the terminal-status write below to be skipped entirely —
+        // the kill primitive has already stamped KILLED with the operator's
+        // reason, and overwriting that would lose the signal.
+        boolean killedByOperator = false;
 
         try {
             try {
@@ -497,7 +502,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                 terminalStatus = SubagentRun.Status.COMPLETED;
                 terminalOutcome = reply;
             } catch (TimeoutException te) {
-                future.cancel(true); // best-effort interrupt; AgentRunner has no cancel hook yet
+                future.cancel(false);
                 terminalStatus = SubagentRun.Status.TIMEOUT;
                 errorReason = "Subagent run exceeded %d-second budget".formatted(timeoutSeconds);
                 terminalOutcome = errorReason;
@@ -508,33 +513,57 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                 errorReason = "Parent thread interrupted while awaiting subagent";
                 terminalOutcome = errorReason;
                 reply = "";
+            } catch (java.util.concurrent.CancellationException ce) {
+                // JCLAW-291: kill primitive cancelled our Future. The
+                // registry already stamped KILLED; bail without overwriting.
+                killedByOperator = true;
+                terminalStatus = SubagentRun.Status.KILLED;
+                terminalOutcome = "Killed by operator";
+                reply = "";
             } catch (ExecutionException ee) {
                 var cause = ee.getCause() != null ? ee.getCause() : ee;
-                terminalStatus = SubagentRun.Status.FAILED;
-                errorReason = cause.getMessage() != null ? cause.getMessage() : cause.toString();
-                terminalOutcome = errorReason;
-                reply = "";
+                if (cause instanceof agents.RunCancelledException) {
+                    // JCLAW-291: runner observed the cancel flag at a
+                    // checkpoint and threw. Registry already KILLED; do
+                    // not touch the audit row.
+                    killedByOperator = true;
+                    terminalStatus = SubagentRun.Status.KILLED;
+                    terminalOutcome = "Killed by operator";
+                    reply = "";
+                } else {
+                    terminalStatus = SubagentRun.Status.FAILED;
+                    errorReason = cause.getMessage() != null ? cause.getMessage() : cause.toString();
+                    terminalOutcome = errorReason;
+                    reply = "";
+                }
             }
         } finally {
             services.SubagentRegistry.unregister(runId);
         }
 
         // Step 5: write the terminal SubagentRun update in its own short Tx.
-        // JCLAW-271: skip the terminal write when the kill primitive already
-        // stamped KILLED — its outcome ("Killed by operator") is the
-        // operator-visible truth, and overwriting it with a TIMEOUT/FAILED
-        // reason from this thread's await result would lose that signal.
-        final var finalStatus = terminalStatus;
-        final var finalOutcome = terminalOutcome;
-        Tx.run(() -> {
-            var fresh = (SubagentRun) SubagentRun.findById(runId);
-            if (fresh != null && fresh.status != SubagentRun.Status.KILLED) {
-                fresh.status = finalStatus;
-                fresh.endedAt = Instant.now();
-                fresh.outcome = finalOutcome;
-                fresh.save();
-            }
-        });
+        // JCLAW-271 / JCLAW-291: skip the terminal write when the kill
+        // primitive already stamped KILLED — its outcome ("Killed by
+        // operator") is the operator-visible truth, and overwriting it
+        // with a TIMEOUT/FAILED reason from this thread's await result
+        // would lose that signal. We check both via the local
+        // killedByOperator flag (set when our catch saw the cancel path)
+        // AND via the row's status in DB (belt-and-suspenders against a
+        // race where the kill flipped the row but our future.get returned
+        // a non-cancel exception path first).
+        if (!killedByOperator) {
+            final var finalStatus = terminalStatus;
+            final var finalOutcome = terminalOutcome;
+            Tx.run(() -> {
+                var fresh = (SubagentRun) SubagentRun.findById(runId);
+                if (fresh != null && fresh.status != SubagentRun.Status.KILLED) {
+                    fresh.status = finalStatus;
+                    fresh.endedAt = Instant.now();
+                    fresh.outcome = finalOutcome;
+                    fresh.save();
+                }
+            });
+        }
 
         // JCLAW-267: inline-mode boundary-end marker. Written into the parent
         // Conversation AFTER the child run terminates so the chat UI's
@@ -544,7 +573,13 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         // SubagentRun. Stamped with the same SubagentRun id as the start
         // marker and the runner-produced rows in between so they all fold
         // together.
-        if (inlineMode) {
+        //
+        // JCLAW-291: when killed by operator, the kill confirmation in the
+        // operator's slash-command response is the user-facing signal; we
+        // skip the inline end marker (and the terminal lifecycle event
+        // below) so a kill doesn't double-render as both
+        // "Killed by operator" and a synthesized "Subagent killed" line.
+        if (inlineMode && !killedByOperator) {
             final var statusForMarker = terminalStatus;
             final var replyForMarker = reply;
             Tx.run(() -> {
@@ -560,15 +595,18 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
             });
         }
 
-        // Step 6: emit the terminal lifecycle event.
-        var childName = lookupAgentName(childAgentId);
-        switch (terminalStatus) {
-            case COMPLETED -> EventLogger.recordSubagentComplete(
-                    parentAgent.name, childName, runIdStr, mode, context, "ok");
-            case TIMEOUT -> EventLogger.recordSubagentTimeout(parentAgent.name, runIdStr);
-            default -> EventLogger.recordSubagentError(
-                    parentAgent.name, childName, runIdStr,
-                    mode, context, errorReason);
+        // Step 6: emit the terminal lifecycle event. JCLAW-291: kill path
+        // already emitted SUBAGENT_KILL — don't duplicate as SUBAGENT_ERROR.
+        if (!killedByOperator) {
+            var childName = lookupAgentName(childAgentId);
+            switch (terminalStatus) {
+                case COMPLETED -> EventLogger.recordSubagentComplete(
+                        parentAgent.name, childName, runIdStr, mode, context, "ok");
+                case TIMEOUT -> EventLogger.recordSubagentTimeout(parentAgent.name, runIdStr);
+                default -> EventLogger.recordSubagentError(
+                        parentAgent.name, childName, runIdStr,
+                        mode, context, errorReason);
+            }
         }
 
         // Tool return — the LLM will see this JSON string.
@@ -933,13 +971,21 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         SubagentRun.Status terminalStatus;
         String reply;
         String errorReason = null;
+        // JCLAW-291: set when /subagent kill flipped the registry flag and
+        // the runner bailed via RunCancelledException (or the Future was
+        // cancelled outright by the kill primitive). Causes us to skip the
+        // audit-row write, the announce post, and the terminal lifecycle
+        // event — the kill primitive's SUBAGENT_KILL + KILLED row stamp
+        // is the operator-visible truth, and the operator initiated the
+        // kill so an announce card would be redundant noise.
+        boolean killedByOperator = false;
 
-        // JCLAW-271: like the sync path, capture the carrier thread inside
-        // the VT body so /subagent kill can hand-interrupt it (the JDK
-        // CompletableFuture.cancel boolean is a no-op for the running task).
+        // JCLAW-291: cooperative-cancel registration. See sync-path comment +
+        // services.SubagentRegistry's class doc for why we don't capture the
+        // carrier thread.
         var future = new CompletableFuture<AgentRunner.RunResult>();
+        services.SubagentRegistry.register(runId, future);
         Thread.ofVirtual().name("subagent-async-runner-" + runId).start(() -> {
-            services.SubagentRegistry.registerWithThread(runId, future, Thread.currentThread());
             try {
                 var childAgent = Tx.run(() -> (Agent) Agent.findById(childAgentId));
                 var childConv = Tx.run(() -> (Conversation) Conversation.findById(childConvId));
@@ -959,7 +1005,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                 reply = result == null ? "" : result.response();
                 terminalStatus = SubagentRun.Status.COMPLETED;
             } catch (TimeoutException te) {
-                future.cancel(true);
+                future.cancel(false);
                 terminalStatus = SubagentRun.Status.TIMEOUT;
                 errorReason = "Subagent run exceeded %d-second budget".formatted(timeoutSeconds);
                 reply = "";
@@ -968,11 +1014,24 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                 terminalStatus = SubagentRun.Status.FAILED;
                 errorReason = "Async subagent VT interrupted";
                 reply = "";
+            } catch (java.util.concurrent.CancellationException ce) {
+                // JCLAW-291: kill primitive cancelled our Future before the
+                // runner reached a checkpoint. Registry already stamped
+                // KILLED; nothing more to do.
+                killedByOperator = true;
+                terminalStatus = SubagentRun.Status.KILLED;
+                reply = "";
             } catch (ExecutionException ee) {
                 var cause = ee.getCause() != null ? ee.getCause() : ee;
-                terminalStatus = SubagentRun.Status.FAILED;
-                errorReason = cause.getMessage() != null ? cause.getMessage() : cause.toString();
-                reply = "";
+                if (cause instanceof agents.RunCancelledException) {
+                    killedByOperator = true;
+                    terminalStatus = SubagentRun.Status.KILLED;
+                    reply = "";
+                } else {
+                    terminalStatus = SubagentRun.Status.FAILED;
+                    errorReason = cause.getMessage() != null ? cause.getMessage() : cause.toString();
+                    reply = "";
+                }
             } catch (Throwable t) {
                 // Top-level guard: this is a background VT — must never let an
                 // unchecked failure escape (it would lose the announce + terminal
@@ -984,6 +1043,15 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
             }
         } finally {
             services.SubagentRegistry.unregister(runId);
+        }
+
+        // JCLAW-291: kill primitive owns the terminal state on this path —
+        // skip every downstream side effect (audit write, announce post,
+        // lifecycle event, yield resume). The operator's slash-command
+        // response is the user-visible kill confirmation.
+        if (killedByOperator) {
+            EventLogger.flush();
+            return;
         }
 
         // Update the SubagentRun audit row (terminal status + outcome).

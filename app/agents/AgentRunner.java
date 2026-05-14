@@ -145,6 +145,41 @@ public class AgentRunner {
     }
 
     /**
+     * JCLAW-291: cooperative-cancellation checkpoint for subagent runs. If
+     * the conversation belongs to a still-RUNNING subagent whose
+     * {@link services.SubagentRegistry} entry has had its cancel flag
+     * flipped (by {@code /subagent kill} or the admin UI), throws
+     * {@link RunCancelledException} so the caller bails cleanly. No-op for
+     * non-subagent conversations (no SubagentRun row points at them).
+     *
+     * <p>Replaces the prior {@code Thread.interrupt()} mechanism. The
+     * checkpoint is intentionally placed at safe boundaries — between LLM
+     * rounds, between tool calls, at the top of queue-drain — never inside
+     * a streaming chunk loop or a tool execution. The cost is losing the
+     * "instant break a hung HTTP read" property; the
+     * {@code runTimeoutSeconds} budget remains the ceiling for that case.
+     * See {@link services.SubagentRegistry} for the H2-corruption post-mortem.
+     */
+    public static void checkSubagentCancel(Conversation conversation) {
+        if (conversation == null || conversation.id == null) return;
+        // Query both the inline-mode (parentConversation FK == this conv) and
+        // session-mode (childConversation FK == this conv) cases. In practice
+        // inline-mode reuses the parent conversation as the child target so
+        // both columns reference the same row; session mode uses a separate
+        // child conv. Either way, the cancel flag is keyed on the SubagentRun
+        // id, and a kill against the matching run should bail the runner.
+        var runId = services.Tx.run(() -> {
+            var run = (models.SubagentRun) models.SubagentRun.find(
+                    "childConversation.id = ?1 AND status = ?2",
+                    conversation.id, models.SubagentRun.Status.RUNNING).first();
+            return run != null ? run.id : null;
+        });
+        if (runId != null && services.SubagentRegistry.isCancelled(runId)) {
+            throw new RunCancelledException(runId);
+        }
+    }
+
+    /**
      * Effective model id for this turn — honors the conversation-scoped
      * override (JCLAW-108 per-conversation, JCLAW-269 per-spawn) when
      * present, otherwise returns the agent's default. Thin wrapper over
@@ -338,6 +373,11 @@ public class AgentRunner {
         // Chat Performance dashboard (channel-partitioned per JCLAW-102).
         var trace = LatencyTrace.forTurn(conversation.channelType, null);
         trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
+
+        // JCLAW-291: cooperative-cancel checkpoint at the conversation-forward
+        // boundary. If a /subagent kill landed between queue acquire and now,
+        // bail before we burn any LLM budget or persist any state.
+        checkSubagentCancel(conversation);
 
         try {
             // Short setup transaction: persist user message, assemble prompt, resolve provider.
@@ -1099,6 +1139,11 @@ public class AgentRunner {
         boolean transcriptAwaitedAlready = !supportsAudioInitially && !audioBearers.isEmpty();
 
         for (int round = 0; round < maxToolRounds(); round++) {
+            // JCLAW-291: cooperative-cancel checkpoint at the top of each
+            // LLM round. Between-rounds is the natural safe point — we
+            // never check inside a streaming chunk handler (too chatty)
+            // or mid-tool-call (would orphan partial side effects).
+            checkSubagentCancel(conversation);
             // Recompute per-round so the clamp tracks the growing history.
             var maxTokens = effectiveMaxTokens(agent, conversation, primary, currentMessages, tools);
             ChatResponse response;
@@ -1177,6 +1222,12 @@ public class AgentRunner {
 
             executeToolsParallel(assistantMsg.toolCalls(), agent, conversationId,
                     currentMessages, null, null, null, null);
+
+            // JCLAW-291: cooperative-cancel checkpoint between tool calls
+            // and the next LLM round. If /subagent kill landed during the
+            // tool-call batch, abort here rather than spending another
+            // round on the now-stale plan.
+            checkSubagentCancel(conversation);
 
             // JCLAW-273: detect a successful yield_to_subagent call and bail
             // out of the tool-call loop without continuing to the next LLM
@@ -1336,6 +1387,12 @@ public class AgentRunner {
         trace.addToolRound((System.nanoTime() - toolRoundStartNs) / 1_000_000L);
 
         if (isCancelled.get()) return cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+
+        // JCLAW-291: cooperative-cancel checkpoint between the tool round
+        // and the LLM continuation. Subagent-driven streaming runs aren't
+        // the common case but the checkpoint is cheap and keeps the two
+        // round-loops symmetric.
+        checkSubagentCancel(conversation);
 
         // JCLAW-273: yield_to_subagent detected in this round — exit the
         // streaming loop without continuing to the next LLM round and
