@@ -90,13 +90,13 @@ public class WebSearchTool implements ToolRegistry.Tool {
     @Override
     public Map<String, Object> parameters() {
         return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "query", Map.of("type", "string", "description", "The search query"),
-                        "numResults", Map.of("type", "integer",
-                                "description", "Number of results to return (default: 5, max: 10)")
+                SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                SchemaKeys.PROPERTIES, Map.of(
+                        "query", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING, SchemaKeys.DESCRIPTION, "The search query"),
+                        "numResults", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
+                                SchemaKeys.DESCRIPTION, "Number of results to return (default: 5, max: 10)")
                 ),
-                "required", List.of("query")
+                SchemaKeys.REQUIRED, List.of("query")
         );
     }
 
@@ -421,7 +421,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
                 return List.of();
             }
             var arr = json.getAsJsonObject("web").getAsJsonArray("results");
-            return parseResultArray(arr, "url", r -> nullableString(r, "description"));
+            return parseResultArray(arr, "url", r -> nullableString(r, SchemaKeys.DESCRIPTION));
         }
     }
 

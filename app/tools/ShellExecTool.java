@@ -118,19 +118,19 @@ public class ShellExecTool implements ToolRegistry.Tool {
     @Override
     public Map<String, Object> parameters() {
         return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "command", Map.of("type", "string",
-                                "description", "Shell command to execute"),
-                        "workdir", Map.of("type", "string",
-                                "description", "Working directory (relative to workspace, or absolute if global paths enabled)"),
-                        "timeout", Map.of("type", "integer",
-                                "description", "Timeout in seconds (default: 30, max: 300)"),
-                        "env", Map.of("type", "object",
-                                "description", "Additional environment variables as key-value pairs",
-                                "additionalProperties", Map.of("type", "string"))
+                SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                SchemaKeys.PROPERTIES, Map.of(
+                        "command", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "Shell command to execute"),
+                        "workdir", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "Working directory (relative to workspace, or absolute if global paths enabled)"),
+                        "timeout", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
+                                SchemaKeys.DESCRIPTION, "Timeout in seconds (default: 30, max: 300)"),
+                        "env", Map.of(SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                                SchemaKeys.DESCRIPTION, "Additional environment variables as key-value pairs",
+                                SchemaKeys.ADDITIONAL_PROPERTIES, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING))
                 ),
-                "required", List.of("command")
+                SchemaKeys.REQUIRED, List.of("command")
         );
     }
 

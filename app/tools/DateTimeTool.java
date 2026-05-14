@@ -72,28 +72,28 @@ public class DateTimeTool implements ToolRegistry.Tool {
     @Override
     public Map<String, Object> parameters() {
         return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "action", Map.of("type", "string",
-                                "enum", List.of("now", "convert", "calculate"),
-                                "description", "The action to perform"),
-                        "timezone", Map.of("type", "string",
-                                "description", "IANA timezone (e.g. 'Asia/Kuala_Lumpur', 'America/New_York'). Defaults to server timezone."),
-                        "timestamp", Map.of("type", "string",
-                                "description", "ISO-8601 timestamp for convert/calculate (e.g. '2026-04-13T09:15:00')"),
-                        "fromTimezone", Map.of("type", "string",
-                                "description", "Source timezone for convert action"),
-                        "toTimezone", Map.of("type", "string",
-                                "description", "Target timezone for convert action"),
-                        "amount", Map.of("type", "integer",
-                                "description", "Amount to add (positive) or subtract (negative) for calculate"),
-                        "unit", Map.of("type", "string",
-                                "enum", List.of("minutes", "hours", "days", "weeks", "months", "years"),
-                                "description", "Unit for the amount in calculate"),
-                        "endTimestamp", Map.of("type", "string",
-                                "description", "Second timestamp for computing the difference between two times")
+                SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                SchemaKeys.PROPERTIES, Map.of(
+                        "action", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.ENUM, List.of("now", "convert", "calculate"),
+                                SchemaKeys.DESCRIPTION, "The action to perform"),
+                        "timezone", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "IANA timezone (e.g. 'Asia/Kuala_Lumpur', 'America/New_York'). Defaults to server timezone."),
+                        "timestamp", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "ISO-8601 timestamp for convert/calculate (e.g. '2026-04-13T09:15:00')"),
+                        "fromTimezone", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "Source timezone for convert action"),
+                        "toTimezone", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "Target timezone for convert action"),
+                        "amount", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
+                                SchemaKeys.DESCRIPTION, "Amount to add (positive) or subtract (negative) for calculate"),
+                        "unit", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.ENUM, List.of("minutes", "hours", "days", "weeks", "months", "years"),
+                                SchemaKeys.DESCRIPTION, "Unit for the amount in calculate"),
+                        "endTimestamp", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "Second timestamp for computing the difference between two times")
                 ),
-                "required", List.of("action")
+                SchemaKeys.REQUIRED, List.of("action")
         );
     }
 

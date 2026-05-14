@@ -82,21 +82,21 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     @Override
     public Map<String, Object> parameters() {
         return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "action", Map.of("type", "string",
-                                "enum", List.of("navigate", "click", "fill", "getText", "screenshot", "evaluate", "close"),
-                                "description", "The browser action to perform"),
-                        "url", Map.of("type", "string",
-                                "description", "URL to navigate to (for navigate action)"),
-                        "selector", Map.of("type", "string",
-                                "description", "CSS selector (for click, fill, getText actions)"),
-                        "value", Map.of("type", "string",
-                                "description", "Value to fill (for fill action)"),
-                        "expression", Map.of("type", "string",
-                                "description", "JavaScript expression (for evaluate action)")
+                SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                SchemaKeys.PROPERTIES, Map.of(
+                        "action", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.ENUM, List.of("navigate", "click", "fill", "getText", "screenshot", "evaluate", "close"),
+                                SchemaKeys.DESCRIPTION, "The browser action to perform"),
+                        "url", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "URL to navigate to (for navigate action)"),
+                        "selector", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "CSS selector (for click, fill, getText actions)"),
+                        "value", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "Value to fill (for fill action)"),
+                        "expression", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "JavaScript expression (for evaluate action)")
                 ),
-                "required", List.of("action")
+                SchemaKeys.REQUIRED, List.of("action")
         );
     }
 

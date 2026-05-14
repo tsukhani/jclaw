@@ -76,14 +76,14 @@ public class WebFetchTool implements ToolRegistry.Tool {
     @Override
     public Map<String, Object> parameters() {
         return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "url", Map.of("type", "string", "description", "The URL to fetch"),
-                        "mode", Map.of("type", "string",
-                                "enum", List.of("text", "html"),
-                                "description", "Extraction mode: 'text' extracts readable content (default), 'html' returns raw HTML")
+                SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                SchemaKeys.PROPERTIES, Map.of(
+                        "url", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING, SchemaKeys.DESCRIPTION, "The URL to fetch"),
+                        "mode", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.ENUM, List.of("text", "html"),
+                                SchemaKeys.DESCRIPTION, "Extraction mode: 'text' extracts readable content (default), 'html' returns raw HTML")
                 ),
-                "required", List.of("url")
+                SchemaKeys.REQUIRED, List.of("url")
         );
     }
 

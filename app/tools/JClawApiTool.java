@@ -52,10 +52,6 @@ public class JClawApiTool implements ToolRegistry.Tool {
 
     public static final String TOOL_NAME = "jclaw_api";
 
-    private static final String KEY_TYPE = "type";
-    private static final String KEY_OBJECT = "object";
-    private static final String KEY_STRING = "string";
-    private static final String KEY_DESCRIPTION = "description";
     private static final String KEY_METHOD = "method";
     private static final String KEY_PATH = "path";
     private static final String KEY_BODY = "body";
@@ -101,25 +97,25 @@ public class JClawApiTool implements ToolRegistry.Tool {
     @Override
     public Map<String, Object> parameters() {
         return Map.of(
-                KEY_TYPE, KEY_OBJECT,
-                "properties", Map.of(
+                SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                SchemaKeys.PROPERTIES, Map.of(
                         KEY_METHOD, Map.of(
-                                KEY_TYPE, KEY_STRING,
-                                "enum", ALLOWED_METHODS,
-                                KEY_DESCRIPTION, "HTTP method"),
+                                SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.ENUM, ALLOWED_METHODS,
+                                SchemaKeys.DESCRIPTION, "HTTP method"),
                         KEY_PATH, Map.of(
-                                KEY_TYPE, KEY_STRING,
-                                KEY_DESCRIPTION, "JClaw API path starting with /api/ (e.g. /api/agents)"),
+                                SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "JClaw API path starting with /api/ (e.g. /api/agents)"),
                         KEY_BODY, Map.of(
-                                KEY_TYPE, KEY_OBJECT,
-                                KEY_DESCRIPTION, "JSON request body for POST/PUT/PATCH; omit for GET/DELETE",
-                                "additionalProperties", true),
+                                SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                                SchemaKeys.DESCRIPTION, "JSON request body for POST/PUT/PATCH; omit for GET/DELETE",
+                                SchemaKeys.ADDITIONAL_PROPERTIES, true),
                         KEY_QUERY, Map.of(
-                                KEY_TYPE, KEY_OBJECT,
-                                KEY_DESCRIPTION, "Query parameters as key→string-value pairs",
-                                "additionalProperties", Map.of(KEY_TYPE, KEY_STRING))
+                                SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                                SchemaKeys.DESCRIPTION, "Query parameters as key→string-value pairs",
+                                SchemaKeys.ADDITIONAL_PROPERTIES, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING))
                 ),
-                "required", List.of(KEY_METHOD, KEY_PATH)
+                SchemaKeys.REQUIRED, List.of(KEY_METHOD, KEY_PATH)
         );
     }
 

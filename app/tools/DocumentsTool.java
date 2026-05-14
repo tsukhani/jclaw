@@ -84,22 +84,22 @@ public class DocumentsTool implements ToolRegistry.Tool {
     @Override
     public Map<String, Object> parameters() {
         return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "action", Map.of("type", "string",
-                                "enum", List.of("readDocument", "writeDocument", "appendDocument", "renderDocument"),
-                                "description", "The document operation to perform"),
-                        "path", Map.of("type", "string",
-                                "description", "File path relative to the agent workspace (target for writeDocument/renderDocument, source for readDocument)"),
-                        "sourcePath", Map.of("type", "string",
-                                "description", "For renderDocument only: workspace-relative path to an existing markdown file whose contents should be rendered to 'path'."),
-                        "content", Map.of("type", "string",
-                                "description", "Markdown content (for writeDocument and appendDocument)"),
-                        "format", Map.of("type", "string",
-                                "enum", WRITE_FORMATS,
-                                "description", "Output format for writeDocument/renderDocument: html, pdf, or docx. If omitted, inferred from the target path extension.")
+                SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                SchemaKeys.PROPERTIES, Map.of(
+                        "action", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.ENUM, List.of("readDocument", "writeDocument", "appendDocument", "renderDocument"),
+                                SchemaKeys.DESCRIPTION, "The document operation to perform"),
+                        "path", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "File path relative to the agent workspace (target for writeDocument/renderDocument, source for readDocument)"),
+                        "sourcePath", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "For renderDocument only: workspace-relative path to an existing markdown file whose contents should be rendered to 'path'."),
+                        "content", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.DESCRIPTION, "Markdown content (for writeDocument and appendDocument)"),
+                        "format", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                SchemaKeys.ENUM, WRITE_FORMATS,
+                                SchemaKeys.DESCRIPTION, "Output format for writeDocument/renderDocument: html, pdf, or docx. If omitted, inferred from the target path extension.")
                 ),
-                "required", List.of("action", "path")
+                SchemaKeys.REQUIRED, List.of("action", "path")
         );
     }
 
