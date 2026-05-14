@@ -22,7 +22,10 @@ import {
 } from '@heroicons/vue/24/outline'
 // BotMessageSquare is Lucide's robot glyph — Heroicons doesn't ship a robot,
 // so this is the narrow exception where we drop down to Lucide for a nav icon.
-import { BotMessageSquare, PanelLeftClose, PanelLeftOpen } from 'lucide-vue-next'
+// UsersRound covers the "spawned children" feel of the SubagentRuns admin page
+// (JCLAW-271); Heroicons' UserGroup is too tilted toward a "team" gloss to
+// read as the parent/child fan-out we want.
+import { BotMessageSquare, PanelLeftClose, PanelLeftOpen, UsersRound } from 'lucide-vue-next'
 import { loadTourStatus } from '~/composables/useGuidedTour'
 import TourIntroDialog from '~/components/TourIntroDialog.vue'
 
@@ -197,6 +200,11 @@ const navGroups: NavGroup[] = [
     items: [
       { label: 'Settings', to: '/settings', icon: Cog6ToothIcon },
       { label: 'Logs', to: '/logs', icon: Bars3Icon },
+      // JCLAW-271: SubagentRuns admin — operator-facing list of every
+      // subagent invocation with status pills and a kill action for
+      // RUNNING rows. Sits next to Logs because both are read-mostly
+      // operational views of background activity.
+      { label: 'Subagents', to: '/subagents', icon: UsersRound },
     ],
   },
   {

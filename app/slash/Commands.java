@@ -59,7 +59,8 @@ public final class Commands {
         HELP("/help", "Show available commands"),
         MODEL("/model", "Show current model and its capabilities"),
         USAGE("/usage", "Show context usage for this conversation"),
-        STOP("/stop", "Interrupt the current generation");
+        STOP("/stop", "Interrupt the current generation"),
+        SUBAGENT("/subagent", "Inspect or kill subagent runs");
 
         public final String literal;
         public final String shortDescription;
@@ -81,7 +82,8 @@ public final class Commands {
             • /help — show this message
             • /model — show current model and its capabilities
             • /usage — show context usage for this conversation
-            • /stop — interrupt the current generation""";
+            • /stop — interrupt the current generation
+            • /subagent — inspect or kill subagent runs (list, info ID, log ID, kill ID)""";
 
     /**
      * Canned response for {@link Command#NEW}. The leading {@code >} line
@@ -187,6 +189,7 @@ public final class Commands {
             case MODEL -> executeModel(agent, channelType, current, args);
             case USAGE -> executeUsage(agent, channelType, current);
             case STOP -> executeStop(agent, channelType, current);
+            case SUBAGENT -> executeSubagent(agent, channelType, current, args);
         };
     }
 
@@ -798,5 +801,236 @@ public final class Commands {
     private static String formatTokens(int tokens) {
         // Thousands separator for readability at larger counts.
         return String.format("%,d", tokens);
+    }
+
+    // ── /subagent ─────────────────────────────────────────────────────────
+    //
+    // JCLAW-271: operator-facing introspection + kill surface for subagent
+    // runs spawned by the current parent conversation. The four subcommands
+    // map 1:1 to the AC:
+    //   list           — RUNNING + recently-terminal rows scoped to current
+    //   info <id>      — full metadata for a single run
+    //   log <id>       — chronological EventLog rows matching run id
+    //   kill <id>      — flip RUNNING → KILLED, interrupt the VT, emit event
+    // Output is plain text suitable for a chat bubble; the SubagentRuns
+    // admin page (separate Vue route) gets the same data via the new
+    // /api/subagent-runs REST endpoint.
+
+    /** Max EventLog rows returned by {@code /subagent log}. Chosen so the
+     *  output stays readable in a chat bubble while still covering a
+     *  multi-turn child run's typical event-rate. */
+    private static final int SUBAGENT_LOG_LIMIT = 50;
+
+    private static Result executeSubagent(Agent agent, String channelType,
+                                           Conversation current, String args) {
+        var sub = parseSubagentArgs(args);
+        var responseText = Tx.run(() -> {
+            var text = buildSubagentResponse(agent, current, sub);
+            persistCannedResponseInTx(current, text);
+            return text;
+        });
+        EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+                "/subagent " + (sub.kind() != null ? sub.kind() : "(no-args)")
+                        + (sub.id() != null ? " " + sub.id() : "")
+                        + (current != null ? " for conversation " + current.id : ""));
+        return new Result(current, responseText, Command.SUBAGENT);
+    }
+
+    /** Outcome of parsing the subcommand portion of {@code /subagent ARGS}. */
+    private record SubagentArgs(String kind, Long id, String error) {}
+
+    private static SubagentArgs parseSubagentArgs(String args) {
+        if (args == null || args.isBlank()) {
+            return new SubagentArgs("list", null, null);
+        }
+        var trimmed = args.strip();
+        var space = indexOfWhitespace(trimmed);
+        var head = (space < 0 ? trimmed : trimmed.substring(0, space)).toLowerCase();
+        var rest = space < 0 ? "" : trimmed.substring(space + 1).strip();
+        switch (head) {
+            case "list" -> {
+                return new SubagentArgs("list", null, null);
+            }
+            case "info", "log", "kill" -> {
+                if (rest.isEmpty()) {
+                    return new SubagentArgs(head, null,
+                            "Missing run id. Usage: /subagent " + head + " <run-id>");
+                }
+                try {
+                    return new SubagentArgs(head, Long.parseLong(rest), null);
+                } catch (NumberFormatException _) {
+                    return new SubagentArgs(head, null,
+                            "Invalid run id '" + rest + "' — expected a numeric SubagentRun id.");
+                }
+            }
+            default -> {
+                return new SubagentArgs(null, null,
+                        "Unknown subcommand '" + head + "'. "
+                                + "Available: list, info <id>, log <id>, kill <id>.");
+            }
+        }
+    }
+
+    /** Build the response text for a parsed {@code /subagent} call. Must run
+     *  inside a Tx so the DB lookups have an active EntityManager. */
+    private static String buildSubagentResponse(Agent agent, Conversation current, SubagentArgs sub) {
+        if (sub.error() != null) {
+            return sub.error();
+        }
+        return switch (sub.kind()) {
+            case "list" -> renderSubagentList(current);
+            case "info" -> renderSubagentInfo(sub.id());
+            case "log" -> renderSubagentLog(sub.id());
+            case "kill" -> renderSubagentKill(agent, sub.id());
+            default -> "Unknown /subagent subcommand.";
+        };
+    }
+
+    private static String renderSubagentList(Conversation current) {
+        if (current == null) {
+            return "No active conversation — /subagent list requires a parent conversation.";
+        }
+        // AC: scoped to the current parent conversation. RUNNING first, then
+        // most recent. JPQL doesn't allow enum literals in ORDER BY, so we
+        // fetch with a startedAt-DESC sort and re-sort in Java to lift the
+        // RUNNING rows to the top (stable, small N — limit 50). Limit a
+        // generous 50 so a long-running parent's history still fits;
+        // anything more goes to the admin page.
+        List<models.SubagentRun> runs = models.SubagentRun.find(
+                "parentConversation = ?1 ORDER BY startedAt DESC",
+                current).fetch(50);
+        if (runs.isEmpty()) {
+            return "No subagent runs in this conversation.";
+        }
+        runs = new java.util.ArrayList<>(runs);
+        runs.sort((a, b) -> {
+            int aRunning = a.status == models.SubagentRun.Status.RUNNING ? 0 : 1;
+            int bRunning = b.status == models.SubagentRun.Status.RUNNING ? 0 : 1;
+            if (aRunning != bRunning) return Integer.compare(aRunning, bRunning);
+            // Tie-break: newer first. startedAt is non-null per @PrePersist.
+            return b.startedAt.compareTo(a.startedAt);
+        });
+        var sb = new StringBuilder();
+        sb.append("Subagent runs for this conversation:\n");
+        for (var run : runs) {
+            sb.append('\n').append(formatRunSummary(run));
+        }
+        return sb.toString();
+    }
+
+    private static String renderSubagentInfo(Long runId) {
+        if (runId == null) return "Missing run id.";
+        var run = (models.SubagentRun) models.SubagentRun.findById(runId);
+        if (run == null) return "Run " + runId + " not found.";
+        // Pull mode/context from the most recent SUBAGENT_SPAWN event for this
+        // run id. Those fields aren't on SubagentRun directly — the typed
+        // EventLogger helpers stash them in the JSON details payload.
+        var spawnEvent = findSpawnEventDetails(runId);
+        String mode = spawnEvent != null ? extractJsonField(spawnEvent, "mode") : null;
+        String context = spawnEvent != null ? extractJsonField(spawnEvent, "context") : null;
+
+        var sb = new StringBuilder();
+        sb.append("Subagent run #").append(run.id).append('\n');
+        sb.append("Parent agent: ").append(run.parentAgent != null ? run.parentAgent.name : "?").append('\n');
+        sb.append("Child agent: ").append(run.childAgent != null ? run.childAgent.name : "?").append('\n');
+        sb.append("Parent conversation: ").append(run.parentConversation != null ? run.parentConversation.id : "?").append('\n');
+        sb.append("Child conversation: ").append(run.childConversation != null ? run.childConversation.id : "?").append('\n');
+        sb.append("Mode: ").append(mode != null ? mode : "?").append('\n');
+        sb.append("Context: ").append(context != null ? context : "?").append('\n');
+        sb.append("Status: ").append(run.status.name()).append('\n');
+        sb.append("Started: ").append(run.startedAt != null ? run.startedAt.toString() : "?").append('\n');
+        sb.append("Ended: ").append(run.endedAt != null ? run.endedAt.toString() : "—").append('\n');
+        if (run.outcome != null && !run.outcome.isBlank()) {
+            // Truncate long outcomes so an LLM-essay reply doesn't blow up
+            // the chat bubble; the full text is on the child Conversation
+            // page anyway.
+            var outcome = run.outcome.length() > 500
+                    ? run.outcome.substring(0, 497) + "..."
+                    : run.outcome;
+            sb.append("Outcome: ").append(outcome);
+        }
+        else {
+            sb.append("Outcome: —");
+        }
+        return sb.toString();
+    }
+
+    private static String renderSubagentLog(Long runId) {
+        if (runId == null) return "Missing run id.";
+        // The run must exist before we promise log rows for it; surface a
+        // clear 404 rather than an empty list (which an operator would
+        // misread as "no events" when the id is actually a typo).
+        var run = (models.SubagentRun) models.SubagentRun.findById(runId);
+        if (run == null) return "Run " + runId + " not found.";
+
+        // EventLog.details is a JSON blob containing run_id. H2's LIKE on a
+        // small set of rows is cheap; we filter further in Java to extract
+        // the canonical run_id field rather than matching string prefixes
+        // that could collide with a substring elsewhere in the payload.
+        var marker = "\"run_id\":\"" + runId + "\"";
+        List<models.EventLog> rows = models.EventLog.<models.EventLog>find(
+                "details LIKE ?1 AND category LIKE 'SUBAGENT_%' ORDER BY timestamp ASC",
+                "%" + marker + "%").fetch(SUBAGENT_LOG_LIMIT);
+        if (rows.isEmpty()) {
+            return "No events for run " + runId + ".";
+        }
+        var sb = new StringBuilder();
+        sb.append("Events for subagent run #").append(runId).append(":\n");
+        for (var row : rows) {
+            sb.append('\n')
+                    .append(row.timestamp != null ? row.timestamp.toString() : "?")
+                    .append(' ').append(row.level)
+                    .append(' ').append(row.category)
+                    .append(" — ").append(row.message != null ? row.message : "");
+        }
+        return sb.toString();
+    }
+
+    private static String renderSubagentKill(Agent agent, Long runId) {
+        if (runId == null) return "Missing run id.";
+        var reason = agent != null
+                ? "Killed by operator via /subagent kill (agent " + agent.name + ")"
+                : "Killed by operator via /subagent kill";
+        var result = services.SubagentRegistry.kill(runId, reason);
+        return result.message();
+    }
+
+    /** Compact one-line summary of a SubagentRun for the {@code list} view. */
+    private static String formatRunSummary(models.SubagentRun run) {
+        var label = run.childAgent != null ? run.childAgent.name : "(unnamed)";
+        var sb = new StringBuilder();
+        sb.append("#").append(run.id)
+                .append(' ').append(run.status.name())
+                .append(' ').append(label)
+                .append(" started=").append(run.startedAt != null ? run.startedAt.toString() : "?");
+        if (run.endedAt != null) {
+            var durSec = java.time.Duration.between(run.startedAt, run.endedAt).toSeconds();
+            sb.append(" duration=").append(durSec).append('s');
+        }
+        return sb.toString();
+    }
+
+    /** Find the most recent SUBAGENT_SPAWN event for a given run id and
+     *  return its {@code details} JSON, or null when no event exists yet. */
+    private static String findSpawnEventDetails(Long runId) {
+        var marker = "\"run_id\":\"" + runId + "\"";
+        List<models.EventLog> rows = models.EventLog.<models.EventLog>find(
+                "category = ?1 AND details LIKE ?2 ORDER BY timestamp DESC",
+                "SUBAGENT_SPAWN", "%" + marker + "%").fetch(1);
+        return rows.isEmpty() ? null : rows.getFirst().details;
+    }
+
+    /** Tiny JSON-field extractor — Gson is heavy for a single-key lookup
+     *  in a known-shape payload. Returns null on missing key or unparseable
+     *  input (the SUBAGENT_* details payload is always a flat object). */
+    private static String extractJsonField(String json, String key) {
+        if (json == null || json.isBlank()) return null;
+        try {
+            var obj = JsonParser.parseString(json).getAsJsonObject();
+            if (!obj.has(key) || obj.get(key).isJsonNull()) return null;
+            return obj.get(key).getAsString();
+        } catch (Exception _) {
+            return null;
+        }
     }
 }

@@ -140,6 +140,10 @@ POST    /api/webhooks/whatsapp                  WebhookWhatsAppController.webhoo
 # Logs API
 GET     /api/logs                               ApiLogsController.list
 
+# Subagent Runs API (JCLAW-271)
+GET     /api/subagent-runs                      ApiSubagentRunsController.list
+POST    /api/subagent-runs/{id}/kill            ApiSubagentRunsController.kill
+
 # Metrics API (in-memory latency histograms — reset on JVM restart)
 GET     /api/metrics/latency                    ApiMetricsController.latency
 DELETE  /api/metrics/latency                    ApiMetricsController.resetLatency

@@ -450,27 +450,40 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         // marker through, leaving Message.subagentRunId null on child rows
         // (they're in their own Conversation row anyway).
         final Long runIdForMarker = inlineMode ? runId : null;
-        var future = CompletableFuture.supplyAsync(
-                () -> {
-                    var childAgent = Tx.run(() -> (Agent) Agent.findById(childAgentId));
-                    var childConv = Tx.run(() -> (Conversation) Conversation.findById(childConvId));
-                    if (childAgent == null || childConv == null) {
-                        throw new IllegalStateException(
-                                "Subagent rows vanished before AgentRunner.run");
-                    }
-                    if (runIdForMarker == null) {
-                        return AgentRunner.run(childAgent, childConv, task);
-                    }
+        // JCLAW-271: capture the carrier thread so /subagent kill can
+        // hand-interrupt it (CompletableFuture.cancel doesn't propagate
+        // interrupts on its own — the boolean is a no-op per the JDK
+        // javadoc). Lambda stashes its own Thread in the registry as
+        // its first act so a kill firing the instant after register()
+        // observes both halves of the handle.
+        var future = new java.util.concurrent.CompletableFuture<AgentRunner.RunResult>();
+        Thread.ofVirtual().name("subagent-" + runId).start(() -> {
+            services.SubagentRegistry.registerWithThread(runId, future, Thread.currentThread());
+            try {
+                var childAgent = Tx.run(() -> (Agent) Agent.findById(childAgentId));
+                var childConv = Tx.run(() -> (Conversation) Conversation.findById(childConvId));
+                if (childAgent == null || childConv == null) {
+                    throw new IllegalStateException(
+                            "Subagent rows vanished before AgentRunner.run");
+                }
+                AgentRunner.RunResult result;
+                if (runIdForMarker == null) {
+                    result = AgentRunner.run(childAgent, childConv, task);
+                } else {
                     // JCLAW-267: inline mode runs in the parent Conversation,
                     // whose queue the parent already owns. Use runWithOwnedQueue
                     // to bypass the redundant tryAcquire (which would queue the
                     // child's "user message" behind the parent's still-running
                     // turn). The ThreadLocal marker stamps every Message
                     // AgentRunner persists during the child run.
-                    return ConversationService.withSubagentRunIdMarker(runIdForMarker,
+                    result = ConversationService.withSubagentRunIdMarker(runIdForMarker,
                             () -> AgentRunner.runWithOwnedQueue(childAgent, childConv, task));
-                },
-                runnable -> Thread.ofVirtual().name("subagent-" + runId).start(runnable));
+                }
+                future.complete(result);
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+        });
 
         String reply;
         SubagentRun.Status terminalStatus;
@@ -478,36 +491,44 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         String errorReason = null;
 
         try {
-            var result = future.get(timeoutSeconds, TimeUnit.SECONDS);
-            reply = result == null ? "" : result.response();
-            terminalStatus = SubagentRun.Status.COMPLETED;
-            terminalOutcome = reply;
-        } catch (TimeoutException te) {
-            future.cancel(true); // best-effort interrupt; AgentRunner has no cancel hook yet
-            terminalStatus = SubagentRun.Status.TIMEOUT;
-            errorReason = "Subagent run exceeded %d-second budget".formatted(timeoutSeconds);
-            terminalOutcome = errorReason;
-            reply = "";
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-            terminalStatus = SubagentRun.Status.FAILED;
-            errorReason = "Parent thread interrupted while awaiting subagent";
-            terminalOutcome = errorReason;
-            reply = "";
-        } catch (ExecutionException ee) {
-            var cause = ee.getCause() != null ? ee.getCause() : ee;
-            terminalStatus = SubagentRun.Status.FAILED;
-            errorReason = cause.getMessage() != null ? cause.getMessage() : cause.toString();
-            terminalOutcome = errorReason;
-            reply = "";
+            try {
+                var result = future.get(timeoutSeconds, TimeUnit.SECONDS);
+                reply = result == null ? "" : result.response();
+                terminalStatus = SubagentRun.Status.COMPLETED;
+                terminalOutcome = reply;
+            } catch (TimeoutException te) {
+                future.cancel(true); // best-effort interrupt; AgentRunner has no cancel hook yet
+                terminalStatus = SubagentRun.Status.TIMEOUT;
+                errorReason = "Subagent run exceeded %d-second budget".formatted(timeoutSeconds);
+                terminalOutcome = errorReason;
+                reply = "";
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                terminalStatus = SubagentRun.Status.FAILED;
+                errorReason = "Parent thread interrupted while awaiting subagent";
+                terminalOutcome = errorReason;
+                reply = "";
+            } catch (ExecutionException ee) {
+                var cause = ee.getCause() != null ? ee.getCause() : ee;
+                terminalStatus = SubagentRun.Status.FAILED;
+                errorReason = cause.getMessage() != null ? cause.getMessage() : cause.toString();
+                terminalOutcome = errorReason;
+                reply = "";
+            }
+        } finally {
+            services.SubagentRegistry.unregister(runId);
         }
 
         // Step 5: write the terminal SubagentRun update in its own short Tx.
+        // JCLAW-271: skip the terminal write when the kill primitive already
+        // stamped KILLED — its outcome ("Killed by operator") is the
+        // operator-visible truth, and overwriting it with a TIMEOUT/FAILED
+        // reason from this thread's await result would lose that signal.
         final var finalStatus = terminalStatus;
         final var finalOutcome = terminalOutcome;
         Tx.run(() -> {
             var fresh = (SubagentRun) SubagentRun.findById(runId);
-            if (fresh != null) {
+            if (fresh != null && fresh.status != SubagentRun.Status.KILLED) {
                 fresh.status = finalStatus;
                 fresh.endedAt = Instant.now();
                 fresh.outcome = finalOutcome;
@@ -913,53 +934,71 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         String reply;
         String errorReason = null;
 
-        var future = CompletableFuture.supplyAsync(() -> {
-            var childAgent = Tx.run(() -> (Agent) Agent.findById(childAgentId));
-            var childConv = Tx.run(() -> (Conversation) Conversation.findById(childConvId));
-            if (childAgent == null || childConv == null) {
-                throw new IllegalStateException(
-                        "Subagent rows vanished before AgentRunner.run");
+        // JCLAW-271: like the sync path, capture the carrier thread inside
+        // the VT body so /subagent kill can hand-interrupt it (the JDK
+        // CompletableFuture.cancel boolean is a no-op for the running task).
+        var future = new CompletableFuture<AgentRunner.RunResult>();
+        Thread.ofVirtual().name("subagent-async-runner-" + runId).start(() -> {
+            services.SubagentRegistry.registerWithThread(runId, future, Thread.currentThread());
+            try {
+                var childAgent = Tx.run(() -> (Agent) Agent.findById(childAgentId));
+                var childConv = Tx.run(() -> (Conversation) Conversation.findById(childConvId));
+                if (childAgent == null || childConv == null) {
+                    throw new IllegalStateException(
+                            "Subagent rows vanished before AgentRunner.run");
+                }
+                future.complete(AgentRunner.run(childAgent, childConv, task));
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
             }
-            return AgentRunner.run(childAgent, childConv, task);
-        }, runnable -> Thread.ofVirtual().name("subagent-async-runner-" + runId).start(runnable));
+        });
 
         try {
-            var result = future.get(timeoutSeconds, TimeUnit.SECONDS);
-            reply = result == null ? "" : result.response();
-            terminalStatus = SubagentRun.Status.COMPLETED;
-        } catch (TimeoutException te) {
-            future.cancel(true);
-            terminalStatus = SubagentRun.Status.TIMEOUT;
-            errorReason = "Subagent run exceeded %d-second budget".formatted(timeoutSeconds);
-            reply = "";
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-            terminalStatus = SubagentRun.Status.FAILED;
-            errorReason = "Async subagent VT interrupted";
-            reply = "";
-        } catch (ExecutionException ee) {
-            var cause = ee.getCause() != null ? ee.getCause() : ee;
-            terminalStatus = SubagentRun.Status.FAILED;
-            errorReason = cause.getMessage() != null ? cause.getMessage() : cause.toString();
-            reply = "";
-        } catch (Throwable t) {
-            // Top-level guard: this is a background VT — must never let an
-            // unchecked failure escape (it would lose the announce + terminal
-            // event entirely). Stamp the audit row + announce as FAILED with
-            // the throwable's string form.
-            terminalStatus = SubagentRun.Status.FAILED;
-            errorReason = t.getMessage() != null ? t.getMessage() : t.toString();
-            reply = "";
+            try {
+                var result = future.get(timeoutSeconds, TimeUnit.SECONDS);
+                reply = result == null ? "" : result.response();
+                terminalStatus = SubagentRun.Status.COMPLETED;
+            } catch (TimeoutException te) {
+                future.cancel(true);
+                terminalStatus = SubagentRun.Status.TIMEOUT;
+                errorReason = "Subagent run exceeded %d-second budget".formatted(timeoutSeconds);
+                reply = "";
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                terminalStatus = SubagentRun.Status.FAILED;
+                errorReason = "Async subagent VT interrupted";
+                reply = "";
+            } catch (ExecutionException ee) {
+                var cause = ee.getCause() != null ? ee.getCause() : ee;
+                terminalStatus = SubagentRun.Status.FAILED;
+                errorReason = cause.getMessage() != null ? cause.getMessage() : cause.toString();
+                reply = "";
+            } catch (Throwable t) {
+                // Top-level guard: this is a background VT — must never let an
+                // unchecked failure escape (it would lose the announce + terminal
+                // event entirely). Stamp the audit row + announce as FAILED with
+                // the throwable's string form.
+                terminalStatus = SubagentRun.Status.FAILED;
+                errorReason = t.getMessage() != null ? t.getMessage() : t.toString();
+                reply = "";
+            }
+        } finally {
+            services.SubagentRegistry.unregister(runId);
         }
 
         // Update the SubagentRun audit row (terminal status + outcome).
+        // JCLAW-271: skip the write when /subagent kill already stamped
+        // KILLED — the operator's reason is the source of truth, and
+        // overwriting it here would replace "Killed by operator" with the
+        // TIMEOUT / FAILED message we synthesized when the cancelled
+        // Future threw.
         final var finalStatus = terminalStatus;
         final var finalReply = reply;
         final var finalErrorReason = errorReason;
         try {
             Tx.run(() -> {
                 var fresh = (SubagentRun) SubagentRun.findById(runId);
-                if (fresh != null) {
+                if (fresh != null && fresh.status != SubagentRun.Status.KILLED) {
                     fresh.status = finalStatus;
                     fresh.endedAt = Instant.now();
                     fresh.outcome = finalStatus == SubagentRun.Status.COMPLETED
