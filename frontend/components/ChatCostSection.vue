@@ -930,12 +930,12 @@ defineExpose({ refresh })
               :aria-pressed="selectedSubscriptionProvider === p.name"
               :disabled="selectedSubscriptionProvider !== p.name
                 && !subscriptionProvidersWithUsage.has(p.name)"
-              class="border min-w-[9rem] text-left transition-colors flex items-stretch"
+              class="border border-border min-w-[9rem] text-left transition-colors flex items-stretch"
               :class="selectedSubscriptionProvider === p.name
-                ? 'border-emerald-600 dark:border-emerald-400 bg-muted/40'
+                ? 'bg-emerald-500/10'
                 : subscriptionProvidersWithUsage.has(p.name)
-                  ? 'border-border bg-muted/20 hover:bg-muted/30 cursor-pointer'
-                  : 'border-border bg-muted/10 opacity-50 cursor-not-allowed'"
+                  ? 'bg-muted/20 hover:bg-muted/30 cursor-pointer'
+                  : 'bg-muted/10 opacity-50 cursor-not-allowed'"
               @click="onSubscriptionChipClick(p.name)"
             >
               <!-- Same per-provider swatch as the chart bar below — the
