@@ -417,13 +417,15 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         } else {
             // Clone the parent's runtime config (provider, model, thinkingMode)
             // into a fresh row so the child is its own auditable identity.
-            var provider = modelProviderOverride != null && !modelProviderOverride.isBlank()
-                    ? modelProviderOverride : parentAgent.modelProvider;
-            var modelId = modelIdOverride != null && !modelIdOverride.isBlank()
-                    ? modelIdOverride : parentAgent.modelId;
+            // JCLAW-269: child Agent ALWAYS inherits the parent's defaults; the
+            // per-spawn modelProvider/modelId override (when supplied) lands on
+            // the child Conversation below, not on this row. Keeping the Agent
+            // row clean of one-shot overrides means re-running the same child
+            // agent later (via agentId) doesn't carry stale per-spawn state.
             var name = buildChildAgentName(parentAgent.name);
             try {
-                childAgent = AgentService.create(name, provider, modelId,
+                childAgent = AgentService.create(name,
+                        parentAgent.modelProvider, parentAgent.modelId,
                         parentAgent.thinkingMode,
                         label != null && !label.isBlank()
                                 ? label
@@ -437,6 +439,17 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
 
         var childConv = ConversationService.create(childAgent, SUBAGENT_CHANNEL, null);
         childConv.parentConversation = parentConv;
+        // JCLAW-269: persist the per-spawn override on the child Conversation so
+        // AgentRunner's ModelOverrideResolver picks it up for this run, and so
+        // the JCLAW-28 cost dashboard's
+        // COALESCE(c.modelProviderOverride, c.agent.modelProvider) attributes
+        // spend to the actually-used model. Both columns are set together or
+        // neither — half-set is undefined per Conversation.java's contract.
+        if (modelProviderOverride != null && !modelProviderOverride.isBlank()
+                && modelIdOverride != null && !modelIdOverride.isBlank()) {
+            childConv.modelProviderOverride = modelProviderOverride;
+            childConv.modelIdOverride = modelIdOverride;
+        }
         childConv.save();
 
         return Bootstrap.ok(childAgent.id, childConv.id);

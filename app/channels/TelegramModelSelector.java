@@ -68,11 +68,10 @@ public final class TelegramModelSelector {
      * disambiguates command syntax from prose).
      */
     public static String summaryText(Agent agent, Conversation conversation) {
-        var overrideActive = conversation != null
-                && conversation.modelProviderOverride != null
-                && conversation.modelIdOverride != null;
-        var provider = overrideActive ? conversation.modelProviderOverride : agent.modelProvider;
-        var modelId = overrideActive ? conversation.modelIdOverride : agent.modelId;
+        var overrideActive = services.ModelOverrideResolver.hasOverride(conversation);
+        var resolved = services.ModelOverrideResolver.resolve(conversation, agent);
+        var provider = resolved.provider();
+        var modelId = resolved.modelId();
         var providerLabel = TelegramModelKeyboard.providerLabel(provider);
         var sb = new StringBuilder();
         sb.append("⚙️ <b>Model Configuration</b>\n\n");
@@ -94,12 +93,7 @@ public final class TelegramModelSelector {
      * matching row.
      */
     public static String currentProviderName(Agent agent, Conversation conversation) {
-        if (conversation != null
-                && conversation.modelProviderOverride != null
-                && !conversation.modelProviderOverride.isBlank()) {
-            return conversation.modelProviderOverride;
-        }
-        return agent != null ? agent.modelProvider : null;
+        return services.ModelOverrideResolver.provider(conversation, agent);
     }
 
     private static String escape(String s) {

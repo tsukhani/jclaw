@@ -306,7 +306,8 @@ public final class Commands {
         // Resolve provider: prefer the conversation override, fall back to
         // the agent default, then to the registry's primary. Mirrors
         // AgentRunner.run's provider-selection flow.
-        var providerName = current.modelProviderOverride != null ? current.modelProviderOverride : agent.modelProvider;
+        var resolved = services.ModelOverrideResolver.resolve(current, agent);
+        var providerName = resolved.provider();
         var primary = ProviderRegistry.get(providerName);
         if (primary == null) primary = ProviderRegistry.getPrimary();
         if (primary == null) {
@@ -315,7 +316,7 @@ public final class Commands {
             return new Result(current, msg, Command.COMPACT);
         }
 
-        var modelId = current.modelIdOverride != null ? current.modelIdOverride : agent.modelId;
+        var modelId = resolved.modelId();
         var modelLabel = primary.config().name() + "/" + modelId;
         var maxOutput = services.ConfigService.getInt("chat.compactionMaxTokens", 8192);
 
@@ -528,27 +529,19 @@ public final class Commands {
 
     /** Resolve the effective provider name — override when present, else agent default. */
     private static String effectiveProviderName(Agent agent, Conversation current) {
-        if (current != null && current.modelProviderOverride != null && current.modelIdOverride != null) {
-            return current.modelProviderOverride;
-        }
-        return agent != null ? agent.modelProvider : null;
+        return services.ModelOverrideResolver.provider(current, agent);
     }
 
     /** Resolve the effective model id — override when present, else agent default. */
     private static String effectiveModelIdFor(Agent agent, Conversation current) {
-        if (current != null && current.modelProviderOverride != null && current.modelIdOverride != null) {
-            return current.modelIdOverride;
-        }
-        return agent != null ? agent.modelId : null;
+        return services.ModelOverrideResolver.modelId(current, agent);
     }
 
     public static String buildModelResponse(Agent agent, Conversation current) {
         if (agent == null) return "No agent bound to this conversation.";
         var providerName = effectiveProviderName(agent, current);
         var modelId = effectiveModelIdFor(agent, current);
-        var overrideActive = current != null
-                && current.modelProviderOverride != null
-                && current.modelIdOverride != null;
+        var overrideActive = services.ModelOverrideResolver.hasOverride(current);
         var model = resolveModel(agent, current);
         if (model.isEmpty()) {
             return "Model not found in provider config (%s/%s). Re-assign the agent's model or restore the provider entry."

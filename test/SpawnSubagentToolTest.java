@@ -317,6 +317,85 @@ class SpawnSubagentToolTest extends UnitTest {
     }
 
     @Test
+    void modelOverridePersistedOnChildConversationNotChildAgent() throws Exception {
+        // JCLAW-269: when the spawn args carry modelProvider + modelId, those
+        // values land on the child Conversation override columns; the child
+        // Agent row inherits the parent's defaults verbatim. The JCLAW-28 cost
+        // dashboard reads COALESCE(c.modelProviderOverride, c.agent.modelProvider)
+        // so this is what attributes spend to the actually-used model.
+        startLlmServer(simpleResponse("Subagent reply: override path."));
+        configureProviderWithTwoModels();
+
+        var parent = createAgent("p-override", "test-provider", "test-model");
+        ConversationService.create(parent, "web", "u-override");
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id,
+                "{\"task\":\"with override\",\"modelProvider\":\"test-provider\",\"modelId\":\"test-model-alt\"}");
+        EventLogger.flush();
+
+        var parsed = JsonParser.parseString(reply).getAsJsonObject();
+        assertEquals("COMPLETED", parsed.get("status").getAsString(),
+                "override spawn should complete cleanly, got: " + reply);
+
+        JPA.em().clear();
+        var runId = Long.parseLong(parsed.get("run_id").getAsString());
+        SubagentRun run = SubagentRun.findById(runId);
+        assertNotNull(run);
+
+        // Child Conversation carries the override.
+        Conversation childConv = Conversation.findById(run.childConversation.id);
+        assertEquals("test-provider", childConv.modelProviderOverride,
+                "child Conversation must record the per-spawn provider override");
+        assertEquals("test-model-alt", childConv.modelIdOverride,
+                "child Conversation must record the per-spawn modelId override");
+
+        // Child Agent inherits the parent's defaults — NOT the override.
+        Agent childAgent = Agent.findById(run.childAgent.id);
+        assertEquals("test-provider", childAgent.modelProvider,
+                "child Agent provider must equal the parent's default");
+        assertEquals("test-model", childAgent.modelId,
+                "child Agent modelId must equal the parent's default, not the per-spawn override");
+    }
+
+    @Test
+    void noModelOverrideLeavesChildConversationColumnsNull() throws Exception {
+        // JCLAW-269 regression: when modelProvider / modelId aren't supplied,
+        // the child Conversation override columns stay null and the child
+        // Agent still inherits the parent's defaults. The cost dashboard's
+        // COALESCE then falls through to the agent row.
+        startLlmServer(simpleResponse("Subagent reply: no override."));
+        configureProvider();
+
+        var parent = createAgent("p-no-override", "test-provider", "test-model");
+        ConversationService.create(parent, "web", "u-no-override");
+
+        commitAndReopen();
+
+        var reply = invokeOnVirtualThread(parent.id, "{\"task\":\"plain\"}");
+        EventLogger.flush();
+
+        var parsed = JsonParser.parseString(reply).getAsJsonObject();
+        assertEquals("COMPLETED", parsed.get("status").getAsString());
+
+        JPA.em().clear();
+        var runId = Long.parseLong(parsed.get("run_id").getAsString());
+        SubagentRun run = SubagentRun.findById(runId);
+        assertNotNull(run);
+
+        Conversation childConv = Conversation.findById(run.childConversation.id);
+        assertNull(childConv.modelProviderOverride,
+                "no per-spawn override means modelProviderOverride stays null");
+        assertNull(childConv.modelIdOverride,
+                "no per-spawn override means modelIdOverride stays null");
+
+        Agent childAgent = Agent.findById(run.childAgent.id);
+        assertEquals("test-provider", childAgent.modelProvider);
+        assertEquals("test-model", childAgent.modelId);
+    }
+
+    @Test
     void limitsNotTriggeredAllowsSpawnNormally() throws Exception {
         // Regression guard for JCLAW-266: a top-level agent with no RUNNING
         // children must still spawn successfully (no false-positive refusal).
@@ -373,6 +452,17 @@ class SpawnSubagentToolTest extends UnitTest {
         ConfigService.set("provider.test-provider.apiKey", "sk-test");
         ConfigService.set("provider.test-provider.models",
                 "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":4096}]");
+        llm.ProviderRegistry.refresh();
+    }
+
+    /** Same provider, two models — exercises the per-spawn override resolution
+     *  without standing up a second mock server. */
+    private void configureProviderWithTwoModels() {
+        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:" + port);
+        ConfigService.set("provider.test-provider.apiKey", "sk-test");
+        ConfigService.set("provider.test-provider.models",
+                "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":4096},"
+                        + "{\"id\":\"test-model-alt\",\"name\":\"Test Alt\",\"contextWindow\":100000,\"maxTokens\":4096}]");
         llm.ProviderRegistry.refresh();
     }
 

@@ -135,23 +135,18 @@ public class AgentRunner {
 
     /**
      * Effective model id for this turn — honors the conversation-scoped
-     * override (JCLAW-108) when present, otherwise returns the agent's
-     * default. Null-safe on the conversation argument so legacy callers and
-     * test fixtures that don't thread a conversation keep working.
+     * override (JCLAW-108 per-conversation, JCLAW-269 per-spawn) when
+     * present, otherwise returns the agent's default. Thin wrapper over
+     * {@link services.ModelOverrideResolver#modelId} kept on this class so
+     * call sites read naturally next to the rest of the runner's helpers.
      */
     static String effectiveModelId(Agent agent, Conversation conv) {
-        if (conv != null && conv.modelProviderOverride != null && conv.modelIdOverride != null) {
-            return conv.modelIdOverride;
-        }
-        return agent != null ? agent.modelId : null;
+        return services.ModelOverrideResolver.modelId(conv, agent);
     }
 
     /** Companion to {@link #effectiveModelId} — returns the effective provider name. */
     static String effectiveModelProvider(Agent agent, Conversation conv) {
-        if (conv != null && conv.modelProviderOverride != null && conv.modelIdOverride != null) {
-            return conv.modelProviderOverride;
-        }
-        return agent != null ? agent.modelProvider : null;
+        return services.ModelOverrideResolver.provider(conv, agent);
     }
 
     /**
