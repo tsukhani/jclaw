@@ -41,6 +41,9 @@ public class ToolRegistrationJob extends Job<Void> {
         // every non-main agent so only main can actually invoke it
         // (defense in depth alongside the skill-not-installed gate).
         toolList.add(new JClawApiTool());
+        // JCLAW-265: spawn_subagent. Recursion limits and async path land
+        // later (JCLAW-266, JCLAW-270) — this is the synchronous primitive.
+        toolList.add(new SpawnSubagentTool());
         // JCLAW-281: list_mcp_tools is gone. Discovery is folded into each
         // MCP server's own surface — the model calls mcp_<server> with
         // empty args to enumerate that server's actions, registered by
