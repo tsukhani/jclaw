@@ -355,7 +355,7 @@ onBeforeUnmount(() => {
             <tr
               v-for="row in latencyRows"
               :key="row.key"
-              :class="row.key === 'total' ? 'border-t-2 border-fg-muted/30 bg-muted/30 font-semibold' : 'border-b border-border last:border-b-0'"
+              :class="row.key === 'total' ? 'bg-muted/50 font-semibold' : 'border-b border-border last:border-b-0'"
             >
               <!--
                 Child rows render with indent + muted label + smaller font —
