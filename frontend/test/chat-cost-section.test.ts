@@ -480,11 +480,14 @@ describe('ChatCostSection (JCLAW-28)', () => {
     expect(text).toContain('$100')
   })
 
-  it('shows an unallocated footnote when a subscription provider has zero usage', async () => {
+  it('dims the provider chip when a subscription provider has zero usage', async () => {
     // OpenAI subscribed at $20/month but never used. Ollama Cloud
-    // subscribed at $100/month with one model in use. Expected: model
-    // row gets $100 allocated; footnote calls out $20 unallocated for
-    // OpenAI; Total = $100 (sum of allocations only, per option (a)).
+    // subscribed at $100/month with one model in use. The model row gets
+    // $100 allocated; OpenAI shows up as a dimmed (opacity-50) provider
+    // chip rather than a footnote line — the visual de-emphasis IS the
+    // "no usage this window" signal, replacing the previous explicit
+    // footnote text. Asserts (a) both chips render, (b) only the unused
+    // one is dimmed, (c) the removed footnote phrasing is gone.
     stubSubscriptionFixture({
       providers: [
         { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
@@ -505,15 +508,27 @@ describe('ChatCostSection (JCLAW-28)', () => {
     await flushPromises()
 
     const text = wrapper.text()
-    // The allocated row.
+    // The allocated row + both provider amounts on the chips.
     expect(text).toContain('$100')
-    // Footnote names OpenAI and the unallocated amount. The "no usage
-    // this window" phrasing is part of the footnote so we assert on it
-    // to pin the wording — operators read it to understand the gap
-    // between the section subtitle ("$120 this window") and the table
-    // total ("$100").
-    expect(text).toContain('$20 unallocated')
-    expect(text).toContain('OpenAI has no usage this window')
+    expect(text).toContain('$20')
+
+    // Both provider chips render. Find them by their displayName label.
+    const chips = wrapper.findAll('button[aria-pressed]')
+    const openaiChip = chips.find(c => c.text().includes('OpenAI'))
+    const ollamaChip = chips.find(c => c.text().includes('Ollama Cloud'))
+    expect(openaiChip).toBeDefined()
+    expect(ollamaChip).toBeDefined()
+    // Unused provider's chip is visually dimmed AND non-clickable.
+    expect(openaiChip!.classes()).toContain('opacity-50')
+    expect((openaiChip!.element as HTMLButtonElement).disabled).toBe(true)
+    // Provider with usage stays at full opacity, clickable.
+    expect(ollamaChip!.classes()).not.toContain('opacity-50')
+    expect((ollamaChip!.element as HTMLButtonElement).disabled).toBe(false)
+
+    // The previous footnote phrasing has been removed.
+    expect(text).not.toContain('unallocated')
+    expect(text).not.toContain('has no usage this window')
+    expect(text).not.toContain('Subscription cost allocated across models')
   })
 
   it('cached + reasoning tokens count toward the allocation key', async () => {

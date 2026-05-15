@@ -19,7 +19,7 @@
  */
 import {
   ArrowDownTrayIcon, Bars3Icon, ChevronDownIcon, ChevronUpIcon,
-  PresentationChartLineIcon,
+  InformationCircleIcon, PresentationChartLineIcon,
 } from '@heroicons/vue/24/outline'
 import type { Agent } from '~/types/api'
 import {
@@ -1042,12 +1042,20 @@ defineExpose({ refresh })
                      provider's pro-rated bill × (this model's tokens /
                      this provider's total tokens this window). It's a
                      derived share, not actual per-call billing — the
-                     footnote below the table calls that out explicitly. -->
+                     info-icon tooltip next to the column header carries
+                     the methodology disclaimer. -->
                 <th
                   scope="col"
                   class="text-right px-3 py-2 font-medium"
                 >
-                  Cost*
+                  <span class="inline-flex items-center justify-end gap-1">
+                    <span>Cost</span>
+                    <InformationCircleIcon
+                      class="w-3.5 h-3.5 text-fg-muted shrink-0"
+                      aria-hidden="true"
+                      title="Subscription cost allocated across models by total tokens (prompt + completion + reasoning + cached)."
+                    />
+                  </span>
                 </th>
               </tr>
             </thead>
@@ -1188,31 +1196,6 @@ defineExpose({ refresh })
               <span class="text-fg-muted">· {{ r.turnCount }}t</span>
             </div>
           </template>
-        </div>
-
-        <!-- Footnote: clarifies the allocation, and flags any
-             subscription bill that couldn't be allocated because the
-             provider had zero usage this window. The Total in the table
-             above (or the bars in the chart) equals the bill iff this
-             footnote shows no unallocated entries; otherwise the gap is
-             exactly the sum of the listed amounts. Rendered in both
-             views because the methodology disclaimer applies regardless
-             of whether the operator is looking at the table or the
-             chart. -->
-        <div class="px-4 py-2 text-[11px] text-fg-muted border-t border-border">
-          *Subscription cost allocated across models by total tokens (prompt + completion + reasoning + cached).
-          <div
-            v-if="unallocatedSubscriptions.length > 0"
-            class="mt-1"
-          >
-            <template
-              v-for="(p, idx) in unallocatedSubscriptions"
-              :key="p.name"
-            >
-              <span v-if="idx > 0">; </span><span class="font-mono text-fg-primary">{{ formatStatCurrency(p.proRatedFee) }}</span>
-              unallocated — {{ p.displayName }} has no usage this window
-            </template>
-          </div>
         </div>
       </div>
 
