@@ -480,6 +480,46 @@ describe('ChatCostSection (JCLAW-28)', () => {
     expect(text).toContain('$100')
   })
 
+  it('hides the subscription per-model table entirely when no provider has usage', async () => {
+    // Pre-fix the per-model table rendered with a single TOTAL row at $0
+    // even on weeks with no chat activity, while the per-token block
+    // rendered nothing in the same case. The user wants symmetric
+    // behaviour: when no usage exists the section collapses to just the
+    // chip strip + COMBINED TOTAL footer.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+        { name: 'openai', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 20 },
+      ],
+      rows: [],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    await wrapper.find<HTMLSelectElement>('#chat-cost-window').setValue('30d')
+    await flushPromises()
+
+    const text = wrapper.text()
+    // Provider chips still render (carrying the bill on zero-usage weeks).
+    expect(text).toContain('Ollama Cloud')
+    expect(text).toContain('$100')
+    expect(text).toContain('OpenAI')
+    expect(text).toContain('$20')
+    // COMBINED TOTAL row stays — it's the section's bottom-line summary.
+    // (Rendered as "Combined total" in the DOM; the uppercase look is a
+    // CSS text-transform.)
+    expect(text).toContain('Combined total')
+    expect(text).toContain('$120')
+    // The per-model subscription table is absent. The Combined-total
+    // table at the bottom still ships its own <thead> (Row label /
+    // Turns / Prompt / ...), so we assert exactly one <thead> remains —
+    // not zero. Pre-fix there were two.
+    expect(wrapper.findAll('thead').length).toBe(1)
+    // No isolated "$0" subscription sub-total row to confuse the operator.
+    expect(text).not.toContain('$0')
+  })
+
   it('dims the provider chip when a subscription provider has zero usage', async () => {
     // OpenAI subscribed at $20/month but never used. Ollama Cloud
     // subscribed at $100/month with one model in use. The model row gets

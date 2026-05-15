@@ -1011,10 +1011,12 @@ defineExpose({ refresh })
              flat fee allocated proportionally to work done. Fixed sort
              by turn count descending; interactive sort would be overkill
              on what's usually a 1-2 model set per subscription provider.
-             Always rendered when a subscription is configured so the
-             Total row shows the fee even on weeks with no activity. -->
+             Hidden when there is no subscription usage in the window so
+             the section stays consistent with the per-token block (which
+             gates on hasPaidData). The provider chip strip above and the
+             COMBINED TOTAL row below carry the bill on zero-usage weeks. -->
         <div
-          v-if="view === 'table'"
+          v-if="view === 'table' && subscriptionPerModelAllocated.length > 0"
           class="overflow-x-auto border-t border-border"
         >
           <table class="w-full text-xs table-fixed">
