@@ -1455,9 +1455,14 @@ defineExpose({ refresh })
            bg flood-fills the gap above the row plus the row itself, so the
            operator reads "everything below the per-token table is the
            combined-total summary" without a hard line stitched between
-           the gap and the row. -->
+           the gap and the row.
+           Suppressed entirely when no usage exists in the window — even
+           when a subscription is configured. The (dimmed) provider chips
+           up top already convey the bill on zero-usage weeks; rendering
+           a Combined Total of $bill / 0 turns / 0 tokens / 0 cost-per-row
+           was visual noise the operator had to mentally subtract from. -->
       <div
-        v-if="hasPaidData || hasSubscriptionSection"
+        v-if="hasPaidData || subscriptionPerModelAllocated.length > 0"
         class="overflow-x-auto pt-6 bg-muted/30"
       >
         <table class="w-full text-xs table-fixed">

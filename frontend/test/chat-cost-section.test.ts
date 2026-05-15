@@ -480,12 +480,15 @@ describe('ChatCostSection (JCLAW-28)', () => {
     expect(text).toContain('$100')
   })
 
-  it('hides the subscription per-model table entirely when no provider has usage', async () => {
-    // Pre-fix the per-model table rendered with a single TOTAL row at $0
-    // even on weeks with no chat activity, while the per-token block
-    // rendered nothing in the same case. The user wants symmetric
-    // behaviour: when no usage exists the section collapses to just the
-    // chip strip + COMBINED TOTAL footer.
+  it('collapses the cost section to just the provider chips when no usage exists', async () => {
+    // Pre-fix the section rendered a per-model table with a $0 TOTAL row
+    // PLUS a Combined Total row showing the unused subscription bill,
+    // even on weeks with no chat activity. The per-token block already
+    // hid itself in that case, so the section was lopsided. New
+    // behaviour: when no provider has any usage, the section collapses
+    // to just the (dimmed) provider chip strip up top — both the
+    // per-model table AND the combined-total footer go away. The chips
+    // alone carry the "you're paying these subscriptions" message.
     stubSubscriptionFixture({
       providers: [
         { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
@@ -501,22 +504,18 @@ describe('ChatCostSection (JCLAW-28)', () => {
     await flushPromises()
 
     const text = wrapper.text()
-    // Provider chips still render (carrying the bill on zero-usage weeks).
+    // Provider chips still render — they carry the bill on zero-usage
+    // weeks via their own labels, dimmed to signal "no activity yet."
     expect(text).toContain('Ollama Cloud')
     expect(text).toContain('$100')
     expect(text).toContain('OpenAI')
     expect(text).toContain('$20')
-    // COMBINED TOTAL row stays — it's the section's bottom-line summary.
-    // (Rendered as "Combined total" in the DOM; the uppercase look is a
-    // CSS text-transform.)
-    expect(text).toContain('Combined total')
-    expect(text).toContain('$120')
-    // The per-model subscription table is absent. The Combined-total
-    // table at the bottom still ships its own <thead> (Row label /
-    // Turns / Prompt / ...), so we assert exactly one <thead> remains —
-    // not zero. Pre-fix there were two.
-    expect(wrapper.findAll('thead').length).toBe(1)
-    // No isolated "$0" subscription sub-total row to confuse the operator.
+    // Per-model table is gone — no <thead> anywhere in the section.
+    expect(wrapper.findAll('thead').length).toBe(0)
+    // Combined-total footer is gone — no "Combined total" row label.
+    expect(text).not.toContain('Combined total')
+    // No isolated $0 anywhere; the chips' $20 / $100 are non-zero so
+    // a literal "$0" appearing would mean a zeroed sub-total leaked in.
     expect(text).not.toContain('$0')
   })
 
