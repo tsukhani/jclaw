@@ -183,6 +183,12 @@ const navGroups: NavGroup[] = [
     label: 'Ops',
     items: [
       { label: 'Agents', to: '/agents', icon: BotMessageSquare },
+      // Subagents is the operator-facing list of every subagent invocation
+      // (RUNNING, COMPLETED, FAILED, KILLED, TIMEOUT) with status pills
+      // and a kill action for RUNNING rows. Sits directly below Agents
+      // because the two are conceptually paired — Agents configures the
+      // workforce, Subagents shows what that workforce is currently doing.
+      { label: 'Subagents', to: '/subagents', icon: UsersRound },
       { label: 'Tasks', to: '/tasks', icon: ClipboardDocumentCheckIcon },
       { label: 'Skills', to: '/skills', icon: BoltIcon },
       // WrenchScrewdriverIcon (not Cog) — disambiguates Tools from Settings,
@@ -201,11 +207,6 @@ const navGroups: NavGroup[] = [
     items: [
       { label: 'Settings', to: '/settings', icon: Cog6ToothIcon },
       { label: 'Logs', to: '/logs', icon: Bars3Icon },
-      // JCLAW-271: SubagentRuns admin — operator-facing list of every
-      // subagent invocation with status pills and a kill action for
-      // RUNNING rows. Sits next to Logs because both are read-mostly
-      // operational views of background activity.
-      { label: 'Subagents', to: '/subagents', icon: UsersRound },
     ],
   },
   {
