@@ -946,9 +946,17 @@ defineExpose({ refresh })
            activity plus the pro-rated monthly fee. Subscription has no
            per-row cost attribution so this subsection never feeds the
            per-model table or chart below. -->
+      <!-- border-b is only meaningful as a separator from the per-model
+           table / Combined Total below. With both gated on actual usage,
+           leaving the border in unconditionally drew a stray line under
+           the chip strip on zero-usage weeks. Same predicate as the
+           Combined Total wrapper below. -->
       <div
         v-if="hasSubscriptionSection"
-        class="border-b border-border mt-6 mb-6"
+        class="mt-6 mb-6"
+        :class="hasPaidData || subscriptionPerModelAllocated.length > 0
+          ? 'border-b border-border'
+          : ''"
       >
         <div class="px-4 pt-3 pb-3">
           <div class="text-xs font-medium text-fg-muted uppercase tracking-wide">
