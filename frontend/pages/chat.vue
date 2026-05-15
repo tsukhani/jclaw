@@ -2584,9 +2584,18 @@ function exportConversation() {
                         View full →
                       </NuxtLink>
                     </div>
-                    <div class="px-3 py-2 text-sm text-fg-strong whitespace-pre-wrap break-words">
-                      {{ subagentAnnounceReply(msg) }}
-                    </div>
+                    <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify (see renderMarkdown above) before returning. -->
+                    <!-- JCLAW-291 follow-up: render announce reply through the
+                         same markdown path the assistant bubble uses, so
+                         headings, lists, tables, and bold text in the
+                         child's summary aren't shown raw. prose-chat brings
+                         the styled-typography rules; overflow-x-auto keeps
+                         wide tables scrollable inside the card. -->
+                    <div
+                      class="prose-chat px-3 py-2 text-sm text-fg-strong overflow-x-auto break-words"
+                      v-html="renderMarkdown(subagentAnnounceReply(msg), effectiveDisplayAgentId)"
+                    />
+                    <!-- eslint-enable vue/no-v-html -->
                     <!-- JCLAW-291: child's reply was cut off by the model's
                          max_tokens budget. Footer keeps the marker visually
                          distinct from the reply body so the operator doesn't
