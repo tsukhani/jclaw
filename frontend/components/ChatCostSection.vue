@@ -57,6 +57,28 @@ const selectedWindow = ref<WindowKey>('30d')
 const selectedAgentId = ref<number | null>(null)
 const selectedChannel = ref<string | null>(null)
 const view = ref<CostView>('table')
+
+// Cost-column tooltip state. Teleport-to-body so the popover escapes
+// the table wrapper's overflow-x-auto clip (which implicitly clips Y
+// too, masking an in-flow absolute-positioned tooltip — see the
+// JCLAW-292-era cost-table polish for the original repro). Coords are
+// expressed as right/bottom offsets from the viewport edges so the
+// tooltip lands above the icon, right-aligned, without needing to
+// know its own height up front.
+const costTooltipVisible = ref(false)
+const costTooltipBottom = ref(0)
+const costTooltipRight = ref(0)
+function showCostTooltip(event: MouseEvent | FocusEvent) {
+  const el = event.currentTarget as HTMLElement | null
+  if (!el) return
+  const r = el.getBoundingClientRect()
+  costTooltipBottom.value = window.innerHeight - r.top + 4
+  costTooltipRight.value = window.innerWidth - r.right
+  costTooltipVisible.value = true
+}
+function hideCostTooltip() {
+  costTooltipVisible.value = false
+}
 // Provider-chip filter for the Subscription subsection. When set, the
 // subscription per-model table + tfoot Total + Combined Total all narrow
 // to that provider's models and prorated bill. Click the same chip again
@@ -1050,22 +1072,34 @@ defineExpose({ refresh })
                 >
                   <span class="inline-flex items-center justify-end gap-1">
                     <span>Cost</span>
-                    <!-- JClaw tooltip pattern (mirrors settings.vue's
-                         group/tip + group-hover/tip:block popover):
-                         native title-attribute tooltips on SVG don't
-                         fire reliably in Chrome, so the rest of the
-                         app uses an absolute-positioned hover panel.
-                         right-0 because this is the rightmost column;
-                         left-0 would push the panel offscreen. -->
-                    <span class="relative group/tip">
+                    <!-- Tooltip rendered via <Teleport to="body"> below
+                         (so it escapes the table wrapper's overflow-x-auto
+                         clip, which implicitly clips Y too in CSS).
+                         The native title-attribute fallback is unreliable
+                         on SVG in Chrome; the project's group/tip popover
+                         pattern works for non-clipped contexts but not
+                         here. mouseenter computes coords from the icon's
+                         bounding rect; mouseleave hides. -->
+                    <!-- A button (not a span) so keyboard users can
+                         focus + read the tooltip via Tab; the focus/blur
+                         handlers mirror the mouseenter/leave pair. The
+                         button-styled-as-icon trick keeps the visual the
+                         same as a bare InformationCircleIcon. -->
+                    <button
+                      type="button"
+                      class="inline-flex p-0 m-0 bg-transparent border-0 cursor-help"
+                      aria-label="Cost column information"
+                      @mouseenter="showCostTooltip"
+                      @mouseleave="hideCostTooltip"
+                      @focus="showCostTooltip"
+                      @blur="hideCostTooltip"
+                    >
                       <InformationCircleIcon
-                        class="w-3.5 h-3.5 text-fg-muted cursor-help"
+                        class="w-3.5 h-3.5 text-fg-muted"
                         aria-hidden="true"
+                        data-testid="cost-info-icon"
                       />
-                      <span class="absolute right-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none normal-case font-normal text-left">
-                        Subscription cost allocated across models by total tokens (prompt + completion + reasoning + cached).
-                      </span>
-                    </span>
+                    </button>
                   </span>
                 </th>
               </tr>
@@ -1511,5 +1545,23 @@ defineExpose({ refresh })
         </table>
       </div>
     </template>
+
+    <!-- Cost-column tooltip. Teleported to <body> so it renders outside
+         the table wrapper's overflow-x-auto clipping context (which
+         clips Y too — see showCostTooltip). Fixed positioning anchored
+         from the icon's bounding rect; right/bottom offsets keep it
+         above and right-aligned with the icon without needing the
+         tooltip's intrinsic dimensions. -->
+    <Teleport to="body">
+      <div
+        v-if="costTooltipVisible"
+        :style="{ bottom: costTooltipBottom + 'px', right: costTooltipRight + 'px' }"
+        class="fixed z-50 w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none"
+        role="tooltip"
+        data-testid="cost-info-tooltip"
+      >
+        Subscription cost allocated across models by total tokens (prompt + completion + reasoning + cached).
+      </div>
+    </Teleport>
   </div>
 </template>
