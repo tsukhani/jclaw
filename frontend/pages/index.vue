@@ -195,7 +195,10 @@ onBeforeUnmount(() => {
          Driven on the parent's 5 s tick (see pollTimer below) so all three
          dashboard panels refresh in lockstep — avoids the per-panel pending
          flicker that staggered timers caused. -->
-    <ChatCostSection ref="chatCostRef" :agents="agents" />
+    <ChatCostSection
+      ref="chatCostRef"
+      :agents="agents"
+    />
 
     <!-- Chat Performance -->
     <div class="bg-surface-elevated border border-border mb-8">

@@ -55,7 +55,9 @@ async function refresh() {
   runs.value = await $fetch<SubagentRun[]>(url.value)
 }
 await refresh()
-watch(url, () => { refresh() })
+watch(url, () => {
+  refresh()
+})
 
 // Auto-refresh every 5s when there is at least one RUNNING row — keeps the
 // admin view live during an actual subagent fan-out without polling
