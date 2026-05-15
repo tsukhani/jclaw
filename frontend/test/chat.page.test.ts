@@ -325,6 +325,109 @@ describe('Chat page — JCLAW-131 per-kind upload caps + JCLAW-165 audio univers
   // focused on the attach-time gates here.
 })
 
+describe('Chat page — subagent transcript read-only mode (JCLAW-274)', () => {
+  // The /subagents page's "View transcript" link and the chat page's own
+  // subagent_announce "View full →" link both route to /chat?conversation=ID
+  // where the conversation belongs to a subagent (Agent.parentAgent != null,
+  // channel="subagent"). Subagents are filtered from /api/agents, so the
+  // resolver enters a read-only branch: messages render, a banner names the
+  // subagent, and the composer is disabled.
+
+  function setupSubagentTranscriptFixture() {
+    setupBaseChatApi()
+    // /api/conversations/{id} returns the subagent conversation directly —
+    // resolveAndLoadConversation hits this endpoint (not the list endpoint,
+    // which is channel-scoped and would silently miss subagent rows).
+    registerEndpoint('/api/conversations/501', () => ({
+      id: 501, agentId: 99, agentName: 'helper-subagent', channelType: 'subagent',
+      peerId: null, messageCount: 2, preview: 'subagent task',
+      createdAt: '2026-05-15T10:00:00Z', updatedAt: '2026-05-15T10:00:01Z',
+    }))
+    registerEndpoint('/api/conversations/501/messages', () => [
+      { id: 700, role: 'user', content: 'Subagent task instructions',
+        createdAt: '2026-05-15T10:00:00Z' },
+      { id: 701, role: 'assistant', content: 'Subagent reply.',
+        createdAt: '2026-05-15T10:00:01Z' },
+    ])
+  }
+
+  it('enters read-only mode and renders the banner when resolving a subagent conversation', async () => {
+    setupSubagentTranscriptFixture()
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    const vm = component.vm as unknown as {
+      resolveAndLoadConversation: (id: number) => Promise<boolean>
+      subagentTranscript: { agentId: number, agentName: string } | null
+    }
+    const loaded = await vm.resolveAndLoadConversation(501)
+    expect(loaded).toBe(true)
+    await flushPromises()
+
+    expect(vm.subagentTranscript).toEqual({ agentId: 99, agentName: 'helper-subagent' })
+    const banner = component.find('[data-testid="subagent-transcript-banner"]')
+    expect(banner.exists()).toBe(true)
+    expect(banner.text()).toContain('helper-subagent')
+    expect(banner.text()).toContain('Read-only')
+  })
+
+  it('disables the composer textarea when in subagent-transcript mode', async () => {
+    setupSubagentTranscriptFixture()
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    const vm = component.vm as unknown as {
+      resolveAndLoadConversation: (id: number) => Promise<boolean>
+    }
+    await vm.resolveAndLoadConversation(501)
+    await flushPromises()
+
+    const textarea = component.find('textarea').element as HTMLTextAreaElement
+    expect(textarea.disabled).toBe(true)
+    expect(textarea.placeholder).toContain('read-only')
+  })
+
+  it('renders the subagent transcript messages so the user can read them', async () => {
+    setupSubagentTranscriptFixture()
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    const vm = component.vm as unknown as {
+      resolveAndLoadConversation: (id: number) => Promise<boolean>
+    }
+    await vm.resolveAndLoadConversation(501)
+    await flushPromises()
+
+    const html = component.html()
+    expect(html).toContain('Subagent task instructions')
+    expect(html).toContain('Subagent reply.')
+  })
+
+  it('does not enter read-only mode for a normal (in-dropdown) conversation', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations/77', () => ({
+      id: 77, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+      peerId: 'admin', messageCount: 1, preview: 'normal',
+      createdAt: '2026-05-15T10:00:00Z', updatedAt: '2026-05-15T10:00:00Z',
+    }))
+    registerEndpoint('/api/conversations/77/messages', () => [])
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    const vm = component.vm as unknown as {
+      resolveAndLoadConversation: (id: number) => Promise<boolean>
+      subagentTranscript: { agentId: number, agentName: string } | null
+    }
+    await vm.resolveAndLoadConversation(77)
+    await flushPromises()
+
+    expect(vm.subagentTranscript).toBeNull()
+    expect(component.find('[data-testid="subagent-transcript-banner"]').exists()).toBe(false)
+    const textarea = component.find('textarea').element as HTMLTextAreaElement
+    expect(textarea.disabled).toBe(false)
+  })
+})
+
 describe('Chat page — composer focus on entry', () => {
   // Pin the "land the cursor in the message box" contract: any path that
   // resets the chat to a typeable state should leave the textarea focused

@@ -1325,6 +1325,35 @@ const route = useRoute()
 const deepLinkConvoId = route.query.conversation ? Number(route.query.conversation) : null
 const initializing = ref(true) // suppresses agent-change clear during setup
 
+/**
+ * Read-only transcript mode for subagent conversations (JCLAW-274).
+ *
+ * Subagents are filtered out of {@code /api/agents} (they don't belong in the
+ * user-facing dropdown), so their conversations can't be "selected" the way
+ * top-level agents' can. When the user opens {@code /chat?conversation=ID}
+ * from the /subagents page or a {@code subagent_announce} card, this ref
+ * holds the owning subagent's identity so the page can:
+ *   1. Render a "Read-only transcript" banner naming the subagent.
+ *   2. Disable the composer — sending a message would post against whatever
+ *      agent the dropdown happens to be showing, not the subagent that owns
+ *      the transcript.
+ *   3. Pass the subagent's id into {@code renderMarkdown} so workspace-file
+ *      links inside the transcript resolve against the subagent's
+ *      workspace, not the parent agent's.
+ *
+ * Cleared by {@code clearSubagentTranscript} whenever the user navigates
+ * away from the read-only view (agent change, new chat, sidebar Recents
+ * click, or deep-linking to a non-subagent conversation).
+ */
+const subagentTranscript = ref<{ agentId: number, agentName: string } | null>(null)
+
+/** Effective agent id for {@code renderMarkdown} workspace-link rewriting. */
+const effectiveDisplayAgentId = computed(() => subagentTranscript.value?.agentId ?? selectedAgentId.value)
+
+function clearSubagentTranscript() {
+  subagentTranscript.value = null
+}
+
 // Auto-select agent on load
 watch(agents, (val) => {
   if (!val?.length || selectedAgentId.value) return
@@ -1338,7 +1367,51 @@ watch(selectedAgentId, () => {
   if (initializing.value) return
   selectedConvoId.value = null
   messages.value = []
+  clearSubagentTranscript()
 })
+
+/**
+ * Resolve and load a deep-linked conversation that isn't in the current
+ * agent's list. Returns {@code true} if the conversation was loaded (either
+ * by switching agents or by entering read-only subagent-transcript mode),
+ * {@code false} if it couldn't be resolved.
+ *
+ * Uses {@code GET /api/conversations/{id}} so it works for any channel type
+ * (web, telegram, subagent, etc.) — the prior implementation scanned
+ * {@code /api/conversations?channel=web&limit=100} which structurally
+ * missed subagent conversations stamped with {@code channelType="subagent"}.
+ */
+async function resolveAndLoadConversation(id: number): Promise<boolean> {
+  let convo: Conversation | null = null
+  try {
+    convo = await $fetch<Conversation>(`/api/conversations/${id}`)
+  }
+  catch { return false }
+  if (!convo) return false
+
+  const owningAgent = agents.value?.find(a => a.id === convo!.agentId)
+  if (owningAgent) {
+    // Top-level agent we know about — switch the dropdown to it. The
+    // selectedAgentId watcher would normally clear messages, but we suppress
+    // that during initial setup via {@code initializing}; for in-page
+    // navigations we accept the brief clear since loadConversation runs next.
+    clearSubagentTranscript()
+    if (owningAgent.id !== selectedAgentId.value) {
+      selectedAgentId.value = owningAgent.id
+    }
+    await loadConversation(id)
+    return true
+  }
+
+  // Owning agent is filtered from the dropdown — almost always a subagent
+  // (parentAgent != null). Enter read-only transcript mode. We deliberately
+  // do NOT mutate selectedAgentId here: the dropdown should keep showing
+  // whatever top-level agent the user had chosen, and the banner names the
+  // subagent.
+  subagentTranscript.value = { agentId: convo.agentId, agentName: convo.agentName }
+  await loadConversation(id)
+  return true
+}
 
 // Deep-link: once conversations are loaded, find and select the target conversation.
 // The useFetch URL function above re-fires when selectedAgentId changes, so we
@@ -1359,24 +1432,10 @@ if (deepLinkConvoId) {
       return
     }
 
-    // Not in the current agent's list — find which agent owns it
+    // Not in the current agent's list — resolve via direct fetch (works for
+    // any channel including subagent transcripts).
     if (initializing.value) {
-      try {
-        const allConvos = await $fetch<Conversation[]>('/api/conversations?channel=web&limit=100')
-        const convo = allConvos?.find(c => c.id === deepLinkConvoId)
-        if (convo) {
-          const agent = agents.value.find(a => a.name === convo.agentName)
-          if (agent && agent.id !== selectedAgentId.value) {
-            // Switch agent — this changes the URL the useFetch function returns,
-            // which triggers a refetch, which fires this watcher again with the
-            // correct agent's conversation list.
-            selectedAgentId.value = agent.id
-            return // wait for next watcher fire with new conversations
-          }
-        }
-      }
-      catch { /* fall through */ }
-      // Couldn't find the conversation — give up and finish init
+      await resolveAndLoadConversation(deepLinkConvoId)
       initializing.value = false
       stopDeepLink()
     }
@@ -1438,31 +1497,27 @@ function focusInput() {
 // without remounting the page, so the one-shot deep-link watcher above
 // doesn't re-fire. This route-query watcher catches in-page navigations
 // and loads the target conversation — switching agents when the target
-// belongs to a different agent's list.
+// belongs to a different agent's list, or entering read-only subagent-
+// transcript mode when the target belongs to a subagent (which isn't in
+// the dropdown).
 watch(() => route.query.conversation, async (raw) => {
   const id = raw ? Number(raw) : null
   if (!id || id === selectedConvoId.value) return
   const ownedByCurrent = conversations.value?.some(c => c.id === id) ?? false
   if (ownedByCurrent) {
+    clearSubagentTranscript()
     await loadConversation(id)
     return
   }
-  // Target lives under a different agent — find it and switch, then load.
-  try {
-    const allConvos = await $fetch<Conversation[]>('/api/conversations?channel=web&limit=100')
-    const convo = allConvos?.find(c => c.id === id)
-    if (!convo) return
-    const agent = agents.value?.find(a => a.name === convo.agentName)
-    if (agent && agent.id !== selectedAgentId.value) {
-      selectedAgentId.value = agent.id
-    }
-    await loadConversation(id)
-  }
-  catch { /* best-effort */ }
+  await resolveAndLoadConversation(id)
 })
 
 async function sendMessage() {
   if (streaming.value || !selectedAgentId.value) return
+  // Subagent transcripts are read-only — the user reached this view via a
+  // "View transcript" link, and there's no well-defined target agent to
+  // post to (the dropdown shows a top-level agent, not the subagent).
+  if (subagentTranscript.value) return
   const rawText = input.value.trim()
   if (!rawText && !attachedFiles.value.length) return
 
@@ -1776,6 +1831,7 @@ function newChat() {
   if (streaming.value) stopStreaming()
   selectedConvoId.value = null
   messages.value = []
+  clearSubagentTranscript()
   // Clear composer + streaming buffers so the new-chat boundary is a hard
   // reset: no half-typed prompt, no attachments carried over, no stale
   // reasoning/content placeholders. The context meter is derived from
@@ -1890,6 +1946,7 @@ function triggerFileUpload() {
 function handleFileUpload(event: Event) {
   const target = event.target as HTMLInputElement
   const picked = target.files ? Array.from(target.files) : []
+  if (subagentTranscript.value) return // read-only transcript: drop attachments silently
   addAttachments(picked)
   target.value = ''
 }
@@ -1899,6 +1956,7 @@ function handleFileUpload(event: Event) {
 // cap, and thumbnail preview apply uniformly regardless of how the file
 // entered the composer.
 function handleDrop(event: DragEvent) {
+  if (subagentTranscript.value) return
   const files = event.dataTransfer?.files
   if (!files || files.length === 0) return
   addAttachments(Array.from(files))
@@ -1908,6 +1966,7 @@ function handleDrop(event: DragEvent) {
 // typically a single image from a screenshot-copy (Cmd/Ctrl-Shift-4,
 // Windows Snipping Tool, etc.). Text pastes fall through untouched.
 function handlePaste(event: ClipboardEvent) {
+  if (subagentTranscript.value) return
   const items = event.clipboardData?.items
   if (!items || items.length === 0) return
   const files: File[] = []
@@ -2112,7 +2171,8 @@ async function uploadAttachments(agentId: number): Promise<UploadedAttachment[]>
 // mountSuspended wait before calling the exposed method, so the async
 // gap doesn't manifest in practice.
 // eslint-disable-next-line vue/no-expose-after-await
-defineExpose({ addAttachments, attachedFiles, attachError, loadConversation, messages, hasPendingAsyncAnnounce, pollForAnnounce })
+defineExpose({ addAttachments, attachedFiles, attachError, loadConversation, messages,
+  hasPendingAsyncAnnounce, pollForAnnounce, resolveAndLoadConversation, subagentTranscript })
 
 function exportConversation() {
   if (!displayMessages.value.length) return
@@ -2289,6 +2349,28 @@ function exportConversation() {
             </p>
           </div>
         </Transition>
+
+        <!--
+          JCLAW-274: subagent-transcript banner. Surfaces above the message
+          list when {@code subagentTranscript} is set — i.e. the user landed
+          on this conversation via a "View transcript" link from /subagents
+          or a {@code subagent_announce} card. The composer is disabled
+          below; this banner makes the read-only state obvious so the user
+          doesn't try to type and wonder why nothing sends.
+        -->
+        <div
+          v-if="subagentTranscript"
+          data-testid="subagent-transcript-banner"
+          class="mx-auto w-full max-w-3xl px-4 pt-3"
+        >
+          <div
+            class="flex items-center gap-2 px-3 py-2 text-xs bg-blue-50 dark:bg-blue-400/10
+                   border border-blue-200 dark:border-blue-400/20 text-blue-700 dark:text-blue-300 rounded"
+          >
+            <span class="font-mono uppercase tracking-wide">Read-only</span>
+            <span>Subagent transcript for <strong>{{ subagentTranscript.agentName }}</strong></span>
+          </div>
+        </div>
 
         <!--
           Messages — overscroll-contain stops trackpad/wheel momentum
@@ -2695,7 +2777,7 @@ function exportConversation() {
                         v-if="!msg.thinkingCollapsed"
                         data-reasoning-body
                         class="prose-chat px-4 pb-4 pt-3 text-sm text-fg-primary break-words max-h-80 overflow-y-auto border-t border-neutral-200 dark:border-neutral-700"
-                        v-html="msg._key === streamingMessageKey ? streamReasoningHtml : renderMarkdown(msg.reasoning, selectedAgentId)"
+                        v-html="msg._key === streamingMessageKey ? streamReasoningHtml : renderMarkdown(msg.reasoning, effectiveDisplayAgentId)"
                       />
                       <!-- eslint-enable vue/no-v-html -->
                     </div>
@@ -2713,7 +2795,7 @@ function exportConversation() {
                     <div
                       v-if="msg._key === streamingMessageKey ? !!streamContent : !!msg.content"
                       class="prose-chat text-fg-primary text-base overflow-x-auto break-words"
-                      v-html="msg._key === streamingMessageKey ? streamContentHtml : renderMarkdown(msg.content ?? '', selectedAgentId)"
+                      v-html="msg._key === streamingMessageKey ? streamContentHtml : renderMarkdown(msg.content ?? '', effectiveDisplayAgentId)"
                     />
                     <!-- eslint-enable vue/no-v-html -->
                     <div
@@ -3057,12 +3139,13 @@ function exportConversation() {
               id="chat-message-input"
               ref="chatInput"
               v-model="input"
-              placeholder="Send a message..."
-              :disabled="streaming"
+              :placeholder="subagentTranscript ? 'Subagent transcripts are read-only' : 'Send a message...'"
+              :disabled="streaming || !!subagentTranscript"
               rows="1"
               aria-label="Message input"
               class="w-full px-4 pt-4 pb-6 bg-transparent text-sm text-fg-strong
-                   placeholder-fg-muted focus:outline-hidden resize-none overflow-hidden"
+                   placeholder-fg-muted focus:outline-hidden resize-none overflow-hidden
+                   disabled:cursor-not-allowed"
               @keydown.enter.exact="onInputEnter"
               @keydown.down="onInputKeydown"
               @keydown.up="onInputKeydown"

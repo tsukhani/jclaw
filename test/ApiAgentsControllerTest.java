@@ -340,4 +340,62 @@ class ApiAgentsControllerTest extends FunctionalTest {
         assertTrue(getContent(response).contains("\"name\":\"main\""),
                 "main agent must remain visible in /api/agents listing");
     }
+
+    /**
+     * Subagent rows (Agent.parentAgent != null) belong to a parent's
+     * spawn tree, not to the user-facing dropdown. The /subagents admin
+     * page is the only surface that exposes them. The list endpoint must
+     * filter them out so the chat header's "Agent" selector stays clean.
+     */
+    @Test
+    void subagentsAreFilteredFromListEndpoint() {
+        login();
+        var parentId = createAgent("subagent-parent");
+        createChildAgent("subagent-child", parentId);
+
+        var response = GET("/api/agents");
+        assertIsOk(response);
+        var body = getContent(response);
+        assertTrue(body.contains("\"name\":\"subagent-parent\""),
+                "parent agent must be present: " + body);
+        assertFalse(body.contains("\"name\":\"subagent-child\""),
+                "subagent child must be filtered from list: " + body);
+    }
+
+    /**
+     * Seed a subagent row (parentAgent set) directly via JPA. Same
+     * virtual-thread + Tx.run pattern as {@link #createMainAgent} since
+     * the FunctionalTest carrier thread is already inside an uncommitted
+     * JPA transaction.
+     */
+    private Long createChildAgent(String name, String parentIdStr) {
+        var parentId = Long.parseLong(parentIdStr);
+        var holder = new java.util.concurrent.atomic.AtomicLong(0);
+        var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var t = Thread.ofVirtual().start(() -> {
+            try {
+                services.Tx.run(() -> {
+                    var parent = Agent.<Agent>findById(parentId);
+                    var child = new Agent();
+                    child.name = name;
+                    child.modelProvider = "openrouter";
+                    child.modelId = "gpt-4.1";
+                    child.enabled = true;
+                    child.parentAgent = parent;
+                    child.save();
+                    holder.set(child.id);
+                });
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+        if (err.get() != null) throw new RuntimeException(err.get());
+        return holder.get();
+    }
 }

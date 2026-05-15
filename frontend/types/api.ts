@@ -45,6 +45,7 @@ export interface TelegramBindingSummary {
 /** A conversation between a user and an agent. */
 export interface Conversation {
   id: number
+  agentId: number
   preview: string | null
   channelType: string
   agentName: string

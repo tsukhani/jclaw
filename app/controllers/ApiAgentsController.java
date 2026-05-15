@@ -96,8 +96,14 @@ public class ApiAgentsController extends Controller {
     public static void list() {
         var agents = AgentService.listAll();
         var configuredKeys = AgentService.configuredModelKeys();
+        // Subagents (parentAgent != null) are scoped to their parent's spawn
+        // tree and don't belong in the user-facing dropdown — they appear on
+        // the /subagents admin page, where their transcripts are viewable.
+        // Filtering here keeps the chat UI's "Agent" selector strictly for
+        // top-level agents.
         var result = agents.stream()
                 .filter(a -> !isReservedName(a.name))
+                .filter(a -> a.parentAgent == null)
                 .map(a -> AgentView.of(a, configuredKeys))
                 .toList();
         renderJSON(gson.toJson(result));
