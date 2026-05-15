@@ -105,7 +105,7 @@ public class Message extends Model {
      * for every other row — only the assistant turn that hit the cap and the
      * subagent_announce row that carries a truncated child reply ever flip it.
      */
-    @Column(name = "truncated", nullable = false)
+    @Column(name = "truncated", nullable = false, columnDefinition = "BOOLEAN DEFAULT FALSE")
     public boolean truncated;
 
     @Column(name = "created_at", nullable = false, updatable = false)
