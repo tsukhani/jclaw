@@ -525,10 +525,13 @@ describe('ChatCostSection (JCLAW-28)', () => {
     expect(ollamaChip!.classes()).not.toContain('opacity-50')
     expect((ollamaChip!.element as HTMLButtonElement).disabled).toBe(false)
 
-    // The previous footnote phrasing has been removed.
+    // The previous "$X unallocated — Provider has no usage this window"
+    // phrasing has been removed entirely (the dimmed chip carries that
+    // signal now). The methodology disclaimer text DOES still live in
+    // the DOM — but inside a hidden hover-tooltip span on the Cost
+    // column header — so we don't assert against its presence here.
     expect(text).not.toContain('unallocated')
     expect(text).not.toContain('has no usage this window')
-    expect(text).not.toContain('Subscription cost allocated across models')
   })
 
   it('cached + reasoning tokens count toward the allocation key', async () => {

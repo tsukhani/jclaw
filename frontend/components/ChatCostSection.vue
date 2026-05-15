@@ -1050,11 +1050,22 @@ defineExpose({ refresh })
                 >
                   <span class="inline-flex items-center justify-end gap-1">
                     <span>Cost</span>
-                    <InformationCircleIcon
-                      class="w-3.5 h-3.5 text-fg-muted shrink-0"
-                      aria-hidden="true"
-                      title="Subscription cost allocated across models by total tokens (prompt + completion + reasoning + cached)."
-                    />
+                    <!-- JClaw tooltip pattern (mirrors settings.vue's
+                         group/tip + group-hover/tip:block popover):
+                         native title-attribute tooltips on SVG don't
+                         fire reliably in Chrome, so the rest of the
+                         app uses an absolute-positioned hover panel.
+                         right-0 because this is the rightmost column;
+                         left-0 would push the panel offscreen. -->
+                    <span class="relative group/tip">
+                      <InformationCircleIcon
+                        class="w-3.5 h-3.5 text-fg-muted cursor-help"
+                        aria-hidden="true"
+                      />
+                      <span class="absolute right-0 top-5 z-20 hidden group-hover/tip:block w-64 px-2.5 py-2 bg-muted border border-input text-[10px] text-fg-muted leading-relaxed shadow-xl pointer-events-none normal-case font-normal text-left">
+                        Subscription cost allocated across models by total tokens (prompt + completion + reasoning + cached).
+                      </span>
+                    </span>
                   </span>
                 </th>
               </tr>
