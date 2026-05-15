@@ -1471,7 +1471,7 @@ defineExpose({ refresh })
            was visual noise the operator had to mentally subtract from. -->
       <div
         v-if="hasPaidData || subscriptionPerModelAllocated.length > 0"
-        class="overflow-x-auto pt-6 bg-muted/30"
+        class="overflow-x-auto pt-6 bg-muted/50"
       >
         <table class="w-full text-xs table-fixed">
           <!-- Explicit colgroup so table-fixed has a column-width source
