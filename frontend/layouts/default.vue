@@ -6,6 +6,7 @@ import {
   ArrowRightOnRectangleIcon,
   Bars3Icon,
   BoltIcon,
+  BookOpenIcon,
   ChatBubbleLeftRightIcon,
   ChatBubbleOvalLeftEllipsisIcon,
   ClipboardDocumentCheckIcon,
@@ -212,6 +213,10 @@ const navGroups: NavGroup[] = [
     items: [
       { label: 'Feedback', to: 'https://github.com/tsukhani/jclaw/issues', icon: MegaphoneIcon, external: true },
       { label: 'Guided Tour', icon: MapIcon, onClick: showTourIntro },
+      // JCLAW-292: in-app User Guide. Sits below Guided Tour because
+      // the tour is a one-time onboarding ritual; the guide is the
+      // operator's recurring reference.
+      { label: 'User Guide', to: '/guide', icon: BookOpenIcon },
     ],
   },
 ]
