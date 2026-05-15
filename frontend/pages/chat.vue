@@ -1634,7 +1634,23 @@ async function sendMessage() {
   }
   attachedFiles.value = []
   if (chatInput.value) chatInput.value.style.height = 'auto'
-  messages.value.push({ _key: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString() })
+  // Map the just-uploaded attachments onto the optimistic user bubble so
+  // the file chips render immediately. Without this, the chips stayed
+  // hidden until the next /messages refetch surfaced the persisted
+  // {@link MessageAttachment} rows — observable as "I uploaded a file
+  // but it doesn't show until I leave and come back." Field shapes are
+  // close-enough copies; the only translation is `attachmentId` → `uuid`,
+  // since both refer to the same opaque /api/attachments/{id} key.
+  const optimisticAttachments = uploaded.length
+    ? uploaded.map(u => ({
+        uuid: u.attachmentId,
+        originalFilename: u.originalFilename,
+        mimeType: u.mimeType,
+        sizeBytes: u.sizeBytes,
+        kind: u.kind,
+      }))
+    : undefined
+  messages.value.push({ _key: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString(), attachments: optimisticAttachments })
   triggerRef(messages)
   scrollToBottom()
 
@@ -1993,13 +2009,16 @@ const maxFileBytes = computed(() => configInt('upload.maxFileBytes', DEFAULT_MAX
 // long chat sessions.
 const attachmentPreviews = ref(new Map<File, string>())
 
-/** Upload response shape returned per file from POST /api/chat/upload. */
+/** Upload response shape returned per file from POST /api/chat/upload.
+ *  AUDIO joins IMAGE / FILE on this union — the backend's
+ *  {@code MessageAttachment.kindForMime} routes audio mimetypes through
+ *  the AUDIO branch (browser-recorded voice notes especially). */
 interface UploadedAttachment {
   attachmentId: string
   originalFilename: string
   mimeType: string
   sizeBytes: number
-  kind: 'IMAGE' | 'FILE'
+  kind: 'IMAGE' | 'AUDIO' | 'FILE'
 }
 
 function isImageFile(f: File): boolean {

@@ -915,6 +915,46 @@ describe('Chat page — truncated reply marker', () => {
     expect(component.text()).toContain('Reply was truncated by the model')
   })
 
+  it('renders attachment chips on a user message that carries attachments', async () => {
+    // Regression: the just-uploaded attachments must render on the
+    // user bubble immediately, not only after a reload. sendMessage's
+    // optimistic-push branch was missing the {@code attachments} field —
+    // without it the chip stayed hidden until a fresh /messages fetch
+    // surfaced the persisted MessageAttachment row. This test exercises
+    // the render branch the fix unlocks: a user message that carries
+    // attachments must produce both the filename text and the
+    // /api/attachments/{uuid} download href.
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 504, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 1, preview: 'attachment chip',
+        createdAt: '2026-05-15T10:00:00Z', updatedAt: '2026-05-15T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/504/messages', () => [
+      { id: 1500, role: 'user', content: 'What is in this document?',
+        createdAt: '2026-05-15T10:00:00Z',
+        attachments: [{
+          uuid: 'att-uuid-1',
+          originalFilename: 'Attendance List.docx',
+          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          sizeBytes: 2_900_000,
+          kind: 'FILE',
+        }] },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as {
+      loadConversation: (id: number) => Promise<void>
+    }
+    await vm.loadConversation(504)
+    await flushPromises()
+
+    const html = component.html()
+    expect(html).toContain('Attendance List.docx')
+    expect(html).toContain('href="/api/attachments/att-uuid-1"')
+  })
+
   it('omits the truncation marker when truncated is false/absent', async () => {
     setupBaseChatApi()
     registerEndpoint('/api/conversations', () => [
