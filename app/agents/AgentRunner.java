@@ -50,7 +50,25 @@ public class AgentRunner {
     // max_tokens so small the reply is useless.
     private static final int MIN_OUTPUT_TOKENS = 256;
 
-    public record RunResult(String response, Conversation conversation) {}
+    /**
+     * JCLAW-291: minimum output budget the runner reserves for the assistant
+     * reply. {@link #trimToContextWindow} drops oldest history until the
+     * prompt fits in {@code contextWindow - RESERVED_OUTPUT_TOKENS}, so
+     * {@link #effectiveMaxTokens} headroom stays at least
+     * {@code RESERVED_OUTPUT_TOKENS - OUTPUT_SAFETY_MARGIN_TOKENS} (~3584)
+     * tokens after trimming. Without this reservation, a prompt that
+     * approaches the context window collapses headroom to
+     * {@link #MIN_OUTPUT_TOKENS} and the reply silently truncates with
+     * {@code finish_reason=length}. Repro: chat-page run 1602.
+     */
+    private static final int RESERVED_OUTPUT_TOKENS = 4096;
+
+    public record RunResult(String response, Conversation conversation, boolean truncated) {
+        /** 2-arg compatibility: legacy paths that don't track truncation. */
+        public RunResult(String response, Conversation conversation) {
+            this(response, conversation, false);
+        }
+    }
 
     /**
      * JCLAW-273: sentinel content the tool loop returns when the parent
@@ -460,9 +478,11 @@ public class AgentRunner {
 
             trace.mark(LatencyTrace.PROLOGUE_DONE);
             // LLM call loop — no transaction open, JDBC connection back in pool
-            var response = callWithToolLoop(agent, conversation, conversationId,
+            var outcome = callWithToolLoop(agent, conversation, conversationId,
                     prepared.messages(), prepared.tools(), prepared.primary(), prepared.secondary(),
                     prepared.audioBearers());
+            var response = outcome.content();
+            var truncated = outcome.truncated();
             trace.mark(LatencyTrace.STREAM_BODY_END);
 
             // JCLAW-273: yielded response — no final assistant message to
@@ -490,14 +510,15 @@ public class AgentRunner {
                                     .formatted(conversationId));
                     return;
                 }
-                ConversationService.appendAssistantMessage(conv, response, null);
+                ConversationService.appendAssistantMessage(conv, response, null, null, null, truncated);
             });
 
             EventLogger.info("llm", agent.name, conversation.channelType,
-                    "Response generated (%d chars)".formatted(response.length()));
+                    "Response generated (%d chars%s)".formatted(response.length(),
+                            truncated ? ", TRUNCATED" : ""));
 
             var updatedConversation = services.Tx.run(() -> ConversationService.findById(conversationId));
-            return new RunResult(response, updatedConversation);
+            return new RunResult(response, updatedConversation, truncated);
         } finally {
             trace.mark(LatencyTrace.TERMINAL_SENT);
             trace.end();
@@ -895,6 +916,20 @@ public class AgentRunner {
             return;
         }
 
+        // JCLAW-291: detect the empty-toolCalls truncation case — a plain
+        // assistant reply that hit max_tokens. Sibling to the tool-call
+        // truncation guard above; that one fires only when toolCalls is
+        // non-empty (incomplete JSON args), this one fires when toolCalls
+        // is empty (the model just ran out of output budget mid-reply).
+        // The flag rides through to the persist site so the chat UI can
+        // render a "Reply was truncated" marker.
+        boolean replyTruncated = isTruncationFinish(accumulator.finishReason)
+                && accumulator.toolCalls.isEmpty();
+        if (replyTruncated) {
+            logEmptyToolCallsTruncation("streamLlmLoop", agent, conversation, primary,
+                    channelType, accumulator.finishReason, messages, tools);
+        }
+
         // Handle tool calls if present. JCLAW-104: the image collector lives
         // at turn scope (not per recursion level) so a screenshot captured
         // mid-chain — say in round 1 — still reaches buildImagePrefix when
@@ -958,6 +993,12 @@ public class AgentRunner {
         // any future re-introduction of an out-of-order delete.
         var finalContent = content;
         var finalReasoning = turnUsage.reasoningText();
+        // JCLAW-291: replyTruncated is captured from the round-1 accumulator;
+        // a tool-call recursion that lands on a clean final reply WON'T flip
+        // this — by design, since the final reply itself is what the user
+        // reads. The recursive truncation case is covered by the
+        // handleToolCallsStreaming guard at the existing tool-call site.
+        var finalTruncated = replyTruncated;
         long persistStartNs = System.nanoTime();
         services.Tx.run(() -> {
             var conv = ConversationService.findById(conversation.id);
@@ -967,7 +1008,7 @@ public class AgentRunner {
                                 .formatted(conversation.id));
                 return;
             }
-            ConversationService.appendAssistantMessage(conv, finalContent, null, usageJson, finalReasoning);
+            ConversationService.appendAssistantMessage(conv, finalContent, null, usageJson, finalReasoning, finalTruncated);
         });
         utils.LatencyStats.record(channelType, "persist",
                 (System.nanoTime() - persistStartNs) / 1_000_000L);
@@ -1119,7 +1160,20 @@ public class AgentRunner {
      * the call once.
      */
     @SuppressWarnings({"java:S107", "java:S127"}) // S107: internal tool-loop dispatcher; S127: round-- in body is JCLAW-165's single-use audio-format retry
-    private static String callWithToolLoop(Agent agent, Conversation conversation, Long conversationId,
+    /**
+     * JCLAW-291: result wrapper for {@link #callWithToolLoop}. Carries the
+     * model's reply text plus a {@code truncated} flag set when the final
+     * non-tool-call assistant turn came back with {@code finish_reason =
+     * length / max_tokens}. Caller plumbs the flag into the persist site
+     * and (for subagents) into the {@link RunResult} so the announce
+     * card can surface a truncation marker without the chat UI having
+     * to introspect raw provider responses.
+     */
+    public record LoopOutcome(String content, boolean truncated) {
+        public LoopOutcome(String content) { this(content, false); }
+    }
+
+    private static LoopOutcome callWithToolLoop(Agent agent, Conversation conversation, Long conversationId,
                                             List<ChatMessage> messages, List<ToolDef> tools,
                                             LlmProvider primary, LlmProvider secondary,
                                             List<AudioBearer> audioBearers) {
@@ -1168,7 +1222,7 @@ public class AgentRunner {
                                 "no_transcript_after_rejection", true);
                         EventLogger.warn("llm", agent.name, null,
                                 "Audio format rejected and no transcript available — failing turn");
-                        return "I'm sorry — the audio attachment couldn't be transcribed and the model rejected the audio format directly. Please try again.";
+                        return new LoopOutcome("I'm sorry — the audio attachment couldn't be transcribed and the model rejected the audio format directly. Please try again.");
                     }
                     EventLogger.warn("llm", agent.name, null,
                             "Provider %s rejected audio format; retrying with transcript-as-text"
@@ -1183,7 +1237,7 @@ public class AgentRunner {
                     logAudioPassthroughOutcome(agent, conversation, primary, "error",
                             shortErrorTag(e), transcriptAwaitedAlready);
                 }
-                return "I'm sorry, I encountered an error communicating with the AI provider. Please try again.";
+                return new LoopOutcome("I'm sorry, I encountered an error communicating with the AI provider. Please try again.");
             }
             // Successful response. Fire AUDIO_PASSTHROUGH_OUTCOME log when the
             // request carried audio so the field-data set we'll later use to
@@ -1195,23 +1249,33 @@ public class AgentRunner {
             }
 
             if (response.choices() == null || response.choices().isEmpty()) {
-                return "No response received from the AI provider.";
+                return new LoopOutcome("No response received from the AI provider.");
             }
 
             var choice = response.choices().getFirst();
             var assistantMsg = choice.message();
+            boolean toolCallsEmpty = assistantMsg.toolCalls() == null || assistantMsg.toolCalls().isEmpty();
 
-            // No tool calls — return the content
-            if (assistantMsg.toolCalls() == null || assistantMsg.toolCalls().isEmpty()) {
-                return contentAsString(assistantMsg.content());
+            // No tool calls — return the content. JCLAW-291: when finish_reason
+            // signals truncation on this branch, the model ran out of output
+            // budget mid-reply (the prompt-fills-window scenario). Carry the
+            // flag up to the persist site so the chat UI can mark the row.
+            if (toolCallsEmpty) {
+                if (isTruncationFinish(choice.finishReason())) {
+                    logEmptyToolCallsTruncation("callWithToolLoop", agent, conversation, primary,
+                            conversation.channelType, choice.finishReason(), currentMessages, tools);
+                    return new LoopOutcome(contentAsString(assistantMsg.content()), true);
+                }
+                return new LoopOutcome(contentAsString(assistantMsg.content()));
             }
 
             // Check for truncated response (max tokens hit mid-tool-call)
             if (isTruncationFinish(choice.finishReason())) {
                 EventLogger.warn("llm", agent.name, null,
                         "Response truncated (finish_reason=length) with pending tool calls — skipping execution of incomplete tool arguments");
-                return assistantMsg.content() != null ? (String) assistantMsg.content()
+                var content = assistantMsg.content() != null ? (String) assistantMsg.content()
                         : "I tried to use a tool but my response was too long and got cut off. Let me try a more concise approach.";
+                return new LoopOutcome(content, true);
             }
 
             // Tool calls — execute (in parallel when multiple) and continue
@@ -1238,11 +1302,11 @@ public class AgentRunner {
             if (yieldRequestedInLastRound(currentMessages, toolResultsAnchor)) {
                 EventLogger.info("tool", agent.name, null,
                         "Round %d: yield_to_subagent invoked — suspending parent turn".formatted(round + 1));
-                return YIELDED_RESPONSE;
+                return new LoopOutcome(YIELDED_RESPONSE);
             }
         }
 
-        return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
+        return new LoopOutcome("I reached the maximum number of tool execution rounds. Please try a simpler request.");
     }
 
     /**
@@ -2147,23 +2211,30 @@ public class AgentRunner {
         var modelInfo = resolveModelInfo(agent, conv, provider).orElse(null);
         if (modelInfo == null || modelInfo.contextWindow() <= 0) return messages;
 
-        int maxTokens = modelInfo.contextWindow();
+        int contextWindow = modelInfo.contextWindow();
         int estimatedTokens = estimateTokens(messages);
+        // JCLAW-291: trim target reserves RESERVED_OUTPUT_TOKENS so the reply has
+        // a real budget — without this, headroom in effectiveMaxTokens collapses
+        // and the model truncates with finish_reason=length on plain replies.
+        // Reservation is capped at half the window so tiny-context models don't
+        // get trimmed to nothing.
+        int reservation = Math.min(RESERVED_OUTPUT_TOKENS, contextWindow / 2);
+        int trimTarget = contextWindow - reservation;
 
-        if (estimatedTokens <= maxTokens) return messages;
+        if (estimatedTokens <= trimTarget) return messages;
 
         // Find how many oldest non-system messages to drop. Scan forward from index 1
         // (first after system prompt) and accumulate tokens to remove until we fit.
         int total = estimatedTokens;
         int dropCount = 0;
-        for (int i = 1; i < messages.size() - 1 && total > maxTokens; i++) {
+        for (int i = 1; i < messages.size() - 1 && total > trimTarget; i++) {
             total -= estimateTokens(List.of(messages.get(i)));
             dropCount++;
         }
         if (dropCount > 0) {
             EventLogger.warn("llm", agent.name, null,
-                    "Trimmed %d messages to fit context window (%d tokens max, estimated %d)"
-                            .formatted(dropCount, maxTokens, estimatedTokens));
+                    "Trimmed %d messages to fit context window (window=%d, reservation=%d, target=%d, estimated=%d, post-trim=%d)"
+                            .formatted(dropCount, contextWindow, reservation, trimTarget, estimatedTokens, total));
             // Build result: system message + surviving history (skip dropped range)
             var trimmed = new ArrayList<ChatMessage>(messages.size() - dropCount);
             trimmed.add(messages.getFirst());
@@ -2444,6 +2515,32 @@ public class AgentRunner {
      */
     public static boolean isTruncationFinish(String finishReason) {
         return "length".equals(finishReason) || "max_tokens".equals(finishReason);
+    }
+
+    /**
+     * JCLAW-291: emit a structured warn line whenever the model truncates a
+     * plain (non-tool-call) reply via {@code finish_reason = length /
+     * max_tokens}. Mirrors the existing tool-call truncation guards but
+     * dumps the headroom math so operators can correlate the truncation
+     * with the model's effective output budget. Single call site so the
+     * format stays canonical across streaming and non-streaming.
+     */
+    private static void logEmptyToolCallsTruncation(String site, Agent agent, Conversation conversation,
+                                                     LlmProvider provider, String channelType,
+                                                     String finishReason, List<ChatMessage> messages,
+                                                     List<ToolDef> tools) {
+        var modelInfo = resolveModelInfo(agent, conversation, provider).orElse(null);
+        int promptTokens = estimateTokens(messages) + estimateToolTokens(tools);
+        int configured = modelInfo != null ? modelInfo.maxTokens() : -1;
+        int contextWindow = modelInfo != null ? modelInfo.contextWindow() : -1;
+        int headroom = contextWindow > 0
+                ? contextWindow - promptTokens - OUTPUT_SAFETY_MARGIN_TOKENS
+                : -1;
+        Integer clamped = effectiveMaxTokens(agent, conversation, provider, messages, tools);
+        EventLogger.warn("llm", agent.name, channelType,
+                "Truncated reply (site=%s, finish=%s, configured=%d, contextWindow=%d, prompt~%d, headroom=%d, clamped=%s)"
+                        .formatted(site, finishReason, configured, contextWindow, promptTokens, headroom,
+                                clamped == null ? "null" : clamped.toString()));
     }
 
     /**

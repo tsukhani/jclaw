@@ -170,6 +170,52 @@ class AgentRunnerCoreTest extends UnitTest {
                 "Should return the partial content, got: " + result.response());
     }
 
+    @Test
+    void runFlagsEmptyToolCallsTruncationOnRunResult() throws Exception {
+        // JCLAW-291: a final non-tool-call assistant turn that comes back with
+        // finish_reason=length is the silent-truncation case the production
+        // bug surfaced — the existing isTruncationFinish guards required
+        // pending tool_calls to fire, so a plain reply truncated by
+        // max_tokens slipped through with no warning. After this fix the
+        // RunResult and the persisted Message both carry the truncated flag.
+        startLlmServer(exchange -> {
+            var body = """
+                {"choices":[{"index":0,"message":{"role":"assistant","content":"Here is the start of my answer but it gets cut o"},
+                "finish_reason":"length"}],
+                "usage":{"prompt_tokens":42,"completion_tokens":256}}""";
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.getBytes().length);
+            exchange.getResponseBody().write(body.getBytes());
+            exchange.close();
+        });
+        configureProvider();
+
+        var agent = createAgent("empty-tc-trunc-agent", "test-provider", "test-model");
+        var convo = ConversationService.create(agent, "web", "user1");
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var result = runOnVirtualThread(agent, convo, "Write a long answer please");
+
+        assertNotNull(result.response());
+        assertTrue(result.response().contains("Here is the start of my answer"),
+                "Should return the partial reply text, got: " + result.response());
+        assertTrue(result.truncated(),
+                "RunResult.truncated must be true on empty-toolCalls finish_reason=length");
+
+        // Persisted Message row should also carry the flag so the chat UI can
+        // surface the marker on /messages reload without re-introspecting
+        // provider responses.
+        java.util.List<Message> rows = Message.<Message>find(
+                "conversation = ?1 AND role = ?2 ORDER BY id ASC",
+                convo, MessageRole.ASSISTANT.value).fetch();
+        assertFalse(rows.isEmpty(), "Should have persisted at least one assistant message");
+        Message lastAssistant = rows.get(rows.size() - 1);
+        assertTrue(lastAssistant.truncated,
+                "Persisted assistant Message must carry truncated=true");
+    }
+
     // --- Max tool rounds ---
 
     @Test

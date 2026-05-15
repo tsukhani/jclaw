@@ -97,6 +97,17 @@ public class Message extends Model {
     @Column(name = "usage_json", columnDefinition = "TEXT")
     public String usageJson;
 
+    /**
+     * JCLAW-291: model output was cut off by the provider's max_tokens budget
+     * (finish_reason = length / max_tokens). The chat UI renders a small
+     * "Reply was truncated by the model" marker on these rows so the operator
+     * does not mistake the cut-off text for a complete answer. Default false
+     * for every other row — only the assistant turn that hit the cap and the
+     * subagent_announce row that carries a truncated child reply ever flip it.
+     */
+    @Column(name = "truncated", nullable = false)
+    public boolean truncated;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 

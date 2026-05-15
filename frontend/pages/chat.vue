@@ -7,6 +7,7 @@ import {
   ClipboardIcon,
   CommandLineIcon,
   DocumentIcon,
+  ExclamationTriangleIcon,
   EyeIcon,
   FolderIcon,
   GlobeAltIcon,
@@ -845,18 +846,69 @@ async function regenerateMessage(msg: Message) {
 const tokStatsHoverKey = ref<string | number | null>(null)
 
 /**
+ * Pair id-less local rows with their server-side counterparts by role,
+ * mutating local rows to carry the server id. Used both at end-of-stream
+ * (reconcileMessageIds) and inside the announce poll loop so subsequent
+ * id-membership checks dedupe correctly.
+ *
+ * Algorithm: build a per-role LIFO stack of unpaired server ids, then walk
+ * local rows back to front and pop the latest matching-role server id off
+ * the stack. Server rows whose ids are already present locally are excluded
+ * from the stacks up front so they can't be re-stolen.
+ *
+ * Earlier versions walked both lists backwards in lockstep and broke on the
+ * first role mismatch — that fell over when the server list contained
+ * intermediate {@code tool} / {@code system} rows the local list never
+ * tracked (e.g., a JCLAW-270 async subagent that injects a system-role
+ * announce between the parent's user turn and the parent's final assistant
+ * reply). The role-stack walk skips those intermediates without false
+ * pairings: a local row whose role's stack runs dry stays id-less.
+ */
+function backfillServerIds(local: Message[], fresh: Message[]): boolean {
+  const localTakenIds = new Set<number>()
+  for (const L of local) {
+    if (typeof L.id === 'number') localTakenIds.add(L.id)
+  }
+  const idsByRole = new Map<string, number[]>()
+  for (const R of fresh) {
+    if (typeof R.id !== 'number' || !R.role) continue
+    if (localTakenIds.has(R.id)) continue
+    const list = idsByRole.get(R.role) ?? []
+    list.push(R.id)
+    idsByRole.set(R.role, list)
+  }
+  // Index server rows by id so the post-pairing pass below can also copy
+  // server-side flags (currently just JCLAW-291 truncated) onto the local
+  // optimistic rows. Without this the in-flight assistant bubble would
+  // never gain its truncation marker until a hard reload.
+  const freshById = new Map<number, Message>()
+  for (const R of fresh) {
+    if (typeof R.id === 'number') freshById.set(R.id, R)
+  }
+  let mutated = false
+  for (let li = local.length - 1; li >= 0; li--) {
+    const L = local[li]
+    if (!L || L.id || !L.role) continue
+    const list = idsByRole.get(L.role)
+    if (!list?.length) continue
+    L.id = list.pop()!
+    const R = freshById.get(L.id)
+    if (R?.truncated) L.truncated = true
+    mutated = true
+  }
+  return mutated
+}
+
+/**
  * Backfill server ids onto the local `messages` array after a stream turn.
  *
  * The stream protocol doesn't emit persisted message ids (see
  * ApiChatController.writeSse — the complete event carries only content).
- * That left the optimistic user + assistant bubbles without ids until the
- * user left and re-entered the conversation, which disabled the Delete
- * button (gated on `msg.id`) until then.
- *
- * Rather than renegotiate the SSE contract, we refetch the transcript once
- * at end-of-stream and walk both lists backwards, pairing id-less local
- * rows with the freshest server row of the same role. Bounded by the tail
- * distance so unrelated mid-conversation edits can't re-key older rows.
+ * Without this, the optimistic user + assistant bubbles stay id-less until
+ * the user leaves and re-enters the conversation, which disabled the Delete
+ * button (gated on `msg.id`) and caused {@link pollForAnnounce} to treat
+ * the server-side copy of those same rows as new additions, duplicating
+ * the user bubble in the transcript.
  */
 async function reconcileMessageIds() {
   const convoId = selectedConvoId.value
@@ -864,19 +916,7 @@ async function reconcileMessageIds() {
   try {
     const fresh = await $fetch<Message[]>(`/api/conversations/${convoId}/messages`)
     if (!fresh?.length) return
-    const local = messages.value
-    let mutated = false
-    for (let li = local.length - 1, ri = fresh.length - 1; li >= 0 && ri >= 0; li--, ri--) {
-      const L = local[li]
-      const R = fresh[ri]
-      if (!L || !R) continue
-      if (L.role !== R.role) break
-      if (!L.id && R.id) {
-        L.id = R.id
-        mutated = true
-      }
-    }
-    if (mutated) triggerRef(messages)
+    if (backfillServerIds(messages.value, fresh)) triggerRef(messages)
   }
   catch (e) {
     console.error('Failed to reconcile message ids:', e)
@@ -1032,19 +1072,18 @@ const ANNOUNCE_POLL_INTERVAL_MS = 5000
 let announcePollTimer: ReturnType<typeof setInterval> | undefined
 
 /**
- * Returns the {@code run_id} string carried in a tool message's JSON content
- * when the result reported {@code status:RUNNING}. Returns null for
- * non-pending tool results, non-tool rows, or malformed JSON — every "not
- * an async-pending row" branch falls through harmlessly.
+ * Extract the async-spawn {@code run_id} from a JSON-shaped tool result body.
+ * Returns null when the body isn't a {@code status:RUNNING} async-spawn
+ * payload — every "not an async-pending result" branch falls through
+ * harmlessly. The cheap substring pre-check avoids JSON.parse on every other
+ * tool result body (web_search responses, file reads, etc.) on every poll
+ * tick.
  */
-function pendingAsyncRunId(m: Message): string | null {
-  if (m.role !== 'tool' || !m.content) return null
-  // Cheap pre-check: skip the parse on tool results that obviously aren't
-  // async-spawn payloads. Avoids JSON.parse on every other tool result body
-  // (web_search responses, file reads, etc.) on every poll tick.
-  if (!m.content.includes('"status"') || !m.content.includes('RUNNING')) return null
+function pendingAsyncRunIdFromResultText(text: string | null | undefined): string | null {
+  if (!text) return null
+  if (!text.includes('"status"') || !text.includes('RUNNING')) return null
   try {
-    const parsed = JSON.parse(m.content) as { run_id?: unknown, status?: unknown }
+    const parsed = JSON.parse(text) as { run_id?: unknown, status?: unknown }
     if (parsed?.status !== 'RUNNING') return null
     const runId = parsed.run_id
     return typeof runId === 'string' ? runId : (typeof runId === 'number' ? String(runId) : null)
@@ -1055,10 +1094,32 @@ function pendingAsyncRunId(m: Message): string | null {
 }
 
 /**
+ * Returns the {@code run_id} string carried in a tool-role message's JSON
+ * content when the result reported {@code status:RUNNING}. This is the
+ * post-reload shape — the standalone tool-role row only lands in
+ * {@code messages.value} after a transcript refetch.
+ */
+function pendingAsyncRunId(m: Message): string | null {
+  if (m.role !== 'tool') return null
+  return pendingAsyncRunIdFromResultText(m.content)
+}
+
+/**
  * True when the open conversation has at least one async-spawn tool result
  * whose announce hasn't landed. Drives the poll-tick decision: if false we
  * skip the network call entirely and let the interval idle until either a
  * new spawn fires or the page unmounts.
+ *
+ * Walks both shapes the spawn result can take in the local list:
+ *   1. Standalone tool-role row (post-reload, after the {@code /messages}
+ *      refetch that {@code loadConversation} runs).
+ *   2. {@code resultText} on an entry of an assistant message's
+ *      {@link Message.toolCalls} array — this is the only shape that exists
+ *      between stream-end and the next reload, since the SSE
+ *      {@code tool_call} frame folds the result inline rather than emitting
+ *      a separate tool-role message. Without this branch the poller would
+ *      never fire on the same-page spawn-and-wait path, and the user would
+ *      have to navigate away to see the announce land.
  */
 function hasPendingAsyncAnnounce(): boolean {
   const msgs = messages.value
@@ -1073,6 +1134,12 @@ function hasPendingAsyncAnnounce(): boolean {
   for (const m of msgs) {
     const pending = pendingAsyncRunId(m)
     if (pending && !announcedRunIds.has(pending)) return true
+    if (m.role === 'assistant' && m.toolCalls?.length) {
+      for (const tc of m.toolCalls) {
+        const tcPending = pendingAsyncRunIdFromResultText(tc.resultText)
+        if (tcPending && !announcedRunIds.has(tcPending)) return true
+      }
+    }
   }
   return false
 }
@@ -1082,6 +1149,12 @@ function hasPendingAsyncAnnounce(): boolean {
  * id isn't already present locally. Preserves client-only state on existing
  * rows (toolCallsCollapsed, _key on optimistic placeholders, etc.) by
  * never mutating or replacing them.
+ *
+ * Backfills server ids onto id-less optimistic rows BEFORE computing the
+ * additions set: without that step the server-side copies of those rows
+ * (which carry ids the local set doesn't yet have) sail past the
+ * id-membership filter and get appended as duplicates, producing the
+ * "user prompt rendered twice" symptom on async-spawn turns.
  */
 async function pollForAnnounce() {
   const convoId = selectedConvoId.value
@@ -1095,6 +1168,7 @@ async function pollForAnnounce() {
     return
   }
   if (!fresh.length) return
+  backfillServerIds(messages.value, fresh)
   const knownIds = new Set<number>()
   for (const m of messages.value) {
     if (typeof m.id === 'number') knownIds.add(m.id)
@@ -1272,7 +1346,7 @@ function subagentBlockStatus(runId: number, msgs: Message[]): string {
  * sensible string fallbacks so a malformed payload never crashes the
  * render.
  */
-type AnnouncePayload = { runId?: number, label?: string, status?: string, reply?: string, childConversationId?: number }
+type AnnouncePayload = { runId?: number, label?: string, status?: string, reply?: string, childConversationId?: number, truncated?: boolean }
 function readAnnounce(m: Message): AnnouncePayload {
   const meta = (m as Message & { metadata?: AnnouncePayload }).metadata
   return (meta ?? {}) as AnnouncePayload
@@ -1289,6 +1363,16 @@ function subagentAnnounceReply(m: Message): string {
 function subagentAnnounceChildId(m: Message): number | null {
   const id = readAnnounce(m).childConversationId
   return typeof id === 'number' ? id : null
+}
+/**
+ * JCLAW-291: child's underlying reply was cut off by max_tokens. Reads from
+ * the announce metadata payload first (set by SpawnSubagentTool when the
+ * child's RunResult.truncated was true) and falls back to the row-level
+ * column for older announces written before the column existed. The card
+ * renders a "Reply was truncated by the model" marker when this is true.
+ */
+function subagentAnnounceTruncated(m: Message): boolean {
+  return !!(readAnnounce(m).truncated || m.truncated)
 }
 
 // Recompute the cost meter only when streaming is idle — usage lands at
@@ -2411,7 +2495,7 @@ function exportConversation() {
               -->
               <div
                 v-if="subagentRunSlices[msgIdx]?.position === 'first'"
-                class="flex items-center gap-2 -mb-2 select-none"
+                class="flex items-center gap-2 select-none"
               >
                 <button
                   type="button"
@@ -2502,6 +2586,21 @@ function exportConversation() {
                     </div>
                     <div class="px-3 py-2 text-sm text-fg-strong whitespace-pre-wrap break-words">
                       {{ subagentAnnounceReply(msg) }}
+                    </div>
+                    <!-- JCLAW-291: child's reply was cut off by the model's
+                         max_tokens budget. Footer keeps the marker visually
+                         distinct from the reply body so the operator doesn't
+                         mistake it for content. -->
+                    <div
+                      v-if="subagentAnnounceTruncated(msg)"
+                      class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] text-amber-600 dark:text-amber-400 border-t border-neutral-200 dark:border-neutral-700 bg-amber-50/50 dark:bg-amber-950/20"
+                      data-testid="truncated-marker"
+                    >
+                      <ExclamationTriangleIcon
+                        class="w-3.5 h-3.5 shrink-0"
+                        aria-hidden="true"
+                      />
+                      <span>Reply was truncated by the model</span>
                     </div>
                   </div>
                 </div>
@@ -2803,6 +2902,23 @@ function exportConversation() {
                       class="text-fg-muted text-base italic"
                     >
                       (empty response)
+                    </div>
+                    <!-- JCLAW-291: model-output truncation marker. Sits below
+                         the rendered reply (and inside the inline subagent
+                         block when subagentRunId is set) so the operator sees
+                         "this isn't the full answer" without parsing finish
+                         reasons. Same amber chip style as the announce-card
+                         marker at the SYSTEM-role render path above. -->
+                    <div
+                      v-if="msg.truncated"
+                      class="flex items-center gap-1.5 mt-1.5 px-2 py-1 text-[11px] text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50 rounded bg-amber-50/50 dark:bg-amber-950/20"
+                      data-testid="truncated-marker"
+                    >
+                      <ExclamationTriangleIcon
+                        class="w-3.5 h-3.5 shrink-0"
+                        aria-hidden="true"
+                      />
+                      <span>Reply was truncated by the model</span>
                     </div>
                     <!--
                       Assistant footer — Unsloth-style compact row:

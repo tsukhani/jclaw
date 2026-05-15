@@ -186,7 +186,25 @@ public class ConversationService {
 
     public static Message appendAssistantMessage(Conversation conversation, String content,
                                                    String toolCalls, String usageJson, String reasoning) {
-        return appendMessage(conversation, MessageRole.ASSISTANT, content, toolCalls, null, usageJson, reasoning);
+        return appendAssistantMessage(conversation, content, toolCalls, usageJson, reasoning, false);
+    }
+
+    /**
+     * JCLAW-291 overload: persist the assistant turn AND stamp
+     * {@link Message#truncated} when the runner detected
+     * {@code finish_reason=length / max_tokens} on a non-tool-call reply
+     * (the empty-{@code toolCalls} truncation branch). The chat UI reads
+     * the column and renders a "Reply was truncated by the model" marker.
+     */
+    public static Message appendAssistantMessage(Conversation conversation, String content,
+                                                   String toolCalls, String usageJson, String reasoning,
+                                                   boolean truncated) {
+        var msg = appendMessage(conversation, MessageRole.ASSISTANT, content, toolCalls, null, usageJson, reasoning);
+        if (truncated) {
+            msg.truncated = true;
+            msg.save();
+        }
+        return msg;
     }
 
     public static Message appendToolResult(Conversation conversation, String toolCallId, String result) {

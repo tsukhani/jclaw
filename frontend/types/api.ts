@@ -137,6 +137,12 @@ export interface SubagentAnnounceMetadata {
   reply: string
   /** Id of the child Conversation row — drives the "View full" link. */
   childConversationId: number
+  /** JCLAW-291: child's underlying reply was cut off by max_tokens. The
+   *  announce card surfaces a "Reply was truncated by the model" marker
+   *  when this is true. Distinct from the 4000-char display cap above —
+   *  this means the child's full output ran short, not just that the
+   *  display version was clipped. Absent when false. */
+  truncated?: boolean | null
 }
 
 /** A single message within a conversation. */
@@ -167,6 +173,13 @@ export interface Message {
   /** JCLAW-270: kind-specific JSON metadata. For {@code messageKind ===
    *  'subagent_announce'} the shape is {@link SubagentAnnounceMetadata}. */
   metadata?: SubagentAnnounceMetadata | Record<string, unknown> | null
+  /** JCLAW-291: model output was cut off by the provider's max_tokens budget
+   *  (finish_reason = length / max_tokens). The chat view renders a small
+   *  "Reply was truncated by the model" marker on rows where this is true,
+   *  applied uniformly to assistant bubbles, async announce cards, and
+   *  inline subagent block last messages. Absent on the wire when false
+   *  (the dominant case). */
+  truncated?: boolean | null
   /** Frontend-only key assigned to optimistic/streaming placeholders. */
   _key?: string
   /** Client-only: whether the thinking/reasoning bubble is collapsed for this message. */

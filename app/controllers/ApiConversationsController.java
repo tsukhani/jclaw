@@ -207,6 +207,11 @@ public class ApiConversationsController extends Controller {
                     map.put("metadata", jsonParser.parse(m.metadata));
                 }
             }
+            // JCLAW-291: model-output truncation flag. Surfaced only when true
+            // so the dominant non-truncated row stays small on the wire.
+            if (m.truncated) {
+                map.put("truncated", Boolean.TRUE);
+            }
             // JCLAW-279: surface attachment metadata so the chat UI can render
             // download chips on conversation reload. Empty list rather than
             // absent so the frontend can rely on the field always being present.

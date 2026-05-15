@@ -667,6 +667,156 @@ describe('Chat page — async subagent announce polling', () => {
     expect(vm.hasPendingAsyncAnnounce()).toBe(false)
   })
 
+  it('detects pending state from inline assistant.toolCalls (post-stream shape)', async () => {
+    // Regression: between stream-end and the next reload, the SSE tool_call
+    // frame folds the result into assistant.toolCalls[i].resultText rather
+    // than emitting a separate tool-role row. Without this branch, the
+    // poller would never fire on a same-page spawn-and-wait flow and the
+    // user would have to navigate away to see the announce land.
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 404, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 2, preview: 'post-stream pending',
+        createdAt: '2026-05-14T10:00:00Z', updatedAt: '2026-05-14T10:00:00Z' },
+    ])
+    // Server has only the assistant row + tool row; the test then mutates the
+    // local list to mimic the post-stream shape (no separate tool-role row,
+    // result inline on the assistant row).
+    registerEndpoint('/api/conversations/404/messages', () => [
+      { id: 1000, role: 'user', content: 'spawn async',
+        createdAt: '2026-05-14T10:00:00Z' },
+      { id: 1001, role: 'assistant', content: 'Spawned!',
+        createdAt: '2026-05-14T10:00:01Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as {
+      loadConversation: (id: number) => Promise<void>
+      hasPendingAsyncAnnounce: () => boolean
+      messages: Array<{ role: string, toolCalls?: Array<{ id: string, name: string, icon: string, arguments: string, resultText?: string | null }> }>
+    }
+    await vm.loadConversation(404)
+    await flushPromises()
+
+    // Splice the inline-toolCall onto the streamed assistant row, mirroring
+    // what the chat page's tool_call SSE handler does live.
+    const assistant = vm.messages.find(m => m.role === 'assistant')!
+    assistant.toolCalls = [{
+      id: 'call_async', name: 'spawn_subagent', icon: 'users', arguments: '{}',
+      resultText: '{"run_id":"7","conversation_id":"40020","status":"RUNNING"}',
+    }]
+
+    expect(vm.hasPendingAsyncAnnounce()).toBe(true)
+  })
+
+  it('does not duplicate the user bubble when the announce arrives via poll', async () => {
+    // Regression: pollForAnnounce used to filter additions purely by
+    // id-not-in-knownIds. Optimistic local rows have id=null, so the
+    // server-side copies of those same rows (which DO have ids) sailed
+    // past the filter and got appended a second time. Symptom: the user
+    // prompt bubble rendered twice in the transcript after an async
+    // spawn turn — once from the optimistic placeholder, once from the
+    // poll-fetched server row. The fix backfills server ids onto local
+    // optimistic rows before computing additions.
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 405, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 5, preview: 'dedup test',
+        createdAt: '2026-05-14T10:00:00Z', updatedAt: '2026-05-14T10:00:00Z' },
+    ])
+    // First /messages call: pre-announce shape — 4 rows, no announce yet.
+    // Second call (after the optimistic state is set up): full 5-row shape
+    // including the system-role announce.
+    let messagesCalls = 0
+    registerEndpoint('/api/conversations/405/messages', () => {
+      messagesCalls++
+      const base: Array<Record<string, unknown>> = [
+        { id: 1100, role: 'user', content: 'spawn async, please',
+          createdAt: '2026-05-14T10:00:00Z' },
+        { id: 1101, role: 'assistant', content: '',
+          toolCalls: [
+            { id: 'call_x', type: 'function', icon: 'users',
+              function: { name: 'spawn_subagent', arguments: '{}' } },
+          ],
+          createdAt: '2026-05-14T10:00:01Z' },
+        { id: 1102, role: 'tool',
+          content: '{"run_id":"9","conversation_id":"40030","status":"RUNNING"}',
+          toolResults: 'call_x',
+          createdAt: '2026-05-14T10:00:02Z' },
+        { id: 1103, role: 'assistant',
+          content: 'Run id is 9. Will let you know.',
+          createdAt: '2026-05-14T10:00:03Z' },
+      ]
+      if (messagesCalls >= 2) {
+        base.push({
+          id: 1104, role: 'system',
+          content: 'Subagent completed (test): done',
+          messageKind: 'subagent_announce',
+          metadata: {
+            runId: 9, label: 'test', status: 'COMPLETED',
+            reply: 'done', childConversationId: 40030,
+          },
+          createdAt: '2026-05-14T10:00:04Z',
+        })
+      }
+      return base
+    })
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as {
+      loadConversation: (id: number) => Promise<void>
+      pollForAnnounce: () => Promise<void>
+      messages: Array<{
+        id: number | null
+        role: string
+        content?: string | null
+        toolCalls?: Array<{
+          id: string
+          name: string
+          icon: string
+          arguments: string
+          resultText?: string | null
+        }>
+      }>
+    }
+    await vm.loadConversation(405)
+    await flushPromises()
+
+    // Simulate the post-stream optimistic state: clear the loaded list and
+    // rebuild it the way the SSE path leaves it — id-less user + id-less
+    // assistant carrying the spawn's RUNNING result inline (no standalone
+    // tool-role row, no announce yet).
+    vm.messages.splice(0, vm.messages.length)
+    vm.messages.push(
+      { id: null, role: 'user', content: 'spawn async, please' },
+      { id: null, role: 'assistant', content: 'Run id is 9. Will let you know.',
+        toolCalls: [{
+          id: 'call_x', name: 'spawn_subagent', icon: 'users', arguments: '{}',
+          resultText: '{"run_id":"9","conversation_id":"40030","status":"RUNNING"}',
+        }] },
+    )
+
+    // Tick the poll. The next /messages fetch returns the full 5-row shape
+    // including the announce.
+    await vm.pollForAnnounce()
+    await flushPromises()
+
+    // Exactly ONE user row should remain — the optimistic one, now with its
+    // server id backfilled. The assistant row's id should also be backfilled
+    // (it's the LAST assistant by role-stack pairing). Only the
+    // intermediate empty-assistant + tool + system rows should have been
+    // appended as additions.
+    const userRows = vm.messages.filter(m => m.role === 'user')
+    expect(userRows.length).toBe(1)
+    expect(userRows[0]!.id).toBe(1100)
+    const assistantWithContent = vm.messages.find(m => m.role === 'assistant' && m.content?.startsWith('Run id'))
+    expect(assistantWithContent?.id).toBe(1103)
+    // Announce row should now be present in the local list.
+    expect(vm.messages.some(m => m.role === 'system')).toBe(true)
+  })
+
   it('clears the polling interval on unmount', async () => {
     setupBaseChatApi()
     // Spy on the global clearInterval so we can assert the unmount hook
@@ -684,5 +834,110 @@ describe('Chat page — async subagent announce polling', () => {
     // At least one clearInterval call must have happened; the chat page
     // owns the announce poll's setInterval handle in onUnmounted.
     expect(clearSpy).toHaveBeenCalled()
+  })
+})
+
+/**
+ * JCLAW-291: model output was cut off by max_tokens. Both the assistant
+ * bubble and the async announce card render an amber "Reply was truncated
+ * by the model" marker so the operator does not mistake the cut-off text
+ * for a complete answer. Tests cover both render paths.
+ */
+describe('Chat page — truncated reply marker', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('renders a truncation marker on assistant messages where truncated=true', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 501, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 2, preview: 'truncated assistant',
+        createdAt: '2026-05-15T10:00:00Z', updatedAt: '2026-05-15T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/501/messages', () => [
+      { id: 1200, role: 'user', content: 'Write me a long answer please',
+        createdAt: '2026-05-15T10:00:00Z' },
+      { id: 1201, role: 'assistant', content: 'Here is the start but it ran out',
+        truncated: true,
+        createdAt: '2026-05-15T10:00:01Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as {
+      loadConversation: (id: number) => Promise<void>
+    }
+    await vm.loadConversation(501)
+    await flushPromises()
+
+    const markers = component.findAll('[data-testid="truncated-marker"]')
+    expect(markers.length).toBeGreaterThanOrEqual(1)
+    expect(component.text()).toContain('Reply was truncated by the model')
+  })
+
+  it('renders a truncation marker on the announce card when metadata.truncated=true', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 502, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 2, preview: 'truncated announce',
+        createdAt: '2026-05-15T10:00:00Z', updatedAt: '2026-05-15T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/502/messages', () => [
+      { id: 1300, role: 'user', content: 'Spawn an async research subagent please',
+        createdAt: '2026-05-15T10:00:00Z' },
+      { id: 1301, role: 'assistant', content: 'Spawned!',
+        createdAt: '2026-05-15T10:00:01Z' },
+      { id: 1302, role: 'system' as unknown as 'tool',
+        content: 'Subagent completed (research): partial reply text',
+        messageKind: 'subagent_announce',
+        truncated: true,
+        metadata: {
+          runId: 12, label: 'research', status: 'COMPLETED',
+          reply: 'partial reply text', childConversationId: 60000,
+          truncated: true,
+        },
+        createdAt: '2026-05-15T10:00:05Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as {
+      loadConversation: (id: number) => Promise<void>
+    }
+    await vm.loadConversation(502)
+    await flushPromises()
+
+    expect(component.find('[data-testid="subagent-announce-card"]').exists()).toBe(true)
+    const markers = component.findAll('[data-testid="truncated-marker"]')
+    expect(markers.length).toBeGreaterThanOrEqual(1)
+    expect(component.text()).toContain('Reply was truncated by the model')
+  })
+
+  it('omits the truncation marker when truncated is false/absent', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 503, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 2, preview: 'no truncation',
+        createdAt: '2026-05-15T10:00:00Z', updatedAt: '2026-05-15T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/503/messages', () => [
+      { id: 1400, role: 'user', content: 'Hi',
+        createdAt: '2026-05-15T10:00:00Z' },
+      { id: 1401, role: 'assistant', content: 'Hello — full reply, no truncation here.',
+        createdAt: '2026-05-15T10:00:01Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as {
+      loadConversation: (id: number) => Promise<void>
+    }
+    await vm.loadConversation(503)
+    await flushPromises()
+
+    expect(component.findAll('[data-testid="truncated-marker"]').length).toBe(0)
+    expect(component.text()).not.toContain('Reply was truncated by the model')
   })
 })

@@ -494,11 +494,18 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         // the kill primitive has already stamped KILLED with the operator's
         // reason, and overwriting that would lose the signal.
         boolean killedByOperator = false;
+        // JCLAW-291: child's reply was cut off by max_tokens. Plumbed into
+        // the inline-mode end marker (so the inline subagent block's last
+        // assistant Message carries truncated=true) and into the tool-return
+        // payload (so the parent LLM sees a "truncated" signal next to its
+        // synthesized reply).
+        boolean replyTruncated = false;
 
         try {
             try {
                 var result = future.get(timeoutSeconds, TimeUnit.SECONDS);
                 reply = result == null ? "" : result.response();
+                replyTruncated = result != null && result.truncated();
                 terminalStatus = SubagentRun.Status.COMPLETED;
                 terminalOutcome = reply;
             } catch (TimeoutException te) {
@@ -582,6 +589,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         if (inlineMode && !killedByOperator) {
             final var statusForMarker = terminalStatus;
             final var replyForMarker = reply;
+            final var truncatedForMarker = replyTruncated;
             Tx.run(() -> {
                 var conv = Conversation.<Conversation>findById(parentConvIdFinal);
                 ConversationService.withSubagentRunIdMarker(runId, () -> {
@@ -589,7 +597,11 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                             + (replyForMarker != null && !replyForMarker.isBlank()
                                     ? ": " + replyForMarker
                                     : "");
-                    ConversationService.appendAssistantMessage(conv, endContent, null);
+                    // JCLAW-291: stamp truncated on the inline run's terminal
+                    // marker so the chat UI surfaces the marker on the inline
+                    // subagent block's last assistant row.
+                    ConversationService.appendAssistantMessage(conv, endContent, null, null, null,
+                            truncatedForMarker);
                     return null;
                 });
             });
@@ -615,6 +627,10 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         payload.put("conversation_id", String.valueOf(childConvId));
         payload.put("reply", reply);
         payload.put("status", terminalStatus.name());
+        // JCLAW-291: hint to the parent LLM that the child's reply was cut
+        // off — useful when the parent decides whether to re-summarize or
+        // to surface the truncation to the user.
+        if (replyTruncated) payload.put("truncated", Boolean.TRUE);
         return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
     }
 
@@ -979,6 +995,10 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         // is the operator-visible truth, and the operator initiated the
         // kill so an announce card would be redundant noise.
         boolean killedByOperator = false;
+        // JCLAW-291: child's reply was cut off by max_tokens. Plumbed into
+        // the announce-message metadata so the chat-page card can render
+        // a truncation marker on the announce body.
+        boolean replyTruncated = false;
 
         // JCLAW-291: cooperative-cancel registration. See sync-path comment +
         // services.SubagentRegistry's class doc for why we don't capture the
@@ -1003,6 +1023,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
             try {
                 var result = future.get(timeoutSeconds, TimeUnit.SECONDS);
                 reply = result == null ? "" : result.response();
+                replyTruncated = result != null && result.truncated();
                 terminalStatus = SubagentRun.Status.COMPLETED;
             } catch (TimeoutException te) {
                 future.cancel(false);
@@ -1085,7 +1106,11 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         var announceBody = finalStatus == SubagentRun.Status.COMPLETED
                 ? finalReply
                 : (finalErrorReason != null ? finalErrorReason : "");
-        var truncated = truncateForAnnounce(announceBody);
+        // NB: the local `displayTruncatedBody` is the 4000-char display cap on
+        // the announce body, NOT the JCLAW-291 model-output truncation flag.
+        // The two flow through postAnnounceMessage as separate parameters.
+        var displayTruncatedBody = truncateForAnnounce(announceBody);
+        final var modelOutputTruncated = replyTruncated;
 
         // JCLAW-273: read the yield flag inside the same Tx that persists the
         // announce so the role-decision and the message insert see a
@@ -1100,7 +1125,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                 var run = (SubagentRun) SubagentRun.findById(runId);
                 boolean isYielded = run != null && run.yielded;
                 postAnnounceMessage(parentConvId, runId, label, finalStatus,
-                        truncated, childConvId, isYielded);
+                        displayTruncatedBody, childConvId, isYielded, modelOutputTruncated);
                 return isYielded;
             });
         } catch (Throwable t) {
@@ -1216,7 +1241,8 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
      */
     private static void postAnnounceMessage(Long parentConvId, Long runId, String label,
                                             SubagentRun.Status status, String truncatedReply,
-                                            Long childConvId, boolean yielded) {
+                                            Long childConvId, boolean yielded,
+                                            boolean modelOutputTruncated) {
         var parentConv = (Conversation) Conversation.findById(parentConvId);
         if (parentConv == null) return;
 
@@ -1227,6 +1253,12 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         payload.put("reply", truncatedReply != null ? truncatedReply : "");
         payload.put("childConversationId", childConvId);
         payload.put("yielded", yielded);
+        // JCLAW-291: separate from {@code truncatedReply} (which is the
+        // 4000-char display cap on the announce body) — this flag means the
+        // CHILD'S underlying reply was cut off by max_tokens. The chat-page
+        // announce card reads this and renders a "Reply was truncated by
+        // the model" marker.
+        if (modelOutputTruncated) payload.put("truncated", Boolean.TRUE);
 
         var fallbackLabel = label != null && !label.isBlank() ? label : "subagent run";
         var fallback = "Subagent " + status.name().toLowerCase() + " (" + fallbackLabel + ")"
@@ -1240,6 +1272,9 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         msg.content = fallback;
         msg.messageKind = MESSAGE_KIND_ANNOUNCE;
         msg.metadata = utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+        // JCLAW-291: also stamp the column on the announce row itself so
+        // queries that count truncated messages see it without parsing JSON.
+        msg.truncated = modelOutputTruncated;
         msg.save();
 
         parentConv.messageCount++;
