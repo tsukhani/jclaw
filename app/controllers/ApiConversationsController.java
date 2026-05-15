@@ -103,19 +103,26 @@ public class ApiConversationsController extends Controller {
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 100) : 20;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
 
-        var where = filter.toWhereClause();
-        String jpql = where.isEmpty()
-                ? "SELECT c FROM Conversation c JOIN FETCH c.agent ORDER BY c.updatedAt DESC"
-                : "SELECT c FROM Conversation c JOIN FETCH c.agent WHERE " + where + " ORDER BY c.updatedAt DESC";
+        // Subagent child conversations (parentConversation != null) are
+        // scoped to their parent's spawn tree and surface on the dedicated
+        // /subagents admin page, not in the user-facing conversation list
+        // or the chat sidebar's recent feed. Filtering at the API rather
+        // than the frontend keeps both consumers consistent and preserves
+        // accurate pagination counts. Mirrors the JCLAW-274 follow-up that
+        // hid subagents from /api/agents (commit 26e2acd).
+        var dynamicWhere = filter.toWhereClause();
+        var fullWhere = dynamicWhere.isEmpty()
+                ? "c.parentConversation IS NULL"
+                : "c.parentConversation IS NULL AND " + dynamicWhere;
+        String jpql = "SELECT c FROM Conversation c JOIN FETCH c.agent WHERE "
+                + fullWhere + " ORDER BY c.updatedAt DESC";
         var q = JPA.em().createQuery(jpql, Conversation.class);
         var params = filter.paramList();
         for (int i = 0; i < params.size(); i++) {
             q.setParameter(i + 1, params.get(i));
         }
 
-        String countJpql = where.isEmpty()
-                ? "SELECT COUNT(c) FROM Conversation c"
-                : "SELECT COUNT(c) FROM Conversation c WHERE " + where;
+        String countJpql = "SELECT COUNT(c) FROM Conversation c WHERE " + fullWhere;
         var countQ = JPA.em().createQuery(countJpql, Long.class);
         for (int i = 0; i < params.size(); i++) {
             countQ.setParameter(i + 1, params.get(i));

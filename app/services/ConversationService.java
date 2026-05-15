@@ -344,7 +344,32 @@ public class ConversationService {
     public static int deleteByIds(List<Long> ids) {
         if (ids == null || ids.isEmpty()) return 0;
         var em = JPA.em();
-        // MessageAttachment first — FK from chat_message_attachment.message_id to
+        // Subagent-tree cascade: a Conversation can be the parent of one or
+        // more child Conversations (subagent runs), and SubagentRun audit
+        // rows hold FKs to both ends. Pre-fix, bulk-delete-by-filter
+        // happened to include the children in the same SQL statement so
+        // the FKs were satisfied at statement-end. Now that the listing
+        // filter excludes children (so /conversations doesn't double-show
+        // them), explicit cascade-cleanup keeps deleteByIds working when
+        // a parent has subagent children.
+        // 1. Recursive deleteByIds for child conversations (depth-first —
+        //    handles grandchildren / SubagentRuns / Messages / etc).
+        List<Long> childIds = em.createQuery(
+                "SELECT c.id FROM Conversation c WHERE c.parentConversation.id IN :ids",
+                Long.class).setParameter("ids", ids).getResultList();
+        if (!childIds.isEmpty()) {
+            deleteByIds(childIds);
+        }
+        // 2. SubagentRun rows referencing any of these conversations on
+        //    either side. Done after the child cascade so a recursive call
+        //    doesn't try to double-delete a SubagentRun the parent's
+        //    cleanup would have removed.
+        em.createQuery(
+                "DELETE FROM SubagentRun sr "
+                        + "WHERE sr.parentConversation.id IN :ids "
+                        + "   OR sr.childConversation.id IN :ids")
+                .setParameter("ids", ids).executeUpdate();
+        // 3. MessageAttachment first — FK from chat_message_attachment.message_id to
         // message.id has no ON DELETE CASCADE, so the bulk Message delete below
         // would otherwise fail with a referential-integrity violation.
         em.createQuery("DELETE FROM MessageAttachment a WHERE a.message.conversation.id IN :ids")
@@ -382,10 +407,18 @@ public class ConversationService {
                 .like("LOWER(preview)", hasNameFilter ? "%" + name.toLowerCase() + "%" : null)
                 .like("LOWER(peerId)", peer != null && !peer.isBlank() ? "%" + peer.toLowerCase() + "%" : null);
 
-        var where = filter.toWhereClause();
-        String jpql = where.isEmpty()
-                ? "SELECT c.id FROM Conversation c"
-                : "SELECT c.id FROM Conversation c WHERE " + where;
+        // Bulk-delete must mirror the listing endpoint's exclusion of
+        // subagent children (parentConversation != null). Without this,
+        // the /conversations page's "Delete all" would silently nuke the
+        // subagent transcripts too — invisible to the operator and
+        // potentially destructive to a still-RUNNING subagent's audit row
+        // foreign keys. Per-id deletes (deleteByIds) are still allowed
+        // because those are explicit, scoped operator actions.
+        var dynamicWhere = filter.toWhereClause();
+        var fullWhere = dynamicWhere.isEmpty()
+                ? "c.parentConversation IS NULL"
+                : "c.parentConversation IS NULL AND " + dynamicWhere;
+        String jpql = "SELECT c.id FROM Conversation c WHERE " + fullWhere;
         var q = JPA.em().createQuery(jpql, Long.class);
         var params = filter.paramList();
         for (int i = 0; i < params.size(); i++) {

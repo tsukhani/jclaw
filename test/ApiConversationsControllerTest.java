@@ -174,6 +174,100 @@ class ApiConversationsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void listConversationsExcludesSubagentChildren() {
+        // Regression: /api/conversations is the data source for both the
+        // /conversations admin page AND the chat sidebar's recent feed.
+        // Subagent child conversations (parentConversation != null) belong
+        // on the dedicated /subagents page, not in either of those views.
+        // Pre-fix the page rendered every Conversation row including
+        // children, with a "SUBAGENT" pill, which was redundant with
+        // /subagents and made the bulk-delete dangerous.
+        var ids = commitInFreshTx(() -> {
+            var agent = new Agent();
+            agent.name = "subagent-filter-test";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+
+            var parent = new Conversation();
+            parent.agent = agent;
+            parent.channelType = "web";
+            parent.peerId = "list-filter-test";
+            parent.preview = "parent visible row";
+            parent.save();
+
+            var child = new Conversation();
+            child.agent = agent;
+            child.channelType = "subagent";
+            child.parentConversation = parent;
+            child.preview = "subagent invisible child";
+            child.save();
+
+            return new long[] { parent.id, child.id };
+        });
+
+        login();
+        var response = GET("/api/conversations?peer=list-filter-test");
+        assertIsOk(response);
+        var body = getContent(response);
+        assertTrue(body.contains("\"id\":" + ids[0]),
+                "parent conversation must be in the list response: " + body);
+        assertFalse(body.contains("\"id\":" + ids[1]),
+                "subagent child conversation must NOT appear in /api/conversations: " + body);
+    }
+
+    @Test
+    void deleteByFilterSkipsSubagentChildren() {
+        // Companion to the list test above: bulk-delete-by-filter must
+        // mirror the listing exclusion. Otherwise a /conversations "Delete
+        // all" would silently nuke subagent transcripts the operator
+        // couldn't even see. Tests ConversationService.deleteByFilter
+        // directly because Play 1.x's FunctionalTest.DELETE doesn't
+        // expose a body-bearing overload, and the controller is a thin
+        // pass-through to this service method.
+        var ids = commitInFreshTx(() -> {
+            var agent = new Agent();
+            agent.name = "subagent-deletefilter-test";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+
+            var parent = new Conversation();
+            parent.agent = agent;
+            parent.channelType = "web";
+            parent.peerId = "delete-filter-test";
+            parent.preview = "parent should be deleted";
+            parent.save();
+
+            var child = new Conversation();
+            child.agent = agent;
+            child.channelType = "subagent";
+            child.parentConversation = parent;
+            child.peerId = "delete-filter-test";
+            child.preview = "subagent should survive";
+            child.save();
+
+            return new long[] { parent.id, child.id };
+        });
+
+        // Filter picks up only the parent (peer matches both, but the
+        // listing/filter exclusion drops the child). Returned count is
+        // the number of top-level rows the filter resolved to — 1.
+        Integer deletedCount = commitInFreshTx(() ->
+                ConversationService.deleteByFilter(null, null, null, "delete-filter-test"));
+        assertEquals(Integer.valueOf(1), deletedCount,
+                "expected deletedCount=1 (parent only — child not directly matched by filter)");
+
+        // The parent IS deleted, and the cascade walks down to the child
+        // so no FK-violating orphan remains. Both rows are gone end-state.
+        Boolean parentDeleted = commitInFreshTx(() -> Conversation.findById(ids[0]) == null);
+        assertTrue(parentDeleted, "parent conversation should have been deleted by the filter");
+        Boolean childCascaded = commitInFreshTx(() -> Conversation.findById(ids[1]) == null);
+        assertTrue(childCascaded,
+                "subagent child must be cascaded when its parent is deleted (FK integrity)");
+    }
+
+    @Test
     void listConversationsWithLimitAndOffset() {
         login();
         var response = GET("/api/conversations?limit=5&offset=0");
