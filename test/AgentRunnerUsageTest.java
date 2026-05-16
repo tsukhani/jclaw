@@ -1,13 +1,13 @@
 import org.junit.jupiter.api.*;
 import play.test.*;
-import agents.AgentRunner;
+import agents.UsageMetricsBuilder;
 import com.google.gson.JsonParser;
 import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.Usage;
 
 /**
- * JCLAW-76 — verifies that {@code AgentRunner.buildUsageJson} surfaces
+ * JCLAW-76 — verifies that {@code UsageMetricsBuilder.buildUsageJson} surfaces
  * token counts summed across every LLM round in a turn, not just the
  * first round's values. Exercises the pure helper directly against a
  * {@link LlmProvider.TurnUsage} built up via {@link LlmProvider.TurnUsage#addRound}
@@ -73,7 +73,7 @@ class AgentRunnerUsageTest extends UnitTest {
         turn.addRound(roundWithUsage(new Usage(100, 10, 110, 5, 0, 0)));
         turn.addRound(roundWithUsage(new Usage(200, 800, 1000, 15, 0, 0)));
 
-        var json = AgentRunner.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
+        var json = UsageMetricsBuilder.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertEquals(300, obj.get("prompt").getAsInt());
@@ -90,7 +90,7 @@ class AgentRunnerUsageTest extends UnitTest {
         var turn = new LlmProvider.TurnUsage();
         turn.addRound(roundWithUsage(new Usage(500, 300, 800, 50, 100, 0)));
 
-        var json = AgentRunner.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
+        var json = UsageMetricsBuilder.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertEquals(500, obj.get("prompt").getAsInt());
@@ -109,7 +109,7 @@ class AgentRunnerUsageTest extends UnitTest {
         var turn = new LlmProvider.TurnUsage();
         turn.addRound(roundWithUsage(null));
 
-        var json = AgentRunner.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
+        var json = UsageMetricsBuilder.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
         assertFalse(json.contains("\"prompt\""), "no prompt field when zero usage: " + json);
         assertFalse(json.contains("\"completion\""), "no completion field when zero usage: " + json);
         assertTrue(json.contains("\"durationMs\""), "durationMs always present: " + json);
@@ -136,7 +136,7 @@ class AgentRunnerUsageTest extends UnitTest {
         round2.appendReasoningText("B".repeat(100));
         turn.addRound(round2);
 
-        var json = AgentRunner.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
+        var json = UsageMetricsBuilder.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         // 300 chars / 4 chars-per-token, rounded up = 75
@@ -158,7 +158,7 @@ class AgentRunnerUsageTest extends UnitTest {
         var turn = new LlmProvider.TurnUsage();
         turn.addRound(round);
 
-        var json = AgentRunner.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
+        var json = UsageMetricsBuilder.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertTrue(obj.has("reasoningDurationMs"), "duration field present for single-round turn: " + json);
@@ -193,7 +193,7 @@ class AgentRunnerUsageTest extends UnitTest {
         round2.noteFirstContentChunk();   // round 2 streams content directly
         turn.addRound(round2);
 
-        var json = AgentRunner.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
+        var json = UsageMetricsBuilder.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertTrue(obj.has("reasoningDurationMs"), "duration field present: " + json);
@@ -283,7 +283,7 @@ class AgentRunnerUsageTest extends UnitTest {
         var model = new ModelInfo("test-model", "Test", 128000, 4096, false,
                 3.0, 15.0, 0.30, 3.75);
 
-        var json = AgentRunner.buildUsageJson(turn, model, System.currentTimeMillis(), null, null);
+        var json = UsageMetricsBuilder.buildUsageJson(turn, model, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertEquals(3.0, obj.get("promptPrice").getAsDouble(), 0.001);
@@ -305,7 +305,7 @@ class AgentRunnerUsageTest extends UnitTest {
         agent.modelProvider = "openrouter";
         agent.modelId = "flash-preview";
 
-        var json = AgentRunner.buildUsageJson(turn, model, System.currentTimeMillis(), agent, null);
+        var json = UsageMetricsBuilder.buildUsageJson(turn, model, System.currentTimeMillis(), agent, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertEquals("openrouter", obj.get("modelProvider").getAsString());
@@ -334,7 +334,7 @@ class AgentRunnerUsageTest extends UnitTest {
         conversation.modelProviderOverride = "override-provider";
         conversation.modelIdOverride = "override-model";
 
-        var json = AgentRunner.buildUsageJson(turn, model, System.currentTimeMillis(), agent, conversation);
+        var json = UsageMetricsBuilder.buildUsageJson(turn, model, System.currentTimeMillis(), agent, conversation);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertEquals("override-provider", obj.get("modelProvider").getAsString(),
@@ -360,7 +360,7 @@ class AgentRunnerUsageTest extends UnitTest {
         conversation.modelProviderOverride = "only-provider-set";
         // modelIdOverride intentionally null
 
-        var json = AgentRunner.buildUsageJson(turn, null, System.currentTimeMillis(), agent, conversation);
+        var json = UsageMetricsBuilder.buildUsageJson(turn, null, System.currentTimeMillis(), agent, conversation);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertEquals("agent-provider", obj.get("modelProvider").getAsString());
@@ -376,7 +376,7 @@ class AgentRunnerUsageTest extends UnitTest {
         var turn = new LlmProvider.TurnUsage();
         turn.addRound(roundWithUsage(new Usage(100, 50, 150, 0, 0, 0)));
 
-        var json = AgentRunner.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
+        var json = UsageMetricsBuilder.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
         var obj = JsonParser.parseString(json).getAsJsonObject();
 
         assertFalse(obj.has("modelProvider"), "no modelProvider field when agent is null: " + json);
