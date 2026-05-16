@@ -235,6 +235,101 @@ public class AgentRunner {
         return runAfterAcquire(agent, conversation, userMessage, attachments, false);
     }
 
+    /**
+     * JCLAW-21: sink-based entry point for scheduled task fires. No
+     * {@link Conversation} is manufactured — each fire is a fresh agent
+     * invocation with no per-fire history loaded — but the rest of the
+     * runner machinery composes the same as it does for chat:
+     * {@link SystemPromptAssembler} builds the system prompt,
+     * {@link ToolCallLoopRunner#callWithToolLoop} drives the
+     * LLM → tools → continuation cycle up to {@code chat.maxToolRounds},
+     * and {@link ParallelToolExecutor} writes turns via the supplied
+     * sink. The sink is the only persistence target — for the production
+     * Tasks path that's a {@code TaskRunSink} writing to
+     * {@code task_run_message}.
+     *
+     * <p><b>Stub Conversation:</b> a transient (not persisted)
+     * {@link Conversation} carries the few metadata fields the loop
+     * reads — {@code agent} for provider resolution,
+     * {@code channelType=null} (the existing convention for non-chat
+     * callers, per {@link llm.LlmProvider#chat}). The instance is never
+     * passed to {@code ConversationService} or saved; only the loop's
+     * helpers see it.
+     *
+     * <p>What this method skips vs the chat path:
+     * <ul>
+     *   <li>No {@link services.ConversationQueue} acquire — fires are
+     *   scheduled, not queued by inbound traffic; each fire is a
+     *   fresh agent run with no concurrent siblings on the same
+     *   "conversation".</li>
+     *   <li>No history load — every fire starts from a clean
+     *   {@code [system, user]} message list.</li>
+     *   <li>No compaction or context-window trim — small message list,
+     *   no growth between fires.</li>
+     *   <li>No audio attachments — Tasks accept only the
+     *   {@code userPrompt} string. Image/audio attachment support
+     *   ships as a separate Tasks-feature story.</li>
+     *   <li>No streaming surface — Tasks run headless; transports
+     *   render the final outcome from {@link TaskRunSink#onComplete}.</li>
+     * </ul>
+     *
+     * <p>Reuses the chat per-turn round cap
+     * ({@code chat.maxToolRounds}, default 100) — Hermes ships 90 by
+     * default for the same reason, OpenClaw inherits per-agent. A
+     * single shared cap keeps the loop body identical and the
+     * operational dial single-pointed.
+     *
+     * @param agent      the executing agent
+     * @param userPrompt the task's input text (typically {@code task.description})
+     * @param sink       persistence target — {@link ConversationSink} for
+     *                   tests that want to round-trip via the chat schema,
+     *                   {@link TaskRunSink} for production task fires
+     * @return outcome carrying the final assistant content and the
+     *         truncated flag (true when the model hit
+     *         {@code finish_reason=length} on the final turn)
+     */
+    public static ToolCallLoopRunner.LoopOutcome runForTask(Agent agent, String userPrompt,
+                                                             AgentExecutionSink sink) {
+        java.util.Objects.requireNonNull(agent, "agent");
+        java.util.Objects.requireNonNull(userPrompt, "userPrompt");
+        java.util.Objects.requireNonNull(sink, "sink");
+
+        services.Tx.run(() -> sink.appendUserMessage(userPrompt, null));
+
+        var stubConv = new Conversation();
+        stubConv.agent = agent;
+
+        var assembled = SystemPromptAssembler.assemble(agent, userPrompt, null, null);
+        var messages = new ArrayList<ChatMessage>();
+        messages.add(ChatMessage.system(assembled.systemPrompt()));
+        messages.add(ChatMessage.user(userPrompt));
+
+        var agentProvider = ProviderRegistry.get(ModelResolver.effectiveModelProvider(agent, stubConv));
+        var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
+        if (primary == null) {
+            var error = "No LLM provider configured. Add provider config via Settings.";
+            EventLogger.error("llm", agent.name, null, error);
+            services.Tx.run(() -> sink.appendAssistantMessage(error, null));
+            return new ToolCallLoopRunner.LoopOutcome(error);
+        }
+        var secondary = ProviderRegistry.getSecondary();
+        var tools = ToolRegistry.getToolDefsForAgent(agent);
+
+        EventLogger.info("llm", agent.name, null,
+                "Task fire: calling %s / %s".formatted(
+                        primary.config().name(),
+                        ModelResolver.effectiveModelId(agent, stubConv)));
+
+        var outcome = ToolCallLoopRunner.callWithToolLoop(
+                agent, stubConv, null, messages, tools, primary, secondary,
+                new ArrayList<>(), sink);
+
+        final var response = outcome.content();
+        final var truncated = outcome.truncated();
+        services.Tx.run(() -> sink.appendAssistantMessage(response, null, null, null, truncated));
+        return outcome;
+    }
+
     private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,
                                               java.util.List<services.AttachmentService.Input> attachments,
                                               boolean skipUserAppend) {
