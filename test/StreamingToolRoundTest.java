@@ -127,7 +127,9 @@ class StreamingToolRoundTest extends UnitTest {
     // === cancelledReturn: cancellation early-exit fallback resolution ===
 
     private static java.lang.reflect.Method cancelledReturnMethod() throws Exception {
-        var m = AgentRunner.class.getDeclaredMethod("cancelledReturn",
+        // JCLAW-299 Phase 2: cancelledReturn lives on agents.CancellationManager
+        // now. Reflection target moved here; signature and semantics preserved.
+        var m = agents.CancellationManager.class.getDeclaredMethod("cancelledReturn",
                 String.class, List.class, String.class,
                 AgentRunner.StreamingCallbacks.class, models.Agent.class, int.class);
         m.setAccessible(true);

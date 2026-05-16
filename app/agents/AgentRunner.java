@@ -102,7 +102,7 @@ public class AgentRunner {
      * Callbacks for streaming mode. Groups the event handlers that
      * {@link #runStreaming} pushes SSE data through.
      *
-     * <p>{@code onCancel} fires once when {@link #checkCancelled} detects a
+     * <p>{@code onCancel} fires once when {@link CancellationManager#checkCancelled} detects a
      * cancellation flag flip and the streaming thread is about to early-return.
      * Unlike {@code onComplete} / {@code onError} it carries no payload — its
      * job is to let transports quiesce side-channel state (the Telegram typing
@@ -141,26 +141,6 @@ public class AgentRunner {
         java.util.Set<String> disabledTools,
         List<AudioBearer> audioBearers
     ) {}
-
-    private static final String STREAM_CANCELLED_MSG = "Stream cancelled by client disconnect";
-
-    /**
-     * Check whether the streaming client has disconnected. Logs the cancellation
-     * when detected, fires {@code onCancel} so transports can quiesce side-channel
-     * state (e.g. the Telegram typing heartbeat — JCLAW-181 follow-up), and
-     * returns {@code true} so the caller can short-circuit. {@code onCancel}
-     * itself is idempotent on every wired implementation, so multiple checkpoints
-     * along an early-return path are safe.
-     */
-    private static boolean checkCancelled(AtomicBoolean isCancelled, Agent agent, String channelType,
-                                           StreamingCallbacks cb) {
-        if (isCancelled.get()) {
-            EventLogger.info("llm", agent.name, channelType, STREAM_CANCELLED_MSG);
-            if (cb != null && cb.onCancel() != null) cb.onCancel().run();
-            return true;
-        }
-        return false;
-    }
 
     /**
      * JCLAW-291: cooperative-cancellation checkpoint for subagent runs. If
@@ -585,7 +565,7 @@ public class AgentRunner {
 
                 trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
 
-                if (checkCancelled(isCancelled, agent, channelType, tracedCb)) return;
+                if (CancellationManager.checkCancelled(isCancelled, agent, channelType, tracedCb)) return;
 
                 // Phase 2: Assemble prompt, resolve provider, call LLM in streaming loop
                 streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, tracedCb, trace);
@@ -757,7 +737,7 @@ public class AgentRunner {
             return;
         }
 
-        if (checkCancelled(isCancelled, agent, channelType, cb)) return;
+        if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
 
         // Fold the remaining DB reads into ONE transaction. Tx.run short-circuits
         // nested calls, so inner helpers that also call Tx.run (e.g. loadRecentMessages
@@ -800,7 +780,7 @@ public class AgentRunner {
         var assembled = prepared.assembled();
         var messages = trimmedMessages;
 
-        if (checkCancelled(isCancelled, agent, channelType, cb)) return;
+        if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
 
         trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
 
@@ -831,7 +811,7 @@ public class AgentRunner {
                 effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(),
                 maxTokens, thinkingMode, channelType);
 
-        if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return;
+        if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return;
 
         // Retry once on transient 5xx errors
         if (accumulator.error != null && accumulator.error.getMessage() != null
@@ -840,10 +820,10 @@ public class AgentRunner {
             accumulator = primary.chatStreamAccumulate(
                     effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(),
                     maxTokens, thinkingMode, channelType);
-            if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return;
+            if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, isCancelled, agent, channelType, cb)) return;
         }
 
-        if (checkCancelled(isCancelled, agent, channelType, cb)) return;
+        if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
 
         // JCLAW-165: fire AUDIO_PASSTHROUGH_OUTCOME for the round-1 LLM call
         // when the request carried audio. Streaming has no retry (you can't
@@ -943,7 +923,7 @@ public class AgentRunner {
                     isCancelled, trace, turnUsage, turnImages, channelType);
         }
 
-        if (checkCancelled(isCancelled, agent, channelType, cb)) return;
+        if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
 
         // JCLAW-273: parent agent yielded into an async subagent. No final
         // assistant message to persist or emit; the parent's logical turn
@@ -1013,22 +993,6 @@ public class AgentRunner {
         utils.LatencyStats.record(channelType, "persist",
                 (System.nanoTime() - persistStartNs) / 1_000_000L);
         UsageMetricsBuilder.emitUsageAndComplete(agent, channelType, content, turnUsage, streamStartMs, usageJson, cb);
-    }
-
-    /**
-     * Poll an accumulator for completion, checking for cancellation every 5 s.
-     * Returns {@code true} if the accumulator completed, {@code false} if
-     * cancelled (in which case the cancellation has already been logged).
-     */
-    private static boolean awaitAccumulatorOrCancel(LlmProvider.StreamAccumulator accumulator,
-                                                     AtomicBoolean isCancelled,
-                                                     Agent agent, String channelType,
-                                                     StreamingCallbacks cb)
-            throws InterruptedException {
-        while (!accumulator.awaitCompletion(5000)) {
-            if (checkCancelled(isCancelled, agent, channelType, cb)) return false;
-        }
-        return true;
     }
 
     // --- Internal ---
@@ -1315,7 +1279,7 @@ public class AgentRunner {
             return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
         }
         if (isCancelled.get()) {
-            return cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+            return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
         }
         EventLogger.info("tool", agent.name, null,
                 "Streaming round %d: executing %d tool call(s)".formatted(round + 1, toolCalls.size()));
@@ -1329,7 +1293,7 @@ public class AgentRunner {
                 cb.onStatus(), cb.onToolCall(), collectedImages, isCancelled);
         trace.addToolRound((System.nanoTime() - toolRoundStartNs) / 1_000_000L);
 
-        if (isCancelled.get()) return cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+        if (isCancelled.get()) return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
 
         // JCLAW-291: cooperative-cancel checkpoint between the tool round
         // and the LLM continuation. Subagent-driven streaming runs aren't
@@ -1365,14 +1329,14 @@ public class AgentRunner {
                 maxTokens, thinkingMode, channelType);
 
         try {
-            if (!awaitAccumulatorOrCancel(accumulator, isCancelled, agent, null, cb))
-                return cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+            if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, isCancelled, agent, null, cb))
+                return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            return cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+            return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
         }
 
-        if (isCancelled.get()) return cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+        if (isCancelled.get()) return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
 
         // Fold this round's usage into the turn-level cumulative (JCLAW-76).
         // Runs regardless of whether the round resolves to more tool calls,
@@ -1426,11 +1390,11 @@ public class AgentRunner {
                     effectiveModelIdForCall, retryMessages, tools, cb.onToken(), cb.onReasoning(),
                     retryMaxTokens, thinkingMode, channelType);
             try {
-                if (!awaitAccumulatorOrCancel(retry, isCancelled, agent, null, cb))
-                    return cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+                if (!CancellationManager.awaitAccumulatorOrCancel(retry, isCancelled, agent, null, cb))
+                    return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                return cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
+                return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
             }
 
             // Retry round is a real LLM call — its usage counts too (JCLAW-76).
@@ -1459,46 +1423,6 @@ public class AgentRunner {
         return MessageDeduplicator.buildImagePrefix(collectedImages, accumulator.content)
                 + accumulator.content
                 + MessageDeduplicator.buildDownloadSuffix(collectedImages, accumulator.content, channelType);
-    }
-
-    /**
-     * Resolve the return value for a cancellation early-exit inside
-     * {@link #handleToolCallsStreaming}. When {@code priorContent} is non-blank
-     * (the round-1 model emitted a preamble before the tool calls), preserve it
-     * untouched — the user already saw it streamed.
-     *
-     * <p>When {@code priorContent} is empty, the model emitted only tool_calls
-     * on round 1 and the synthesis was about to run. Returning {@code ""} here
-     * was the silent-data-loss bug behind "(empty response)" reports: a
-     * heartbeat write fail, token write fail, or 600s safety timeout flips
-     * {@code cancelled}, the tool result is already on screen, and the
-     * synthesis disappears with no diagnostic. Emit a labeled fallback instead
-     * so the persisted assistant row is non-empty and the user sees what
-     * happened.
-     *
-     * <p>The fallback is also pushed via {@link StreamingCallbacks#onToken} for
-     * symmetry with {@link #handleToolCallsStreaming}'s empty-retry diagnostic.
-     * If the SSE channel is already dead the underlying {@code sse.send} call
-     * is a no-op (SseStream catches the write exception and auto-closes); on
-     * Telegram the sink's {@code update} is similarly tolerant.
-     */
-    private static String cancelledReturn(String priorContent, List<String> collectedImages,
-                                           String channelType, StreamingCallbacks cb,
-                                           Agent agent, int round) {
-        if (priorContent != null && !priorContent.isBlank()) {
-            return priorContent;
-        }
-        EventLogger.warn("llm", agent != null ? agent.name : null, null,
-                "Cancelled in round %d before any synthesis content — emitting labeled fallback"
-                        .formatted(round + 1));
-        var images = collectedImages != null ? collectedImages : List.<String>of();
-        var fallbackPrefix = images.isEmpty() ? "" : String.join("\n\n", images) + "\n\n";
-        var fallbackSuffix = MessageDeduplicator.buildDownloadSuffix(images, "", channelType);
-        var fallback = fallbackPrefix
-                + "*[Synthesis was cancelled before the model produced any output. Tool results are in the conversation history above — try resending the request.]*"
-                + fallbackSuffix;
-        cb.onToken().accept(fallback);
-        return fallback;
     }
 
     /**

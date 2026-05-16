@@ -1,4 +1,5 @@
 import agents.AgentRunner;
+import agents.CancellationManager;
 import models.Agent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -11,13 +12,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * Characterization tests for {@link AgentRunner}'s cancellation contract,
- * locking in current behavior ahead of the JCLAW-299 refactor.
+ * Characterization tests for {@link CancellationManager}'s checkpoint
+ * contract — the JCLAW-299 Phase 2 home for the cancellation primitives
+ * that used to live in {@link AgentRunner}.
  *
  * <p>The streaming code path checks {@code AtomicBoolean isCancelled} at
  * safe boundaries (between LLM rounds, between tool calls, at the top of
- * queue-drain) via the private {@code checkCancelled} helper. When the
- * flag is set, the helper:
+ * queue-drain) via the package-private {@code checkCancelled} helper.
+ * When the flag is set, the helper:
  * <ul>
  *   <li>logs the cancellation to event_log,</li>
  *   <li>invokes the {@code onCancel} Runnable on the supplied callbacks
@@ -27,9 +29,8 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p>These tests pin the helper's contract via reflection — same pattern
  * {@code StreamingToolRoundTest} uses for {@code cancelledReturn}. The
- * refactor must preserve this contract; any extracted
- * {@code CancellationManager} component (per the JCLAW-299 decomposition)
- * has to honour the same return value and side effects.
+ * extraction commit moved the methods but must preserve this contract,
+ * which is what these tests verify.
  *
  * <p>Integration-level mid-stream cancellation (SSE token cadence with the
  * flag flipping between tokens) lives in a sibling characterization test
@@ -47,7 +48,7 @@ class AgentRunnerCancellationTest extends UnitTest {
     // === checkCancelled (private static) — unit contract via reflection ===
 
     private static Method checkCancelledMethod() throws Exception {
-        var m = AgentRunner.class.getDeclaredMethod("checkCancelled",
+        var m = CancellationManager.class.getDeclaredMethod("checkCancelled",
                 AtomicBoolean.class,
                 Agent.class,
                 String.class,
