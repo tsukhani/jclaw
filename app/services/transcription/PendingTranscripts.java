@@ -9,7 +9,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * {@code MessageAttachment.id}. The dispatcher in
  * {@code ConversationService.appendUserMessage} registers a future
  * here when it kicks off a virtual-thread transcription; the
- * {@code AgentRunner.userMessageFor} text-only branch and the
+ * {@code agents.VisionAudioAssembler.userMessageFor} text-only branch and the
  * provider-rejection retry branch look up the future to await it.
  *
  * <p>Lookup semantics: completed futures stay in the map after

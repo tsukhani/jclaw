@@ -9,7 +9,7 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Exercises {@code agents.AgentRunner.userMessageFor} — the content-part assembler
+ * Exercises {@code agents.VisionAudioAssembler.userMessageFor} — the content-part assembler
  * that lifts a stored user turn into an OpenAI-compatible
  * {@code content: [...]} array when attachments are present (JCLAW-25 for
  * images, JCLAW-132 for audio). Play 1.x pins tests to the default package,
@@ -57,7 +57,7 @@ class VisionAudioAssemblyTest extends UnitTest {
         // here would mask that production path.
         var fresh = Message.<Message>findById(message.id);
 
-        var chatMsg = agents.AgentRunner.userMessageFor(fresh);
+        var chatMsg = agents.VisionAudioAssembler.userMessageFor(fresh);
         assertTrue(chatMsg.content() instanceof List,
                 "multimodal turn must emit a content-parts list, not a string");
         var parts = (List<?>) chatMsg.content();
@@ -87,7 +87,7 @@ class VisionAudioAssemblyTest extends UnitTest {
 
         var fresh = Message.<Message>findById(message.id);
 
-        var chatMsg = agents.AgentRunner.userMessageFor(fresh);
+        var chatMsg = agents.VisionAudioAssembler.userMessageFor(fresh);
         var parts = (List<?>) chatMsg.content();
         var audioPart = firstPartOfType(parts, "input_audio");
         assertNotNull(audioPart);
@@ -107,7 +107,7 @@ class VisionAudioAssemblyTest extends UnitTest {
         persistAttachment("rfc.wav", "audio/vnd.wave",
                 MessageAttachment.KIND_AUDIO, new byte[]{1, 2, 3});
         var fresh1 = Message.<Message>findById(message.id);
-        var inner1 = (Map<?, ?>) firstPartOfType((List<?>) agents.AgentRunner.userMessageFor(fresh1)
+        var inner1 = (Map<?, ?>) firstPartOfType((List<?>) agents.VisionAudioAssembler.userMessageFor(fresh1)
                 .content(), "input_audio").get("input_audio");
         assertEquals("wav", inner1.get("format"),
                 "audio/vnd.wave must alias to 'wav' format hint");
@@ -117,7 +117,7 @@ class VisionAudioAssemblyTest extends UnitTest {
         persistAttachment("legacy.wav", "audio/x-wav",
                 MessageAttachment.KIND_AUDIO, new byte[]{4, 5, 6});
         var fresh2 = Message.<Message>findById(message.id);
-        var inner2 = (Map<?, ?>) firstPartOfType((List<?>) agents.AgentRunner.userMessageFor(fresh2)
+        var inner2 = (Map<?, ?>) firstPartOfType((List<?>) agents.VisionAudioAssembler.userMessageFor(fresh2)
                 .content(), "input_audio").get("input_audio");
         assertEquals("wav", inner2.get("format"),
                 "audio/x-wav must alias to 'wav' format hint");
@@ -130,7 +130,7 @@ class VisionAudioAssemblyTest extends UnitTest {
 
         var fresh = Message.<Message>findById(message.id);
 
-        var chatMsg = agents.AgentRunner.userMessageFor(fresh);
+        var chatMsg = agents.VisionAudioAssembler.userMessageFor(fresh);
         var parts = (List<?>) chatMsg.content();
 
         // No image_url or input_audio parts for a plain document.
@@ -160,7 +160,7 @@ class VisionAudioAssemblyTest extends UnitTest {
 
         var fresh = Message.<Message>findById(message.id);
 
-        var chatMsg = agents.AgentRunner.userMessageFor(fresh);
+        var chatMsg = agents.VisionAudioAssembler.userMessageFor(fresh);
         var parts = (List<?>) chatMsg.content();
 
         // Exactly one of each expected structured kind, plus one text part.

@@ -1,4 +1,5 @@
 import agents.AgentRunner;
+import agents.VisionAudioAssembler;
 import models.Agent;
 import models.Conversation;
 import models.Message;
@@ -70,7 +71,7 @@ class TranscriptionPipelineTest extends UnitTest {
         persistAudioAttachment("clip.mp3", "audio/mpeg", new byte[]{1, 2, 3, 4, 5}, null);
         var fresh = Message.<Message>findById(message.id);
 
-        var chatMsg = AgentRunner.userMessageFor(fresh, true);
+        var chatMsg = VisionAudioAssembler.userMessageFor(fresh, true);
         assertTrue(chatMsg.content() instanceof List);
         var parts = (List<?>) chatMsg.content();
         assertNotNull(firstPartOfType(parts, "input_audio"),
@@ -88,7 +89,7 @@ class TranscriptionPipelineTest extends UnitTest {
                 "hello, this is a voice note");
         var fresh = Message.<Message>findById(message.id);
 
-        var chatMsg = AgentRunner.userMessageFor(fresh, false);
+        var chatMsg = VisionAudioAssembler.userMessageFor(fresh, false);
         var parts = (List<?>) chatMsg.content();
 
         assertNull(firstPartOfType(parts, "input_audio"),
@@ -110,7 +111,7 @@ class TranscriptionPipelineTest extends UnitTest {
         persistAudioAttachment("recording.ogg", "audio/ogg", new byte[]{9, 8, 7}, null);
         var fresh = Message.<Message>findById(message.id);
 
-        var chatMsg = AgentRunner.userMessageFor(fresh, false);
+        var chatMsg = VisionAudioAssembler.userMessageFor(fresh, false);
         var parts = (List<?>) chatMsg.content();
 
         var textPart = firstPartOfType(parts, "text");
@@ -131,7 +132,7 @@ class TranscriptionPipelineTest extends UnitTest {
         persistAudioAttachment("clip.mp3", "audio/mpeg", new byte[]{1, 2}, null);
         var fresh = Message.<Message>findById(message.id);
 
-        var chatMsg = AgentRunner.userMessageFor(fresh);
+        var chatMsg = VisionAudioAssembler.userMessageFor(fresh);
         var parts = (List<?>) chatMsg.content();
         assertNotNull(firstPartOfType(parts, "input_audio"),
                 "default overload must preserve input_audio behaviour");

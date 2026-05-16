@@ -19,8 +19,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -101,7 +99,7 @@ public class AgentRunner {
         LlmProvider primary,
         LlmProvider secondary,
         List<ToolDef> tools,
-        List<AudioBearer> audioBearers
+        List<VisionAudioAssembler.AudioBearer> audioBearers
     ) {}
 
     /**
@@ -114,7 +112,7 @@ public class AgentRunner {
         List<ChatMessage> messages,
         List<ToolDef> tools,
         java.util.Set<String> disabledTools,
-        List<AudioBearer> audioBearers
+        List<VisionAudioAssembler.AudioBearer> audioBearers
     ) {}
 
     /**
@@ -271,7 +269,7 @@ public class AgentRunner {
                 // for inherit-mode subagents. No-op for fresh-mode and non-subagent
                 // conversations (parentContext is null).
                 sysPrompt = services.SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);
-                var audioBearers = new ArrayList<AudioBearer>();
+                var audioBearers = new ArrayList<VisionAudioAssembler.AudioBearer>();
                 var messages = buildMessages(sysPrompt, conv, audioBearers);
 
                 // JCLAW-108: resolve the provider from the effective provider name
@@ -320,7 +318,7 @@ public class AgentRunner {
             // audio-capable happy path is a no-op and pays zero added latency.
             var modelInfoForAudio = ModelResolver.resolveModelInfo(agent, conversation, prepared.primary()).orElse(null);
             var supportsAudioForCall = modelInfoForAudio != null && modelInfoForAudio.supportsAudio();
-            finalMessages = applyTranscriptsForCapability(finalMessages, prepared.audioBearers(), supportsAudioForCall);
+            finalMessages = VisionAudioAssembler.applyTranscriptsForCapability(finalMessages, prepared.audioBearers(), supportsAudioForCall);
             prepared = new PreparedData(finalMessages, prepared.primary(), prepared.secondary(), prepared.tools(), prepared.audioBearers());
             trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
 
@@ -606,7 +604,7 @@ public class AgentRunner {
             var sysPrompt = services.SessionCompactor.appendSummaryToPrompt(assembled0.systemPrompt(), convo);
             // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
             sysPrompt = services.SessionCompactor.appendParentContextToPrompt(sysPrompt, convo);
-            var audioBearers = new ArrayList<AudioBearer>();
+            var audioBearers = new ArrayList<VisionAudioAssembler.AudioBearer>();
             var msgs = buildMessages(sysPrompt, convo, audioBearers);
             // Conversation-aware overload: applies the loadtest-agent
             // short-circuit AND the lazy MCP discovery gate (only ship
@@ -627,7 +625,7 @@ public class AgentRunner {
         // active model lacks supportsAudio. Audio-capable happy path is a no-op.
         var modelInfoForAudioStream = ModelResolver.resolveModelInfo(agent, conversation, primaryRef).orElse(null);
         var supportsAudioForStream = modelInfoForAudioStream != null && modelInfoForAudioStream.supportsAudio();
-        trimmedMessages = applyTranscriptsForCapability(trimmedMessages, prepared.audioBearers(), supportsAudioForStream);
+        trimmedMessages = VisionAudioAssembler.applyTranscriptsForCapability(trimmedMessages, prepared.audioBearers(), supportsAudioForStream);
 
         var assembled = prepared.assembled();
         var messages = trimmedMessages;
@@ -871,7 +869,7 @@ public class AgentRunner {
     private static LoopOutcome callWithToolLoop(Agent agent, Conversation conversation, Long conversationId,
                                             List<ChatMessage> messages, List<ToolDef> tools,
                                             LlmProvider primary, LlmProvider secondary,
-                                            List<AudioBearer> audioBearers) {
+                                            List<VisionAudioAssembler.AudioBearer> audioBearers) {
         // Helpers like effectiveModelId / effectiveMaxTokens accept a nullable
         // conversation for use elsewhere, but this loop dereferences
         // conversation.channelType when handing off to the LLM provider —
@@ -922,7 +920,7 @@ public class AgentRunner {
                     EventLogger.warn("llm", agent.name, null,
                             "Provider %s rejected audio format; retrying with transcript-as-text"
                                     .formatted(primary.config().name()));
-                    currentMessages = new ArrayList<>(applyTranscriptsForCapability(
+                    currentMessages = new ArrayList<>(VisionAudioAssembler.applyTranscriptsForCapability(
                             currentMessages, audioBearers, false));
                     round--;  // JCLAW-165: re-issue this round with the rewritten messages (gated by audioRetryAttempted)
                     continue;
@@ -1055,7 +1053,7 @@ public class AgentRunner {
     /** Check whether at least one of the audio attachments has a non-empty
      *  transcript persisted. Used by the rejection-retry path to decide
      *  whether to retry with text or fail with a user-visible error. */
-    private static boolean anyTranscriptAvailable(List<AudioBearer> audioBearers) {
+    private static boolean anyTranscriptAvailable(List<VisionAudioAssembler.AudioBearer> audioBearers) {
         if (audioBearers == null || audioBearers.isEmpty()) return false;
         return services.Tx.run(() -> {
             for (var b : audioBearers) {
@@ -1279,127 +1277,6 @@ public class AgentRunner {
 
 
     /**
-     * OpenAI {@code input_audio.format} values we know the shared adapter
-     * can emit. JCLAW-132: {@link services.MimeExtensions} reverse-looks a
-     * MIME against this list to derive the format hint; the underlying data
-     * lives in Play's {@code mime-types.properties} + {@code mimetype.*}
-     * application config, so adding a new audio format is a config change,
-     * not a code edit.
-     */
-    private static final String[] AUDIO_FORMAT_CANDIDATES = {
-            "mp3", "wav", "m4a", "aac", "ogg", "oga", "flac", "opus", "weba"
-    };
-
-    /**
-     * Build the {@link ChatMessage} for a historical user turn, lifting it
-     * into OpenAI-style content parts when the row has attachments. Images
-     * ride as {@code image_url} parts (JCLAW-25); audio rides as
-     * {@code input_audio} parts (JCLAW-132); other files fall through as
-     * bracketed filename references inside the text part. Plain-text turns
-     * without attachments still emit the compact {@code {role,content:"..."}}
-     * shape; the provider registry's shared serializer routes either form
-     * correctly.
-     *
-     * <p>Exposed as {@code public} purely so the unit test
-     * {@code VisionAudioAssemblyTest} can exercise the content-part
-     * assembly directly — Play 1.x pins tests to the default package, so
-     * package-private access is unreachable from the test. Not part of
-     * the production contract; callers outside {@link AgentRunner} itself
-     * should route through {@link #buildMessages}.
-     */
-    public static ChatMessage userMessageFor(models.Message msg) {
-        // Default behaviour preserves the pre-JCLAW-165 input_audio shape;
-        // audio-capable models still go through this overload from
-        // buildMessages and from any caller that wants the Telegram
-        // happy-path (Gemini accepting OGG Opus natively).
-        return userMessageFor(msg, true);
-    }
-
-    /**
-     * JCLAW-165 capability-aware overload. {@code supportsAudio=true} emits
-     * the OpenAI {@code input_audio} content part for each audio attachment;
-     * {@code supportsAudio=false} emits a text part containing the cached
-     * transcript (or a clear "could not be transcribed" fallback note when
-     * the transcript field is null/empty).
-     *
-     * <p>This method is pure with respect to async work: it reads the
-     * {@link models.MessageAttachment#transcript} field as-is. The caller
-     * is responsible for awaiting any in-flight {@link services.transcription.PendingTranscripts}
-     * future and persisting the result before calling with
-     * {@code supportsAudio=false} — the orchestrator handles that outside
-     * any blocking JPA transaction.
-     */
-    public static ChatMessage userMessageFor(models.Message msg, boolean supportsAudio) {
-        // Defensive fallback: in most paths Play's enhancer installs a
-        // Hibernate lazy proxy on @OneToMany and the field is non-null;
-        // VisionAudioAssemblyTest saw null collections after direct entity
-        // manipulation, so the explicit query is cheap insurance against
-        // the field being null for any reason.
-        var atts = msg.attachments;
-        if (atts == null) {
-            atts = models.MessageAttachment.findByMessage(msg);
-        }
-        if (atts.isEmpty()) {
-            return ChatMessage.user(msg.content);
-        }
-
-        var text = msg.content == null ? "" : msg.content;
-        var fileNotes = new StringBuilder();
-        var parts = new ArrayList<Map<String, Object>>();
-        for (var a : atts) {
-            if (!a.isImage() && !a.isAudio()) {
-                // FILE-kind attachments are surfaced to the LLM as a
-                // filename + workspace path it can read via the filesystem
-                // tool. Images and audio ride as structured content parts
-                // below, so they skip this branch.
-                fileNotes.append("\n[Attached file: ")
-                        .append(a.originalFilename)
-                        .append(" — workspace:")
-                        .append(a.storagePath)
-                        .append("]");
-            }
-        }
-        // Transcript blocks for the !supportsAudio branch ride INSIDE the
-        // text part so the LLM sees one cohesive prompt rather than fragmented
-        // text + transcript. Append after the user's typed content (if any).
-        var transcriptBlocks = new StringBuilder();
-        if (!supportsAudio) {
-            for (var a : atts) {
-                if (a.isAudio()) {
-                    var transcript = a.transcript;
-                    if (transcript != null && !transcript.isBlank()) {
-                        transcriptBlocks.append("\n\n[Voice note transcription: ")
-                                .append(transcript.trim())
-                                .append("]");
-                    } else {
-                        transcriptBlocks.append("\n\n[Voice note ")
-                                .append(a.originalFilename != null ? a.originalFilename : "unnamed")
-                                .append(": transcription unavailable]");
-                    }
-                }
-            }
-        }
-        var combinedText = text + fileNotes + transcriptBlocks;
-        if (!combinedText.isBlank()) {
-            parts.add(Map.of("type", "text", "text", combinedText));
-        }
-        for (var a : atts) {
-            if (a.isImage()) {
-                parts.add(Map.of(
-                        "type", "image_url",
-                        "image_url", Map.of("url", services.AttachmentService.readAsDataUrl(a))));
-            } else if (a.isAudio() && supportsAudio) {
-                var format = services.MimeExtensions.forMime(a.mimeType, AUDIO_FORMAT_CANDIDATES);
-                var inner = new LinkedHashMap<String, Object>();
-                inner.put("data", services.AttachmentService.readAsBase64(a));
-                if (!format.isEmpty()) inner.put("format", format);
-                parts.add(Map.of("type", "input_audio", "input_audio", inner));
-            }
-        }
-        return new ChatMessage(MessageRole.USER.value, parts, null, null, null);
-    }
-
-    /**
      * JCLAW-165: backward-compat overload for callers that don't need the
      * audio-bearer side-map (compaction path, tests). Drops the captured
      * refs on the floor.
@@ -1409,17 +1286,6 @@ public class AgentRunner {
     }
 
     /**
-     * JCLAW-165: tracks which user messages in the assembled list carry
-     * audio attachments, so the post-Tx orchestrator can rewrite them as
-     * text-with-transcript when the active model lacks {@code supportsAudio}.
-     * The {@code chatMessageIndex} is the position in the returned
-     * {@link ChatMessage} list (which always begins with the system prompt
-     * at index 0); {@code msgId} re-locates the persisted Message in a
-     * fresh transaction at rewrite time.
-     */
-    record AudioBearer(int chatMessageIndex, Long msgId, List<Long> audioAttachmentIds) {}
-
-    /**
      * Build the LLM message list and capture the audio-bearer side-map
      * concurrently. Caller passes in {@code audioBearersOut} (typically a
      * fresh ArrayList); the method appends one entry per user message that
@@ -1427,78 +1293,8 @@ public class AgentRunner {
      * history via {@link ConversationService#loadRecentMessages} which
      * touches lazy collections.
      */
-    /** Bounded ceiling for awaiting a Whisper future during message
-     *  reassembly. The text-only branch normally awaits a future whose
-     *  VT has been running since appendUserMessage committed (well before
-     *  this point), so timeouts should be rare; the cap is defensive
-     *  against pathological transcription stalls (e.g. a stuck ffmpeg).
-     *  After timeout, the empty-string sentinel is used and the fallback
-     *  "could not be transcribed" note appears in the prompt. */
-    private static final long TRANSCRIPT_AWAIT_TIMEOUT_SECONDS = 60;
-
-    /**
-     * JCLAW-165 outside-Tx helper: when the active model lacks
-     * {@code supportsAudio}, await any in-flight transcripts for the
-     * messages identified by {@code audioBearers}, then rebuild those
-     * user messages as text-with-transcript via
-     * {@link #userMessageFor(models.Message, boolean) userMessageFor(msg, false)}.
-     *
-     * <p>Awaits run on the calling (typically virtual) thread with a
-     * bounded timeout per future. The dispatcher in
-     * {@link services.ConversationService} also persists the transcript
-     * to {@link models.MessageAttachment#transcript} on success, so the
-     * fresh re-fetch inside {@code userMessageFor} sees the field
-     * populated. Failed/timed-out futures leave the field NULL and the
-     * fallback note carries the user's original filename.
-     *
-     * <p>Returns {@code messages} unchanged when {@code supportsAudio}
-     * is true or {@code audioBearers} is empty — the audio-capable
-     * happy path keeps zero added latency.
-     */
-    private static List<ChatMessage> applyTranscriptsForCapability(
-            List<ChatMessage> messages, List<AudioBearer> audioBearers, boolean supportsAudio) {
-        if (supportsAudio || audioBearers == null || audioBearers.isEmpty()) return messages;
-
-        // Phase 1 (no Tx): await each in-flight future. Bounded timeout
-        // protects against a stuck Whisper from blocking the LLM call
-        // indefinitely. Failures resolve with empty-string sentinel via
-        // the dispatcher's catch-all, so .get() returns "" rather than
-        // throwing — the timeout branch is the only one the catch handles.
-        for (var b : audioBearers) {
-            for (var attId : b.audioAttachmentIds()) {
-                var future = services.transcription.PendingTranscripts.lookup(attId);
-                if (future.isEmpty()) continue;
-                try {
-                    future.get().get(TRANSCRIPT_AWAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                } catch (TimeoutException e) {
-                    EventLogger.warn("transcription",
-                            "Transcript await timeout for attachment %d after %ds"
-                                    .formatted(attId, TRANSCRIPT_AWAIT_TIMEOUT_SECONDS));
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return messages;
-                } catch (Exception _) {
-                    // ExecutionException — the dispatcher's silent-failure
-                    // contract means this shouldn't fire, but treat any
-                    // surprise as "use the fallback note."
-                }
-            }
-        }
-
-        // Phase 2 (fresh Tx): refetch each affected message + rebuild.
-        return services.Tx.run(() -> {
-            var rewritten = new ArrayList<>(messages);
-            for (var b : audioBearers) {
-                var msg = (models.Message) models.Message.findById(b.msgId());
-                if (msg == null) continue;
-                rewritten.set(b.chatMessageIndex(), userMessageFor(msg, false));
-            }
-            return rewritten;
-        });
-    }
-
     private static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation,
-                                                    List<AudioBearer> audioBearersOut) {
+                                                    List<VisionAudioAssembler.AudioBearer> audioBearersOut) {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(systemPrompt));
 
@@ -1525,9 +1321,9 @@ public class AgentRunner {
                         if (a.isAudio() && a.id != null) audioIds.add(a.id);
                     }
                     if (!audioIds.isEmpty()) {
-                        audioBearersOut.add(new AudioBearer(messages.size(), msg.id, audioIds));
+                        audioBearersOut.add(new VisionAudioAssembler.AudioBearer(messages.size(), msg.id, audioIds));
                     }
-                    yield userMessageFor(msg);
+                    yield VisionAudioAssembler.userMessageFor(msg);
                 }
                 case ASSISTANT -> {
                     if (msg.toolCalls != null && !msg.toolCalls.isBlank()) {

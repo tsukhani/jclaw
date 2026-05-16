@@ -13,7 +13,7 @@ import java.util.Map;
  * <ul>
  *   <li>{@code ApiChatController.uploadChatFiles} picks a canonical
  *       extension when the uploader's sanitized filename has none</li>
- *   <li>{@code AgentRunner.userMessageFor} derives the OpenAI
+ *   <li>{@code agents.VisionAudioAssembler.userMessageFor} derives the OpenAI
  *       {@code input_audio.format} hint from the sniffed MIME stored on the
  *       attachment row</li>
  * </ul>
