@@ -14,8 +14,6 @@ import services.EventLogger;
 import utils.LatencyTrace;
 
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -270,7 +268,7 @@ public class AgentRunner {
                 // conversations (parentContext is null).
                 sysPrompt = services.SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);
                 var audioBearers = new ArrayList<VisionAudioAssembler.AudioBearer>();
-                var messages = buildMessages(sysPrompt, conv, audioBearers);
+                var messages = MessageHydrator.buildMessages(sysPrompt, conv, audioBearers);
 
                 // JCLAW-108: resolve the provider from the effective provider name
                 // (conversation override when set, agent default otherwise), not
@@ -605,7 +603,7 @@ public class AgentRunner {
             // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
             sysPrompt = services.SessionCompactor.appendParentContextToPrompt(sysPrompt, convo);
             var audioBearers = new ArrayList<VisionAudioAssembler.AudioBearer>();
-            var msgs = buildMessages(sysPrompt, convo, audioBearers);
+            var msgs = MessageHydrator.buildMessages(sysPrompt, convo, audioBearers);
             // Conversation-aware overload: applies the loadtest-agent
             // short-circuit AND the lazy MCP discovery gate (only ship
             // schemas for servers the model has called list_mcp_tools on).
@@ -957,9 +955,9 @@ public class AgentRunner {
                 if (isTruncationFinish(choice.finishReason())) {
                     logEmptyToolCallsTruncation("callWithToolLoop", agent, conversation, primary,
                             conversation.channelType, choice.finishReason(), currentMessages, tools);
-                    return new LoopOutcome(contentAsString(assistantMsg.content()), true);
+                    return new LoopOutcome(MessageHydrator.contentAsString(assistantMsg.content()), true);
                 }
-                return new LoopOutcome(contentAsString(assistantMsg.content()));
+                return new LoopOutcome(MessageHydrator.contentAsString(assistantMsg.content()));
             }
 
             // Check for truncated response (max tokens hit mid-tool-call)
@@ -1277,99 +1275,6 @@ public class AgentRunner {
 
 
     /**
-     * JCLAW-165: backward-compat overload for callers that don't need the
-     * audio-bearer side-map (compaction path, tests). Drops the captured
-     * refs on the floor.
-     */
-    private static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation) {
-        return buildMessages(systemPrompt, conversation, new ArrayList<>());
-    }
-
-    /**
-     * Build the LLM message list and capture the audio-bearer side-map
-     * concurrently. Caller passes in {@code audioBearersOut} (typically a
-     * fresh ArrayList); the method appends one entry per user message that
-     * has audio attachments. Inside-Tx use only — reads conversation
-     * history via {@link ConversationService#loadRecentMessages} which
-     * touches lazy collections.
-     */
-    private static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation,
-                                                    List<VisionAudioAssembler.AudioBearer> audioBearersOut) {
-        var messages = new ArrayList<ChatMessage>();
-        messages.add(ChatMessage.system(systemPrompt));
-
-        // JCLAW-193: tool-row history doesn't store the function name, but
-        // Ollama Cloud's Gemini bridge requires it on the tool-result message.
-        // Recover it from the immediately-preceding ASSISTANT row's tool_calls
-        // by registering id->name as we iterate; the loop is in chronological
-        // order, so the assistant row containing the matching call is always
-        // visited before its TOOL row.
-        var toolNamesById = new HashMap<String, String>();
-
-        var history = ConversationService.loadRecentMessages(conversation);
-        for (var msg : history) {
-            var role = MessageRole.fromValue(msg.role);
-            messages.add(switch (role != null ? role : MessageRole.USER) {
-                case USER -> {
-                    // Capture audio-bearer ids before assembling the
-                    // ChatMessage so the rewrite path can re-target the
-                    // exact slot in the messages list.
-                    var atts = msg.attachments;
-                    if (atts == null) atts = models.MessageAttachment.findByMessage(msg);
-                    var audioIds = new ArrayList<Long>();
-                    for (var a : atts) {
-                        if (a.isAudio() && a.id != null) audioIds.add(a.id);
-                    }
-                    if (!audioIds.isEmpty()) {
-                        audioBearersOut.add(new VisionAudioAssembler.AudioBearer(messages.size(), msg.id, audioIds));
-                    }
-                    yield VisionAudioAssembler.userMessageFor(msg);
-                }
-                case ASSISTANT -> {
-                    if (msg.toolCalls != null && !msg.toolCalls.isBlank()) {
-                        var toolCalls = parseToolCalls(msg.toolCalls);
-                        for (var tc : toolCalls) {
-                            if (tc.id() != null && tc.function() != null && tc.function().name() != null) {
-                                toolNamesById.put(tc.id(), tc.function().name());
-                            }
-                        }
-                        yield ChatMessage.assistant(msg.content, toolCalls);
-                    }
-                    yield ChatMessage.assistant(msg.content != null ? msg.content : "");
-                }
-                // JCLAW-119: sanitize the tool_call_id on the TOOL-role row so
-                // it matches the normalized id on the assistant-row tool_calls.
-                // Paired normalization is deterministic — same input string
-                // produces the same output on both sides of the pair — so this
-                // does not break pairing.
-                case TOOL -> {
-                    var sanitizedId = sanitizeToolCallId(msg.toolResults);
-                    yield ChatMessage.toolResult(sanitizedId, toolNamesById.get(sanitizedId), msg.content);
-                }
-                case SYSTEM -> ChatMessage.system(msg.content);
-            });
-        }
-
-        return messages;
-    }
-
-    /**
-     * Replace every character outside {@code [a-zA-Z0-9_-]} with {@code '_'}
-     * (JCLAW-119). Historical tool_call IDs sometimes carry provider-specific
-     * shapes — Gemini and some open-weight model servers emit forms like
-     * {@code "functions.web_search:7"} — that stricter providers (Ollama
-     * Cloud on kimi-k2.6, for example) reject with HTTP 400 {@code
-     * "invalid tool call arguments"}. Normalizing at read time lets a
-     * /model switch across provider families keep working without
-     * mutating the DB or losing context. Returns {@code null} unchanged
-     * so callers can detect missing IDs.
-     */
-    public static String sanitizeToolCallId(String id) {
-        if (id == null) return null;
-        return id.replaceAll("[^a-zA-Z0-9_-]", "_");
-    }
-
-    /**
      * If {@code current} exceeds the compaction budget for the effective
      * model, run {@link services.SessionCompactor#compact} and return a
      * freshly rebuilt message list (with the new summary injected into
@@ -1430,7 +1335,7 @@ public class AgentRunner {
             var sysPrompt = services.SessionCompactor.appendSummaryToPrompt(assembled.systemPrompt(), conv);
             // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
             sysPrompt = services.SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);
-            return buildMessages(sysPrompt, conv);
+            return MessageHydrator.buildMessages(sysPrompt, conv);
         });
     }
 
@@ -1655,42 +1560,4 @@ public class AgentRunner {
                                 clamped == null ? "null" : clamped.toString()));
     }
 
-    /**
-     * Safely extract string content from a {@link ChatMessage#content()} which may
-     * be a {@code String} or a multi-part content array (vision). Returns empty
-     * string if content is null or a non-string type that can't be converted.
-     */
-    private static String contentAsString(Object content) {
-        if (content instanceof String s) return s;
-        if (content == null) return "";
-        // Multi-part content (e.g. vision blocks): extract text parts
-        if (content instanceof List<?> parts) {
-            var sb = new StringBuilder();
-            for (var part : parts) {
-                if (part instanceof Map<?,?> m && m.get("text") instanceof String t) {
-                    sb.append(t);
-                }
-            }
-            return sb.toString();
-        }
-        return content.toString();
-    }
-
-    private static List<ToolCall> parseToolCalls(String json) {
-        try {
-            var tc = gson.fromJson(json, ToolCall.class);
-            if (tc == null) return List.of();
-            // JCLAW-119: normalize historical IDs so cross-provider /model
-            // switches don't re-ship IDs the new provider rejects. Same
-            // transformation as the TOOL-role sanitizer in buildMessages so
-            // assistant-tool_calls and tool-row tool_call_id still pair.
-            var safeId = sanitizeToolCallId(tc.id());
-            if (!java.util.Objects.equals(safeId, tc.id())) {
-                tc = new ToolCall(safeId, tc.type(), tc.function());
-            }
-            return List.of(tc);
-        } catch (Exception _) {
-            return List.of();
-        }
-    }
 }
