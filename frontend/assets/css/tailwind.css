@@ -20,6 +20,14 @@
 
 @layer base {
   :root {
+    /* color-scheme tells the browser to render its native UI (date/time
+       pickers, scrollbars, default form controls, focus rings) in the
+       matching palette. Without it the browser falls back to the OS
+       preference and ignores the in-app theme toggle, so a dark-mode
+       user on a light-mode OS gets a glaring white datetime popup. The
+       `.dark` block below flips this to `dark`. */
+    color-scheme: light;
+
     /* ── shadcn-vue component tokens ─────────────────────────────────────
        Background surfaces match Unsloth Studio's light mode:
        body/background is pure white; sidebar/composer (surface-elevated
@@ -62,6 +70,10 @@
   }
 
   .dark {
+    /* Flip the browser's native-UI palette to dark. See :root above for
+       why this exists. */
+    color-scheme: dark;
+
     /* ── shadcn-vue component tokens ─────────────────────────────────────
        Background surfaces match Unsloth Studio's dark mode: #1a1b1e for
        the main chat area, #222427 for the elevated tier (sidebar, header,
