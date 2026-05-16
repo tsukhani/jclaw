@@ -26,7 +26,17 @@ import java.util.function.Consumer;
 public class AgentRunner {
 
     private static final Gson gson = INSTANCE;
-    public static final int DEFAULT_MAX_TOOL_ROUNDS = 10;
+    /**
+     * Default per-turn tool-round cap. Raised from 10 to 100 ahead of
+     * JCLAW-21 Tasks: scheduled task fires have no human in the loop to
+     * nudge a continuation, so the budget needs headroom for fan-out work
+     * (e.g. "summarise yesterday + email it" runs through fetch → parse →
+     * summarise → format → send chains that legitimately consume rounds).
+     * Hermes ships with 90 by default for the same reason; OpenClaw
+     * inherits per-agent. Override via {@code chat.maxToolRounds} in
+     * application.conf.
+     */
+    public static final int DEFAULT_MAX_TOOL_ROUNDS = 100;
 
     // Package-private so ToolCallLoopRunner (JCLAW-299) can read the
     // operator-configurable per-turn round cap.

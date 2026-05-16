@@ -116,12 +116,15 @@ class StreamingToolRoundTest extends UnitTest {
 
     @Test
     void maxToolRoundsConstantExists() throws Exception {
-        // Verify MAX_TOOL_ROUNDS is accessible and reasonable
+        // Verify the round cap is accessible and in the operator-sensible
+        // range. Raised to 100 ahead of JCLAW-21 Tasks: scheduled fires
+        // have no human in the loop to nudge a continuation, so the
+        // budget needs headroom for fan-out work.
         var field = AgentRunner.class.getDeclaredField("DEFAULT_MAX_TOOL_ROUNDS");
         field.setAccessible(true);
         var maxRounds = (int) field.get(null);
-        assertTrue(maxRounds > 0 && maxRounds <= 20,
-                "MAX_TOOL_ROUNDS should be between 1 and 20, got: " + maxRounds);
+        assertTrue(maxRounds > 0 && maxRounds <= 200,
+                "DEFAULT_MAX_TOOL_ROUNDS should be between 1 and 200, got: " + maxRounds);
     }
 
     // === cancelledReturn: cancellation early-exit fallback resolution ===
