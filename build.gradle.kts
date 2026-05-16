@@ -308,4 +308,25 @@ dependencies {
     // bundles native libs for every developer-laptop platform (mac arm64/x64,
     // linux x64, win x64) so there's no per-platform install dance.
     implementation("io.github.givimad:whisper-jni:1.7.1")
+
+    // JCLAW-21: db-scheduler — persistent task scheduling backed by a single
+    // DB table (scheduled_tasks). Replaces what would otherwise be a custom
+    // TaskPollerJob + CronParser + StuckTaskRecoveryJob trio. db-scheduler
+    // handles polling, atomic claim via a row-version column, retry via
+    // pluggable FailureHandler, and heartbeat-based dead-execution detection;
+    // JClaw contributes the TaskExecutionHandler that knows how to fire each
+    // Task. Core artifact has no Spring dependency (the spring-boot starter
+    // is a separate optional module we don't pull in).
+    implementation("com.github.kagkarlsson:db-scheduler:16.9.0")
+
+    // JCLAW-21: Lucene — backs H2's FullTextLucene (FTL_*) full-text index on
+    // task_run_message.content for transcript search. Version 9.11.1 matches
+    // what H2 2.3.232 (the fork's bundled version) tests against per H2's
+    // own pom.xml. Lucene 9.x renamed lucene-analyzers-common to
+    // lucene-analysis-common; we use the 9.x artifact name. tika-parsers-
+    // standard-package above already excludes the transitive lucene pull
+    // (line 205), so this is the only org.apache.lucene declaration in the
+    // resolved graph.
+    implementation("org.apache.lucene:lucene-core:9.11.1")
+    implementation("org.apache.lucene:lucene-analysis-common:9.11.1")
 }
