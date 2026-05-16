@@ -306,7 +306,7 @@ public class AgentRunner {
             // rebuild. trimToContextWindow below stays as a drop-oldest
             // fallback for when compaction is skipped (too few turns) or
             // fails.
-            var compactedMessages = maybeCompactAndRebuild(
+            var compactedMessages = CompactionGate.maybeCompactAndRebuild(
                     agent, conversationId, userMessage, null,
                     prepared.primary(), prepared.messages());
             var finalMessages = ContextWindowManager.trimToContextWindow(compactedMessages, agent, conversation, prepared.primary());
@@ -615,7 +615,7 @@ public class AgentRunner {
         // summarize older turns (LLM call, outside Tx) and rebuild.
         // trimToContextWindow below stays as a drop-oldest fallback for
         // when compaction is skipped or fails.
-        var compactedMessages = maybeCompactAndRebuild(
+        var compactedMessages = CompactionGate.maybeCompactAndRebuild(
                 agent, conversation.id, userMessage, prepared.disabledTools(),
                 primaryRef, prepared.messages());
         var trimmedMessages = ContextWindowManager.trimToContextWindow(compactedMessages, agent, conversation, primaryRef);
@@ -1188,73 +1188,6 @@ public class AgentRunner {
                 + MessageDeduplicator.buildDownloadSuffix(collectedImages, accumulator.content, channelType);
     }
 
-
-    /**
-     * If {@code current} exceeds the compaction budget for the effective
-     * model, run {@link services.SessionCompactor#compact} and return a
-     * freshly rebuilt message list (with the new summary injected into
-     * the system prompt and the older turns dropped). Otherwise returns
-     * {@code current} unchanged (JCLAW-38).
-     *
-     * <p>Called from both {@link #run} and {@link #streamLlmLoop} after
-     * the initial prep Tx closes, because the summarization call itself
-     * is LLM-bound and must not hold a JDBC connection. On success the
-     * caller should still pass the result through
-     * {@link #trimToContextWindow} as a final safety net — if the
-     * summary plus retained tail somehow still doesn't fit, drop-oldest
-     * guarantees we never ship an over-budget context.
-     */
-    private static List<ChatMessage> maybeCompactAndRebuild(
-            Agent agent, Long conversationId, String userMessage,
-            java.util.Set<String> disabledTools, LlmProvider primary,
-            List<ChatMessage> current) {
-        // Cheap snapshot: model info + effective model id + channel type.
-        // resolveModelInfo reads only in-memory provider config, so this
-        // Tx is bounded by one findById.
-        var snapshot = services.Tx.run(() -> {
-            var conv = ConversationService.findById(conversationId);
-            if (conv == null) return null;
-            var mi = ModelResolver.resolveModelInfo(agent, conv, primary).orElse(null);
-            var modelId = ModelResolver.effectiveModelId(agent, conv);
-            return new CompactionDecision(mi, modelId, conv.channelType);
-        });
-        if (snapshot == null || snapshot.modelInfo() == null || snapshot.modelId() == null) return current;
-        if (!services.SessionCompactor.shouldCompact(ContextWindowManager.estimateTokens(current), snapshot.modelInfo())) return current;
-
-        final var modelId = snapshot.modelId();
-        final var compactionChannel = snapshot.channelType();
-        final var maxOutput = services.ConfigService.getInt("chat.compactionMaxTokens", 8192);
-        final var modelLabel = primary.config().name() + "/" + modelId;
-
-        services.SessionCompactor.Summarizer summarizer = sumMsgs -> {
-            var resp = primary.chat(modelId, sumMsgs, List.of(), maxOutput, null, compactionChannel);
-            return services.SessionCompactor.firstChoiceText(resp);
-        };
-
-        var result = services.SessionCompactor.compact(conversationId, modelLabel, summarizer);
-        if (!result.compacted()) {
-            EventLogger.info("compaction", agent.name, snapshot.channelType(),
-                    "Compaction skipped (%s); falling back to drop-oldest".formatted(result.skipReason()));
-            return current;
-        }
-        EventLogger.info("compaction", agent.name, snapshot.channelType(),
-                "Compacted %d turns (%d chars) via %s".formatted(
-                        result.turnsCompacted(), result.summaryChars(), modelLabel));
-
-        // Rebuild messages: fresh read picks up the bumped compactionSince,
-        // appendSummaryToPrompt re-injects the (now stored) summary.
-        return services.Tx.run(() -> {
-            var conv = ConversationService.findById(conversationId);
-            if (conv == null) return current;
-            var assembled = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, conv.channelType);
-            var sysPrompt = services.SessionCompactor.appendSummaryToPrompt(assembled.systemPrompt(), conv);
-            // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
-            sysPrompt = services.SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);
-            return MessageHydrator.buildMessages(sysPrompt, conv);
-        });
-    }
-
-    private record CompactionDecision(ModelInfo modelInfo, String modelId, String channelType) {}
 
     /**
      * Shared webhook message handler: resolve agent route, find/create conversation,
