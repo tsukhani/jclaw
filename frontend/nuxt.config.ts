@@ -68,6 +68,15 @@ export default defineNuxtConfig({
 
   vite: {
     plugins: [tailwindcss()],
+    // The User Guide imports `../../docs/user-guide/*.md?raw` so the
+    // canonical operator-facing copy can live next to the rest of the
+    // repo's docs. Vite's default fs.allow root is the frontend/ folder;
+    // widen it one level to the repo root so those imports resolve.
+    server: {
+      fs: {
+        allow: ['..'],
+      },
+    },
     // Pre-bundle deps Vite otherwise discovers at runtime on the first
     // page load — avoids the "Vite discovered new dependencies" reload
     // that makes cold `pnpm dev` starts (and container restarts) flicker.

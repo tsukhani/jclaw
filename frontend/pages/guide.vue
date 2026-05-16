@@ -1,44 +1,43 @@
 <script setup lang="ts">
 /**
- * JCLAW-292: in-app User Guide.
+ * In-app User Guide.
  *
  * Two-pane layout: left rail = sticky TOC of registered sections; right
- * pane = stacked section components with a max-w reading rail. The TOC's
- * active highlight follows scroll position via IntersectionObserver so
- * the operator always knows where they are.
- *
- * Mobile: TOC collapses behind a button that toggles a slide-down panel
- * (sticky positioning would shrink the reading column too aggressively
- * at narrow widths). The chosen breakpoint mirrors what /chat uses to
- * collapse its sidebar.
+ * pane = stacked section cards, each rendered from its source .md file.
+ * The TOC's active highlight follows scroll position via
+ * IntersectionObserver.
  *
  * Sections are sourced from `components/guide/sections.ts`. Adding a new
- * section is one import + one array entry there — this file doesn't
- * change. The page never hits `/api`; content is fully client-side.
+ * section is one .md file + one entry there — this page doesn't change.
+ * The page hits no /api endpoints; content is bundled at build time via
+ * Vite's `?raw` markdown imports.
+ *
+ * Anchor scheme: each section's `id` becomes the URL-fragment prefix for
+ * every heading inside that section (e.g. `subagents-spawn-modes`). Deep
+ * links like `/guide#subagents-async-yield` jump straight to the right
+ * place; the onMounted hash handler below re-jumps after hydration so
+ * hard refreshes work.
  */
-import { computed, onMounted, onUnmounted, ref, nextTick } from 'vue'
+import { computed, onMounted, onUnmounted, ref, nextTick, watch } from 'vue'
 import { useRoute } from '#imports'
 import { Bars3Icon, XMarkIcon } from '@heroicons/vue/24/outline'
 import { sections } from '~/components/guide/sections'
+import GuideRenderer from '~/components/guide/GuideRenderer.vue'
 
 const route = useRoute()
 const activeSectionId = ref<string>(sections[0]?.id ?? '')
 const mobileNavOpen = ref(false)
 
-// Watcher target for IntersectionObserver. We register one observer that
-// watches the section-anchor sentinels emitted at the top of each
-// section card; whichever sentinel is closest to the viewport top wins
-// the active highlight. RootMargin pulls the trigger slightly below the
-// header so a section becomes "active" the moment its title scrolls into
-// the upper third of the viewport rather than only after the entire
-// section has cleared the top edge.
+// One IntersectionObserver watches the section sentinels. The topmost
+// intersecting sentinel wins the active highlight. RootMargin pulls the
+// trigger slightly below the header so a section becomes "active" the
+// moment its title scrolls into the upper third of the viewport, not
+// only after the entire section has cleared the top edge.
 let observer: IntersectionObserver | null = null
 
 function setupObserver() {
   if (typeof IntersectionObserver === 'undefined') return // SSR / test env without DOM
   observer = new IntersectionObserver((entries) => {
-    // Multiple entries can fire per scroll tick. Track the topmost-visible
-    // one rather than just the first because order isn't guaranteed.
     let topId: string | null = null
     let topY = Number.POSITIVE_INFINITY
     for (const entry of entries) {
@@ -65,8 +64,6 @@ function setupObserver() {
 }
 
 function jumpTo(sectionId: string, anchorId?: string) {
-  // anchorId is the deep target inside a section (sub-heading); when
-  // omitted we jump to the section's anchor sentinel.
   const target = anchorId
     ? document.getElementById(anchorId)
     : document.querySelector(`[data-section-id="${sectionId}"]`)
@@ -76,30 +73,37 @@ function jumpTo(sectionId: string, anchorId?: string) {
   mobileNavOpen.value = false
 }
 
+/**
+ * Resolve a URL fragment back to the owning section and scroll into view.
+ * Used both on initial mount and when the user clicks a `/guide#x` link
+ * from within a section (the inbound URL change fires `route.hash` but
+ * Nuxt's router doesn't auto-scroll on same-route hash changes).
+ */
+function jumpToHash(hash: string) {
+  if (!hash) return
+  const bare = hash.replace(/^#/, '')
+  if (!bare) return
+  const el = document.getElementById(bare)
+  if (el) {
+    el.scrollIntoView({ behavior: 'auto', block: 'start' })
+  }
+  // The section id is either the literal fragment or its prefix-before-dash.
+  const sectionId = sections.find(s => bare === s.id || bare.startsWith(`${s.id}-`))?.id
+  if (sectionId) activeSectionId.value = sectionId
+}
+
 onMounted(async () => {
-  // Wait one tick so the section components mount + emit their sentinel
-  // elements before the observer goes hunting for them.
+  // Wait one tick so each section's markdown body mounts and emits its
+  // heading anchors before the observer goes hunting.
   await nextTick()
   setupObserver()
+  jumpToHash(route.hash)
+})
 
-  // Honour the inbound URL hash on first load. The browser's native
-  // anchor jump can fire before the section components hydrate (especially
-  // on a hard refresh of /guide#xyz), so we re-jump explicitly once the
-  // DOM is ready. Falls through harmlessly if the hash is absent or
-  // points at an id that doesn't exist yet (custom 404s aren't worth
-  // it for this surface — silent fallthrough lands on section 0).
-  const hash = route.hash?.replace(/^#/, '')
-  if (hash) {
-    const el = document.getElementById(hash)
-    if (el) {
-      el.scrollIntoView({ behavior: 'auto', block: 'start' })
-      // Derive the section id from the anchor: anchors are
-      // `<sectionId>-<slug>`, so the prefix up to the first dash is the
-      // owning section.
-      const sectionId = sections.find(s => hash === s.id || hash.startsWith(`${s.id}-`))?.id
-      if (sectionId) activeSectionId.value = sectionId
-    }
-  }
+// Same-route hash changes (a click on a `/guide#section-id` link from
+// inside the page) don't reload the page; jump to the new anchor.
+watch(() => route.hash, (h) => {
+  jumpToHash(h)
 })
 
 onUnmounted(() => {
@@ -139,9 +143,8 @@ const tocItems = computed(() => sections.map(s => ({
     </button>
 
     <div class="flex flex-col md:flex-row gap-8">
-      <!-- TOC rail. Sticky on desktop so it stays in view while reading
-           a long section; an overlay panel on mobile that closes on link
-           click via jumpTo above. -->
+      <!-- TOC rail. Sticky on desktop; an overlay panel on mobile that
+           closes on link click via jumpTo above. -->
       <aside
         id="guide-toc-mobile"
         :class="[
@@ -184,8 +187,7 @@ const tocItems = computed(() => sections.map(s => ({
       </aside>
 
       <!-- Reading rail. Caps at max-w-3xl to keep line lengths comfortable
-           regardless of viewport width — same column width chat.vue uses
-           for its message rail. -->
+           regardless of viewport width. -->
       <div class="flex-1 min-w-0">
         <div class="max-w-3xl space-y-8">
           <section
@@ -195,7 +197,10 @@ const tocItems = computed(() => sections.map(s => ({
             :data-section-id="s.id"
             class="border border-border rounded-xl bg-surface-elevated p-6"
           >
-            <component :is="s.component" />
+            <GuideRenderer
+              :section-id="s.id"
+              :content="s.content"
+            />
           </section>
         </div>
       </div>
