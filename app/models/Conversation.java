@@ -85,7 +85,7 @@ public class Conversation extends Model {
     /**
      * Conversation-scoped model override (JCLAW-108). When both
      * {@link #modelProviderOverride} and {@link #modelIdOverride} are
-     * non-null, {@code AgentRunner.resolveModelInfo} uses them in place of
+     * non-null, {@code agents.ModelResolver.resolveModelInfo} uses them in place of
      * the agent's default {@code modelProvider}/{@code modelId}. Either
      * both are set or both are null — a half-set override is undefined
      * behavior (see {@code ConversationService.setModelOverride} for the

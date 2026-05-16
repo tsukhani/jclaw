@@ -85,7 +85,7 @@ public final class ContextWindowManager {
      */
     static Integer effectiveMaxTokens(Agent agent, Conversation conv, LlmProvider provider,
                                        List<ChatMessage> messages, List<ToolDef> tools) {
-        var modelInfo = AgentRunner.resolveModelInfo(agent, conv, provider).orElse(null);
+        var modelInfo = ModelResolver.resolveModelInfo(agent, conv, provider).orElse(null);
         if (modelInfo == null || modelInfo.maxTokens() <= 0) return null;
 
         int configured = modelInfo.maxTokens();
@@ -128,7 +128,7 @@ public final class ContextWindowManager {
      * fits.
      */
     static List<ChatMessage> trimToContextWindow(List<ChatMessage> messages, Agent agent, Conversation conv, LlmProvider provider) {
-        var modelInfo = AgentRunner.resolveModelInfo(agent, conv, provider).orElse(null);
+        var modelInfo = ModelResolver.resolveModelInfo(agent, conv, provider).orElse(null);
         if (modelInfo == null || modelInfo.contextWindow() <= 0) return messages;
 
         int contextWindow = modelInfo.contextWindow();

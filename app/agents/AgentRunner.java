@@ -19,7 +19,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -154,61 +153,6 @@ public class AgentRunner {
     }
 
     /**
-     * Effective model id for this turn — honors the conversation-scoped
-     * override (JCLAW-108 per-conversation, JCLAW-269 per-spawn) when
-     * present, otherwise returns the agent's default. Thin wrapper over
-     * {@link services.ModelOverrideResolver#modelId} kept on this class so
-     * call sites read naturally next to the rest of the runner's helpers.
-     */
-    static String effectiveModelId(Agent agent, Conversation conv) {
-        return services.ModelOverrideResolver.modelId(conv, agent);
-    }
-
-    /** Companion to {@link #effectiveModelId} — returns the effective provider name. */
-    static String effectiveModelProvider(Agent agent, Conversation conv) {
-        return services.ModelOverrideResolver.provider(conv, agent);
-    }
-
-    /**
-     * Resolve the model's {@link ModelInfo} from the provider's configured model list.
-     * Used by {@link #callWithToolLoop}, {@link #runStreaming}, and {@link ContextWindowManager#trimToContextWindow}.
-     * Honors the conversation-scoped override (JCLAW-108): when
-     * {@code conv.modelIdOverride} is set, looks up that id instead of the
-     * agent's default.
-     */
-    // Package-private so ContextWindowManager (JCLAW-299) can resolve
-    // model info when computing trim-target and effectiveMaxTokens.
-    static Optional<ModelInfo> resolveModelInfo(Agent agent, Conversation conv, LlmProvider provider) {
-        var modelId = effectiveModelId(agent, conv);
-        if (modelId == null) return Optional.empty();
-        return provider.config().models().stream()
-                .filter(m -> modelId.equals(m.id()))
-                .findFirst();
-    }
-
-    /**
-     * Resolve the reasoning-effort level this call should use. Combines the
-     * agent's persisted {@code thinkingMode} with the model's capability:
-     * the setting only takes effect when the model supports thinking and the
-     * stored level is still advertised by the model. Otherwise returns
-     * {@code null} (reasoning disabled).
-     *
-     * <p>The {@code null} path is not redundant with
-     * {@link services.AgentService#normalizeThinkingMode}: agents can persist a
-     * valid level today and see their model's levels change tomorrow (operator
-     * edits the provider config), and we prefer to silently disable reasoning
-     * rather than send a level the model no longer understands.
-     */
-    private static String resolveThinkingMode(Agent agent, Conversation conv, LlmProvider provider) {
-        if (agent.thinkingMode == null || agent.thinkingMode.isBlank()) return null;
-        return resolveModelInfo(agent, conv, provider)
-                .filter(ModelInfo::supportsThinking)
-                .filter(m -> m.effectiveThinkingLevels().contains(agent.thinkingMode))
-                .map(_ -> agent.thinkingMode)
-                .orElse(null);
-    }
-
-    /**
      * Run the agent synchronously. Returns the final assistant response.
      * JPA transactions are scoped to short Tx.run() blocks — no JDBC connection
      * is held during LLM HTTP calls or tool execution.
@@ -334,7 +278,7 @@ public class AgentRunner {
                 // (conversation override when set, agent default otherwise), not
                 // from agent.modelProvider directly. Downstream helpers that take
                 // (agent, conv, provider) compute their own effective model id.
-                var agentProvider = ProviderRegistry.get(effectiveModelProvider(agent, conv));
+                var agentProvider = ProviderRegistry.get(ModelResolver.effectiveModelProvider(agent, conv));
                 var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
                 if (primary == null) {
                     var error = "No LLM provider configured. Add provider config via Settings.";
@@ -350,7 +294,7 @@ public class AgentRunner {
                 var tools = ToolRegistry.getToolDefsForAgent(agent, conv);
 
                 EventLogger.info("llm", agent.name, conv.channelType,
-                        "Calling %s / %s".formatted(primary.config().name(), effectiveModelId(agent, conv)));
+                        "Calling %s / %s".formatted(primary.config().name(), ModelResolver.effectiveModelId(agent, conv)));
 
                 return new PreparedData(messages, primary, secondary, tools, audioBearers);
             });
@@ -374,7 +318,7 @@ public class AgentRunner {
             // any in-flight transcription futures and rewrite the user
             // messages as text-with-transcript before the LLM call. The
             // audio-capable happy path is a no-op and pays zero added latency.
-            var modelInfoForAudio = resolveModelInfo(agent, conversation, prepared.primary()).orElse(null);
+            var modelInfoForAudio = ModelResolver.resolveModelInfo(agent, conversation, prepared.primary()).orElse(null);
             var supportsAudioForCall = modelInfoForAudio != null && modelInfoForAudio.supportsAudio();
             finalMessages = applyTranscriptsForCapability(finalMessages, prepared.audioBearers(), supportsAudioForCall);
             prepared = new PreparedData(finalMessages, prepared.primary(), prepared.secondary(), prepared.tools(), prepared.audioBearers());
@@ -637,7 +581,7 @@ public class AgentRunner {
         // JCLAW-108: use the effective provider (conversation override when set,
         // agent default otherwise) so /model NAME actually routes turns to the
         // overridden provider rather than the agent's original.
-        var agentProvider = ProviderRegistry.get(effectiveModelProvider(agent, conversation));
+        var agentProvider = ProviderRegistry.get(ModelResolver.effectiveModelProvider(agent, conversation));
         var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
         if (primary == null) {
             EventLogger.error("llm", agent.name, channelType, "No LLM provider configured");
@@ -681,7 +625,7 @@ public class AgentRunner {
         var trimmedMessages = ContextWindowManager.trimToContextWindow(compactedMessages, agent, conversation, primaryRef);
         // JCLAW-165: rewrite audio messages to text-with-transcript when the
         // active model lacks supportsAudio. Audio-capable happy path is a no-op.
-        var modelInfoForAudioStream = resolveModelInfo(agent, conversation, primaryRef).orElse(null);
+        var modelInfoForAudioStream = ModelResolver.resolveModelInfo(agent, conversation, primaryRef).orElse(null);
         var supportsAudioForStream = modelInfoForAudioStream != null && modelInfoForAudioStream.supportsAudio();
         trimmedMessages = applyTranscriptsForCapability(trimmedMessages, prepared.audioBearers(), supportsAudioForStream);
 
@@ -693,14 +637,14 @@ public class AgentRunner {
         trace.mark(LatencyTrace.PROLOGUE_PROMPT_ASSEMBLED);
 
         var tools = prepared.tools();
-        var thinkingMode = resolveThinkingMode(agent, conversation, primary);
+        var thinkingMode = ModelResolver.resolveThinkingMode(agent, conversation, primary);
         EventLogger.info("llm", agent.name, channelType,
                 "Streaming: calling %s / %s (%d messages, %d tools, %d skills%s)"
-                        .formatted(primary.config().name(), effectiveModelId(agent, conversation),
+                        .formatted(primary.config().name(), ModelResolver.effectiveModelId(agent, conversation),
                                 messages.size(), tools.size(), assembled.skills().size(),
                                 thinkingMode != null ? ", thinking=" + thinkingMode : ""));
         var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, messages, tools);
-        var modelInfo = resolveModelInfo(agent, conversation, primary).orElse(null);
+        var modelInfo = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
 
         // Stream with tool call handling (HTTP, no JPA)
         trace.mark(LatencyTrace.PROLOGUE_DONE);
@@ -714,7 +658,7 @@ public class AgentRunner {
         // JCLAW-108: route the actual LLM call through the effective modelId,
         // so conversation overrides take effect on the wire. Failover (line 706)
         // and tool-loop continuations (line 781) use the same effective id.
-        var effectiveModelIdForCall = effectiveModelId(agent, conversation);
+        var effectiveModelIdForCall = ModelResolver.effectiveModelId(agent, conversation);
         var accumulator = primary.chatStreamAccumulate(
                 effectiveModelIdForCall, messages, tools, cb.onToken(), cb.onReasoning(),
                 maxTokens, thinkingMode, channelType);
@@ -936,9 +880,9 @@ public class AgentRunner {
         // clear failure here instead of an opaque NPE deeper in the stack.
         Objects.requireNonNull(conversation, "conversation");
         var currentMessages = new ArrayList<>(messages);
-        var thinkingMode = resolveThinkingMode(agent, conversation, primary);
-        var effectiveModelId = effectiveModelId(agent, conversation);
-        var modelInfoForOutcome = resolveModelInfo(agent, conversation, primary).orElse(null);
+        var thinkingMode = ModelResolver.resolveThinkingMode(agent, conversation, primary);
+        var effectiveModelId = ModelResolver.effectiveModelId(agent, conversation);
+        var modelInfoForOutcome = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
         var supportsAudioInitially = modelInfoForOutcome != null && modelInfoForOutcome.supportsAudio();
         boolean audioRetryAttempted = false;
         boolean transcriptAwaitedAlready = !supportsAudioInitially && !audioBearers.isEmpty();
@@ -1162,7 +1106,7 @@ public class AgentRunner {
                                                     String errorTag, boolean transcriptAwaited) {
         var providerName = provider != null && provider.config() != null
                 ? provider.config().name() : "unknown";
-        var modelId = effectiveModelId(agent, conversation);
+        var modelId = ModelResolver.effectiveModelId(agent, conversation);
         var channel = conversation != null ? conversation.channelType : null;
         var detail = "provider=%s model=%s outcome=%s transcript_awaited=%s%s".formatted(
                 providerName, modelId, outcome, transcriptAwaited,
@@ -1228,7 +1172,7 @@ public class AgentRunner {
 
         // Continue with streaming after tool results. JCLAW-108: effective
         // model id honors conversation override, same as the round-1 call.
-        var effectiveModelIdForCall = effectiveModelId(agent, conversation);
+        var effectiveModelIdForCall = ModelResolver.effectiveModelId(agent, conversation);
         // Recompute max_tokens against the grown message list so the clamp
         // tightens as the tool loop accumulates history.
         var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, provider, currentMessages, tools);
@@ -1654,8 +1598,8 @@ public class AgentRunner {
         var snapshot = services.Tx.run(() -> {
             var conv = ConversationService.findById(conversationId);
             if (conv == null) return null;
-            var mi = resolveModelInfo(agent, conv, primary).orElse(null);
-            var modelId = effectiveModelId(agent, conv);
+            var mi = ModelResolver.resolveModelInfo(agent, conv, primary).orElse(null);
+            var modelId = ModelResolver.effectiveModelId(agent, conv);
             return new CompactionDecision(mi, modelId, conv.channelType);
         });
         if (snapshot == null || snapshot.modelInfo() == null || snapshot.modelId() == null) return current;
@@ -1901,7 +1845,7 @@ public class AgentRunner {
                                                      LlmProvider provider, String channelType,
                                                      String finishReason, List<ChatMessage> messages,
                                                      List<ToolDef> tools) {
-        var modelInfo = resolveModelInfo(agent, conversation, provider).orElse(null);
+        var modelInfo = ModelResolver.resolveModelInfo(agent, conversation, provider).orElse(null);
         int promptTokens = ContextWindowManager.estimateTokens(messages) + ContextWindowManager.estimateToolTokens(tools);
         int configured = modelInfo != null ? modelInfo.maxTokens() : -1;
         int contextWindow = modelInfo != null ? modelInfo.contextWindow() : -1;

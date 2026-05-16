@@ -128,8 +128,8 @@ public final class UsageMetricsBuilder {
         // override when present, agent's default otherwise) — this is
         // the identity of the model that actually ran the turn, which
         // is what cost attribution needs.
-        var resolvedProvider = AgentRunner.effectiveModelProvider(agent, conversation);
-        var resolvedModelId = AgentRunner.effectiveModelId(agent, conversation);
+        var resolvedProvider = ModelResolver.effectiveModelProvider(agent, conversation);
+        var resolvedModelId = ModelResolver.effectiveModelId(agent, conversation);
         if (resolvedProvider != null) usageMap.addProperty("modelProvider", resolvedProvider);
         if (resolvedModelId != null) usageMap.addProperty("modelId", resolvedModelId);
         return gson.toJson(usageMap);
