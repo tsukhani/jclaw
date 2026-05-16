@@ -1,4 +1,4 @@
-import agents.AgentRunner;
+import agents.ContextWindowManager;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.FunctionCall;
 import llm.LlmTypes.ToolCall;
@@ -13,8 +13,9 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * Characterization tests for {@link AgentRunner}'s token-estimation
- * helper, locking in current behavior ahead of the JCLAW-299 refactor.
+ * Characterization tests for {@link ContextWindowManager}'s
+ * token-estimation helper — JCLAW-299 Phase 2 home for the chars/4
+ * estimator that used to live on AgentRunner.
  *
  * <p>{@code estimateTokens} is the foundation of the JCLAW-291 trim
  * arithmetic (and the JCLAW-38 compaction trigger). It takes a list of
@@ -33,26 +34,26 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  *   <li>Total is summed across all messages, then divided by 4.</li>
  * </ul>
  *
- * <p>Any extracted {@code ContextWindowManager} component (per the
- * JCLAW-299 decomposition) must preserve these rules. A change to the
- * chars/4 ratio, or accidentally counting image data, or dropping the
- * tool-call accounting would all surface as test failures here.
+ * <p>The extraction commit moved the method but must preserve these
+ * rules — a change to the chars/4 ratio, or accidentally counting
+ * image data, or dropping the tool-call accounting would all surface
+ * as test failures here.
  *
- * <p>Tested via reflection on the private static {@code estimateTokens} —
- * same pattern as {@code AgentRunnerCancellationTest}.
+ * <p>Tested via reflection on the package-private static
+ * {@code estimateTokens} — same pattern as
+ * {@code AgentRunnerCancellationTest}.
  *
  * <p>The full trim algorithm in {@code trimToContextWindow} (loop that
  * drops oldest non-system messages until the message list fits under
- * {@code contextWindow - reservation}) is NOT characterized in this
- * commit — it depends on {@code resolveModelInfo}, which requires a
- * configured LLM provider. That path is exercised by the Phase 2 unit
- * tests for the extracted {@code ContextWindowManager} component, with
- * the chars/4 estimator validated here as its testing foundation.
+ * {@code contextWindow - reservation}) is NOT characterized here —
+ * it depends on {@code resolveModelInfo}, which requires a configured
+ * LLM provider. Adding that integration test is on the Phase 2
+ * deferred list.
  */
 class AgentRunnerContextWindowTest extends UnitTest {
 
     private static Method estimateTokensMethod() throws Exception {
-        var m = AgentRunner.class.getDeclaredMethod("estimateTokens", List.class);
+        var m = ContextWindowManager.class.getDeclaredMethod("estimateTokens", List.class);
         m.setAccessible(true);
         return m;
     }

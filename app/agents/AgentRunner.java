@@ -39,29 +39,6 @@ public class AgentRunner {
         return services.ConfigService.getInt("chat.maxToolRounds", DEFAULT_MAX_TOOL_ROUNDS);
     }
 
-    // Absorbs slack between our chars/4 token heuristic and the provider's
-    // real tokenizer, plus the overhead of role tags, JSON punctuation, and
-    // streaming framing that promptTokens accounting doesn't cover.
-    private static final int OUTPUT_SAFETY_MARGIN_TOKENS = 512;
-
-    // Floor on the clamped max_tokens. If the prompt nearly fills the window,
-    // we'd rather the provider truncate a too-long prompt than ship a
-    // max_tokens so small the reply is useless.
-    private static final int MIN_OUTPUT_TOKENS = 256;
-
-    /**
-     * JCLAW-291: minimum output budget the runner reserves for the assistant
-     * reply. {@link #trimToContextWindow} drops oldest history until the
-     * prompt fits in {@code contextWindow - RESERVED_OUTPUT_TOKENS}, so
-     * {@link #effectiveMaxTokens} headroom stays at least
-     * {@code RESERVED_OUTPUT_TOKENS - OUTPUT_SAFETY_MARGIN_TOKENS} (~3584)
-     * tokens after trimming. Without this reservation, a prompt that
-     * approaches the context window collapses headroom to
-     * {@link #MIN_OUTPUT_TOKENS} and the reply silently truncates with
-     * {@code finish_reason=length}. Repro: chat-page run 1602.
-     */
-    private static final int RESERVED_OUTPUT_TOKENS = 4096;
-
     public record RunResult(String response, Conversation conversation, boolean truncated) {
         /** 2-arg compatibility: legacy paths that don't track truncation. */
         public RunResult(String response, Conversation conversation) {
@@ -194,71 +171,19 @@ public class AgentRunner {
 
     /**
      * Resolve the model's {@link ModelInfo} from the provider's configured model list.
-     * Used by {@link #callWithToolLoop}, {@link #runStreaming}, and {@link #trimToContextWindow}.
+     * Used by {@link #callWithToolLoop}, {@link #runStreaming}, and {@link ContextWindowManager#trimToContextWindow}.
      * Honors the conversation-scoped override (JCLAW-108): when
      * {@code conv.modelIdOverride} is set, looks up that id instead of the
      * agent's default.
      */
-    private static Optional<ModelInfo> resolveModelInfo(Agent agent, Conversation conv, LlmProvider provider) {
+    // Package-private so ContextWindowManager (JCLAW-299) can resolve
+    // model info when computing trim-target and effectiveMaxTokens.
+    static Optional<ModelInfo> resolveModelInfo(Agent agent, Conversation conv, LlmProvider provider) {
         var modelId = effectiveModelId(agent, conv);
         if (modelId == null) return Optional.empty();
         return provider.config().models().stream()
                 .filter(m -> modelId.equals(m.id()))
                 .findFirst();
-    }
-
-    /**
-     * Derive the effective {@code max_tokens} for a specific LLM call,
-     * clamped so that {@code promptTokens + returnedValue + safetyMargin}
-     * fits inside the model's context window.
-     *
-     * <p>Two bounds at play:
-     * <ul>
-     *   <li><b>Upper</b>: the operator-configured {@code ModelInfo.maxTokens}
-     *       (policy cap on reply size).</li>
-     *   <li><b>Context-fit</b>: {@code contextWindow - promptTokens - OUTPUT_SAFETY_MARGIN_TOKENS}
-     *       (so providers don't reject with HTTP 400 "requested N tokens but
-     *       context is M"). Returned value is {@code min(upper, contextFit)}
-     *       and never below {@link #MIN_OUTPUT_TOKENS}.</li>
-     * </ul>
-     *
-     * <p>Returns {@code null} when the model has no configured cap, in which
-     * case we omit {@code max_tokens} from the request and let the provider
-     * apply its own default.
-     */
-    private static Integer effectiveMaxTokens(Agent agent, Conversation conv, LlmProvider provider,
-                                              List<ChatMessage> messages, List<ToolDef> tools) {
-        var modelInfo = resolveModelInfo(agent, conv, provider).orElse(null);
-        if (modelInfo == null || modelInfo.maxTokens() <= 0) return null;
-
-        int configured = modelInfo.maxTokens();
-        if (modelInfo.contextWindow() <= 0) return configured;
-
-        int promptTokens = estimateTokens(messages) + estimateToolTokens(tools);
-        int headroom = modelInfo.contextWindow() - promptTokens - OUTPUT_SAFETY_MARGIN_TOKENS;
-        // NB: not Math.clamp — when configured < MIN_OUTPUT_TOKENS (small / mis-configured model) we still want MIN_OUTPUT_TOKENS, which clamp would reject as min>max.
-        @SuppressWarnings("java:S6885")
-        var result = Math.max(MIN_OUTPUT_TOKENS, Math.min(configured, headroom));
-        return result;
-    }
-
-    /**
-     * Rough token estimate for the tool-schema payload (names, descriptions,
-     * parameter JSON). Mirrors {@link #estimateTokens}'s {@code chars/4}
-     * approximation; {@code Map.toString()} differs from the JSON wire format
-     * but is within that heuristic's margin.
-     */
-    private static int estimateToolTokens(List<ToolDef> tools) {
-        if (tools == null || tools.isEmpty()) return 0;
-        int chars = 0;
-        for (var tool : tools) {
-            var fn = tool.function();
-            if (fn == null) continue;
-            if (fn.name() != null) chars += fn.name().length();
-            if (fn.description() != null) chars += fn.description().length();
-            if (fn.parameters() != null) chars += fn.parameters().toString().length();
-        }
-        return chars / 4;
     }
 
     /**
@@ -444,7 +369,7 @@ public class AgentRunner {
             var compactedMessages = maybeCompactAndRebuild(
                     agent, conversationId, userMessage, null,
                     prepared.primary(), prepared.messages());
-            var finalMessages = trimToContextWindow(compactedMessages, agent, conversation, prepared.primary());
+            var finalMessages = ContextWindowManager.trimToContextWindow(compactedMessages, agent, conversation, prepared.primary());
             // JCLAW-165: when the active model lacks supportsAudio, await
             // any in-flight transcription futures and rewrite the user
             // messages as text-with-transcript before the LLM call. The
@@ -753,7 +678,7 @@ public class AgentRunner {
         var compactedMessages = maybeCompactAndRebuild(
                 agent, conversation.id, userMessage, prepared.disabledTools(),
                 primaryRef, prepared.messages());
-        var trimmedMessages = trimToContextWindow(compactedMessages, agent, conversation, primaryRef);
+        var trimmedMessages = ContextWindowManager.trimToContextWindow(compactedMessages, agent, conversation, primaryRef);
         // JCLAW-165: rewrite audio messages to text-with-transcript when the
         // active model lacks supportsAudio. Audio-capable happy path is a no-op.
         var modelInfoForAudioStream = resolveModelInfo(agent, conversation, primaryRef).orElse(null);
@@ -774,7 +699,7 @@ public class AgentRunner {
                         .formatted(primary.config().name(), effectiveModelId(agent, conversation),
                                 messages.size(), tools.size(), assembled.skills().size(),
                                 thinkingMode != null ? ", thinking=" + thinkingMode : ""));
-        var maxTokens = effectiveMaxTokens(agent, conversation, primary, messages, tools);
+        var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, messages, tools);
         var modelInfo = resolveModelInfo(agent, conversation, primary).orElse(null);
 
         // Stream with tool call handling (HTTP, no JPA)
@@ -1025,7 +950,7 @@ public class AgentRunner {
             // or mid-tool-call (would orphan partial side effects).
             checkSubagentCancel(conversation);
             // Recompute per-round so the clamp tracks the growing history.
-            var maxTokens = effectiveMaxTokens(agent, conversation, primary, currentMessages, tools);
+            var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, currentMessages, tools);
             ChatResponse response;
             try {
                 response = (secondary != null)
@@ -1306,7 +1231,7 @@ public class AgentRunner {
         var effectiveModelIdForCall = effectiveModelId(agent, conversation);
         // Recompute max_tokens against the grown message list so the clamp
         // tightens as the tool loop accumulates history.
-        var maxTokens = effectiveMaxTokens(agent, conversation, provider, currentMessages, tools);
+        var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, provider, currentMessages, tools);
         var accumulator = provider.chatStreamAccumulate(
                 effectiveModelIdForCall, currentMessages, tools, cb.onToken(), cb.onReasoning(),
                 maxTokens, thinkingMode, channelType);
@@ -1368,7 +1293,7 @@ public class AgentRunner {
                     "Synthesize the final response for me now using the tool results above. "
                             + "Do not call any more tools. Write the full answer as markdown."));
 
-            var retryMaxTokens = effectiveMaxTokens(agent, conversation, provider, retryMessages, tools);
+            var retryMaxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, provider, retryMessages, tools);
             var retry = provider.chatStreamAccumulate(
                     effectiveModelIdForCall, retryMessages, tools, cb.onToken(), cb.onReasoning(),
                     retryMaxTokens, thinkingMode, channelType);
@@ -1734,7 +1659,7 @@ public class AgentRunner {
             return new CompactionDecision(mi, modelId, conv.channelType);
         });
         if (snapshot == null || snapshot.modelInfo() == null || snapshot.modelId() == null) return current;
-        if (!services.SessionCompactor.shouldCompact(estimateTokens(current), snapshot.modelInfo())) return current;
+        if (!services.SessionCompactor.shouldCompact(ContextWindowManager.estimateTokens(current), snapshot.modelInfo())) return current;
 
         final var modelId = snapshot.modelId();
         final var compactionChannel = snapshot.channelType();
@@ -1770,72 +1695,6 @@ public class AgentRunner {
     }
 
     private record CompactionDecision(ModelInfo modelInfo, String modelId, String channelType) {}
-
-    private static List<ChatMessage> trimToContextWindow(List<ChatMessage> messages, Agent agent, Conversation conv, LlmProvider provider) {
-        var modelInfo = resolveModelInfo(agent, conv, provider).orElse(null);
-        if (modelInfo == null || modelInfo.contextWindow() <= 0) return messages;
-
-        int contextWindow = modelInfo.contextWindow();
-        int estimatedTokens = estimateTokens(messages);
-        // JCLAW-291: trim target reserves RESERVED_OUTPUT_TOKENS so the reply has
-        // a real budget — without this, headroom in effectiveMaxTokens collapses
-        // and the model truncates with finish_reason=length on plain replies.
-        // Reservation is capped at half the window so tiny-context models don't
-        // get trimmed to nothing.
-        int reservation = Math.min(RESERVED_OUTPUT_TOKENS, contextWindow / 2);
-        int trimTarget = contextWindow - reservation;
-
-        if (estimatedTokens <= trimTarget) return messages;
-
-        // Find how many oldest non-system messages to drop. Scan forward from index 1
-        // (first after system prompt) and accumulate tokens to remove until we fit.
-        int total = estimatedTokens;
-        int dropCount = 0;
-        for (int i = 1; i < messages.size() - 1 && total > trimTarget; i++) {
-            total -= estimateTokens(List.of(messages.get(i)));
-            dropCount++;
-        }
-        if (dropCount > 0) {
-            EventLogger.warn("llm", agent.name, null,
-                    "Trimmed %d messages to fit context window (window=%d, reservation=%d, target=%d, estimated=%d, post-trim=%d)"
-                            .formatted(dropCount, contextWindow, reservation, trimTarget, estimatedTokens, total));
-            // Build result: system message + surviving history (skip dropped range)
-            var trimmed = new ArrayList<ChatMessage>(messages.size() - dropCount);
-            trimmed.add(messages.getFirst());
-            trimmed.addAll(messages.subList(1 + dropCount, messages.size()));
-            return trimmed;
-        }
-        return messages;
-    }
-
-    private static int estimateTokens(List<ChatMessage> messages) {
-        int chars = 0;
-        for (var msg : messages) {
-            if (msg.content() instanceof String s) {
-                chars += s.length();
-            } else if (msg.content() instanceof List<?> parts) {
-                // Multi-part content (vision/image blocks): sum text parts only.
-                // Image data is base64 and doesn't meaningfully correspond to
-                // chars/4 token estimation — providers count image tokens separately.
-                for (var part : parts) {
-                    if (part instanceof Map<?,?> m) {
-                        var text = m.get("text");
-                        if (text instanceof String t) chars += t.length();
-                    }
-                }
-            }
-            // Tool call names + arguments also consume input tokens.
-            if (msg.toolCalls() != null) {
-                for (var tc : msg.toolCalls()) {
-                    if (tc.function() != null) {
-                        if (tc.function().name() != null) chars += tc.function().name().length();
-                        if (tc.function().arguments() != null) chars += tc.function().arguments().length();
-                    }
-                }
-            }
-        }
-        return chars / 4; // rough approximation: ~4 chars per token
-    }
 
     /**
      * Shared webhook message handler: resolve agent route, find/create conversation,
@@ -2043,13 +1902,13 @@ public class AgentRunner {
                                                      String finishReason, List<ChatMessage> messages,
                                                      List<ToolDef> tools) {
         var modelInfo = resolveModelInfo(agent, conversation, provider).orElse(null);
-        int promptTokens = estimateTokens(messages) + estimateToolTokens(tools);
+        int promptTokens = ContextWindowManager.estimateTokens(messages) + ContextWindowManager.estimateToolTokens(tools);
         int configured = modelInfo != null ? modelInfo.maxTokens() : -1;
         int contextWindow = modelInfo != null ? modelInfo.contextWindow() : -1;
         int headroom = contextWindow > 0
-                ? contextWindow - promptTokens - OUTPUT_SAFETY_MARGIN_TOKENS
+                ? contextWindow - promptTokens - ContextWindowManager.OUTPUT_SAFETY_MARGIN_TOKENS
                 : -1;
-        Integer clamped = effectiveMaxTokens(agent, conversation, provider, messages, tools);
+        Integer clamped = ContextWindowManager.effectiveMaxTokens(agent, conversation, provider, messages, tools);
         EventLogger.warn("llm", agent.name, channelType,
                 "Truncated reply (site=%s, finish=%s, configured=%d, contextWindow=%d, prompt~%d, headroom=%d, clamped=%s)"
                         .formatted(site, finishReason, configured, contextWindow, promptTokens, headroom,

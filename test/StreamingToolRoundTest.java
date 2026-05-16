@@ -16,7 +16,7 @@ class StreamingToolRoundTest extends UnitTest {
     @Test
     void estimateTokensCalculatesApproximately() throws Exception {
         // Use reflection to test the private estimateTokens method
-        var method = AgentRunner.class.getDeclaredMethod("estimateTokens", List.class);
+        var method = agents.ContextWindowManager.class.getDeclaredMethod("estimateTokens", List.class);
         method.setAccessible(true);
 
         var messages = List.of(
@@ -30,7 +30,7 @@ class StreamingToolRoundTest extends UnitTest {
 
     @Test
     void estimateTokensHandlesEmptyMessages() throws Exception {
-        var method = AgentRunner.class.getDeclaredMethod("estimateTokens", List.class);
+        var method = agents.ContextWindowManager.class.getDeclaredMethod("estimateTokens", List.class);
         method.setAccessible(true);
 
         var messages = List.<ChatMessage>of();
@@ -40,7 +40,7 @@ class StreamingToolRoundTest extends UnitTest {
 
     @Test
     void estimateTokensHandlesNullContent() throws Exception {
-        var method = AgentRunner.class.getDeclaredMethod("estimateTokens", List.class);
+        var method = agents.ContextWindowManager.class.getDeclaredMethod("estimateTokens", List.class);
         method.setAccessible(true);
 
         // Assistant message with null content (tool call record). The tool call
@@ -62,7 +62,7 @@ class StreamingToolRoundTest extends UnitTest {
         // honor conversation-scoped model overrides. Pass null here — tests
         // that care about override behavior use the AgentRunnerUsageTest
         // suite instead.
-        var method = AgentRunner.class.getDeclaredMethod("trimToContextWindow",
+        var method = agents.ContextWindowManager.class.getDeclaredMethod("trimToContextWindow",
                 List.class, models.Agent.class, models.Conversation.class, LlmProvider.class);
         method.setAccessible(true);
 
@@ -91,7 +91,7 @@ class StreamingToolRoundTest extends UnitTest {
 
     @Test
     void trimToContextWindowNoOpWhenFits() throws Exception {
-        var method = AgentRunner.class.getDeclaredMethod("trimToContextWindow",
+        var method = agents.ContextWindowManager.class.getDeclaredMethod("trimToContextWindow",
                 List.class, models.Agent.class, models.Conversation.class, LlmProvider.class);
         method.setAccessible(true);
 
