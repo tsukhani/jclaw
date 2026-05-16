@@ -83,7 +83,8 @@ public final class ToolCallLoopRunner {
     static LoopOutcome callWithToolLoop(Agent agent, Conversation conversation, Long conversationId,
                                          List<ChatMessage> messages, List<ToolDef> tools,
                                          LlmProvider primary, LlmProvider secondary,
-                                         List<VisionAudioAssembler.AudioBearer> audioBearers) {
+                                         List<VisionAudioAssembler.AudioBearer> audioBearers,
+                                         AgentExecutionSink sink) {
         // Helpers like effectiveModelId / effectiveMaxTokens accept a nullable
         // conversation for use elsewhere, but this loop dereferences
         // conversation.channelType when handing off to the LLM provider —
@@ -192,7 +193,7 @@ public final class ToolCallLoopRunner {
                     "Round %d: executing %d tool call(s)".formatted(round + 1, assistantMsg.toolCalls().size()));
 
             ParallelToolExecutor.executeToolsParallel(assistantMsg.toolCalls(), agent, conversationId,
-                    currentMessages, null, null, null, null);
+                    currentMessages, null, null, null, null, sink);
 
             // JCLAW-291: cooperative-cancel checkpoint between tool calls
             // and the next LLM round. If /subagent kill landed during the
@@ -255,7 +256,8 @@ public final class ToolCallLoopRunner {
                                             LatencyTrace trace,
                                             LlmProvider.TurnUsage turnUsage,
                                             List<String> collectedImages,
-                                            String channelType) {
+                                            String channelType,
+                                            AgentExecutionSink sink) {
         if (round >= AgentRunner.maxToolRounds()) {
             return "I reached the maximum number of tool execution rounds. Please try a simpler request.";
         }
@@ -271,7 +273,7 @@ public final class ToolCallLoopRunner {
         int streamingToolResultsAnchor = currentMessages.size();
         var toolRoundStartNs = System.nanoTime();
         ParallelToolExecutor.executeToolsParallel(toolCalls, agent, conversationId, currentMessages,
-                cb.onStatus(), cb.onToolCall(), collectedImages, isCancelled);
+                cb.onStatus(), cb.onToolCall(), collectedImages, isCancelled, sink);
         trace.addToolRound((System.nanoTime() - toolRoundStartNs) / 1_000_000L);
 
         if (isCancelled.get()) return CancellationManager.cancelledReturn(priorContent, collectedImages, channelType, cb, agent, round);
@@ -348,7 +350,7 @@ public final class ToolCallLoopRunner {
         if (!accumulator.toolCalls.isEmpty()) {
             return handleToolCallsStreaming(agent, conversation, conversationId, currentMessages, tools,
                     accumulator.toolCalls, accumulator.content, provider, cb, thinkingMode,
-                    round + 1, isCancelled, trace, turnUsage, collectedImages, channelType);
+                    round + 1, isCancelled, trace, turnUsage, collectedImages, channelType, sink);
         }
 
         // Some models (especially smaller/distilled ones) occasionally return zero tokens

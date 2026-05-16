@@ -239,6 +239,13 @@ public class AgentRunner {
                                               java.util.List<services.AttachmentService.Input> attachments,
                                               boolean skipUserAppend) {
         final Long conversationId = conversation.id;
+        // JCLAW-21: every persistence write inside the runner routes
+        // through this sink. ConversationSink keeps existing chat
+        // semantics (re-fetch managed entity, delegate to
+        // ConversationService); TaskRunSink overrides the same surface
+        // to write into task_run_message. Constructed at the boundary
+        // where AgentRunner takes responsibility for the conversation.
+        final AgentExecutionSink sink = new ConversationSink(conversation);
         // Non-streaming callers (TaskPollerJob, background) have no pre-runner
         // queue-accept timestamp, so queue_wait is naturally skipped. Every other
         // segment is captured, which is why scheduled turns now show up in the
@@ -264,7 +271,7 @@ public class AgentRunner {
                 // Message before this call, so re-appending would duplicate the
                 // row in both the chat scrollback and the LLM context.
                 if (!skipUserAppend) {
-                    ConversationService.appendUserMessage(conv, userMessage, attachments);
+                    sink.appendUserMessage(userMessage, attachments);
                 }
                 trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
 
@@ -289,7 +296,7 @@ public class AgentRunner {
                 if (primary == null) {
                     var error = "No LLM provider configured. Add provider config via Settings.";
                     EventLogger.error("llm", agent.name, null, error);
-                    ConversationService.appendAssistantMessage(conv, error, null);
+                    sink.appendAssistantMessage(error, null);
                     return null;
                 }
                 var secondary = ProviderRegistry.getSecondary();
@@ -334,7 +341,7 @@ public class AgentRunner {
             // LLM call loop — no transaction open, JDBC connection back in pool
             var outcome = ToolCallLoopRunner.callWithToolLoop(agent, conversation, conversationId,
                     prepared.messages(), prepared.tools(), prepared.primary(), prepared.secondary(),
-                    prepared.audioBearers());
+                    prepared.audioBearers(), sink);
             var response = outcome.content();
             var truncated = outcome.truncated();
             trace.mark(LatencyTrace.STREAM_BODY_END);
@@ -354,18 +361,11 @@ public class AgentRunner {
 
             // Short persistence transaction: final assistant message.
             // Conversation may have been deleted between LLM call and persist
-            // (loadtest cleanup, manual UI delete, etc.) — log + skip rather
-            // than insert a Message with a null FK.
-            services.Tx.run(() -> {
-                var conv = ConversationService.findById(conversationId);
-                if (conv == null) {
-                    EventLogger.warn("agent", agent.name, conversation.channelType,
-                            "Persist skipped: conversation %d was deleted before persist completed"
-                                    .formatted(conversationId));
-                    return;
-                }
-                ConversationService.appendAssistantMessage(conv, response, null, null, null, truncated);
-            });
+            // (loadtest cleanup, manual UI delete, etc.); ConversationSink
+            // logs + skips internally rather than inserting a row with a
+            // null FK.
+            services.Tx.run(() ->
+                sink.appendAssistantMessage(response, null, null, null, truncated));
 
             EventLogger.info("llm", agent.name, conversation.channelType,
                     "Response generated (%d chars%s)".formatted(response.length(),
@@ -557,12 +557,12 @@ public class AgentRunner {
             return null;
         }
 
-        // Now that we hold the lock, persist the user message (and any
-        // attachments that rode with it — JCLAW-25).
-        services.Tx.run(() -> {
-            var convo = ConversationService.findById(conversation.id);
-            ConversationService.appendUserMessage(convo, userMessage, attachments);
-        });
+        // JCLAW-21: route the user-message persist through ConversationSink.
+        // Local sink construction here keeps this method's signature
+        // unchanged; streamLlmLoop builds its own ConversationSink from
+        // the returned Conversation for the post-LLM writes.
+        AgentExecutionSink sink = new ConversationSink(conversation);
+        services.Tx.run(() -> sink.appendUserMessage(userMessage, attachments));
 
         cb.onInit().accept(conversation);
         return conversation;
@@ -578,6 +578,14 @@ public class AgentRunner {
                                        AtomicBoolean isCancelled, StreamingCallbacks cb,
                                        LatencyTrace trace)
             throws InterruptedException {
+
+        // JCLAW-21: streaming-side sink. Same construction shape as the
+        // sync runAfterAcquire path; the user-message append already
+        // happened inside resolveConversationAndAcquireQueue using its
+        // own local sink, so this one only owns the post-LLM writes
+        // (final assistant, per-tool-call via ParallelToolExecutor,
+        // truncation-fallback persist).
+        final AgentExecutionSink sink = new ConversationSink(conversation);
 
         EventLogger.info("llm", agent.name, channelType,
                 "Streaming: assembling prompt for conversation id: %d".formatted(conversation.id));
@@ -738,16 +746,7 @@ public class AgentRunner {
             // null-check stays as belt-and-suspenders against any future
             // re-introduction of an out-of-order delete.
             long truncPersistStartNs = System.nanoTime();
-            services.Tx.run(() -> {
-                var conv = ConversationService.findById(conversation.id);
-                if (conv == null) {
-                    EventLogger.warn("agent", agent.name, channelType,
-                            "Trunc persist skipped: conversation %d was deleted before persist completed"
-                                    .formatted(conversation.id));
-                    return;
-                }
-                ConversationService.appendAssistantMessage(conv, finalContent, null);
-            });
+            services.Tx.run(() -> sink.appendAssistantMessage(finalContent, null));
             utils.LatencyStats.record(channelType, "persist",
                     (System.nanoTime() - truncPersistStartNs) / 1_000_000L);
             cb.onComplete().accept(finalContent);
@@ -778,7 +777,7 @@ public class AgentRunner {
         if (!accumulator.toolCalls.isEmpty()) {
             content = ToolCallLoopRunner.handleToolCallsStreaming(agent, conversation, conversation.id, messages, tools,
                     accumulator.toolCalls, content, primary, cb, thinkingMode, 0,
-                    isCancelled, trace, turnUsage, turnImages, channelType);
+                    isCancelled, trace, turnUsage, turnImages, channelType, sink);
         }
 
         if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
@@ -838,16 +837,8 @@ public class AgentRunner {
         // handleToolCallsStreaming guard at the existing tool-call site.
         var finalTruncated = replyTruncated;
         long persistStartNs = System.nanoTime();
-        services.Tx.run(() -> {
-            var conv = ConversationService.findById(conversation.id);
-            if (conv == null) {
-                EventLogger.warn("agent", agent.name, channelType,
-                        "Persist skipped: conversation %d was deleted before persist completed"
-                                .formatted(conversation.id));
-                return;
-            }
-            ConversationService.appendAssistantMessage(conv, finalContent, null, usageJson, finalReasoning, finalTruncated);
-        });
+        services.Tx.run(() ->
+            sink.appendAssistantMessage(finalContent, null, usageJson, finalReasoning, finalTruncated));
         utils.LatencyStats.record(channelType, "persist",
                 (System.nanoTime() - persistStartNs) / 1_000_000L);
         UsageMetricsBuilder.emitUsageAndComplete(agent, channelType, content, turnUsage, streamStartMs, usageJson, cb);

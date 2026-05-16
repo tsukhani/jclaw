@@ -3,6 +3,7 @@ package agents;
 import models.Conversation;
 import services.AttachmentService;
 import services.ConversationService;
+import services.EventLogger;
 
 import java.util.List;
 
@@ -12,20 +13,34 @@ import java.util.List;
  * {@link ConversationService}, preserving the existing message
  * persistence semantics for chat flows.
  *
+ * <h3>Detached-entity safety</h3>
+ * Callers on virtual threads (TaskPollerJob, webhooks, the streaming
+ * runStreaming entry point) pass a {@link Conversation} loaded in an
+ * already-committed {@code Tx.run()} block — that entity is detached
+ * when AgentRunner sees it, and {@code conversation.save()} inside
+ * {@link ConversationService#appendMessage} would throw
+ * {@code PersistentObjectException}. Each write method therefore
+ * re-fetches the managed entity by id from the current persistence
+ * context before delegating, matching the pattern the chat code path
+ * used before this sink was introduced. The re-fetch is cheap inside
+ * an open Tx because JPA's L1 cache returns the same instance.
+ *
  * <p>Lifecycle methods are no-ops. The Conversation already exists
  * before the runner is invoked, and the chat UI treats "completion" as
  * the natural end of the streaming response — there's nothing to mark
  * on a row that already represents the conversation as a whole.
- * {@code TaskRunSink} (a subsequent JCLAW-21 commit) overrides
- * {@link #onStart}, {@link #onComplete}, and {@link #onFailure} because
- * the TaskRun row's lifecycle bookends the agent loop one-to-one with
- * a single fire.
+ * {@code TaskRunSink} (sibling implementation in the JCLAW-21 series)
+ * overrides {@link #onStart}, {@link #onComplete}, and
+ * {@link #onFailure} because the TaskRun row's lifecycle bookends the
+ * agent loop one-to-one with a single fire.
  *
  * <p>Exposes the underlying {@link #conversation()} via accessor so the
  * subset of AgentRunner code that still needs conversation-specific
  * metadata (channelType, peerId, id) can reach it without going through
- * the sink interface. Migrating those calls to interface methods is
- * incremental refactoring left to subsequent JCLAW-21 commits.
+ * the sink interface. The read-side fields used on AgentRunner's paths
+ * (channelType, id, agent.name) are eager primitives or strings that
+ * stay readable on the detached entity, so no re-fetch is needed for
+ * metadata access.
  *
  * <p>Part of JCLAW-21's Tasks foundation.
  */
@@ -51,19 +66,48 @@ public class ConversationSink implements AgentExecutionSink {
 
     @Override
     public void appendUserMessage(String content, List<AttachmentService.Input> attachments) {
-        ConversationService.appendUserMessage(conversation, content, attachments);
+        var managed = ConversationService.findById(conversation.id);
+        if (managed == null) {
+            warnSkipped("user");
+            return;
+        }
+        ConversationService.appendUserMessage(managed, content, attachments);
     }
 
     @Override
     public void appendAssistantMessage(String content, String toolCalls, String usageJson,
                                        String reasoning, boolean truncated) {
-        ConversationService.appendAssistantMessage(conversation, content, toolCalls,
+        var managed = ConversationService.findById(conversation.id);
+        if (managed == null) {
+            warnSkipped("assistant");
+            return;
+        }
+        ConversationService.appendAssistantMessage(managed, content, toolCalls,
                 usageJson, reasoning, truncated);
     }
 
     @Override
     public void appendToolResult(String toolCallId, String result, String structuredJson) {
-        ConversationService.appendToolResult(conversation, toolCallId, result, structuredJson);
+        var managed = ConversationService.findById(conversation.id);
+        if (managed == null) {
+            warnSkipped("tool-result");
+            return;
+        }
+        ConversationService.appendToolResult(managed, toolCallId, result, structuredJson);
+    }
+
+    /**
+     * Mirror the pre-sink AgentRunner pattern: when the conversation was
+     * deleted between the LLM call and the write (loadtest cleanup,
+     * manual UI delete, etc.), log + skip rather than insert a Message
+     * with a null FK. The chat UI never displays these — they're
+     * operator-only diagnostics.
+     */
+    private void warnSkipped(String kind) {
+        var channel = conversation.channelType;
+        EventLogger.warn("agent", null, channel,
+                "Persist skipped (%s): conversation %d was deleted before persist completed"
+                        .formatted(kind, conversation.id));
     }
 
     @Override

@@ -13,7 +13,6 @@ import com.google.gson.JsonParser;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ToolCall;
 import models.Agent;
-import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
 
@@ -142,7 +141,8 @@ public final class ParallelToolExecutor {
                                       Consumer<String> onStatus,
                                       Consumer<AgentRunner.ToolCallEvent> onToolCall,
                                       List<String> imageCollector,
-                                      AtomicBoolean isCancelled) {
+                                      AtomicBoolean isCancelled,
+                                      AgentExecutionSink sink) {
         int n = toolCalls.size();
         if (n == 0) return;
 
@@ -239,9 +239,8 @@ public final class ParallelToolExecutor {
             final String r = text;
             final String s = structured;
             Tx.run(() -> {
-                var conv = ConversationService.findById(conversationId);
-                ConversationService.appendAssistantMessage(conv, null, gson.toJson(tc));
-                ConversationService.appendToolResult(conv, tc.id(), r, s);
+                sink.appendAssistantMessage(null, gson.toJson(tc));
+                sink.appendToolResult(tc.id(), r, s);
             });
             // JCLAW-170: surface the completed call to the SSE stream so the
             // chat UI can render a per-call row with the structured result

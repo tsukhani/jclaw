@@ -112,14 +112,21 @@ class ParallelToolExecutionTest extends UnitTest {
         // these tests exercise scheduling semantics, not the per-call event
         // stream — the production code tolerates null onToolCall.
         // JCLAW-299 Phase 2: executeToolsParallel lives on
-        // agents.ParallelToolExecutor now; same signature, package-private
-        // so reflection + setAccessible is still the test entry path.
+        // agents.ParallelToolExecutor.
+        // JCLAW-21 commit 1: trailing AgentExecutionSink parameter wires
+        // per-tool-call assistant + tool-result writes through the sink
+        // abstraction. Reflection-construct a ConversationSink from the
+        // test's persisted conversation so the writes hit the same
+        // conversation_message rows the pre-sink tests assert on.
+        var conv = (models.Conversation) services.Tx.run(() ->
+                services.ConversationService.findById(convId));
+        var sink = new agents.ConversationSink(conv);
         var m = agents.ParallelToolExecutor.class.getDeclaredMethod("executeToolsParallel",
                 List.class, Agent.class, Long.class, List.class,
                 java.util.function.Consumer.class, java.util.function.Consumer.class,
-                List.class, AtomicBoolean.class);
+                List.class, AtomicBoolean.class, agents.AgentExecutionSink.class);
         m.setAccessible(true);
-        m.invoke(null, calls, agent, convId, messages, null, null, null, cancelled);
+        m.invoke(null, calls, agent, convId, messages, null, null, null, cancelled, sink);
     }
 
     @Test
