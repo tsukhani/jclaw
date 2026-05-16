@@ -111,7 +111,10 @@ class ParallelToolExecutionTest extends UnitTest {
         // parameter ahead of the image collector. We pass null here since
         // these tests exercise scheduling semantics, not the per-call event
         // stream — the production code tolerates null onToolCall.
-        var m = AgentRunner.class.getDeclaredMethod("executeToolsParallel",
+        // JCLAW-299 Phase 2: executeToolsParallel lives on
+        // agents.ParallelToolExecutor now; same signature, package-private
+        // so reflection + setAccessible is still the test entry path.
+        var m = agents.ParallelToolExecutor.class.getDeclaredMethod("executeToolsParallel",
                 List.class, Agent.class, Long.class, List.class,
                 java.util.function.Consumer.class, java.util.function.Consumer.class,
                 List.class, AtomicBoolean.class);
