@@ -701,7 +701,7 @@ public class AgentRunner {
         var content = accumulator.content;
 
         // Check for truncated response (max tokens hit mid-tool-call)
-        if (isTruncationFinish(accumulator.finishReason) && !accumulator.toolCalls.isEmpty()) {
+        if (TruncationDiagnostics.isTruncationFinish(accumulator.finishReason) && !accumulator.toolCalls.isEmpty()) {
             EventLogger.warn("llm", agent.name, channelType,
                     "Response truncated (finish_reason=length) with pending tool calls — skipping execution of incomplete tool arguments");
             var truncMsg = content.isEmpty()
@@ -751,10 +751,10 @@ public class AgentRunner {
         // is empty (the model just ran out of output budget mid-reply).
         // The flag rides through to the persist site so the chat UI can
         // render a "Reply was truncated" marker.
-        boolean replyTruncated = isTruncationFinish(accumulator.finishReason)
+        boolean replyTruncated = TruncationDiagnostics.isTruncationFinish(accumulator.finishReason)
                 && accumulator.toolCalls.isEmpty();
         if (replyTruncated) {
-            logEmptyToolCallsTruncation("streamLlmLoop", agent, conversation, primary,
+            TruncationDiagnostics.logEmptyToolCallsTruncation("streamLlmLoop", agent, conversation, primary,
                     channelType, accumulator.finishReason, messages, tools);
         }
 
@@ -952,8 +952,8 @@ public class AgentRunner {
             // budget mid-reply (the prompt-fills-window scenario). Carry the
             // flag up to the persist site so the chat UI can mark the row.
             if (toolCallsEmpty) {
-                if (isTruncationFinish(choice.finishReason())) {
-                    logEmptyToolCallsTruncation("callWithToolLoop", agent, conversation, primary,
+                if (TruncationDiagnostics.isTruncationFinish(choice.finishReason())) {
+                    TruncationDiagnostics.logEmptyToolCallsTruncation("callWithToolLoop", agent, conversation, primary,
                             conversation.channelType, choice.finishReason(), currentMessages, tools);
                     return new LoopOutcome(MessageHydrator.contentAsString(assistantMsg.content()), true);
                 }
@@ -961,7 +961,7 @@ public class AgentRunner {
             }
 
             // Check for truncated response (max tokens hit mid-tool-call)
-            if (isTruncationFinish(choice.finishReason())) {
+            if (TruncationDiagnostics.isTruncationFinish(choice.finishReason())) {
                 EventLogger.warn("llm", agent.name, null,
                         "Response truncated (finish_reason=length) with pending tool calls — skipping execution of incomplete tool arguments");
                 var content = assistantMsg.content() != null ? (String) assistantMsg.content()
@@ -1110,7 +1110,7 @@ public class AgentRunner {
         // will be an incomplete JSON fragment. Passing that to ToolRegistry.execute causes
         // a Gson EOFException and the user sees a cryptic "End of input" error. Instead,
         // surface a clear message so the LLM can retry with a more concise approach.
-        if (isTruncationFinish(accumulator.finishReason) && !accumulator.toolCalls.isEmpty()) {
+        if (TruncationDiagnostics.isTruncationFinish(accumulator.finishReason) && !accumulator.toolCalls.isEmpty()) {
             EventLogger.warn("tool", agent.name, null,
                     "Response truncated (finish_reason=%s) with pending tool calls in round %d — skipping execution of incomplete tool arguments"
                             .formatted(accumulator.finishReason, round + 1));
@@ -1367,45 +1367,5 @@ public class AgentRunner {
         }
     }
 
-    /**
-     * Return {@code true} when a streaming finish_reason signals the model
-     * exhausted its output token budget mid-response. OpenAI-compatible routes
-     * emit {@code "length"}; Anthropic-native (and OpenRouter's Bedrock route
-     * for Anthropic models) emit {@code "max_tokens"}. Both must be treated as
-     * truncation — if only {@code "length"} is matched, Bedrock-routed Claude
-     * tool-call deltas get dispatched with incomplete JSON args and the
-     * downstream tool fails with a cryptic Gson EOFException. Visible for the
-     * {@code AgentRunnerTest} coverage; kept here so the canonical list of
-     * truncation values lives next to the guards that consume it.
-     */
-    public static boolean isTruncationFinish(String finishReason) {
-        return "length".equals(finishReason) || "max_tokens".equals(finishReason);
-    }
-
-    /**
-     * JCLAW-291: emit a structured warn line whenever the model truncates a
-     * plain (non-tool-call) reply via {@code finish_reason = length /
-     * max_tokens}. Mirrors the existing tool-call truncation guards but
-     * dumps the headroom math so operators can correlate the truncation
-     * with the model's effective output budget. Single call site so the
-     * format stays canonical across streaming and non-streaming.
-     */
-    private static void logEmptyToolCallsTruncation(String site, Agent agent, Conversation conversation,
-                                                     LlmProvider provider, String channelType,
-                                                     String finishReason, List<ChatMessage> messages,
-                                                     List<ToolDef> tools) {
-        var modelInfo = ModelResolver.resolveModelInfo(agent, conversation, provider).orElse(null);
-        int promptTokens = ContextWindowManager.estimateTokens(messages) + ContextWindowManager.estimateToolTokens(tools);
-        int configured = modelInfo != null ? modelInfo.maxTokens() : -1;
-        int contextWindow = modelInfo != null ? modelInfo.contextWindow() : -1;
-        int headroom = contextWindow > 0
-                ? contextWindow - promptTokens - ContextWindowManager.OUTPUT_SAFETY_MARGIN_TOKENS
-                : -1;
-        Integer clamped = ContextWindowManager.effectiveMaxTokens(agent, conversation, provider, messages, tools);
-        EventLogger.warn("llm", agent.name, channelType,
-                "Truncated reply (site=%s, finish=%s, configured=%d, contextWindow=%d, prompt~%d, headroom=%d, clamped=%s)"
-                        .formatted(site, finishReason, configured, contextWindow, promptTokens, headroom,
-                                clamped == null ? "null" : clamped.toString()));
-    }
 
 }

@@ -119,11 +119,11 @@ class ToolSystemTest extends UnitTest {
         // Anthropic-native "max_tokens" must trip the truncation path — the
         // second was added to fix OpenRouter's Bedrock route, which passes
         // the Anthropic spelling through verbatim.
-        assertTrue(agents.AgentRunner.isTruncationFinish("length"));
-        assertTrue(agents.AgentRunner.isTruncationFinish("max_tokens"));
-        assertFalse(agents.AgentRunner.isTruncationFinish("stop"));
-        assertFalse(agents.AgentRunner.isTruncationFinish("tool_calls"));
-        assertFalse(agents.AgentRunner.isTruncationFinish(null));
+        assertTrue(agents.TruncationDiagnostics.isTruncationFinish("length"));
+        assertTrue(agents.TruncationDiagnostics.isTruncationFinish("max_tokens"));
+        assertFalse(agents.TruncationDiagnostics.isTruncationFinish("stop"));
+        assertFalse(agents.TruncationDiagnostics.isTruncationFinish("tool_calls"));
+        assertFalse(agents.TruncationDiagnostics.isTruncationFinish(null));
     }
 
     // --- TaskTool ---
