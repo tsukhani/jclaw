@@ -1,4 +1,4 @@
-import agents.AgentRunner;
+import agents.AudioRetryStrategy;
 import agents.VisionAudioAssembler;
 import models.Agent;
 import models.Conversation;
@@ -143,30 +143,30 @@ class TranscriptionPipelineTest extends UnitTest {
     @Test
     void isAudioFormatRejectionDetectsKnownProviderShapes() {
         // OpenAI-style unsupported_format
-        assertTrue(AgentRunner.isAudioFormatRejection(
+        assertTrue(AudioRetryStrategy.isAudioFormatRejection(
                 new RuntimeException("HTTP 400 from openai: unsupported_format webm")));
         // Gemini-style invalid_argument
-        assertTrue(AgentRunner.isAudioFormatRejection(
+        assertTrue(AudioRetryStrategy.isAudioFormatRejection(
                 new RuntimeException("HTTP 400 from openrouter: invalid_argument: audio format not supported")));
         // Generic format not-supported
-        assertTrue(AgentRunner.isAudioFormatRejection(
+        assertTrue(AudioRetryStrategy.isAudioFormatRejection(
                 new RuntimeException("HTTP 400 from acme: the format is not supported by this model")));
         // Audio + format combo
-        assertTrue(AgentRunner.isAudioFormatRejection(
+        assertTrue(AudioRetryStrategy.isAudioFormatRejection(
                 new RuntimeException("HTTP 400 from acme: audio format mismatch")));
     }
 
     @Test
     void isAudioFormatRejectionIgnoresUnrelated400s() {
         // 400 with no audio/format hints — unrelated client error.
-        assertFalse(AgentRunner.isAudioFormatRejection(
+        assertFalse(AudioRetryStrategy.isAudioFormatRejection(
                 new RuntimeException("HTTP 400 from openai: model not found")));
         // 500-class server error: not a client format rejection.
-        assertFalse(AgentRunner.isAudioFormatRejection(
+        assertFalse(AudioRetryStrategy.isAudioFormatRejection(
                 new RuntimeException("HTTP 500 from openai: internal error")));
         // Null / non-LlmException-shaped
-        assertFalse(AgentRunner.isAudioFormatRejection(null));
-        assertFalse(AgentRunner.isAudioFormatRejection(new RuntimeException()));
+        assertFalse(AudioRetryStrategy.isAudioFormatRejection(null));
+        assertFalse(AudioRetryStrategy.isAudioFormatRejection(new RuntimeException()));
     }
 
     // ── PendingTranscripts state ─────────────────────────────────────
