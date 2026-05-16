@@ -316,7 +316,7 @@ public class AgentRunner {
      * conversation queue via {@link services.ConversationQueue#drain}
      * (JCLAW-117). Skips {@code tryAcquire} because the caller holds
      * ownership; the shared body's {@code finally} calls
-     * {@link #processQueueDrain} which releases ownership when the pending
+     * {@link QueueDrainOrchestrator#processQueueDrain} which releases ownership when the pending
      * deque is empty (or transfers it to the next drained message).
      */
     public static RunResult runWithOwnedQueue(Agent agent, Conversation conversation, String userMessage) {
@@ -502,7 +502,7 @@ public class AgentRunner {
             trace.mark(LatencyTrace.TERMINAL_SENT);
             trace.end();
             EventLogger.flush();
-            processQueueDrain(conversationId);
+            QueueDrainOrchestrator.processQueueDrain(conversationId);
         }
     }
 
@@ -582,7 +582,7 @@ public class AgentRunner {
                 // releaseQueueOnce no-ops here. The block only fires for
                 // exception paths that returned without invoking any
                 // terminal callback.
-                releaseQueueOnce(conversationIdRef, queueReleased);
+                QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, queueReleased);
             }
         });
     }
@@ -598,7 +598,7 @@ public class AgentRunner {
      *
      * <p>Also handles the conversation-queue early release. The terminal
      * callbacks (onComplete / onError / onCancel) call
-     * {@link #processQueueDrain} BEFORE invoking the wrapped caller's handler,
+     * {@link QueueDrainOrchestrator#processQueueDrain} BEFORE invoking the wrapped caller's handler,
      * so the queue lock is freed before the SSE terminal frame flushes to
      * the wire. Without this, a fast client (e.g. the loadtest worker firing
      * back-to-back turns inside the same conversation) would observe the
@@ -631,37 +631,21 @@ public class AgentRunner {
                 cb.onStatus(),
                 cb.onToolCall(),
                 content -> {
-                    releaseQueueOnce(conversationIdRef, queueReleased);
+                    QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, queueReleased);
                     try { cb.onComplete().accept(content); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
                 },
                 error -> {
-                    releaseQueueOnce(conversationIdRef, queueReleased);
+                    QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, queueReleased);
                     try { cb.onError().accept(error); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
                 },
                 () -> {
-                    releaseQueueOnce(conversationIdRef, queueReleased);
+                    QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, queueReleased);
                     try { cb.onCancel().run(); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
                 }
         );
-    }
-
-    /**
-     * Idempotent queue release helper used by {@link #wrapCallbacksWithTrace}'s
-     * terminal callbacks. The {@link AtomicBoolean#compareAndSet} ensures
-     * exactly one drain fires per turn even if multiple terminal callbacks
-     * race (which shouldn't happen in normal flow, but the CAS makes the
-     * invariant local to this method rather than relying on caller
-     * discipline). When {@code conversationIdRef[0]} is null the queue was
-     * never acquired (e.g. the queued-canned-response short-circuit), so
-     * the no-op skip is correct.
-     */
-    private static void releaseQueueOnce(Long[] conversationIdRef, AtomicBoolean queueReleased) {
-        if (conversationIdRef[0] == null) return;
-        if (!queueReleased.compareAndSet(false, true)) return;
-        processQueueDrain(conversationIdRef[0]);
     }
 
     /**
@@ -1854,59 +1838,6 @@ public class AgentRunner {
     }
 
     /**
-     * Drain the conversation queue after processing completes, then re-process
-     * any waiting messages on a virtual thread. Each drained message gets a
-     * full {@link #run} invocation (which handles its own queue acquisition,
-     * user-message persistence, LLM call, and response persistence). For
-     * external channels (Telegram, Slack, WhatsApp), the response is dispatched
-     * back through the channel. For web, the response is persisted to the DB
-     * and the user sees it on next conversation load.
-     *
-     * <p>Called from the {@code finally} block of both {@link #run} and
-     * {@link #runStreaming}. Failures are logged but never propagated — the
-     * primary request must not fail because a queued message's re-processing
-     * fails.
-     */
-    private static void processQueueDrain(Long conversationId) {
-        // JCLAW-117: drain() now keeps processing=true when it returns a
-        // non-empty list — ownership transfers to this call. The virtual
-        // thread below must either re-drain on success (runAfterAcquire's
-        // finally will re-invoke processQueueDrain, and a later empty drain
-        // releases) or explicitly releaseOwnership on early-exit paths
-        // (findById returned null, or run threw before finally could fire).
-        var drained = services.ConversationQueue.drain(conversationId);
-        if (drained.isEmpty()) return;
-
-        Thread.ofVirtual().name("agent-drain").start(() -> {
-            var combined = services.ConversationQueue.formatCollectedMessages(drained);
-            var msg = drained.getFirst(); // channel info is the same for all queued messages
-            boolean runStarted = false;
-            try {
-                var conversation = services.Tx.run(() -> ConversationService.findById(conversationId));
-                if (conversation == null) {
-                    services.ConversationQueue.releaseOwnership(conversationId);
-                    return;
-                }
-                runStarted = true;
-                // JCLAW-117: queue ownership was transferred to us by drain()
-                // above — use the owned-queue variant to avoid re-acquire.
-                var result = runWithOwnedQueue(msg.agent(), conversation, combined);
-                dispatchToChannel(msg.agent(), msg.channelType(), msg.peerId(), result.response());
-            } catch (Exception e) {
-                EventLogger.error("queue", msg.agent().name, msg.channelType(),
-                        "Failed to process queued message: %s".formatted(e.getMessage()));
-                if (!runStarted) {
-                    // Exception before run() — release so we don't wedge the queue.
-                    // If runWithOwnedQueue started and threw, its own finally ran
-                    // processQueueDrain which will observe pending and release
-                    // ownership correctly on the empty path.
-                    services.ConversationQueue.releaseOwnership(conversationId);
-                }
-            }
-        });
-    }
-
-    /**
      * Shared webhook message handler: resolve agent route, find/create conversation,
      * run the agent synchronously, and send the response via the provided sender.
      * Used by Slack, Telegram, and WhatsApp webhook controllers.
@@ -2054,7 +1985,9 @@ public class AgentRunner {
      * the matching {@link models.TelegramBinding} by (agent, peerId) instead of
      * using the generic {@link Channel} interface.
      */
-    private static void dispatchToChannel(Agent agent, String channelType, String peerId, String text) {
+    // Package-private so QueueDrainOrchestrator (JCLAW-299) can dispatch
+    // queued replies back through the originating channel.
+    static void dispatchToChannel(Agent agent, String channelType, String peerId, String text) {
         if (peerId == null || text == null) return;
         try {
             var type = ChannelType.fromValue(channelType);
