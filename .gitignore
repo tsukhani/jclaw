@@ -130,6 +130,10 @@ data/
 *.h2.db
 *.mv.db
 *.sql
+# conf/db/*.sql holds checked-in schema scripts (e.g. db-scheduler's
+# scheduled_tasks DDL) that ship with the app. The global *.sql ignore
+# above is for transient H2 dumps and similar generated files.
+!conf/db/*.sql
 *.sqlite
 *.sqlite3
 
