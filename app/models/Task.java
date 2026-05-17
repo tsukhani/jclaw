@@ -12,7 +12,14 @@ import java.util.List;
 })
 public class Task extends Model {
 
-    public enum Type { IMMEDIATE, SCHEDULED, CRON }
+    /**
+     * Fire-shape enum. JCLAW-21 introduced INTERVAL as the fourth value
+     * to express "recurring every N seconds" — complements CRON
+     * (calendar-aligned recurrence) for the simple-fixed-period case
+     * where a cron expression is overkill (e.g. "every 5 minutes" is
+     * cleaner as INTERVAL than the cron equivalent).
+     */
+    public enum Type { IMMEDIATE, SCHEDULED, INTERVAL, CRON }
     public enum Status { PENDING, RUNNING, COMPLETED, FAILED, CANCELLED }
 
     @ManyToOne
@@ -32,12 +39,36 @@ public class Task extends Model {
     @Column(name = "cron_expression")
     public String cronExpression;
 
+    /**
+     * For {@link Type#INTERVAL} Tasks: the recurrence period in
+     * seconds. Mandatory when {@code type=INTERVAL}; null otherwise.
+     * Validation happens at scheduling time
+     * ({@code TaskSchedulingService.computeFirstFire}) — the entity
+     * itself accepts null so a malformed Task can be persisted long
+     * enough to be flagged in the UI rather than failing at save.
+     */
+    @Column(name = "interval_seconds")
+    public Long intervalSeconds;
+
     @Column(name = "scheduled_at")
     public Instant scheduledAt;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     public Status status = Status.PENDING;
+
+    /**
+     * Pause flag. When {@code true}, {@code TaskExecutionHandler}
+     * skips the fire body and re-schedules the next occurrence (for
+     * INTERVAL/CRON) or removes the row (for IMMEDIATE/SCHEDULED)
+     * without invoking {@code TaskExecutor.runTask}. Operators flip
+     * this via {@code TaskSchedulingService.pause(taskId)} /
+     * {@code resume(taskId)}; toggling does NOT cancel the
+     * scheduled_tasks row, so resuming on a CRON Task picks up its
+     * existing cadence without operator-side rescheduling.
+     */
+    @Column(nullable = false)
+    public boolean paused = false;
 
     @Column(name = "retry_count", nullable = false)
     public int retryCount = 0;

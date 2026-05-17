@@ -37,6 +37,7 @@ public class TaskTool implements ToolRegistry.Tool {
                 new agents.ToolAction("createTask",            "Create an immediate background task with a name and description"),
                 new agents.ToolAction("scheduleTask",          "Schedule a task to run once at a specific ISO 8601 datetime"),
                 new agents.ToolAction("scheduleRecurringTask", "Create a recurring task using a cron expression"),
+                new agents.ToolAction("scheduleIntervalTask",  "Create a recurring task that fires every N seconds"),
                 new agents.ToolAction("deleteRecurringTask",   "Cancel a recurring task by name"),
                 new agents.ToolAction("listRecurringTasks",    "List all currently active recurring tasks")
         );
@@ -49,6 +50,7 @@ public class TaskTool implements ToolRegistry.Tool {
                 Use action="createTask" to create a one-off task. \
                 Use action="scheduleTask" to schedule a task for a future time. \
                 Use action="scheduleRecurringTask" to create a recurring task on a cron schedule. \
+                Use action="scheduleIntervalTask" to create a recurring task on a fixed period (every N seconds). \
                 Use action="deleteRecurringTask" to remove a recurring schedule. \
                 Use action="listRecurringTasks" to list all recurring schedules. \
                 Tasks run asynchronously via the agent.""";
@@ -56,7 +58,7 @@ public class TaskTool implements ToolRegistry.Tool {
 
     @Override
     public String summary() {
-        return "Manage background tasks via the 'action' parameter: createTask, scheduleTask, scheduleRecurringTask, deleteRecurringTask, listRecurringTasks.";
+        return "Manage background tasks via the 'action' parameter: createTask, scheduleTask, scheduleRecurringTask, scheduleIntervalTask, deleteRecurringTask, listRecurringTasks.";
     }
 
     @Override
@@ -66,14 +68,16 @@ public class TaskTool implements ToolRegistry.Tool {
                 SchemaKeys.PROPERTIES, Map.of(
                         "action", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.ENUM, List.of("createTask", "scheduleTask", "scheduleRecurringTask",
-                                        "deleteRecurringTask", "listRecurringTasks"),
+                                        "scheduleIntervalTask", "deleteRecurringTask", "listRecurringTasks"),
                                 SchemaKeys.DESCRIPTION, "The action to perform"),
                         "name", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING, SchemaKeys.DESCRIPTION, "Task name (short identifier)"),
                         SchemaKeys.DESCRIPTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING, SchemaKeys.DESCRIPTION, "Task description/instructions"),
                         "executionTime", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "ISO datetime for scheduled tasks: YYYY-MM-ddTHH:mm:ss"),
                         "cronExpression", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                                SchemaKeys.DESCRIPTION, "Cron expression for recurring tasks (e.g. '0 12 * * *')")
+                                SchemaKeys.DESCRIPTION, "Cron expression for recurring tasks (e.g. '0 12 * * *')"),
+                        "intervalSeconds", Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
+                                SchemaKeys.DESCRIPTION, "Recurrence period in seconds for scheduleIntervalTask (positive integer)")
                 ),
                 SchemaKeys.REQUIRED, List.of("action")
         );
@@ -88,6 +92,7 @@ public class TaskTool implements ToolRegistry.Tool {
             case "createTask" -> createTask(args, agent);
             case "scheduleTask" -> scheduleTask(args, agent);
             case "scheduleRecurringTask" -> scheduleRecurringTask(args, agent);
+            case "scheduleIntervalTask" -> scheduleIntervalTask(args, agent);
             case "deleteRecurringTask" -> deleteRecurringTask(args);
             case "listRecurringTasks" -> listRecurringTasks();
             default -> "Error: Unknown action '%s'".formatted(action);
@@ -120,6 +125,31 @@ public class TaskTool implements ToolRegistry.Tool {
         services.TaskSchedulingService.register(task);
         EventLogger.info("task", agent.name, null, "Task scheduled: %s at %s".formatted(task.name, ldt));
         return "Task '%s' scheduled for %s.".formatted(task.name, ldt);
+    }
+
+    private String scheduleIntervalTask(JsonObject args, Agent agent) {
+        var seconds = args.get("intervalSeconds").getAsLong();
+        if (seconds <= 0) {
+            return "Error: intervalSeconds must be a positive integer.";
+        }
+        var task = new Task();
+        task.agent = agent;
+        task.name = args.get("name").getAsString();
+        task.description = args.has(SchemaKeys.DESCRIPTION) ? args.get(SchemaKeys.DESCRIPTION).getAsString() : "";
+        task.type = Task.Type.INTERVAL;
+        task.intervalSeconds = seconds;
+        // First fire is now; subsequent fires self-reschedule from
+        // TaskExecutionHandler's CompletionHandler at completion-time
+        // + intervalSeconds. The nextRunAt column is no longer
+        // authoritative under db-scheduler — the scheduled_tasks row
+        // is the source of truth — but we set it for backward-compat
+        // dashboard queries until the column drops.
+        task.nextRunAt = Instant.now();
+        task.save();
+        services.TaskSchedulingService.register(task);
+        EventLogger.info("task", agent.name, null,
+                "Interval task created: %s (every %ds)".formatted(task.name, seconds));
+        return "Interval task '%s' created (every %ds).".formatted(task.name, seconds);
     }
 
     private String scheduleRecurringTask(JsonObject args, Agent agent) {

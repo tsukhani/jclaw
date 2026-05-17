@@ -120,6 +120,16 @@ public final class TaskExecutionHandler {
                                 .formatted(jclawTaskId));
                 return defaultCompletion();
             }
+            if (jclawTask.paused) {
+                EventLogger.info("task",
+                        jclawTask.agent != null ? jclawTask.agent.name : null, null,
+                        "TaskExecutionHandler: Task id %d is paused; skipping fire body"
+                                .formatted(jclawTaskId));
+                // Recurring Tasks still self-reschedule so the cadence
+                // resumes when {@link Task#paused} clears, without
+                // operator intervention.
+                return scheduleNextIfRecurring(jclawTask);
+            }
 
             // Drive the fire. Any RuntimeException propagates to
             // JClawFailureHandler (wired in via .onFailure above)
@@ -127,11 +137,24 @@ public final class TaskExecutionHandler {
             // based on TransientErrorClassifier.
             TaskExecutor.runTask(jclawTask);
 
-            if (jclawTask.type == Task.Type.CRON && jclawTask.cronExpression != null) {
-                return scheduleCronNextCompletion(jclawTask);
-            }
-            return defaultCompletion();
+            return scheduleNextIfRecurring(jclawTask);
         });
+    }
+
+    /**
+     * For INTERVAL and CRON Tasks, build the
+     * {@link CompletionHandler} that drops the current row and
+     * inserts the next-fire row. For one-shot Tasks (IMMEDIATE,
+     * SCHEDULED), return the default {@code OnCompleteRemove}.
+     */
+    private static CompletionHandler<Void> scheduleNextIfRecurring(Task task) {
+        if (task.type == Task.Type.CRON && task.cronExpression != null) {
+            return scheduleCronNextCompletion(task);
+        }
+        if (task.type == Task.Type.INTERVAL && task.intervalSeconds != null && task.intervalSeconds > 0) {
+            return scheduleIntervalNextCompletion(task);
+        }
+        return defaultCompletion();
     }
 
     /**
@@ -169,6 +192,44 @@ public final class TaskExecutionHandler {
      * CRON Task effectively pauses until the next BootConsistencyCheck
      * sweep reschedules it.
      */
+    /**
+     * INTERVAL counterpart to {@link #scheduleCronNextCompletion} —
+     * same stop-then-schedule shape, but next fire is
+     * {@code now + task.intervalSeconds} rather than parsed from a
+     * cron expression. "Next fire is from-now, not from-completion"
+     * is the conventional INTERVAL semantic (matches Hermes,
+     * matches systemd timers) — if the body took 90 seconds to
+     * complete on a 60-second interval, the next fire is still
+     * 60 seconds out, not "30 seconds ago".
+     */
+    private static CompletionHandler<Void> scheduleIntervalNextCompletion(Task task) {
+        return (executionComplete, executionOperations) -> {
+            executionOperations.stop();
+            try {
+                SchedulerClient client = schedulerClient;
+                if (client == null) {
+                    EventLogger.warn("task",
+                            task.agent != null ? task.agent.name : null, null,
+                            "SchedulerClient not wired; cannot reschedule Task '%s' next INTERVAL fire"
+                                    .formatted(task.name));
+                    return;
+                }
+                Instant next = Instant.now().plusSeconds(task.intervalSeconds);
+                String instanceId = task.id.toString();
+                client.schedule(new TaskInstance<>(TASK_NAME, instanceId), next);
+                EventLogger.info("task",
+                        task.agent != null ? task.agent.name : null, null,
+                        "Rescheduled Task '%s' next INTERVAL fire for %s (every %ds)"
+                                .formatted(task.name, next, task.intervalSeconds));
+            } catch (Exception e) {
+                EventLogger.error("task",
+                        task.agent != null ? task.agent.name : null, null,
+                        "Failed to reschedule next INTERVAL fire for Task '%s': %s"
+                                .formatted(task.name, e.getMessage()));
+            }
+        };
+    }
+
     private static CompletionHandler<Void> scheduleCronNextCompletion(Task task) {
         return (executionComplete, executionOperations) -> {
             executionOperations.stop();

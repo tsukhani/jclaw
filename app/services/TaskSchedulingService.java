@@ -206,6 +206,18 @@ public final class TaskSchedulingService {
                     return Instant.now();
                 }
                 return task.scheduledAt;
+            case INTERVAL:
+                if (task.intervalSeconds == null || task.intervalSeconds <= 0) {
+                    EventLogger.warn("task",
+                            task.agent != null ? task.agent.name : null, null,
+                            "INTERVAL Task '%s' has invalid intervalSeconds (%s); skipping registration"
+                                    .formatted(task.name, task.intervalSeconds));
+                    return null;
+                }
+                // First fire happens immediately; subsequent fires
+                // self-reschedule from TaskExecutionHandler's
+                // CompletionHandler at {@code completionTime + intervalSeconds}.
+                return Instant.now();
             case CRON:
                 if (task.cronExpression == null || task.cronExpression.isBlank()) {
                     EventLogger.warn("task",
@@ -225,6 +237,49 @@ public final class TaskSchedulingService {
             default:
                 return null;
         }
+    }
+
+    /**
+     * Flip {@link Task#paused} to true. The
+     * {@link TaskExecutionHandler} checks the flag at fire time and
+     * skips invoking {@link TaskExecutor} when set, so pause is
+     * effective on the next scheduled fire without removing the
+     * {@code scheduled_tasks} row. For CRON/INTERVAL Tasks this
+     * preserves the recurrence cadence — resume picks up where the
+     * Task would have fired anyway.
+     */
+    public static void pause(Long taskId) {
+        Objects.requireNonNull(taskId, "taskId");
+        Tx.run(() -> {
+            var task = (Task) Task.findById(taskId);
+            if (task == null) return null;
+            task.paused = true;
+            task.save();
+            EventLogger.info("task",
+                    task.agent != null ? task.agent.name : null, null,
+                    "Task '%s' paused".formatted(task.name));
+            return null;
+        });
+    }
+
+    /**
+     * Flip {@link Task#paused} to false. Companion to {@link #pause}.
+     * Does not re-register the row — the existing scheduled_tasks
+     * row continues firing on schedule; the handler just stops
+     * skipping the body once the flag clears.
+     */
+    public static void resume(Long taskId) {
+        Objects.requireNonNull(taskId, "taskId");
+        Tx.run(() -> {
+            var task = (Task) Task.findById(taskId);
+            if (task == null) return null;
+            task.paused = false;
+            task.save();
+            EventLogger.info("task",
+                    task.agent != null ? task.agent.name : null, null,
+                    "Task '%s' resumed".formatted(task.name));
+            return null;
+        });
     }
 
     private static void scheduleFire(Task task, Instant when) {
