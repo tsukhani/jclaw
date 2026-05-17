@@ -100,31 +100,42 @@ public class TaskTool implements ToolRegistry.Tool {
     }
 
     private String createTask(JsonObject args, Agent agent) {
-        var task = new Task();
-        task.agent = agent;
-        task.name = args.get("name").getAsString();
-        task.description = args.has(SchemaKeys.DESCRIPTION) ? args.get(SchemaKeys.DESCRIPTION).getAsString() : "";
-        task.type = Task.Type.IMMEDIATE;
-        task.nextRunAt = Instant.now();
-        task.save();
-        services.TaskSchedulingService.register(task);
-        EventLogger.info("task", agent.name, null, "Task created: %s".formatted(task.name));
-        return "Task '%s' created and queued for immediate execution.".formatted(task.name);
+        // Tools run on a virtual thread spawned by
+        // ParallelToolExecutor with no inherited JPA transaction.
+        // Wrap the save in a short Tx so the entity persists; the
+        // scheduler-side register() runs after commit (it needs
+        // task.id) and uses its own internal Tx for any reads.
+        var saved = services.Tx.run(() -> {
+            var task = new Task();
+            task.agent = agent;
+            task.name = args.get("name").getAsString();
+            task.description = args.has(SchemaKeys.DESCRIPTION) ? args.get(SchemaKeys.DESCRIPTION).getAsString() : "";
+            task.type = Task.Type.IMMEDIATE;
+            task.nextRunAt = Instant.now();
+            task.save();
+            return task;
+        });
+        services.TaskSchedulingService.register(saved);
+        EventLogger.info("task", agent.name, null, "Task created: %s".formatted(saved.name));
+        return "Task '%s' created and queued for immediate execution.".formatted(saved.name);
     }
 
     private String scheduleTask(JsonObject args, Agent agent) {
-        var task = new Task();
-        task.agent = agent;
-        task.name = args.get("name").getAsString();
-        task.description = args.has(SchemaKeys.DESCRIPTION) ? args.get(SchemaKeys.DESCRIPTION).getAsString() : "";
-        task.type = Task.Type.SCHEDULED;
         var ldt = LocalDateTime.parse(args.get("executionTime").getAsString());
-        task.scheduledAt = ldt.atZone(ZoneId.systemDefault()).toInstant();
-        task.nextRunAt = task.scheduledAt;
-        task.save();
-        services.TaskSchedulingService.register(task);
-        EventLogger.info("task", agent.name, null, "Task scheduled: %s at %s".formatted(task.name, ldt));
-        return "Task '%s' scheduled for %s.".formatted(task.name, ldt);
+        var saved = services.Tx.run(() -> {
+            var task = new Task();
+            task.agent = agent;
+            task.name = args.get("name").getAsString();
+            task.description = args.has(SchemaKeys.DESCRIPTION) ? args.get(SchemaKeys.DESCRIPTION).getAsString() : "";
+            task.type = Task.Type.SCHEDULED;
+            task.scheduledAt = ldt.atZone(ZoneId.systemDefault()).toInstant();
+            task.nextRunAt = task.scheduledAt;
+            task.save();
+            return task;
+        });
+        services.TaskSchedulingService.register(saved);
+        EventLogger.info("task", agent.name, null, "Task scheduled: %s at %s".formatted(saved.name, ldt));
+        return "Task '%s' scheduled for %s.".formatted(saved.name, ldt);
     }
 
     private String scheduleIntervalTask(JsonObject args, Agent agent) {
@@ -132,55 +143,76 @@ public class TaskTool implements ToolRegistry.Tool {
         if (seconds <= 0) {
             return "Error: intervalSeconds must be a positive integer.";
         }
-        var task = new Task();
-        task.agent = agent;
-        task.name = args.get("name").getAsString();
-        task.description = args.has(SchemaKeys.DESCRIPTION) ? args.get(SchemaKeys.DESCRIPTION).getAsString() : "";
-        task.type = Task.Type.INTERVAL;
-        task.intervalSeconds = seconds;
-        // First fire is now; subsequent fires self-reschedule from
-        // TaskExecutionHandler's CompletionHandler at completion-time
-        // + intervalSeconds. The nextRunAt column is no longer
-        // authoritative under db-scheduler — the scheduled_tasks row
-        // is the source of truth — but we set it for backward-compat
-        // dashboard queries until the column drops.
-        task.nextRunAt = Instant.now();
-        task.save();
-        services.TaskSchedulingService.register(task);
+        var saved = services.Tx.run(() -> {
+            var task = new Task();
+            task.agent = agent;
+            task.name = args.get("name").getAsString();
+            task.description = args.has(SchemaKeys.DESCRIPTION) ? args.get(SchemaKeys.DESCRIPTION).getAsString() : "";
+            task.type = Task.Type.INTERVAL;
+            task.intervalSeconds = seconds;
+            // First fire is now; subsequent fires self-reschedule from
+            // TaskExecutionHandler's CompletionHandler at completion-time
+            // + intervalSeconds. The nextRunAt column is no longer
+            // authoritative under db-scheduler — the scheduled_tasks row
+            // is the source of truth — but we set it for backward-compat
+            // dashboard queries until the column drops.
+            task.nextRunAt = Instant.now();
+            task.save();
+            return task;
+        });
+        services.TaskSchedulingService.register(saved);
         EventLogger.info("task", agent.name, null,
-                "Interval task created: %s (every %ds)".formatted(task.name, seconds));
-        return "Interval task '%s' created (every %ds).".formatted(task.name, seconds);
+                "Interval task created: %s (every %ds)".formatted(saved.name, seconds));
+        return "Interval task '%s' created (every %ds).".formatted(saved.name, seconds);
     }
 
     private String scheduleRecurringTask(JsonObject args, Agent agent) {
-        var task = new Task();
-        task.agent = agent;
-        task.name = args.get("name").getAsString();
-        task.description = args.has(SchemaKeys.DESCRIPTION) ? args.get(SchemaKeys.DESCRIPTION).getAsString() : "";
-        task.type = Task.Type.CRON;
-        task.cronExpression = args.get("cronExpression").getAsString();
-        // nextRunAt is no longer authoritative — db-scheduler's scheduled_tasks
-        // row carries the next fire time. Set to a sentinel so the column has
-        // a value (the entity refactor will drop it entirely).
-        task.nextRunAt = Instant.now();
-        task.save();
-        services.TaskSchedulingService.register(task);
+        var saved = services.Tx.run(() -> {
+            var task = new Task();
+            task.agent = agent;
+            task.name = args.get("name").getAsString();
+            task.description = args.has(SchemaKeys.DESCRIPTION) ? args.get(SchemaKeys.DESCRIPTION).getAsString() : "";
+            task.type = Task.Type.CRON;
+            task.cronExpression = args.get("cronExpression").getAsString();
+            // nextRunAt is no longer authoritative — db-scheduler's scheduled_tasks
+            // row carries the next fire time. Set to a sentinel so the column has
+            // a value (the entity refactor will drop it entirely).
+            task.nextRunAt = Instant.now();
+            task.save();
+            return task;
+        });
+        services.TaskSchedulingService.register(saved);
         EventLogger.info("task", agent.name, null,
-                "Recurring task created: %s (cron: %s)".formatted(task.name, task.cronExpression));
-        return "Recurring task '%s' created with cron '%s'.".formatted(task.name, task.cronExpression);
+                "Recurring task created: %s (cron: %s)".formatted(saved.name, saved.cronExpression));
+        return "Recurring task '%s' created with cron '%s'.".formatted(saved.name, saved.cronExpression);
     }
 
     private String deleteRecurringTask(JsonObject args) {
         var name = args.get("name").getAsString();
-        java.util.List<Task> tasks = Task.find("name = ?1 AND type = ?2 AND status != ?3",
-                name, Task.Type.CRON, Task.Status.CANCELLED).fetch();
-        if (tasks.isEmpty()) {
+        // Same Tx-on-tool-thread issue: the finder + save below need
+        // an active EntityManager which the VT carrier thread lacks.
+        // Collect the ids inside the Tx; cancel scheduler rows outside
+        // since SchedulerClient.cancel is JDBC-driven and doesn't
+        // need JPA context.
+        var cancelledIds = services.Tx.run(() -> {
+            @SuppressWarnings("unchecked")
+            var raw = (java.util.List<Object>) (java.util.List<?>) Task.find(
+                    "name = ?1 AND type = ?2 AND status != ?3",
+                    name, Task.Type.CRON, Task.Status.CANCELLED).fetch();
+            var ids = new java.util.ArrayList<Long>(raw.size());
+            for (var row : raw) {
+                var task = (Task) row;
+                task.status = Task.Status.CANCELLED;
+                task.save();
+                ids.add(task.id);
+            }
+            return ids;
+        });
+        if (cancelledIds.isEmpty()) {
             return "No recurring task found with name '%s'.".formatted(name);
         }
-        for (var task : tasks) {
-            task.status = Task.Status.CANCELLED;
-            task.save();
-            services.TaskSchedulingService.cancel(task.id);
+        for (var taskId : cancelledIds) {
+            services.TaskSchedulingService.cancel(taskId);
         }
         return "Recurring task '%s' cancelled.".formatted(name);
     }

@@ -101,6 +101,25 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
         EventLogger.info("task", null, null,
                 "db-scheduler started (polling 2s, virtual-thread executor, "
                 + "registered task '%s')".formatted(TaskExecutionHandler.TASK_NAME));
+
+        // Run the consistency sweep inline now that the scheduler is
+        // alive. Pre-fix this was a standalone @OnApplicationStart
+        // job, but Play 1.x doesn't order startup jobs deterministically
+        // — on some restarts BootConsistencyCheck fired BEFORE this
+        // bootstrap and logged "scheduler not bootstrapped; skipping
+        // sweep", stranding existing PENDING Tasks. Calling sweep
+        // here makes the ordering explicit and removes that race.
+        try {
+            BootConsistencyCheck.sweep(built);
+        } catch (Exception e) {
+            // Don't crash the bootstrap if sweep throws — the scheduler
+            // is already alive and TaskSchedulingService.register
+            // calls from CRUD operations will keep the system live for
+            // newly-created Tasks. Pre-existing PENDING orphans get
+            // picked up on the next restart.
+            EventLogger.warn("task", null, null,
+                    "BootConsistencyCheck.sweep raised at startup: %s".formatted(e.getMessage()));
+        }
     }
 
     /**

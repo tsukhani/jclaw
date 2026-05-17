@@ -4,7 +4,6 @@ import com.github.kagkarlsson.scheduler.SchedulerClient;
 import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
 import models.Task;
 import play.jobs.Job;
-import play.jobs.OnApplicationStart;
 import services.EventLogger;
 import services.TaskExecutionHandler;
 import services.TaskSchedulingService;
@@ -48,15 +47,20 @@ import java.util.HashSet;
  *   skipped — operators need to fix the expression via the API.</li>
  * </ul>
  *
- * <p>Runs in a separate {@code @OnApplicationStart} job rather
- * than chained into {@link DbSchedulerBootstrapJob} because Play
- * 1.x doesn't guarantee startup-job ordering, and the consistency
- * sweep depends on the scheduler being live. The job reads
- * {@code DbSchedulerBootstrapJob.scheduler()} at run-time and
- * exits cleanly if the bootstrap hasn't completed yet (rare, but
- * possible under specific Play startup interleaving).
+ * <h3>Invocation</h3>
+ * Called inline from {@link DbSchedulerBootstrapJob#doJob}
+ * immediately after {@code scheduler.start()} so the ordering is
+ * deterministic. Pre-fix this class was its own
+ * {@code @OnApplicationStart} job, but Play 1.x doesn't order
+ * sibling startup jobs — on some restarts it fired BEFORE the
+ * bootstrap and logged "scheduler not bootstrapped; skipping
+ * sweep", stranding pre-existing PENDING Tasks until the next
+ * restart. Driving it from the bootstrap removes the race.
+ *
+ * <p>The class is still a Play {@link Job} for the test hook
+ * {@link #runForTest} that exists so test classes can re-trigger
+ * the sweep without restarting the JVM.
  */
-@OnApplicationStart
 public class BootConsistencyCheck extends Job<Void> {
 
     @Override
