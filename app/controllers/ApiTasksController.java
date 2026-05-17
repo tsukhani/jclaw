@@ -23,14 +23,16 @@ public class ApiTasksController extends Controller {
 
     private record TaskView(Long id, String name, String description, String type, String status,
                             String cronExpression, int retryCount, int maxRetries, String lastError,
-                            String nextRunAt, String createdAt, Long agentId, String agentName) {
+                            String nextRunAt, String createdAt, Long agentId, String agentName,
+                            boolean paused) {
         static TaskView of(Task t) {
             return new TaskView(t.id, t.name, t.description, t.type.name(), t.status.name(),
                     t.cronExpression, t.retryCount, t.maxRetries, t.lastError,
                     t.nextRunAt != null ? t.nextRunAt.toString() : null,
                     t.createdAt.toString(),
                     t.agent != null ? t.agent.id : null,
-                    t.agent != null ? t.agent.name : null);
+                    t.agent != null ? t.agent.name : null,
+                    t.paused);
         }
     }
 
@@ -70,6 +72,32 @@ public class ApiTasksController extends Controller {
         task.save();
         services.TaskSchedulingService.cancel(task.id);
         renderJSON(gson.toJson(TaskView.of(task)));
+    }
+
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
+    public static void pause(Long id) {
+        Task task = Task.findById(id);
+        if (task == null) notFound();
+        if (task.status != Task.Status.PENDING) {
+            // Pause only applies to live (PENDING/recurring) tasks — pausing a
+            // terminal Task would have no effect since the scheduler row is
+            // already gone.
+            badRequest();
+        }
+        services.TaskSchedulingService.pause(task.id);
+        // Re-read so the response reflects the flipped flag.
+        renderJSON(gson.toJson(TaskView.of(Task.findById(task.id))));
+    }
+
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
+    public static void resume(Long id) {
+        Task task = Task.findById(id);
+        if (task == null) notFound();
+        if (task.status != Task.Status.PENDING) {
+            badRequest();
+        }
+        services.TaskSchedulingService.resume(task.id);
+        renderJSON(gson.toJson(TaskView.of(Task.findById(task.id))));
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))

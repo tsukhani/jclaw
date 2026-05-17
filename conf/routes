@@ -30,6 +30,8 @@ POST    /api/transcription/models/{id}/download ApiTranscriptionController.downl
 GET     /api/tasks                              ApiTasksController.list
 POST    /api/tasks/{id}/cancel                  ApiTasksController.cancel
 POST    /api/tasks/{id}/retry                   ApiTasksController.retry
+POST    /api/tasks/{id}/pause                   ApiTasksController.pause
+POST    /api/tasks/{id}/resume                  ApiTasksController.resume
 
 # Bindings API
 GET     /api/bindings                           ApiBindingsController.list
