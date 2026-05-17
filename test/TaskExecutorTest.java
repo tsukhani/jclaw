@@ -115,6 +115,23 @@ class TaskExecutorTest extends UnitTest {
         assertEquals(MessageRole.ASSISTANT, assistant.role);
         assertEquals(1, assistant.turnIndex);
         assertEquals("Hi from the task fire.", assistant.content);
+
+        // JCLAW-21 lifecycle audit: TASK_STARTED + TASK_COMPLETED
+        // bookmarks must land in event_log with the agent name and a
+        // structured details payload carrying task_id / run_id.
+        services.EventLogger.flush();
+        var events = loadEventsByCategory("TASK_STARTED", "TASK_COMPLETED");
+        assertTrue(events.stream().anyMatch(e ->
+                "TASK_STARTED".equals(e.category)
+                && e.message != null
+                && e.message.contains("Daily summary")),
+                "TASK_STARTED must reference the task name");
+        assertTrue(events.stream().anyMatch(e ->
+                "TASK_COMPLETED".equals(e.category)
+                && e.details != null
+                && e.details.contains("\"task_id\":" + task.id)
+                && e.details.contains("\"run_id\":" + closed.id)),
+                "TASK_COMPLETED details must carry task_id and run_id");
     }
 
     @Test
@@ -251,6 +268,16 @@ class TaskExecutorTest extends UnitTest {
                     "taskRun.id = ?1 ORDER BY turnIndex ASC", taskRunId).fetch();
             var typed = new java.util.ArrayList<TaskRunMessage>(raw.size());
             for (var row : raw) typed.add((TaskRunMessage) row);
+            return typed;
+        });
+    }
+
+    private java.util.List<models.EventLog> loadEventsByCategory(String... categories) {
+        return Tx.run(() -> {
+            var raw = models.EventLog.find(
+                    "category IN (?1)", java.util.Arrays.asList(categories)).fetch();
+            var typed = new java.util.ArrayList<models.EventLog>(raw.size());
+            for (var row : raw) typed.add((models.EventLog) row);
             return typed;
         });
     }

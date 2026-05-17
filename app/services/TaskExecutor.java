@@ -79,6 +79,13 @@ public final class TaskExecutor {
             return r;
         });
 
+        // JCLAW-21: lifecycle audit — TASK_STARTED bookmark. Operator
+        // monitoring (JCLAW-22) reads these to render "running" pills
+        // without depending on the heartbeat to catch up. Sibling
+        // events COMPLETED (below) and FAILED (in JClawFailureHandler)
+        // bracket the fire.
+        TaskLifecycleEvents.started(task, run);
+
         var sink = new TaskRunSink(run);
         sink.onStart();
         try {
@@ -109,9 +116,21 @@ public final class TaskExecutor {
         } catch (RuntimeException e) {
             String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             sink.onFailure(msg);
+            // NB: we do NOT emit TASK_FAILED here. Whether this failure is
+            // permanent or transient is decided by JClawFailureHandler
+            // upstream — emitting at this point would fire a "permanent
+            // fail" lifecycle bookmark for every transient retry too. The
+            // handler emits TASK_FAILED only when its Decision is Fail.
             throw e;
         }
 
-        return Tx.run(() -> (TaskRun) TaskRun.findById(run.id));
+        // Re-read the closed TaskRun so durationMs reflects the
+        // sink.onComplete-written value rather than recomputing.
+        var closed = Tx.run(() -> (TaskRun) TaskRun.findById(run.id));
+        if (closed != null && closed.status == TaskRun.Status.COMPLETED) {
+            TaskLifecycleEvents.completed(task, closed,
+                    closed.durationMs != null ? closed.durationMs : 0L);
+        }
+        return closed;
     }
 }

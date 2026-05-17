@@ -4,6 +4,7 @@ import com.github.kagkarlsson.scheduler.task.ExecutionComplete;
 import com.github.kagkarlsson.scheduler.task.ExecutionOperations;
 import com.github.kagkarlsson.scheduler.task.FailureHandler;
 import models.Task;
+import models.TaskRun;
 import utils.TransientErrorClassifier;
 
 import java.time.Instant;
@@ -157,6 +158,15 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
                 task.agent != null ? task.agent.name : null, null,
                 "Task '%s' failed (%s) after %d attempt(s): %s"
                         .formatted(task.name, reason, currentRetry + 1, errorMessage));
+
+        // JCLAW-21 lifecycle audit: TASK_FAILED bookmark. Sibling
+        // to TASK_STARTED / TASK_COMPLETED emitted by TaskExecutor.
+        // Fired only when the failure is terminal — transient
+        // retries emit the WARN under "task" category above.
+        var runForLifecycle = Tx.run(() ->
+                (TaskRun) TaskRun.find("task.id = ?1 ORDER BY startedAt DESC", jclawTaskId).first());
+        TaskLifecycleEvents.failed(task, runForLifecycle, errorMessage);
+
         return new Decision.Fail(reason);
     }
 
