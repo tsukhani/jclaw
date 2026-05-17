@@ -76,7 +76,7 @@ const typeSelectId = useId()
             All types
           </option>
           <option
-            v-for="t in ['IMMEDIATE', 'SCHEDULED', 'CRON']"
+            v-for="t in ['IMMEDIATE', 'SCHEDULED', 'INTERVAL', 'CRON']"
             :key="t"
             :value="t"
           >
