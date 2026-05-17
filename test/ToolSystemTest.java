@@ -147,7 +147,7 @@ class ToolSystemTest extends UnitTest {
                 {"action": "scheduleRecurringTask", "name": "daily-report", "description": "Generate report", "cronExpression": "0 9 * * *"}
                 """, agent);
         assertTrue(result.contains("Recurring task"));
-        var recurring = Task.findRecurring();
+        var recurring = Task.findRecurring(agent);
         assertEquals(1, recurring.size());
     }
 

@@ -16,6 +16,23 @@ import utils.JpqlFilter;
 import java.time.Instant;
 import java.util.List;
 
+/**
+ * Tasks API.
+ *
+ * <h3>TODO: agent-ownership enforcement</h3>
+ * Every id-addressed mutation here ({@link #cancel}, {@link #retry},
+ * {@link #pause}, {@link #resume}) currently authenticates via
+ * {@link AuthCheck} but does not check that the resolved Task belongs
+ * to the caller's agent — because user-ownership infrastructure does
+ * not yet exist in JClaw (no {@code User} model, no {@code owner} FK
+ * on {@code Agent}; see CLAUDE memory
+ * {@code project_multi_tenancy_design}). AuthCheck today admits a
+ * single system principal. When the user-ownership story lands, add
+ * a {@code task.agent} ↔ {@code currentUser.agents()} guard before
+ * the {@code task.save()} call in each handler. The {@link #list}
+ * endpoint also needs the same scoping (currently honors an optional
+ * {@code agentId} filter but returns ALL tasks when omitted).
+ */
 @With(AuthCheck.class)
 public class ApiTasksController extends Controller {
 

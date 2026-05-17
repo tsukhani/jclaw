@@ -126,8 +126,15 @@ public class Task extends Model {
                 .getResultList();
     }
 
-    public static List<Task> findRecurring() {
-        return Task.find("type = ?1 AND status != ?2",
-                Type.CRON, Status.CANCELLED).fetch();
+    /**
+     * Recurring (CRON + INTERVAL) Tasks for the given agent that are
+     * still active. Agent-scoped because per the multi-tenancy stance
+     * one agent must never see another agent's recurring schedule —
+     * see CLAUDE memory project_multi_tenancy_design.
+     */
+    public static List<Task> findRecurring(models.Agent agent) {
+        return Task.find(
+                "agent = ?1 AND type IN (?2, ?3) AND status != ?4",
+                agent, Type.CRON, Type.INTERVAL, Status.CANCELLED).fetch();
     }
 }

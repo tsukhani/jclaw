@@ -94,7 +94,7 @@ public class TaskTool implements ToolRegistry.Tool {
             case "scheduleRecurringTask" -> scheduleRecurringTask(args, agent);
             case "scheduleIntervalTask" -> scheduleIntervalTask(args, agent);
             case "cancelTask" -> cancelTask(args, agent);
-            case "listRecurringTasks" -> listRecurringTasks();
+            case "listRecurringTasks" -> listRecurringTasks(agent);
             default -> "Error: Unknown action '%s'".formatted(action);
         };
     }
@@ -222,13 +222,22 @@ public class TaskTool implements ToolRegistry.Tool {
                 : "%d tasks named '%s' cancelled.".formatted(cancelledIds.size(), name);
     }
 
-    private String listRecurringTasks() {
-        var tasks = Task.findRecurring();
+    private String listRecurringTasks(Agent agent) {
+        // Agent-scoped: per the multi-tenancy stance one agent must not
+        // see another agent's recurring schedule. The finder also now
+        // includes INTERVAL alongside CRON since both are recurring.
+        var tasks = services.Tx.run(() -> Task.findRecurring(agent));
         if (tasks.isEmpty()) return "No recurring tasks configured.";
         var sb = new StringBuilder("Recurring tasks:\n");
         for (var task : tasks) {
-            sb.append("- %s (cron: %s) — %s\n".formatted(
-                    task.name, task.cronExpression,
+            // CRON shows the cron expression; INTERVAL shows the period.
+            // Mixed types in one list because both are "recurring" from
+            // the operator's POV.
+            String cadence = task.type == Task.Type.CRON
+                    ? "cron: " + task.cronExpression
+                    : "every " + task.intervalSeconds + "s";
+            sb.append("- %s (%s) — %s\n".formatted(
+                    task.name, cadence,
                     task.description != null && task.description.length() > 100
                             ? task.description.substring(0, 100) + "..." : task.description));
         }
