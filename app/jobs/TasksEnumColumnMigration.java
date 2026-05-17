@@ -53,8 +53,8 @@ public class TasksEnumColumnMigration extends Job<Void> {
                 // needed; this column-type rewrite is H2-specific.
                 return;
             }
-            tryAlterToVarchar(conn, "tasks", "type", 32);
-            tryAlterToVarchar(conn, "tasks", "status", 32);
+            tryAlterToVarchar(conn, "task", "type", 32);
+            tryAlterToVarchar(conn, "task", "status", 32);
             tryAlterToVarchar(conn, "task_run", "status", 32);
         } catch (Exception e) {
             EventLogger.error("system",
