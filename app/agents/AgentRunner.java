@@ -299,7 +299,22 @@ public class AgentRunner {
         var stubConv = new Conversation();
         stubConv.agent = agent;
 
-        var assembled = SystemPromptAssembler.assemble(agent, userPrompt, null, null);
+        // The fire path runs on db-scheduler's virtual-thread carrier with
+        // no inherited JPA Tx — the chat path inherits one from the
+        // [agent-stream] thread's request-scoped context, but Tasks have no
+        // such context. SystemPromptAssembler reads McpServer via
+        // McpServerCatalog, and ToolRegistry.getToolDefsForAgent reads
+        // AgentToolConfig — both need a live EntityManager. Bundle them
+        // into one short Tx that commits well before the long-running LLM
+        // call below, preserving the "no Tx during LLM" design while
+        // letting the assembler / tool-registry stay tx-agnostic.
+        record Prelude(SystemPromptAssembler.AssembledPrompt assembled, List<ToolDef> tools) {}
+        var prelude = services.Tx.run(() -> new Prelude(
+                SystemPromptAssembler.assemble(agent, userPrompt, null, null),
+                ToolRegistry.getToolDefsForAgent(agent)));
+        var assembled = prelude.assembled();
+        var tools = prelude.tools();
+
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(assembled.systemPrompt()));
         messages.add(ChatMessage.user(userPrompt));
@@ -313,7 +328,6 @@ public class AgentRunner {
             return new ToolCallLoopRunner.LoopOutcome(error);
         }
         var secondary = ProviderRegistry.getSecondary();
-        var tools = ToolRegistry.getToolDefsForAgent(agent);
 
         EventLogger.info("llm", agent.name, null,
                 "Task fire: calling %s / %s".formatted(
