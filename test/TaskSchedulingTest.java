@@ -1,6 +1,6 @@
 import org.junit.jupiter.api.*;
 import play.test.*;
-import jobs.CronParser;
+import services.JClawCronUtils;
 import models.Agent;
 import models.Task;
 
@@ -15,42 +15,64 @@ class TaskSchedulingTest extends UnitTest {
         Fixtures.deleteDatabase();
     }
 
-    // --- CronParser tests ---
+    // --- JClawCronUtils tests (post-JCLAW-294 cron migration to db-scheduler) ---
 
     @Test
     void cronEveryMinute() {
-        var next = CronParser.nextExecution("* * * * *");
+        // Spring 6-field: seconds minutes hours dom month dow.
+        // "0 * * * * *" = "at second 0 of every minute".
+        var next = JClawCronUtils.nextExecution("0 * * * * *");
         assertNotNull(next);
         assertTrue(next.isAfter(Instant.now()));
+        var ldt = LocalDateTime.ofInstant(next, ZoneId.systemDefault());
+        assertEquals(0, ldt.getSecond());
     }
 
     @Test
-    void cronSpecificTime() {
-        // Every day at noon
-        var after = LocalDateTime.of(2026, 4, 7, 11, 0)
-                .atZone(ZoneId.systemDefault()).toInstant();
-        var next = CronParser.nextExecution("0 12 * * *", after);
+    void cronAtShortcutDaily() {
+        // db-scheduler's CronSchedule supports @-shortcuts natively
+        // (exposed to operators per JCLAW-294 AC). @daily = midnight every day.
+        var next = JClawCronUtils.nextExecution("@daily");
         assertNotNull(next);
         var ldt = LocalDateTime.ofInstant(next, ZoneId.systemDefault());
-        assertEquals(12, ldt.getHour());
+        assertEquals(0, ldt.getHour());
         assertEquals(0, ldt.getMinute());
     }
 
     @Test
     void cronWithStep() {
-        // Every 15 minutes
-        var after = LocalDateTime.of(2026, 4, 7, 10, 0)
-                .atZone(ZoneId.systemDefault()).toInstant();
-        var next = CronParser.nextExecution("*/15 * * * *", after);
+        // "0 */15 * * * *" = at second 0 of every 15th minute.
+        var next = JClawCronUtils.nextExecution("0 */15 * * * *");
         assertNotNull(next);
         var ldt = LocalDateTime.ofInstant(next, ZoneId.systemDefault());
         assertEquals(0, ldt.getMinute() % 15);
+        assertEquals(0, ldt.getSecond());
     }
 
     @Test
     void cronInvalidReturnsNull() {
-        var next = CronParser.nextExecution("bad");
+        var next = JClawCronUtils.nextExecution("bad");
         assertNull(next);
+    }
+
+    @Test
+    void cronUnixFiveFieldRejectedAtValidationBoundary() {
+        // Validation throws with a helpful hint (prepend "0 " for seconds)
+        // when an operator pastes a legacy Unix 5-field expression.
+        var ex = assertThrows(IllegalArgumentException.class,
+                () -> JClawCronUtils.validate("0 9 * * *"));
+        assertTrue(ex.getMessage().contains("5 fields"),
+                "message should call out the field count");
+        assertTrue(ex.getMessage().contains("'0 0 9 * * *'"),
+                "message should suggest the prepended fix");
+    }
+
+    @Test
+    void cronAtShortcutPassesValidation() {
+        // Should not throw — sanity check that validate() admits @-shortcuts.
+        JClawCronUtils.validate("@hourly");
+        JClawCronUtils.validate("@daily");
+        JClawCronUtils.validate("@weekly");
     }
 
     // --- Task retry with backoff ---

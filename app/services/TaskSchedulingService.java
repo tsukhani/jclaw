@@ -4,7 +4,6 @@ import com.github.kagkarlsson.scheduler.SchedulerClient;
 import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
 import jobs.DbSchedulerBootstrapJob;
-import jobs.CronParser;
 import models.Task;
 
 import java.time.Instant;
@@ -38,7 +37,7 @@ import java.util.function.Supplier;
  *       (caller validates non-null at form-bind time; defensive
  *       fall-through to {@code now()} keeps the system live if a stale
  *       row sneaks through)</li>
- *   <li>{@link Task.Type#CRON} → {@link CronParser#nextExecution}
+ *   <li>{@link Task.Type#CRON} → {@link JClawCronUtils#nextExecution}
  *       computed from {@link Task#cronExpression}; if the parser
  *       returns null the registration is skipped and a warn is
  *       logged so operators can spot a malformed cron string
@@ -226,7 +225,7 @@ public final class TaskSchedulingService {
                                     .formatted(task.name));
                     return null;
                 }
-                Instant next = CronParser.nextExecution(task.cronExpression);
+                Instant next = JClawCronUtils.nextExecution(task.cronExpression);
                 if (next == null) {
                     EventLogger.warn("task",
                             task.agent != null ? task.agent.name : null, null,

@@ -5,7 +5,6 @@ import com.github.kagkarlsson.scheduler.task.CompletionHandler;
 import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import com.github.kagkarlsson.scheduler.task.helper.CustomTask;
 import com.github.kagkarlsson.scheduler.task.helper.Tasks;
-import jobs.CronParser;
 import models.Task;
 
 import java.time.Instant;
@@ -234,7 +233,7 @@ public final class TaskExecutionHandler {
         return (executionComplete, executionOperations) -> {
             executionOperations.stop();
             try {
-                Instant next = CronParser.nextExecution(task.cronExpression);
+                Instant next = JClawCronUtils.nextExecution(task.cronExpression);
                 if (next == null) {
                     EventLogger.warn("task",
                             task.agent != null ? task.agent.name : null, null,
