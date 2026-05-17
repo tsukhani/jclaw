@@ -92,6 +92,21 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
                 .pollingInterval(Duration.ofSeconds(2))
                 .executorService(Executors.newVirtualThreadPerTaskExecutor())
                 .enableImmediateExecution()
+                // db-scheduler's JdbcRunner inspects connection.getAutoCommit()
+                // to decide whether to commit. Play 1.x's Hibernate
+                // configuration sets autoCommit=false on its Hikari pool
+                // connections (because Hibernate manages JPA transactions).
+                // When db-scheduler grabs a connection from that pool, it
+                // sees autoCommit=false and — without this flag — assumes
+                // "the transaction is externally managed" and silently
+                // SKIPS the commit. The INSERT into scheduled_tasks runs
+                // but is then rolled back when Hikari recycles the
+                // connection, so client.schedule() appears to succeed but
+                // no row lands. .commitWhenAutocommitDisabled(true) tells
+                // db-scheduler to always commit/rollback explicitly even
+                // when autoCommit is off — which is what we need since
+                // db-scheduler is the EXTERNAL caller from JPA's view.
+                .commitWhenAutocommitDisabled(true)
                 .build();
 
         TaskExecutionHandler.setSchedulerClient(built);
