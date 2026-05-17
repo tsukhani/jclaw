@@ -49,9 +49,9 @@ import java.time.Instant;
  * (deleted between scheduling and firing) or
  * {@link Task.Status#CANCELLED}. {@code TaskExecutor.runTask} owns the
  * mid-fire failure path — anything thrown out of it propagates to
- * db-scheduler's {@code FailureHandler} (default
- * {@code OnFailureRetryLater(5min)} until the JCLAW-21 retry policy
- * commit replaces it).
+ * {@link JClawFailureHandler} which classifies the error
+ * (transient vs permanent), applies the JCLAW-21 backoff schedule on
+ * retry, and marks the Task FAILED when retries are exhausted.
  *
  * <p>Part of JCLAW-21's Tasks foundation.
  */
@@ -94,7 +94,9 @@ public final class TaskExecutionHandler {
      * {@code SchedulerBuilder.startTasks(...)}.
      */
     public static CustomTask<Void> buildTask() {
-        return Tasks.custom(TASK_NAME, Void.class).execute((inst, ctx) -> {
+        return Tasks.custom(TASK_NAME, Void.class)
+                .onFailure(new JClawFailureHandler())
+                .execute((inst, ctx) -> {
             String instanceId = inst.getId();
             Long jclawTaskId = parseTaskId(instanceId);
             if (jclawTaskId == null) {
@@ -120,9 +122,9 @@ public final class TaskExecutionHandler {
             }
 
             // Drive the fire. Any RuntimeException propagates to
-            // db-scheduler's FailureHandler — for now the
-            // OnFailureRetryLater default; JClawFailureHandler ships
-            // in a later JCLAW-21 commit.
+            // JClawFailureHandler (wired in via .onFailure above)
+            // which decides retry-with-backoff vs permanent fail
+            // based on TransientErrorClassifier.
             TaskExecutor.runTask(jclawTask);
 
             if (jclawTask.type == Task.Type.CRON && jclawTask.cronExpression != null) {

@@ -34,12 +34,11 @@ import java.util.concurrent.Executors;
  *       feel snappy, long enough to keep idle CPU at zero.</li>
  *   <li><b>Immediate execution</b>: enabled so {@code runNow} doesn't
  *       have to wait up to one polling interval.</li>
- *   <li><b>Failure handler</b>: deferred — JCLAW-21's
- *       {@code JClawFailureHandler} (transient-error classifier +
- *       backoff schedule) ships in a follow-up commit. Until then,
- *       db-scheduler's default
- *       {@code OnFailureRetryLater(Duration.ofMinutes(5))} applies
- *       per the {@code Tasks.custom(...)} default.</li>
+ *   <li><b>Failure handler</b>:
+ *       {@link services.JClawFailureHandler} (transient-error
+ *       classifier + backoff schedule) is wired into the
+ *       {@code Tasks.custom(...)} registration in
+ *       {@link services.TaskExecutionHandler#buildTask}.</li>
  * </ul>
  *
  * <h3>Migration of pre-cutover PENDING Tasks</h3>
