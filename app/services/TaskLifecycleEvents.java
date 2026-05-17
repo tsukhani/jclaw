@@ -96,18 +96,30 @@ public final class TaskLifecycleEvents {
      * transient failures with retry budget remaining emit WARN
      * entries via {@link JClawFailureHandler}'s usual logging
      * rather than this lifecycle event.
+     *
+     * @param classification short tag for the failure category —
+     *        {@code "permanent error"} or {@code "retries exhausted"}.
+     *        Operators / dashboard alerts key on this to distinguish
+     *        config bugs (permanent) from upstream flakiness that
+     *        outran the retry budget (exhausted).
+     * @param errorMessage   the underlying exception's message;
+     *        carried so the dashboard can show "what actually
+     *        happened" without joining to the TaskRun row.
      */
-    public static void failed(Task task, TaskRun run, String reason) {
+    public static void failed(Task task, TaskRun run,
+                              String classification, String errorMessage) {
         var agentName = task.agent != null ? task.agent.name : null;
         long durationMs = run != null && run.startedAt != null
                 ? Duration.between(run.startedAt, Instant.now()).toMillis()
                 : 0L;
-        var message = "Task '%s' permanently failed: %s".formatted(task.name, reason);
+        var message = "Task '%s' failed (%s): %s".formatted(
+                task.name, classification, errorMessage);
         var details = detailsJson(
                 "task_id", task.id,
                 "run_id", run != null ? run.id : null,
                 "duration_ms", durationMs,
-                "reason", reason);
+                "classification", classification,
+                "error_message", errorMessage);
         EventLogger.record("ERROR", FAILED, agentName, null, message, details);
     }
 

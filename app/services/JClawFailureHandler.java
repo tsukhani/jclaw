@@ -163,9 +163,12 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
         // to TASK_STARTED / TASK_COMPLETED emitted by TaskExecutor.
         // Fired only when the failure is terminal — transient
         // retries emit the WARN under "task" category above.
+        // Pass both the classification (permanent vs exhausted) and
+        // the raw error message so dashboards can group by class
+        // while still showing the operator what actually happened.
         var runForLifecycle = Tx.run(() ->
                 (TaskRun) TaskRun.find("task.id = ?1 ORDER BY startedAt DESC", jclawTaskId).first());
-        TaskLifecycleEvents.failed(task, runForLifecycle, errorMessage);
+        TaskLifecycleEvents.failed(task, runForLifecycle, reason, errorMessage);
 
         return new Decision.Fail(reason);
     }
