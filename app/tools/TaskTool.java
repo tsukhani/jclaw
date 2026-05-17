@@ -38,7 +38,7 @@ public class TaskTool implements ToolRegistry.Tool {
                 new agents.ToolAction("scheduleTask",          "Schedule a task to run once at a specific ISO 8601 datetime"),
                 new agents.ToolAction("scheduleRecurringTask", "Create a recurring task using a cron expression"),
                 new agents.ToolAction("scheduleIntervalTask",  "Create a recurring task that fires every N seconds"),
-                new agents.ToolAction("deleteRecurringTask",   "Cancel a recurring task by name"),
+                new agents.ToolAction("cancelTask",            "Cancel a task by name (any type — immediate, scheduled, interval, or cron)"),
                 new agents.ToolAction("listRecurringTasks",    "List all currently active recurring tasks")
         );
     }
@@ -51,14 +51,14 @@ public class TaskTool implements ToolRegistry.Tool {
                 Use action="scheduleTask" to schedule a task for a future time. \
                 Use action="scheduleRecurringTask" to create a recurring task on a cron schedule. \
                 Use action="scheduleIntervalTask" to create a recurring task on a fixed period (every N seconds). \
-                Use action="deleteRecurringTask" to remove a recurring schedule. \
+                Use action="cancelTask" to cancel any task by name (any type). \
                 Use action="listRecurringTasks" to list all recurring schedules. \
                 Tasks run asynchronously via the agent.""";
     }
 
     @Override
     public String summary() {
-        return "Manage background tasks via the 'action' parameter: createTask, scheduleTask, scheduleRecurringTask, scheduleIntervalTask, deleteRecurringTask, listRecurringTasks.";
+        return "Manage background tasks via the 'action' parameter: createTask, scheduleTask, scheduleRecurringTask, scheduleIntervalTask, cancelTask, listRecurringTasks.";
     }
 
     @Override
@@ -68,7 +68,7 @@ public class TaskTool implements ToolRegistry.Tool {
                 SchemaKeys.PROPERTIES, Map.of(
                         "action", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.ENUM, List.of("createTask", "scheduleTask", "scheduleRecurringTask",
-                                        "scheduleIntervalTask", "deleteRecurringTask", "listRecurringTasks"),
+                                        "scheduleIntervalTask", "cancelTask", "listRecurringTasks"),
                                 SchemaKeys.DESCRIPTION, "The action to perform"),
                         "name", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING, SchemaKeys.DESCRIPTION, "Task name (short identifier)"),
                         SchemaKeys.DESCRIPTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING, SchemaKeys.DESCRIPTION, "Task description/instructions"),
@@ -93,7 +93,7 @@ public class TaskTool implements ToolRegistry.Tool {
             case "scheduleTask" -> scheduleTask(args, agent);
             case "scheduleRecurringTask" -> scheduleRecurringTask(args, agent);
             case "scheduleIntervalTask" -> scheduleIntervalTask(args, agent);
-            case "deleteRecurringTask" -> deleteRecurringTask(args);
+            case "cancelTask" -> cancelTask(args, agent);
             case "listRecurringTasks" -> listRecurringTasks();
             default -> "Error: Unknown action '%s'".formatted(action);
         };
@@ -187,18 +187,21 @@ public class TaskTool implements ToolRegistry.Tool {
         return "Recurring task '%s' created with cron '%s'.".formatted(saved.name, saved.cronExpression);
     }
 
-    private String deleteRecurringTask(JsonObject args) {
+    private String cancelTask(JsonObject args, Agent agent) {
         var name = args.get("name").getAsString();
-        // Same Tx-on-tool-thread issue: the finder + save below need
-        // an active EntityManager which the VT carrier thread lacks.
-        // Collect the ids inside the Tx; cancel scheduler rows outside
-        // since SchedulerClient.cancel is JDBC-driven and doesn't
-        // need JPA context.
+        // Tx-on-tool-thread: the finder + save need an active EntityManager
+        // which the VT carrier thread lacks. Collect the ids inside the Tx;
+        // cancel the scheduler rows outside since SchedulerClient.cancel is
+        // JDBC-driven and doesn't need JPA context.
+        //
+        // Agent-scoped by design — two agents naming a task "daily summary"
+        // must not be able to cancel each other's. Pairs with the multi-
+        // tenancy stance documented elsewhere in JClaw.
         var cancelledIds = services.Tx.run(() -> {
             @SuppressWarnings("unchecked")
             var raw = (java.util.List<Object>) (java.util.List<?>) Task.find(
-                    "name = ?1 AND type = ?2 AND status != ?3",
-                    name, Task.Type.CRON, Task.Status.CANCELLED).fetch();
+                    "name = ?1 AND agent = ?2 AND status != ?3",
+                    name, agent, Task.Status.CANCELLED).fetch();
             var ids = new java.util.ArrayList<Long>(raw.size());
             for (var row : raw) {
                 var task = (Task) row;
@@ -209,12 +212,14 @@ public class TaskTool implements ToolRegistry.Tool {
             return ids;
         });
         if (cancelledIds.isEmpty()) {
-            return "No recurring task found with name '%s'.".formatted(name);
+            return "No task found with name '%s'.".formatted(name);
         }
         for (var taskId : cancelledIds) {
             services.TaskSchedulingService.cancel(taskId);
         }
-        return "Recurring task '%s' cancelled.".formatted(name);
+        return cancelledIds.size() == 1
+                ? "Task '%s' cancelled.".formatted(name)
+                : "%d tasks named '%s' cancelled.".formatted(cancelledIds.size(), name);
     }
 
     private String listRecurringTasks() {
