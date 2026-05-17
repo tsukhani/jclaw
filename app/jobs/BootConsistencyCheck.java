@@ -1,5 +1,6 @@
 package jobs;
 
+import com.github.kagkarlsson.scheduler.SchedulerClient;
 import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
 import models.Task;
 import play.jobs.Job;
@@ -66,7 +67,29 @@ public class BootConsistencyCheck extends Job<Void> {
                     "BootConsistencyCheck: scheduler not bootstrapped; skipping sweep");
             return;
         }
+        sweep(scheduler);
+    }
 
+    /**
+     * The sweep itself, extracted so functional tests can drive it
+     * directly with a stub {@link SchedulerClient} without spinning
+     * up a live scheduler. Returns the count of Tasks newly
+     * registered — operator-visible in the summary log line and
+     * useful for tests as a yes/no signal.
+     *
+     * <p>Algorithm:
+     * <ol>
+     *   <li>Read the set of {@code task_instance} ids currently
+     *       sitting in {@code scheduled_tasks} for our
+     *       {@link TaskExecutionHandler#TASK_NAME}.</li>
+     *   <li>Walk all PENDING Tasks. Skip any whose id is in the
+     *       set (already scheduled — no action needed).</li>
+     *   <li>For each orphan, call
+     *       {@link TaskSchedulingService#register} which translates
+     *       the Task's type into a fresh scheduled_tasks row.</li>
+     * </ol>
+     */
+    public static int sweep(SchedulerClient scheduler) {
         // Build the set of task_instance ids currently scheduled, so we can
         // skip Tasks that already have a row. One query (typically a small
         // set — most Tasks complete and remove their row).
@@ -101,12 +124,14 @@ public class BootConsistencyCheck extends Job<Void> {
                     "BootConsistencyCheck: %d Task(s) registered, %d already scheduled"
                             .formatted(registered, skippedAlreadyScheduled));
         }
+        return registered;
     }
 
     /**
-     * Test hook: re-run the sweep. Exposed so the cutover commit's
-     * acceptance test can verify behavior without restarting the
-     * Play test JVM.
+     * Test hook: re-run the sweep against the live scheduler.
+     * Production callers should not use this — it's the same
+     * @OnApplicationStart entry point under a different name so
+     * tests can re-trigger without restarting the JVM.
      */
     public static void runForTest() {
         new BootConsistencyCheck().doJob();
