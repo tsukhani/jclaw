@@ -1,0 +1,134 @@
+package jobs;
+
+import com.github.kagkarlsson.scheduler.Scheduler;
+import play.db.DB;
+import play.jobs.Job;
+import play.jobs.OnApplicationStart;
+import services.EventLogger;
+import services.TaskExecutionHandler;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.Executors;
+
+/**
+ * JCLAW-21: build the db-scheduler {@link Scheduler}, register
+ * {@link TaskExecutionHandler}, and start polling.
+ *
+ * <p>Runs on {@code @OnApplicationStart} but is ordered after
+ * {@link DbSchedulerSchemaInitJob} only by virtue of explicitly
+ * calling {@link DbSchedulerSchemaInitJob#ensureSchema} as its first
+ * step — Play 1.x doesn't guarantee startup-job ordering, so we
+ * make the dependency explicit instead of relying on declaration
+ * order.
+ *
+ * <h3>Configuration</h3>
+ * <ul>
+ *   <li><b>DataSource</b>: Play's pool (read via {@link DB#datasource}).</li>
+ *   <li><b>Executor</b>: {@link Executors#newVirtualThreadPerTaskExecutor()}
+ *       — task fires are LLM-bound (tens of seconds wall-clock) and
+ *       virtual threads unmount during blocking I/O, so a single fire
+ *       in flight doesn't tie up a platform thread.</li>
+ *   <li><b>Polling interval</b>: 2 seconds — the spec's choice;
+ *       short enough that ad-hoc fires (e.g. {@code TaskSchedulingService.runNow})
+ *       feel snappy, long enough to keep idle CPU at zero.</li>
+ *   <li><b>Immediate execution</b>: enabled so {@code runNow} doesn't
+ *       have to wait up to one polling interval.</li>
+ *   <li><b>Failure handler</b>: deferred — JCLAW-21's
+ *       {@code JClawFailureHandler} (transient-error classifier +
+ *       backoff schedule) ships in a follow-up commit. Until then,
+ *       db-scheduler's default
+ *       {@code OnFailureRetryLater(Duration.ofMinutes(5))} applies
+ *       per the {@code Tasks.custom(...)} default.</li>
+ * </ul>
+ *
+ * <h3>What this commit does NOT do</h3>
+ * <ul>
+ *   <li>Does not seed any rows in {@code scheduled_tasks} —
+ *       {@code TaskSchedulingService.register} (later commit) is the
+ *       Task-CRUD → db-scheduler bridge.</li>
+ *   <li>Does not delete {@link TaskPollerJob} — the poller keeps
+ *       firing existing PENDING Tasks until the scheduling bridge +
+ *       {@code BootConsistencyCheck} land in subsequent commits.</li>
+ * </ul>
+ *
+ * <p>Static {@link #scheduler} reference exposed so
+ * {@link DbSchedulerShutdownJob} can stop the same instance, and
+ * future commits' {@code TaskSchedulingService} can read it for
+ * {@code SchedulerClient.schedule}-style operations.
+ */
+@OnApplicationStart
+public class DbSchedulerBootstrapJob extends Job<Void> {
+
+    /**
+     * The running {@link Scheduler} instance. {@code volatile} because
+     * boot runs on the startup thread while
+     * {@link DbSchedulerShutdownJob}'s {@code @OnApplicationStop}
+     * callback runs on a different thread.
+     */
+    private static volatile Scheduler scheduler;
+
+    public static Scheduler scheduler() {
+        return scheduler;
+    }
+
+    @Override
+    @SuppressWarnings("java:S2696") // Static scheduler handoff is intentional: shutdown hook needs the same instance
+    public void doJob() throws Exception {
+        // Defense-in-depth: re-run the DDL idempotency check. The schema-init
+        // job runs in the same @OnApplicationStart phase but the framework
+        // doesn't strictly order siblings, so we re-assert the schema rather
+        // than depend on it.
+        DbSchedulerSchemaInitJob.ensureSchema();
+
+        var datasource = DB.datasource;
+        if (datasource == null) {
+            EventLogger.error("task", null, null,
+                    "DbSchedulerBootstrap: no DataSource available — db-scheduler will not start");
+            return;
+        }
+
+        var jclawTask = TaskExecutionHandler.buildTask();
+
+        var built = Scheduler.create(datasource, List.of(jclawTask))
+                .pollingInterval(Duration.ofSeconds(2))
+                .executorService(Executors.newVirtualThreadPerTaskExecutor())
+                .enableImmediateExecution()
+                .build();
+
+        TaskExecutionHandler.setSchedulerClient(built);
+        scheduler = built;
+        built.start();
+
+        EventLogger.info("task", null, null,
+                "db-scheduler started (polling 2s, virtual-thread executor, "
+                + "registered task '%s')".formatted(TaskExecutionHandler.TASK_NAME));
+    }
+
+    /**
+     * Graceful stop hook for {@link ShutdownJob}. Plugged into the
+     * existing parallel-component shutdown list rather than a separate
+     * {@code @OnApplicationStop} job so the existing 15-second
+     * overall-timeout ceiling covers it and so two competing shutdown
+     * windows aren't fighting for Play's 30s scheduler budget.
+     *
+     * <p>{@link Scheduler#stop} blocks until in-flight fires finish or
+     * the executor times out (db-scheduler's internal default is 30s
+     * which is past our ceiling, but the parallel-VT pattern in
+     * {@code ShutdownJob} means our 15s overall-cap still bounds the
+     * wall-clock — db-scheduler's stop runs in a sibling VT alongside
+     * the other components and gets cut off by the latch await).
+     */
+    public static void shutdownGracefully() {
+        Scheduler local = scheduler;
+        if (local == null) return;
+        try {
+            local.stop();
+        } catch (Exception e) {
+            EventLogger.warn("task", null, null,
+                    "db-scheduler stop raised: %s".formatted(e.getMessage()));
+        } finally {
+            scheduler = null;
+        }
+    }
+}

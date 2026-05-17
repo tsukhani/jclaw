@@ -44,6 +44,7 @@ public class ShutdownJob extends Job<Void> {
     public void doJob() {
         var components = List.<Runnable>of(
                 TaskPollerJob::shutdownGracefully,
+                DbSchedulerBootstrapJob::shutdownGracefully,
                 PlaywrightBrowserTool::closeAllSessions,
                 TelegramPollingRunner::stop,
                 TelegramStreamingSink::shutdown,
