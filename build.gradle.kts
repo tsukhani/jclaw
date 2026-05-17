@@ -329,4 +329,8 @@ dependencies {
     // resolved graph.
     implementation("org.apache.lucene:lucene-core:9.11.1")
     implementation("org.apache.lucene:lucene-analysis-common:9.11.1")
+    // Query parser lives in its own artifact since Lucene 9; H2's
+    // FullTextLucene.searchData calls into StandardQueryParser at
+    // query time and ClassNotFoundException without this dep.
+    implementation("org.apache.lucene:lucene-queryparser:9.11.1")
 }
