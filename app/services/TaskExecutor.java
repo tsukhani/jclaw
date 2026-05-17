@@ -128,6 +128,24 @@ public final class TaskExecutor {
         // sink.onComplete-written value rather than recomputing.
         var closed = Tx.run(() -> (TaskRun) TaskRun.findById(run.id));
         if (closed != null && closed.status == TaskRun.Status.COMPLETED) {
+            // Mark one-shot Tasks (IMMEDIATE/SCHEDULED) as COMPLETED so
+            // the operator UI shows the terminal state. Recurring Tasks
+            // (CRON/INTERVAL) intentionally stay PENDING — the Task row
+            // is the recurrence config; the scheduled_tasks row carries
+            // the next fire time, and per-fire history lives in
+            // task_run rows. Symmetric with JClawFailureHandler's
+            // FAILED write on terminal failure (we don't pair this
+            // with PENDING resets — once a one-shot succeeds it's done).
+            if (task.type == Task.Type.IMMEDIATE || task.type == Task.Type.SCHEDULED) {
+                Tx.run(() -> {
+                    var fresh = (Task) Task.findById(task.id);
+                    if (fresh != null && fresh.status == Task.Status.PENDING) {
+                        fresh.status = Task.Status.COMPLETED;
+                        fresh.save();
+                    }
+                    return null;
+                });
+            }
             TaskLifecycleEvents.completed(task, closed,
                     closed.durationMs != null ? closed.durationMs : 0L);
         }

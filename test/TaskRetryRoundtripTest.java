@@ -163,6 +163,16 @@ class TaskRetryRoundtripTest extends UnitTest {
 
         // === Second attempt: LLM is now up, drive the production lambda ===
 
+        // The first-attempt failure handler ran on this thread, so its
+        // Tx.run-wrapped writes (retryCount, lastError) nested inside
+        // the JUnit outer Tx and still hold row locks on the Task row
+        // from the VT thread's perspective. Commit + begin to flush
+        // and release the locks before driving the VT thread's
+        // TaskExecutor.runTask, which now writes Task.status =
+        // COMPLETED on the success path.
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
         startLlmServer(simpleResponse("Task completed on retry."));
         configureProvider();
 
