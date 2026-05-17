@@ -341,10 +341,11 @@ public class AgentRunner {
         // to write into task_run_message. Constructed at the boundary
         // where AgentRunner takes responsibility for the conversation.
         final AgentExecutionSink sink = new ConversationSink(conversation);
-        // Non-streaming callers (TaskPollerJob, background) have no pre-runner
-        // queue-accept timestamp, so queue_wait is naturally skipped. Every other
-        // segment is captured, which is why scheduled turns now show up in the
-        // Chat Performance dashboard (channel-partitioned per JCLAW-102).
+        // Non-streaming callers (background jobs, webhook follow-ups) have
+        // no pre-runner queue-accept timestamp, so queue_wait is naturally
+        // skipped. Every other segment is captured, which is why
+        // scheduled turns now show up in the Chat Performance dashboard
+        // (channel-partitioned per JCLAW-102).
         var trace = LatencyTrace.forTurn(conversation.channelType, null);
         trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
 
@@ -356,7 +357,7 @@ public class AgentRunner {
         try {
             // Short setup transaction: persist user message, assemble prompt, resolve provider.
             // Re-fetch the conversation by ID so it is managed in this persistence context.
-            // Callers on virtual threads (TaskPollerJob, webhooks) pass entities that were
+            // Callers on virtual threads (TaskExecutionHandler, webhooks) pass entities that were
             // loaded in a separate, already-committed Tx.run() — those are detached and
             // would throw PersistentObjectException on save().
             var prepared = services.Tx.run(() -> {

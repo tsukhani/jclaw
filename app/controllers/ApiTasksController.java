@@ -68,6 +68,7 @@ public class ApiTasksController extends Controller {
         }
         task.status = Task.Status.CANCELLED;
         task.save();
+        services.TaskSchedulingService.cancel(task.id);
         renderJSON(gson.toJson(TaskView.of(task)));
     }
 
@@ -83,6 +84,11 @@ public class ApiTasksController extends Controller {
         task.nextRunAt = Instant.now();
         task.lastError = null;
         task.save();
+        // FAILED Tasks have no scheduled_tasks row (it was removed when the
+        // failure terminated the previous fire), so register() rather than
+        // update() — the latter would try to cancel a non-existent row,
+        // which is harmless but wasteful.
+        services.TaskSchedulingService.register(task);
         renderJSON(gson.toJson(TaskView.of(task)));
     }
 

@@ -1154,11 +1154,11 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         // AgentRunner.run kicks off a fresh turn that picks up the announce
         // via ConversationService.loadRecentMessages (which keeps USER-role
         // announce rows visible to the LLM) and produces a final assistant
-        // reply. Matches the inbound-trigger shape used by
-        // jobs.TaskPollerJob#executeTask — a background context calling
-        // AgentRunner.run on a conversation with the new prompt as the
-        // user message. The Tx re-fetch dodges detached-entity issues on
-        // the async VT carrier thread.
+        // reply. Matches the inbound-trigger shape used by webhook handlers
+        // and scheduled tasks — a background context calling AgentRunner.run
+        // on a conversation with the new prompt as the user message. The Tx
+        // re-fetch dodges detached-entity issues on the async VT carrier
+        // thread.
         if (Boolean.TRUE.equals(yieldedFlag)) {
             try {
                 resumeParentAfterYield(parentConvId, runId);

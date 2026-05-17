@@ -102,6 +102,7 @@ public class TaskTool implements ToolRegistry.Tool {
         task.type = Task.Type.IMMEDIATE;
         task.nextRunAt = Instant.now();
         task.save();
+        services.TaskSchedulingService.register(task);
         EventLogger.info("task", agent.name, null, "Task created: %s".formatted(task.name));
         return "Task '%s' created and queued for immediate execution.".formatted(task.name);
     }
@@ -116,6 +117,7 @@ public class TaskTool implements ToolRegistry.Tool {
         task.scheduledAt = ldt.atZone(ZoneId.systemDefault()).toInstant();
         task.nextRunAt = task.scheduledAt;
         task.save();
+        services.TaskSchedulingService.register(task);
         EventLogger.info("task", agent.name, null, "Task scheduled: %s at %s".formatted(task.name, ldt));
         return "Task '%s' scheduled for %s.".formatted(task.name, ldt);
     }
@@ -127,8 +129,12 @@ public class TaskTool implements ToolRegistry.Tool {
         task.description = args.has(SchemaKeys.DESCRIPTION) ? args.get(SchemaKeys.DESCRIPTION).getAsString() : "";
         task.type = Task.Type.CRON;
         task.cronExpression = args.get("cronExpression").getAsString();
-        task.nextRunAt = Instant.now(); // Will be computed properly by poller
+        // nextRunAt is no longer authoritative — db-scheduler's scheduled_tasks
+        // row carries the next fire time. Set to a sentinel so the column has
+        // a value (the entity refactor will drop it entirely).
+        task.nextRunAt = Instant.now();
         task.save();
+        services.TaskSchedulingService.register(task);
         EventLogger.info("task", agent.name, null,
                 "Recurring task created: %s (cron: %s)".formatted(task.name, task.cronExpression));
         return "Recurring task '%s' created with cron '%s'.".formatted(task.name, task.cronExpression);
@@ -144,6 +150,7 @@ public class TaskTool implements ToolRegistry.Tool {
         for (var task : tasks) {
             task.status = Task.Status.CANCELLED;
             task.save();
+            services.TaskSchedulingService.cancel(task.id);
         }
         return "Recurring task '%s' cancelled.".formatted(name);
     }

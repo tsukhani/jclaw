@@ -86,20 +86,6 @@ public class Task extends Model {
     private static final String TASK_ENTITY_NAME = "models.Task";
 
     @SuppressWarnings("unchecked")
-    public static List<Task> findPendingDue() {
-        // Status passed as String (.name()) to avoid the same classloader trap
-        // hitting the enum-parameter binding path. Native SQL compares VARCHAR
-        // to VARCHAR; no enum reflection involved.
-        return play.db.jpa.JPA.em()
-                .createNativeQuery("SELECT * FROM task WHERE status = ?1 AND next_run_at <= ?2")
-                .unwrap(org.hibernate.query.NativeQuery.class)
-                .addEntity(TASK_ENTITY_NAME)
-                .setParameter(1, Status.PENDING.name())
-                .setParameter(2, Instant.now())
-                .getResultList();
-    }
-
-    @SuppressWarnings("unchecked")
     public static List<Task> findByStatus(Status status) {
         return play.db.jpa.JPA.em()
                 .createNativeQuery("SELECT * FROM task WHERE status = ?1")

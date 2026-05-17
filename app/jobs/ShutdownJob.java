@@ -19,16 +19,12 @@ import java.util.concurrent.TimeUnit;
  * running serially. Each component has its own internal timeout (5–10s);
  * running them in parallel means the total wall-clock is bounded by
  * {@code max(component)} rather than {@code sum(component)}, well inside
- * Play's 30-second scheduler-shutdown budget. The previous serial
- * structure could exceed 30s when {@code TaskPollerJob.shutdownGracefully}
- * alone was given 30s, surfacing the "Jobs scheduler did not terminate
- * within 30000 ms" warn on every restart.
+ * Play's 30-second scheduler-shutdown budget.
  *
- * <p>Components are independent — {@link TaskPollerJob} doesn't share
- * state with {@link TelegramPollingRunner}, etc. — so order doesn't
- * matter and concurrency is safe. Any individual component failure is
- * logged but doesn't block the others; the JVM exits whatever the
- * outcome.
+ * <p>Components are independent — they don't share state — so order
+ * doesn't matter and concurrency is safe. Any individual component
+ * failure is logged but doesn't block the others; the JVM exits
+ * whatever the outcome.
  */
 @OnApplicationStop
 public class ShutdownJob extends Job<Void> {
@@ -43,7 +39,6 @@ public class ShutdownJob extends Job<Void> {
     @Override
     public void doJob() {
         var components = List.<Runnable>of(
-                TaskPollerJob::shutdownGracefully,
                 DbSchedulerBootstrapJob::shutdownGracefully,
                 PlaywrightBrowserTool::closeAllSessions,
                 TelegramPollingRunner::stop,

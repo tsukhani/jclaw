@@ -42,15 +42,14 @@ import java.util.concurrent.Executors;
  *       per the {@code Tasks.custom(...)} default.</li>
  * </ul>
  *
- * <h3>What this commit does NOT do</h3>
- * <ul>
- *   <li>Does not seed any rows in {@code scheduled_tasks} —
- *       {@code TaskSchedulingService.register} (later commit) is the
- *       Task-CRUD → db-scheduler bridge.</li>
- *   <li>Does not delete {@link TaskPollerJob} — the poller keeps
- *       firing existing PENDING Tasks until the scheduling bridge +
- *       {@code BootConsistencyCheck} land in subsequent commits.</li>
- * </ul>
+ * <h3>Migration of pre-cutover PENDING Tasks</h3>
+ * Pre-cutover Tasks (created before this scheduler was wired in)
+ * exist as PENDING rows with no corresponding {@code scheduled_tasks}
+ * row. {@link BootConsistencyCheck} runs as a separate
+ * {@code @OnApplicationStart} job and registers them with
+ * {@link services.TaskSchedulingService} so they don't sit stranded.
+ * The crash-recovery case (Task persisted but register() never
+ * ran) is closed by the same sweep.
  *
  * <p>Static {@link #scheduler} reference exposed so
  * {@link DbSchedulerShutdownJob} can stop the same instance, and

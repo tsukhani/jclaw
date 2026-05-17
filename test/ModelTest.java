@@ -124,7 +124,7 @@ class ModelTest extends UnitTest {
         task.nextRunAt = Instant.now();
         task.save();
 
-        var pending = Task.findPendingDue();
+        var pending = Task.findByStatus(Task.Status.PENDING);
         assertEquals(1, pending.size());
         assertEquals("test-task", pending.getFirst().name);
     }

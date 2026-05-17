@@ -14,7 +14,8 @@ import java.util.List;
  * persistence semantics for chat flows.
  *
  * <h3>Detached-entity safety</h3>
- * Callers on virtual threads (TaskPollerJob, webhooks, the streaming
+ * Callers on virtual threads (db-scheduler fires via TaskExecutionHandler,
+ * webhooks, the streaming
  * runStreaming entry point) pass a {@link Conversation} loaded in an
  * already-committed {@code Tx.run()} block — that entity is detached
  * when AgentRunner sees it, and {@code conversation.save()} inside

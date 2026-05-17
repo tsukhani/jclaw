@@ -135,7 +135,7 @@ class ToolSystemTest extends UnitTest {
                 {"action": "createTask", "name": "test-task", "description": "Do something"}
                 """, agent);
         assertTrue(result.contains("created and queued"));
-        var tasks = Task.findPendingDue();
+        var tasks = Task.findByStatus(Task.Status.PENDING);
         assertEquals(1, tasks.size());
         assertEquals("test-task", tasks.getFirst().name);
     }

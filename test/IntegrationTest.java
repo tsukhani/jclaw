@@ -196,7 +196,7 @@ class IntegrationTest extends UnitTest {
                 """, agent);
         assertTrue(result.contains("created"));
 
-        var tasks = Task.findPendingDue();
+        var tasks = Task.findByStatus(Task.Status.PENDING);
         assertEquals(1, tasks.size());
         assertEquals("integration-task", tasks.getFirst().name);
         assertEquals(agent.id, tasks.getFirst().agent.id);

@@ -117,33 +117,6 @@ class TaskSchedulingTest extends UnitTest {
         assertEquals(Task.Status.CANCELLED, found.status);
     }
 
-    @Test
-    void findPendingDueReturnsOnlyDueTasks() {
-        var agent = createAgent();
-
-        // Due now
-        var due = new Task();
-        due.agent = agent;
-        due.name = "due-now";
-        due.type = Task.Type.IMMEDIATE;
-        due.status = Task.Status.PENDING;
-        due.nextRunAt = Instant.now().minusSeconds(10);
-        due.save();
-
-        // Not due yet
-        var future = new Task();
-        future.agent = agent;
-        future.name = "future";
-        future.type = Task.Type.SCHEDULED;
-        future.status = Task.Status.PENDING;
-        future.nextRunAt = Instant.now().plusSeconds(3600);
-        future.save();
-
-        var pending = Task.findPendingDue();
-        assertEquals(1, pending.size());
-        assertEquals("due-now", pending.getFirst().name);
-    }
-
     private Agent createAgent() {
         var agent = new Agent();
         agent.name = "task-test-agent";
