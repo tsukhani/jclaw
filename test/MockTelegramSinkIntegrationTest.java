@@ -286,15 +286,28 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
     // ==================== Helpers ====================
 
     /**
-     * Poke the sink's pending buffer directly via reflection + call update.
-     * update() schedules a flush via the scheduler; we invoke flush()
-     * directly from tests so we don't have to wait for the throttle delay.
+     * Poke the sink's pending buffer directly via reflection. Skips
+     * {@link TelegramStreamingSink#update(String)} on purpose: update()
+     * schedules a virtual-thread flush via the static scheduler, which
+     * then races with the test's direct {@code flushMethod.invoke(sink)}
+     * call. When the scheduler-side flush wins the race for the
+     * {@code flushInFlight} re-entrance guard, the test's direct invoke
+     * returns early and that iteration's expected ratchet step never
+     * fires — surfacing as a flaky "expected 750 but was 500" failure
+     * on the {@code throttleRatchetsUpOnMockTelegram429} test under CI
+     * load. Mutating the {@code pending} StringBuilder directly bypasses
+     * scheduling, so the test's manual flush is the only flush in
+     * flight.
      */
     private static void pokePending(TelegramStreamingSink sink, String text) {
-        // update() appends to pending and schedules a flush. We only need
-        // the pending contents; the scheduled flush is ignored by the
-        // reflection-invoked manual flush below.
-        sink.update(text);
+        try {
+            var f = TelegramStreamingSink.class.getDeclaredField("pending");
+            f.setAccessible(true);
+            var pending = (StringBuilder) f.get(sink);
+            pending.append(text);
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private static void invokeQuietly(java.lang.reflect.Method m, Object target) {
