@@ -5,6 +5,7 @@ import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
 import models.Task;
 import play.jobs.Job;
 import services.EventLogger;
+import services.LostTaskDetector;
 import services.TaskExecutionHandler;
 import services.TaskSchedulingService;
 import services.Tx;
@@ -33,10 +34,15 @@ import java.util.HashSet;
  * <p><b>What this does NOT cover:</b>
  * <ul>
  *   <li>Tasks in {@link Task.Status#RUNNING} — db-scheduler's
- *   built-in dead-execution detection handles these via the
- *   {@code last_heartbeat} mechanism (default 5-minute heartbeat,
- *   6 missed heartbeats → declared dead and re-fired). We don't
- *   need to do anything here.</li>
+ *   built-in dead-execution detection still handles the actual
+ *   re-fire (30 s heartbeat × 4 misses = 120 s before declared
+ *   dead, per {@link DbSchedulerBootstrapJob}). JCLAW-258 layered
+ *   a visibility step on top: the boot sweep also runs
+ *   {@link LostTaskDetector#detect()} so any RUNNING Task whose
+ *   {@code scheduled_tasks.last_heartbeat} is older than 60 s is
+ *   reconciled to {@link Task.Status#LOST} immediately on restart,
+ *   rather than the operator seeing a stale RUNNING pill for up
+ *   to the next periodic detector tick.</li>
  *
  *   <li>Tasks in terminal states (COMPLETED / FAILED / CANCELLED)
  *   — they shouldn't have rows in {@code scheduled_tasks} and we
@@ -94,6 +100,17 @@ public class BootConsistencyCheck extends Job<Void> {
      * </ol>
      */
     public static int sweep(SchedulerClient scheduler) {
+        // JCLAW-258: surface LOST tasks first so the admin UI is correct
+        // by the time the rest of the sweep finishes. Reads scheduled_tasks
+        // directly, no scheduler interaction — runs cheaply when the table
+        // is empty (the common case after a clean shutdown).
+        int lost = LostTaskDetector.detect();
+        if (lost > 0) {
+            EventLogger.info("task", null, null,
+                    "BootConsistencyCheck: %d Task(s) reconciled to LOST at startup"
+                            .formatted(lost));
+        }
+
         // Build the set of task_instance ids currently scheduled, so we can
         // skip Tasks that already have a row. One query (typically a small
         // set — most Tasks complete and remove their row).

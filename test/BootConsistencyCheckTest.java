@@ -8,12 +8,14 @@ import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.db.DB;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.TaskExecutionHandler;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -127,6 +129,22 @@ class BootConsistencyCheckTest extends UnitTest {
     }
 
     @Test
+    void lostSweepRunsAtBoot() throws Exception {
+        // JCLAW-258: a RUNNING Task whose scheduled_tasks row has a stale
+        // heartbeat (the crash-then-restart case) must be reconciled to
+        // LOST inside sweep() — operators shouldn't have to wait up to
+        // 30 s for the periodic LostTaskScanJob's first tick.
+        var stale = persistTask("crash-orphan", Task.Status.RUNNING);
+        insertScheduledTaskRow(stale.id, Instant.now().minusSeconds(90));
+
+        BootConsistencyCheck.sweep(stub.proxy());
+
+        assertEquals(Task.Status.LOST,
+                ((Task) Task.findById(stale.id)).status,
+                "boot sweep must transition stale-heartbeat RUNNING to LOST");
+    }
+
+    @Test
     void everyPendingAlreadyScheduledIsANoop() {
         // The "boot after a normal shutdown" case — every PENDING
         // Task still has its scheduled_tasks row because the prior
@@ -153,6 +171,29 @@ class BootConsistencyCheckTest extends UnitTest {
         a.enabled = true;
         a.save();
         return a;
+    }
+
+    private void insertScheduledTaskRow(Long taskId, Instant lastHeartbeat) throws Exception {
+        // DB.datasource returns Hikari-pooled connections with autoCommit=false
+        // (Hibernate-managed). Force autocommit on so the row lands before the
+        // detector's separate-connection SELECT.
+        try (var conn = DB.datasource.getConnection()) {
+            conn.setAutoCommit(true);
+            try (var ps = conn.prepareStatement(
+                    "INSERT INTO scheduled_tasks "
+                    + "(task_name, task_instance, execution_time, picked, "
+                    + " picked_by, last_heartbeat, version) "
+                    + "VALUES (?, ?, ?, ?, ?, ?, ?)")) {
+                ps.setString(1, TaskExecutionHandler.TASK_NAME);
+                ps.setString(2, taskId.toString());
+                ps.setTimestamp(3, Timestamp.from(Instant.now()));
+                ps.setBoolean(4, true);
+                ps.setString(5, "test-scheduler");
+                ps.setTimestamp(6, Timestamp.from(lastHeartbeat));
+                ps.setLong(7, 1L);
+                ps.executeUpdate();
+            }
+        }
     }
 
     private Task persistTask(String name, Task.Status status) {

@@ -406,6 +406,7 @@ public class TaskTool implements ToolRegistry.Tool {
 
         // Any-state lookup — runNow can target COMPLETED/FAILED/CANCELLED too.
         var revivedRef = new int[] { 0 };
+        var lostIds = new ArrayList<Long>();
         var ranIds = services.Tx.run(() -> {
             @SuppressWarnings("unchecked")
             var raw = (java.util.List<Object>) (java.util.List<?>) Task.find(
@@ -418,13 +419,30 @@ public class TaskTool implements ToolRegistry.Tool {
                     task.status = Task.Status.PENDING;
                     task.save();
                     revivedRef[0]++;
+                } else if (task.status == Task.Status.LOST) {
+                    // JCLAW-258: operator pre-empts db-scheduler's
+                    // auto-recovery. Flip to PENDING and remember the id
+                    // so we can force-remove the picked-but-stale
+                    // scheduled_tasks row outside the Tx before registering
+                    // a fresh fire below.
+                    task.status = Task.Status.PENDING;
+                    task.save();
+                    lostIds.add(task.id);
                 }
                 ids.add(task.id);
             }
             return ids;
         });
         if (ranIds.isEmpty()) return "No task found with name '%s'.".formatted(name);
-        for (var id : ranIds) services.TaskSchedulingService.runNow(id);
+        for (var id : lostIds) {
+            services.TaskSchedulingService.forceRemoveStaleRow(id);
+            var fresh = services.Tx.run(() -> (Task) Task.findById(id));
+            if (fresh != null) services.TaskSchedulingService.register(fresh);
+        }
+        for (var id : ranIds) {
+            if (lostIds.contains(id)) continue;
+            services.TaskSchedulingService.runNow(id);
+        }
 
         var revived = revivedRef[0];
         EventLogger.info("TASK_MGMT_MANUAL_RUN", agent.name, null,

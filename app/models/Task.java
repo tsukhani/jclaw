@@ -20,7 +20,20 @@ public class Task extends Model {
      * cleaner as INTERVAL than the cron equivalent).
      */
     public enum Type { IMMEDIATE, SCHEDULED, INTERVAL, CRON }
-    public enum Status { PENDING, RUNNING, COMPLETED, FAILED, CANCELLED }
+
+    /**
+     * Task lifecycle state. JCLAW-258 introduced {@code LOST} between
+     * {@code RUNNING} and {@code FAILED}: a Task observed as
+     * {@code RUNNING} whose db-scheduler {@code scheduled_tasks.last_heartbeat}
+     * has gone stale (older than {@link services.LostTaskDetector#STALE_THRESHOLD})
+     * is reconciled to LOST for operator visibility. db-scheduler's own
+     * dead-execution detection (at the longer heartbeat-misses threshold)
+     * subsequently re-fires the row, transitioning LOST → RUNNING →
+     * COMPLETED/FAILED. LOST is therefore visibility-only, not terminal —
+     * Design A in the ticket. Position between RUNNING and FAILED keeps
+     * status-pill rendering on a natural heat-axis (blue → orange → red).
+     */
+    public enum Status { PENDING, RUNNING, LOST, COMPLETED, FAILED, CANCELLED }
 
     @ManyToOne
     @JoinColumn(name = "agent_id")

@@ -5,7 +5,9 @@ import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
 import jobs.DbSchedulerBootstrapJob;
 import models.Task;
+import play.db.DB;
 
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -328,6 +330,49 @@ public final class TaskSchedulingService {
                     task.agent != null ? task.agent.name : null, null,
                     "Failed to schedule Task '%s': %s".formatted(task.name, e.getMessage()));
             throw e;
+        }
+    }
+
+    /**
+     * JCLAW-258 LOST-recovery helper. Force-remove the
+     * {@code scheduled_tasks} row for a Task whose scheduler-side state
+     * is {@code picked=true} with a stale heartbeat —
+     * {@link SchedulerClient#cancel} refuses to touch picked rows
+     * (raises {@code TaskInstanceCurrentlyExecutingException}), but for
+     * a LOST Task we know by construction that the picking JVM is dead.
+     * Bypassing the API guard is the only way for the operator's retry
+     * click to pre-empt db-scheduler's own dead-execution detection.
+     *
+     * <p>Direct JDBC delete is intentional: it avoids re-implementing
+     * the version-aware optimistic-lock branch of db-scheduler's
+     * repository, which we cannot reach through the public surface.
+     */
+    public static void forceRemoveStaleRow(Long taskId) {
+        Objects.requireNonNull(taskId, "taskId");
+        var ds = DB.datasource;
+        if (ds == null) return;
+        var sql = "DELETE FROM scheduled_tasks WHERE task_name = ? AND task_instance = ?";
+        try (var conn = ds.getConnection()) {
+            // Hikari's pool returns connections with autoCommit=false
+            // (Hibernate-managed); without flipping it on the DELETE
+            // would roll back when the connection returns to the pool.
+            // Direct setAutoCommit is safe here because this method is
+            // intentionally outside any JPA transaction.
+            conn.setAutoCommit(true);
+            try (var ps = conn.prepareStatement(sql)) {
+                ps.setString(1, TaskExecutionHandler.TASK_NAME);
+                ps.setString(2, taskId.toString());
+                int removed = ps.executeUpdate();
+                if (removed > 0) {
+                    EventLogger.info("task", null, null,
+                            "TaskSchedulingService.forceRemoveStaleRow: removed stale "
+                                    + "scheduled_tasks row for Task id %d".formatted(taskId));
+                }
+            }
+        } catch (SQLException e) {
+            EventLogger.warn("task", null, null,
+                    "TaskSchedulingService.forceRemoveStaleRow: failed for Task id %d: %s"
+                            .formatted(taskId, e.getMessage()));
         }
     }
 

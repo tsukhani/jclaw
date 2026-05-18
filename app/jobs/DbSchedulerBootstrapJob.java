@@ -113,6 +113,19 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
 
         SchedulerBuilder builder = Scheduler.create(datasource, List.of(jclawTask))
                 .pollingInterval(Duration.ofSeconds(2))
+                // JCLAW-258: shorten heartbeat from db-scheduler's default to
+                // 30 s so a crash-interrupted fire surfaces faster. 30 s × 4
+                // missed = 120 s before db-scheduler declares an execution
+                // dead and re-fires it; LostTaskDetector flips the visible
+                // Task.status to LOST at the 60 s mark (2 missed heartbeats),
+                // so operator visibility consistently leads scheduler
+                // recovery by roughly 60 s. Floor of missedHeartbeatsLimit
+                // is 4 in db-scheduler 16.9 — pinning to the floor (rather
+                // than 2 to mirror the visibility threshold) keeps the
+                // safety margin db-scheduler's authors mandate for the
+                // re-fire path.
+                .heartbeatInterval(Duration.ofSeconds(30))
+                .missedHeartbeatsLimit(4)
                 .executorService(Executors.newVirtualThreadPerTaskExecutor())
                 .enableImmediateExecution()
                 // db-scheduler's JdbcRunner inspects connection.getAutoCommit()

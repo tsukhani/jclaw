@@ -25,9 +25,13 @@ async function retryTask(id: number) {
   refresh()
 }
 
+// LOST sits between RUNNING (blue) and FAILED (red) on the heat axis —
+// the task is stuck but db-scheduler will auto-recover it. Orange
+// communicates "needs attention but not yet a terminal failure".
 const statusColors: Record<string, string> = {
   PENDING: 'text-yellow-400',
   RUNNING: 'text-blue-400',
+  LOST: 'text-orange-400',
   COMPLETED: 'text-green-400',
   FAILED: 'text-red-400',
   CANCELLED: 'text-neutral-600',
@@ -57,7 +61,7 @@ const typeSelectId = useId()
             All statuses
           </option>
           <option
-            v-for="s in ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED']"
+            v-for="s in ['PENDING', 'RUNNING', 'LOST', 'COMPLETED', 'FAILED', 'CANCELLED']"
             :key="s"
             :value="s"
           >
@@ -148,7 +152,7 @@ const typeSelectId = useId()
                 Cancel
               </button>
               <button
-                v-if="task.status === 'FAILED'"
+                v-if="task.status === 'FAILED' || task.status === 'LOST'"
                 class="text-xs text-fg-muted hover:text-fg-strong transition-colors"
                 @click="retryTask(task.id)"
               >

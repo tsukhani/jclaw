@@ -51,6 +51,15 @@ public final class TaskLifecycleEvents {
     public static final String STARTED = "TASK_STARTED";
     public static final String COMPLETED = "TASK_COMPLETED";
     public static final String FAILED = "TASK_FAILED";
+    /**
+     * JCLAW-258: emitted when {@link services.LostTaskDetector} flips a
+     * RUNNING Task to LOST after observing a stale db-scheduler heartbeat.
+     * Visibility-only: db-scheduler's own dead-execution detection
+     * recovers the row at a longer threshold, so a TASK_LOST entry is
+     * typically followed by a fresh TASK_STARTED / TASK_COMPLETED pair
+     * once the re-fire lands.
+     */
+    public static final String LOST = "TASK_LOST";
     // Reserved for the JCLAW-21 sibling delivery story. Declared
     // here so the taxonomy is one-stop and so dashboard consumers
     // can group on the prefix.
@@ -121,6 +130,23 @@ public final class TaskLifecycleEvents {
                 "classification", classification,
                 "error_message", errorMessage);
         EventLogger.record("ERROR", FAILED, agentName, null, message, details);
+    }
+
+    /**
+     * Mark a RUNNING Task as LOST. Distinct from {@link #failed} because
+     * the recovery surface is db-scheduler, not the operator —
+     * {@code staleSeconds} is preserved in the details payload so
+     * dashboards can distinguish "barely past the threshold" from
+     * "JVM was offline for an hour" without joining to scheduled_tasks.
+     */
+    public static void lost(Task task, long staleSeconds) {
+        var agentName = task.agent != null ? task.agent.name : null;
+        var message = "Task '%s' marked LOST after %ds of stale heartbeat"
+                .formatted(task.name, staleSeconds);
+        var details = detailsJson(
+                "task_id", task.id,
+                "stale_seconds", staleSeconds);
+        EventLogger.record("WARN", LOST, agentName, null, message, details);
     }
 
     /**

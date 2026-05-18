@@ -525,7 +525,15 @@ public class ApiTasksController extends Controller {
     public static void retry(Long id) {
         Task task = Task.findById(id);
         if (task == null) notFound();
-        if (task.status != Task.Status.FAILED) {
+        // JCLAW-258 extends retry to accept LOST in addition to FAILED.
+        // FAILED: no scheduled_tasks row (it was removed when the failure
+        // terminated the previous fire) — register() inserts a fresh row.
+        // LOST: scheduled_tasks row still exists (Design A keeps it intact
+        // for db-scheduler's own recovery); operator click pre-empts that
+        // auto-recovery by cancelling the stale row and registering a
+        // fresh one via update().
+        boolean wasLost = task.status == Task.Status.LOST;
+        if (task.status != Task.Status.FAILED && !wasLost) {
             badRequest();
         }
         task.retryCount = 0;
@@ -533,20 +541,23 @@ public class ApiTasksController extends Controller {
         task.nextRunAt = Instant.now();
         task.lastError = null;
         task.save();
-        // FAILED Tasks have no scheduled_tasks row (it was removed when the
-        // failure terminated the previous fire), so register() rather than
-        // update() — the latter would try to cancel a non-existent row,
-        // which is harmless but wasteful.
+        if (wasLost) {
+            // LOST rows are picked=true with a stale heartbeat — the regular
+            // cancel API refuses to touch them. forceRemoveStaleRow deletes
+            // the row directly so the subsequent register inserts a clean
+            // new fire row without tripping the PK constraint.
+            services.TaskSchedulingService.forceRemoveStaleRow(task.id);
+        }
         services.TaskSchedulingService.register(task);
         // /retry is operator-initiated re-firing — same intent as /run from
         // the audit timeline's POV. The mechanical distinction (resets
-        // retryCount/lastError, FAILED-only guard) is internal; the operator
-        // simply "ran a previously-failed task again", which is exactly the
-        // MANUAL_RUN category. /retry doesn't get its own TASK_MGMT_RETRY
-        // category because the AC enumerates six and this isn't one.
+        // retryCount/lastError, FAILED/LOST-only guard) is internal; the
+        // operator simply "ran a previously-stuck task again", which maps
+        // to the MANUAL_RUN category.
         EventLogger.info("TASK_MGMT_MANUAL_RUN",
                 task.agent != null ? task.agent.name : null, null,
-                "Task '%s' (id=%d) retried via API (was FAILED)".formatted(task.name, task.id));
+                "Task '%s' (id=%d) retried via API (was %s)"
+                        .formatted(task.name, task.id, wasLost ? "LOST" : "FAILED"));
         renderJSON(gson.toJson(TaskView.of(task)));
     }
 
