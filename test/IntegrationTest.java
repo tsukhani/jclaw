@@ -189,10 +189,10 @@ class IntegrationTest extends UnitTest {
     void toolExecutionInAgentPipeline() {
         var agent = AgentService.create("tool-agent", "openrouter", "gpt-4.1");
 
-        // Test TaskTool creates a task
+        // Test TaskTool creates a task (post-JCLAW-294 schedule shorthand).
         var result = ToolRegistry.execute("task_manager",
                 """
-                {"action": "createTask", "name": "integration-task", "description": "Test task from integration test"}
+                {"action": "createTask", "name": "integration-task", "description": "Test task from integration test", "schedule": "now"}
                 """, agent);
         assertTrue(result.contains("created"));
 

@@ -132,7 +132,7 @@ class ToolSystemTest extends UnitTest {
     void taskToolCreateTask() {
         var result = ToolRegistry.execute("task_manager",
                 """
-                {"action": "createTask", "name": "test-task", "description": "Do something"}
+                {"action": "createTask", "name": "test-task", "description": "Do something", "schedule": "now"}
                 """, agent);
         assertTrue(result.contains("created and queued"));
         var tasks = Task.findByStatus(Task.Status.PENDING);
@@ -142,9 +142,10 @@ class ToolSystemTest extends UnitTest {
 
     @Test
     void taskToolScheduleRecurring() {
+        // Spring 6-field cron post-JCLAW-294 cron migration.
         var result = ToolRegistry.execute("task_manager",
                 """
-                {"action": "scheduleRecurringTask", "name": "daily-report", "description": "Generate report", "cronExpression": "0 9 * * *"}
+                {"action": "createTask", "name": "daily-report", "description": "Generate report", "schedule": "0 0 9 * * *"}
                 """, agent);
         assertTrue(result.contains("Recurring task"));
         var recurring = Task.findRecurring(agent);
@@ -155,7 +156,7 @@ class ToolSystemTest extends UnitTest {
     void taskToolListRecurring() {
         ToolRegistry.execute("task_manager",
                 """
-                {"action": "scheduleRecurringTask", "name": "task-1", "description": "First task", "cronExpression": "0 9 * * *"}
+                {"action": "createTask", "name": "task-1", "description": "First task", "schedule": "0 0 9 * * *"}
                 """, agent);
         var result = ToolRegistry.execute("task_manager",
                 """
