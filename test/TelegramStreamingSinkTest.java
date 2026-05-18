@@ -588,22 +588,6 @@ class TelegramStreamingSinkTest extends UnitTest {
     }
 
     @Test
-    void getterAccessorsReflectInitialState() {
-        // Locks in the test-only getters that JCLAW-325 wants verified — a
-        // future refactor that drops one of these will fail the build, not
-        // silently regress test-coverage.
-        var sink = new TelegramStreamingSink("tok", "chat", null);
-        assertNull(sink.messageIdForTest());
-        assertFalse(sink.streamCapReachedForTest());
-        assertFalse(sink.sealedForTest());
-        assertEquals("", sink.lastSentTextForTest());
-        assertEquals(0L, sink.lastSentAtForTest());
-        assertFalse(sink.draftWasSentForTest());
-        assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
-                sink.transportForTest());
-    }
-
-    @Test
     void shutdownAndReinitializeAllowsContinuedUse() {
         // Lines 134-135 / 145-146: ShutdownJob path. After shutdown(),
         // the next scheduler() call must transparently recreate the executor

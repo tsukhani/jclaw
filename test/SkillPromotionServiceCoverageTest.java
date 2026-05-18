@@ -225,12 +225,13 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
     }
 
     @Test
-    void promoteNoOpWhenWorkspaceMatchesGlobal() throws Exception {
-        // Tests the isIdenticalToGlobal predicate directly to avoid implicit
-        // reliance on promoteInBackground's internal call ordering — a future
-        // refactor that moved sanitizeWithLlm (a real LLM HTTP call) earlier
-        // than the hash-equal short-circuit would silently take this test to
-        // the network.
+    void isIdenticalToGlobalPublishesPromoteNoopForByteIdenticalCopies() throws Exception {
+        // Tests the isIdenticalToGlobal predicate directly rather than driving
+        // it through promoteInBackground — a future refactor that moved
+        // sanitizeWithLlm (a real LLM HTTP call) earlier than the hash-equal
+        // short-circuit would silently take this test to the network. The
+        // predicate publishes skill.promote_noop as a side effect, so calling
+        // it directly is sufficient to pin the noop-event contract.
         var agent = createAgent("promote-identical");
 
         // Author "alpha" in BOTH global and workspace with identical content.
@@ -253,10 +254,11 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
     }
 
     @Test
-    void promoteRefusedOnDowngrade() throws Exception {
-        // Tests the isDowngrade predicate directly to avoid implicit reliance
-        // on promoteInBackground's internal call ordering — see the noop test
-        // above for the same rationale.
+    void isDowngradePublishesPromoteFailedForOlderWorkspaceVersion() throws Exception {
+        // Tests the isDowngrade predicate directly rather than driving it
+        // through promoteInBackground — see the noop test above for the same
+        // rationale. The predicate publishes skill.promote_failed as a side
+        // effect, so calling it directly is sufficient to pin the contract.
         var agent = createAgent("promote-downgrade");
 
         // Global is at 2.0.0, workspace at 1.0.0 — downgrade

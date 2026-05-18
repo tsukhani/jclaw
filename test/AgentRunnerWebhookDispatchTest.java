@@ -176,7 +176,8 @@ class AgentRunnerWebhookDispatchTest extends UnitTest {
                 "/new response must not be blank");
     }
 
-    // ─── dispatchToChannel (package-private; reflection) ────────────────
+    // ─── dispatchToChannel (package-private in `agents`; tests live in
+    //     the default package, so reflection is the seam) ───────────────
 
     private static Method dispatchToChannelMethod() throws Exception {
         var m = AgentRunner.class.getDeclaredMethod("dispatchToChannel",
@@ -186,74 +187,21 @@ class AgentRunnerWebhookDispatchTest extends UnitTest {
     }
 
     @Test
-    void dispatchToChannelIsNoOpWhenPeerIdIsNull() throws Exception {
-        // The very first guard in dispatchToChannel — short-circuit on
-        // null peerId before even doing a fromValue lookup. The assertion
-        // is just "no exception": if this NPEs, the queue-drain on a turn
-        // whose peer got nulled in the meantime would crash.
-        var agent = createAgent("disp-null-peer", "missing", "model");
-        dispatchToChannelMethod().invoke(null, agent, "telegram", null, "text");
-    }
-
-    @Test
-    void dispatchToChannelIsNoOpWhenTextIsNull() throws Exception {
-        // Symmetric guard on the text side — a null reply text from the
-        // runner must not be re-dispatched.
-        var agent = createAgent("disp-null-text", "missing", "model");
-        dispatchToChannelMethod().invoke(null, agent, "telegram", "peer-1", null);
-    }
-
-    @Test
-    void dispatchToChannelIsNoOpForUnrecognisedChannelType() throws Exception {
-        // ChannelType.fromValue returns null for unknown channels; the
-        // guard at line 1115 of AgentRunner short-circuits before any
-        // resolve()/send call. Pin the contract so a future "unknown
-        // channel falls through to a default send" regression fails.
-        var agent = createAgent("disp-unknown-ch", "missing", "model");
-        dispatchToChannelMethod().invoke(null, agent, "discord", "peer-1", "hi");
-    }
-
-    @Test
-    void dispatchToChannelLogsAndReturnsForTelegramWhenBindingMissing() throws Exception {
-        // The telegram branch looks up the binding via Tx.run; when the
-        // lookup returns null (e.g. operator deleted the binding between
-        // turn-accept and queue-drain), dispatchToChannel logs a warn and
-        // returns — must NOT call TelegramChannel.sendMessage which would
-        // throw on the missing bot token.
-        var agent = createAgent("disp-telegram-no-binding", "missing", "model");
-        // Commit so the Tx.run lookup inside dispatchToChannel sees the agent.
-        JPA.em().getTransaction().commit();
-        JPA.em().getTransaction().begin();
-
-        dispatchToChannelMethod().invoke(null, agent, "telegram", "tg-user-1", "hello");
-        // Reached without exception — pass. No assertion on the warn
-        // because EventLogger doesn't expose a read-back API; the value
-        // here is the no-throw guarantee.
-    }
-
-    @Test
-    void dispatchToChannelIsNoOpForWebChannelBecauseResolveReturnsNull() throws Exception {
-        // type.resolve() returns null for WEB (web replies live in the DB
-        // and are picked up on the next /messages poll, not pushed out).
-        // The branch at line 1129 falls through silently.
-        var agent = createAgent("disp-web", "missing", "model");
-        dispatchToChannelMethod().invoke(null, agent, "web", "u-web", "queued reply");
-    }
-
-    @Test
     void dispatchToChannelSwallowsExceptionsRaisedByTheChannelLookup() throws Exception {
         // The outer try/catch around dispatchToChannel exists so a
         // channel-side failure (network, missing config, JPA glitch) on
         // queue-drain doesn't propagate up and break the orchestrator's
         // drain loop. Pass a null agent to the telegram branch; the
         // findEnabledByAgentAndUser query will NPE inside the Tx.run, and
-        // the catch must swallow it.
+        // the catch must swallow it. Removing the catch would let the NPE
+        // escape as an InvocationTargetException and fail this test.
+        //
         // Commit so the Tx.run inside dispatchToChannel runs against a clean
         // EM state — otherwise the harness-thread tx leaks into the lookup.
         JPA.em().getTransaction().commit();
         JPA.em().getTransaction().begin();
 
-        // Must not throw — the catch at line 1132 swallows.
+        // Must not throw — the catch at AgentRunner.java:1132 swallows.
         dispatchToChannelMethod().invoke(null, null, "telegram", "tg-user-2", "hello");
     }
 

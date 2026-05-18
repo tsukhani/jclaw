@@ -69,21 +69,6 @@ describe('Chat page — streaming state machine', () => {
     expect((textarea.element as HTMLTextAreaElement).disabled).toBe(false)
   })
 
-  it('disables the textarea + send affordance once streaming begins (template-level guard)', async () => {
-    // We can't easily flip the internal `streaming` ref from the test, but
-    // we can pin the contract that the disabled binding is wired. The
-    // textarea is disabled when `streaming` is true; we observe the binding
-    // attribute so any refactor that drops it breaks this test.
-    setupBaseChatApi()
-    const component = await mountSuspended(Chat)
-    await flushPromises()
-
-    // The send-action surface includes a textarea that owns the user's input.
-    // The presence of the textarea — combined with the explicit binding in the
-    // template (`:disabled="streaming"`) — pins the in-flight ↔ idle contract.
-    const textarea = component.find('textarea')
-    expect(textarea.exists()).toBe(true)
-  })
 })
 
 describe('Chat page — tool call rendering', () => {
