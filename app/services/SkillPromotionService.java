@@ -326,7 +326,8 @@ public class SkillPromotionService {
 
     // --- Internal helpers ---
 
-    private static boolean isIdenticalToGlobal(Path skillDir, Path globalDir, String skillName) {
+    // Public for SkillPromotionServiceCoverageTest (default-package test cannot access package-private)
+    public static boolean isIdenticalToGlobal(Path skillDir, Path globalDir, String skillName) {
         try {
             var workspaceHash = SkillLoader.hashSkillDirectory(skillDir);
             var globalHash = SkillLoader.hashSkillDirectory(globalDir);
@@ -354,7 +355,8 @@ public class SkillPromotionService {
         return false;
     }
 
-    private static boolean isDowngrade(Path skillDir, Path globalDir, String skillName) {
+    // Public for SkillPromotionServiceCoverageTest (default-package test cannot access package-private)
+    public static boolean isDowngrade(Path skillDir, Path globalDir, String skillName) {
         var workspaceInfo = SkillLoader.parseSkillFile(skillDir.resolve("SKILL.md"));
         var globalInfo = SkillLoader.parseSkillFile(globalDir.resolve("SKILL.md"));
         if (workspaceInfo != null && globalInfo != null) {

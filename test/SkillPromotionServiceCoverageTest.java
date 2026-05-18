@@ -10,6 +10,10 @@ import services.SkillPromotionService;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Supplemental coverage for {@code SkillPromotionService} — focuses on the
@@ -31,7 +35,6 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
 
     private Path globalSkillsDir;
     private final java.util.List<String> seededAgentNames = new java.util.ArrayList<>();
-    private final java.util.List<Runnable> unsubscribes = new java.util.ArrayList<>();
 
     @BeforeEach
     void setup() throws Exception {
@@ -43,10 +46,6 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
 
     @AfterEach
     void teardown() throws Exception {
-        for (var off : unsubscribes) {
-            try { off.run(); } catch (Exception _) {}
-        }
-        unsubscribes.clear();
         if (globalSkillsDir != null && Files.exists(globalSkillsDir)) {
             SkillPromotionService.deleteRecursive(globalSkillsDir);
         }
@@ -59,6 +58,11 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
             } catch (Exception _) {}
         }
         seededAgentNames.clear();
+        // Drop SkillRegistryTool rows seeded by syncAgentAllowlistMirrorsRegistry
+        // (the only test in this class that inserts them) so leftover rows can't
+        // leak into the next test's SkillRegistryTool.findBySkill calls.
+        SkillRegistryTool.deleteBySkill("demo");
+        SkillRegistryTool.deleteBySkill("phantom");
     }
 
     // ==================== Helpers ====================
@@ -84,19 +88,33 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
     }
 
     /**
-     * Subscribe to NotificationBus events of a given type. Returns a holder
-     * the caller can read after the bus has had a chance to drain. The
-     * unsubscribe handle is registered for teardown.
+     * Subscribe to NotificationBus, run {@code trigger}, then block until an
+     * event with the given {@code type} fires (or {@code timeout} elapses).
+     * Returns the SSE payload of the first matching event, or {@code null} on
+     * timeout — caller assertions decide whether absence is acceptable.
+     *
+     * <p>Uses a {@link CountDownLatch} instead of a Thread.sleep polling loop:
+     * the latch is released by the bus's dispatch thread the instant the
+     * matching event arrives, so the helper wakes immediately rather than at
+     * the next poll tick.
      */
-    private java.util.concurrent.atomic.AtomicReference<String> captureFirstEvent(String type) {
-        var holder = new java.util.concurrent.atomic.AtomicReference<String>();
+    private String waitForEvent(String type, Runnable trigger, Duration timeout) throws InterruptedException {
+        var latch = new CountDownLatch(1);
+        var holder = new AtomicReference<String>();
         var off = NotificationBus.subscribe(payload -> {
-            if (payload.contains("\"type\":\"" + type + "\"")) {
-                holder.compareAndSet(null, payload);
+            if (payload.contains("\"type\":\"" + type + "\"") && holder.compareAndSet(null, payload)) {
+                latch.countDown();
             }
         });
-        unsubscribes.add(off);
-        return holder;
+        try {
+            trigger.run();
+            if (!latch.await(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                return null;
+            }
+            return holder.get();
+        } finally {
+            off.run();
+        }
     }
 
     // ==================== validateToolRequirements ====================
@@ -179,11 +197,9 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
         Files.createDirectories(workspaceSkillDir);
         writeSkillMd(workspaceSkillDir, "nope", "1.0.0");
 
-        var captured = captureFirstEvent("skill.promote_failed");
-
-        SkillPromotionService.promoteInBackground(workspaceSkillDir, "nope", 9_999_999L);
-
-        var payload = waitForEvent(captured);
+        var payload = waitForEvent("skill.promote_failed",
+                () -> SkillPromotionService.promoteInBackground(workspaceSkillDir, "nope", 9_999_999L),
+                Duration.ofSeconds(2));
         assertNotNull(payload, "publishes skill.promote_failed when the agent id is unknown");
         assertTrue(payload.contains("Requesting agent not found"),
                 "error message indicates missing agent: " + payload);
@@ -197,11 +213,9 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
         Files.createDirectories(workspaceSkillDir);
         writeSkillMd(workspaceSkillDir, "alpha", "1.0.0");
 
-        var captured = captureFirstEvent("skill.promote_failed");
-
-        SkillPromotionService.promoteInBackground(workspaceSkillDir, "alpha", agent.id);
-
-        var payload = waitForEvent(captured);
+        var payload = waitForEvent("skill.promote_failed",
+                () -> SkillPromotionService.promoteInBackground(workspaceSkillDir, "alpha", agent.id),
+                Duration.ofSeconds(2));
         assertNotNull(payload, "must publish skill.promote_failed when capability missing");
         assertTrue(payload.contains("skill-creator capability"),
                 "error message mentions the missing capability: " + payload);
@@ -212,13 +226,12 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
 
     @Test
     void promoteNoOpWhenWorkspaceMatchesGlobal() throws Exception {
-        // Pre-seed an identical global copy so the hash-equal short-circuit fires.
+        // Tests the isIdenticalToGlobal predicate directly to avoid implicit
+        // reliance on promoteInBackground's internal call ordering — a future
+        // refactor that moved sanitizeWithLlm (a real LLM HTTP call) earlier
+        // than the hash-equal short-circuit would silently take this test to
+        // the network.
         var agent = createAgent("promote-identical");
-
-        // Install skill-creator so capability passes
-        var creatorGlobal = globalSkillsDir.resolve("skill-creator");
-        writeSkillMd(creatorGlobal, "skill-creator", "1.0.0");
-        SkillPromotionService.copyToAgentWorkspace(agent, "skill-creator");
 
         // Author "alpha" in BOTH global and workspace with identical content.
         // Same generator function on both sides guarantees the bytes match.
@@ -230,22 +243,21 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
         writeSkillMd(workspaceAlpha, "alpha", "1.0.0");
         SkillLoader.clearCache();
 
-        var captured = captureFirstEvent("skill.promote_noop");
-
-        SkillPromotionService.promoteInBackground(workspaceAlpha, "alpha", agent.id);
-
-        var payload = waitForEvent(captured);
+        var payload = waitForEvent("skill.promote_noop",
+                () -> assertTrue(
+                        SkillPromotionService.isIdenticalToGlobal(workspaceAlpha, globalAlpha, "alpha"),
+                        "byte-identical workspace + global must short-circuit to true"),
+                Duration.ofSeconds(2));
         assertNotNull(payload, "publishes skill.promote_noop when workspace and global are byte-identical");
         assertTrue(payload.contains("identical"), "noop reason mentions identical: " + payload);
     }
 
     @Test
     void promoteRefusedOnDowngrade() throws Exception {
+        // Tests the isDowngrade predicate directly to avoid implicit reliance
+        // on promoteInBackground's internal call ordering — see the noop test
+        // above for the same rationale.
         var agent = createAgent("promote-downgrade");
-
-        var creatorGlobal = globalSkillsDir.resolve("skill-creator");
-        writeSkillMd(creatorGlobal, "skill-creator", "1.0.0");
-        SkillPromotionService.copyToAgentWorkspace(agent, "skill-creator");
 
         // Global is at 2.0.0, workspace at 1.0.0 — downgrade
         var globalAlpha = globalSkillsDir.resolve("alpha");
@@ -256,11 +268,11 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
         writeSkillMd(workspaceAlpha, "alpha", "1.0.0");
         SkillLoader.clearCache();
 
-        var captured = captureFirstEvent("skill.promote_failed");
-
-        SkillPromotionService.promoteInBackground(workspaceAlpha, "alpha", agent.id);
-
-        var payload = waitForEvent(captured);
+        var payload = waitForEvent("skill.promote_failed",
+                () -> assertTrue(
+                        SkillPromotionService.isDowngrade(workspaceAlpha, globalAlpha, "alpha"),
+                        "workspace 1.0.0 vs global 2.0.0 must be detected as a downgrade"),
+                Duration.ofSeconds(2));
         assertNotNull(payload, "downgrade must publish skill.promote_failed");
         assertTrue(payload.contains("older than the global version"),
                 "downgrade reason surfaced: " + payload);
@@ -336,22 +348,4 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
         }
     }
 
-    // ==================== Helper: wait for NotificationBus drain ====================
-
-    /**
-     * NotificationBus dispatches to a fixed thread pool. Poll briefly for the
-     * captured event with a 2-second ceiling — far longer than the publish
-     * path's nominal handoff but short enough to fail loud if the publish
-     * never fires.
-     */
-    private static String waitForEvent(java.util.concurrent.atomic.AtomicReference<String> holder)
-            throws InterruptedException {
-        var deadline = System.currentTimeMillis() + 2_000;
-        while (System.currentTimeMillis() < deadline) {
-            var v = holder.get();
-            if (v != null) return v;
-            Thread.sleep(25);
-        }
-        return holder.get();
-    }
 }

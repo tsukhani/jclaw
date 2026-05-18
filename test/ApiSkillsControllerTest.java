@@ -50,7 +50,12 @@ class ApiSkillsControllerTest extends FunctionalTest {
             try {
                 var ws = AgentService.workspacePath(name);
                 if (Files.exists(ws)) SkillPromotionService.deleteRecursive(ws);
-            } catch (Exception _) {}
+            } catch (Exception e) {
+                // Use System.err rather than EventLogger so teardown stays
+                // independent of the DB-backed logger (which has its own
+                // teardown ordering against Fixtures.deleteDatabase()).
+                System.err.println("Workspace teardown failed for " + name + ": " + e.getMessage());
+            }
         }
     }
 
@@ -620,6 +625,9 @@ class ApiSkillsControllerTest extends FunctionalTest {
         assertEquals(404, resp.status.intValue());
     }
 
+    // Background path is inert here: agent has no skill-creator workspace skill, so
+    // hasSkillCreatorCapability() returns false before sanitizeWithLlm is reached.
+    // Future capability-gate reordering would invalidate this assumption.
     @Test
     void promoteAcceptedReturns200StatusPromoting() throws Exception {
         // The endpoint returns 200 immediately and dispatches the actual work
