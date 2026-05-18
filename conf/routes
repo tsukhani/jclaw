@@ -28,6 +28,7 @@ POST    /api/transcription/models/{id}/download ApiTranscriptionController.downl
 
 # Tasks API
 GET     /api/tasks                              ApiTasksController.list
+GET     /api/tasks/{id}/runs                    ApiTasksController.runs
 POST    /api/tasks                              ApiTasksController.create
 PATCH   /api/tasks/{id}                         ApiTasksController.update
 POST    /api/tasks/{id}/cancel                  ApiTasksController.cancel

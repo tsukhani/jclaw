@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Agent;
 import models.Task;
+import models.TaskRun;
 import play.db.jpa.JPA;
 import services.EventLogger;
 import services.ScheduleShorthandParser;
@@ -68,6 +69,59 @@ public class ApiTasksController extends Controller {
                     t.preCheck, t.script, t.noAgent,
                     t.contextFromTaskIds, t.repeatLimit);
         }
+    }
+
+    /**
+     * Operator-facing view of one TaskRun row. Returns the audit fields
+     * (status + timestamps + duration) plus the operator-relevant payload
+     * (error, outputSummary, delivery state, trace). Verbose fields like
+     * {@code error} and {@code traceJson} are returned raw — the UI
+     * decides how to render or truncate them. Keeping the API honest
+     * about what's there avoids a second round-trip for "show me the
+     * full error" UX.
+     */
+    private record TaskRunView(Long id, String status,
+                               String startedAt, String completedAt, Long durationMs,
+                               String error, String outputSummary,
+                               String deliveryStatus, String deliveryTarget, String deliveryError,
+                               String traceJson, String createdAt) {
+        static TaskRunView of(TaskRun r) {
+            return new TaskRunView(
+                    r.id,
+                    r.status != null ? r.status.name() : null,
+                    r.startedAt != null ? r.startedAt.toString() : null,
+                    r.completedAt != null ? r.completedAt.toString() : null,
+                    r.durationMs,
+                    r.error,
+                    r.outputSummary,
+                    r.deliveryStatus != null ? r.deliveryStatus.name() : null,
+                    r.deliveryTarget,
+                    r.deliveryError,
+                    r.traceJson,
+                    r.createdAt != null ? r.createdAt.toString() : null);
+        }
+    }
+
+    /**
+     * Paginated TaskRun history for one Task. Sorted most-recent first
+     * (startedAt DESC). Returns {@code []} for a task that exists but
+     * has no runs yet. Returns 404 only if the Task itself is missing.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskRunView.class))))
+    public static void runs(Long id, Integer limit, Integer offset) {
+        Task task = Task.findById(id);
+        if (task == null) notFound();
+
+        int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 200) : 50;
+        int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
+
+        @SuppressWarnings("unchecked")
+        List<TaskRun> rows = (List<TaskRun>) (List<?>) TaskRun.find(
+                "task = ?1 ORDER BY startedAt DESC", task)
+                .from(effectiveOffset)
+                .fetch(effectiveLimit);
+
+        renderJSON(gson.toJson(rows.stream().map(TaskRunView::of).toList()));
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TaskView.class))))
