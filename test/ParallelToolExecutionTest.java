@@ -65,6 +65,15 @@ class ParallelToolExecutionTest extends UnitTest {
     }
 
     private ToolRegistry.Tool sleepTool(String toolName, boolean parallelSafe) {
+        return sleepTool(toolName, parallelSafe, null);
+    }
+
+    /** Variant that lets a test pin the {@link ToolRegistry.Tool#serializationGroup()}
+     *  key, mirroring how {@code SpawnSubagentTool}/{@code YieldToSubagentTool}
+     *  override the default to opt into a shared serial queue. {@code null}
+     *  preserves the default behavior (group = name when unsafe, no group when
+     *  parallel-safe). */
+    private ToolRegistry.Tool sleepTool(String toolName, boolean parallelSafe, String groupKey) {
         return new ToolRegistry.Tool() {
             @Override public String name() { return toolName; }
             @Override public String description() { return "Sleeps for the test."; }
@@ -72,6 +81,9 @@ class ParallelToolExecutionTest extends UnitTest {
                 return Map.of("type", "object", "properties", Map.of());
             }
             @Override public boolean parallelSafe() { return parallelSafe; }
+            @Override public String serializationGroup() {
+                return groupKey != null ? groupKey : ToolRegistry.Tool.super.serializationGroup();
+            }
             @Override public String execute(String argsJson, Agent agent) {
                 executionOrder.add(toolName + ":start");
                 int nowRunning = concurrentExecutions.incrementAndGet();
@@ -326,6 +338,124 @@ class ParallelToolExecutionTest extends UnitTest {
         assertEquals("solo", messages.getFirst().toolCallId());
         // Peak concurrency should be 1 — no spurious virtual thread fan-out.
         assertEquals(1, peakConcurrency.get());
+    }
+
+    @Test
+    void differentlyNamedToolsWithSharedSerializationGroupRunSequentially() throws Exception {
+        // Regression for the spawn_subagent + yield_to_subagent race:
+        // two distinct unsafe tools that share state (e.g. one inserts the
+        // SubagentRun row, the other reads it) must serialize even when
+        // their names differ. Both opt into the shared "subagent_lifecycle"
+        // group via {@link ToolRegistry.Tool#serializationGroup}.
+        //
+        // Before the fix, name-keyed grouping placed these in two separate
+        // VTs running in parallel — yield's findById could fire before
+        // spawn's INSERT committed and return null. After the fix, the
+        // shared group key collapses them into one serial queue in
+        // declared order: spawn finishes (commits the row) before yield
+        // begins (reads it).
+        ToolRegistry.publish(List.of(
+                sleepTool("fake_spawn", false, "subagent_lifecycle"),
+                sleepTool("fake_yield", false, "subagent_lifecycle"),
+                // A separate unsafe tool with the default (name-keyed) group
+                // must NOT be dragged into the shared queue — confirms the
+                // grouping is by key, not by some global "all-unsafe" sink.
+                sleepTool("unrelated_unsafe", false)));
+        long[] ids = seedAgentAndConversation();
+        var agent = (Agent) Agent.findById(ids[0]);
+
+        var calls = List.of(
+                new ToolCall("spawn", "function", new FunctionCall("fake_spawn", "{}")),
+                new ToolCall("yield", "function", new FunctionCall("fake_yield", "{}")),
+                new ToolCall("other", "function", new FunctionCall("unrelated_unsafe", "{}")));
+        var messages = new ArrayList<ChatMessage>();
+
+        long t0 = System.nanoTime();
+        invokeParallel(calls, agent, ids[1], messages, new AtomicBoolean(false));
+        long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
+
+        // Shared-group pair runs on ONE VT; unrelated_unsafe runs on its own VT.
+        // Peak concurrency therefore is 2, never 3 — if peak == 3, the shared
+        // group was not honored and spawn/yield were racing again.
+        assertEquals(2, peakConcurrency.get(),
+                "expected peak concurrency of 2 (shared group + 1 unrelated VT); got "
+                        + peakConcurrency.get());
+
+        // Declared order inside the shared group is the load-bearing invariant:
+        // fake_spawn:start MUST appear before fake_yield:start in the
+        // execution-order log, regardless of VT scheduling. The unrelated tool
+        // can interleave in any position relative to the pair.
+        int spawnIdx = executionOrder.indexOf("fake_spawn:start");
+        int yieldIdx = executionOrder.indexOf("fake_yield:start");
+        assertTrue(spawnIdx >= 0 && yieldIdx >= 0,
+                "both shared-group tools must record their start: " + executionOrder);
+        assertTrue(spawnIdx < yieldIdx,
+                "fake_spawn must start before fake_yield in the shared group; got "
+                        + executionOrder);
+
+        // Wall-clock floor: shared group runs 2 calls serially => >= 2x sleep.
+        // Upper bound: unrelated_unsafe runs concurrently with the group, so
+        // total stays below 3x sleep (fully serial would be 3x sleep).
+        assertTrue(elapsedMs >= TOOL_SLEEP_MS * 2 - 50,
+                "shared-group serialization should take >=%dms, got %dms"
+                        .formatted(TOOL_SLEEP_MS * 2, elapsedMs));
+        assertTrue(elapsedMs < TOOL_SLEEP_MS * 3,
+                "unrelated_unsafe should still run in parallel with the shared group; got %dms"
+                        .formatted(elapsedMs));
+
+        // Commit-order invariant unchanged: results land in declared input order.
+        assertEquals(List.of("spawn", "yield", "other"),
+                messages.stream().map(ChatMessage::toolCallId).toList());
+    }
+
+    @Test
+    void serializationGroupOverrideBeatsDefaultNameGrouping() throws Exception {
+        // Boundary check: when two tools share a serializationGroup key and
+        // a THIRD tool keeps the default (its own name as the key), the
+        // override-pair serializes against each other but not against the
+        // third tool.
+        //
+        // This pins the lookup contract in ToolRegistry.serializationGroupFor:
+        // the override is honored even when one of the participating tools
+        // hasn't opted in by name match. Without this, a future regression
+        // that special-cased "share group only when both tools agree on the
+        // override" would let yield race spawn again on the first turn after
+        // a registry reload.
+        ToolRegistry.publish(List.of(
+                sleepTool("pair_alpha", false, "shared_state"),
+                sleepTool("pair_beta",  false, "shared_state"),
+                sleepTool("loner",      false))); // default group = "loner"
+        long[] ids = seedAgentAndConversation();
+        var agent = (Agent) Agent.findById(ids[0]);
+
+        var calls = List.of(
+                new ToolCall("p1", "function", new FunctionCall("pair_alpha", "{}")),
+                new ToolCall("p2", "function", new FunctionCall("pair_beta",  "{}")),
+                new ToolCall("p3", "function", new FunctionCall("pair_alpha", "{}")),
+                new ToolCall("l1", "function", new FunctionCall("loner",      "{}")));
+        var messages = new ArrayList<ChatMessage>();
+
+        invokeParallel(calls, agent, ids[1], messages, new AtomicBoolean(false));
+
+        // 4 calls, 2 work units: {shared_state group of 3} + {loner singleton}.
+        // Peak == 2: the shared group's single VT + loner's own VT.
+        assertEquals(2, peakConcurrency.get(),
+                "shared_state group should run on ONE VT in parallel with loner; got peak "
+                        + peakConcurrency.get());
+
+        // Inside the shared group, the three calls run in declared order
+        // (p1: pair_alpha, p2: pair_beta, p3: pair_alpha). The execution-order
+        // log records the start of each — extract just the shared-group rows
+        // and assert the order matches LLM-declared.
+        var sharedGroupStarts = executionOrder.stream()
+                .filter(s -> s.startsWith("pair_alpha:") || s.startsWith("pair_beta:"))
+                .toList();
+        assertEquals(List.of("pair_alpha:start", "pair_beta:start", "pair_alpha:start"),
+                sharedGroupStarts,
+                "shared-group calls must execute in declared order on one VT");
+
+        assertEquals(List.of("p1", "p2", "p3", "l1"),
+                messages.stream().map(ChatMessage::toolCallId).toList());
     }
 
     @Test

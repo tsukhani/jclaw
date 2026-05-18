@@ -113,6 +113,27 @@ public class ToolRegistry {
          *  (JCLAW-80). When in doubt, leave it {@code false}. */
         default boolean parallelSafe() { return false; }
 
+        /** Serialization-group key for the parallel tool dispatcher. Tools
+         *  returning the same non-null key are placed in the same serial
+         *  queue and execute in LLM-declared order on a single virtual
+         *  thread — even when their {@link #name() name}s differ.
+         *
+         *  <p>The default mirrors the pre-JCLAW-291 behavior: parallel-safe
+         *  tools are not grouped at all (each call gets its own VT), while
+         *  non-parallel-safe tools group by their own name (multiple calls
+         *  to the same tool serialize, calls to different tools parallelize).
+         *
+         *  <p>Override when two distinct tools share state that races at the
+         *  DB or in-memory layer. The {@code spawn_subagent} + {@code
+         *  yield_to_subagent} pair is the motivating case: yield reads the
+         *  SubagentRun row that spawn just inserted, so they must serialize
+         *  even when the LLM emits both in one assistant message. Both
+         *  return the same {@code "subagent_lifecycle"} key from this
+         *  method, forcing them onto one serial queue. */
+        default String serializationGroup() {
+            return parallelSafe() ? null : name();
+        }
+
         /** Optional grouping key for the {@code /tools} admin page. Tools
          *  sharing the same {@code group} render as a single card with
          *  their {@link #actions()} folded together. Used by
@@ -232,6 +253,19 @@ public class ToolRegistry {
     public static boolean isParallelSafe(String toolName) {
         var tool = tools.get(toolName);
         return tool != null && tool.parallelSafe();
+    }
+
+    /** Resolve a tool's {@link Tool#serializationGroup()} key by name. Returns
+     *  {@code null} for unknown names AND for tools whose own
+     *  {@code serializationGroup()} is {@code null} (the parallel-safe case);
+     *  used by {@link agents.ParallelToolExecutor} to merge cross-name serial
+     *  queues for the {@code spawn_subagent}/{@code yield_to_subagent} pair
+     *  and similar future cases. For unknown tools we fall back to the tool
+     *  name as the group key so a typo can't accidentally unlock parallelism. */
+    public static String serializationGroupFor(String toolName) {
+        var tool = tools.get(toolName);
+        if (tool == null) return toolName;
+        return tool.serializationGroup();
     }
 
     /** JCLAW-170: resolve a tool's semantic icon key by name. Returns the

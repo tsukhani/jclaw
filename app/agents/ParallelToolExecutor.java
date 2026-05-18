@@ -32,15 +32,19 @@ import static utils.GsonHolder.INSTANCE;
  *   virtual thread — the pre-v0.7.13 behavior. Appropriate for stateless
  *   HTTP clients ({@code web_fetch}, {@code web_search}), pure-compute
  *   helpers ({@code date_time}), and validators ({@code checklist}).</li>
- *   <li><b>Non-parallel-safe tool</b>: calls are grouped by tool name
- *   into a single virtual thread and run sequentially in declared order.
- *   This is the JCLAW-80 fix — the LLM's declared call order is the
- *   authoritative contract for stateful tools (browser Page, shell cwd,
- *   workspace writers) because racing them gives screenshot-before-navigate
- *   class bugs.</li>
- *   <li><b>Across tool-name groups</b> (whether safe or unsafe): always
- *   parallel. Different tools touch different state, so there's no
- *   correctness reason to serialize them.</li>
+ *   <li><b>Non-parallel-safe tool</b>: calls are grouped by
+ *   {@link ToolRegistry.Tool#serializationGroup()} into a single virtual
+ *   thread and run sequentially in declared order. The default group key
+ *   is the tool's own name, so multiple calls to the same tool serialize.
+ *   Tools that share DB or in-memory state with another tool override
+ *   {@code serializationGroup()} to return a shared key — for instance
+ *   {@code spawn_subagent} and {@code yield_to_subagent} both return
+ *   {@code "subagent_lifecycle"} so yield can't read before spawn has
+ *   committed its SubagentRun row. The JCLAW-80 fix in spirit: the LLM's
+ *   declared call order is the authoritative contract for stateful tools.</li>
+ *   <li><b>Across serialization groups</b> (whether safe or unsafe):
+ *   always parallel. Groups touch disjoint state by construction, so
+ *   there's no correctness reason to serialize across them.</li>
  * </ul>
  *
  * <p>Single-tool batches skip the virtual-thread overhead and execute
@@ -156,18 +160,24 @@ public final class ParallelToolExecutor {
         } else {
             // Partition calls into work units:
             //   - parallel-safe tools → one work unit per CALL (each races freely)
-            //   - non-parallel-safe tools → one work unit per tool-NAME group
+            //   - non-parallel-safe tools → one work unit per
+            //     {@link ToolRegistry.Tool#serializationGroup() group key}
             //     (calls within it run sequentially in declared order)
+            // Default group key is the tool's own name, so distinct tools
+            // still parallelize. Tools that share state across names (e.g.
+            // spawn_subagent + yield_to_subagent both return
+            // "subagent_lifecycle") merge into one serial queue.
             // LinkedHashMap preserves first-occurrence order so the unsafe
             // groups, like the safe singletons, see their declared positions.
             var unsafeGroups = new LinkedHashMap<String, List<Integer>>();
             var safeCalls = new ArrayList<Integer>();
             for (int i = 0; i < n; i++) {
                 var name = toolCalls.get(i).function().name();
-                if (ToolRegistry.isParallelSafe(name)) {
+                var groupKey = ToolRegistry.serializationGroupFor(name);
+                if (groupKey == null) {
                     safeCalls.add(i);
                 } else {
-                    unsafeGroups.computeIfAbsent(name, k -> new ArrayList<>()).add(i);
+                    unsafeGroups.computeIfAbsent(groupKey, k -> new ArrayList<>()).add(i);
                 }
             }
 

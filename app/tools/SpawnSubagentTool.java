@@ -237,6 +237,16 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
     @Override
     public boolean parallelSafe() { return false; }
 
+    /** Subagent-lifecycle group: shared with {@link YieldToSubagentTool} so
+     *  the {@link ParallelToolExecutor} cannot dispatch yield's findById
+     *  before spawn's SubagentRun INSERT commits. Without this, a model that
+     *  emits both tool calls in one assistant message (guessing the runId
+     *  from prior history) races on the row visibility — the symptom is
+     *  yield_to_subagent returning "no SubagentRun found for runId X" for a
+     *  freshly-spawned async run. */
+    @Override
+    public String serializationGroup() { return "subagent_lifecycle"; }
+
     @Override
     public String execute(String argsJson, Agent parentAgent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();

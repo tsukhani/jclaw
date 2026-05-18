@@ -117,6 +117,15 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
     @Override
     public boolean parallelSafe() { return false; }
 
+    /** Subagent-lifecycle group: shared with {@link SpawnSubagentTool} so a
+     *  same-message {@code spawn_subagent} + {@code yield_to_subagent} pair
+     *  serializes inside the {@link agents.ParallelToolExecutor}. Yield reads
+     *  the SubagentRun row spawn just inserted; the default name-keyed group
+     *  would put each tool in its own VT and yield's findById could race
+     *  spawn's INSERT commit. */
+    @Override
+    public String serializationGroup() { return "subagent_lifecycle"; }
+
     @Override
     public String execute(String argsJson, Agent callingAgent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
