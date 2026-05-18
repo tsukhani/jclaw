@@ -206,6 +206,110 @@ class TaskFireFunctionalTest extends UnitTest {
         assertTrue(loadEventsByCategory("TASK_FAILED").isEmpty());
     }
 
+    /**
+     * JCLAW-294 AC: pause a recurring task, observe handler no-ops on
+     * fires until resume. Drives the production lambda three times
+     * across one pause+resume cycle and verifies the TASK_STARTED
+     * count tracks the unpaused fires only.
+     */
+    @Test
+    void recurringPauseResumeCycleSkipsFiresUntilResume() throws Exception {
+        startLlmServer(simpleResponse("OK"));
+        configureProvider();
+
+        var agent = createAgent("pause-cycle-agent", "test-provider", "test-model");
+        // INTERVAL task — recurring shape so the handler's pause-skip
+        // routes through scheduleNextIfRecurring (cadence preserved)
+        // rather than defaultCompletion (drop the row).
+        var task = persistTask(agent, "Cycle task", "Reply OK.", Task.Type.INTERVAL);
+        task.intervalSeconds = 3600L;
+        task.save();
+
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var dbTask = TaskExecutionHandler.buildTask();
+        var instance = new TaskInstance<Void>(TaskExecutionHandler.TASK_NAME,
+                task.id.toString());
+
+        // === Fire 1: unpaused → full execution ===
+        driveFire(dbTask, instance);
+        JPA.em().clear();
+        assertEquals(1, listRunsForTask(task.id).size(),
+                "fire 1 should produce one TaskRun");
+        EventLogger.flush();
+        assertEquals(1, loadEventsByCategory("TASK_STARTED").size(),
+                "fire 1 emits TASK_STARTED");
+        assertEquals(1, loadEventsByCategory("TASK_COMPLETED").size(),
+                "fire 1 emits TASK_COMPLETED");
+
+        // === Pause via the service (matches production caller — both
+        // the HTTP /pause and the chat-tool pause action route here) ===
+        // The pause call's Tx.run nests in this thread's outer tx; commit
+        // + begin so the lambda's VT thread sees paused=true on its next
+        // Task.findById read (per project_functionaltest_tx_isolation).
+        services.TaskSchedulingService.pause(task.id);
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        JPA.em().clear();
+
+        // === Fire 2: paused → handler skips body, no new TaskRun, no
+        // new TASK_STARTED. Per the handler's recurring-paused path,
+        // it still calls scheduleNextIfRecurring so the cadence
+        // continues (we just can't observe that scheduling at this layer
+        // because db-scheduler is unwired in this test) ===
+        driveFire(dbTask, instance);
+        JPA.em().clear();
+        assertEquals(1, listRunsForTask(task.id).size(),
+                "fire 2 (paused) must not open a new TaskRun");
+        EventLogger.flush();
+        assertEquals(1, loadEventsByCategory("TASK_STARTED").size(),
+                "fire 2 (paused) must not emit a new TASK_STARTED");
+        assertEquals(1, loadEventsByCategory("TASK_COMPLETED").size(),
+                "fire 2 (paused) must not emit a new TASK_COMPLETED");
+
+        // === Resume via the service ===
+        services.TaskSchedulingService.resume(task.id);
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        JPA.em().clear();
+
+        // === Fire 3: resumed → full execution, second TaskRun + second
+        // TASK_STARTED/COMPLETED pair ===
+        driveFire(dbTask, instance);
+        JPA.em().clear();
+        assertEquals(2, listRunsForTask(task.id).size(),
+                "fire 3 (resumed) should produce a second TaskRun");
+        EventLogger.flush();
+        assertEquals(2, loadEventsByCategory("TASK_STARTED").size(),
+                "fire 3 (resumed) emits a second TASK_STARTED");
+        assertEquals(2, loadEventsByCategory("TASK_COMPLETED").size(),
+                "fire 3 (resumed) emits a second TASK_COMPLETED");
+    }
+
+    /**
+     * Drive one db-scheduler lambda invocation against {@code instance}.
+     * Same execution shape as TaskFireFunctionalTest's primary test —
+     * extracted as a helper because the pause/resume test fires three
+     * times across one method.
+     */
+    private static void driveFire(com.github.kagkarlsson.scheduler.task.helper.CustomTask<Void> dbTask,
+                                   TaskInstance<Void> instance) throws Exception {
+        var ctx = new ExecutionContext(null,
+                new Execution(Instant.now(), instance), null, null);
+        var errorRef = new AtomicReference<Exception>();
+        var t = Thread.ofVirtual().start(() -> {
+            try {
+                dbTask.execute(instance, ctx);
+            } catch (Exception e) {
+                errorRef.set(e);
+            }
+        });
+        t.join(30_000);
+        if (t.isAlive()) throw new AssertionError("execute did not finish within 30s");
+        if (errorRef.get() != null) throw errorRef.get();
+    }
+
     @Test
     void pausedTaskIsSkippedWithoutOpeningARun() throws Exception {
         var agent = createAgent("paused-test-agent", "test-provider", "test-model");
