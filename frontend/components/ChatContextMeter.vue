@@ -96,11 +96,15 @@ function handleMouseLeave() {
         @focus="open = true"
         @blur="open = false"
       >
-        <span class="text-sm font-mono text-fg-muted tabular-nums">
+        <span
+          data-testid="context-readout"
+          class="text-sm font-mono text-fg-muted tabular-nums"
+        >
           {{ total.toLocaleString() }} / {{ triggerRight }}
         </span>
         <span class="w-10 h-1 bg-muted rounded-full overflow-hidden">
           <span
+            data-testid="context-bar"
             class="block h-full rounded-full transition-[width] duration-300 ease-out"
             :class="percent >= 90 ? 'bg-red-400' : percent >= 70 ? 'bg-amber-400' : 'bg-emerald-400'"
             :style="{ width: `${percent}%` }"

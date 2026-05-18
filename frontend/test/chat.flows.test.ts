@@ -121,7 +121,10 @@ describe('Chat page — POST /api/chat/stream on form submit', () => {
 
   it('does not POST when the input is empty and no attachments are queued', async () => {
     setupChatApi()
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    // Always provide a mock implementation — without one, vi.spyOn falls
+    // through to the real fetch and can hit the network in happy-dom.
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
+      new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } }))
 
     const component = await mountSuspended(Chat)
     await flushPromises()
@@ -160,9 +163,9 @@ describe('Chat page — conversation switch via loadConversation', () => {
     // Both turns landed in the message list.
     expect(vm.messages.length).toBe(2)
     expect(vm.messages[0]!.role).toBe('user')
-    expect(vm.messages[0]!.content).toContain('configure skills')
+    expect(vm.messages[0]!.content).toBe('how do I configure skills?')
     expect(vm.messages[1]!.role).toBe('assistant')
-    expect(vm.messages[1]!.content).toContain('Configure skills in /settings/skills.')
+    expect(vm.messages[1]!.content).toBe('Configure skills in /settings/skills.')
 
     // Page DOM also shows them — the message list iterates messages.
     const html = component.html()

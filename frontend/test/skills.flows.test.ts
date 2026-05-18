@@ -152,6 +152,14 @@ describe('Skills page — filter-bar LIKE matching (agents list)', () => {
 })
 
 describe('Skills page — promote flow opens ConfirmDialog when global already exists', () => {
+  afterEach(() => {
+    // Reset useConfirm singleton state and strip teleported dialog content
+    // so leakage from one promote-flow case doesn't bleed into the next.
+    const { _state, _resolve } = useConfirm()
+    if (_state.open) _resolve(false)
+    document.body.querySelectorAll('[role="dialog"]').forEach(el => el.remove())
+  })
+
   it('fires /api/skills/promote when the user confirms the replacement dialog', async () => {
     let promotePosted = false
     let promoteBody: unknown = null
@@ -211,7 +219,7 @@ describe('Skills page — promote flow opens ConfirmDialog when global already e
     expect(promoteBtn).toBeTruthy()
     promoteBtn!.click()
     await flushPromises()
-    await new Promise(r => setTimeout(r, 30))
+    await flushPromises()
 
     expect(promotePosted).toBe(true)
     expect(promoteBody).toEqual({ agentId: 1, skillName: 'web-search' })
@@ -253,18 +261,10 @@ describe('Skills page — promote flow opens ConfirmDialog when global already e
     expect(cancelBtn).toBeTruthy()
     cancelBtn!.click()
     await flushPromises()
-    await new Promise(r => setTimeout(r, 30))
+    await flushPromises()
 
     expect(promotePosted).toBe(false)
   })
-})
-
-afterEach(() => {
-  // Reset useConfirm singleton state and strip teleported dialog content
-  // so leakage from one promote-flow case doesn't bleed into the next.
-  const { _state, _resolve } = useConfirm()
-  if (_state.open) _resolve(false)
-  document.body.querySelectorAll('[role="dialog"]').forEach(el => el.remove())
 })
 
 describe('Skills page — delete a global custom skill', () => {
@@ -292,7 +292,7 @@ describe('Skills page — delete a global custom skill', () => {
     expect(trashBtn).toBeTruthy()
     await trashBtn!.trigger('click')
     await flushPromises()
-    await new Promise(r => setTimeout(r, 30))
+    await flushPromises()
 
     expect(deletedName).toBe('code-review')
   })

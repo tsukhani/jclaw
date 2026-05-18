@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { registerEndpoint } from '@nuxt/test-utils/runtime'
+import { flushPromises } from '@vue/test-utils'
 import {
   __resetInFlightRecord,
   useGuidedTour,
@@ -87,7 +88,7 @@ describe('useGuidedTour — confirmStart activates step 0', () => {
     const tour = useGuidedTour()
     tour.confirmStart()
     // recordStepReached is fire-and-forget; wait a tick for the $fetch to land.
-    await new Promise(r => setTimeout(r, 50))
+    await flushPromises()
     expect(posted).toEqual({ step: 1 })
   })
 })
@@ -104,11 +105,11 @@ describe('useGuidedTour — end clears state without completing', () => {
     })
     const tour = useGuidedTour()
     tour.confirmStart()
-    await new Promise(r => setTimeout(r, 50))
+    await flushPromises()
     const postsAfterStart = postCount
 
     tour.end()
-    await new Promise(r => setTimeout(r, 50))
+    await flushPromises()
 
     // end() must not POST — it's the "skip all" path, not the "completed" one.
     expect(postCount).toBe(postsAfterStart)
