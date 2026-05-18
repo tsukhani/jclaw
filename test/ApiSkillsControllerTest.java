@@ -695,4 +695,203 @@ class ApiSkillsControllerTest extends FunctionalTest {
                 "{\"newName\": \"beta-skill\"}");
         assertEquals(409, resp.status.intValue());
     }
+
+    // ==================== copyToAgent — tool-validation rejection ====================
+
+    /**
+     * Copy is refused with 400 when the global skill declares a tool the
+     * canonical {@code ToolRegistry} doesn't recognise. Verifies the
+     * controller surfaces the validator's message verbatim via renderText.
+     */
+    @Test
+    void copyToAgentRejectsSkillDeclaringUnknownTool() throws Exception {
+        login();
+        var idStr = createAgent("copy-unknown-tool");
+
+        // Skill declares a tool that the canonical ToolRegistry cannot resolve.
+        // resolveSkillTools' validateSkillTools call falls into the !ok path
+        // and the controller responds 400 with the validator's message.
+        var dir = globalSkillsDir.resolve("needs-fake-tool");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("SKILL.md"),
+                "---\n"
+              + "name: needs-fake-tool\n"
+              + "description: depends on a tool that does not exist\n"
+              + "version: 1.0.0\n"
+              + "tools: [definitely_not_a_real_tool_xyz]\n"
+              + "---\n"
+              + "# body\n");
+        SkillLoader.clearCache();
+
+        var resp = POST("/api/agents/" + idStr + "/skills/needs-fake-tool/copy",
+                "application/json", "{}");
+        assertEquals(400, resp.status.intValue());
+        var body = getContent(resp);
+        assertTrue(body.contains("definitely_not_a_real_tool_xyz"),
+                "error body names the unknown tool: " + body);
+    }
+
+    /**
+     * Re-copy of a previously-disabled workspace skill flips
+     * AgentSkillConfig.enabled back to true (lines 309-313 of
+     * ApiSkillsController). Without the toggle, a user who disabled then
+     * re-installed a skill would silently keep it disabled.
+     */
+    @Test
+    void copyToAgentReEnablesPreviouslyDisabledSkill() throws Exception {
+        login();
+        var idStr = createAgent("copy-re-enable");
+        var agentId = Long.parseLong(idStr);
+        seedGlobalSkill("widget-skill", "widget", "A widget");
+
+        // Pre-seed a disabled config row. Fresh tx so the HTTP handler sees it.
+        commitInFreshTx(() -> {
+            var cfg = new AgentSkillConfig();
+            cfg.agent = Agent.findById(agentId);
+            cfg.skillName = "widget-skill";
+            cfg.enabled = false;
+            cfg.save();
+        });
+
+        var resp = POST("/api/agents/" + idStr + "/skills/widget-skill/copy",
+                "application/json", "{}");
+        assertIsOk(resp);
+
+        var enabled = fetchInFreshTx(() -> {
+            var cfg = AgentSkillConfig.findByAgentAndSkill(
+                    Agent.findById(agentId), "widget-skill");
+            return cfg != null && cfg.enabled;
+        });
+        assertTrue(enabled, "copy must flip a disabled config row back to enabled");
+    }
+
+    // ==================== listFiles — declared tools, body heuristic, author ====================
+
+    /**
+     * When a skill SKILL.md frontmatter declares {@code tools:}, the file
+     * listing's "tools" key reflects the declared list verbatim and skips
+     * the body-text heuristic (lines 138-151 of ApiSkillsController). The
+     * declared-tools branch never executes against the SonarQube fixture
+     * because shipped skills don't declare tools — covered now.
+     */
+    @Test
+    void listGlobalSkillFilesUsesDeclaredToolsFromFrontmatter() throws Exception {
+        login();
+        var dir = globalSkillsDir.resolve("declared-tools");
+        Files.createDirectories(dir);
+        // 'exec' is a known canonical tool name in ToolRegistry
+        Files.writeString(dir.resolve("SKILL.md"),
+                "---\n"
+              + "name: declared-tools\n"
+              + "description: declared tools test\n"
+              + "version: 1.0.0\n"
+              + "tools: [exec]\n"
+              + "author: tester\n"
+              + "commands: [echo, ls]\n"
+              + "---\n"
+              + "# body with no other tool names\n");
+        SkillLoader.clearCache();
+
+        var resp = GET("/api/skills/declared-tools/files");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"name\":\"exec\""),
+                "declared 'exec' must appear in tools: " + body);
+        assertTrue(body.contains("\"commands\":[\"echo\",\"ls\"]"),
+                "commands key reflects frontmatter: " + body);
+        assertTrue(body.contains("\"author\":\"tester\""),
+                "author key reflects frontmatter: " + body);
+    }
+
+    /**
+     * Skill without {@code tools:} frontmatter falls back to the body-text
+     * heuristic. A SKILL.md body that contains a bash code fence triggers
+     * the implicit 'exec' detection (lines 184-193 of ApiSkillsController).
+     */
+    @Test
+    void listGlobalSkillFilesDetectsImplicitShellFromBashFence() throws Exception {
+        login();
+        var dir = globalSkillsDir.resolve("bash-fence");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("SKILL.md"),
+                "---\n"
+              + "name: bash-fence\n"
+              + "description: legacy skill, no tools declaration\n"
+              + "version: 1.0.0\n"
+              + "---\n"
+              + "# Howto\n\n"
+              + "```bash\necho hello\n```\n");
+        SkillLoader.clearCache();
+
+        var resp = GET("/api/skills/bash-fence/files");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"name\":\"exec\""),
+                "bash code fence implies exec tool: " + body);
+    }
+
+    /**
+     * Skill without {@code tools:} frontmatter whose body literally mentions
+     * the alias "readFile" triggers the TOOL_ALIASES map → canonical
+     * 'filesystem' tool (lines 171-180 of ApiSkillsController).
+     */
+    @Test
+    void listGlobalSkillFilesDetectsFilesystemAlias() throws Exception {
+        login();
+        var dir = globalSkillsDir.resolve("alias-skill");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("SKILL.md"),
+                "---\n"
+              + "name: alias-skill\n"
+              + "description: legacy skill with alias mention\n"
+              + "version: 1.0.0\n"
+              + "---\n"
+              + "# Body\n\nUse readFile to load data.\n");
+        SkillLoader.clearCache();
+
+        var resp = GET("/api/skills/alias-skill/files");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        // 'filesystem' is the canonical tool name for the readFile alias
+        assertTrue(body.contains("\"name\":\"filesystem\""),
+                "readFile alias must resolve to filesystem tool: " + body);
+    }
+
+    // ==================== promote — agent without skill-creator capability ====================
+
+    /**
+     * Pushes the agent past the controller's synchronous 404 gate (the
+     * workspace skill exists), then verifies the background promotion job
+     * publishes {@code skill.promote_failed} for the missing capability. This
+     * proves the controller wires the agent id through correctly without
+     * sneaking past the capability check.
+     */
+    @Test
+    void promoteBackgroundFailsWhenAgentLacksSkillCreator() throws Exception {
+        login();
+        var idStr = createAgent("promote-no-cap");
+        seedAgentWorkspaceSkill("promote-no-cap", "alpha", "alpha");
+
+        // Subscribe BEFORE firing the POST so we don't miss the event
+        var latch = new java.util.concurrent.CountDownLatch(1);
+        var ref = new java.util.concurrent.atomic.AtomicReference<String>();
+        var off = services.NotificationBus.subscribe(payload -> {
+            if (payload.contains("\"type\":\"skill.promote_failed\"")
+                    && ref.compareAndSet(null, payload)) {
+                latch.countDown();
+            }
+        });
+        try {
+            var resp = POST("/api/skills/promote", "application/json",
+                    "{\"agentId\": " + idStr + ", \"skillName\": \"alpha\"}");
+            assertIsOk(resp);
+
+            assertTrue(latch.await(5, java.util.concurrent.TimeUnit.SECONDS),
+                    "background job must publish skill.promote_failed");
+            assertTrue(ref.get().contains("skill-creator capability"),
+                    "failure message names the missing capability: " + ref.get());
+        } finally {
+            off.run();
+        }
+    }
 }

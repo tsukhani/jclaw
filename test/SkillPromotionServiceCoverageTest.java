@@ -348,4 +348,195 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
         }
     }
 
+    // ==================== promoteInBackground end-to-end (LLM-skipped) ====================
+
+    /**
+     * Install skill-creator into {@code agent}'s workspace so
+     * {@link SkillPromotionService#hasSkillCreatorCapability} passes. The
+     * promotion pipeline's capability gate at the top of
+     * {@code promoteInBackground} is exercised in
+     * {@link #promoteRefusedWhenAgentLacksSkillCreator}; here we want to push
+     * past it to cover the file walk, frontmatter preservation, sanitize
+     * pass-through, and atomic-write branches.
+     */
+    private void installSkillCreatorWorkspace(Agent agent) throws Exception {
+        var skillCreatorDir = AgentService.workspacePath(agent.name)
+                .resolve("skills").resolve(SkillPromotionService.SKILL_CREATOR_NAME);
+        writeSkillMd(skillCreatorDir, SkillPromotionService.SKILL_CREATOR_NAME, "1.0.0");
+    }
+
+    /**
+     * End-to-end promotion happy path with LLM sanitization short-circuited by
+     * absence of a configured provider and no main agent — covers
+     * writeToGlobalRegistry, syncRegistryToolRows, atomic swap into the global
+     * registry, and the skill.promoted notification.
+     */
+    @Test
+    void promoteEndToEndWritesGlobalRegistryWhenNoLlmConfigured() throws Exception {
+        var agent = createAgent("promote-e2e-no-llm");
+        installSkillCreatorWorkspace(agent);
+        SkillLoader.clearCache();
+
+        // No main agent + no skillsPromotion.provider config → sanitizeWithLlm
+        // returns the inputs unchanged (lines 588-592 of SkillPromotionService).
+        var workspaceSkillDir = AgentService.workspacePath(agent.name)
+                .resolve("skills").resolve("widget");
+        writeSkillMd(workspaceSkillDir, "widget", "1.0.0", "echo", "ls");
+
+        var payload = waitForEvent("skill.promoted",
+                () -> SkillPromotionService.promoteInBackground(workspaceSkillDir, "widget", agent.id),
+                Duration.ofSeconds(5));
+        assertNotNull(payload, "must publish skill.promoted after writeToGlobalRegistry");
+        assertTrue(payload.contains("\"replaced\":false"), "first promotion is a create: " + payload);
+
+        // Global registry now contains the promoted skill.
+        var globalWidget = globalSkillsDir.resolve("widget").resolve("SKILL.md");
+        assertTrue(Files.exists(globalWidget),
+                "promoted skill must land in global registry");
+        assertTrue(Files.readString(globalWidget).contains("name: widget"));
+
+        // syncRegistryToolRows wrote one row per command from the SKILL.md frontmatter
+        var rows = SkillRegistryTool.findBySkill("widget").stream()
+                .map(r -> r.toolName).sorted().toList();
+        assertEquals(java.util.List.of("echo", "ls"), rows,
+                "syncRegistryToolRows must mirror the commands frontmatter");
+
+        // Cleanup so SkillRegistryTool.findBySkill("widget") doesn't leak into other tests
+        SkillRegistryTool.deleteBySkill("widget");
+    }
+
+    /**
+     * Same flow as above but on a re-promotion: global already has the skill,
+     * workspace is at a higher version. Covers the {@code replacing=true} branch
+     * of writeToGlobalRegistry / atomicSwap.
+     */
+    @Test
+    void promoteReplacesExistingGlobalSkill() throws Exception {
+        var agent = createAgent("promote-e2e-replace");
+        installSkillCreatorWorkspace(agent);
+        SkillLoader.clearCache();
+
+        // Pre-existing global skill at 1.0.0
+        var globalWidget = globalSkillsDir.resolve("widget");
+        writeSkillMd(globalWidget, "widget", "1.0.0");
+
+        // Workspace at 2.0.0 — newer, no downgrade, hashes differ
+        var workspaceWidget = AgentService.workspacePath(agent.name)
+                .resolve("skills").resolve("widget");
+        writeSkillMd(workspaceWidget, "widget", "2.0.0", "echo");
+
+        var payload = waitForEvent("skill.promoted",
+                () -> SkillPromotionService.promoteInBackground(workspaceWidget, "widget", agent.id),
+                Duration.ofSeconds(5));
+        assertNotNull(payload, "publishes skill.promoted on replacement");
+        assertTrue(payload.contains("\"replaced\":true"), "second promotion replaces: " + payload);
+
+        // New version landed in global
+        assertTrue(Files.readString(globalWidget.resolve("SKILL.md")).contains("version: 2.0.0"),
+                "global must carry the new version after replace");
+
+        // Cleanup
+        SkillRegistryTool.deleteBySkill("widget");
+    }
+
+    /**
+     * promoteInBackground with a credentials/ file in the workspace exercises
+     * the stripCredentialsJson branch (lines 297-301 of SkillPromotionService).
+     * The promoted global copy must have the credentials value redacted but
+     * keep the JSON key.
+     */
+    @Test
+    void promoteStripsCredentialsBeforeGlobalRegistry() throws Exception {
+        var agent = createAgent("promote-e2e-credentials");
+        installSkillCreatorWorkspace(agent);
+        SkillLoader.clearCache();
+
+        var workspaceWidget = AgentService.workspacePath(agent.name)
+                .resolve("skills").resolve("widget");
+        writeSkillMd(workspaceWidget, "widget", "1.0.0");
+        var credsDir = workspaceWidget.resolve("credentials");
+        Files.createDirectories(credsDir);
+        Files.writeString(credsDir.resolve("config.json"),
+                "{\"apiKey\": \"sk-leak-me\", \"baseUrl\": \"https://example.com\"}");
+
+        var payload = waitForEvent("skill.promoted",
+                () -> SkillPromotionService.promoteInBackground(workspaceWidget, "widget", agent.id),
+                Duration.ofSeconds(5));
+        assertNotNull(payload);
+
+        var promotedConfig = Files.readString(
+                globalSkillsDir.resolve("widget").resolve("credentials").resolve("config.json"));
+        assertFalse(promotedConfig.contains("sk-leak-me"),
+                "credentials value must be stripped: " + promotedConfig);
+        assertTrue(promotedConfig.contains("apiKey"),
+                "credentials key preserved: " + promotedConfig);
+        assertTrue(promotedConfig.contains("[CREDENTIAL]"),
+                "stripped values replaced with placeholder: " + promotedConfig);
+
+        SkillRegistryTool.deleteBySkill("widget");
+    }
+
+    /**
+     * Binary files in the workspace get relocated under tools/ in the global
+     * copy (lines 285-294). Workspace has a stray .png at the root; the
+     * promoted global registry should carry it under tools/.
+     */
+    @Test
+    void promoteRelocatesBinaryFilesUnderTools() throws Exception {
+        var agent = createAgent("promote-e2e-binary");
+        installSkillCreatorWorkspace(agent);
+        SkillLoader.clearCache();
+
+        var workspaceWidget = AgentService.workspacePath(agent.name)
+                .resolve("skills").resolve("widget");
+        writeSkillMd(workspaceWidget, "widget", "1.0.0");
+        // 1x1 PNG (a tiny but plausible binary) at the root of the workspace skill
+        var png = new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+        Files.write(workspaceWidget.resolve("icon.png"), png);
+
+        var payload = waitForEvent("skill.promoted",
+                () -> SkillPromotionService.promoteInBackground(workspaceWidget, "widget", agent.id),
+                Duration.ofSeconds(5));
+        assertNotNull(payload);
+
+        assertTrue(Files.exists(globalSkillsDir.resolve("widget").resolve("tools").resolve("icon.png")),
+                "binary at root must be relocated under tools/");
+        assertFalse(Files.exists(globalSkillsDir.resolve("widget").resolve("icon.png")),
+                "binary must NOT remain at the root of the promoted skill");
+
+        SkillRegistryTool.deleteBySkill("widget");
+    }
+
+    /**
+     * End-to-end happy path but with a main agent present whose
+     * {@code modelProvider} isn't registered (no API key). Covers the
+     * second {@code sanitizeWithLlm} skip branch (lines 597-599) where
+     * {@code provider == null} after the main-agent fallback. The downstream
+     * writeToGlobalRegistry still runs, so the promotion succeeds.
+     */
+    @Test
+    void promoteSkipsLlmWhenMainAgentProviderUnregistered() throws Exception {
+        // Main agent exists, but provider isn't in the registry — sanitize
+        // pipeline falls through and inputs pass unchanged.
+        AgentService.create(Agent.MAIN_AGENT_NAME, "no-such-provider-xyz", "no-such-model");
+        seededAgentNames.add(Agent.MAIN_AGENT_NAME);
+        llm.ProviderRegistry.refresh();
+
+        var agent = createAgent("promote-e2e-main-no-provider");
+        installSkillCreatorWorkspace(agent);
+        SkillLoader.clearCache();
+
+        var workspaceSkillDir = AgentService.workspacePath(agent.name)
+                .resolve("skills").resolve("widget");
+        writeSkillMd(workspaceSkillDir, "widget", "1.0.0");
+
+        var payload = waitForEvent("skill.promoted",
+                () -> SkillPromotionService.promoteInBackground(workspaceSkillDir, "widget", agent.id),
+                Duration.ofSeconds(5));
+        assertNotNull(payload, "promotion still succeeds when sanitize is skipped");
+        assertTrue(Files.exists(globalSkillsDir.resolve("widget").resolve("SKILL.md")));
+
+        SkillRegistryTool.deleteBySkill("widget");
+    }
+
 }
