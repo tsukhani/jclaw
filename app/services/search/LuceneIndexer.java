@@ -84,9 +84,19 @@ public final class LuceneIndexer {
         // the only way that happens is if an operator drops in segments
         // from another install. The cleanup story is "wipe the directory".
         var dir = FSDirectory.open(indexDir);
-        var iwc = new IndexWriterConfig(new StandardAnalyzer());
-        iwc.setOpenMode(IndexWriterConfig.OpenMode.CREATE_OR_APPEND);
-        var writer = new IndexWriter(dir, iwc);
+        IndexWriter writer;
+        try {
+            var iwc = new IndexWriterConfig(new StandardAnalyzer());
+            iwc.setOpenMode(IndexWriterConfig.OpenMode.CREATE_OR_APPEND);
+            // IndexWriter takes ownership of dir on success and closes it
+            // via its own close(); we only release dir if construction throws
+            // (e.g. lock contention, corrupt segment) — otherwise the FS lock
+            // leaks and blocks next-boot retry.
+            writer = new IndexWriter(dir, iwc);
+        } catch (IOException | RuntimeException e) {
+            try { dir.close(); } catch (IOException ignored) { /* surface original */ }
+            throw e;
+        }
         WRITER.set(writer);
         SEARCHER.set(new SearcherManager(writer, new SearcherFactory()));
 
