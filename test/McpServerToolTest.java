@@ -303,12 +303,18 @@ class McpServerToolTest extends UnitTest {
     // ==================== unknown action with no live connection ====================
 
     @Test
-    void unknownActionWithDisconnectedServerSignalsBothFailures() {
-        // No adapter registered for the action AND no live connection ⇒ both
-        // diagnostic phrases should appear: the "no action named" error AND
-        // the catalog's not-connected line (since the catalog body is
-        // appended after the error). Together they tell the model exactly
-        // what to do next: re-enumerate via empty args.
+    void unknownActionWithDisconnectedServerNamesTheActionAndServer() {
+        // Unknown-action error path: when no adapter is registered AND no live
+        // connection advertises the action, the response must (a) name the
+        // unknown action, (b) name the server, and (c) point the model at
+        // empty-args discovery for the full schemas. The compact name list
+        // collapses to a "(none — server not connected ...)" sentinel here,
+        // since the fake serverName has no advertised actions.
+        //
+        // The error body must NOT include action input schemas — that
+        // bloated the next LLM turn's prompt by tens of thousands of tokens
+        // on schema-heavy servers like google-workspace, dragging
+        // time-to-first-token into the minute range.
         var serverName = "absent-" + System.nanoTime();
         var tool = new McpServerTool(serverName);
         var result = tool.executeRich(
@@ -317,7 +323,13 @@ class McpServerToolTest extends UnitTest {
                 "missing-adapter message lets the model recognize stale tool names: "
                         + result.text());
         assertTrue(result.text().contains(serverName),
-                "server name surfaces in both halves of the diagnostic");
+                "server name surfaces so multi-server agents can attribute the failure");
+        assertTrue(result.text().contains("Available actions:"),
+                "compact name list header replaces the old schema-dump catalog: "
+                        + result.text());
+        assertFalse(result.text().contains("inputSchema"),
+                "input schemas must NOT appear in the unknown-action error: "
+                        + result.text());
     }
 
     // ==================== helpers ====================

@@ -160,11 +160,17 @@ public final class McpServerTool implements ToolRegistry.Tool {
         if (adapter == null) {
             // Tool not registered: server may not be connected, action may
             // be misspelled, or the server's tool list may have changed
-            // since the model last enumerated. Return the current catalog
-            // so the model can self-correct on the next turn.
+            // since the model last enumerated. Return a compact name list
+            // (no schemas) so the model can self-correct on the next turn
+            // without re-ingesting the full action catalog — a server with
+            // many actions can otherwise push the corrected-turn prompt
+            // tens of thousands of tokens past what's needed for a typo
+            // fix, dragging time-to-first-token into the minute range.
             return ToolRegistry.ToolResult.text(
                     "MCP server '" + serverName + "' has no action named '" + actionName + "'. "
-                            + "Current actions:\n" + enumerateActions().text());
+                            + "Available actions: " + enumerateActionNames()
+                            + ". Call mcp_" + serverName + " with empty arguments to "
+                            + "retrieve the full input schemas if needed.");
         }
         return adapter.executeRich(actionArgs, agent);
     }
@@ -188,5 +194,24 @@ public final class McpServerTool implements ToolRegistry.Tool {
                 "actions", catalog
         );
         return new ToolRegistry.ToolResult(GSON.toJson(payload), GSON.toJson(payload));
+    }
+
+    /**
+     * Compact name-only list for the unknown-action error path. The full
+     * {@link #enumerateActions} dump includes each action's
+     * {@code inputSchema} — for a typo-correction signal that's overkill
+     * and on schema-heavy servers (google-workspace observed at ~175 KB)
+     * inflates the next LLM turn's prompt by tens of thousands of tokens.
+     * Names alone let the model spot the right action; if it actually needs
+     * a schema it can re-invoke {@code mcp_<server>} with no args.
+     */
+    private String enumerateActionNames() {
+        var defs = McpConnectionManager.tools(serverName);
+        if (defs == null || defs.isEmpty()) {
+            return "(none — server not connected or advertises no actions)";
+        }
+        var names = new ArrayList<String>(defs.size());
+        for (var def : defs) names.add(def.name());
+        return String.join(", ", names);
     }
 }
