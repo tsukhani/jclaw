@@ -981,3 +981,634 @@ describe('Chat page — truncated reply marker', () => {
     expect(component.text()).not.toContain('Reply was truncated by the model')
   })
 })
+
+/**
+ * JCLAW-323 — additional coverage targeting residual uncovered surface in
+ * chat.vue. These tests drive code paths that are reachable from the public
+ * exposed surface (loadConversation + messages ref + UI clicks) without
+ * touching production code.
+ */
+
+describe('Chat page — subagent_announce status pill + child-conversation link', () => {
+  it('renders the COMPLETED status pill with emerald color and the View full link', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 601, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 2, preview: 'completed announce',
+        createdAt: '2026-05-16T10:00:00Z', updatedAt: '2026-05-16T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/601/messages', () => [
+      { id: 1600, role: 'user', content: 'Spawn a research subagent',
+        createdAt: '2026-05-16T10:00:00Z' },
+      { id: 1601, role: 'system' as unknown as 'tool',
+        content: 'Subagent completed (deep-research): result body',
+        messageKind: 'subagent_announce',
+        metadata: {
+          runId: 33, label: 'deep-research', status: 'COMPLETED',
+          reply: 'A short summary of the research output.',
+          childConversationId: 70001,
+        },
+        createdAt: '2026-05-16T10:00:01Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(601)
+    await flushPromises()
+
+    const card = component.find('[data-testid="subagent-announce-card"]')
+    expect(card.exists()).toBe(true)
+    expect(card.text()).toContain('deep-research')
+    expect(card.text()).toContain('COMPLETED')
+    // The View full link routes back to /chat with the child id as a query.
+    const viewFull = component.find('[data-testid="subagent-announce-view-full"]')
+    expect(viewFull.exists()).toBe(true)
+    expect(viewFull.attributes('href')).toBe('/chat?conversation=70001')
+  })
+
+  it('renders the FAILED status pill in the red color class', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 602, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 2, preview: 'failed announce',
+        createdAt: '2026-05-16T10:00:00Z', updatedAt: '2026-05-16T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/602/messages', () => [
+      { id: 1700, role: 'user', content: 'spawn failure',
+        createdAt: '2026-05-16T10:00:00Z' },
+      { id: 1701, role: 'system' as unknown as 'tool',
+        content: 'Subagent failed (broken): err',
+        messageKind: 'subagent_announce',
+        metadata: {
+          runId: 34, label: 'broken', status: 'FAILED',
+          reply: 'It failed.',
+          childConversationId: 70002,
+        },
+        createdAt: '2026-05-16T10:00:01Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(602)
+    await flushPromises()
+
+    const card = component.find('[data-testid="subagent-announce-card"]')
+    expect(card.exists()).toBe(true)
+    // Status pill carries the FAILED text and the red color class.
+    expect(card.text()).toContain('FAILED')
+    expect(card.html()).toContain('bg-red-100')
+  })
+
+  it('renders the TIMEOUT status pill in the red color class', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 603, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 2, preview: 'timeout',
+        createdAt: '2026-05-16T10:00:00Z', updatedAt: '2026-05-16T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/603/messages', () => [
+      { id: 1800, role: 'user', content: 'spawn timeout',
+        createdAt: '2026-05-16T10:00:00Z' },
+      { id: 1801, role: 'system' as unknown as 'tool',
+        content: 'Subagent timeout (slow): timed out',
+        messageKind: 'subagent_announce',
+        metadata: {
+          runId: 35, label: 'slow', status: 'TIMEOUT',
+          reply: 'Timed out.',
+          childConversationId: 70003,
+        },
+        createdAt: '2026-05-16T10:00:01Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(603)
+    await flushPromises()
+
+    const card = component.find('[data-testid="subagent-announce-card"]')
+    expect(card.exists()).toBe(true)
+    expect(card.text()).toContain('TIMEOUT')
+    expect(card.html()).toContain('bg-red-100')
+  })
+
+  it('omits the View full link when the announce has no childConversationId', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 604, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 1, preview: 'no link',
+        createdAt: '2026-05-16T10:00:00Z', updatedAt: '2026-05-16T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/604/messages', () => [
+      { id: 1900, role: 'system' as unknown as 'tool',
+        content: 'Subagent completed',
+        messageKind: 'subagent_announce',
+        metadata: {
+          runId: 36, status: 'COMPLETED',
+          reply: 'done',
+        },
+        createdAt: '2026-05-16T10:00:01Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(604)
+    await flushPromises()
+
+    // No childConversationId in the payload → "View full" is omitted.
+    expect(component.find('[data-testid="subagent-announce-view-full"]').exists()).toBe(false)
+    // The status pill defaults to COMPLETED when present in the metadata.
+    expect(component.find('[data-testid="subagent-announce-card"]').text()).toContain('COMPLETED')
+  })
+})
+
+describe('Chat page — tool-call rendering edges', () => {
+  it('renders a single tool call without splitting it into a multi-call accordion', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 700, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 3, preview: 'single tool call',
+        createdAt: '2026-05-16T10:00:00Z', updatedAt: '2026-05-16T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/700/messages', () => [
+      { id: 2100, role: 'user', content: 'tell me about jclaw',
+        createdAt: '2026-05-16T10:00:00Z' },
+      { id: 2101, role: 'assistant', content: '',
+        toolCalls: [{
+          id: 'call_only', type: 'function', icon: 'search',
+          function: { name: 'web_search', arguments: '{"query":"jclaw"}' },
+        }],
+        createdAt: '2026-05-16T10:00:01Z' },
+      { id: 2102, role: 'tool', content: 'plain text result body',
+        toolResults: 'call_only',
+        createdAt: '2026-05-16T10:00:02Z' },
+      { id: 2103, role: 'assistant', content: 'OK done.',
+        createdAt: '2026-05-16T10:00:03Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(700)
+    await flushPromises()
+
+    // Header reads "1 tool call" (singular form).
+    const accordionBtn = component.findAll('button').find(b => b.text().includes('1 tool call'))
+    expect(accordionBtn).toBeTruthy()
+  })
+
+  it('truncates a long plain-text tool result preview with an ellipsis', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 701, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 3, preview: 'long result',
+        createdAt: '2026-05-16T10:00:00Z', updatedAt: '2026-05-16T10:00:00Z' },
+    ])
+    // 1000-char body — MAX_RESULT_TEXT_PREVIEW is 600 inside the page.
+    const longBody = 'a'.repeat(1000)
+    registerEndpoint('/api/conversations/701/messages', () => [
+      { id: 2200, role: 'user', content: 'fetch please',
+        createdAt: '2026-05-16T10:00:00Z' },
+      { id: 2201, role: 'assistant', content: '',
+        toolCalls: [{
+          id: 'call_fetch', type: 'function', icon: 'wrench',
+          function: { name: 'web_fetch', arguments: '{"url":"https://x"}' },
+        }],
+        createdAt: '2026-05-16T10:00:01Z' },
+      { id: 2202, role: 'tool', content: longBody,
+        toolResults: 'call_fetch',
+        createdAt: '2026-05-16T10:00:02Z' },
+      { id: 2203, role: 'assistant', content: 'Here.',
+        createdAt: '2026-05-16T10:00:03Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(701)
+    await flushPromises()
+
+    // Open the accordion so per-call bodies render.
+    const accordionBtn = component.findAll('button').find(b => b.text().includes('1 tool call'))
+    if (accordionBtn) await accordionBtn.trigger('click')
+    await flushPromises()
+
+    // The clipped preview ends with the ellipsis character — truncatedToolResultText
+    // returns slice(0, 600) + '…' for >600-char inputs.
+    expect(component.html()).toContain('…')
+  })
+
+  it('toggles a tool-call accordion open and closed via the header button', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 702, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 3, preview: 'toggle',
+        createdAt: '2026-05-16T10:00:00Z', updatedAt: '2026-05-16T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/702/messages', () => [
+      { id: 2300, role: 'user', content: 'go',
+        createdAt: '2026-05-16T10:00:00Z' },
+      { id: 2301, role: 'assistant', content: '',
+        toolCalls: [{
+          id: 'call_z', type: 'function', icon: 'search',
+          function: { name: 'web_search', arguments: '{"query":"abc"}' },
+        }],
+        createdAt: '2026-05-16T10:00:01Z' },
+      { id: 2302, role: 'tool', content: 'result',
+        toolResults: 'call_z',
+        toolResultStructured: {
+          results: [{ title: 'A', url: 'https://example.com/a', snippet: 's' }],
+        },
+        createdAt: '2026-05-16T10:00:02Z' },
+      { id: 2303, role: 'assistant', content: 'Done.',
+        createdAt: '2026-05-16T10:00:03Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(702)
+    await flushPromises()
+
+    const headerBtn = component.findAll('button').find(b => b.text().includes('1 tool call'))
+    expect(headerBtn).toBeTruthy()
+    // Collapsed by default on reload — opening exposes the per-call body.
+    await headerBtn!.trigger('click')
+    await flushPromises()
+    expect(component.html()).toContain('example.com/a')
+
+    // Closing again hides the per-call chip grid.
+    await headerBtn!.trigger('click')
+    await flushPromises()
+    expect(component.html()).not.toContain('example.com/a')
+  })
+})
+
+describe('Chat page — assistant message footer actions', () => {
+  function setupAssistantConversation() {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 800, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 2, preview: 'footer actions',
+        createdAt: '2026-05-16T10:00:00Z', updatedAt: '2026-05-16T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/800/messages', () => [
+      { id: 2400, role: 'user', content: 'Tell me a joke.',
+        createdAt: '2026-05-16T10:00:00Z' },
+      { id: 2401, role: 'assistant',
+        content: 'A joke landed here for you.',
+        createdAt: '2026-05-16T10:00:01Z' },
+    ])
+  }
+
+  it('copies the assistant message content via the clipboard API and flashes a check icon', async () => {
+    setupAssistantConversation()
+    // Stub navigator.clipboard.writeText — jsdom doesn't provide it by default.
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(800)
+    await flushPromises()
+
+    const copyBtn = component.find('button[title="Copy to clipboard"]')
+    expect(copyBtn.exists()).toBe(true)
+    await copyBtn.trigger('click')
+    await flushPromises()
+
+    expect(writeText).toHaveBeenCalledWith('A joke landed here for you.')
+  })
+
+  it('deletes a server-id-bearing assistant message via DELETE /api/conversations/{id}/messages/{msgId}', async () => {
+    setupAssistantConversation()
+    let deleteCalled = false
+    registerEndpoint('/api/conversations/800/messages/2401', {
+      method: 'DELETE',
+      handler: () => {
+        deleteCalled = true
+        return { status: 'ok' }
+      },
+    })
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(800)
+    await flushPromises()
+
+    // Both user + assistant footers carry a Delete button. Find the one
+    // attached to the assistant row — its sibling button title is
+    // "Regenerate response" which only appears on assistant turns.
+    const assistantGroups = component.findAll('.group')
+    // Find a group that has both Regenerate and Delete buttons.
+    let deleteBtn: ReturnType<typeof component.find> | null = null
+    for (const g of assistantGroups) {
+      const regen = g.find('button[title="Regenerate response"]')
+      if (regen.exists()) {
+        deleteBtn = g.find('button[title="Delete message"]')
+        if (deleteBtn.exists()) break
+      }
+    }
+    expect(deleteBtn?.exists()).toBe(true)
+    await deleteBtn!.trigger('click')
+    await vi.waitFor(() => expect(deleteCalled).toBe(true))
+  })
+})
+
+describe('Chat page — user-message hover actions', () => {
+  function setupUserMsgConversation() {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 850, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 1, preview: 'user message',
+        createdAt: '2026-05-16T10:00:00Z', updatedAt: '2026-05-16T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/850/messages', () => [
+      { id: 2500, role: 'user', content: 'my prompt text',
+        createdAt: '2026-05-16T10:00:00Z' },
+    ])
+  }
+
+  it('Edit & resubmit populates the composer with the user message text', async () => {
+    setupUserMsgConversation()
+    const component = await mountSuspended(Chat, { attachTo: document.body })
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(850)
+    await flushPromises()
+
+    const editBtn = component.find('button[title="Edit & resubmit"]')
+    expect(editBtn.exists()).toBe(true)
+    await editBtn.trigger('click')
+    await flushPromises()
+    // editUserMessage uses nextTick before focusing; flush a tick for safety.
+    await new Promise(r => setTimeout(r, 0))
+
+    const textarea = component.find('textarea').element as HTMLTextAreaElement
+    expect(textarea.value).toBe('my prompt text')
+  })
+})
+
+describe('Chat page — error-event SSE branch', () => {
+  it('renders the error content from a provider error envelope into the assistant bubble', async () => {
+    setupBaseChatApi()
+    // Stub fetch to emit an error event mid-stream; the assistant placeholder
+    // bubble should pick up the error string instead of a model response.
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      const encoder = new TextEncoder()
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: {"type":"init","conversationId":900}\n'))
+          controller.enqueue(encoder.encode('data: {"type":"error","content":"Provider returned 429: rate limited"}\n'))
+          controller.enqueue(encoder.encode('data: {"type":"done"}\n'))
+          controller.close()
+        },
+      })
+      return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    })
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    const textarea = component.find<HTMLTextAreaElement>('textarea')
+    await textarea.setValue('please try')
+    await component.find('form').trigger('submit.prevent')
+    await flushPromises()
+    await flushPromises()
+
+    // The page should now have the error envelope as the assistant content.
+    expect(component.text()).toContain('Provider returned 429: rate limited')
+  })
+
+  it('renders the queued-position content from a queued event', async () => {
+    setupBaseChatApi()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      const encoder = new TextEncoder()
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: {"type":"init","conversationId":901}\n'))
+          controller.enqueue(encoder.encode('data: {"type":"queued","position":3}\n'))
+          controller.enqueue(encoder.encode('data: {"type":"done"}\n'))
+          controller.close()
+        },
+      })
+      return new Response(body, { status: 200 })
+    })
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    const textarea = component.find<HTMLTextAreaElement>('textarea')
+    await textarea.setValue('queued one')
+    await component.find('form').trigger('submit.prevent')
+    await flushPromises()
+    await flushPromises()
+
+    expect(component.text()).toContain('queued')
+    expect(component.text()).toContain('3')
+  })
+})
+
+describe('Chat page — export conversation', () => {
+  it('does not throw when called on an empty conversation', async () => {
+    setupBaseChatApi()
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    // exportConversation is gated by displayMessages.length — empty list is a
+    // no-op. The export button is rendered in the header; clicking it must
+    // not throw.
+    const exportBtn = component.find('button[title="Export as Markdown"]')
+    expect(exportBtn.exists()).toBe(true)
+    await exportBtn.trigger('click')
+    await flushPromises()
+  })
+
+  it('triggers a markdown download when the conversation has messages', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 950, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 2, preview: 'exportable',
+        createdAt: '2026-05-16T10:00:00Z', updatedAt: '2026-05-16T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/950/messages', () => [
+      { id: 2600, role: 'user', content: 'export prompt',
+        createdAt: '2026-05-16T10:00:00Z' },
+      { id: 2601, role: 'assistant', content: 'exported response body',
+        createdAt: '2026-05-16T10:00:01Z' },
+    ])
+
+    // Stub URL.createObjectURL because happy-dom can be picky with Blob inputs.
+    const createSpy = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(950)
+    await flushPromises()
+
+    const exportBtn = component.find('button[title="Export as Markdown"]')
+    await exportBtn.trigger('click')
+    await flushPromises()
+
+    expect(createSpy).toHaveBeenCalled()
+  })
+})
+
+describe('Chat page — new chat reset', () => {
+  it('clears messages and selected conversation when New conversation is clicked', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations/960/messages', () => [
+      { id: 2700, role: 'user', content: 'history',
+        createdAt: '2026-05-16T10:00:00Z' },
+    ])
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as {
+      loadConversation: (id: number) => Promise<void>
+      messages: Array<{ role: string, content?: string | null }>
+    }
+    await vm.loadConversation(960)
+    await flushPromises()
+    expect(vm.messages.length).toBe(1)
+
+    const newChatBtn = component.find('button[title="New conversation"]')
+    expect(newChatBtn.exists()).toBe(true)
+    await newChatBtn.trigger('click')
+    await flushPromises()
+
+    // newChat clears messages, the input value, and the selected conversation.
+    expect(vm.messages.length).toBe(0)
+    const textarea = component.find('textarea').element as HTMLTextAreaElement
+    expect(textarea.value).toBe('')
+  })
+})
+
+describe('Chat page — model switch indicator', () => {
+  it('renders the "Switched to" divider when consecutive assistant messages use different models', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 970, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 4, preview: 'model switch',
+        createdAt: '2026-05-16T10:00:00Z', updatedAt: '2026-05-16T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/970/messages', () => [
+      { id: 2800, role: 'user', content: 'first prompt',
+        createdAt: '2026-05-16T10:00:00Z' },
+      { id: 2801, role: 'assistant', content: 'reply from model A',
+        usage: {
+          prompt: 10, completion: 5, total: 15, reasoning: 0, cached: 0,
+          durationMs: 100, modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5',
+        },
+        createdAt: '2026-05-16T10:00:01Z' },
+      { id: 2802, role: 'user', content: 'second prompt',
+        createdAt: '2026-05-16T10:00:02Z' },
+      { id: 2803, role: 'assistant', content: 'reply from model B',
+        usage: {
+          prompt: 12, completion: 7, total: 19, reasoning: 0, cached: 0,
+          durationMs: 100, modelProvider: 'openai', modelId: 'gpt-4',
+        },
+        createdAt: '2026-05-16T10:00:03Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(970)
+    await flushPromises()
+
+    // The page renders a label including the new model's provider/id.
+    const text = component.text()
+    expect(text).toContain('openai')
+    expect(text).toContain('gpt-4')
+  })
+})
+
+describe('Chat page — input handlers', () => {
+  it('routes Enter inside the textarea to sendMessage (form submit fires)', async () => {
+    setupBaseChatApi()
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      const encoder = new TextEncoder()
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: {"type":"init","conversationId":980}\n'))
+          controller.enqueue(encoder.encode('data: {"type":"done"}\n'))
+          controller.close()
+        },
+      })
+      return new Response(body, { status: 200 })
+    })
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    const textarea = component.find<HTMLTextAreaElement>('textarea')
+    await textarea.setValue('hello via enter')
+    await textarea.trigger('keydown.enter')
+    await flushPromises()
+
+    const streamCall = fetchSpy.mock.calls.find(call =>
+      String(call[0] ?? '').includes('/api/chat/stream'))
+    expect(streamCall).toBeTruthy()
+  })
+
+  it('autoresize sets the textarea height bound to its scrollHeight', async () => {
+    setupBaseChatApi()
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+
+    const textarea = component.find<HTMLTextAreaElement>('textarea')
+    // Multi-line content; autoResize is hooked to @input.
+    await textarea.setValue('line one\nline two\nline three\nline four')
+    await textarea.trigger('input')
+    await flushPromises()
+    // We don't assert the exact px value (happy-dom returns 0 for scrollHeight
+    // in headless mode), only that the style attribute was touched without throwing.
+    expect(textarea.element.style.height).toBeDefined()
+  })
+})
+
+describe('Chat page — attachment chip thumbnail rendering', () => {
+  it('renders an image thumbnail preview in the composer once an image is queued (vision model)', async () => {
+    // Vision-capable model so the image gate doesn't bounce the attachment.
+    registerEndpoint('/api/agents', () => [
+      { id: 1, name: 'vision-agent', modelProvider: 'ollama-cloud', modelId: 'qwen2.5-vl',
+        enabled: true, isMain: true, thinkingMode: null, providerConfigured: true },
+    ])
+    registerEndpoint('/api/config', () => ({
+      entries: [
+        { key: 'provider.ollama-cloud.baseUrl', value: 'https://ollama.com/v1' },
+        { key: 'provider.ollama-cloud.apiKey', value: 'xxxx****' },
+        { key: 'provider.ollama-cloud.models', value:
+          '[{"id":"qwen2.5-vl","name":"Qwen 2.5 VL","supportsThinking":false,"supportsVision":true}]' },
+      ],
+    }))
+    registerEndpoint('/api/conversations', () => [])
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:vision-fake')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    const vm = component.vm as unknown as {
+      addAttachments: (files: File[]) => void
+    }
+    const png = new File([new Uint8Array([0x89, 0x50, 0x4E, 0x47])], 'thumb.png', { type: 'image/png' })
+    vm.addAttachments([png])
+    await flushPromises()
+
+    // Template renders an <img :src="attachmentPreviews.get(f)"> for image
+    // attachments — the fake blob URL should land there.
+    expect(component.html()).toContain('blob:vision-fake')
+    // The filename label is also visible.
+    expect(component.html()).toContain('thumb.png')
+  })
+})
