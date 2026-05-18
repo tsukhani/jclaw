@@ -87,9 +87,11 @@ describe('useGuidedTour — confirmStart activates step 0', () => {
     })
     const tour = useGuidedTour()
     tour.confirmStart()
-    // recordStepReached is fire-and-forget; wait a tick for the $fetch to land.
-    await flushPromises()
-    expect(posted).toEqual({ step: 1 })
+    // recordStepReached is fire-and-forget; vi.waitFor polls the assertion
+    // until the registerEndpoint mock's multi-microtask resolution chain
+    // settles. flushPromises drains only one microtask round which is not
+    // enough for $fetch through the Nitro mock.
+    await vi.waitFor(() => expect(posted).toEqual({ step: 1 }))
   })
 })
 
@@ -105,7 +107,7 @@ describe('useGuidedTour — end clears state without completing', () => {
     })
     const tour = useGuidedTour()
     tour.confirmStart()
-    await flushPromises()
+    await vi.waitFor(() => expect(postCount).toBeGreaterThan(0))
     const postsAfterStart = postCount
 
     tour.end()

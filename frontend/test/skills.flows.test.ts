@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
@@ -218,10 +218,10 @@ describe('Skills page — promote flow opens ConfirmDialog when global already e
       .find(b => (b.textContent ?? '').trim() === 'Promote')
     expect(promoteBtn).toBeTruthy()
     promoteBtn!.click()
-    await flushPromises()
-    await flushPromises()
-
-    expect(promotePosted).toBe(true)
+    // vi.waitFor polls the assertion while the registerEndpoint mock's
+    // multi-microtask resolution chain settles. flushPromises drains
+    // only one round which is insufficient for $fetch through Nitro.
+    await vi.waitFor(() => expect(promotePosted).toBe(true))
     expect(promoteBody).toEqual({ agentId: 1, skillName: 'web-search' })
   })
 
@@ -291,9 +291,8 @@ describe('Skills page — delete a global custom skill', () => {
     const trashBtn = codeReviewRow!.findAll('button[title="Delete skill"]')[0]
     expect(trashBtn).toBeTruthy()
     await trashBtn!.trigger('click')
-    await flushPromises()
-    await flushPromises()
-
-    expect(deletedName).toBe('code-review')
+    // vi.waitFor for the async DELETE handler to land — see the comment
+    // on the promote-confirm test above for the rationale.
+    await vi.waitFor(() => expect(deletedName).toBe('code-review'))
   })
 })
