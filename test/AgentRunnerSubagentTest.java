@@ -52,7 +52,13 @@ class AgentRunnerSubagentTest extends UnitTest {
     private int port;
 
     @BeforeEach
-    void setup() {
+    void setup() throws Exception {
+        // Mirror AgentRunnerCoreTest's setup: a 200ms gap lets any prior
+        // test's lingering VT activity (queue drain, EventLogger flush)
+        // settle before this test resets the DB. Without it the
+        // Fixtures.deleteDatabase() can race in-flight writes from the
+        // previous test's tail.
+        Thread.sleep(200);
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
         llm.ProviderRegistry.refresh();
@@ -155,7 +161,8 @@ class AgentRunnerSubagentTest extends UnitTest {
         // Flip the cancel flag while keeping the audit row in RUNNING
         // status. Mirrors the mid-kill window where the flag is set but
         // the status-update Tx hasn't landed yet.
-        flipCancelFlag(run.id);
+        assertTrue(SubagentRegistry.cancelForTest(run.id),
+                "test precondition: registry must contain an entry for the run before cancelForTest");
         assertTrue(SubagentRegistry.isCancelled(run.id),
                 "test precondition: flag must be flipped before invoking the checkpoint");
 
@@ -166,30 +173,6 @@ class AgentRunnerSubagentTest extends UnitTest {
                 "exception must carry the runId so the outer catch can correlate to the audit row");
 
         SubagentRegistry.unregister(run.id);
-    }
-
-    /**
-     * Flip the {@code cancelRequested} AtomicBoolean on the registry entry
-     * for {@code runId} without going through {@link SubagentRegistry#kill},
-     * which would transition the SubagentRun's status to KILLED and hide
-     * the row from the checkpoint's {@code status=RUNNING} lookup.
-     *
-     * <p>Tests-only — production callers always go through {@code kill()}.
-     * The reflection is targeted at the package-private {@code Entry}
-     * record so a future field rename surfaces as a test failure rather
-     * than a silent skip.
-     */
-    private static void flipCancelFlag(Long runId) throws Exception {
-        var activeField = SubagentRegistry.class.getDeclaredField("ACTIVE");
-        activeField.setAccessible(true);
-        @SuppressWarnings("unchecked")
-        var active = (java.util.Map<Long, Object>) activeField.get(null);
-        var entry = active.get(runId);
-        assertNotNull(entry, "test precondition: registry must contain an entry for runId " + runId);
-        var cancelMethod = entry.getClass().getDeclaredMethod("cancelRequested");
-        cancelMethod.setAccessible(true);
-        var flag = (java.util.concurrent.atomic.AtomicBoolean) cancelMethod.invoke(entry);
-        flag.set(true);
     }
 
     @Test
@@ -278,7 +261,8 @@ class AgentRunnerSubagentTest extends UnitTest {
             return r;
         });
         SubagentRegistry.register(run.id, new CompletableFuture<Void>());
-        flipCancelFlag(run.id);
+        assertTrue(SubagentRegistry.cancelForTest(run.id),
+                "test precondition: registry must contain an entry for the run before cancelForTest");
 
         JPA.em().getTransaction().commit();
         JPA.em().getTransaction().begin();

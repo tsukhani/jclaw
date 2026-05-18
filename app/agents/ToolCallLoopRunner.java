@@ -231,7 +231,8 @@ public final class ToolCallLoopRunner {
      * shape) and a prefix compare is robust against any future field
      * reordering.
      */
-    private static boolean yieldRequestedInLastRound(List<ChatMessage> currentMessages, int fromIndex) {
+    // Visible (public) for ToolCallLoopRunnerEdgeCasesTest in the default package
+    public static boolean yieldRequestedInLastRound(List<ChatMessage> currentMessages, int fromIndex) {
         for (int i = fromIndex; i < currentMessages.size(); i++) {
             var m = currentMessages.get(i);
             if (m == null) continue;

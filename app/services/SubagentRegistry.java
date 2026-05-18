@@ -87,6 +87,25 @@ public final class SubagentRegistry {
         ACTIVE.clear();
     }
 
+    /**
+     * Test-only helper: flips the cancel flag without the DB write that
+     * {@link #kill} does; lets tests verify the in-memory checkpoint path
+     * that runs between flag-flip and DB-write in production. Returns
+     * {@code true} when an entry existed and was flipped, {@code false}
+     * otherwise (no entry registered for {@code runId}).
+     *
+     * <p>Public (rather than package-private) because callers live in the
+     * default test package and cannot otherwise reach a {@code services}-
+     * package member.
+     */
+    public static boolean cancelForTest(Long runId) {
+        if (runId == null) return false;
+        var entry = ACTIVE.get(runId);
+        if (entry == null) return false;
+        entry.cancelRequested().set(true);
+        return true;
+    }
+
     /** Snapshot of the currently-registered run ids. For tests + admin
      *  introspection only. */
     public static java.util.Set<Long> activeRunIds() {

@@ -134,8 +134,9 @@ public final class ParallelToolExecutor {
      * suffix; {@code onToolCall} (when non-null) fires once per completed
      * call so the SSE chat UI can render a per-call row post-persist.
      */
+    // Visible (public) for ToolCallLoopRunnerEdgeCasesTest in the default package
     @SuppressWarnings("java:S107") // every parameter is required to schedule and surface tool results
-    static void executeToolsParallel(List<ToolCall> toolCalls,
+    public static void executeToolsParallel(List<ToolCall> toolCalls,
                                       Agent agent, Long conversationId,
                                       List<ChatMessage> currentMessages,
                                       Consumer<String> onStatus,

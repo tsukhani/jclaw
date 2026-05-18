@@ -22,7 +22,6 @@ import services.ConversationService;
 import services.SubagentRegistry;
 import services.Tx;
 
-import java.lang.reflect.Method;
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.List;
@@ -56,6 +55,12 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
 
     @BeforeEach
     void setup() throws Exception {
+        // Mirror AgentRunnerCoreTest's setup: a 200ms gap lets any prior
+        // test's lingering VT activity (queue drain, EventLogger flush)
+        // settle before this test resets the DB. Without it the
+        // Fixtures.deleteDatabase() can race in-flight writes from the
+        // previous test's tail.
+        Thread.sleep(200);
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
         llm.ProviderRegistry.refresh();
@@ -73,6 +78,9 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
             ToolRegistry.publish(originalTools);
         }
         SubagentRegistry.clear();
+        // Reset config keys mutated by individual tests so siblings in the
+        // same JVM don't inherit them.
+        ConfigService.delete("chat.maxToolRounds");
     }
 
     // =========================================================
@@ -495,66 +503,54 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
     // =========================================================
 
     @Test
-    void yieldRequestedInLastRoundReturnsTrueOnSentinelPrefix() throws Exception {
-        var method = yieldRequestedInLastRoundMethod();
+    void yieldRequestedInLastRoundReturnsTrueOnSentinelPrefix() {
         var sentinel = tools.YieldToSubagentTool.YIELD_SENTINEL_PREFIX + "child-reply";
         var messages = List.of(
                 ChatMessage.user("user msg"),
                 ChatMessage.toolResult("tc1", "yield_to_subagent", sentinel));
-        boolean yielded = (boolean) method.invoke(null, messages, 1);
-        assertTrue(yielded,
+        assertTrue(ToolCallLoopRunner.yieldRequestedInLastRound(messages, 1),
                 "yield sentinel in a TOOL-role result must return true");
     }
 
     @Test
-    void yieldRequestedInLastRoundIgnoresNonToolRoleAndNonSentinel() throws Exception {
-        var method = yieldRequestedInLastRoundMethod();
-
+    void yieldRequestedInLastRoundIgnoresNonToolRoleAndNonSentinel() {
         var nonToolSentinel = List.of(
                 ChatMessage.assistant(
                         tools.YieldToSubagentTool.YIELD_SENTINEL_PREFIX + "looks-like-yield",
                         null));
-        assertFalse((boolean) method.invoke(null, nonToolSentinel, 0),
+        assertFalse(ToolCallLoopRunner.yieldRequestedInLastRound(nonToolSentinel, 0),
                 "sentinel text in assistant role must NOT trigger yield");
 
         var normalTool = List.of(
                 ChatMessage.toolResult("tc1", "datetime", "2026-01-01T00:00:00Z"));
-        assertFalse((boolean) method.invoke(null, normalTool, 0),
+        assertFalse(ToolCallLoopRunner.yieldRequestedInLastRound(normalTool, 0),
                 "regular tool result without the sentinel must NOT trigger yield");
 
         var empty = new ArrayList<ChatMessage>();
-        assertFalse((boolean) method.invoke(null, empty, 0),
+        assertFalse(ToolCallLoopRunner.yieldRequestedInLastRound(empty, 0),
                 "empty message list must NOT trigger yield");
     }
 
     @Test
-    void yieldRequestedInLastRoundHonorsFromIndexBoundary() throws Exception {
+    void yieldRequestedInLastRoundHonorsFromIndexBoundary() {
         // The fromIndex argument scopes the scan to messages appended in
         // the just-finished round. A sentinel BEFORE fromIndex must NOT
         // trigger.
-        var method = yieldRequestedInLastRoundMethod();
         var sentinel = tools.YieldToSubagentTool.YIELD_SENTINEL_PREFIX + "prior-round";
         var messages = List.of(
                 ChatMessage.toolResult("old", "yield_to_subagent", sentinel),
                 ChatMessage.user("subsequent user msg"));
 
-        assertFalse((boolean) method.invoke(null, messages, 1),
+        assertFalse(ToolCallLoopRunner.yieldRequestedInLastRound(messages, 1),
                 "sentinel before fromIndex must NOT trigger yield");
 
-        assertTrue((boolean) method.invoke(null, messages, 0),
+        assertTrue(ToolCallLoopRunner.yieldRequestedInLastRound(messages, 0),
                 "sentinel at/after fromIndex must trigger yield");
     }
 
     // =========================================================
     // Helpers
     // =========================================================
-
-    private static Method yieldRequestedInLastRoundMethod() throws Exception {
-        var m = ToolCallLoopRunner.class.getDeclaredMethod(
-                "yieldRequestedInLastRound", List.class, int.class);
-        m.setAccessible(true);
-        return m;
-    }
 
     private static ToolCall toolCall(String id, String name) {
         return new ToolCall(id, "function", new FunctionCall(name, "{}"));
@@ -581,15 +577,11 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
     }
 
     private void invokeExecuteToolsParallel(List<ToolCall> calls, Agent agent, long convId,
-                                            List<ChatMessage> messages) throws Exception {
+                                            List<ChatMessage> messages) {
         var conv = (Conversation) Tx.run(() -> ConversationService.findById(convId));
         AgentExecutionSink sink = new ConversationSink(conv);
-        var m = ParallelToolExecutor.class.getDeclaredMethod("executeToolsParallel",
-                List.class, Agent.class, Long.class, List.class,
-                java.util.function.Consumer.class, java.util.function.Consumer.class,
-                List.class, AtomicBoolean.class, AgentExecutionSink.class);
-        m.setAccessible(true);
-        m.invoke(null, calls, agent, convId, messages, null, null, null, new AtomicBoolean(false), sink);
+        ParallelToolExecutor.executeToolsParallel(
+                calls, agent, convId, messages, null, null, null, new AtomicBoolean(false), sink);
     }
 
     private static ToolRegistry.Tool throwingTool(String name, RuntimeException error) {

@@ -136,20 +136,17 @@ class AgentRunnerErrorEnvelopeTest extends UnitTest {
         var result = runOnVirtualThread(agent, convo, "Hello");
 
         assertNotNull(result.response());
-        // Either of the two deterministic prefixes is acceptable depending on
-        // whether the provider retry exhausted to an exception (the
-        // "I'm sorry" branch) or somehow surfaced a non-5xx error during the
-        // retry sequence. Both are deterministic — the assertion is that the
-        // string is NOT empty and NOT a stack trace.
         assertFalse(result.response().isBlank(),
                 "envelope must not be empty on provider failure");
         assertFalse(result.response().toLowerCase().contains("exception"),
                 "envelope must not surface raw exception class names, got: " + result.response());
-        // The canonical 5xx envelope from ToolCallLoopRunner.callWithToolLoop.
-        assertTrue(
-                result.response().contains("I'm sorry")
-                        || result.response().toLowerCase().contains("error"),
-                "envelope must include the canonical apology / error wording, got: "
+        // The canonical 5xx envelope from ToolCallLoopRunner.callWithToolLoop
+        // is "I'm sorry, I encountered an error communicating with the AI
+        // provider." Pin the exact prefix — a loose `contains("error")` or
+        // similar would let a regression that ships a raw stack-trace
+        // substring through.
+        assertTrue(result.response().startsWith("I'm sorry"),
+                "envelope must start with the canonical 'I'm sorry' apology, got: "
                         + result.response());
     }
 

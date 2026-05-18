@@ -12,6 +12,7 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConfigService;
 import services.ConversationService;
+import services.SessionCompactor;
 import services.Tx;
 
 import java.util.concurrent.atomic.AtomicInteger;
@@ -44,6 +45,12 @@ class AgentRunnerCompactionTest extends UnitTest {
 
     @BeforeEach
     void setup() throws Exception {
+        // Mirror AgentRunnerCoreTest's setup: a 200ms gap lets any prior
+        // test's lingering VT activity (queue drain, EventLogger flush)
+        // settle before this test resets the DB. Without it the
+        // Fixtures.deleteDatabase() can race in-flight writes from the
+        // previous test's tail.
+        Thread.sleep(200);
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
         llm.ProviderRegistry.refresh();
@@ -163,11 +170,15 @@ class AgentRunnerCompactionTest extends UnitTest {
         // raw older turns.
         var chatBody = secondCallBody.get();
         assertNotNull(chatBody, "second LLM call body must have been captured");
-        // The summary header from SessionCompactor.PRIOR_SUMMARY_HEADER
-        // and the canned summary content must appear in the system prompt.
-        assertTrue(chatBody.contains("Prior conversation summary")
-                        || chatBody.contains("SUMMARY-OF-OLDER-TURNS"),
-                "chat call after compaction must carry the summary in its system prompt, "
+        // The canonical summary header AND the canned summary content must
+        // both appear in the system prompt — the header alone could be
+        // emitted by an empty-summary regression; the content alone could
+        // be a stale-message leak. Pin both.
+        assertTrue(chatBody.contains(SessionCompactor.PRIOR_SUMMARY_HEADER),
+                "chat call after compaction must carry the PRIOR_SUMMARY_HEADER constant, "
+                        + "got chatBody: " + chatBody.substring(0, Math.min(800, chatBody.length())));
+        assertTrue(chatBody.contains("SUMMARY-OF-OLDER-TURNS"),
+                "chat call after compaction must carry the summarize-call's canned summary content, "
                         + "got chatBody: " + chatBody.substring(0, Math.min(800, chatBody.length())));
         // The summarize call's request body, by contrast, should contain
         // the raw older-turn content — that's how the summarizer can
