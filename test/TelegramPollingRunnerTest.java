@@ -1,5 +1,6 @@
 import channels.ChannelTransport;
 import channels.TelegramPollingRunner;
+import channels.TelegramPollingRunnerTestHooks;
 import models.Agent;
 import models.TelegramBinding;
 import org.junit.jupiter.api.*;
@@ -28,18 +29,29 @@ import java.util.function.Supplier;
  * (forbidden by the story). The dispatch logic itself is exercised
  * end-to-end by {@code TelegramChannelTest} / {@code TelegramMediaGroupBufferTest}.
  */
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class TelegramPollingRunnerTest extends FunctionalTest {
+
+    private InMemoryPollingApp fakeApp;
 
     @BeforeEach
     void setup() {
         Fixtures.deleteDatabase();
-        // Drain anything a prior test (or boot) left in the static maps.
-        try { TelegramPollingRunner.stop(); } catch (Exception _) { /* best-effort */ }
+        // JCLAW-316: clear the runner's static state without shutting down
+        // its background scheduler — stop() would kill SCHEDULER, and a
+        // later unregister via reconcile() schedules a delayed re-reconcile
+        // that would then RejectedExecutionException. clear() is the test-
+        // only state reset; stop() stays the production shutdown path.
+        TelegramPollingRunnerTestHooks.clear();
+        // Install an in-memory long-polling app so reconcile() can register
+        // bindings without dialing api.telegram.org.
+        fakeApp = new InMemoryPollingApp();
+        TelegramPollingRunnerTestHooks.setApp(fakeApp);
     }
 
     @AfterEach
     void teardown() {
-        try { TelegramPollingRunner.stop(); } catch (Exception _) { /* best-effort */ }
+        TelegramPollingRunnerTestHooks.clear();
     }
 
     private static <T> T commitInFreshTx(Supplier<T> block) {
@@ -157,18 +169,136 @@ class TelegramPollingRunnerTest extends FunctionalTest {
                 "disabled bindings must not be registered");
     }
 
-    // Registration-dependent tests (reconcileRegistersEnabledPollingBinding,
-    // reconcileIsIdempotent, reconcileDropsBindingRemovedFromDb,
-    // reconcileUnregistersBindingFlippedToDisabled, reconcileRestartsOnTokenRotation,
-    // reconcileDefersRegistrationWhileTokenInCooldown, stopClearsActiveBindings)
-    // live under JCLAW-316: they need a TelegramBotsLongPollingApplication
-    // injection seam before they can verify our state-machine contracts without
-    // dragging a real api.telegram.org round-trip into the test. JCLAW-316 ships
-    // the seam plus the tests together.
+    // ===== Registration-dependent reconcile() state machine (JCLAW-316) =====
+    //
+    // These six exercise reconcile() against the in-memory polling app
+    // installed in @BeforeEach. Each test seeds DB rows, optionally mutates
+    // them in a fresh committed transaction, and asserts on activeBindingIds()
+    // / cooldownRemainingMs() — no api.telegram.org traffic.
+
+    @Test
+    void reconcileRegistersEnabledPollingBinding() {
+        Long id = seedPollingBinding("agent-a", "111:tokA", "1", true);
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id),
+                "enabled POLLING binding should be registered");
+    }
+
+    @Test
+    void reconcileIsIdempotent() {
+        Long id = seedPollingBinding("agent-b", "222:tokB", "2", true);
+        TelegramPollingRunner.reconcile();
+        var first = TelegramPollingRunner.activeBindingIds();
+        TelegramPollingRunner.reconcile();
+        var second = TelegramPollingRunner.activeBindingIds();
+        assertEquals(first, second,
+                "two reconciles with unchanged DB state should yield the same active set");
+        assertTrue(second.contains(id));
+    }
+
+    @Test
+    void reconcileDropsBindingRemovedFromDb() {
+        Long id = seedPollingBinding("agent-c", "333:tokC", "3", true);
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
+
+        // Delete the row in a committed transaction so reconcile()'s read
+        // sees it gone.
+        commitInFreshTx(() -> {
+            TelegramBinding b = TelegramBinding.findById(id);
+            if (b != null) b.delete();
+            return null;
+        });
+
+        TelegramPollingRunner.reconcile();
+        assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
+                "binding removed from DB should be unregistered on next reconcile");
+    }
+
+    @Test
+    void reconcileUnregistersBindingFlippedToDisabled() {
+        String token = "444:tokD";
+        Long id = seedPollingBinding("agent-d", token, "4", true);
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
+
+        commitInFreshTx(() -> {
+            TelegramBinding b = TelegramBinding.findById(id);
+            b.enabled = false;
+            b.save();
+            return null;
+        });
+
+        TelegramPollingRunner.reconcile();
+        assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
+                "binding flipped to disabled should be unregistered");
+        assertTrue(TelegramPollingRunner.cooldownRemainingMs(token) > 0L,
+                "unregister should stamp cooldown on the prior token");
+    }
+
+    @Test
+    void reconcileRestartsOnTokenRotation() {
+        String tokenA = "555:tokA";
+        String tokenB = "555:tokB";
+        Long id = seedPollingBinding("agent-e", tokenA, "5", true);
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
+
+        commitInFreshTx(() -> {
+            TelegramBinding b = TelegramBinding.findById(id);
+            b.botToken = tokenB;
+            b.save();
+            return null;
+        });
+
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.activeBindingIds().contains(id),
+                "binding should still be active under the rotated token");
+        assertTrue(TelegramPollingRunner.cooldownRemainingMs(tokenA) > 0L,
+                "old token should have cooldown stamped after rotation");
+        assertEquals(0L, TelegramPollingRunner.cooldownRemainingMs(tokenB),
+                "new token should be live (no cooldown)");
+    }
+
+    @Test
+    void reconcileDefersRegistrationWhileTokenInCooldown() {
+        String token = "666:tokF";
+        Long id = seedPollingBinding("agent-f", token, "6", true);
+
+        // Register, then disable so reconcile() unregisters + stamps cooldown.
+        TelegramPollingRunner.reconcile();
+        commitInFreshTx(() -> {
+            TelegramBinding b = TelegramBinding.findById(id);
+            b.enabled = false;
+            b.save();
+            return null;
+        });
+        TelegramPollingRunner.reconcile();
+        assertTrue(TelegramPollingRunner.cooldownRemainingMs(token) > 0L);
+
+        // Re-enable and reconcile again — registerInternal must see the live
+        // cooldown and bail out without populating ACTIVE.
+        commitInFreshTx(() -> {
+            TelegramBinding b = TelegramBinding.findById(id);
+            b.enabled = true;
+            b.save();
+            return null;
+        });
+        TelegramPollingRunner.reconcile();
+        assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
+                "re-enable during cooldown must defer registration");
+    }
 
     // ===== stop() =====
 
+    /**
+     * Runs last because {@code stop()} also shuts down the runner's static
+     * {@code SCHEDULER}; any subsequent test that triggers an unregister
+     * would then hit a {@code RejectedExecutionException} from
+     * {@code SCHEDULER.schedule(...)}.
+     */
     @Test
+    @Order(Integer.MAX_VALUE)
     void stopIsSafeToCallWhenNothingRegistered() {
         // No reconcile() yet — APP is null. stop() must be a no-op rather
         // than NPE.

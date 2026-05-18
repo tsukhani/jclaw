@@ -136,6 +136,32 @@ public final class TelegramPollingRunner {
         return app != null && app.isRunning();
     }
 
+    /**
+     * Test-only injection seam (JCLAW-316). Installs {@code app} into the
+     * {@link #APP} reference so {@link #reconcile} reuses it instead of
+     * instantiating a real {@link TelegramBotsLongPollingApplication} that
+     * would dial {@code api.telegram.org}. Pass {@code null} to clear.
+     * Package-private — see {@code TelegramPollingRunnerTestHooks} for the
+     * default-package bridge tests use.
+     */
+    static void setAppForTest(TelegramBotsLongPollingApplication app) {
+        APP.set(app);
+    }
+
+    /**
+     * Test-only state reset (JCLAW-316). Clears {@link #ACTIVE} and
+     * {@link #COOLDOWN_UNTIL} and nulls the {@link #APP} reference without
+     * shutting down {@link #SCHEDULER}, so tests that exercise the
+     * register/unregister state machine can run sequentially without the
+     * scheduler entering a rejected-execution state. Production uses
+     * {@link #stop} (which DOES drain the scheduler at app shutdown).
+     */
+    static void clearForTest() {
+        ACTIVE.clear();
+        COOLDOWN_UNTIL.clear();
+        APP.set(null);
+    }
+
     private static void registerInternal(TelegramBotsLongPollingApplication app, TelegramBinding binding) {
         final Long bindingId = binding.id;
         final String token = binding.botToken;
