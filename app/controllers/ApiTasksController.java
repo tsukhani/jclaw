@@ -210,6 +210,124 @@ public class ApiTasksController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
+    public static void update(Long id) {
+        Task task = Task.findById(id);
+        if (task == null) notFound();
+
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null) badRequest();
+
+        boolean anyChange = false;
+        boolean scheduleChanged = false;
+
+        // schedule re-parse: when present, drives type + scheduledAt +
+        // cronExpression + intervalSeconds + scheduleDisplay together.
+        // Passing through ScheduleShorthandParser revalidates cron
+        // expressions (with the prepend-0 hint for Unix 5-field) per AC.
+        if (body.has("schedule") && !body.get("schedule").isJsonNull()) {
+            final ScheduleShorthandParser.ScheduleSpec spec;
+            try {
+                spec = ScheduleShorthandParser.parse(body.get("schedule").getAsString());
+            } catch (IllegalArgumentException e) {
+                error(400, "Invalid schedule: " + e.getMessage());
+                return;
+            }
+            task.type = spec.type();
+            task.scheduledAt = spec.scheduledAt();
+            task.cronExpression = spec.cronExpression();
+            task.intervalSeconds = spec.intervalSeconds();
+            task.scheduleDisplay = spec.scheduleDisplay();
+            // nextRunAt mirrors the new fire time so the Tasks page render
+            // stays in sync — the scheduled_tasks row is the source of
+            // truth at fire time but operators read nextRunAt from the UI.
+            task.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : Instant.now();
+            scheduleChanged = true;
+            anyChange = true;
+        }
+
+        // Optional-string fields: present-and-null clears, present-and-blank
+        // also clears (readOptionalString collapses both to null).
+        if (body.has("description")) {
+            var v = readOptionalString(body, "description");
+            task.description = v != null ? v : "";
+            anyChange = true;
+        }
+        if (body.has("delivery")) {
+            task.delivery = readOptionalString(body, "delivery");
+            anyChange = true;
+        }
+        if (body.has("payloadType")) {
+            task.payloadType = readOptionalString(body, "payloadType");
+            anyChange = true;
+        }
+        if (body.has("modelProvider")) {
+            task.modelProvider = readOptionalString(body, "modelProvider");
+            anyChange = true;
+        }
+        if (body.has("modelId")) {
+            task.modelId = readOptionalString(body, "modelId");
+            anyChange = true;
+        }
+        if (body.has("enabledToolNames")) {
+            task.enabledToolNames = readOptionalString(body, "enabledToolNames");
+            anyChange = true;
+        }
+        if (body.has("workdir")) {
+            task.workdir = readOptionalString(body, "workdir");
+            anyChange = true;
+        }
+        if (body.has("preCheck")) {
+            task.preCheck = readOptionalString(body, "preCheck");
+            anyChange = true;
+        }
+        if (body.has("script")) {
+            task.script = readOptionalString(body, "script");
+            anyChange = true;
+        }
+        if (body.has("contextFromTaskIds")) {
+            task.contextFromTaskIds = readOptionalString(body, "contextFromTaskIds");
+            anyChange = true;
+        }
+
+        // Boolean fields. Explicit null is rejected (no meaningful semantic)
+        // — callers should omit instead.
+        if (body.has("paused") && !body.get("paused").isJsonNull()) {
+            task.paused = body.get("paused").getAsBoolean();
+            anyChange = true;
+        }
+        if (body.has("noAgent") && !body.get("noAgent").isJsonNull()) {
+            task.noAgent = body.get("noAgent").getAsBoolean();
+            anyChange = true;
+        }
+
+        // Integer fields. Explicit null clears (sets back to unlimited).
+        if (body.has("repeatLimit")) {
+            var el = body.get("repeatLimit");
+            task.repeatLimit = el.isJsonNull() ? null : el.getAsInt();
+            anyChange = true;
+        }
+
+        if (!anyChange) {
+            error(400, "No patchable fields in body");
+            return;
+        }
+
+        task.save();
+        if (scheduleChanged) {
+            // cancel-then-register against db-scheduler. No-op in tests
+            // where SchedulerClient isn't wired (null-soft per the
+            // service's internal client() guard).
+            TaskSchedulingService.update(task);
+        }
+
+        EventLogger.info("TASK_MGMT_UPDATE",
+                task.agent != null ? task.agent.name : null, null,
+                "Task '%s' (id=%d) updated via API".formatted(task.name, task.id));
+
+        renderJSON(gson.toJson(TaskView.of(task)));
+    }
+
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     public static void cancel(Long id) {
         Task task = Task.findById(id);
         if (task == null) notFound();
