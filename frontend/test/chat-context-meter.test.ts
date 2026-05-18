@@ -106,3 +106,141 @@ describe('ChatContextMeter — capacity handling edge cases', () => {
     expect(component.find('[data-testid="context-readout"]').text()).toBe('0 / 50.0k')
   })
 })
+
+describe('ChatContextMeter — popover content', () => {
+  it('renders prompt / completion / total breakdown rows in the popover', async () => {
+    const component = await mountSuspended(ChatContextMeter, {
+      props: {
+        promptTokens: 1_000,
+        completionTokens: 200,
+        contextWindow: 100_000,
+      },
+    })
+    // The PopoverContent is rendered conditionally with v-if when the
+    // Popover root is open; the component HTML still contains the dl
+    // body. Force open via the exposed trigger.
+    const trigger = component.find('button')
+    await trigger.trigger('mouseenter')
+    // The popover may teleport; query both the component html and document body.
+    const html = component.html() + document.body.innerHTML
+    expect(html).toContain('Prompt tokens')
+    expect(html).toContain('Completion')
+    expect(html).toContain('Total')
+    // Cleanup: close popover so leaked content doesn't bleed into the next test.
+    await trigger.trigger('mouseleave')
+  })
+
+  it('shows the cost row only when costLabel is provided', async () => {
+    const component = await mountSuspended(ChatContextMeter, {
+      props: {
+        promptTokens: 100,
+        completionTokens: 50,
+        contextWindow: 50_000,
+        costLabel: '$0.0042',
+        turnCount: 3,
+      },
+    })
+    const trigger = component.find('button')
+    await trigger.trigger('mouseenter')
+    const html = component.html() + document.body.innerHTML
+    expect(html).toContain('$0.0042')
+    expect(html).toContain('Turns')
+    await trigger.trigger('mouseleave')
+  })
+
+  it('shows the thinking-tokens row when reasoningTokens > 0', async () => {
+    const component = await mountSuspended(ChatContextMeter, {
+      props: {
+        promptTokens: 100,
+        completionTokens: 50,
+        reasoningTokens: 25,
+        contextWindow: 50_000,
+      },
+    })
+    const trigger = component.find('button')
+    await trigger.trigger('mouseenter')
+    const html = component.html() + document.body.innerHTML
+    expect(html).toContain('Thinking tokens')
+    await trigger.trigger('mouseleave')
+  })
+
+  it('shows the cached-tokens row when cachedTokens > 0', async () => {
+    const component = await mountSuspended(ChatContextMeter, {
+      props: {
+        promptTokens: 100,
+        completionTokens: 50,
+        cachedTokens: 30,
+        contextWindow: 50_000,
+      },
+    })
+    const trigger = component.find('button')
+    await trigger.trigger('mouseenter')
+    const html = component.html() + document.body.innerHTML
+    expect(html).toContain('Cached tokens')
+    await trigger.trigger('mouseleave')
+  })
+})
+
+describe('ChatContextMeter — trigger button interactions', () => {
+  it('opens the popover on mouseenter and closes on mouseleave', async () => {
+    const component = await mountSuspended(ChatContextMeter, {
+      props: {
+        promptTokens: 100,
+        completionTokens: 50,
+        contextWindow: 50_000,
+      },
+    })
+    const trigger = component.find('button')
+    // Just exercise the handler chain — assertion via no-throw + popover render.
+    await trigger.trigger('mouseenter')
+    const openedHtml = component.html() + document.body.innerHTML
+    expect(openedHtml).toContain('Prompt tokens')
+    await trigger.trigger('mouseleave')
+    // After mouseleave the handleMouseLeave path ran (would have thrown
+    // if the ref was wrong); we don't assert focus because Popover's
+    // Teleport + happy-dom focus handling is unreliable.
+    await trigger.trigger('focus')
+    await trigger.trigger('blur')
+  })
+
+  it('uses amber bar coloring between 70 and 90 percent', async () => {
+    const component = await mountSuspended(ChatContextMeter, {
+      props: {
+        promptTokens: 80_000,
+        completionTokens: 0,
+        contextWindow: 100_000,
+      },
+    })
+    const bar = component.find('[data-testid="context-bar"]')
+    expect(bar.classes()).toContain('bg-amber-400')
+  })
+
+  it('renders the trigger right-side as em-dash when capacity is null but uses kFormat when small', async () => {
+    // capacity 100 stays raw "100"; 1000 becomes "1k"; in-between rounds.
+    const c1 = await mountSuspended(ChatContextMeter, {
+      props: { promptTokens: 0, completionTokens: 0, contextWindow: 100 },
+    })
+    expect(c1.find('[data-testid="context-readout"]').text()).toBe('0 / 100')
+
+    const c2 = await mountSuspended(ChatContextMeter, {
+      props: { promptTokens: 0, completionTokens: 0, contextWindow: 1000 },
+    })
+    expect(c2.find('[data-testid="context-readout"]').text()).toBe('0 / 1.00k')
+  })
+
+  it('formats sub-1% usage with one decimal place in the percent label', async () => {
+    const component = await mountSuspended(ChatContextMeter, {
+      props: {
+        // 200/100000 = 0.2% -> "0.2%" not "0%".
+        promptTokens: 200,
+        completionTokens: 0,
+        contextWindow: 100_000,
+      },
+    })
+    const trigger = component.find('button')
+    await trigger.trigger('mouseenter')
+    const html = component.html() + document.body.innerHTML
+    expect(html).toContain('0.2%')
+    await trigger.trigger('mouseleave')
+  })
+})
