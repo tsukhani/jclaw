@@ -76,17 +76,21 @@
       matchUpdateTypes: ["minor", "patch"],
       matchPackageNames: ["nuxt", "@nuxt/**", "nuxi", "h3"],
     },
-    // Block Nuxt 4.4.4 specifically — the dev server crashes with
-    // "Vite Node IPC socket path not configured." (HTTP 500 on every
-    // page request). The bug is invisible to CI because the harness
-    // doesn't start the dev server. Verified 2026-05-04 still broken
-    // when bumping from 4.4.2 → 4.4.4 against pnpm 11.0.4. Without
-    // this rule, every Renovate cycle re-proposes the same broken
-    // version since 4.4.4 is the latest published. Drop the rule once
-    // upstream ships 4.4.5+ with the IPC regression resolved.
+    // Block Nuxt 4.4.4 and 4.4.5 — both crash the dev server, in
+    // different ways:
+    //   - 4.4.4: SSR mode 500s with "Vite Node IPC socket path not
+    //     configured." (verified 2026-05-04).
+    //   - 4.4.5: SPA mode startup throws "No entry found in
+    //     rollupOptions.input" from resolveServerEntry — the 4.4.4
+    //     fix called resolveServer unconditionally on !ssr, but SPA
+    //     builds have no server entry to resolve (verified
+    //     2026-05-18, see project_nuxt_4_4_4_avoid memory).
+    // Both regressions are invisible to CI because the harness doesn't
+    // start the dev server, so the gate lives here. Drop the rule once
+    // upstream ships a verified-fixed 4.4.6+.
     {
       matchPackageNames: ["nuxt"],
-      allowedVersions: ">4.4.4",
+      allowedVersions: ">4.4.5",
     },
     {
       groupName: "eslint",
