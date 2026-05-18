@@ -333,11 +333,4 @@ dependencies {
     // FullTextLucene.searchData calls into StandardQueryParser at
     // query time and ClassNotFoundException without this dep.
     implementation("org.apache.lucene:lucene-queryparser:9.12.3")
-    // Backward codecs let Lucene 9.12 read indexes written by older 9.x
-    // codecs (Lucene99 written by 9.11.1, Lucene912 written by 9.12+).
-    // Lucene 9.12 ships only the current codec by default; existing
-    // on-disk segments_* files would fail with "Could not load codec
-    // 'Lucene99'" on the first read. Keeping this dep is the standard
-    // pattern for any Lucene bump that crosses a codec-version boundary.
-    implementation("org.apache.lucene:lucene-backward-codecs:9.12.3")
 }
