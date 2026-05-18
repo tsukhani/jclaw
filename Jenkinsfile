@@ -134,11 +134,21 @@ pipeline {
                 // tagged with the actual application.version being analyzed,
                 // keeping Sonar's history aligned with the release stream.
                 //
-                // Wrapped in catchError so a scanner failure, a missing Sonar
-                // server, or a future quality-gate check downstream marks the
-                // stage UNSTABLE (yellow) without aborting the build. Sonar
-                // is advisory here — code quality feedback, not a merge gate.
-                // Same pattern used by the 'Cleanup Old Releases' stage below.
+                // Scanner submission is wrapped in catchError so a scanner
+                // crash, a Sonar-server outage, or a transient network blip
+                // marks the stage UNSTABLE (yellow) without aborting the
+                // build — we don't want infrastructure flakes to block
+                // releases. Same pattern used by the 'Cleanup Old Releases'
+                // stage below.
+                //
+                // The quality-gate check (waitForQualityGate) lives OUTSIDE
+                // catchError on purpose (JCLAW-306): once analysis has
+                // landed in Sonar, a Failed gate is a real signal about new
+                // code quality and SHOULD abort the build. abortPipeline:
+                // true raises a flow-control error() that bypasses any
+                // surrounding catchError, so the gate is binding even if we
+                // ever wrap it. Timeout caps the polling wait at 5 minutes
+                // so a server hang doesn't pin the executor indefinitely.
                 catchError(buildResult: 'SUCCESS', stageResult: 'UNSTABLE') {
                     script {
                         def appVersion = sh(
@@ -149,6 +159,9 @@ pipeline {
                             sh "./gradlew sonar -Dsonar.projectVersion=v${appVersion}"
                         }
                     }
+                }
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }

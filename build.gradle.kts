@@ -79,6 +79,30 @@ sonar {
                 "**/*.properties, **/*.sql",
         )
 
+        // Coverage-only exclusions: these files are still analyzed for
+        // code smells, bugs, and security issues, but are not counted
+        // toward the coverage metric (numerator OR denominator). The
+        // sonar.exclusions list above removes files from analysis entirely;
+        // this list narrows just the coverage denominator so JClaw's headline
+        // coverage % reflects business code that meaningfully benefits from
+        // tests, rather than being deflated by vendored or harness code.
+        // See JCLAW-306 for the rationale per category.
+        property(
+            "sonar.coverage.exclusions",
+            // shadcn-vue primitives: upstream-vendored UI wrappers, not
+            // JClaw business logic. ~50 files at 0% inflate the gap without
+            // representing genuine untested code.
+            "frontend/components/ui/**, " +
+                // Playwright end-to-end specs: test code, not production source.
+                "frontend/tests/e2e/**, " +
+                // Dev-mode load harnesses: run manually under controlled
+                // conditions, not part of production code paths.
+                "app/services/LoadTestRunner.java, app/tools/LoadTestSleepTool.java, " +
+                // Generated TypeScript types: emitted by codegen, no
+                // hand-written behavior to cover.
+                "frontend/types/schemas.ts",
+        )
+
         // Override the Gradle plugin's default (build/classes/java/main) to
         // also include Play's template-derived classes from `play precompile`.
         property("sonar.java.binaries", "build/classes/java/main,precompiled/java")
