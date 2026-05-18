@@ -524,7 +524,12 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     public static void retry(Long id) {
         Task task = Task.findById(id);
-        if (task == null) notFound();
+        // Explicit return after notFound() so Sonar's flow analysis
+        // narrows `task` to non-null on the following line (Play's
+        // notFound() throws a Result internally, but Sonar can't see
+        // that). Matches the pattern used by update/run/pause/resume
+        // in this file.
+        if (task == null) { notFound(); return; }
         // JCLAW-258 extends retry to accept LOST in addition to FAILED.
         // FAILED: no scheduled_tasks row (it was removed when the failure
         // terminated the previous fire) — register() inserts a fresh row.
