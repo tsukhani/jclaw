@@ -64,10 +64,6 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
     // Wire-level tests prove the guard actually prevents the network call
     // rather than the exception path producing the same observable state.
 
-    // Note: the DRAFT-path re-entrance test was removed alongside DRAFT
-    // disablement (JCLAW-121). The EDIT_IN_PLACE variant below covers the
-    // same guard — DRAFT and EDIT_IN_PLACE share flushInFlight state.
-
     @Test
     void editInPlaceReentranceGuardPreventsSecondSendMessage() throws Exception {
         // EDIT_IN_PLACE variant: first flush sends a placeholder sendMessage;
@@ -154,10 +150,6 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
         // recordFlushFailure which ratchets currentThrottleMs. Previously
         // only unit-tested with a hand-built exception; this proves the
         // SDK's exception shape is what the classifier expects.
-        //
-        // Post-JCLAW-121: EDIT_IN_PLACE is the only transport, so we
-        // throttle sendMessage (the placeholder call) instead of
-        // sendMessageDraft.
         server.respondWith("sendMessage", 429,
                 "{\"ok\":false,\"error_code\":429,\"description\":\"Too Many Requests\","
                         + "\"parameters\":{\"retry_after\":1}}");
@@ -179,14 +171,6 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
                     "after 429 #" + (i + 1) + " the ratchet should be at " + expected[i] + "ms");
         }
     }
-
-    // ==================== Gap 5: draft-unsupported runtime fallback ====================
-    //
-    // The draft-unsupported fallback test was removed alongside DRAFT
-    // disablement (JCLAW-121). The classifier itself remains covered by
-    // the unit-level draftUnsupportedClassifierRecognizesExpectedPatterns
-    // test in TelegramStreamingSinkTest, retained as documented dead code
-    // in case Bot API 10.x gains a working draft-clear.
 
     // ==================== Gap 6: planner-dedupe sendPhoto count ====================
 

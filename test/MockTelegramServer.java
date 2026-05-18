@@ -25,8 +25,8 @@ import java.util.concurrent.Executors;
  * <ul>
  *   <li>{@code Message}-returning methods ({@code sendMessage},
  *       {@code editMessageText}, {@code sendPhoto}) → minimal valid Message.
- *   <li>{@code Boolean}-returning methods ({@code sendMessageDraft},
- *       {@code deleteMessage}, {@code sendChatAction}) → {@code {ok:true,result:true}}.
+ *   <li>{@code Boolean}-returning methods ({@code deleteMessage},
+ *       {@code sendChatAction}) → {@code {ok:true,result:true}}.
  *   <li>Anything else → {@code {ok:true,result:true}}.
  * </ul>
  *
@@ -108,8 +108,7 @@ public final class MockTelegramServer implements AutoCloseable {
      * case-insensitively against the SDK's lowercased request path.
      * Status codes other than 200 exercise the SDK's error path — the
      * SDK throws {@code TelegramApiRequestException} which the sink's
-     * catch blocks route through {@code recordFlushFailure} /
-     * {@code tryDraftFlushWithFallback}.
+     * catch blocks route through {@code recordFlushFailure}.
      */
     public void respondWith(String methodName, int statusCode, String body) {
         overrides.put(methodName.toLowerCase(), new CannedResponse(statusCode, body, 0));
@@ -134,11 +133,10 @@ public final class MockTelegramServer implements AutoCloseable {
 
     private static String defaultResponseFor(String methodName) {
         // Compare case-insensitively — the SDK lowercases method names in
-        // the URL path (sendmessagedraft, etc.) even though the Bot API
-        // docs and our test assertions use camelCase.
+        // the URL path (sendmessage, etc.) even though the Bot API docs
+        // and our test assertions use camelCase.
         String m = methodName.toLowerCase();
-        if (m.equals("sendmessagedraft")
-                || m.equals("deletemessage")
+        if (m.equals("deletemessage")
                 || m.equals("sendchataction")
                 || m.equals("setwebhook")
                 || m.equals("setmycommands")

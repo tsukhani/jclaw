@@ -182,15 +182,14 @@ class TelegramStreamingSinkTest extends UnitTest {
     // === JCLAW-95: flushInFlight re-entrance ===
     //
     // The reflection-based test that lived here was superseded by
-    // MockTelegramSinkIntegrationTest.draftReentranceGuardPreventsSecondSendMessageDraft
-    // and editInPlaceReentranceGuardPreventsSecondSendMessage (JCLAW-96).
-    // The old test asserted state-unchanged after a planted-guard flush,
-    // which passed whether or not the guard actually short-circuited —
+    // MockTelegramSinkIntegrationTest.editInPlaceReentranceGuardPreventsSecondSendMessage
+    // (JCLAW-96). The old test asserted state-unchanged after a planted-guard
+    // flush, which passed whether or not the guard actually short-circuited —
     // an exception from the HTTP execute path would have left state
-    // unchanged too. The wire-level versions count outbound requests on
-    // a mock server, which is necessary-and-sufficient: if the guard
-    // were removed, both concurrent flushes would land as real HTTP
-    // calls and the assertion would fail.
+    // unchanged too. The wire-level version counts outbound requests on a
+    // mock server, which is necessary-and-sufficient: if the guard were
+    // removed, both concurrent flushes would land as real HTTP calls and
+    // the assertion would fail.
 
     @Test
     void awaitInFlightFlushWakesImmediatelyOnFutureCompletion() throws Exception {
@@ -285,100 +284,6 @@ class TelegramStreamingSinkTest extends UnitTest {
 
         assertTrue(TelegramStreamingSink.tryFireNotifier(999L),
                 "should fire again once the rate window has elapsed");
-    }
-
-    // === JCLAW-121: transport is always EDIT_IN_PLACE ===
-    //
-    // DRAFT transport was disabled after we discovered Bot API 9.5 has no
-    // working draft-clear — sendMessageDraft with empty text is rejected HTTP
-    // 400 by both the SDK validator and the server, leaving stale draft
-    // bubbles visible for several seconds until Telegram's client cache
-    // auto-expires. These tests now pin the "always EDIT_IN_PLACE" contract.
-
-    @Test
-    void transportIsEditInPlaceWhenChatTypeOmitted() {
-        var sink = new TelegramStreamingSink("tok", "chat", null);
-        assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
-                sink.transportForTest());
-    }
-
-    @Test
-    void transportIsEditInPlaceForPrivateChats() {
-        var sink = new TelegramStreamingSink("tok", "12345", null, null, "private");
-        assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
-                sink.transportForTest());
-    }
-
-    @Test
-    void transportIsEditInPlaceForGroupSupergroupAndChannel() {
-        for (String type : new String[] { "group", "supergroup", "channel" }) {
-            var sink = new TelegramStreamingSink("tok", "chat", null, null, type);
-            assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
-                    sink.transportForTest(),
-                    "chat.type=" + type + " must select EDIT_IN_PLACE (DRAFT disabled)");
-        }
-    }
-
-    @Test
-    void transportIsEditInPlaceForNullOrBlankChatType() {
-        // Null / blank chatType still produces EDIT_IN_PLACE — same contract
-        // as when DRAFT was active, just now universal.
-        assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
-                new TelegramStreamingSink("tok", "chat", null, null, null)
-                        .transportForTest());
-        assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
-                new TelegramStreamingSink("tok", "chat", null, null, "")
-                        .transportForTest());
-        assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
-                new TelegramStreamingSink("tok", "chat", null, null, "   ")
-                        .transportForTest());
-    }
-
-    @Test
-    void draftWasSentIsFalseOnFreshSink() {
-        var sink = new TelegramStreamingSink("tok", "chat", null, null, "private");
-        assertFalse(sink.draftWasSentForTest(),
-                "a fresh DRAFT sink has not yet saved a draft");
-    }
-
-    @Test
-    void draftUnsupportedClassifierRecognizesExpectedPatterns() throws Exception {
-        // JCLAW-103: when sendMessageDraft returns a 400 matching either
-        // DRAFT_METHOD_UNAVAILABLE_RE or DRAFT_CHAT_UNSUPPORTED_RE, the sink
-        // must transition to EDIT_IN_PLACE. Verify the classifier directly
-        // via reflection — the sink's runtime fallback path is driven off it.
-        var classifier = TelegramStreamingSink.class
-                .getDeclaredMethod("isDraftUnsupported",
-                        org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException.class);
-        classifier.setAccessible(true);
-
-        String[] unsupportedMessages = {
-                "method sendMessageDraft can be used only in private chats",
-                "400: Bad Request: method not found",
-                "unknown method",
-                "unsupported",
-                "can't be used in this chat",
-        };
-        for (String msg : unsupportedMessages) {
-            var ex = new org.telegram.telegrambots.meta.exceptions
-                    .TelegramApiRequestException(msg);
-            assertEquals(true, classifier.invoke(null, ex),
-                    "should classify '" + msg + "' as draft-unsupported");
-        }
-
-        // Unrelated errors must NOT be classified as draft-unsupported
-        // (they should propagate via the normal 429/other-error path).
-        String[] unrelatedMessages = {
-                "Too Many Requests",
-                "Bad Request: chat not found",
-                "Forbidden: bot was blocked by the user",
-        };
-        for (String msg : unrelatedMessages) {
-            var ex = new org.telegram.telegrambots.meta.exceptions
-                    .TelegramApiRequestException(msg);
-            assertEquals(false, classifier.invoke(null, ex),
-                    "must not classify '" + msg + "' as draft-unsupported");
-        }
     }
 
     // === JCLAW-100: adaptive throttle ratchet ===

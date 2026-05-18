@@ -7,13 +7,8 @@ import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKe
 import play.test.UnitTest;
 
 /**
- * Unit tests for {@link TelegramChannel} raw-HTTP helpers that bypass the
- * telegrambots-meta SDK (JCLAW-121 clearMessageDraft).
- *
- * <p>The SDK validates {@code SendMessageDraft} with non-empty text before
- * the HTTP call, so the clear-draft mechanism used by OpenClaw's grammY
- * streamer (post empty {@code text}) required a raw-HTTP path. These tests
- * drive that path against {@link MockTelegramServer}.
+ * Unit tests for {@link TelegramChannel} outbound paths (photo upload
+ * timeouts, inline keyboard rendering) against {@link MockTelegramServer}.
  */
 class TelegramChannelTest extends UnitTest {
 
@@ -32,62 +27,6 @@ class TelegramChannelTest extends UnitTest {
     void teardown() {
         TelegramChannel.TELEGRAM_API_BASE = prevBase;
         if (mock != null) mock.close();
-    }
-
-    @Test
-    void clearMessageDraft_postsEmptyTextToSendMessageDraft() {
-        var ok = TelegramChannel.clearMessageDraft("bot-token", "12345", 42);
-        assertTrue(ok, "mock returns 200 by default; helper should return true");
-
-        var reqs = mock.requests();
-        assertEquals(1, reqs.size());
-        var req = reqs.get(0);
-        // MockTelegramServer lowercases the method name; accept either case.
-        assertTrue(req.method().equalsIgnoreCase("sendMessageDraft"),
-                "expected sendMessageDraft method, got: " + req.method());
-        assertTrue(req.path().contains("/botbot-token/"),
-                "bot token must be in the URL path, got: " + req.path());
-
-        // Empty text is the clear signal — confirm the wire payload carries it.
-        var body = req.body();
-        assertTrue(body.contains("\"text\":\"\""),
-                "request body must include empty text, got: " + body);
-        assertTrue(body.contains("\"chat_id\":12345"),
-                "request body must include chat_id, got: " + body);
-        assertTrue(body.contains("\"draft_id\":42"),
-                "request body must include draft_id, got: " + body);
-    }
-
-    @Test
-    void clearMessageDraft_returnsFalseOnServerError() {
-        // Override to return 400 as the Telegram API would for a rejected clear.
-        mock.respondWith("sendMessageDraft", 400,
-                "{\"ok\":false,\"error_code\":400,\"description\":\"test\"}");
-        var ok = TelegramChannel.clearMessageDraft("bot-token", "12345", 42);
-        assertFalse(ok, "helper must return false on non-200");
-    }
-
-    @Test
-    void clearMessageDraft_returnsFalseOnNullToken() {
-        // Must not make an HTTP call when the token is missing — gates the
-        // clearDraftBestEffort no-op for test / admin sinks.
-        var ok = TelegramChannel.clearMessageDraft(null, "12345", 42);
-        assertFalse(ok);
-        assertEquals(0, mock.requests().size());
-    }
-
-    @Test
-    void clearMessageDraft_returnsFalseOnBlankToken() {
-        var ok = TelegramChannel.clearMessageDraft("", "12345", 42);
-        assertFalse(ok);
-        assertEquals(0, mock.requests().size());
-    }
-
-    @Test
-    void clearMessageDraft_returnsFalseOnNullChatId() {
-        var ok = TelegramChannel.clearMessageDraft("bot-token", null, 42);
-        assertFalse(ok);
-        assertEquals(0, mock.requests().size());
     }
 
     // ─── Upload client timeouts (JCLAW-122) ─────────────────────────────
@@ -130,32 +69,6 @@ class TelegramChannelTest extends UnitTest {
     }
 
     // ─── JCLAW-325: residual coverage ───────────────────────────────────
-
-    @Test
-    void clearMessageDraft_returnsFalseOnBlankChatId_via_null_short_circuit() {
-        // Note: the production guard rejects null chatId but a non-null blank
-        // chatId still attempts an HTTP call. This documents the actual
-        // short-circuit set the helper enforces — only null token / blank
-        // token / null chat short-circuit; blank chat hits the wire.
-        assertFalse(TelegramChannel.clearMessageDraft("bot-token", null, 42));
-        assertEquals(0, mock.requests().size(),
-                "null chat must short-circuit before any HTTP call");
-    }
-
-    @Test
-    void clearMessageDraft_swallowsConnectErrorReturningFalse() {
-        // Force the IOException catch path (line 290) by pointing the helper
-        // at a known-closed loopback port. The helper must log a warn and
-        // return false rather than propagate.
-        String prev = TelegramChannel.TELEGRAM_API_BASE;
-        try {
-            TelegramChannel.TELEGRAM_API_BASE = "http://127.0.0.1:1"; // reserved/closed
-            boolean ok = TelegramChannel.clearMessageDraft("bot-token", "12345", 42);
-            assertFalse(ok, "connection-refused must yield false, not throw");
-        } finally {
-            TelegramChannel.TELEGRAM_API_BASE = prev;
-        }
-    }
 
     @Test
     void botToken_accessorReturnsTokenPassedToConstructor() {

@@ -21,7 +21,6 @@ import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 import services.EventLogger;
-import utils.HttpKeys;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -46,9 +45,8 @@ public class TelegramChannel implements Channel {
      * Generic inbound shape consumed by {@link controllers.WebhookTelegramController}
      * and {@link TelegramPollingRunner}. {@code chatType} is the Telegram Bot API
      * chat.type string ({@code "private"} / {@code "group"} / {@code "supergroup"} /
-     * {@code "channel"}), used by the streaming sink to pick DRAFT vs EDIT_IN_PLACE
-     * transport — JCLAW-103. Nullable for defensive parsing: if an update somehow
-     * arrives without chat context, callers fall back to EDIT_IN_PLACE.
+     * {@code "channel"}), recorded for structured logging and possible future
+     * routing. Nullable when an update arrives without chat context.
      */
     public record InboundMessage(String chatId, String chatType, String text,
                                  String fromId, String fromUsername,
@@ -255,43 +253,6 @@ public class TelegramChannel implements Channel {
         } catch (Exception e) {
             EventLogger.warn("channel", null, "telegram",
                     "setMyCommands failed: %s".formatted(e.getMessage()));
-        }
-    }
-
-    /**
-     * Clear a pending {@code sendMessageDraft} by posting empty text via
-     * raw HTTP (JCLAW-121). The telegrambots-meta 9.5.0 SDK rejects
-     * empty-text {@code SendMessageDraft} with a pre-submit validator, so
-     * we can't use {@link OkHttpTelegramClient#execute}. Telegram itself
-     * accepts the request — OpenClaw's grammY-backed streamer clears
-     * drafts this way in {@code extensions/telegram/src/draft-stream.ts:445}.
-     *
-     * <p>Best-effort: returns {@code false} on any failure and logs a
-     * warning. Caller (the streaming sink's {@code clearDraftBestEffort})
-     * swallows the result — a failed clear leaves a stale draft but
-     * doesn't prevent the final HTML message from being delivered.
-     */
-    public static boolean clearMessageDraft(String botToken, String chatId, int draftId) {
-        if (botToken == null || botToken.isBlank() || chatId == null) return false;
-        var url = TELEGRAM_API_BASE + "/bot" + botToken + "/sendMessageDraft";
-        var body = "{\"chat_id\":%s,\"draft_id\":%d,\"text\":\"\"}".formatted(chatId, draftId);
-        var req = new okhttp3.Request.Builder()
-                .url(url)
-                .post(okhttp3.RequestBody.create(body, okhttp3.MediaType.get(HttpKeys.APPLICATION_JSON)))
-                .build();
-        try (var resp = utils.HttpFactories.general().newCall(req).execute()) {
-            if (resp.code() != 200) {
-                EventLogger.warn("channel", null, "telegram",
-                        "clearMessageDraft returned HTTP %d for chat %s"
-                                .formatted(resp.code(), chatId));
-                return false;
-            }
-            return true;
-        } catch (Exception e) {
-            EventLogger.warn("channel", null, "telegram",
-                    "clearMessageDraft failed for chat %s: %s"
-                            .formatted(chatId, e.getMessage()));
-            return false;
         }
     }
 
