@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Agent;
 import models.Task;
 import models.TaskRun;
+import models.TaskRunMessage;
 import play.db.jpa.JPA;
 import services.EventLogger;
 import services.ScheduleShorthandParser;
@@ -99,6 +100,61 @@ public class ApiTasksController extends Controller {
                     r.deliveryError,
                     r.traceJson,
                     r.createdAt != null ? r.createdAt.toString() : null);
+        }
+    }
+
+    /**
+     * One hit from the transcript search: the matched
+     * {@link TaskRunMessage} content + role plus enough parent context
+     * (task id/name, taskRun id) for the UI to link back.
+     */
+    private record TranscriptSearchHit(Long messageId, String role, String content,
+                                        String createdAt, Long taskRunId,
+                                        Long taskId, String taskName,
+                                        Long agentId, String agentName) {
+        static TranscriptSearchHit of(TaskRunMessage m) {
+            var run = m.taskRun;
+            var task = run != null ? run.task : null;
+            var agent = task != null ? task.agent : null;
+            return new TranscriptSearchHit(
+                    m.id,
+                    m.role != null ? m.role.name() : null,
+                    m.content,
+                    m.createdAt != null ? m.createdAt.toString() : null,
+                    run != null ? run.id : null,
+                    task != null ? task.id : null,
+                    task != null ? task.name : null,
+                    agent != null ? agent.id : null,
+                    agent != null ? agent.name : null);
+        }
+    }
+
+    /**
+     * Full-text search across task transcripts. Routes through the
+     * {@link services.search.MessageSearch} facade, which dispatches
+     * to either H2's FullTextLucene or Postgres tsvector depending on
+     * the bootstrapped dialect. Query syntax is whatever the active
+     * backend's analyser accepts — H2 supports phrase quoting, AND/OR/NOT,
+     * and prefix wildcards per Lucene's standard syntax.
+     *
+     * <p>Empty {@code q} returns {@code []} — the search facade
+     * intentionally non-exceptional on empty input so the UI can render
+     * an empty results panel before the operator types.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = TranscriptSearchHit.class))))
+    public static void searchTranscripts(String q, Integer limit) {
+        int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 200) : 50;
+        if (q == null || q.isBlank()) {
+            renderJSON("[]");
+        }
+        try {
+            var hits = services.search.MessageSearch.search(q, effectiveLimit);
+            renderJSON(gson.toJson(hits.stream().map(TranscriptSearchHit::of).toList()));
+        } catch (Exception e) {
+            // Surface backend errors as 500 with the message — gives the
+            // operator something actionable (e.g. malformed query syntax
+            // bubbles up from Lucene's parser as "Cannot parse '...'").
+            error(500, "Search failed: " + e.getMessage());
         }
     }
 
