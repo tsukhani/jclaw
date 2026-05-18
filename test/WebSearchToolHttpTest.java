@@ -545,4 +545,679 @@ class WebSearchToolHttpTest extends UnitTest {
         ConfigService.set("search.tavily.baseUrl", server.url("/tavily").toString());
         ConfigService.clearCache();
     }
+
+    private void enableExaAtMock() {
+        ConfigService.set("search.exa.enabled", "true");
+        ConfigService.set("search.exa.apiKey", "test-exa-key");
+        ConfigService.set("search.exa.baseUrl", server.url("/exa").toString());
+        ConfigService.clearCache();
+    }
+
+    private void enablePerplexityAtMock() {
+        ConfigService.set("search.perplexity.enabled", "true");
+        ConfigService.set("search.perplexity.apiKey", "test-perplexity-key");
+        ConfigService.set("search.perplexity.baseUrl", server.url("/perplexity").toString());
+        ConfigService.clearCache();
+    }
+
+    private void enableOllamaAtMock() {
+        ConfigService.set("search.ollama.enabled", "true");
+        ConfigService.set("search.ollama.apiKey", "test-ollama-key");
+        ConfigService.set("search.ollama.baseUrl", server.url("/ollama").toString());
+        ConfigService.clearCache();
+    }
+
+    private void enableFeloAtMock() {
+        ConfigService.set("search.felo.enabled", "true");
+        ConfigService.set("search.felo.apiKey", "test-felo-key");
+        ConfigService.set("search.felo.baseUrl", server.url("/felo").toString());
+        ConfigService.clearCache();
+    }
+
+    // ==================== Exa ====================
+
+    @Test
+    void exaHappyPathReturnsMarkdownWithHighlightsAndAuthHeader() throws Exception {
+        // Exa posts JSON with {query, numResults, contents.highlights}, auths
+        // via x-api-key, and emits per-result `highlights[]` rather than a
+        // single snippet string. The custom formatResults preserves the
+        // one-line-per-highlight shape in markdown.
+        enableExaAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("""
+                        {"results":[
+                          {"title":"Exa search docs",
+                           "url":"https://example.test/exa",
+                           "highlights":["First highlight passage.","Second highlight passage."]},
+                          {"title":"Another Exa hit",
+                           "url":"https://example.test/exa2",
+                           "highlights":["Solo highlight."]}
+                        ]}""")
+                .build());
+
+        var result = tool.execute("{\"query\":\"vector search\"}", null);
+        assertFalse(result.startsWith("Error:"),
+                "happy path must not emit an error envelope: " + result);
+        assertTrue(result.contains("Exa search docs"),
+                "result title must surface in markdown: " + result);
+        assertTrue(result.contains("https://example.test/exa"));
+        assertTrue(result.contains("First highlight passage."),
+                "highlights must surface as separate quoted lines: " + result);
+        assertTrue(result.contains("Second highlight passage."),
+                "every highlight must surface, not just the first: " + result);
+        assertTrue(result.contains("Solo highlight."));
+        assertTrue(result.contains("via Exa"),
+                "provider attribution must be present: " + result);
+
+        var req = server.takeRequest();
+        assertEquals("POST", req.getMethod(),
+                "Exa uses POST with JSON body");
+        assertEquals("test-exa-key", req.getHeaders().get("x-api-key"),
+                "Exa authenticates via x-api-key header");
+        var body = req.getBody().utf8();
+        assertTrue(body.contains("\"query\""), "request body must include query: " + body);
+        assertTrue(body.contains("vector search"),
+                "request body must carry the query verbatim: " + body);
+        assertTrue(body.contains("\"numResults\""),
+                "Exa schema sends numResults (not max_results): " + body);
+        assertTrue(body.contains("highlights"),
+                "Exa request must opt into highlights via contents.highlights: " + body);
+    }
+
+    @Test
+    void exaParsesMultipleResultsFromArray() throws Exception {
+        // parseResults must walk the full top-level results array, not just
+        // the first entry — verifies parseResultArray's loop coverage.
+        enableExaAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("""
+                        {"results":[
+                          {"title":"A","url":"https://example.test/a","highlights":["h-a"]},
+                          {"title":"B","url":"https://example.test/b","highlights":["h-b"]},
+                          {"title":"C","url":"https://example.test/c","highlights":["h-c"]}
+                        ]}""")
+                .build());
+
+        var rich = tool.executeRich("{\"query\":\"x\"}", null);
+        var payload = JsonParser.parseString(rich.structuredJson()).getAsJsonObject();
+        assertEquals(3, payload.getAsJsonArray("results").size(),
+                "all three results must surface in the structured payload");
+    }
+
+    @Test
+    void exaEmptyResultsArrayYieldsNoResultsFound() throws Exception {
+        // topLevelArray returns null on empty-array, which routes through to
+        // the empty-results envelope rather than NPE'ing on a missing key.
+        enableExaAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("{\"results\":[]}")
+                .build());
+
+        var result = tool.execute("{\"query\":\"x\"}", null);
+        assertEquals("No results found.", result);
+    }
+
+    @Test
+    void exaResultWithoutHighlightsRendersWithoutQuoteLines() throws Exception {
+        // joinedHighlights returns null when no highlights array; the custom
+        // formatResults must still emit title + URL but no `> ...` line.
+        enableExaAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("""
+                        {"results":[
+                          {"title":"No highlights here","url":"https://example.test/nh"}
+                        ]}""")
+                .build());
+
+        var result = tool.execute("{\"query\":\"x\"}", null);
+        assertFalse(result.startsWith("Error:"));
+        assertTrue(result.contains("No highlights here"));
+        assertTrue(result.contains("https://example.test/nh"));
+        assertFalse(result.contains("> "),
+                "no highlights ⇒ no `> ...` quote lines: " + result);
+    }
+
+    @Test
+    void exa500SurfacesAsToolError() throws Exception {
+        enableExaAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(500)
+                .body("{\"error\":\"server fault\"}")
+                .build());
+        var result = tool.execute("{\"query\":\"x\"}", null);
+        assertTrue(result.startsWith("Error:"),
+                "5xx must surface as deterministic error envelope");
+        assertTrue(result.contains("HTTP 500"));
+        assertTrue(result.contains("Exa"));
+    }
+
+    @Test
+    void exaMalformedJsonSurfacesAsToolError() throws Exception {
+        // A 200 with body that isn't valid JSON must be caught by the
+        // outer try/catch and emitted as Error: rather than escape as
+        // a JsonParseException.
+        enableExaAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("not json at all {{{")
+                .build());
+
+        var result = tool.execute("{\"query\":\"x\"}", null);
+        assertTrue(result.startsWith("Error:"),
+                "malformed JSON must surface as deterministic error envelope, "
+                        + "not an unchecked exception: " + result);
+        assertTrue(result.contains("Exa"),
+                "provider name surfaces in error: " + result);
+    }
+
+    // ==================== Tavily: happy-path + error completion ====================
+
+    @Test
+    void tavilyHappyPathParsesMultipleResults() throws Exception {
+        // Tavily uses topLevelArray("results") + trimmedContentSnippet. Cover
+        // the parseResults path and the shared markdown renderer.
+        enableTavilyAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("""
+                        {"results":[
+                          {"title":"Tavily one","url":"https://example.test/t1",
+                           "content":"snippet one"},
+                          {"title":"Tavily two","url":"https://example.test/t2",
+                           "content":"snippet two"}
+                        ]}""")
+                .build());
+
+        var result = tool.execute("{\"query\":\"hello\",\"numResults\":4}", null);
+        assertFalse(result.startsWith("Error:"));
+        assertTrue(result.contains("Tavily one") && result.contains("Tavily two"),
+                "both results surface: " + result);
+        assertTrue(result.contains("snippet one") && result.contains("snippet two"));
+        assertTrue(result.contains("via Tavily"));
+
+        var req = server.takeRequest();
+        var body = req.getBody().utf8();
+        assertTrue(body.contains("\"max_results\""),
+                "Tavily request must send max_results (snake_case): " + body);
+        assertTrue(body.contains("\"search_depth\""),
+                "Tavily request must include search_depth=basic: " + body);
+        assertTrue(body.contains("\"include_answer\""),
+                "Tavily request must declare include_answer=false: " + body);
+    }
+
+    @Test
+    void tavilyEmptyResultsYieldsNoResultsFound() throws Exception {
+        enableTavilyAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("{\"results\":[]}")
+                .build());
+        assertEquals("No results found.", tool.execute("{\"query\":\"x\"}", null));
+    }
+
+    @Test
+    void tavily500SurfacesAsToolError() throws Exception {
+        enableTavilyAtMock();
+        server.enqueue(new MockResponse.Builder().code(500).body("boom").build());
+        var result = tool.execute("{\"query\":\"x\"}", null);
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains("HTTP 500"));
+        assertTrue(result.contains("Tavily"));
+    }
+
+    @Test
+    void tavilyNullableContentBecomesNullSnippet() throws Exception {
+        // trimmedContentSnippet returns null when content is missing/JsonNull;
+        // the markdown renderer's snippet-null guard skips the `> ...` line.
+        enableTavilyAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("""
+                        {"results":[
+                          {"title":"NoContent","url":"https://example.test/nc"},
+                          {"title":"NullContent","url":"https://example.test/null",
+                           "content":null}
+                        ]}""")
+                .build());
+
+        var result = tool.execute("{\"query\":\"x\"}", null);
+        assertFalse(result.startsWith("Error:"));
+        assertTrue(result.contains("NoContent"));
+        assertTrue(result.contains("NullContent"));
+    }
+
+    // ==================== Perplexity ====================
+
+    @Test
+    void perplexityHappyPathParsesResultsWithSnippetField() throws Exception {
+        // Perplexity uses POST + Authorization: Bearer ..., reads snippets
+        // from a `snippet` field (not `content`), and adds a recency filter.
+        enablePerplexityAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("""
+                        {"results":[
+                          {"title":"Perplexity hit",
+                           "url":"https://example.test/p1",
+                           "snippet":"pplx snippet body"}
+                        ]}""")
+                .build());
+
+        var result = tool.execute("{\"query\":\"news\",\"numResults\":2}", null);
+        assertFalse(result.startsWith("Error:"));
+        assertTrue(result.contains("Perplexity hit"));
+        assertTrue(result.contains("pplx snippet body"),
+                "snippet field must surface as quoted line: " + result);
+        assertTrue(result.contains("via Perplexity"));
+
+        var req = server.takeRequest();
+        assertEquals("POST", req.getMethod());
+        assertEquals("Bearer test-perplexity-key",
+                req.getHeaders().get("Authorization"),
+                "Perplexity authenticates via Bearer token");
+        var body = req.getBody().utf8();
+        assertTrue(body.contains("\"max_results\""),
+                "request must send max_results: " + body);
+        assertTrue(body.contains("search_recency_filter"),
+                "default recency filter must be on the wire: " + body);
+        assertTrue(body.contains("month"),
+                "default recency value is 'month': " + body);
+    }
+
+    @Test
+    void perplexityRecencyFilterCanBeDisabled() throws Exception {
+        // Setting search.perplexity.recencyFilter=none must suppress the
+        // body field entirely — covers the negative branch on the recency
+        // check in buildRequest.
+        enablePerplexityAtMock();
+        ConfigService.set("search.perplexity.recencyFilter", "none");
+        ConfigService.clearCache();
+        try {
+            server.enqueue(new MockResponse.Builder()
+                    .code(200)
+                    .addHeader("Content-Type", "application/json")
+                    .body("{\"results\":[]}")
+                    .build());
+
+            tool.execute("{\"query\":\"x\"}", null);
+            var req = server.takeRequest();
+            var body = req.getBody().utf8();
+            assertFalse(body.contains("search_recency_filter"),
+                    "recency=none must omit the field entirely: " + body);
+        } finally {
+            ConfigService.delete("search.perplexity.recencyFilter");
+            ConfigService.clearCache();
+        }
+    }
+
+    @Test
+    void perplexityRecencyFilterCustomValuePassedThrough() throws Exception {
+        enablePerplexityAtMock();
+        ConfigService.set("search.perplexity.recencyFilter", "week");
+        ConfigService.clearCache();
+        try {
+            server.enqueue(new MockResponse.Builder()
+                    .code(200)
+                    .addHeader("Content-Type", "application/json")
+                    .body("{\"results\":[]}")
+                    .build());
+
+            tool.execute("{\"query\":\"x\"}", null);
+            var req = server.takeRequest();
+            var body = req.getBody().utf8();
+            assertTrue(body.contains("\"week\""),
+                    "custom recency value must reach the wire: " + body);
+        } finally {
+            ConfigService.delete("search.perplexity.recencyFilter");
+            ConfigService.clearCache();
+        }
+    }
+
+    @Test
+    void perplexityEmptyResultsYieldsNoResultsFound() throws Exception {
+        enablePerplexityAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("{\"results\":[]}")
+                .build());
+        assertEquals("No results found.", tool.execute("{\"query\":\"x\"}", null));
+    }
+
+    @Test
+    void perplexity503SurfacesAsToolError() throws Exception {
+        enablePerplexityAtMock();
+        server.enqueue(new MockResponse.Builder().code(503).body("upstream down").build());
+        var result = tool.execute("{\"query\":\"x\"}", null);
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains("HTTP 503"));
+        assertTrue(result.contains("Perplexity"));
+    }
+
+    @Test
+    void perplexityMalformedJsonSurfacesAsToolError() throws Exception {
+        enablePerplexityAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("][not json")
+                .build());
+        var result = tool.execute("{\"query\":\"x\"}", null);
+        assertTrue(result.startsWith("Error:"),
+                "malformed JSON must surface as error envelope: " + result);
+        assertTrue(result.contains("Perplexity"));
+    }
+
+    // ==================== Ollama ====================
+
+    @Test
+    void ollamaHappyPathParsesResults() throws Exception {
+        // Ollama's /api/web_search uses Bearer auth, sends max_results, and
+        // parses the `results` array with `content` snippets (same shape as
+        // Tavily's parseResults — covers trimmedContentSnippet via a second
+        // call site).
+        enableOllamaAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("""
+                        {"results":[
+                          {"title":"Ollama doc",
+                           "url":"https://example.test/o1",
+                           "content":"local model search content"}
+                        ]}""")
+                .build());
+
+        var result = tool.execute("{\"query\":\"local search\",\"numResults\":3}", null);
+        assertFalse(result.startsWith("Error:"));
+        assertTrue(result.contains("Ollama doc"));
+        assertTrue(result.contains("local model search content"));
+        assertTrue(result.contains("via Ollama"));
+
+        var req = server.takeRequest();
+        assertEquals("POST", req.getMethod());
+        assertEquals("Bearer test-ollama-key",
+                req.getHeaders().get("Authorization"),
+                "Ollama authenticates via Bearer token");
+        var body = req.getBody().utf8();
+        assertTrue(body.contains("\"max_results\""),
+                "Ollama request must use max_results key: " + body);
+        assertTrue(body.contains("\"query\""), "body must include query: " + body);
+    }
+
+    @Test
+    void ollamaCapsMaxResultsAtTenAtTheProviderLayer() throws Exception {
+        // OllamaProvider.buildRequest applies a second Math.min(numResults,10).
+        // numResults already arrives clamped to 10 by runFromArgs, but the
+        // provider-side guard is independent — verify the on-wire value is
+        // capped via the structured request body.
+        enableOllamaAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("{\"results\":[]}")
+                .build());
+
+        tool.execute("{\"query\":\"x\",\"numResults\":50}", null);
+        var req = server.takeRequest();
+        var body = req.getBody().utf8();
+        assertTrue(body.contains("\"max_results\":10"),
+                "max_results must be clamped to 10 on the wire: " + body);
+    }
+
+    @Test
+    void ollamaEmptyResultsYieldsNoResultsFound() throws Exception {
+        enableOllamaAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("{\"results\":[]}")
+                .build());
+        assertEquals("No results found.", tool.execute("{\"query\":\"x\"}", null));
+    }
+
+    @Test
+    void ollama500SurfacesAsToolError() throws Exception {
+        enableOllamaAtMock();
+        server.enqueue(new MockResponse.Builder().code(500).body("fail").build());
+        var result = tool.execute("{\"query\":\"x\"}", null);
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains("HTTP 500"));
+        assertTrue(result.contains("Ollama"));
+    }
+
+    @Test
+    void ollamaMalformedJsonSurfacesAsToolError() throws Exception {
+        enableOllamaAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("garbage")
+                .build());
+        var result = tool.execute("{\"query\":\"x\"}", null);
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains("Ollama"));
+    }
+
+    // ==================== Felo ====================
+
+    @Test
+    void feloHappyPathParsesResourcesAndPrependsAnswerSummary() throws Exception {
+        // Felo's response is nested under `data` with `answer` (summary)
+        // and `resources[]` (per-result; uses `link` not `url`). The custom
+        // formatResults prepends "**Felo summary:** ..." before the standard
+        // result block.
+        enableFeloAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("""
+                        {"data":{
+                          "answer":"Felo's synthesized answer.",
+                          "resources":[
+                            {"title":"Felo resource",
+                             "link":"https://example.test/f1",
+                             "snippet":"resource snippet body"}
+                          ]
+                        }}""")
+                .build());
+
+        var result = tool.execute("{\"query\":\"summary please\"}", null);
+        assertFalse(result.startsWith("Error:"));
+        assertTrue(result.contains("Felo summary:"),
+                "answer summary must prefix the result block: " + result);
+        assertTrue(result.contains("Felo's synthesized answer."));
+        assertTrue(result.contains("Felo resource"));
+        assertTrue(result.contains("https://example.test/f1"));
+        assertTrue(result.contains("resource snippet body"));
+        assertTrue(result.contains("via Felo"));
+
+        var req = server.takeRequest();
+        assertEquals("POST", req.getMethod());
+        assertEquals("Bearer test-felo-key",
+                req.getHeaders().get("Authorization"),
+                "Felo authenticates via Bearer token");
+        var body = req.getBody().utf8();
+        assertTrue(body.contains("\"query\""),
+                "body must include query: " + body);
+        assertTrue(body.contains("summary please"),
+                "query verbatim in body: " + body);
+    }
+
+    @Test
+    void feloResultUrlExtractedFromLinkFieldNotUrlField() throws Exception {
+        // Felo's per-resource URL key is `link`, not `url` — wrong key wiring
+        // would silently produce empty-url results. Verify via the structured
+        // payload so we catch the case where the URL falls through to default.
+        enableFeloAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("""
+                        {"data":{
+                          "answer":"",
+                          "resources":[
+                            {"title":"L","link":"https://example.test/link",
+                             "snippet":"s"}
+                          ]
+                        }}""")
+                .build());
+
+        var rich = tool.executeRich("{\"query\":\"x\"}", null);
+        var payload = JsonParser.parseString(rich.structuredJson()).getAsJsonObject();
+        var first = payload.getAsJsonArray("results").get(0).getAsJsonObject();
+        assertEquals("https://example.test/link", first.get("url").getAsString(),
+                "Felo's `link` field must populate SearchResult.url");
+    }
+
+    @Test
+    void feloMissingDataKeyYieldsNoResultsFound() throws Exception {
+        // Defensive: response with no `data` key at all must not NPE.
+        enableFeloAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("{}")
+                .build());
+        assertEquals("No results found.", tool.execute("{\"query\":\"x\"}", null));
+    }
+
+    @Test
+    void feloNullDataYieldsNoResultsFound() throws Exception {
+        // JsonNull in `data` is the second guard branch — verify it doesn't
+        // throw on getAsJsonObject.
+        enableFeloAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("{\"data\":null}")
+                .build());
+        assertEquals("No results found.", tool.execute("{\"query\":\"x\"}", null));
+    }
+
+    @Test
+    void feloMissingResourcesArrayYieldsNoResultsFound() throws Exception {
+        // `data` present but no `resources` key → empty parsed list. With no
+        // answer summary either, formatResults must still emit the canonical
+        // "No results found." string.
+        enableFeloAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("{\"data\":{}}")
+                .build());
+        var result = tool.execute("{\"query\":\"x\"}", null);
+        assertTrue(result.contains("No results found."),
+                "missing resources must surface the empty envelope: " + result);
+    }
+
+    @Test
+    void feloAnswerOnlyWithEmptyResourcesStillEmitsSummary() throws Exception {
+        // Empty resources[] but a populated answer — the custom formatResults
+        // appends "No results found." after the summary so the LLM sees the
+        // answer-only path.
+        enableFeloAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("""
+                        {"data":{
+                          "answer":"summary only — no sources surfaced",
+                          "resources":[]
+                        }}""")
+                .build());
+
+        var result = tool.execute("{\"query\":\"x\"}", null);
+        assertTrue(result.contains("summary only"),
+                "answer surfaces even with empty resources: " + result);
+        assertTrue(result.contains("Felo summary:"),
+                "summary header prefix surfaces: " + result);
+        assertTrue(result.contains("No results found."),
+                "empty resources path appends the standard no-results tail: " + result);
+    }
+
+    @Test
+    void felo500SurfacesAsToolError() throws Exception {
+        enableFeloAtMock();
+        server.enqueue(new MockResponse.Builder().code(500).body("err").build());
+        var result = tool.execute("{\"query\":\"x\"}", null);
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains("HTTP 500"));
+        assertTrue(result.contains("Felo"));
+    }
+
+    @Test
+    void feloMalformedJsonSurfacesAsToolError() throws Exception {
+        enableFeloAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("nope")
+                .build());
+        var result = tool.execute("{\"query\":\"x\"}", null);
+        assertTrue(result.startsWith("Error:"));
+        assertTrue(result.contains("Felo"));
+    }
+
+    // ==================== shared helpers (parseInt, faviconUrlFor edge cases) ====================
+
+    @Test
+    void faviconUrlIsNullForUrlWithNoHost() throws Exception {
+        // faviconUrlFor returns null when URI parsing yields no host (e.g.
+        // schemeless or bare path). Exercise via a result with a "javascript:"
+        // URL that yields a null host.
+        enableBraveAtMock();
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("""
+                        {"web":{"results":[
+                          {"title":"empty-host","url":"about:blank","description":"d"}
+                        ]}}""")
+                .build());
+
+        var rich = tool.executeRich("{\"query\":\"x\"}", null);
+        var first = JsonParser.parseString(rich.structuredJson())
+                .getAsJsonObject()
+                .getAsJsonArray("results")
+                .get(0).getAsJsonObject();
+        assertTrue(first.get("faviconUrl").isJsonNull(),
+                "URL with no host (about:blank) must yield null faviconUrl: " + first);
+    }
+
+    @Test
+    void priorityNonNumericFallsBackToDefault() throws Exception {
+        // parseInt(value, 99) handles non-numeric priority values without
+        // throwing. With a single provider enabled, the comparator never
+        // actually compares — but the resolveProvidersByPriority path still
+        // computes the priority. Set a junk value and verify the call works.
+        ConfigService.set("search.brave.enabled", "true");
+        ConfigService.set("search.brave.apiKey", "test-brave-key");
+        ConfigService.set("search.brave.baseUrl", server.url("/brave").toString());
+        ConfigService.set("search.brave.priority", "not-a-number");
+        ConfigService.clearCache();
+
+        server.enqueue(new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "application/json")
+                .body("{\"web\":{\"results\":[]}}")
+                .build());
+
+        var result = tool.execute("{\"query\":\"x\"}", null);
+        assertEquals("No results found.", result,
+                "non-numeric priority must not crash provider resolution");
+    }
 }
