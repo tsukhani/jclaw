@@ -5,8 +5,12 @@ import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import models.Agent;
 import models.Task;
 import play.db.jpa.JPA;
+import services.EventLogger;
+import services.ScheduleShorthandParser;
+import services.TaskSchedulingService;
 
 import static utils.GsonHolder.INSTANCE;
 import play.mvc.Controller;
@@ -88,6 +92,121 @@ public class ApiTasksController extends Controller {
                 .setMaxResults(effectiveLimit).getResultList();
 
         renderJSON(gson.toJson(tasks.stream().map(TaskView::of).toList()));
+    }
+
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
+    public static void create() {
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null) badRequest();
+
+        // agentId resolution. Until user-ownership lands (class-level TODO)
+        // the caller can address any agent — admitted by AuthCheck's single
+        // principal. The 400 here is "you typed an id that doesn't resolve";
+        // a non-existent task addressed in /api/tasks/{id} would be 404, but
+        // a non-existent agent named in the request body is bad input.
+        if (!body.has("agentId") || body.get("agentId").isJsonNull()) {
+            error(400, "agentId is required");
+            return;
+        }
+        var agent = (Agent) Agent.findById(body.get("agentId").getAsLong());
+        if (agent == null) {
+            error(400, "agentId does not resolve to an existing agent");
+            return;
+        }
+
+        if (!body.has("name") || body.get("name").isJsonNull()) {
+            error(400, "name is required");
+            return;
+        }
+        var name = body.get("name").getAsString();
+        if (name == null || name.isBlank()) {
+            error(400, "name must be non-blank");
+            return;
+        }
+
+        if (!body.has("schedule") || body.get("schedule").isJsonNull()) {
+            error(400, "schedule is required");
+            return;
+        }
+        final ScheduleShorthandParser.ScheduleSpec spec;
+        try {
+            spec = ScheduleShorthandParser.parse(body.get("schedule").getAsString());
+        } catch (IllegalArgumentException e) {
+            error(400, "Invalid schedule: " + e.getMessage());
+            return;
+        }
+
+        // Recurring-type duplicate detection per AC: 409 with the
+        // conflicting Task ID. Only CRON / INTERVAL — IMMEDIATE and
+        // SCHEDULED are one-shot, so duplicate names are inert and not
+        // worth rejecting.
+        if (spec.type() == Task.Type.CRON || spec.type() == Task.Type.INTERVAL) {
+            @SuppressWarnings("unchecked")
+            var conflicts = (List<Object>) (List<?>) services.Tx.run(() -> Task.find(
+                    "name = ?1 AND agent = ?2 AND type IN (?3, ?4) AND status != ?5",
+                    name, agent, Task.Type.CRON, Task.Type.INTERVAL, Task.Status.CANCELLED
+            ).fetch());
+            if (!conflicts.isEmpty()) {
+                var conflictId = ((Task) conflicts.getFirst()).id;
+                error(409, "A recurring task named '%s' already exists for this agent (id=%d)"
+                        .formatted(name, conflictId));
+                return;
+            }
+        }
+
+        var saved = services.Tx.run(() -> {
+            var t = new Task();
+            t.agent = agent;
+            t.name = name;
+            t.description = readOptionalString(body, "description");
+            if (t.description == null) t.description = "";
+
+            t.type = spec.type();
+            t.scheduledAt = spec.scheduledAt();
+            t.cronExpression = spec.cronExpression();
+            t.intervalSeconds = spec.intervalSeconds();
+            t.scheduleDisplay = spec.scheduleDisplay();
+            // nextRunAt is no longer authoritative under db-scheduler (see
+            // JCLAW-21), but keep it populated for the Tasks-page render
+            // until the column is dropped.
+            t.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : Instant.now();
+
+            // Plumbing-ahead fields (consumed by JCLAW-295/296/297/298).
+            t.delivery = readOptionalString(body, "delivery");
+            t.payloadType = readOptionalString(body, "payloadType");
+            t.modelProvider = readOptionalString(body, "modelProvider");
+            t.modelId = readOptionalString(body, "modelId");
+            t.enabledToolNames = readOptionalString(body, "enabledToolNames");
+            t.workdir = readOptionalString(body, "workdir");
+            t.preCheck = readOptionalString(body, "preCheck");
+            t.script = readOptionalString(body, "script");
+            if (body.has("noAgent") && !body.get("noAgent").isJsonNull()) {
+                t.noAgent = body.get("noAgent").getAsBoolean();
+            }
+            t.contextFromTaskIds = readOptionalString(body, "contextFromTaskIds");
+            if (body.has("repeatLimit") && !body.get("repeatLimit").isJsonNull()) {
+                t.repeatLimit = body.get("repeatLimit").getAsInt();
+            }
+
+            t.save();
+            return t;
+        });
+
+        TaskSchedulingService.register(saved);
+
+        EventLogger.info("TASK_MGMT_CREATE", agent.name, null,
+                "Task '%s' (id=%d, type=%s) created via API"
+                        .formatted(saved.name, saved.id, saved.type));
+
+        renderJSON(gson.toJson(TaskView.of(saved)));
+    }
+
+    private static String readOptionalString(com.google.gson.JsonObject body, String key) {
+        if (!body.has(key)) return null;
+        var el = body.get(key);
+        if (el.isJsonNull()) return null;
+        var s = el.getAsString();
+        return (s == null || s.isBlank()) ? null : s;
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
