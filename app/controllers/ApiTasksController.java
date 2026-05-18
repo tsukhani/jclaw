@@ -24,8 +24,9 @@ import java.util.List;
  * Tasks API.
  *
  * <h3>TODO: agent-ownership enforcement</h3>
- * Every id-addressed mutation here ({@link #cancel}, {@link #retry},
- * {@link #pause}, {@link #resume}) currently authenticates via
+ * Every id-addressed mutation here ({@link #update}, {@link #cancel},
+ * {@link #retry}, {@link #run}, {@link #pause}, {@link #resume})
+ * currently authenticates via
  * {@link AuthCheck} but does not check that the resolved Task belongs
  * to the caller's agent — because user-ownership infrastructure does
  * not yet exist in JClaw (no {@code User} model, no {@code owner} FK
@@ -364,6 +365,38 @@ public class ApiTasksController extends Controller {
         }
         services.TaskSchedulingService.resume(task.id);
         renderJSON(gson.toJson(TaskView.of(Task.findById(task.id))));
+    }
+
+    /**
+     * Operator-initiated immediate fire — distinct from {@link #retry} which
+     * is the FAILED-only "fix and rerun" path. Accepts any current status
+     * per AC; revives a CANCELLED task to PENDING first so
+     * {@link services.TaskExecutionHandler}'s CANCELLED-skip doesn't
+     * swallow the fire. Other terminal states (COMPLETED, FAILED) don't
+     * trigger that skip so their status stays intact — re-firing a
+     * COMPLETED task is a deliberate operator action and the audit-log
+     * record alone is the trail.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
+    public static void run(Long id) {
+        Task task = Task.findById(id);
+        if (task == null) notFound();
+
+        boolean revivedFromCancel = false;
+        if (task.status == Task.Status.CANCELLED) {
+            task.status = Task.Status.PENDING;
+            task.save();
+            revivedFromCancel = true;
+        }
+
+        TaskSchedulingService.runNow(task.id);
+
+        EventLogger.info("TASK_MGMT_MANUAL_RUN",
+                task.agent != null ? task.agent.name : null, null,
+                ("Task '%s' (id=%d) run-now via API" + (revivedFromCancel ? " (revived from CANCELLED)" : ""))
+                        .formatted(task.name, task.id));
+
+        renderJSON(gson.toJson(TaskView.of(task)));
     }
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))

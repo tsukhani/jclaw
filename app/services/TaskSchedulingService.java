@@ -138,27 +138,58 @@ public final class TaskSchedulingService {
     }
 
     /**
-     * Trigger the Task's next fire immediately. Uses
-     * {@link SchedulerClient#reschedule reschedule(Instant.now())}
-     * when a row exists; falls through to a fresh
-     * {@link #register} if no row is currently scheduled (e.g.
-     * after a one-shot SCHEDULED Task completed and the operator
-     * wants to re-fire).
+     * Trigger the Task's next fire immediately. Three live cases the
+     * implementation handles defensively:
+     *
+     * <ol>
+     *   <li>The {@code scheduled_tasks} row exists and isn't being
+     *       executed — {@link SchedulerClient#reschedule} flips its
+     *       next-fire time to now.</li>
+     *   <li>The row exists but is currently being executed (db-scheduler
+     *       holds a row lock for the duration of the fire). Reschedule
+     *       throws {@code TaskInstanceCurrentlyExecutingException}; we
+     *       log and no-op, because the fire the operator wanted is
+     *       already in flight.</li>
+     *   <li>The row is gone — common after a one-shot Task COMPLETED
+     *       (OnCompleteRemove dropped it) or a Task was CANCELLED.
+     *       Reschedule throws {@code TaskInstanceNotFoundException};
+     *       we fall through to {@link #scheduleFire} which registers
+     *       a fresh row at {@code Instant.now()}.</li>
+     * </ol>
+     *
+     * <p>Note: case (3) for CANCELLED Tasks requires the caller to
+     * have already flipped status back to PENDING — otherwise
+     * {@link services.TaskExecutionHandler}'s CANCELLED-skip swallows
+     * the fire body at pick-up time. The API's {@code /run} endpoint
+     * is the canonical caller and does that revive itself.
      */
     public static void runNow(Long taskId) {
         Objects.requireNonNull(taskId, "taskId");
         SchedulerClient client = client();
         if (client == null) return;
-        boolean rescheduled = client.reschedule(
-                TaskInstanceId.of(TaskExecutionHandler.TASK_NAME, taskId.toString()),
-                Instant.now());
+        var instanceId = TaskInstanceId.of(TaskExecutionHandler.TASK_NAME, taskId.toString());
+        boolean rescheduled = false;
+        try {
+            rescheduled = client.reschedule(instanceId, Instant.now());
+        } catch (com.github.kagkarlsson.scheduler.exceptions.TaskInstanceCurrentlyExecutingException e) {
+            // Fire is already in progress — that IS the outcome the
+            // operator wanted. Log and no-op rather than racing with
+            // the executor.
+            EventLogger.info("task", null, null,
+                    "Task id %d run-now: fire already in progress; not rescheduling"
+                            .formatted(taskId));
+            return;
+        } catch (com.github.kagkarlsson.scheduler.exceptions.TaskInstanceNotFoundException e) {
+            // Row was removed (terminal one-shot completion, cancel, etc.)
+            // — fall through to registration. Common after operators
+            // re-run a COMPLETED or CANCELLED Task.
+        }
         if (rescheduled) {
             EventLogger.info("task", null, null,
                     "Task id %d run-now: rescheduled existing row to fire immediately"
                             .formatted(taskId));
             return;
         }
-        // No existing row — look up the Task and register from scratch.
         Task task = Tx.run(() -> (Task) Task.findById(taskId));
         if (task == null) {
             EventLogger.warn("task", null, null,
