@@ -150,11 +150,14 @@ public class ApiTasksController extends Controller {
         try {
             var hits = services.search.MessageSearch.search(q, effectiveLimit);
             renderJSON(gson.toJson(hits.stream().map(TranscriptSearchHit::of).toList()));
-        } catch (Exception e) {
-            // Surface backend errors as 500 with the message — gives the
-            // operator something actionable (e.g. malformed query syntax
-            // bubbles up from Lucene's parser as "Cannot parse '...'").
-            error(500, "Search failed: " + e.getMessage());
+        } catch (Throwable e) {
+            // Throwable (not just Exception) because Lucene API removals
+            // surface as NoClassDefFoundError / LinkageError / AbstractMethodError
+            // — Error subclasses that escape a narrower catch and yield a
+            // generic Play 500 page with no useful diagnostic. Log the full
+            // stack so version-bump incompats are debuggable.
+            play.Logger.error(e, "search-transcripts failed for q='%s'", q);
+            error(500, "Search failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
 

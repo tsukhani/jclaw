@@ -320,17 +320,24 @@ dependencies {
     implementation("com.github.kagkarlsson:db-scheduler:16.9.0")
 
     // JCLAW-21: Lucene — backs H2's FullTextLucene (FTL_*) full-text index on
-    // task_run_message.content for transcript search. Version 9.11.1 matches
+    // task_run_message.content for transcript search. Version 9.12.3 matches
     // what H2 2.3.232 (the fork's bundled version) tests against per H2's
     // own pom.xml. Lucene 9.x renamed lucene-analyzers-common to
     // lucene-analysis-common; we use the 9.x artifact name. tika-parsers-
     // standard-package above already excludes the transitive lucene pull
     // (line 205), so this is the only org.apache.lucene declaration in the
     // resolved graph.
-    implementation("org.apache.lucene:lucene-core:9.11.1")
-    implementation("org.apache.lucene:lucene-analysis-common:9.11.1")
+    implementation("org.apache.lucene:lucene-core:9.12.3")
+    implementation("org.apache.lucene:lucene-analysis-common:9.12.3")
     // Query parser lives in its own artifact since Lucene 9; H2's
     // FullTextLucene.searchData calls into StandardQueryParser at
     // query time and ClassNotFoundException without this dep.
-    implementation("org.apache.lucene:lucene-queryparser:9.11.1")
+    implementation("org.apache.lucene:lucene-queryparser:9.12.3")
+    // Backward codecs let Lucene 9.12 read indexes written by older 9.x
+    // codecs (Lucene99 written by 9.11.1, Lucene912 written by 9.12+).
+    // Lucene 9.12 ships only the current codec by default; existing
+    // on-disk segments_* files would fail with "Could not load codec
+    // 'Lucene99'" on the first read. Keeping this dep is the standard
+    // pattern for any Lucene bump that crosses a codec-version boundary.
+    implementation("org.apache.lucene:lucene-backward-codecs:9.12.3")
 }
