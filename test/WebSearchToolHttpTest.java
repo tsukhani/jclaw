@@ -38,7 +38,9 @@ class WebSearchToolHttpTest extends UnitTest {
     private static final String[] ALL_KEYS = {
             "search.exa.enabled", "search.exa.apiKey", "search.exa.baseUrl",
             "search.brave.enabled", "search.brave.apiKey", "search.brave.baseUrl",
+            "search.brave.priority",
             "search.tavily.enabled", "search.tavily.apiKey", "search.tavily.baseUrl",
+            "search.tavily.priority",
             "search.perplexity.enabled", "search.perplexity.apiKey", "search.perplexity.baseUrl",
             "search.ollama.enabled", "search.ollama.apiKey", "search.ollama.baseUrl",
             "search.felo.enabled", "search.felo.apiKey", "search.felo.baseUrl",

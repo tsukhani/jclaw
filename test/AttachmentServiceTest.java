@@ -62,6 +62,7 @@ class AttachmentServiceTest extends UnitTest {
 
     @AfterEach
     void tearDown() throws Exception {
+        Fixtures.deleteDatabase();
         // Wipe the agent workspace so files don't bleed between tests.
         var ws = AgentService.workspacePath(agent.name);
         deleteRecursive(ws);

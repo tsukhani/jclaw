@@ -28,6 +28,7 @@ class TranscriptionRouterTest extends UnitTest {
     void tearDown() {
         ConfigService.delete(KEY);
         ConfigService.clearCache();
+        Fixtures.deleteDatabase();
     }
 
     @Test
