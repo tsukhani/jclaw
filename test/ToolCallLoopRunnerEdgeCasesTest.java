@@ -429,10 +429,8 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
         // checkSubagentCancel query (filtering on status=RUNNING) to return
         // null — masking the cancellation. The real production race we
         // want to characterize is "flag flipped, status still RUNNING in
-        // the window between the registry write and the DB write." Reach
-        // into the ACTIVE map via reflection to set just the flag, since
-        // SubagentRegistry exposes no flag-only mutator.
-        flipCancelFlag(runId);
+        // the window between the registry write and the DB write."
+        SubagentRegistry.cancelForTest(runId);
         assertTrue(SubagentRegistry.isCancelled(runId),
                 "cancel flag must be set");
 
@@ -448,19 +446,6 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
 
         assertEquals(0, llmCalls.get(),
                 "No LLM call should be issued after the cancel flag is flipped");
-    }
-
-    private static void flipCancelFlag(Long runId) throws Exception {
-        var activeField = SubagentRegistry.class.getDeclaredField("ACTIVE");
-        activeField.setAccessible(true);
-        @SuppressWarnings("unchecked")
-        var active = (java.util.Map<Long, Object>) activeField.get(null);
-        var entry = active.get(runId);
-        assertNotNull(entry, "registry entry must exist before flipping the flag");
-        var cancelField = entry.getClass().getDeclaredMethod("cancelRequested");
-        cancelField.setAccessible(true);
-        var flag = (java.util.concurrent.atomic.AtomicBoolean) cancelField.invoke(entry);
-        flag.set(true);
     }
 
     // =========================================================

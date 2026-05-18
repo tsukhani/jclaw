@@ -63,6 +63,13 @@ class CompactionGateTest extends UnitTest {
             llmServer.stop(0);
             llmServer = null;
         }
+        // Reset tight compaction budgets a few tests in this class set, so
+        // sibling test classes in the same JVM (e.g. AgentRunnerCompactionTest)
+        // don't inherit them. Mirrors AgentRunnerCompactionTest's own teardown.
+        ConfigService.set("chat.compactionReserveTokens", "15000");
+        ConfigService.set("chat.compactionReserveTokensFloor", "9000");
+        ConfigService.set("chat.compactionMinTurns", "10");
+        ConfigService.set("chat.compactionKeepMessages", "10");
     }
 
     // ─── No-op paths ─────────────────────────────────────────────────────
