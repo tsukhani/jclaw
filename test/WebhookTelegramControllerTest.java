@@ -184,4 +184,37 @@ class WebhookTelegramControllerTest extends FunctionalTest {
         var response = postWithSecretHeader(99999999L, SECRET, SECRET, "{}");
         assertEquals(404, response.status.intValue());
     }
+
+    // ===== Callback query (inline keyboard) — peer mismatch only =====
+    //
+    // The accepted-callback path spawns a virtual thread that calls
+    // TelegramCallbackDispatcher.dispatch(), which routes through the live
+    // OkHttp-backed TelegramChannel against api.telegram.org. That leaks
+    // socket activity into the shared test JVM and destabilises later
+    // suite-mates. We only cover the peer-mismatch branch here, which
+    // returns 200 BEFORE the dispatcher is invoked. The accepted-callback
+    // happy path is covered end-to-end by TelegramChannelTest with a
+    // MockTelegramServer harness.
+
+    @Test
+    void silentlyDropsCallbackQueryFromOtherUser() {
+        // JCLAW-109: callback parsed successfully, signature passes, but
+        // from.id != binding.telegramUserId. The controller logs a
+        // peer-mismatch warning and returns 200 — never reaches the
+        // dispatcher.
+        var bindingId = seedBinding(true);
+        var body = "{"
+                + "\"update_id\":1,"
+                + "\"callback_query\":{"
+                + "  \"id\":\"cb-2\","
+                + "  \"chat_instance\":\"ci-2\","
+                + "  \"from\":{\"id\":9999999,\"is_bot\":false,\"first_name\":\"Imposter\"},"
+                + "  \"data\":\"action:ok\","
+                + "  \"message\":{\"message_id\":5,\"date\":1700000000,"
+                + "    \"chat\":{\"id\":100,\"type\":\"private\"},"
+                + "    \"from\":{\"id\":9999999,\"is_bot\":false,\"first_name\":\"Imposter\"}}"
+                + "}}";
+        var response = postWithSecretHeader(bindingId, SECRET, SECRET, body);
+        assertEquals(200, response.status.intValue());
+    }
 }
