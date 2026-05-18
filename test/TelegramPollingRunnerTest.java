@@ -250,6 +250,16 @@ class TelegramPollingRunnerTest extends FunctionalTest {
             b.save();
             return null;
         });
+        // L1-cache eviction: the prior reconcile() loaded `binding(tokenA)`
+        // into the test thread's EntityManager. commitInFreshTx mutated the
+        // row in a separate-thread Tx, but JPA's L1 cache on this thread
+        // still has the old entity. Without clear(), the next reconcile()'s
+        // findAllEnabledByTransport returns the cached binding (still
+        // tokenA), so the rotation branch never trips. delete- and
+        // disable-flavoured tests don't hit this because their filters
+        // exclude the row entirely after the mutation, so cache hit is
+        // moot.
+        play.db.jpa.JPA.em().clear();
 
         TelegramPollingRunner.reconcile();
         assertTrue(TelegramPollingRunner.activeBindingIds().contains(id),

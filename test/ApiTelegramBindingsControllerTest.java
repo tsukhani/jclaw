@@ -1,5 +1,6 @@
 import channels.ChannelTransport;
 import channels.TelegramPollingRunner;
+import channels.TelegramPollingRunnerTestHooks;
 import models.Agent;
 import models.TelegramBinding;
 import org.junit.jupiter.api.*;
@@ -31,9 +32,13 @@ class ApiTelegramBindingsControllerTest extends FunctionalTest {
     @AfterEach
     void teardown() {
         // reconcile() may have stood up live polling sessions against
-        // api.telegram.org. Stop them so the SDK scheduler doesn't carry
-        // state across tests.
-        try { TelegramPollingRunner.stop(); } catch (Exception _) { /* best-effort */ }
+        // api.telegram.org. Clear the runner's static state via the
+        // JCLAW-316 test seam so the SDK scheduler doesn't carry state
+        // across tests. Do NOT call TelegramPollingRunner.stop() — that
+        // terminates the singleton SCHEDULER (final field, can't be
+        // replaced) and poisons subsequent test classes that rely on
+        // scheduled cooldown re-reconciles (TelegramPollingRunnerTest).
+        try { TelegramPollingRunnerTestHooks.clear(); } catch (Exception _) { /* best-effort */ }
     }
 
     private void login() {

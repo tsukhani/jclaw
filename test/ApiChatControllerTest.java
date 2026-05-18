@@ -449,7 +449,7 @@ class ApiChatControllerTest extends FunctionalTest {
     }
 
     @Test
-    void sendAcceptsAudioAttachmentWithoutCapabilityGate() {
+    void sendAcceptsAudioAttachmentWithoutCapabilityGate() throws Exception {
         // JCLAW-165 made audio universal — attachments with kind=AUDIO must
         // not trip the vision-gate or any audio-side gate. We can't drive
         // the full LLM round here, but parseAttachments must return without
@@ -457,6 +457,14 @@ class ApiChatControllerTest extends FunctionalTest {
         // surfacing as a 500 — what matters is we got past validation.
         login();
         var id = createAgent("send-audio-ok");
+        // Stage a fake attachment file so AttachmentService.finalizeAttachment
+        // can resolve the id past validation. findStagedFile matches
+        // {uuid}.{ext} so the .wav suffix is mandatory.
+        var stagingDir = services.AgentService.acquireWorkspacePath(
+                "send-audio-ok", "attachments/staging");
+        java.nio.file.Files.createDirectories(stagingDir);
+        java.nio.file.Files.write(stagingDir.resolve("aud-1.wav"),
+                new byte[]{0x52, 0x49, 0x46, 0x46}); // tiny RIFF header
         var body = """
                 {"agentId": %s, "message": "transcribe",
                  "attachments": [{"attachmentId":"aud-1",

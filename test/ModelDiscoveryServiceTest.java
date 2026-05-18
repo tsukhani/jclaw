@@ -1154,12 +1154,13 @@ class ModelDiscoveryServiceTest extends UnitTest {
     @Test
     void inferMaxTokensPrefersTopProviderField() {
         // Branch order in inferMaxTokens: top_provider.max_completion_tokens wins.
-        var obj = JsonParser.parseString("""
-                {"top_provider": {"max_completion_tokens": 4096},
-                 "max_completion_tokens": 8192,
-                 "max_tokens": 16384}
+        // id field is mandatory — parseModels skips entries with blank id.
+        var json = JsonParser.parseString("""
+                {"data":[{"id":"x",
+                          "top_provider": {"max_completion_tokens": 4096},
+                          "max_completion_tokens": 8192,
+                          "max_tokens": 16384}]}
                 """).getAsJsonObject();
-        var json = JsonParser.parseString("{\"data\":[" + obj + "]}").getAsJsonObject();
         var models = ModelDiscoveryService.parseModels(json);
         assertEquals(4096, models.get(0).get("maxTokens"));
     }
@@ -1210,8 +1211,10 @@ class ModelDiscoveryServiceTest extends UnitTest {
 
     @Test
     void inferPriceReturnsMinusOneOnMalformedValue() {
+        // "NaN" parses as Double.NaN (Java accepts it) — use a string that
+        // genuinely fails Double.parseDouble so the catch branch runs.
         var obj = JsonParser.parseString("""
-                {"pricing":{"prompt":"NaN"}}
+                {"pricing":{"prompt":"not-a-number"}}
                 """).getAsJsonObject();
         // NumberFormatException swallowed → fall through to -1.
         assertEquals(-1, ModelDiscoveryService.inferPrice(obj, "prompt"), 0.001);

@@ -50,8 +50,22 @@ public final class TelegramPollingRunner {
     /** Default Telegram long-poll timeout is 30 s; match it, plus a small margin. */
     public static final long COOLDOWN_MS = 30_000L;
 
-    private static final ScheduledExecutorService SCHEDULER = Executors.newSingleThreadScheduledExecutor(
-            r -> Thread.ofVirtual().name("telegram-cooldown-reconcile").unstarted(r));
+    /**
+     * Cooldown-reconcile scheduler. Non-final so {@link #clearForTest} can
+     * replace a terminated instance with a fresh one — tests that invoke
+     * {@link #stop} (which drains the scheduler) would otherwise poison
+     * every later test that triggers an unregister via {@link #reconcile}.
+     * Volatile so the test-side reassignment is visible to the production
+     * code path on the next polling tick. Production never reassigns;
+     * {@link #stop} is one-shot at app shutdown.
+     */
+    @SuppressWarnings("java:S3077") // Volatile non-primitive is correct here: pure publish-then-read, no compound mutation
+    private static volatile ScheduledExecutorService SCHEDULER = newScheduler();
+
+    private static ScheduledExecutorService newScheduler() {
+        return Executors.newSingleThreadScheduledExecutor(
+                r -> Thread.ofVirtual().name("telegram-cooldown-reconcile").unstarted(r));
+    }
 
     private TelegramPollingRunner() {}
 
@@ -150,16 +164,21 @@ public final class TelegramPollingRunner {
 
     /**
      * Test-only state reset (JCLAW-316). Clears {@link #ACTIVE} and
-     * {@link #COOLDOWN_UNTIL} and nulls the {@link #APP} reference without
-     * shutting down {@link #SCHEDULER}, so tests that exercise the
-     * register/unregister state machine can run sequentially without the
-     * scheduler entering a rejected-execution state. Production uses
-     * {@link #stop} (which DOES drain the scheduler at app shutdown).
+     * {@link #COOLDOWN_UNTIL} and nulls the {@link #APP} reference. If a
+     * prior test (or {@link jobs.ShutdownJob} invoked directly from
+     * {@code JobLifecycleTest}) drained {@link #SCHEDULER} via
+     * {@link #stop}, swap in a fresh executor so subsequent
+     * {@link #reconcile} calls can schedule cooldown re-reconciles without
+     * hitting {@code RejectedExecutionException}. Production never
+     * reassigns SCHEDULER: {@link #stop} is one-shot at app shutdown.
      */
     static void clearForTest() {
         ACTIVE.clear();
         COOLDOWN_UNTIL.clear();
         APP.set(null);
+        if (SCHEDULER.isShutdown()) {
+            SCHEDULER = newScheduler();
+        }
     }
 
     private static void registerInternal(TelegramBotsLongPollingApplication app, TelegramBinding binding) {
