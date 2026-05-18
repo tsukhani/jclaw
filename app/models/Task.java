@@ -171,8 +171,15 @@ public class Task extends Model {
      * the task fire skips the LLM round-trip entirely — either runs
      * {@link #script} (if set) or delivers {@link #description}
      * verbatim. Default false: tasks go through the agent like JCLAW-21.
+     *
+     * <p>{@code @ColumnDefault("false")} is load-bearing: without it,
+     * Hibernate's hbm2ddl=update on existing DBs fails to add this NOT
+     * NULL column (existing rows have nothing to populate it with).
+     * The DEFAULT clause lets the ALTER succeed by backfilling
+     * existing rows before the constraint is enforced.
      */
     @Column(name = "no_agent", nullable = false)
+    @org.hibernate.annotations.ColumnDefault("false")
     public boolean noAgent = false;
 
     /**
