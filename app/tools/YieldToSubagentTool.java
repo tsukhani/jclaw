@@ -141,7 +141,11 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
         }
 
         final var parentAgentId = callingAgent.id;
-        var error = Tx.run(() -> {
+        // Either an error string (returned verbatim to the LLM) OR an
+        // already-terminal structured JSON envelope (when the child raced
+        // ahead of yield's lookup). Both paths short-circuit the sentinel
+        // build below.
+        var shortCircuit = Tx.run(() -> {
             var run = (SubagentRun) SubagentRun.findById(runId);
             if (run == null) {
                 return "Error: no SubagentRun found for runId " + runId + ".";
@@ -153,17 +157,32 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
             if (run.parentAgent == null || !parentAgentId.equals(run.parentAgent.id)) {
                 return "Error: runId " + runId + " is not owned by the calling agent.";
             }
-            // Yielding into a terminal run is a programming error: the child
-            // already finished, so there's nothing to await. Surface a clear
-            // error rather than silently flipping a column nobody reads.
+            // Race-fix follow-up: if the child finished between spawn returning
+            // {status:RUNNING} and yield's findById acquiring the row, there's
+            // no yield semantics to install — the async-finalize VT has either
+            // already posted the announce (as SYSTEM since yielded was still
+            // false) or is about to. Either way, the parent's suspend would
+            // wait for an event that's already happened. Return the recorded
+            // outcome directly as a structured "already_terminal" envelope so
+            // the LLM gets the answer immediately rather than being told its
+            // yield failed. The announce-as-SYSTEM stays visible in the chat
+            // UI; we just hand the LLM a usable result for its current turn.
             if (run.status != SubagentRun.Status.RUNNING) {
-                return "Error: runId " + runId + " is not RUNNING (status=" + run.status + ").";
+                var alreadyDone = new LinkedHashMap<String, Object>();
+                alreadyDone.put("action", "already_terminal");
+                alreadyDone.put("runId", String.valueOf(runId));
+                alreadyDone.put("status", run.status.name());
+                alreadyDone.put("reply", run.outcome != null ? run.outcome : "");
+                if (run.childConversation != null) {
+                    alreadyDone.put("conversation_id", String.valueOf(run.childConversation.id));
+                }
+                return utils.GsonHolder.INSTANCE.toJson(alreadyDone, Map.class);
             }
             run.yielded = true;
             run.save();
             return null;
         });
-        if (error != null) return error;
+        if (shortCircuit != null) return shortCircuit;
 
         // Sentinel payload — AgentRunner scans tool-result text for
         // YIELD_SENTINEL_PREFIX to recognise the yield and break out of the

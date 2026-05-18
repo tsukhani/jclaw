@@ -150,25 +150,82 @@ class YieldToSubagentToolTest extends UnitTest {
     }
 
     @Test
-    void yieldRejectsAlreadyTerminalRun() throws Exception {
+    void yieldOnAlreadyTerminalRunReturnsStructuredOutcomeNotError() throws Exception {
+        // Race-fix follow-up: when the child finishes between spawn returning
+        // {status:RUNNING} and yield's lookup, yield must NOT error out. It
+        // must return a structured "already_terminal" envelope carrying the
+        // recorded reply so the LLM can use it on the current turn instead
+        // of being told its yield failed. The announce posted by the
+        // async-finalize VT is still SYSTEM-role (yielded was false at
+        // post time), which is correct — flipping yielded after the fact
+        // would race the announce in the opposite direction.
         var parent = createAgent("p-yield-terminal", "test-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-yield-terminal");
         var run = seedRunningSubagentRun(parent, parentConv);
-        // Move the run to COMPLETED — yielding into it is now meaningless.
+        // Move the run to COMPLETED with a recorded outcome so the test
+        // can assert the reply field surfaces verbatim.
         run.status = SubagentRun.Status.COMPLETED;
+        run.outcome = "42";
+        run.save();
+        var childConvId = run.childConversation != null ? run.childConversation.id : null;
+
+        commitAndReopen();
+
+        var result = invokeYieldOnVt(parent.id,
+                "{\"runId\":\"" + run.id + "\"}");
+        // Parse the result as JSON and assert each field individually rather
+        // than substring-matching — keeps the test resilient to future
+        // payload reorderings (LinkedHashMap insertion order is the only
+        // thing that pins ordering today).
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("already_terminal", parsed.get("action").getAsString(),
+                "must signal already_terminal, not 'yielded': " + result);
+        assertEquals(String.valueOf(run.id), parsed.get("runId").getAsString());
+        assertEquals("COMPLETED", parsed.get("status").getAsString());
+        assertEquals("42", parsed.get("reply").getAsString(),
+                "reply must echo the SubagentRun.outcome verbatim so the LLM "
+                        + "sees the child's answer without waiting for an announce");
+        if (childConvId != null) {
+            assertEquals(String.valueOf(childConvId),
+                    parsed.get("conversation_id").getAsString(),
+                    "conversation_id link lets the chat UI / LLM jump to the "
+                            + "child's transcript for full context");
+        }
+
+        JPA.em().clear();
+        SubagentRun fresh = SubagentRun.findById(run.id);
+        assertFalse(fresh.yielded,
+                "already-terminal yield must NOT flip the yielded flag — "
+                        + "the announce has already been posted as SYSTEM "
+                        + "and flipping yielded post-hoc would create a "
+                        + "rendering inconsistency between the column and "
+                        + "the message row's role");
+    }
+
+    @Test
+    void yieldOnAlreadyTerminalFailedRunSurfacesFailureReasonAsReply() throws Exception {
+        // Cousin to the COMPLETED test: when the child terminated FAILED,
+        // SubagentRun.outcome carries the failure reason (see
+        // SpawnSubagentTool.runAsyncAndAnnounce). The already_terminal
+        // envelope must surface that reason in the reply field too, not
+        // just for the COMPLETED case — otherwise an LLM yielding into a
+        // crashed child gets an empty reply with no signal about why.
+        var parent = createAgent("p-yield-failed-terminal", "test-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-yield-failed-terminal");
+        var run = seedRunningSubagentRun(parent, parentConv);
+        run.status = SubagentRun.Status.FAILED;
+        run.outcome = "child crashed";
         run.save();
 
         commitAndReopen();
 
         var result = invokeYieldOnVt(parent.id,
                 "{\"runId\":\"" + run.id + "\"}");
-        assertTrue(result.startsWith("Error: runId " + run.id + " is not RUNNING"),
-                "yielding into a terminal run must be refused, got: " + result);
-
-        JPA.em().clear();
-        SubagentRun fresh = SubagentRun.findById(run.id);
-        assertFalse(fresh.yielded,
-                "refused yield must leave the yielded flag unchanged");
+        var parsed = JsonParser.parseString(result).getAsJsonObject();
+        assertEquals("already_terminal", parsed.get("action").getAsString());
+        assertEquals("FAILED", parsed.get("status").getAsString());
+        assertEquals("child crashed", parsed.get("reply").getAsString(),
+                "FAILED runs carry the failure reason in outcome — must surface here");
     }
 
     // ───────── Announce-VT yield-resume branch ─────────
