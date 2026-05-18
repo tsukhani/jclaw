@@ -39,17 +39,29 @@ public class ApiTasksController extends Controller {
     private static final Gson gson = INSTANCE;
 
     private record TaskView(Long id, String name, String description, String type, String status,
-                            String cronExpression, int retryCount, int maxRetries, String lastError,
+                            String cronExpression, Long intervalSeconds, String scheduleDisplay,
+                            int retryCount, int maxRetries, String lastError,
                             String nextRunAt, String createdAt, Long agentId, String agentName,
-                            boolean paused) {
+                            boolean paused,
+                            String delivery, String payloadType,
+                            String modelProvider, String modelId,
+                            String enabledToolNames, String workdir,
+                            String preCheck, String script, boolean noAgent,
+                            String contextFromTaskIds, Integer repeatLimit) {
         static TaskView of(Task t) {
             return new TaskView(t.id, t.name, t.description, t.type.name(), t.status.name(),
-                    t.cronExpression, t.retryCount, t.maxRetries, t.lastError,
+                    t.cronExpression, t.intervalSeconds, t.scheduleDisplay,
+                    t.retryCount, t.maxRetries, t.lastError,
                     t.nextRunAt != null ? t.nextRunAt.toString() : null,
                     t.createdAt.toString(),
                     t.agent != null ? t.agent.id : null,
                     t.agent != null ? t.agent.name : null,
-                    t.paused);
+                    t.paused,
+                    t.delivery, t.payloadType,
+                    t.modelProvider, t.modelId,
+                    t.enabledToolNames, t.workdir,
+                    t.preCheck, t.script, t.noAgent,
+                    t.contextFromTaskIds, t.repeatLimit);
         }
     }
 

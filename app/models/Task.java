@@ -82,6 +82,117 @@ public class Task extends Model {
     @Column(name = "next_run_at")
     public Instant nextRunAt;
 
+    /**
+     * Operator's raw schedule input ("now", "every 30m", "0 0 9 * * *",
+     * "@daily", etc.) preserved verbatim for round-trip rendering in the
+     * UI and CLI. Operator types "every 30m" → sees "every 30m" back,
+     * not the normalized "intervalSeconds=1800". Set by
+     * {@link services.ScheduleShorthandParser}; consumed by the Tasks
+     * page's schedule column and the chat tool's listRecurringTasks
+     * output.
+     */
+    @Column(name = "schedule_display")
+    public String scheduleDisplay;
+
+    /**
+     * JCLAW-294 plumbing for JCLAW-295 (delivery layer). Channel +
+     * identifier route for the task's output, e.g. "telegram:12345" or
+     * "email:foo@bar.com". Stored verbatim; parsed by the
+     * {@code DeliveryDispatcher} that JCLAW-295 wires in. Null = no
+     * delivery (operator reads the TaskRun row directly).
+     */
+    @Column(name = "delivery")
+    public String delivery;
+
+    /**
+     * JCLAW-294 plumbing for JCLAW-295 (delivery layer). Output format
+     * hint for the delivery layer — "text", "json", "markdown". Channel
+     * adapters render the TaskRun's outputSummary accordingly.
+     */
+    @Column(name = "payload_type", length = 50)
+    public String payloadType;
+
+    /**
+     * JCLAW-294 plumbing for JCLAW-296 (cost-saving extensions). When
+     * set, overrides the agent's default LLM provider for this task's
+     * fires. AgentRunner.runForTask currently reads agent.modelProvider;
+     * JCLAW-296 will check task.modelProvider first and fall back.
+     */
+    @Column(name = "model_provider", length = 100)
+    public String modelProvider;
+
+    /**
+     * JCLAW-294 plumbing for JCLAW-296 (cost-saving extensions). Model
+     * id override paired with modelProvider above.
+     */
+    @Column(name = "model_id", length = 100)
+    public String modelId;
+
+    /**
+     * JCLAW-294 plumbing for JCLAW-297 (security: per-task toolset
+     * restriction). JSON-encoded array of tool names the agent is
+     * allowed to use during this task's fires. Null = no per-task
+     * restriction (agent's full toolset applies). ToolRegistry filtering
+     * is wired by JCLAW-297.
+     */
+    @Column(name = "enabled_tool_names", columnDefinition = "TEXT")
+    public String enabledToolNames;
+
+    /**
+     * JCLAW-294 plumbing for JCLAW-298 (advanced features). Working
+     * directory for the task fire — script-mode and file-scoped tasks
+     * resolve relative paths against this. Filesystem paths can be
+     * long; sized at 500 chars rather than the default 255.
+     */
+    @Column(name = "workdir", length = 500)
+    public String workdir;
+
+    /**
+     * JCLAW-294 plumbing for JCLAW-296 (pre-check). Pre-fire condition
+     * expression/script. If non-null, evaluated before each fire; a
+     * falsy result skips the fire without consuming a retry budget.
+     * JCLAW-296 owns the evaluator wiring.
+     */
+    @Column(name = "pre_check", columnDefinition = "TEXT")
+    public String preCheck;
+
+    /**
+     * JCLAW-294 plumbing for JCLAW-296 (script mode). Shell script body.
+     * When non-null and {@link #noAgent} is true, the task fire execs
+     * this script instead of invoking the LLM agent — the Hermes-parity
+     * cost-saving path for tasks that don't need reasoning. JCLAW-296
+     * owns the exec wiring.
+     */
+    @Column(name = "script", columnDefinition = "TEXT")
+    public String script;
+
+    /**
+     * JCLAW-294 plumbing for JCLAW-296 (no-agent payload). When true,
+     * the task fire skips the LLM round-trip entirely — either runs
+     * {@link #script} (if set) or delivers {@link #description}
+     * verbatim. Default false: tasks go through the agent like JCLAW-21.
+     */
+    @Column(name = "no_agent", nullable = false)
+    public boolean noAgent = false;
+
+    /**
+     * JCLAW-294 plumbing for JCLAW-298 (contextFrom). JSON-encoded array
+     * of Long Task ids whose latest TaskRun outputs should be available
+     * as context for this task's fires. JCLAW-298 owns the
+     * context-assembly wiring.
+     */
+    @Column(name = "context_from_task_ids", columnDefinition = "TEXT")
+    public String contextFromTaskIds;
+
+    /**
+     * JCLAW-294 plumbing for JCLAW-298 (repeat limit). Max fires for a
+     * recurring (CRON/INTERVAL) task before auto-cancellation. Null =
+     * unlimited (the JCLAW-21 default). JCLAW-298 wires the fire-counter
+     * check in TaskExecutionHandler.
+     */
+    @Column(name = "repeat_limit")
+    public Integer repeatLimit;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 
