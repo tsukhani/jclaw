@@ -287,8 +287,9 @@ class ApiTelegramBindingsControllerTest extends FunctionalTest {
     void createDefaultsTransportToPolling() {
         var agentId = seedAgent("tg-agent");
         login();
+        // enabled=false so post-mutation reconcile() doesn't trigger a real api.telegram.org call via the SDK; the persisted transport field is still POLLING for assertion.
         var body = """
-                {"botToken": "300:tok", "agentId": %d, "telegramUserId": "7"}
+                {"botToken": "300:tok", "agentId": %d, "telegramUserId": "7", "enabled": false}
                 """.formatted(agentId);
         var response = POST("/api/channels/telegram/bindings",
                 "application/json", body);
@@ -411,7 +412,8 @@ class ApiTelegramBindingsControllerTest extends FunctionalTest {
         var agentId = seedAgent("tg-agent");
         var bindingId = seedBinding(agentId, "111:tok", "42");
         login();
-        var body = "{\"transport\": \"POLLING\"}";
+        // enabled=false so post-mutation reconcile() doesn't trigger a real api.telegram.org call via the SDK; the persisted transport field is still POLLING for assertion.
+        var body = "{\"transport\": \"POLLING\", \"enabled\": false}";
         var response = PUT("/api/channels/telegram/bindings/" + bindingId,
                 "application/json", body);
         assertIsOk(response);

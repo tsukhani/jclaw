@@ -160,25 +160,13 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     // Registration-dependent tests (reconcileRegistersEnabledPollingBinding,
     // reconcileIsIdempotent, reconcileDropsBindingRemovedFromDb,
     // reconcileUnregistersBindingFlippedToDisabled, reconcileRestartsOnTokenRotation,
-    // reconcileDefersRegistrationWhileTokenInCooldown) live under JCLAW-316: they
-    // need a TelegramBotsLongPollingApplication injection seam before they can
-    // verify our state-machine contracts without dragging a real api.telegram.org
-    // round-trip into the test. JCLAW-316 ships the seam plus the tests together.
+    // reconcileDefersRegistrationWhileTokenInCooldown, stopClearsActiveBindings)
+    // live under JCLAW-316: they need a TelegramBotsLongPollingApplication
+    // injection seam before they can verify our state-machine contracts without
+    // dragging a real api.telegram.org round-trip into the test. JCLAW-316 ships
+    // the seam plus the tests together.
 
     // ===== stop() =====
-
-    @Test
-    void stopClearsActiveBindings() {
-        seedPollingBinding("stop-agent", "STOP:tok", "1", true);
-        TelegramPollingRunner.reconcile();
-        // (May be empty if registration failed, but the contract under
-        // test is: after stop(), the active set is empty regardless.)
-        TelegramPollingRunner.stop();
-        assertTrue(TelegramPollingRunner.activeBindingIds().isEmpty(),
-                "stop() must drain the active set");
-        assertFalse(TelegramPollingRunner.isRunning(),
-                "stop() must mark the runner as not running");
-    }
 
     @Test
     void stopIsSafeToCallWhenNothingRegistered() {
