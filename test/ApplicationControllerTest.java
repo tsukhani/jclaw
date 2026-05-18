@@ -21,13 +21,13 @@ class ApplicationControllerTest extends FunctionalTest {
         assertIsOk(response);
         assertContentType("text/html", response);
         assertCharset(play.Play.defaultWebEncoding, response);
-        var body = getContent(response);
-        // Either the SPA is built (response is the SPA index.html) or the
-        // fallback HTML page is served. Both contain "JClaw" or the SPA
-        // <div id="__nuxt"> shell — assert on something stable in either
-        // case.
-        assertNotNull(body, "index response must have a body");
-        assertFalse(body.isBlank(), "index body must not be blank");
+        // Body assertion intentionally omitted: Application.index uses
+        // renderBinary(File) when public/spa/index.html exists, which in
+        // Play 1.x's FunctionalTest bypasses response.out (sendfile path).
+        // getContent(response) returns blank for that branch even though
+        // the live response is correct. Status + content-type + charset
+        // are the parts of the contract we can verify here; full body
+        // checks belong in an e2e (Playwright) spec.
     }
 
     @Test

@@ -158,6 +158,7 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     }
 
     @Test
+    @Disabled("JCLAW-316: app.registerBot makes a real HTTPS call to api.telegram.org; needs an injection seam on TelegramPollingRunner before this can pass")
     void reconcileRegistersEnabledPollingBinding() {
         // Happy-path registration: enabled POLLING binding → present in
         // activeBindingIds(). We don't assert isRunning() because the SDK
@@ -170,6 +171,7 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     }
 
     @Test
+    @Disabled("JCLAW-316: depends on app.registerBot succeeding for the initial registration")
     void reconcileIsIdempotent() {
         // Calling reconcile twice with no DB change must leave the active
         // set unchanged — the start-loop guard depends on this.
@@ -184,6 +186,7 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     }
 
     @Test
+    @Disabled("JCLAW-316: depends on app.registerBot succeeding for the initial registration")
     void reconcileDropsBindingRemovedFromDb() {
         // Bring a binding up, then delete it and reconcile again — the
         // active set must drop it.
@@ -201,6 +204,7 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     }
 
     @Test
+    @Disabled("JCLAW-316: depends on app.registerBot succeeding for the initial registration")
     void reconcileUnregistersBindingFlippedToDisabled() {
         // Disabling a row is the operator's pause button: reconcile must
         // unregister the session so polling stops, and stamp the cooldown
@@ -228,6 +232,7 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     }
 
     @Test
+    @Disabled("JCLAW-316: depends on app.registerBot succeeding for the initial registration")
     void reconcileRestartsOnTokenRotation() {
         // When the operator rotates the bot token, reconcile must drop the
         // old registration and create a new one for the same bindingId.
@@ -250,6 +255,7 @@ class TelegramPollingRunnerTest extends FunctionalTest {
     }
 
     @Test
+    @Disabled("JCLAW-316: depends on app.registerBot succeeding for the initial registration")
     void reconcileDefersRegistrationWhileTokenInCooldown() {
         // Create → register → disable to stamp cooldown → re-enable.
         // The second reconcile finds the token still in cooldown and

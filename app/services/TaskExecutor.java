@@ -69,15 +69,27 @@ public final class TaskExecutor {
 
         // Open the TaskRun in RUNNING state before any LLM/tool work so
         // observers (monitoring UI, db-scheduler heartbeat) see a row to
-        // attach to even if the body throws partway through.
+        // attach to even if the body throws partway through. The re-query
+        // can race with deletion (Fixtures.deleteDatabase in tests, or an
+        // operator cancel + delete in prod) — handle null by returning
+        // null so TaskExecutionHandler can drop the orphan via
+        // defaultCompletion (same path as its own pre-flight null check).
         final TaskRun run = Tx.run(() -> {
+            var resolvedTask = (Task) Task.findById(task.id);
+            if (resolvedTask == null) return null;
             var r = new TaskRun();
-            r.task = (Task) Task.findById(task.id);
+            r.task = resolvedTask;
             r.startedAt = Instant.now();
             r.status = TaskRun.Status.RUNNING;
             r.save();
             return r;
         });
+        if (run == null) {
+            EventLogger.warn("task", null, null,
+                    "TaskExecutor.runTask: Task id %d disappeared between handler resolution and TaskRun creation; skipping"
+                            .formatted(task.id));
+            return null;
+        }
 
         // JCLAW-21: lifecycle audit — TASK_STARTED bookmark. Operator
         // monitoring (JCLAW-22) reads these to render "running" pills
@@ -96,10 +108,22 @@ public final class TaskExecutor {
             // downstream, none of which need a live persistence context.
             var prep = Tx.run(() -> {
                 var t = (Task) Task.findById(task.id);
+                if (t == null) return null;
                 var prompt = (t.description != null && !t.description.isBlank())
                         ? t.description : t.name;
                 return new PreparedFire(t.agent, prompt);
             });
+            if (prep == null) {
+                // Task deleted after the TaskRun row was opened. Mark the
+                // run FAILED so it surfaces in monitoring, and let the
+                // scheduler reap the orphan via the normal completion path.
+                String msg = "Task disappeared mid-execution";
+                EventLogger.warn("task", null, null,
+                        "TaskExecutor.runTask: Task id %d deleted after RUNNING row created; marking TaskRun FAILED"
+                                .formatted(task.id));
+                sink.onFailure(msg);
+                return run;
+            }
 
             // Drive the agent loop through the same machinery chat uses —
             // SystemPromptAssembler, ToolCallLoopRunner, ParallelToolExecutor —

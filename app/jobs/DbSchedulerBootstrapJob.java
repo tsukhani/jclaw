@@ -82,6 +82,20 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
     @Override
     @SuppressWarnings("java:S2696") // Static scheduler handoff is intentional: shutdown hook needs the same instance
     public void doJob() throws Exception {
+        // Skip in test mode. Fixtures.deleteDatabase wipes the task table
+        // between tests but cannot touch db-scheduler's scheduled_tasks
+        // table (non-JPA, created by DbSchedulerSchemaInitJob). A live
+        // scheduler polling at 2s intervals fires orphan rows pointing
+        // at deleted Tasks, surfacing as NPEs in TaskExecutor and
+        // cascading into MCP_SERVER row-lock timeouts on subsequent
+        // Fixtures.deleteDatabase calls. Mirrors FullTextSearchInitJob's
+        // test-mode skip.
+        if (play.Play.runningInTestMode()) {
+            EventLogger.info("task", null, null,
+                    "DbSchedulerBootstrap: skipping scheduler start in test mode");
+            return;
+        }
+
         // Defense-in-depth: re-run the DDL idempotency check. The schema-init
         // job runs in the same @OnApplicationStart phase but the framework
         // doesn't strictly order siblings, so we re-assert the schema rather
