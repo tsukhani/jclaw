@@ -448,6 +448,9 @@ public class ApiTasksController extends Controller {
         task.status = Task.Status.CANCELLED;
         task.save();
         services.TaskSchedulingService.cancel(task.id);
+        EventLogger.info("TASK_MGMT_DELETE",
+                task.agent != null ? task.agent.name : null, null,
+                "Task '%s' (id=%d) cancelled via API".formatted(task.name, task.id));
         renderJSON(gson.toJson(TaskView.of(task)));
     }
 
@@ -462,6 +465,9 @@ public class ApiTasksController extends Controller {
             badRequest();
         }
         services.TaskSchedulingService.pause(task.id);
+        EventLogger.info("TASK_MGMT_PAUSE",
+                task.agent != null ? task.agent.name : null, null,
+                "Task '%s' (id=%d) paused via API".formatted(task.name, task.id));
         // Re-read so the response reflects the flipped flag.
         renderJSON(gson.toJson(TaskView.of(Task.findById(task.id))));
     }
@@ -474,6 +480,9 @@ public class ApiTasksController extends Controller {
             badRequest();
         }
         services.TaskSchedulingService.resume(task.id);
+        EventLogger.info("TASK_MGMT_RESUME",
+                task.agent != null ? task.agent.name : null, null,
+                "Task '%s' (id=%d) resumed via API".formatted(task.name, task.id));
         renderJSON(gson.toJson(TaskView.of(Task.findById(task.id))));
     }
 
@@ -526,6 +535,15 @@ public class ApiTasksController extends Controller {
         // update() — the latter would try to cancel a non-existent row,
         // which is harmless but wasteful.
         services.TaskSchedulingService.register(task);
+        // /retry is operator-initiated re-firing — same intent as /run from
+        // the audit timeline's POV. The mechanical distinction (resets
+        // retryCount/lastError, FAILED-only guard) is internal; the operator
+        // simply "ran a previously-failed task again", which is exactly the
+        // MANUAL_RUN category. /retry doesn't get its own TASK_MGMT_RETRY
+        // category because the AC enumerates six and this isn't one.
+        EventLogger.info("TASK_MGMT_MANUAL_RUN",
+                task.agent != null ? task.agent.name : null, null,
+                "Task '%s' (id=%d) retried via API (was FAILED)".formatted(task.name, task.id));
         renderJSON(gson.toJson(TaskView.of(task)));
     }
 
