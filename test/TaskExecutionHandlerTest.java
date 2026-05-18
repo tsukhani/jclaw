@@ -68,7 +68,6 @@ class TaskExecutionHandlerTest extends UnitTest {
 
     @BeforeEach
     void setup() throws Exception {
-        Thread.sleep(200);
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
         llm.ProviderRegistry.refresh();

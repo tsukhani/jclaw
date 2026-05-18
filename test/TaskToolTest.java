@@ -615,8 +615,9 @@ class TaskToolTest extends UnitTest {
     private Agent persistAgent(String name) {
         var a = new Agent();
         a.name = name;
-        a.modelProvider = "openrouter";
-        a.modelId = "gpt-4.1";
+        // Sentinel values: TaskTool tests don't exercise the LLM path; using non-production names guards against future scope expansion silently triggering a real API call.
+        a.modelProvider = "test-provider";
+        a.modelId = "test-model";
         a.enabled = true;
         a.save();
         return a;
