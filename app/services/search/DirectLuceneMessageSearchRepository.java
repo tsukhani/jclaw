@@ -2,11 +2,15 @@ package services.search;
 
 import models.TaskRunMessage;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.queryparser.classic.ParseException;
 import org.apache.lucene.queryparser.classic.QueryParser;
 import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.SearcherManager;
 import services.EventLogger;
 
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 
 /**
@@ -81,23 +85,30 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
         var sm = LuceneIndexer.searcherManager();
         if (sm == null) return List.of();
 
+        var ids = collectMatchingIds(sm, query, limit);
+        if (ids.isEmpty()) return List.of();
+        return hydrateInOrder(ids);
+    }
+
+    private static List<Long> collectMatchingIds(SearcherManager sm, String query, int limit) throws IOException {
+        // QueryParser.parse throws on malformed input. Treat parse
+        // failure as an empty result rather than propagating —
+        // operators typing free-form text shouldn't 500 the UI.
+        var parser = new QueryParser(LuceneIndexer.CONTENT_FIELD, new StandardAnalyzer());
+        org.apache.lucene.search.Query q;
+        try {
+            q = parser.parse(query);
+        } catch (ParseException _) {
+            return List.of();
+        }
+
         // Refresh the reader so writes from the same Tx (post-commit) are
         // visible. maybeRefresh is cheap when nothing changed.
         sm.maybeRefresh();
 
         var ids = new ArrayList<Long>(limit);
-        IndexSearcher searcher = sm.acquire();
-        try {
-            var parser = new QueryParser(LuceneIndexer.CONTENT_FIELD, new StandardAnalyzer());
-            // QueryParser.parse throws on malformed input. Treat parse
-            // failure as an empty result rather than propagating —
-            // operators typing free-form text shouldn't 500 the UI.
-            org.apache.lucene.search.Query q;
-            try {
-                q = parser.parse(query);
-            } catch (org.apache.lucene.queryparser.classic.ParseException e) {
-                return List.of();
-            }
+        try (var leased = new LeasedSearcher(sm)) {
+            var searcher = leased.get();
             var top = searcher.search(q, limit);
             var storedFields = searcher.storedFields();
             for (var sd : top.scoreDocs) {
@@ -111,11 +122,11 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
                     // beat failing the whole query.
                 }
             }
-        } finally {
-            sm.release(searcher);
         }
-        if (ids.isEmpty()) return List.of();
+        return ids;
+    }
 
+    private static List<TaskRunMessage> hydrateInOrder(List<Long> ids) {
         // Bulk-fetch JPA rows, then re-order to match Lucene's relevance
         // ranking. Same pattern as the prior H2-backed impl.
         var rows = services.Tx.run(() -> {
@@ -128,7 +139,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
             for (var r : raw) typed.add((TaskRunMessage) r);
             return typed;
         });
-        var byId = new java.util.HashMap<Long, TaskRunMessage>(rows.size() * 2);
+        var byId = HashMap.<Long, TaskRunMessage>newHashMap(rows.size());
         for (var row : rows) byId.put(row.id, row);
         var ordered = new ArrayList<TaskRunMessage>(ids.size());
         for (var id : ids) {
@@ -136,6 +147,30 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
             if (row != null) ordered.add(row);
         }
         return ordered;
+    }
+
+    /**
+     * Pairs a {@link SearcherManager#acquire()} with its matching
+     * {@link SearcherManager#release(IndexSearcher)} so callers can use
+     * try-with-resources around the lease.
+     */
+    private static final class LeasedSearcher implements AutoCloseable {
+        private final SearcherManager sm;
+        private final IndexSearcher searcher;
+
+        LeasedSearcher(SearcherManager sm) throws IOException {
+            this.sm = sm;
+            this.searcher = sm.acquire();
+        }
+
+        IndexSearcher get() {
+            return searcher;
+        }
+
+        @Override
+        public void close() throws IOException {
+            sm.release(searcher);
+        }
     }
 
     /** {@inheritDoc} */

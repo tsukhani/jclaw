@@ -55,6 +55,9 @@ public final class LuceneIndexer {
     static final String ID_FIELD = "id";
     static final String CONTENT_FIELD = "content";
 
+    /** EventLogger category for all messages emitted from this indexer. */
+    private static final String CATEGORY = "search";
+
     // Writer and SearcherManager are written once at open() under the class
     // monitor and read by every subsequent indexer/search call. Pure
     // publish-once-read-many reference handoff — volatile reference is
@@ -100,7 +103,7 @@ public final class LuceneIndexer {
         WRITER.set(writer);
         SEARCHER.set(new SearcherManager(writer, new SearcherFactory()));
 
-        EventLogger.info("search", null, null,
+        EventLogger.info(CATEGORY, null, null,
                 "Lucene index opened at %s (%d existing docs)"
                         .formatted(indexDir, writer.getDocStats().numDocs));
     }
@@ -112,7 +115,7 @@ public final class LuceneIndexer {
             try {
                 sm.close();
             } catch (IOException e) {
-                EventLogger.warn("search", null, null,
+                EventLogger.warn(CATEGORY, null, null,
                         "SearcherManager close: %s".formatted(e.getMessage()));
             }
         }
@@ -120,9 +123,9 @@ public final class LuceneIndexer {
         if (writer != null) {
             try {
                 writer.close();
-                EventLogger.info("search", null, null, "Lucene index closed");
+                EventLogger.info(CATEGORY, null, null, "Lucene index closed");
             } catch (IOException e) {
-                EventLogger.warn("search", null, null,
+                EventLogger.warn(CATEGORY, null, null,
                         "IndexWriter close: %s".formatted(e.getMessage()));
             }
         }
@@ -147,7 +150,7 @@ public final class LuceneIndexer {
             // no contention pressure on the writer's per-commit fsync.
             writer.commit();
         } catch (IOException e) {
-            EventLogger.warn("search", null, null,
+            EventLogger.warn(CATEGORY, null, null,
                     "Lucene upsert failed for id=%d: %s".formatted(m.id, e.getMessage()));
         }
     }
@@ -164,7 +167,7 @@ public final class LuceneIndexer {
             writer.deleteDocuments(new Term(ID_FIELD, String.valueOf(id)));
             writer.commit();
         } catch (IOException e) {
-            EventLogger.warn("search", null, null,
+            EventLogger.warn(CATEGORY, null, null,
                     "Lucene remove failed for id=%d: %s".formatted(id, e.getMessage()));
         }
     }
@@ -180,7 +183,7 @@ public final class LuceneIndexer {
     }
 
     /** Number of indexed documents. Test/admin introspection. */
-    public static int docCount() throws IOException {
+    public static int docCount() {
         var writer = WRITER.get();
         if (writer == null) return 0;
         return writer.getDocStats().numDocs;

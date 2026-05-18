@@ -8,7 +8,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.Tx;
