@@ -572,4 +572,152 @@ class TelegramStreamingSinkTest extends UnitTest {
         assertFalse(sink.typingHeartbeatActiveForTest(),
                 "startTypingHeartbeat must no-op when sink is already sealed");
     }
+
+    // === JCLAW-325: residual coverage ===
+
+    @Test
+    void recordFlushFailureIsSilentOnMessageNotModified() {
+        // Line 720: the benign "message is not modified" branch — return
+        // without warning, leave throttle untouched.
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        var ex = new org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException(
+                "[400] Bad Request: message is not modified");
+        sink.recordFlushFailure(ex);
+        assertEquals(250L, sink.currentThrottleMsForTest(),
+                "the no-modify branch must NOT touch the cadence");
+    }
+
+    @Test
+    void getterAccessorsReflectInitialState() {
+        // Locks in the test-only getters that JCLAW-325 wants verified — a
+        // future refactor that drops one of these will fail the build, not
+        // silently regress test-coverage.
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        assertNull(sink.messageIdForTest());
+        assertFalse(sink.streamCapReachedForTest());
+        assertFalse(sink.sealedForTest());
+        assertEquals("", sink.lastSentTextForTest());
+        assertEquals(0L, sink.lastSentAtForTest());
+        assertFalse(sink.draftWasSentForTest());
+        assertEquals(TelegramStreamingSink.Transport.EDIT_IN_PLACE,
+                sink.transportForTest());
+    }
+
+    @Test
+    void shutdownAndReinitializeAllowsContinuedUse() {
+        // Lines 134-135 / 145-146: ShutdownJob path. After shutdown(),
+        // the next scheduler() call must transparently recreate the executor
+        // so the rest of the JVM lifetime (or the rest of the test suite)
+        // can still flush. Drive it indirectly through update() which routes
+        // into scheduleFlushLocked → scheduler().
+        TelegramStreamingSink.shutdown();
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        // update with a non-empty chunk goes through scheduleFlushLocked
+        // which calls scheduler(). If the re-init were broken, this would
+        // NPE or refuse to schedule.
+        Assertions.assertDoesNotThrow(() -> sink.update("hello after shutdown"));
+        // And a follow-up shutdown must remain idempotent / safe.
+        Assertions.assertDoesNotThrow(TelegramStreamingSink::shutdown);
+    }
+
+    @Test
+    void sealNullFinalResponseTreatedAsEmptyString() {
+        // Line 384: seal(null) normalizes to "". With messageId=null and no
+        // streamCap, the planner branch fires; we just confirm sealed=true
+        // and no exception.
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        Assertions.assertDoesNotThrow(() -> sink.seal(null));
+        assertTrue(sink.sealedForTest());
+    }
+
+    @Test
+    void containsMediaOrFileRefsDetectsImageMarkdownAndWorkspaceFiles() throws Exception {
+        // Indirectly exercise containsMediaOrFileRefs via seal(). For the
+        // image-md path we'd hit the planner; for plain text without media
+        // we'd hit the happy-path editMessage. We assert the sealed flag
+        // and the absence of exceptions on each, and that the cap-tripped
+        // sink takes the planner branch (already covered) vs a non-media
+        // sink that never sent a placeholder — also planner branch.
+        //
+        // The classifier lives behind a private static method; exercise it
+        // via reflection to make sure both content shapes match.
+        var m = TelegramStreamingSink.class.getDeclaredMethod(
+                "containsMediaOrFileRefs", String.class);
+        m.setAccessible(true);
+        assertEquals(Boolean.TRUE, m.invoke(null, "before ![alt](u.png) after"));
+        assertEquals(Boolean.TRUE, m.invoke(null, "see [pdf](<workspace/r.pdf>)"));
+        assertEquals(Boolean.FALSE, m.invoke(null, "plain prose only"));
+        assertEquals(Boolean.FALSE, m.invoke(null, (Object) null));
+    }
+
+    @Test
+    void awaitInFlightFlushBoundedByCapWhenFutureNeverCompletes() throws Exception {
+        // Line 743-746: the TimeoutException defensive cap. Plant a future
+        // that never completes and assert seal's caller wakes within (just
+        // over) 2 s rather than hanging.
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+
+        var flushInFlight = TelegramStreamingSink.class.getDeclaredField("flushInFlight");
+        flushInFlight.setAccessible(true);
+        flushInFlight.set(sink, new java.util.concurrent.CompletableFuture<Void>());
+
+        var awaitMethod = TelegramStreamingSink.class.getDeclaredMethod("awaitInFlightFlush");
+        awaitMethod.setAccessible(true);
+
+        long startNs = System.nanoTime();
+        awaitMethod.invoke(sink);
+        long elapsedMs = (System.nanoTime() - startNs) / 1_000_000L;
+
+        // SEAL_INFLIGHT_WAIT_MS = 2000 — give a bit of slack for CI jitter.
+        assertTrue(elapsedMs >= 1900,
+                "awaitInFlightFlush must wait close to the 2 s cap (took " + elapsedMs + " ms)");
+        assertTrue(elapsedMs < 3500,
+                "awaitInFlightFlush must NOT exceed the cap meaningfully (took " + elapsedMs + " ms)");
+    }
+
+    // === Per-chat throttle isolation (AC) ===
+
+    @Test
+    void perChatThrottleStateIsolated() {
+        // AC: two chats with independent ratchets do not cross-contaminate.
+        // Each sink owns its own currentThrottleMs.
+        var sinkA = new TelegramStreamingSink("tok", "chat-A", null);
+        var sinkB = new TelegramStreamingSink("tok", "chat-B", null);
+
+        var ex = new org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException(
+                "Too Many Requests");
+        // Build a 429 with retry_after=1 for sinkA only.
+        var params = new org.telegram.telegrambots.meta.api.objects.ResponseParameters();
+        params.setRetryAfter(1);
+        var apiResponse = new org.telegram.telegrambots.meta.api.objects.ApiResponse<Object>(
+                false, 429, "Too Many Requests", params, null);
+        var tare = new org.telegram.telegrambots.meta.exceptions.TelegramApiRequestException(
+                "Too Many Requests", apiResponse);
+
+        sinkA.recordFlushFailure(tare);
+        assertEquals(500L, sinkA.currentThrottleMsForTest(),
+                "sinkA ratchets to 500 after one 429");
+        assertEquals(250L, sinkB.currentThrottleMsForTest(),
+                "sinkB stays at the floor — sinks don't share ratchet state");
+        // Silence unused-var (the basic exception is just there to document
+        // shape parity with the throttle test that lives above).
+        assertNotNull(ex);
+    }
+
+    // === Sealed-sink rejection (AC) ===
+
+    @Test
+    void postSealUpdatesAreDroppedSilently() {
+        // AC: post-seal updates dropped silently. After seal flips the flag,
+        // update() returns at the sealed-check (line 349) without touching
+        // pending, scheduling, or messageId. No exception, no state change.
+        var sink = new TelegramStreamingSink("tok", "chat", null);
+        sink.seal("");
+        assertTrue(sink.sealedForTest());
+        sink.update("late tokens");
+        assertNull(sink.messageIdForTest(),
+                "post-seal update must NOT trigger a placeholder send");
+        assertFalse(sink.streamCapReachedForTest(),
+                "post-seal update must NOT mutate streamCapReached");
+    }
 }

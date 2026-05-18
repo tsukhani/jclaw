@@ -317,4 +317,121 @@ class MockTelegramSinkIntegrationTest extends UnitTest {
             throw new RuntimeException(e);
         }
     }
+
+    // ==================== JCLAW-325: residual coverage ====================
+
+    @Test
+    void sealHappyPathEditsPlaceholderToFinalHtml() throws Exception {
+        // Drives the EDIT_IN_PLACE happy path in seal(): a flush set
+        // messageId, the final response fits the cap, no media refs, so
+        // seal calls editMessage with html=true (line 441). One placeholder
+        // sendMessage + one final editMessageText must land on the wire.
+        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 7L, "private");
+
+        // Force a placeholder by directly running flush after poking pending.
+        pokePending(sink, "live preview tokens");
+        var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
+        flushMethod.setAccessible(true);
+        flushMethod.invoke(sink);
+
+        assertNotNull(sink.messageIdForTest(),
+                "first flush must set messageId from the mock placeholder response");
+        int placeholderCount = (int) server.countRequests("sendMessage");
+        assertTrue(placeholderCount >= 1, "placeholder sendMessage must have landed");
+
+        // Seal with plain text well under the cap — editMessage path.
+        sink.seal("This is the **final** response.");
+
+        assertTrue(sink.sealedForTest());
+        assertTrue(server.countRequests("editMessageText") >= 1,
+                "seal must dispatch one editMessageText to swap to HTML");
+    }
+
+    @Test
+    void sealWithMediaReferencesDeletesPlaceholderAndRoutesThroughPlanner() throws Exception {
+        // Drives lines 411-422: messageId != null + containsMediaOrFileRefs
+        // → delete placeholder then route via planner. Seed a workspace file
+        // so the planner has something concrete to dispatch as a photo.
+        services.AgentService.writeWorkspaceFile(agent.name, "scrn-325.png", "png-bytes");
+        String url = "/api/agents/" + agent.id + "/files/scrn-325.png";
+
+        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 8L, "private");
+        pokePending(sink, "preview text");
+        var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
+        flushMethod.setAccessible(true);
+        flushMethod.invoke(sink);
+        assertNotNull(sink.messageIdForTest(),
+                "placeholder must be sent before the media-bearing seal");
+
+        // Final response carries an image markdown — needsPlanner = true.
+        sink.seal("Here is the screenshot:\n\n![Screenshot](" + url + ")\n\nDone.");
+
+        assertTrue(server.countRequests("deleteMessage") >= 1,
+                "media-bearing seal must delete the live placeholder");
+        assertTrue(server.countRequests("sendPhoto") >= 1,
+                "planner must dispatch a sendPhoto for the workspace image");
+    }
+
+    @Test
+    void errorFallbackDeletesPlaceholderAndSendsErrorMessage() throws Exception {
+        // Drives lines 517-523: errorFallback with a placeholder already
+        // sent. Must delete and emit the fixed error string. Distinct from
+        // seal's notifier path — error text differs.
+        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 9L, "private");
+        pokePending(sink, "partial response");
+        var flushMethod = TelegramStreamingSink.class.getDeclaredMethod("flush");
+        flushMethod.setAccessible(true);
+        flushMethod.invoke(sink);
+        assertNotNull(sink.messageIdForTest());
+
+        int beforeSends = (int) server.countRequests("sendMessage");
+
+        sink.errorFallback(new RuntimeException("boom"));
+
+        assertTrue(server.countRequests("deleteMessage") >= 1,
+                "errorFallback must delete the placeholder");
+        boolean sawErrorBody = server.requests().stream()
+                .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                .anyMatch(r -> r.body().contains("an error occurred")
+                        || r.body().contains("processing your message"));
+        assertTrue(sawErrorBody,
+                "errorFallback must emit a user-facing error sendMessage; bodies="
+                        + server.requests().stream()
+                                .filter(r -> r.method().equalsIgnoreCase("sendMessage"))
+                                .map(MockTelegramServer.RecordedRequest::body)
+                                .toList());
+        assertTrue(server.countRequests("sendMessage") > beforeSends,
+                "errorFallback must dispatch at least one new sendMessage");
+    }
+
+    @Test
+    void typingHeartbeatFiresImmediatelyWhenStarted() throws Exception {
+        // AC: typingHeartbeat lifecycle — start on first flush is not how
+        // jclaw works (the heartbeat starts BEFORE the LLM call from
+        // AgentRunner). Verify the heartbeat actually hits the wire when
+        // started, then cancels on seal so no more pulses arrive.
+        var sink = new TelegramStreamingSink(BOT_TOKEN, CHAT_ID, agent, 10L, "private");
+        sink.startTypingHeartbeat();
+        assertTrue(sink.typingHeartbeatActiveForTest());
+
+        // Wait briefly for the first scheduled fire (initialDelay=0L) to
+        // reach the mock. The scheduler hop + VT spawn + HTTP is fast on
+        // loopback.
+        long deadline = System.currentTimeMillis() + 1000;
+        while (server.countRequests("sendChatAction") == 0
+                && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+        assertTrue(server.countRequests("sendChatAction") >= 1,
+                "typing heartbeat must fire at least one sendChatAction");
+
+        sink.seal("");
+        assertFalse(sink.typingHeartbeatActiveForTest(),
+                "seal must cancel the heartbeat");
+
+        long countAtSeal = server.countRequests("sendChatAction");
+        Thread.sleep(150);
+        assertEquals(countAtSeal, server.countRequests("sendChatAction"),
+                "no further sendChatAction after seal — heartbeat fully cancelled");
+    }
 }

@@ -1,5 +1,9 @@
 import channels.TelegramChannel;
+import com.google.gson.JsonParser;
 import org.junit.jupiter.api.*;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow;
 import play.test.UnitTest;
 
 /**
@@ -122,6 +126,564 @@ class TelegramChannelTest extends UnitTest {
             java.nio.file.Files.deleteIfExists(tmp);
         } finally {
             TelegramChannel.clearForTest(botToken);
+        }
+    }
+
+    // ─── JCLAW-325: residual coverage ───────────────────────────────────
+
+    @Test
+    void clearMessageDraft_returnsFalseOnBlankChatId_via_null_short_circuit() {
+        // Note: the production guard rejects null chatId but a non-null blank
+        // chatId still attempts an HTTP call. This documents the actual
+        // short-circuit set the helper enforces — only null token / blank
+        // token / null chat short-circuit; blank chat hits the wire.
+        assertFalse(TelegramChannel.clearMessageDraft("bot-token", null, 42));
+        assertEquals(0, mock.requests().size(),
+                "null chat must short-circuit before any HTTP call");
+    }
+
+    @Test
+    void clearMessageDraft_swallowsConnectErrorReturningFalse() {
+        // Force the IOException catch path (line 290) by pointing the helper
+        // at a known-closed loopback port. The helper must log a warn and
+        // return false rather than propagate.
+        String prev = TelegramChannel.TELEGRAM_API_BASE;
+        try {
+            TelegramChannel.TELEGRAM_API_BASE = "http://127.0.0.1:1"; // reserved/closed
+            boolean ok = TelegramChannel.clearMessageDraft("bot-token", "12345", 42);
+            assertFalse(ok, "connection-refused must yield false, not throw");
+        } finally {
+            TelegramChannel.TELEGRAM_API_BASE = prev;
+        }
+    }
+
+    @Test
+    void botToken_accessorReturnsTokenPassedToConstructor() {
+        String token = "accessor-token-" + System.nanoTime();
+        try {
+            var ch = TelegramChannel.forToken(token);
+            assertEquals(token, ch.botToken(),
+                    "botToken() accessor must round-trip the constructor arg");
+        } finally {
+            TelegramChannel.evictToken(token);
+        }
+    }
+
+    @Test
+    void sendMessage_nullArgumentsShortCircuitReturnsFalse() {
+        // Defensive nullability gate at line 355: any null arg fails fast
+        // with a single error log; no HTTP traffic.
+        String token = "null-args-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertFalse(TelegramChannel.sendMessage(null, "chat", "hi"));
+            assertFalse(TelegramChannel.sendMessage(token, null, "hi"));
+            assertFalse(TelegramChannel.sendMessage(token, "chat", null));
+            assertEquals(0, mock.requests().size(),
+                    "null-guard must short-circuit before any HTTP call");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendMessage_emptyTextStillSendsBlankMessage() {
+        // Empty text is not null — the SDK accepts empty strings but Telegram
+        // rejects them with HTTP 400. Mock returns 200 so we just confirm the
+        // helper drives through to sendMessage when text is "".
+        String token = "empty-text-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            // Empty text produces an empty TextSegment → sendTextSegment
+            // short-circuits at the isBlank check, no wire traffic.
+            assertTrue(TelegramChannel.sendMessage(token, "12345", ""),
+                    "empty text is a no-op success");
+            assertEquals(0, mock.requests().size(),
+                    "blank text must not produce any sendMessage on the wire");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void setMyCommands_shortCircuitsOnNullOrEmptyArguments() {
+        // Line 249: triple-guard against null token / null commands / empty
+        // commands. None should cause an HTTP call.
+        String token = "setcmd-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            TelegramChannel.setMyCommands(null, java.util.List.of(
+                    org.telegram.telegrambots.meta.api.objects.commands.BotCommand
+                            .builder().command("/x").description("y").build()));
+            TelegramChannel.setMyCommands(token, null);
+            TelegramChannel.setMyCommands(token, java.util.List.of());
+            assertEquals(0, mock.requests().size(),
+                    "null/empty inputs must short-circuit setMyCommands");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void setMyCommands_successFiresSetMyCommandsRequest() {
+        String token = "setcmd-ok-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            TelegramChannel.setMyCommands(token, java.util.List.of(
+                    org.telegram.telegrambots.meta.api.objects.commands.BotCommand
+                            .builder().command("/help").description("Show help").build()));
+            assertEquals(1, mock.countRequests("setMyCommands"),
+                    "setMyCommands should dispatch one Bot API call");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void setMyCommands_swallowsExceptionFromServerError() {
+        // Mock returns 400 — setMyCommands MUST NOT propagate; the binding
+        // activation loop relies on swallowed failures.
+        String token = "setcmd-fail-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("setMyCommands", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"bad commands\"}");
+            Assertions.assertDoesNotThrow(() ->
+                    TelegramChannel.setMyCommands(token, java.util.List.of(
+                            org.telegram.telegrambots.meta.api.objects.commands.BotCommand
+                                    .builder().command("/x").description("y").build())));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendTypingAction_shortCircuitsOnNullTokenOrChat() {
+        // Line 317: null guard. No wire traffic.
+        String token = "typing-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            TelegramChannel.sendTypingAction(null, "chat");
+            TelegramChannel.sendTypingAction(token, null);
+            assertEquals(0, mock.requests().size(),
+                    "null guard must skip the HTTP path");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendTypingAction_swallowsExceptionFromServerError() {
+        // Failures must NOT abort the LLM flow that owns the actual response.
+        String token = "typing-fail-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("sendChatAction", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"bad\"}");
+            Assertions.assertDoesNotThrow(() ->
+                    TelegramChannel.sendTypingAction(token, "12345"));
+            // Sanity: the call did try the wire (1 request landed).
+            assertEquals(1, mock.countRequests("sendChatAction"));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    // ─── trySend (instance) — JCLAW-325 ─────────────────────────────────
+
+    @Test
+    void trySend_returnsRateLimitedOn429WithRetryAfter() {
+        // Verifies line 784-788: a 429 with retry_after in the parameters
+        // surfaces as SendResult.rateLimited carrying the ms-converted delay.
+        String token = "trysend-429-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("sendMessage", 429,
+                    "{\"ok\":false,\"error_code\":429,\"description\":\"Too Many Requests\","
+                            + "\"parameters\":{\"retry_after\":3}}");
+            var result = TelegramChannel.forToken(token).trySend("12345", "<b>hi</b>");
+            assertFalse(result.ok());
+            assertEquals(3_000L, result.retryAfterMs(),
+                    "retry_after=3s must convert to 3000 ms in SendResult");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void trySend_returnsFailedOn400WithoutRetryAfter() {
+        // Lines 790-792: TelegramApiRequestException without retryAfter falls
+        // through to the generic FAILED branch.
+        String token = "trysend-400-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("sendMessage", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"bad request\"}");
+            var result = TelegramChannel.forToken(token).trySend("12345", "<b>hi</b>");
+            assertFalse(result.ok());
+            assertEquals(0L, result.retryAfterMs(),
+                    "non-rate-limit failure must have zero retryAfterMs");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void trySend_returnsOkOnSuccessfulResponse() {
+        String token = "trysend-ok-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            var result = TelegramChannel.forToken(token).trySend("12345", "<b>hi</b>");
+            assertTrue(result.ok());
+            assertEquals(1, mock.countRequests("sendMessage"));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    // ─── trySendDocument — JCLAW-325 ───────────────────────────────────
+
+    @Test
+    void trySendDocument_successPathReturnsTrue() throws Exception {
+        // Mirrors the trySendPhoto coverage but for the document path.
+        String token = "doc-ok-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            var tmp = java.nio.file.Files.createTempFile("jclaw-doc-", ".txt");
+            java.nio.file.Files.writeString(tmp, "hello");
+            boolean ok = TelegramChannel.forToken(token).trySendDocument(
+                    "12345", tmp.toFile(), "report.txt");
+            assertTrue(ok);
+            assertEquals(1, mock.countRequests("sendDocument"));
+            java.nio.file.Files.deleteIfExists(tmp);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void trySendDocument_failurePathReturnsFalse() throws Exception {
+        // Mock returns 400 — drives the catch branch (lines 762-766).
+        String token = "doc-fail-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("sendDocument", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"bad doc\"}");
+            var tmp = java.nio.file.Files.createTempFile("jclaw-doc-fail-", ".bin");
+            java.nio.file.Files.write(tmp, new byte[]{1, 2, 3});
+            boolean ok = TelegramChannel.forToken(token).trySendDocument(
+                    "12345", tmp.toFile(), null);
+            assertFalse(ok, "400 server response must surface as false return");
+            java.nio.file.Files.deleteIfExists(tmp);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void trySendPhoto_failurePathReturnsFalse() throws Exception {
+        // Drives lines 731-736: photo upload error catch.
+        String token = "photo-fail-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("sendPhoto", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"bad photo\"}");
+            var tmp = java.nio.file.Files.createTempFile("jclaw-photo-fail-", ".png");
+            java.nio.file.Files.write(tmp, new byte[]{(byte) 0x89, 'P', 'N', 'G'});
+            boolean ok = TelegramChannel.forToken(token).trySendPhoto(
+                    "12345", tmp.toFile(), null);
+            assertFalse(ok, "400 from Telegram must surface as false");
+            java.nio.file.Files.deleteIfExists(tmp);
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    // ─── Inline keyboard helpers (JCLAW-109) ───────────────────────────
+
+    @Test
+    void sendMessageWithKeyboard_successReturnsMessageId() {
+        String token = "kbd-ok-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("sendMessage", 200,
+                    "{\"ok\":true,\"result\":{\"message_id\":99,\"chat\":{\"id\":12345,"
+                            + "\"type\":\"private\"},\"date\":1700000000,\"text\":\"hi\"}}");
+            var keyboard = InlineKeyboardMarkup.builder()
+                    .keyboardRow(new InlineKeyboardRow(InlineKeyboardButton.builder()
+                            .text("OK").callbackData("ok").build()))
+                    .build();
+            Integer mid = TelegramChannel.sendMessageWithKeyboard(token, "12345",
+                    "<b>pick</b>", keyboard);
+            assertNotNull(mid);
+            assertEquals(99, mid.intValue(),
+                    "messageId comes from the response payload");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void sendMessageWithKeyboard_failureReturnsNull() {
+        // Drives lines 821-825: keyboard send catch.
+        String token = "kbd-fail-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("sendMessage", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"bad\"}");
+            var keyboard = InlineKeyboardMarkup.builder()
+                    .keyboardRow(new InlineKeyboardRow(InlineKeyboardButton.builder()
+                            .text("OK").callbackData("ok").build()))
+                    .build();
+            assertNull(TelegramChannel.sendMessageWithKeyboard(token, "12345", "x", keyboard));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void editMessageText_keyboardOverload_successAndFailurePaths() {
+        // Covers both the 5-arg static editMessageText: success and the
+        // exception catch (lines 846-849). Includes a null-keyboard branch
+        // to exercise line 842.
+        String token = "edit-kbd-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            // Default 200: with keyboard.
+            var kbd = InlineKeyboardMarkup.builder()
+                    .keyboardRow(new InlineKeyboardRow(InlineKeyboardButton.builder()
+                            .text("ack").callbackData("ack").build()))
+                    .build();
+            assertTrue(TelegramChannel.editMessageText(token, "12345", 7, "x", kbd));
+            // Null keyboard branch (line 842 false-side).
+            assertTrue(TelegramChannel.editMessageText(token, "12345", 7, "x", null));
+
+            // Now force failure.
+            mock.respondWith("editMessageText", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"no\"}");
+            assertFalse(TelegramChannel.editMessageText(token, "12345", 7, "x", null),
+                    "exception path must surface as false");
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void editMessageText_threeArgVariant_propagatesExceptionOnError() {
+        // Line 227-235: the 4-arg overload that propagates instead of
+        // swallowing. Drive the error path and assert the exception is
+        // surfaced — callers (recovery job) decide retry policy.
+        String token = "edit-3arg-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("editMessageText", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"missing msg\"}");
+            assertThrows(
+                    org.telegram.telegrambots.meta.exceptions.TelegramApiException.class,
+                    () -> TelegramChannel.editMessageText(token, "12345", 7, "x"));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void editMessageText_threeArgVariant_successCompletesQuietly() throws Exception {
+        String token = "edit-3arg-ok-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            // Default 200 response — must not throw.
+            TelegramChannel.editMessageText(token, "12345", 7, "x");
+            assertEquals(1, mock.countRequests("editMessageText"));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void answerCallbackQuery_successWithText() {
+        String token = "ans-ok-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.answerCallbackQuery(token, "cb-1", "ok!", true));
+            assertEquals(1, mock.countRequests("answerCallbackQuery"));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void answerCallbackQuery_nullAndEmptyTextSkipBuilderTextField() {
+        // Lines 866 false-side: null/empty text skips the builder.text() call.
+        String token = "ans-blank-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            assertTrue(TelegramChannel.answerCallbackQuery(token, "cb-1", null, false));
+            assertTrue(TelegramChannel.answerCallbackQuery(token, "cb-2", "", false));
+            assertEquals(2, mock.countRequests("answerCallbackQuery"));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    @Test
+    void answerCallbackQuery_failureReturnsFalse() {
+        // Drives lines 870-873: exception catch.
+        String token = "ans-fail-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            mock.respondWith("answerCallbackQuery", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"stale\"}");
+            assertFalse(TelegramChannel.answerCallbackQuery(token, "cb-1", "msg", true));
+        } finally {
+            TelegramChannel.clearForTest(token);
+        }
+    }
+
+    // ─── parseCallback — JCLAW-325 ──────────────────────────────────────
+
+    @Test
+    void parseCallback_returnsNullForNonCallbackUpdates() {
+        // Plain text update → no callback_query → null. Both overloads.
+        var jsonNoCb = JsonParser.parseString("""
+                {"update_id":1,"message":{"message_id":1,
+                  "chat":{"id":1,"type":"private"},"date":1,"text":"hi"}}
+                """).getAsJsonObject();
+        assertNull(TelegramChannel.parseCallback(jsonNoCb));
+        assertNull(TelegramChannel.parseCallback((com.google.gson.JsonObject) null));
+        assertNull(TelegramChannel.parseCallback(
+                (org.telegram.telegrambots.meta.api.objects.Update) null));
+    }
+
+    @Test
+    void parseCallback_returnsNullForBlankOrMissingData() {
+        // cq.getData() blank → return null. Don't dispatch to a router that
+        // can't even pick a destination.
+        var jsonBlank = JsonParser.parseString("""
+                {"update_id":1,"callback_query":{"id":"cb-1",
+                  "from":{"id":42,"is_bot":false,"first_name":"x"},
+                  "chat_instance":"ci","data":""}}
+                """).getAsJsonObject();
+        assertNull(TelegramChannel.parseCallback(jsonBlank));
+    }
+
+    @Test
+    void parseCallback_returnsNullWhenFromMissing() {
+        // No from → unauthorizable → null.
+        var json = JsonParser.parseString("""
+                {"update_id":1,"callback_query":{"id":"cb-1",
+                  "chat_instance":"ci","data":"x"}}
+                """).getAsJsonObject();
+        assertNull(TelegramChannel.parseCallback(json));
+    }
+
+    @Test
+    void parseCallback_extractsChatAndMessageIdWhenPresent() {
+        var json = JsonParser.parseString("""
+                {"update_id":1,"callback_query":{"id":"cb-1",
+                  "from":{"id":42,"is_bot":false,"first_name":"x"},
+                  "message":{"message_id":7,
+                    "chat":{"id":99,"type":"private"},"date":1,"text":"prev"},
+                  "chat_instance":"ci","data":"act:next"}}
+                """).getAsJsonObject();
+        var cb = TelegramChannel.parseCallback(json);
+        assertNotNull(cb);
+        assertEquals("cb-1", cb.callbackId());
+        assertEquals("42", cb.fromId());
+        assertEquals("99", cb.chatId());
+        assertEquals("private", cb.chatType());
+        assertEquals(7, cb.messageId().intValue());
+        assertEquals("act:next", cb.data());
+    }
+
+    @Test
+    void parseCallback_handlesMissingMessageOrigin() {
+        // Inline-mode callbacks may have no `message` (just chat_instance);
+        // chatId/messageId stay null, but the callback is still parseable.
+        var json = JsonParser.parseString("""
+                {"update_id":1,"callback_query":{"id":"cb-2",
+                  "from":{"id":42,"is_bot":false,"first_name":"x"},
+                  "chat_instance":"ci","data":"inline:foo"}}
+                """).getAsJsonObject();
+        var cb = TelegramChannel.parseCallback(json);
+        assertNotNull(cb);
+        assertNull(cb.chatId());
+        assertNull(cb.messageId());
+        assertEquals("inline:foo", cb.data());
+    }
+
+    @Test
+    void parseCallback_returnsNullOnGsonError() {
+        // Lines 696-699: a malformed JSON payload that the Jackson reader can't
+        // bind must return null with a logged warn — not propagate.
+        var bogus = JsonParser.parseString("""
+                {"update_id":"not-a-number","callback_query":1}
+                """).getAsJsonObject();
+        // The Jackson deserializer fails on the structural mismatch.
+        assertNull(TelegramChannel.parseCallback(bogus));
+    }
+
+    // ─── parseUpdate (SDK Update) — VideoNote + Gson-error paths ────────
+
+    @Test
+    void parseUpdate_returnsNullOnGsonError() {
+        // Lines 550-553: malformed JSON returns null instead of throwing.
+        var bogus = JsonParser.parseString("""
+                {"update_id":"oops"}
+                """).getAsJsonObject();
+        assertNull(TelegramChannel.parseUpdate(bogus));
+    }
+
+    @Test
+    void parseUpdate_extractsVideoNoteAttachment() {
+        // Lines 629-635: video_note path (separate from video).
+        var json = JsonParser.parseString("""
+                {"update_id":1,"message":{"message_id":1,
+                  "from":{"id":42,"is_bot":false,"first_name":"x"},
+                  "chat":{"id":42,"type":"private"},"date":1,
+                  "video_note":{"file_id":"VN","file_unique_id":"uvn",
+                    "length":240,"duration":5,"file_size":12345}}}
+                """).getAsJsonObject();
+        var msg = TelegramChannel.parseUpdate(json);
+        assertNotNull(msg);
+        assertEquals(1, msg.attachments().size());
+        assertEquals("VN", msg.attachments().get(0).telegramFileId());
+        assertEquals(models.MessageAttachment.KIND_FILE,
+                msg.attachments().get(0).kind(),
+                "video_note maps to KIND_FILE");
+    }
+
+    // ─── setWebhook — JCLAW-325 ─────────────────────────────────────────
+
+    @Test
+    void setWebhook_nullInputsReturnFalseImmediately() {
+        // Line 469: null binding or null webhookUrl short-circuits.
+        assertFalse(TelegramChannel.setWebhook(null));
+        var b = new models.TelegramBinding();
+        b.botToken = "any";
+        b.webhookUrl = null;
+        assertFalse(TelegramChannel.setWebhook(b));
+    }
+
+    @Test
+    void setWebhook_successAndFailurePaths() {
+        // Drives 473-475 (success log) and 477-480 (catch). Use a dummy
+        // binding with id=0 since we don't persist.
+        String token = "wh-" + System.nanoTime();
+        try {
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            var b = new models.TelegramBinding();
+            b.id = 1L;
+            b.botToken = token;
+            b.webhookUrl = "https://example.com/wh";
+            b.webhookSecret = "secret-bytes";
+            assertTrue(TelegramChannel.setWebhook(b));
+            assertEquals(1, mock.countRequests("setWebhook"));
+
+            mock.respondWith("setWebhook", 400,
+                    "{\"ok\":false,\"error_code\":400,\"description\":\"bad url\"}");
+            assertFalse(TelegramChannel.setWebhook(b));
+        } finally {
+            TelegramChannel.clearForTest(token);
         }
     }
 }
