@@ -42,6 +42,13 @@ import static utils.GsonHolder.INSTANCE;
  * class composes its output via {@link VisionAudioAssembler#userMessageFor}.
  * Splitting them keeps the JCLAW-25 / JCLAW-132 / JCLAW-165 attachment
  * logic separable from the history-walk loop.
+ *
+ * <p>{@link #buildMessages}, {@link #contentAsString}, and
+ * {@link #parseToolCalls} are static helpers exposed for direct invocation
+ * by {@code MessageHydratorTest}. The test lives in the default package,
+ * so package-private visibility wouldn't reach it; the helpers don't really
+ * justify a curated public API surface, but the audit cost of reflection-based
+ * test access exceeded the visibility-widening cost.
  */
 public final class MessageHydrator {
 
@@ -54,7 +61,7 @@ public final class MessageHydrator {
      * the audio-bearer side-map (compaction path, tests). Drops the
      * captured refs on the floor.
      */
-    static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation) {
+    public static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation) {
         return buildMessages(systemPrompt, conversation, new ArrayList<>());
     }
 
@@ -66,7 +73,7 @@ public final class MessageHydrator {
      * conversation history via {@link ConversationService#loadRecentMessages}
      * which touches lazy collections.
      */
-    static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation,
+    public static List<ChatMessage> buildMessages(String systemPrompt, Conversation conversation,
                                             List<VisionAudioAssembler.AudioBearer> audioBearersOut) {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(systemPrompt));
@@ -149,7 +156,7 @@ public final class MessageHydrator {
      * (vision). Returns empty string if content is null or a non-string
      * type that can't be converted.
      */
-    static String contentAsString(Object content) {
+    public static String contentAsString(Object content) {
         if (content instanceof String s) return s;
         if (content == null) return "";
         // Multi-part content (e.g. vision blocks): extract text parts
@@ -165,7 +172,7 @@ public final class MessageHydrator {
         return content.toString();
     }
 
-    static List<ToolCall> parseToolCalls(String json) {
+    public static List<ToolCall> parseToolCalls(String json) {
         try {
             var tc = gson.fromJson(json, ToolCall.class);
             if (tc == null) return List.of();

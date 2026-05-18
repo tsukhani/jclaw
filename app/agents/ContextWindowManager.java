@@ -171,7 +171,7 @@ public final class ContextWindowManager {
      * correspond to {@code chars/4} (providers count image tokens
      * separately), so multi-part content's image segments are skipped.
      */
-    static int estimateTokens(List<ChatMessage> messages) {
+    public static int estimateTokens(List<ChatMessage> messages) {
         int chars = 0;
         for (var msg : messages) {
             if (msg.content() instanceof String s) {

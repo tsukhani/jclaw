@@ -11,7 +11,6 @@ import play.test.*;
 import services.ConversationService;
 import utils.GsonHolder;
 
-import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 
@@ -32,6 +31,11 @@ import java.util.Map;
  * every persisted row returned by {@code ConversationService.loadRecentMessages}
  * (which already caps at {@code chat.maxContextMessages}); the window-aware
  * drop-oldest pass runs in a separate component downstream.
+ *
+ * <p>This test lives in the default package and invokes the package-private
+ * static helpers ({@code buildMessages}, {@code contentAsString},
+ * {@code parseToolCalls}) on {@link MessageHydrator} directly. The helpers
+ * don't justify a public API surface; same-package visibility is enough.
  */
 class MessageHydratorTest extends UnitTest {
 
@@ -47,56 +51,25 @@ class MessageHydratorTest extends UnitTest {
         agent.save();
     }
 
-    // ─── Reflection plumbing ────────────────────────────────────────────
+    // ─── Helpers ────────────────────────────────────────────────────────
 
-    private static List<ChatMessage> buildMessages(String systemPrompt, Conversation conv) throws Exception {
-        Method m = MessageHydrator.class.getDeclaredMethod(
-                "buildMessages", String.class, Conversation.class);
-        m.setAccessible(true);
-        @SuppressWarnings("unchecked")
-        var out = (List<ChatMessage>) m.invoke(null, systemPrompt, conv);
-        return out;
+    private static ToolCall toolCall(String id, String name, String args) {
+        return new ToolCall(id, "function", new FunctionCall(name, args));
     }
 
-    private static String contentAsString(Object content) throws Exception {
-        Method m = MessageHydrator.class.getDeclaredMethod("contentAsString", Object.class);
-        m.setAccessible(true);
-        return (String) m.invoke(null, content);
-    }
-
-    private static List<ToolCall> parseToolCalls(String json) throws Exception {
-        Method m = MessageHydrator.class.getDeclaredMethod("parseToolCalls", String.class);
-        m.setAccessible(true);
-        @SuppressWarnings("unchecked")
-        var out = (List<ToolCall>) m.invoke(null, json);
-        return out;
-    }
-
-    /**
-     * Build a {@link ToolCall} via reflection — mirror of the workaround in
-     * {@code AgentRunnerContextWindowTest} for the {@code new Function*(}
-     * security-hook false positive on Java record construction.
-     */
-    private static ToolCall toolCall(String id, String name, String args) throws Exception {
-        var fc = FunctionCall.class
-                .getDeclaredConstructor(String.class, String.class)
-                .newInstance(name, args);
-        return new ToolCall(id, "function", fc);
-    }
-
-    private static String toolCallJson(String id, String name, String args) throws Exception {
+    private static String toolCallJson(String id, String name, String args) {
         return GsonHolder.INSTANCE.toJson(toolCall(id, name, args));
     }
 
     // ─── buildMessages: empty / system-only inputs ──────────────────────
 
     @Test
-    void buildMessagesEmptyConversationYieldsOnlySystemPrompt() throws Exception {
+    void buildMessagesEmptyConversationYieldsOnlySystemPrompt() {
         var conv = ConversationService.create(agent, "web", "user1");
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = buildMessages("SYSTEM PROMPT", fresh);
+        var messages = MessageHydrator.buildMessages("SYSTEM PROMPT", fresh);
         assertEquals(1, messages.size(),
                 "empty history must produce a one-element list (system prompt only)");
         assertEquals(MessageRole.SYSTEM.value, messages.getFirst().role());
@@ -104,14 +77,14 @@ class MessageHydratorTest extends UnitTest {
     }
 
     @Test
-    void buildMessagesAlwaysPlacesSystemPromptAtIndexZero() throws Exception {
+    void buildMessagesAlwaysPlacesSystemPromptAtIndexZero() {
         var conv = ConversationService.create(agent, "web", "user1");
         ConversationService.appendMessage(conv, MessageRole.USER, "first user", null, null, null);
         ConversationService.appendMessage(conv, MessageRole.ASSISTANT, "reply", null, null, null);
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh);
         assertEquals(MessageRole.SYSTEM.value, messages.getFirst().role());
         assertEquals("SP", messages.getFirst().content());
     }
@@ -119,13 +92,13 @@ class MessageHydratorTest extends UnitTest {
     // ─── buildMessages: per-role hydration ──────────────────────────────
 
     @Test
-    void buildMessagesHydratesUserRowAsUserChatMessage() throws Exception {
+    void buildMessagesHydratesUserRowAsUserChatMessage() {
         var conv = ConversationService.create(agent, "web", "user1");
         ConversationService.appendMessage(conv, MessageRole.USER, "hello there", null, null, null);
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh);
         assertEquals(2, messages.size());
         var user = messages.get(1);
         assertEquals(MessageRole.USER.value, user.role());
@@ -137,14 +110,14 @@ class MessageHydratorTest extends UnitTest {
     }
 
     @Test
-    void buildMessagesHydratesPlainAssistantRow() throws Exception {
+    void buildMessagesHydratesPlainAssistantRow() {
         var conv = ConversationService.create(agent, "web", "user1");
         ConversationService.appendMessage(conv, MessageRole.USER, "hi", null, null, null);
         ConversationService.appendMessage(conv, MessageRole.ASSISTANT, "hello back", null, null, null);
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh);
         assertEquals(3, messages.size());
         var asst = messages.get(2);
         assertEquals(MessageRole.ASSISTANT.value, asst.role());
@@ -154,7 +127,7 @@ class MessageHydratorTest extends UnitTest {
     }
 
     @Test
-    void buildMessagesHydratesAssistantWithToolCallsArray() throws Exception {
+    void buildMessagesHydratesAssistantWithToolCallsArray() {
         var conv = ConversationService.create(agent, "web", "user1");
         ConversationService.appendMessage(conv, MessageRole.USER, "what time?", null, null, null);
         var tcJson = toolCallJson("call_abc", "datetime", "{\"action\":\"now\"}");
@@ -162,7 +135,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh);
         // SYSTEM + USER + ASSISTANT(with tool_calls)
         assertEquals(3, messages.size());
         var asst = messages.get(2);
@@ -178,7 +151,7 @@ class MessageHydratorTest extends UnitTest {
     }
 
     @Test
-    void buildMessagesHydratesToolRowWithIdAndName() throws Exception {
+    void buildMessagesHydratesToolRowWithIdAndName() {
         var conv = ConversationService.create(agent, "web", "user1");
         ConversationService.appendMessage(conv, MessageRole.USER, "what time?", null, null, null);
         var tcJson = toolCallJson("call_abc", "datetime", "{}");
@@ -188,7 +161,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh);
         // SYSTEM + USER + ASSISTANT + TOOL
         assertEquals(4, messages.size());
         var tool = messages.get(3);
@@ -203,7 +176,7 @@ class MessageHydratorTest extends UnitTest {
     }
 
     @Test
-    void buildMessagesSanitizesToolCallIdOnAssistantAndToolRowsConsistently() throws Exception {
+    void buildMessagesSanitizesToolCallIdOnAssistantAndToolRowsConsistently() {
         // JCLAW-119: provider-specific IDs (Gemini-style "functions.web_search:7")
         // get normalized identically on both sides of the pair so pairing survives.
         var conv = ConversationService.create(agent, "web", "user1");
@@ -217,7 +190,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh);
         var asst = messages.get(2);
         var tool = messages.get(3);
         var expectedId = "functions_web_search_7";
@@ -230,7 +203,7 @@ class MessageHydratorTest extends UnitTest {
     }
 
     @Test
-    void buildMessagesHandlesAssistantWithBlankToolCallsString() throws Exception {
+    void buildMessagesHandlesAssistantWithBlankToolCallsString() {
         // toolCalls is non-null but blank — the !isBlank guard takes us into
         // the plain-assistant branch instead of parseToolCalls. content is also
         // null on this row; assistant() helper should fall back to "".
@@ -240,7 +213,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh);
         var asst = messages.get(2);
         assertEquals(MessageRole.ASSISTANT.value, asst.role());
         assertNull(asst.toolCalls(),
@@ -250,7 +223,7 @@ class MessageHydratorTest extends UnitTest {
     }
 
     @Test
-    void buildMessagesPreservesAssistantContentWithToolCallsTogether() throws Exception {
+    void buildMessagesPreservesAssistantContentWithToolCallsTogether() {
         // assistant turns can carry BOTH a text content and tool_calls; both
         // must come through.
         var conv = ConversationService.create(agent, "web", "user1");
@@ -261,7 +234,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh);
         var asst = messages.get(2);
         assertEquals("I'll run that for you.", asst.content());
         assertNotNull(asst.toolCalls());
@@ -269,7 +242,7 @@ class MessageHydratorTest extends UnitTest {
     }
 
     @Test
-    void buildMessagesHydratesPersistedSystemRow() throws Exception {
+    void buildMessagesHydratesPersistedSystemRow() {
         // Rare but the switch handles it: SYSTEM-role rows hydrate as
         // ChatMessage.system(content).
         var conv = ConversationService.create(agent, "web", "user1");
@@ -277,7 +250,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh);
         // SYSTEM prompt + persisted SYSTEM row.
         assertEquals(2, messages.size());
         var sys = messages.get(1);
@@ -286,7 +259,7 @@ class MessageHydratorTest extends UnitTest {
     }
 
     @Test
-    void buildMessagesPreservesChronologicalOrderUserAssistantToolUser() throws Exception {
+    void buildMessagesPreservesChronologicalOrderUserAssistantToolUser() {
         // Tests the toolNamesById lookup is properly populated as the loop
         // walks chronologically (the assistant row is always visited before
         // its companion tool row).
@@ -299,7 +272,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh);
         assertEquals(5, messages.size());
         assertEquals(MessageRole.SYSTEM.value, messages.get(0).role());
         assertEquals(MessageRole.USER.value, messages.get(1).role());
@@ -311,7 +284,7 @@ class MessageHydratorTest extends UnitTest {
     }
 
     @Test
-    void buildMessagesUsesUserAsDefaultForUnknownRoleString() throws Exception {
+    void buildMessagesUsesUserAsDefaultForUnknownRoleString() {
         // MessageRole.fromValue returns null for unrecognised strings; the
         // hydrator's elvis ?: USER fallback must kick in. Direct entity write
         // so the role string is not normalized.
@@ -324,7 +297,7 @@ class MessageHydratorTest extends UnitTest {
         commitAndReopen();
         var fresh = Conversation.<Conversation>findById(conv.id);
 
-        var messages = buildMessages("SP", fresh);
+        var messages = MessageHydrator.buildMessages("SP", fresh);
         // SYSTEM prompt + the bogus row, hydrated through the USER branch.
         assertEquals(2, messages.size());
         assertEquals(MessageRole.USER.value, messages.get(1).role(),
@@ -334,17 +307,17 @@ class MessageHydratorTest extends UnitTest {
     // ─── parseToolCalls ─────────────────────────────────────────────────
 
     @Test
-    void parseToolCallsReturnsEmptyForMalformedJson() throws Exception {
-        assertTrue(parseToolCalls("not json at all").isEmpty(),
+    void parseToolCallsReturnsEmptyForMalformedJson() {
+        assertTrue(MessageHydrator.parseToolCalls("not json at all").isEmpty(),
                 "malformed JSON must return an empty list rather than throwing");
     }
 
     @Test
-    void parseToolCallsHandlesEmptyJsonObjectWithoutThrowing() throws Exception {
+    void parseToolCallsHandlesEmptyJsonObjectWithoutThrowing() {
         // Gson constructs a ToolCall with all-null fields from "{}". The
         // method's catch block only runs on real parse failures — successful
         // parse to a record with null fields still surfaces a one-element list.
-        var parsed = parseToolCalls("{}");
+        var parsed = MessageHydrator.parseToolCalls("{}");
         assertEquals(1, parsed.size(),
                 "Gson parses {} into a non-null record with null fields");
         assertNull(parsed.getFirst().id());
@@ -352,17 +325,17 @@ class MessageHydratorTest extends UnitTest {
     }
 
     @Test
-    void parseToolCallsReturnsEmptyForJsonNullLiteral() throws Exception {
+    void parseToolCallsReturnsEmptyForJsonNullLiteral() {
         // The JSON null literal takes the explicit `if (tc == null)` null-guard
         // branch (parseToolCalls returns empty list).
-        assertTrue(parseToolCalls("null").isEmpty(),
+        assertTrue(MessageHydrator.parseToolCalls("null").isEmpty(),
                 "JSON 'null' must take the null-guard branch and yield empty list");
     }
 
     @Test
-    void parseToolCallsSanitizesIdInRoundTrip() throws Exception {
+    void parseToolCallsSanitizesIdInRoundTrip() {
         var tcJson = toolCallJson("functions.web_search:7", "web_search", "{}");
-        var parsed = parseToolCalls(tcJson);
+        var parsed = MessageHydrator.parseToolCalls(tcJson);
         assertEquals(1, parsed.size());
         assertEquals("functions_web_search_7", parsed.getFirst().id(),
                 "parseToolCalls must apply JCLAW-119 sanitization");
@@ -370,9 +343,9 @@ class MessageHydratorTest extends UnitTest {
     }
 
     @Test
-    void parseToolCallsLeavesAlreadySafeIdUntouched() throws Exception {
+    void parseToolCallsLeavesAlreadySafeIdUntouched() {
         var tcJson = toolCallJson("call_abc_123", "shell_exec", "{}");
-        var parsed = parseToolCalls(tcJson);
+        var parsed = MessageHydrator.parseToolCalls(tcJson);
         assertEquals("call_abc_123", parsed.getFirst().id(),
                 "no rewrite when id is already in [a-zA-Z0-9_-]");
     }
@@ -380,36 +353,36 @@ class MessageHydratorTest extends UnitTest {
     // ─── contentAsString ────────────────────────────────────────────────
 
     @Test
-    void contentAsStringPassesThroughStrings() throws Exception {
-        assertEquals("hello", contentAsString("hello"));
-        assertEquals("", contentAsString(""));
+    void contentAsStringPassesThroughStrings() {
+        assertEquals("hello", MessageHydrator.contentAsString("hello"));
+        assertEquals("", MessageHydrator.contentAsString(""));
     }
 
     @Test
-    void contentAsStringReturnsEmptyForNull() throws Exception {
-        assertEquals("", contentAsString(null));
+    void contentAsStringReturnsEmptyForNull() {
+        assertEquals("", MessageHydrator.contentAsString(null));
     }
 
     @Test
-    void contentAsStringFlattensVisionTextParts() throws Exception {
+    void contentAsStringFlattensVisionTextParts() {
         List<Map<String, Object>> parts = List.of(
                 Map.of("type", "text", "text", "describe "),
                 Map.of("type", "image_url",
                         "image_url", Map.of("url", "data:image/png;base64,AAAA")),
                 Map.of("type", "text", "text", "this image"));
-        assertEquals("describe this image", contentAsString(parts),
+        assertEquals("describe this image", MessageHydrator.contentAsString(parts),
                 "multi-part content concatenates text parts and skips images");
     }
 
     @Test
-    void contentAsStringFallsBackToToStringForOtherTypes() throws Exception {
+    void contentAsStringFallsBackToToStringForOtherTypes() {
         // A bare number reaches the final .toString() path.
-        assertEquals("42", contentAsString(42));
+        assertEquals("42", MessageHydrator.contentAsString(42));
     }
 
     @Test
-    void contentAsStringReturnsEmptyForEmptyPartsList() throws Exception {
-        assertEquals("", contentAsString(List.of()),
+    void contentAsStringReturnsEmptyForEmptyPartsList() {
+        assertEquals("", MessageHydrator.contentAsString(List.of()),
                 "empty parts list yields empty string, not the list's toString()");
     }
 

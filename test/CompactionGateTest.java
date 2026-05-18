@@ -1,16 +1,17 @@
 import agents.CompactionGate;
-import llm.LlmProvider;
+import agents.ContextWindowManager;
 import llm.LlmTypes.ChatMessage;
+import llm.LlmTypes.FunctionCall;
+import llm.LlmTypes.ToolCall;
 import models.Agent;
 import models.Conversation;
 import models.MessageRole;
 import org.junit.jupiter.api.*;
-import play.db.jpa.JPA;
 import play.test.*;
+import play.db.jpa.JPA;
 import services.ConfigService;
 import services.ConversationService;
 
-import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Set;
 
@@ -31,8 +32,11 @@ import java.util.Set;
  * </ul>
  *
  * <p>Pattern: an embedded HTTP server stands in for the LLM provider — the
- * standard JClaw test pattern (see {@code AgentRunnerCoreTest}). Reflection
- * is used to invoke the package-private {@code maybeCompactAndRebuild}.
+ * standard JClaw test pattern (see {@code AgentRunnerCoreTest}). This test
+ * lives in the default package and calls the package-private
+ * {@code CompactionGate.maybeCompactAndRebuild} and
+ * {@code ContextWindowManager.estimateTokens} directly; the helpers don't
+ * justify a public API surface.
  */
 class CompactionGateTest extends UnitTest {
 
@@ -61,26 +65,10 @@ class CompactionGateTest extends UnitTest {
         }
     }
 
-    // ─── Reflection plumbing ────────────────────────────────────────────
-
-    private static List<ChatMessage> maybeCompactAndRebuild(
-            Agent a, Long convId, String userMessage,
-            Set<String> disabled, LlmProvider primary,
-            List<ChatMessage> current) throws Exception {
-        Method m = CompactionGate.class.getDeclaredMethod(
-                "maybeCompactAndRebuild",
-                Agent.class, Long.class, String.class,
-                Set.class, LlmProvider.class, List.class);
-        m.setAccessible(true);
-        @SuppressWarnings("unchecked")
-        var out = (List<ChatMessage>) m.invoke(null, a, convId, userMessage, disabled, primary, current);
-        return out;
-    }
-
     // ─── No-op paths ─────────────────────────────────────────────────────
 
     @Test
-    void returnsCurrentWhenConversationMissing() throws Exception {
+    void returnsCurrentWhenConversationMissing() {
         // No HTTP server needed — the snapshot Tx hits findById(null id) and
         // returns null without ever invoking the provider.
         configureProviderWithModel("test-model", 200_000, 8_192);
@@ -88,14 +76,15 @@ class CompactionGateTest extends UnitTest {
         assertNotNull(primary, "test provider must be registered");
 
         var current = List.of(ChatMessage.system("SP"), ChatMessage.user("hi"));
-        var result = maybeCompactAndRebuild(agent, 999_999_999L, "hi", Set.of(), primary, current);
+        var result = CompactionGate.maybeCompactAndRebuild(
+                agent, 999_999_999L, "hi", Set.of(), primary, current);
 
         assertSame(current, result,
                 "missing conversation → snapshot=null → return current unchanged (same instance)");
     }
 
     @Test
-    void returnsCurrentWhenModelInfoNotInProviderConfig() throws Exception {
+    void returnsCurrentWhenModelInfoNotInProviderConfig() {
         // Provider configured with a DIFFERENT model id than the agent's;
         // resolveModelInfo returns empty → snapshot.modelInfo is null.
         configureProviderWithModel("some-other-model", 200_000, 8_192);
@@ -105,14 +94,15 @@ class CompactionGateTest extends UnitTest {
         commitAndReopen();
 
         var current = List.of(ChatMessage.system("SP"), ChatMessage.user("hi"));
-        var result = maybeCompactAndRebuild(agent, conv.id, "hi", Set.of(), primary, current);
+        var result = CompactionGate.maybeCompactAndRebuild(
+                agent, conv.id, "hi", Set.of(), primary, current);
 
         assertSame(current, result,
                 "modelInfo null → return current unchanged");
     }
 
     @Test
-    void returnsCurrentForEmptyMessageList() throws Exception {
+    void returnsCurrentForEmptyMessageList() {
         // Empty list trivially under threshold — shouldCompact(0, mi) is false.
         configureProviderWithModel("test-model", 200_000, 8_192);
         var primary = llm.ProviderRegistry.get("test-provider");
@@ -120,13 +110,14 @@ class CompactionGateTest extends UnitTest {
         commitAndReopen();
 
         var current = List.<ChatMessage>of();
-        var result = maybeCompactAndRebuild(agent, conv.id, "hi", Set.of(), primary, current);
+        var result = CompactionGate.maybeCompactAndRebuild(
+                agent, conv.id, "hi", Set.of(), primary, current);
 
         assertSame(current, result, "empty list must not trigger compaction");
     }
 
     @Test
-    void returnsCurrentWhenUnderThreshold() throws Exception {
+    void returnsCurrentWhenUnderThreshold() {
         // 200k context window, default reserve=15k, budget=185k. A small message
         // list of ~50 chars produces ~13 tokens — well under budget.
         configureProviderWithModel("test-model", 200_000, 8_192);
@@ -138,7 +129,8 @@ class CompactionGateTest extends UnitTest {
                 ChatMessage.system("SP"),
                 ChatMessage.user("hello world"),
                 ChatMessage.assistant("hi back!"));
-        var result = maybeCompactAndRebuild(agent, conv.id, "hi", Set.of(), primary, current);
+        var result = CompactionGate.maybeCompactAndRebuild(
+                agent, conv.id, "hi", Set.of(), primary, current);
 
         assertSame(current, result, "under-threshold → return current unchanged");
     }
@@ -146,7 +138,7 @@ class CompactionGateTest extends UnitTest {
     // ─── Per-model contextWindow ─────────────────────────────────────────
 
     @Test
-    void perModelContextWindow_smallWindowTriggers_largeWindowDoesNot() throws Exception {
+    void perModelContextWindow_smallWindowTriggers_largeWindowDoesNot() {
         // Two models on the same provider, the conversation override flips
         // between them and the gate honours each one's window independently.
         // Tight reserve so we can keep estimated tokens small.
@@ -182,7 +174,8 @@ class CompactionGateTest extends UnitTest {
             fresh.save();
             commitAndReopen();
 
-            var result = maybeCompactAndRebuild(agent, conv.id, "hi", Set.of(), primary, current);
+            var result = CompactionGate.maybeCompactAndRebuild(
+                    agent, conv.id, "hi", Set.of(), primary, current);
             assertSame(current, result,
                     "200k-window model %s must keep the small list unchanged".formatted(modelId));
         }
@@ -204,7 +197,8 @@ class CompactionGateTest extends UnitTest {
         // contextWindow=2000 path was at least evaluated against the right
         // model. We verify model-specific resolution via the no-op-but-distinct
         // branch by checking that adding more messages CHANGES behaviour.
-        var resultGemini = maybeCompactAndRebuild(agent, conv.id, "hi", Set.of(), primary, current);
+        var resultGemini = CompactionGate.maybeCompactAndRebuild(
+                agent, conv.id, "hi", Set.of(), primary, current);
         // result is still `current` because compact() skipped (no safe boundary),
         // but we've validated the path executed against the gemini window.
         assertSame(current, resultGemini,
@@ -214,7 +208,7 @@ class CompactionGateTest extends UnitTest {
     // ─── Tool-message token contribution ────────────────────────────────
 
     @Test
-    void toolCallTokensCountTowardBudget() throws Exception {
+    void toolCallTokensCountTowardBudget() {
         // The gate delegates token counting to ContextWindowManager.estimateTokens
         // which sums tool-call function names + arguments alongside content.
         // We pin this contract here so a regression to "content-only" estimation
@@ -229,22 +223,21 @@ class CompactionGateTest extends UnitTest {
 
         // Content alone is ~100 chars — well under 1200. But add a tool call
         // whose arguments JSON is 2000 chars and we're over.
-        var fatToolCall = new llm.LlmTypes.ToolCall("call_1", "function",
-                llm.LlmTypes.FunctionCall.class
-                        .getDeclaredConstructor(String.class, String.class)
-                        .newInstance("big_tool", "x".repeat(2000)));
+        var fatToolCall = new ToolCall("call_1", "function",
+                new FunctionCall("big_tool", "x".repeat(2000)));
         var asstWithFatTool = ChatMessage.assistant("brief", List.of(fatToolCall));
         var listWithFatTool = List.of(
                 ChatMessage.system("SP"),
                 ChatMessage.user("hi"),
                 asstWithFatTool);
         // Sanity: estimate via the manager is over budget.
-        int tokens = invokeEstimateTokens(listWithFatTool);
+        int tokens = ContextWindowManager.estimateTokens(listWithFatTool);
         assertTrue(tokens > 300,
                 "sanity: tool-call args must push estimate above the 300-token budget; got " + tokens);
 
         // Gate triggers shouldCompact=true; compact() bails at boundary; result == current.
-        var result = maybeCompactAndRebuild(agent, conv.id, "hi", Set.of(), primary, listWithFatTool);
+        var result = CompactionGate.maybeCompactAndRebuild(
+                agent, conv.id, "hi", Set.of(), primary, listWithFatTool);
         assertSame(listWithFatTool, result,
                 "compact() skipped on no-safe-boundary, but the shouldCompact branch ran (tool-call tokens counted toward budget)");
 
@@ -254,10 +247,11 @@ class CompactionGateTest extends UnitTest {
                 ChatMessage.system("SP"),
                 ChatMessage.user("hi"),
                 ChatMessage.assistant("brief"));
-        int tokensNoTool = invokeEstimateTokens(listWithoutTool);
+        int tokensNoTool = ContextWindowManager.estimateTokens(listWithoutTool);
         assertTrue(tokensNoTool < 300,
                 "sanity: without tool-call, estimate must be under budget; got " + tokensNoTool);
-        var resultNoTool = maybeCompactAndRebuild(agent, conv.id, "hi", Set.of(), primary, listWithoutTool);
+        var resultNoTool = CompactionGate.maybeCompactAndRebuild(
+                agent, conv.id, "hi", Set.of(), primary, listWithoutTool);
         assertSame(listWithoutTool, resultNoTool, "under-budget early-return branch");
     }
 
@@ -289,7 +283,8 @@ class CompactionGateTest extends UnitTest {
         var current = List.of(
                 ChatMessage.system("SP"),
                 ChatMessage.user("a".repeat(8000)));
-        var result = maybeCompactAndRebuild(agent, conv.id, "next user", Set.of(), primary, current);
+        var result = CompactionGate.maybeCompactAndRebuild(
+                agent, conv.id, "next user", Set.of(), primary, current);
 
         assertSame(current, result,
                 "summarizer returned empty → compact() skip-reason='empty summary' → gate falls back to current");
@@ -322,7 +317,8 @@ class CompactionGateTest extends UnitTest {
         var current = List.of(
                 ChatMessage.system("SP"),
                 ChatMessage.user("a".repeat(8000)));
-        var result = maybeCompactAndRebuild(agent, conv.id, "next user", Set.of(), primary, current);
+        var result = CompactionGate.maybeCompactAndRebuild(
+                agent, conv.id, "next user", Set.of(), primary, current);
 
         assertNotSame(current, result,
                 "successful compaction must return a freshly rebuilt list (not the input)");
@@ -343,12 +339,6 @@ class CompactionGateTest extends UnitTest {
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────
-
-    private static int invokeEstimateTokens(List<ChatMessage> msgs) throws Exception {
-        Method m = agents.ContextWindowManager.class.getDeclaredMethod("estimateTokens", List.class);
-        m.setAccessible(true);
-        return (int) m.invoke(null, msgs);
-    }
 
     private void configureProviderWithModel(String modelId, int contextWindow, int maxTokens) {
         ConfigService.set("provider.test-provider.baseUrl",

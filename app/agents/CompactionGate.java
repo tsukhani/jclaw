@@ -54,7 +54,7 @@ public final class CompactionGate {
      * summarization call itself is LLM-bound and must not hold a JDBC
      * connection.
      */
-    static List<ChatMessage> maybeCompactAndRebuild(
+    public static List<ChatMessage> maybeCompactAndRebuild(
             Agent agent, Long conversationId, String userMessage,
             Set<String> disabledTools, LlmProvider primary,
             List<ChatMessage> current) {
