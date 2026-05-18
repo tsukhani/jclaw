@@ -189,10 +189,48 @@ public final class LuceneIndexer {
         return writer.getDocStats().numDocs;
     }
 
+    /** System-property override for {@link #indexPath()}. Tests set this
+     *  in {@code @BeforeAll} to a freshly-created temp directory so the
+     *  autotest JVM doesn't fight a running production JVM for the
+     *  production index's {@code write.lock}. Unset (or blank) preserves
+     *  the production default at {@code data/jclaw-lucene/task_run_message}.
+     *
+     *  <p>Tests must {@link #close} before clearing the property, so the
+     *  next test's {@link #open} re-resolves against either a fresh
+     *  override or the production default. The companion
+     *  {@link #setIndexPathForTest} helper handles both halves and is
+     *  the documented test entrypoint. */
+    public static final String INDEX_PATH_PROPERTY = "jclaw.search.lucenePath";
+
+    /**
+     * Test-only seam: redirect {@link #indexPath} to {@code path} for the
+     * lifetime of the JVM (or until called again with {@code null} to
+     * clear). Tests that drive the real Lucene path must call this in
+     * {@code @BeforeAll} pointing at a per-class temp directory; without
+     * the redirect the index opens at {@code data/jclaw-lucene/...} and
+     * collides with any running production JVM holding the same lock.
+     *
+     * <p>Idempotent. Safe to call before any {@link #open}; the resolved
+     * path is read fresh on every {@code open}.
+     */
+    public static void setIndexPathForTest(Path path) {
+        if (path == null) {
+            System.clearProperty(INDEX_PATH_PROPERTY);
+        } else {
+            System.setProperty(INDEX_PATH_PROPERTY, path.toString());
+        }
+    }
+
     private static Path indexPath() {
-        // Resolve against the Play app root so tests (which run with a
-        // different working directory) land their index in the same
-        // tree as the running JVM.
+        // Test override wins so autotest runs land their index in a
+        // dedicated tmp directory, never the production default.
+        var override = System.getProperty(INDEX_PATH_PROPERTY);
+        if (override != null && !override.isBlank()) {
+            return Path.of(override);
+        }
+        // Production default: resolve against the Play app root so the
+        // running JVM and any subprocess (cli admin, migration tool) all
+        // agree on the same path regardless of cwd.
         return Play.applicationPath.toPath().resolve("data/jclaw-lucene/task_run_message");
     }
 }

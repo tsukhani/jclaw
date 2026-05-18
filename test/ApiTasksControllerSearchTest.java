@@ -6,9 +6,14 @@ import models.MessageRole;
 import models.Task;
 import models.TaskRun;
 import models.TaskRunMessage;
+import services.search.LuceneIndexer;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /**
  * Functional HTTP tests for {@code GET /api/task-runs/search} (JCLAW-294
@@ -17,6 +22,33 @@ import java.util.regex.Pattern;
  * and the live-trigger indexing of newly inserted messages.
  */
 class ApiTasksControllerSearchTest extends FunctionalTest {
+
+    private static Path testIndexParent;
+
+    @BeforeAll
+    static void redirectLuceneIndex() throws Exception {
+        // Redirect Lucene to a per-test-class temp directory so the
+        // autotest JVM never opens the production index's FSDirectory.
+        // Without this, a running production JClaw against the same
+        // checkout holds data/jclaw-lucene/task_run_message/write.lock
+        // and our MessageSearch.init() below crashes with
+        // LockObtainFailedException.
+        testIndexParent = Files.createTempDirectory("jclaw-lucene-test-");
+        LuceneIndexer.setIndexPathForTest(testIndexParent.resolve("task_run_message"));
+    }
+
+    @AfterAll
+    static void restoreLuceneIndex() throws Exception {
+        LuceneIndexer.close();
+        LuceneIndexer.setIndexPathForTest(null);
+        if (testIndexParent != null && Files.exists(testIndexParent)) {
+            try (Stream<Path> walk = Files.walk(testIndexParent)) {
+                walk.sorted(Comparator.reverseOrder()).forEach(p -> {
+                    try { Files.deleteIfExists(p); } catch (Exception _) { /* best-effort */ }
+                });
+            }
+        }
+    }
 
     @BeforeEach
     void setup() throws Exception {

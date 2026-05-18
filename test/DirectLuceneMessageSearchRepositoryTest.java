@@ -49,19 +49,21 @@ class DirectLuceneMessageSearchRepositoryTest extends UnitTest {
     static void allOnce() throws Exception {
         // Boot job skips Lucene init in test mode, so the indexer is
         // closed by default. Open it pointing at a per-test-class temp
-        // directory so we don't share state with whichever path the
-        // running JVM would normally use.
+        // directory so we don't share state — and don't fight the
+        // write.lock — with a production JVM running against the same
+        // checkout.
         testIndexParent = Files.createTempDirectory("jclaw-lucene-test-");
-        // LuceneIndexer reads play.Play.applicationPath.toPath() and
-        // appends data/jclaw-lucene/task_run_message. We can't easily
-        // override the path without forking the indexer, so the test
-        // accepts that the live applicationPath wins — but we DO drop
-        // the index between tests via Fixtures + a fresh open() cycle.
+        LuceneIndexer.setIndexPathForTest(testIndexParent.resolve("task_run_message"));
     }
 
     @AfterAll
     static void allCleanup() throws Exception {
         LuceneIndexer.close();
+        // Clear the override BEFORE the directory delete so a stray
+        // re-open during cleanup can't lock the temp tree we're about
+        // to remove (no production code re-opens here, but the order
+        // documents intent for future readers).
+        LuceneIndexer.setIndexPathForTest(null);
         if (testIndexParent != null && Files.exists(testIndexParent)) {
             try (Stream<Path> walk = Files.walk(testIndexParent)) {
                 walk.sorted(Comparator.reverseOrder()).forEach(p -> {
