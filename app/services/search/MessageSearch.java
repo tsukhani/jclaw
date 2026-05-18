@@ -101,26 +101,32 @@ public final class MessageSearch {
     }
 
     private static MessageSearchRepository chooseRepository() {
+        // The direct Lucene-10 backend works against any JDBC dialect —
+        // it owns its own filesystem index and stays in sync via
+        // TaskRunMessage's JPA lifecycle hooks rather than DB triggers.
+        // Postgres operators who specifically want tsvector + GIN still
+        // get the Postgres-native skeleton; everyone else gets the
+        // direct Lucene path.
         try {
             String productName;
             try (var conn = DB.datasource.getConnection()) {
                 productName = conn.getMetaData().getDatabaseProductName()
                         .toLowerCase(Locale.ROOT);
             }
-            if (productName.contains("postgresql")) {
+            // Postgres-tsvector remains the explicit opt-in for operators
+            // who don't want a sibling Lucene directory. Skeleton today;
+            // the column + GIN index + trigger DDL land when an operator
+            // first deploys against the Postgres dialect.
+            if (productName.contains("postgresql")
+                    && "true".equalsIgnoreCase(System.getProperty("jclaw.search.postgres-native"))) {
                 return new PostgresMessageSearchRepository();
             }
-            // Default to H2 — the Personal Edition's bundled dialect.
-            return new H2LuceneMessageSearchRepository();
+            return new DirectLuceneMessageSearchRepository();
         } catch (Exception e) {
-            // Choose H2 defensively. The init() call following will
-            // surface any actual H2 misconfiguration loudly; we just
-            // don't want a transient DataSource hiccup at boot to
-            // crash the JVM before logging.
             EventLogger.warn("search", null, null,
-                    "MessageSearch: dialect detection failed (%s); defaulting to H2"
+                    "MessageSearch: dialect detection failed (%s); defaulting to direct Lucene"
                             .formatted(e.getMessage()));
-            return new H2LuceneMessageSearchRepository();
+            return new DirectLuceneMessageSearchRepository();
         }
     }
 }

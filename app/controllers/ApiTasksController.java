@@ -132,10 +132,10 @@ public class ApiTasksController extends Controller {
     /**
      * Full-text search across task transcripts. Routes through the
      * {@link services.search.MessageSearch} facade, which dispatches
-     * to either H2's FullTextLucene or Postgres tsvector depending on
-     * the bootstrapped dialect. Query syntax is whatever the active
-     * backend's analyser accepts — H2 supports phrase quoting, AND/OR/NOT,
-     * and prefix wildcards per Lucene's standard syntax.
+     * to either the direct Lucene 10 backend (default) or Postgres
+     * tsvector (operator opt-in via {@code -Djclaw.search.postgres-native=true}).
+     * Query syntax accepts Lucene's standard QueryParser grammar:
+     * phrase quoting, AND/OR/NOT, and prefix wildcards.
      *
      * <p>Empty {@code q} returns {@code []} — the search facade
      * intentionally non-exceptional on empty input so the UI can render

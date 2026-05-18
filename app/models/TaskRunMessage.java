@@ -7,6 +7,9 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.PostPersist;
+import jakarta.persistence.PostRemove;
+import jakarta.persistence.PostUpdate;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import play.db.jpa.Model;
@@ -102,6 +105,30 @@ public class TaskRunMessage extends Model {
     @PrePersist
     void onCreate() {
         if (createdAt == null) createdAt = Instant.now();
+    }
+
+    /**
+     * Mirror this row into the Lucene full-text index. Fires after each
+     * persist or update of the JPA row; the indexer catches and logs
+     * failures internally so a transient FS issue never aborts the
+     * parent transaction. Replaces the H2 FullTextLucene trigger that
+     * lived inside the H2 database file pre Lucene-10 migration.
+     */
+    @PostPersist
+    @PostUpdate
+    void onIndexUpsert() {
+        services.search.LuceneIndexer.upsert(this);
+    }
+
+    /**
+     * Drop this row from the Lucene index. Mirror of the H2 DELETE
+     * trigger; same no-throw contract as the upsert hook.
+     */
+    @PostRemove
+    void onIndexRemove() {
+        if (id != null) {
+            services.search.LuceneIndexer.remove(id);
+        }
     }
 
     /**

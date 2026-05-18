@@ -7,47 +7,44 @@ import services.EventLogger;
 import services.search.MessageSearch;
 
 /**
- * JCLAW-21: initialise full-text search at {@code @OnApplicationStart}.
- * {@link MessageSearch#init} picks the dialect-appropriate
- * {@code MessageSearchRepository} and runs its idempotent setup:
+ * Initialise full-text search at {@code @OnApplicationStart}.
+ * {@link MessageSearch#init} picks the {@code MessageSearchRepository}
+ * implementation and runs its idempotent setup:
  *
  * <ul>
- *   <li><b>H2 path</b>: calls {@code FullTextLucene.init} (creates
- *       the {@code FT_*} stored-procedure aliases if missing) and
- *       {@code FullTextLucene.createIndex} (installs INSERT /
- *       UPDATE / DELETE triggers on {@code task_run_message}). The
- *       trigger creation includes a one-shot
- *       {@code SELECT * FROM table} sweep so existing rows from
- *       before the index existed get indexed immediately.</li>
- *   <li><b>Postgres path</b>: currently a logged no-op — the
- *       {@code search_vector tsvector} column + GIN index + update
- *       trigger DDL ships when an operator first deploys against
- *       Postgres.</li>
+ *   <li><b>Direct Lucene 10 path (default)</b>: opens an FSDirectory
+ *       under {@code data/jclaw-lucene/task_run_message/} via
+ *       {@link services.search.LuceneIndexer#open}. On first boot —
+ *       or any boot after the directory was wiped — backfills the
+ *       index from every existing {@code TaskRunMessage} row. JPA
+ *       lifecycle hooks on {@code TaskRunMessage} keep it in sync
+ *       thereafter (no DB triggers involved).</li>
+ *   <li><b>Postgres-native path</b>: opt-in via the
+ *       {@code -Djclaw.search.postgres-native=true} system property
+ *       when running against the Postgres dialect. Currently a
+ *       logged no-op — the {@code search_vector tsvector} column +
+ *       GIN index + update trigger DDL ships when an operator first
+ *       deploys against that path.</li>
  * </ul>
  *
- * <p>Re-running on every boot costs microseconds when the schema
- * is already in place (both backends' {@code init} are idempotent).
+ * <p>Re-running on every boot costs microseconds when the index is
+ * already in place — both backends' {@code init} short-circuit on
+ * the second call.
  *
  * <h3>Test-mode skip</h3>
- * Play 1.x's {@code Fixtures.deleteDatabase} iterates every table
- * the JDBC metadata exposes and runs an unqualified
- * {@code DELETE FROM &lt;name&gt;}. FullTextLucene creates an
- * {@code INDEXES} table in the {@code FT} schema; the deleteDatabase
- * call hits {@code DELETE FROM INDEXES} (schema-less) and fails when
- * {@code INDEXES} isn't in the default schema search path —
- * cascading across every test class that calls
- * {@code Fixtures.deleteDatabase} in {@code @BeforeEach}.
- *
- * <p>Skipping init in test mode keeps the bulk of the test suite
- * green; tests that need full-text (the H2 repo tests) run their
- * own setup/teardown via {@code FullTextLucene.dropAll} so they
- * don't leak FT artifacts across class boundaries.
+ * Pre-Lucene-10 the test-mode skip was necessary because H2's
+ * {@code FullTextLucene} installed FT_* artifacts that clashed with
+ * Play 1.x's {@code Fixtures.deleteDatabase}. The direct Lucene path
+ * no longer has that interaction (it lives entirely on disk, outside
+ * the JDBC metadata Fixtures iterates over), but we keep the skip:
+ * autotest runs don't need an open FSDirectory locked against the
+ * file, and skipping avoids cross-suite contention when parallel
+ * worktrees run autotest.
  *
  * <p>Sibling to {@link DbSchedulerSchemaInitJob} — both are
  * {@code @OnApplicationStart} schema-readiness jobs. Play 1.x
  * doesn't strictly order siblings, but neither depends on the
- * other: db-scheduler's {@code scheduled_tasks} table is separate
- * from {@code task_run_message} where the FT index lives.
+ * other.
  */
 @OnApplicationStart
 public class FullTextSearchInitJob extends Job<Void> {
@@ -55,8 +52,8 @@ public class FullTextSearchInitJob extends Job<Void> {
     @Override
     public void doJob() {
         if (Play.runningInTestMode()) {
-            // Don't create FT artifacts in test mode — see class
-            // javadoc for the Fixtures.deleteDatabase clash.
+            // Skip in test mode — same rationale as
+            // DbSchedulerBootstrapJob's test-mode skip.
             return;
         }
         try {
