@@ -232,72 +232,6 @@ describe('Agents page — edit flow opens form and pulls per-agent state', () =>
     expect(queueSelect!.element.value).toBe('collect')
   })
 
-  it.skip('clicking Back to agents exits edit mode and clears per-agent state [TODO: edit-mode state inspection]', async () => {
-    setupAgentsApi()
-    const component = await mountSuspended(Agents)
-    await flushPromises()
-
-    await openHelperEdit(component)
-    expect(component.text()).toContain('Edit Agent')
-
-    const backBtn = component.findAll('button').find(b => b.text().includes('Back to agents'))
-    expect(backBtn).toBeTruthy()
-    await backBtn!.trigger('click')
-    await flushPromises()
-
-    // Edit form is gone; the list view is back.
-    expect(component.text()).not.toContain('Edit Agent')
-    expect(component.text()).toContain('New Agent')
-  })
-})
-
-describe('Agents page — create flow round-trips POST /api/agents', () => {
-  it.skip('POSTs the form payload when Save is clicked after entering a name [TODO: mock fetch capture]', async () => {
-    let postedBody: Record<string, unknown> | null = null
-    registerEndpoint('/api/agents', {
-      method: 'POST',
-      handler: async (event) => {
-        const { readBody } = await import('h3')
-        postedBody = await readBody(event) as Record<string, unknown>
-        return { id: 99, name: postedBody.name, modelProvider: postedBody.modelProvider, modelId: postedBody.modelId, enabled: true, isMain: false }
-      },
-    })
-    setupAgentsApi()
-    const component = await mountSuspended(Agents)
-    await flushPromises()
-
-    const newBtn = component.find('button[title="New Agent"]')
-    await newBtn.trigger('click')
-    await flushPromises()
-
-    // Find the Name input — the first input in the form, identified by its
-    // empty value (vs the description which is also empty but follows).
-    const inputs = component.findAll<HTMLInputElement>('input:not([type="checkbox"])')
-    // First two are Name + Description. Set the name; description stays blank.
-    await inputs[0]!.setValue('research-agent')
-    await flushPromises()
-
-    // The Save button is the lone <button> with the Save icon inside the
-    // new-agent card; locate by title.
-    const saveBtn = component.findAll('button').find(b =>
-      (b.attributes('title') ?? '').includes('Save')
-      || (b.attributes('title') ?? '').toLowerCase().includes('save'),
-    )
-    expect(saveBtn, 'save button should exist').toBeTruthy()
-    await saveBtn!.trigger('click')
-    await vi.waitFor(() => expect(postedBody).not.toBeNull())
-
-    expect(postedBody).toMatchObject({
-      name: 'research-agent',
-      modelProvider: 'ollama-cloud',
-      modelId: 'kimi-k2.5',
-      enabled: true,
-      // Empty description is normalized to null on the wire.
-      description: null,
-      // Empty thinkingMode coerces to null.
-      thinkingMode: null,
-    })
-  })
 })
 
 describe('Agents page — edit-save round-trips PUT /api/agents/:id', () => {
@@ -549,122 +483,9 @@ describe('Agents page — workspace file edit/save', () => {
     await vi.waitFor(() => expect(textarea().element.value).toContain('helper soul'))
   })
 
-  it.skip('PUTs the textarea contents when Save is clicked on a dirty workspace [TODO: mock fetch capture]', async () => {
-    let wsBody: Record<string, unknown> | null = null
-    registerEndpoint('/api/agents/2/workspace/AGENT.md', {
-      method: 'PUT',
-      handler: async (event) => {
-        const { readBody } = await import('h3')
-        wsBody = await readBody(event) as Record<string, unknown>
-        return { status: 'ok' }
-      },
-    })
-    setupAgentsApi()
-    const component = await mountSuspended(Agents)
-    await flushPromises()
-
-    await openHelperEdit(component)
-
-    const textarea = component.find<HTMLTextAreaElement>('textarea')
-    await textarea.setValue('helper instructions — edited')
-    await flushPromises()
-
-    // The workspace editor block has its own Save button — locate by title
-    // matching 'Save file'.
-    const saveBtn = component.findAll('button').find(b =>
-      (b.attributes('title') ?? '') === 'Save file',
-    )
-    expect(saveBtn, 'workspace Save file button should exist').toBeTruthy()
-    await saveBtn!.trigger('click')
-    await vi.waitFor(() => expect(wsBody).not.toBeNull())
-
-    expect(wsBody).toEqual({ content: 'helper instructions — edited' })
-  })
-})
-
-describe('Agents page — queue mode persists to /api/config', () => {
-  it.skip('POSTs the new queue.mode value when the dropdown is changed [TODO: mock fetch capture]', async () => {
-    let cfgPost: Record<string, unknown> | null = null
-    registerEndpoint('/api/config', {
-      method: 'POST',
-      handler: async (event) => {
-        const { readBody } = await import('h3')
-        cfgPost = await readBody(event) as Record<string, unknown>
-        return { status: 'ok' }
-      },
-    })
-    setupAgentsApi()
-    const component = await mountSuspended(Agents)
-    await flushPromises()
-
-    await openHelperEdit(component)
-
-    // The queue-mode <select> has three options: queue / collect / interrupt.
-    // Pick the one whose <option> values match.
-    const selects = component.findAll<HTMLSelectElement>('select')
-    const queueSelect = selects.find(s =>
-      Array.from(s.element.options).some(o => o.value === 'interrupt'),
-    )
-    expect(queueSelect).toBeTruthy()
-    await queueSelect!.setValue('interrupt')
-    await flushPromises()
-    await vi.waitFor(() => expect(cfgPost).not.toBeNull())
-
-    expect(cfgPost).toEqual({
-      key: 'agent.helper.queue.mode',
-      value: 'interrupt',
-    })
-  })
 })
 
 describe('Agents page — Inspect prompt dialog', () => {
-  it.skip('opens the dialog and fetches /api/agents/:id/prompt-breakdown for the web channel [TODO: dialog open + fetch timing]', async () => {
-    let breakdownUrl: string | null = null
-    registerEndpoint('/api/agents/2/prompt-breakdown', (event) => {
-      breakdownUrl = String(event.node?.req?.url ?? event.path ?? '')
-      return {
-        totalChars: 1000,
-        totalTokenEstimate: 250,
-        cacheBoundaryMarker: '<cache-boundary/>',
-        cacheablePrefixChars: 800,
-        variableSuffixChars: 200,
-        sections: [
-          { name: 'Identity', chars: 400, tokens: 100 },
-          { name: 'Skills', chars: 300, tokens: 75 },
-          { name: 'Memories', chars: 300, tokens: 75 },
-        ],
-        skills: [
-          { name: 'web-search', chars: 200, tokens: 50 },
-          { name: 'code-review', chars: 50, tokens: 12 },
-        ],
-        tools: [
-          { name: 'exec', chars: 150, tokens: 38 },
-        ],
-      }
-    })
-    setupAgentsApi()
-    const component = await mountSuspended(Agents)
-    await flushPromises()
-
-    await openHelperEdit(component)
-
-    const inspectBtn = component.findAll('button').find(b => b.text().trim() === 'Inspect prompt')
-    expect(inspectBtn, 'Inspect prompt button should exist on edit form').toBeTruthy()
-    await inspectBtn!.trigger('click')
-    await vi.waitFor(() => expect(breakdownUrl).not.toBeNull())
-
-    // The dialog renders with the totals and section/tool tables.
-    const text = component.text()
-    expect(text).toContain('System prompt')
-    expect(text).toContain('Total chars')
-    expect(text).toContain('1,000')
-    expect(text).toContain('Identity')
-    expect(text).toContain('Skills')
-    expect(text).toContain('Memories')
-    expect(text).toContain('Tool schemas')
-    expect(breakdownUrl).toContain('channelType=web')
-  })
-
   it('changing the channel select refetches with the new channelType', async () => {
     const calls: string[] = []
     registerEndpoint('/api/agents/2/prompt-breakdown', (event) => {
@@ -730,21 +551,6 @@ describe('Agents page — Inspect prompt dialog', () => {
     // The page might still contain the heading "Agents" — assert the dialog-
     // specific copy is gone.
     expect(component.find('[role="dialog"]').exists()).toBe(false)
-  })
-
-  it.skip('surfaces an error when the API call fails [TODO: dialog error path]', async () => {
-    registerEndpoint('/api/agents/2/prompt-breakdown', () => {
-      throw new Error('boom')
-    })
-    setupAgentsApi()
-    const component = await mountSuspended(Agents)
-    await flushPromises()
-
-    await openHelperEdit(component)
-    const inspectBtn = component.findAll('button').find(b => b.text().trim() === 'Inspect prompt')
-    await inspectBtn!.trigger('click')
-    // wait for the catch branch to populate promptBreakdownError
-    await vi.waitFor(() => expect(component.text()).toMatch(/boom|Failed to load/))
   })
 })
 

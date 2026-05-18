@@ -1264,29 +1264,6 @@ describe('Chat page — assistant message footer actions', () => {
     ])
   }
 
-  it.skip('copies the assistant message content via the clipboard API and flashes a check icon [TODO: clipboard mock setup]', async () => {
-    setupAssistantConversation()
-    // Stub navigator.clipboard.writeText — jsdom doesn't provide it by default.
-    const writeText = vi.fn().mockResolvedValue(undefined)
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: { writeText },
-    })
-
-    const component = await mountSuspended(Chat)
-    await flushPromises()
-    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
-    await vm.loadConversation(800)
-    await flushPromises()
-
-    const copyBtn = component.find('button[title="Copy to clipboard"]')
-    expect(copyBtn.exists()).toBe(true)
-    await copyBtn.trigger('click')
-    await flushPromises()
-
-    expect(writeText).toHaveBeenCalledWith('A joke landed here for you.')
-  })
-
   it('deletes a server-id-bearing assistant message via DELETE /api/conversations/{id}/messages/{msgId}', async () => {
     setupAssistantConversation()
     let deleteCalled = false
@@ -1577,38 +1554,3 @@ describe('Chat page — input handlers', () => {
   })
 })
 
-describe('Chat page — attachment chip thumbnail rendering', () => {
-  it.skip('renders an image thumbnail preview in the composer once an image is queued (vision model) [TODO: blob URL propagation through Map ref]', async () => {
-    // Vision-capable model so the image gate doesn't bounce the attachment.
-    registerEndpoint('/api/agents', () => [
-      { id: 1, name: 'vision-agent', modelProvider: 'ollama-cloud', modelId: 'qwen2.5-vl',
-        enabled: true, isMain: true, thinkingMode: null, providerConfigured: true },
-    ])
-    registerEndpoint('/api/config', () => ({
-      entries: [
-        { key: 'provider.ollama-cloud.baseUrl', value: 'https://ollama.com/v1' },
-        { key: 'provider.ollama-cloud.apiKey', value: 'xxxx****' },
-        { key: 'provider.ollama-cloud.models', value:
-          '[{"id":"qwen2.5-vl","name":"Qwen 2.5 VL","supportsThinking":false,"supportsVision":true}]' },
-      ],
-    }))
-    registerEndpoint('/api/conversations', () => [])
-    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:vision-fake')
-    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
-
-    const component = await mountSuspended(Chat)
-    await flushPromises()
-    const vm = component.vm as unknown as {
-      addAttachments: (files: File[]) => void
-    }
-    const png = new File([new Uint8Array([0x89, 0x50, 0x4E, 0x47])], 'thumb.png', { type: 'image/png' })
-    vm.addAttachments([png])
-    await flushPromises()
-
-    // Template renders an <img :src="attachmentPreviews.get(f)"> for image
-    // attachments — the fake blob URL should land there.
-    expect(component.html()).toContain('blob:vision-fake')
-    // The filename label is also visible.
-    expect(component.html()).toContain('thumb.png')
-  })
-})

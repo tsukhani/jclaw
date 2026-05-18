@@ -1017,58 +1017,6 @@ describe('Settings page — Skills Promotion', () => {
     expect(String(hit!.value)).toBe('250')
   })
 
-  it.skip('POSTs skillsPromotion.provider and clears skillsPromotion.model when provider is changed [TODO: provider-change handler reactivity timing]', async () => {
-    const captured: Array<{ key?: string, value?: string }> = []
-    setupDefaultApi({ capturePost: b => captured.push(b) })
-    const component = await mountSuspended(Settings)
-    await flushPromises()
-
-    const editBtns = component.findAll('button[title="Edit"]')
-    let target: typeof editBtns[number] | null = null
-    for (const btn of editBtns) {
-      const rowText = btn.element.parentElement?.textContent ?? ''
-      // The Skills Promotion provider row reads "provider" alone.
-      // Disambiguate from LLM Providers rows: those are inside model-management;
-      // the SP row's input has aria-label="Skills promotion provider".
-      if (/^provider$/.test(rowText.trim().split('\n')[0]?.trim() ?? '')
-        || rowText.includes('(from main agent)')) {
-        target = btn
-        break
-      }
-    }
-    if (!target) {
-      // Fallback: select the Edit button immediately before the timeoutSeconds row.
-      // The page layout: provider, model, timeoutSeconds, batchSizeKb. Anchor on
-      // the input that appears after the click.
-      target = editBtns.find((b) => {
-        const txt = b.element.parentElement?.textContent ?? ''
-        return txt.includes('from main agent') || txt.includes('Not configured')
-      }) ?? null
-    }
-    expect(target).not.toBeNull()
-    await target!.trigger('click')
-    await flushPromises()
-
-    const select = component.find<HTMLSelectElement>('select[aria-label="Skills promotion provider"]')
-    expect(select.exists()).toBe(true)
-    await select.setValue('openai')
-
-    const saveBtns = component.findAll('button[title="Save"]')
-    const saveBtn = saveBtns.find(b =>
-      b.element.parentElement?.querySelector('select[aria-label="Skills promotion provider"]'),
-    )
-    expect(saveBtn).toBeTruthy()
-    await saveBtn!.trigger('click')
-    await flushPromises()
-
-    const providerHit = captured.find(b => b.key === 'skillsPromotion.provider')
-    expect(providerHit).toBeTruthy()
-    expect(providerHit!.value).toBe('openai')
-    // Provider-change also clears the saved model.
-    const modelHit = captured.find(b => b.key === 'skillsPromotion.model')
-    expect(modelHit).toBeTruthy()
-    expect(modelHit!.value).toBe('')
-  })
 })
 
 describe('Settings page — Shell Execution', () => {
