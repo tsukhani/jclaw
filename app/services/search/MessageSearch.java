@@ -40,6 +40,12 @@ import java.util.Locale;
  */
 public final class MessageSearch {
 
+    // Publish-once-read-many handoff: written once under init()'s
+    // synchronized guard, read by every subsequent search/activeDialect
+    // call. S3077 targets compound mutation on volatile non-primitives;
+    // a pure reference handoff is the textbook valid use of volatile
+    // (JMM happens-before through the volatile read/write is sufficient).
+    @SuppressWarnings("java:S3077")
     private static volatile MessageSearchRepository repo;
 
     private MessageSearch() {}

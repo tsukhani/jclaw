@@ -211,7 +211,7 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) { badRequest(); return; }
 
         // agentId resolution. Until user-ownership lands (class-level TODO)
         // the caller can address any agent — admitted by AuthCheck's single
@@ -326,10 +326,10 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     public static void update(Long id) {
         Task task = Task.findById(id);
-        if (task == null) notFound();
+        if (task == null) { notFound(); return; }
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) { badRequest(); return; }
 
         boolean anyChange = false;
         boolean scheduleChanged = false;
@@ -460,7 +460,7 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     public static void pause(Long id) {
         Task task = Task.findById(id);
-        if (task == null) notFound();
+        if (task == null) { notFound(); return; }
         if (task.status != Task.Status.PENDING) {
             // Pause only applies to live (PENDING/recurring) tasks — pausing a
             // terminal Task would have no effect since the scheduler row is
@@ -478,7 +478,7 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     public static void resume(Long id) {
         Task task = Task.findById(id);
-        if (task == null) notFound();
+        if (task == null) { notFound(); return; }
         if (task.status != Task.Status.PENDING) {
             badRequest();
         }
@@ -502,7 +502,7 @@ public class ApiTasksController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     public static void run(Long id) {
         Task task = Task.findById(id);
-        if (task == null) notFound();
+        if (task == null) { notFound(); return; }
 
         boolean revivedFromCancel = false;
         if (task.status == Task.Status.CANCELLED) {

@@ -74,6 +74,10 @@ public final class TaskExecutionHandler {
      * Play's startup thread while fires run on a virtual thread from
      * the Scheduler's executorService.
      */
+    // S3077 targets compound mutation on volatile non-primitives. This
+    // is a pure publish-once-read-many handoff — JMM happens-before via
+    // the volatile read/write is sufficient.
+    @SuppressWarnings("java:S3077")
     private static volatile SchedulerClient schedulerClient;
 
     private TaskExecutionHandler() {}

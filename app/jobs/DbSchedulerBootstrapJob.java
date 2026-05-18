@@ -64,6 +64,11 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
      * {@link DbSchedulerShutdownJob}'s {@code @OnApplicationStop}
      * callback runs on a different thread.
      */
+    // Publish-once-read-many handoff between the @OnApplicationStart
+    // bootstrap and the @OnApplicationStop shutdown hook. S3077 targets
+    // compound mutation on volatile non-primitives; a pure reference
+    // handoff is the canonical valid use of volatile.
+    @SuppressWarnings("java:S3077")
     private static volatile Scheduler scheduler;
 
     public static Scheduler scheduler() {
