@@ -1,12 +1,16 @@
 package jobs;
 
 import com.github.kagkarlsson.scheduler.Scheduler;
+import com.github.kagkarlsson.scheduler.SchedulerBuilder;
+import com.github.kagkarlsson.scheduler.jdbc.DefaultJdbcCustomization;
 import play.db.DB;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.EventLogger;
 import services.TaskExecutionHandler;
 
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -93,7 +97,7 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
 
         var jclawTask = TaskExecutionHandler.buildTask();
 
-        var built = Scheduler.create(datasource, List.of(jclawTask))
+        SchedulerBuilder builder = Scheduler.create(datasource, List.of(jclawTask))
                 .pollingInterval(Duration.ofSeconds(2))
                 .executorService(Executors.newVirtualThreadPerTaskExecutor())
                 .enableImmediateExecution()
@@ -111,8 +115,28 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
                 // db-scheduler to always commit/rollback explicitly even
                 // when autoCommit is off — which is what we need since
                 // db-scheduler is the EXTERNAL caller from JPA's view.
-                .commitWhenAutocommitDisabled(true)
-                .build();
+                .commitWhenAutocommitDisabled(true);
+
+        // db-scheduler's AutodetectJdbcCustomization only switches on
+        // MSSQL/Postgres/Oracle/MariaDB/MySQL; H2 falls through to the
+        // default and a SILENCABLE warn fires each boot ("No
+        // database-specific jdbc-overrides applied..."). Our
+        // scheduled_tasks DDL uses TIMESTAMP WITH TIME ZONE (zone-aware),
+        // which DefaultJdbcCustomization(persistTimestampInUTC=false)
+        // handles correctly via setObject(OffsetDateTime). The warn's
+        // suggested .alwaysPersistTimestampInUTC() would actually be
+        // wrong here — that flips to a setTimestamp(..., UTC_Calendar)
+        // path intended for zone-less TIMESTAMP columns.
+        //
+        // We only wire the explicit customization on H2 so that an
+        // operator switching to Postgres via %prod.db.url still gets
+        // PostgreSqlJdbcCustomization, which provides the single-statement
+        // claim-and-fetch (UPDATE ... RETURNING with FOR UPDATE SKIP LOCKED).
+        if (isH2(datasource)) {
+            builder = builder.jdbcCustomization(new DefaultJdbcCustomization(false));
+        }
+
+        var built = builder.build();
 
         TaskExecutionHandler.setSchedulerClient(built);
         scheduler = built;
@@ -166,6 +190,18 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
                     "db-scheduler stop raised: %s".formatted(e.getMessage()));
         } finally {
             scheduler = null;
+        }
+    }
+
+    private static boolean isH2(javax.sql.DataSource datasource) {
+        try (Connection conn = datasource.getConnection()) {
+            return conn.getMetaData().getDatabaseProductName()
+                    .toLowerCase().contains("h2");
+        } catch (SQLException e) {
+            // Conservative fallback: if we can't read metadata, let
+            // AutodetectJdbcCustomization run (and emit its warn) rather
+            // than mis-pin the customization.
+            return false;
         }
     }
 }
