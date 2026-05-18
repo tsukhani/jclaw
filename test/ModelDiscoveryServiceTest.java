@@ -3,6 +3,8 @@ import play.test.*;
 import services.ModelDiscoveryService;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import mockwebserver3.MockResponse;
+import mockwebserver3.MockWebServer;
 
 /**
  * Tests for ModelDiscoveryService static parsing and inference methods.
@@ -799,5 +801,433 @@ class ModelDiscoveryServiceTest extends UnitTest {
         var json = JsonParser.parseString("{}").getAsJsonObject();
         var models = ModelDiscoveryService.parseLmStudioNativeResponse(json);
         assertTrue(models.isEmpty());
+    }
+
+    // ─── JCLAW-324: discover() dispatcher + transport-side discovery ─────
+
+    private static MockResponse jsonResponse(int code, String body) {
+        return new MockResponse.Builder()
+                .code(code)
+                .addHeader("Content-Type", "application/json")
+                .body(body)
+                .build();
+    }
+
+    private static String baseUrlOf(MockWebServer server) {
+        var url = server.url("/").toString();
+        return url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
+    }
+
+    @Test
+    void discoverOpenAiCompatHappyPathReturnsOk() throws Exception {
+        // Vanilla OpenAI-compat endpoint at /models — wrapped data shape.
+        // Picks up two chat models, drops the embedding one via the Tier 3
+        // id heuristic in EmbeddingModelFilter.
+        try (var server = new MockWebServer()) {
+            server.start();
+            server.enqueue(jsonResponse(200, """
+                    {"data": [
+                      {"id": "gpt-4.1", "context_length": 128000},
+                      {"id": "gpt-4.1-mini", "context_length": 128000},
+                      {"id": "text-embedding-3-small"}
+                    ]}
+                    """));
+            var result = ModelDiscoveryService.discover(
+                    "openai", baseUrlOf(server), "sk-test");
+            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Ok,
+                    "happy path should produce Ok: " + result);
+            var ok = (ModelDiscoveryService.DiscoveryResult.Ok) result;
+            // Embedding model dropped by the id heuristic.
+            assertEquals(2, ok.models().size(),
+                    "embedding-model entry must be filtered out by EmbeddingModelFilter");
+            // Sort is alphabetical when no rankings — gpt-4.1 before gpt-4.1-mini.
+            assertEquals("gpt-4.1", ok.models().get(0).get("id"));
+        }
+    }
+
+    @Test
+    void discoverOpenAiCompatBareArrayShape() throws Exception {
+        // Together AI shape — bare top-level JSON array.
+        try (var server = new MockWebServer()) {
+            server.start();
+            server.enqueue(jsonResponse(200, """
+                    [{"id": "moonshotai/Kimi-K2.5", "context_length": 262144}]
+                    """));
+            var result = ModelDiscoveryService.discover(
+                    "togetherai", baseUrlOf(server), "sk-test");
+            var ok = (ModelDiscoveryService.DiscoveryResult.Ok) result;
+            assertEquals(1, ok.models().size());
+            assertEquals("moonshotai/Kimi-K2.5", ok.models().get(0).get("id"));
+        }
+    }
+
+    @Test
+    void discoverOpenAiCompatSurfacesUpstreamHttpError() throws Exception {
+        try (var server = new MockWebServer()) {
+            server.start();
+            server.enqueue(jsonResponse(401, "{\"error\":\"bad key\"}"));
+            var result = ModelDiscoveryService.discover(
+                    "openai", baseUrlOf(server), "sk-bad");
+            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Error,
+                    "upstream non-200 must surface as Error: " + result);
+            var err = (ModelDiscoveryService.DiscoveryResult.Error) result;
+            assertEquals(502, err.statusCode());
+            assertTrue(err.message().contains("401"),
+                    "error message must echo the upstream status: " + err.message());
+        }
+    }
+
+    @Test
+    void discoverOpenAiCompatSurfacesMalformedJson() throws Exception {
+        try (var server = new MockWebServer()) {
+            server.start();
+            server.enqueue(jsonResponse(200, "not-json{"));
+            var result = ModelDiscoveryService.discover(
+                    "openai", baseUrlOf(server), "sk-test");
+            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Error);
+            var err = (ModelDiscoveryService.DiscoveryResult.Error) result;
+            assertEquals(502, err.statusCode());
+            assertTrue(err.message().toLowerCase().contains("invalid json"),
+                    "malformed body must produce 'Invalid JSON' message: " + err.message());
+        }
+    }
+
+    @Test
+    void discoverOpenAiCompatHandlesTrailingSlashBaseUrl() throws Exception {
+        // Branch in url construction: baseUrl.endsWith("/") vs not.
+        try (var server = new MockWebServer()) {
+            server.start();
+            server.enqueue(jsonResponse(200, "{\"data\":[]}"));
+            var url = baseUrlOf(server) + "/"; // force the trailing-slash branch
+            var result = ModelDiscoveryService.discover("openai", url, "sk-test");
+            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Ok);
+        }
+    }
+
+    @Test
+    void discoverOllamaRoutesToNativePath() throws Exception {
+        // Name contains "ollama" → discoverOllamaNative.
+        // /api/tags must come first, then /api/show per model.
+        try (var server = new MockWebServer()) {
+            server.start();
+            server.enqueue(jsonResponse(200, """
+                    {"models":[{"name":"glm-5","model":"glm-5"}]}
+                    """));
+            server.enqueue(jsonResponse(200, """
+                    {
+                      "model_info": {"glm.context_length": 131072},
+                      "capabilities": ["completion", "thinking"]
+                    }
+                    """));
+            var result = ModelDiscoveryService.discover(
+                    "ollama-local", baseUrlOf(server), "sk-test");
+            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Ok,
+                    "ollama happy path must be Ok: " + result);
+            var ok = (ModelDiscoveryService.DiscoveryResult.Ok) result;
+            assertEquals(1, ok.models().size());
+            assertEquals("glm-5", ok.models().get(0).get("id"));
+            assertEquals(131072, ok.models().get(0).get("contextWindow"));
+            assertEquals(true, ok.models().get(0).get("supportsThinking"));
+        }
+    }
+
+    @Test
+    void discoverOllamaSurfaces5xxFromTagsEndpoint() throws Exception {
+        try (var server = new MockWebServer()) {
+            server.start();
+            server.enqueue(jsonResponse(503, "boom"));
+            var result = ModelDiscoveryService.discover(
+                    "ollama-local", baseUrlOf(server), null);
+            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Error);
+            var err = (ModelDiscoveryService.DiscoveryResult.Error) result;
+            assertEquals(502, err.statusCode());
+            assertTrue(err.message().contains("/api/tags"),
+                    "error message must identify the failing endpoint: " + err.message());
+        }
+    }
+
+    @Test
+    void discoverOllamaReturnsOkEmptyWhenTagsListIsEmpty() throws Exception {
+        try (var server = new MockWebServer()) {
+            server.start();
+            server.enqueue(jsonResponse(200, "{\"models\":[]}"));
+            var result = ModelDiscoveryService.discover(
+                    "ollama-cloud", baseUrlOf(server), null);
+            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Ok);
+            assertTrue(((ModelDiscoveryService.DiscoveryResult.Ok) result).models().isEmpty());
+        }
+    }
+
+    @Test
+    void discoverOllamaErrorWhenAllShowsFiltered() throws Exception {
+        // /api/tags lists one model; /api/show reports embedding-only capabilities;
+        // parseOllamaShow returns null → discoverOllamaNative returns Error.
+        try (var server = new MockWebServer()) {
+            server.start();
+            server.enqueue(jsonResponse(200, """
+                    {"models":[{"name":"nomic-embed-text:latest"}]}
+                    """));
+            server.enqueue(jsonResponse(200, """
+                    {
+                      "model_info": {"nomic-bert.context_length": 2048},
+                      "capabilities": ["embedding"]
+                    }
+                    """));
+            var result = ModelDiscoveryService.discover(
+                    "ollama-local", baseUrlOf(server), null);
+            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Error);
+            var err = (ModelDiscoveryService.DiscoveryResult.Error) result;
+            assertTrue(err.message().toLowerCase().contains("no chat-capable"),
+                    "expected 'No chat-capable models' tag, got: " + err.message());
+        }
+    }
+
+    @Test
+    void discoverLmStudioNativeHappyPath() throws Exception {
+        try (var server = new MockWebServer()) {
+            server.start();
+            server.enqueue(jsonResponse(200, """
+                    {"data": [
+                      {"id": "qwen3-32b", "type": "llm", "max_context_length": 131072},
+                      {"id": "llava", "type": "vlm", "max_context_length": 8192}
+                    ]}
+                    """));
+            var result = ModelDiscoveryService.discover(
+                    "lm-studio-local", baseUrlOf(server), null);
+            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Ok,
+                    "lm-studio native path must be Ok: " + result);
+            var ok = (ModelDiscoveryService.DiscoveryResult.Ok) result;
+            assertEquals(2, ok.models().size());
+        }
+    }
+
+    @Test
+    void discoverLmStudioFallsThroughToOpenAiCompatOn404() throws Exception {
+        // Native /api/v0/models returns 404 (older LM Studio) → fall through
+        // to the OpenAI-compat /models endpoint. The second enqueue must
+        // satisfy that follow-up request.
+        try (var server = new MockWebServer()) {
+            server.start();
+            server.enqueue(jsonResponse(404, "missing"));
+            server.enqueue(jsonResponse(200, """
+                    {"data":[{"id":"qwen3-32b","context_length":131072}]}
+                    """));
+            var result = ModelDiscoveryService.discover(
+                    "lm-studio-fallback", baseUrlOf(server), null);
+            assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Ok,
+                    "fallback path must yield Ok: " + result);
+            var ok = (ModelDiscoveryService.DiscoveryResult.Ok) result;
+            assertEquals(1, ok.models().size());
+            assertEquals("qwen3-32b", ok.models().get(0).get("id"));
+        }
+    }
+
+    // ─── JCLAW-324: leaderboard + ranking, exercised via discover() ──────
+    // (fetchLeaderboard / parseHtmlLeaderboard / applyRankings are package-
+    // private; tests live in the default package, so we drive them through
+    // the public discover() entry point with a configured leaderboardUrl.)
+
+    @Test
+    void discoverAppliesJsonLeaderboardRankings() throws Exception {
+        // /models returns three models in alphabetical order; the leaderboard
+        // overrides that ordering with gpt-5 first, then claude.
+        try (var modelsServer = new MockWebServer();
+             var boardServer = new MockWebServer()) {
+            modelsServer.start();
+            boardServer.start();
+            modelsServer.enqueue(jsonResponse(200, """
+                    {"data":[
+                      {"id":"anthropic/claude-opus-4-6"},
+                      {"id":"openai/gpt-5"},
+                      {"id":"unknown/model"}
+                    ]}
+                    """));
+            boardServer.enqueue(jsonResponse(200, """
+                    [{"id":"openai/gpt-5"},
+                     {"slug":"anthropic/claude-opus-4-6"}]
+                    """));
+
+            // Provider-keyed config plug. discoverOpenAiCompat reads
+            // "provider.<name>.leaderboardUrl" before sorting.
+            var providerName = "openai-ranked";
+            services.ConfigService.set(
+                    "provider." + providerName + ".leaderboardUrl",
+                    boardServer.url("/").toString());
+            try {
+                var result = ModelDiscoveryService.discover(
+                        providerName, baseUrlOf(modelsServer), "sk-test");
+                assertTrue(result instanceof ModelDiscoveryService.DiscoveryResult.Ok);
+                var ok = (ModelDiscoveryService.DiscoveryResult.Ok) result;
+                // gpt-5 ranked 1, claude ranked 2, unknown unranked (sorted last alphabetically).
+                assertEquals("openai/gpt-5", ok.models().get(0).get("id"));
+                assertEquals(1, ok.models().get(0).get("leaderboardRank"));
+                assertEquals("anthropic/claude-opus-4-6", ok.models().get(1).get("id"));
+                assertEquals(2, ok.models().get(1).get("leaderboardRank"));
+                assertEquals("unknown/model", ok.models().get(2).get("id"));
+                assertNull(ok.models().get(2).get("leaderboardRank"));
+            } finally {
+                services.ConfigService.set(
+                        "provider." + providerName + ".leaderboardUrl", "");
+            }
+        }
+    }
+
+    @Test
+    void discoverParsesHtmlLeaderboardFallback() throws Exception {
+        // Leaderboard endpoint returns HTML (not JSON); parseHtmlLeaderboard
+        // path picks the slugs out of href attributes.
+        try (var modelsServer = new MockWebServer();
+             var boardServer = new MockWebServer()) {
+            modelsServer.start();
+            boardServer.start();
+            modelsServer.enqueue(jsonResponse(200, """
+                    {"data":[
+                      {"id":"openai/gpt-5"},
+                      {"id":"anthropic/claude-opus-4-6"}
+                    ]}
+                    """));
+            boardServer.enqueue(new MockResponse.Builder()
+                    .code(200)
+                    .addHeader("Content-Type", "text/html")
+                    .body("""
+                        <html>
+                          <a href="/openai/gpt-5">A</a>
+                          <a href="/anthropic/claude-opus-4-6">B</a>
+                          <a href="/docs/quickstart">skip</a>
+                        </html>
+                        """)
+                    .build());
+
+            var providerName = "openrouter-html";
+            services.ConfigService.set(
+                    "provider." + providerName + ".leaderboardUrl",
+                    boardServer.url("/").toString());
+            try {
+                var result = ModelDiscoveryService.discover(
+                        providerName, baseUrlOf(modelsServer), "sk-test");
+                var ok = (ModelDiscoveryService.DiscoveryResult.Ok) result;
+                // HTML leaderboard parsed → gpt-5 ranked first.
+                assertEquals("openai/gpt-5", ok.models().get(0).get("id"));
+                assertEquals(1, ok.models().get(0).get("leaderboardRank"));
+            } finally {
+                services.ConfigService.set(
+                        "provider." + providerName + ".leaderboardUrl", "");
+            }
+        }
+    }
+
+    @Test
+    void discoverToleratesLeaderboardNon200() throws Exception {
+        // Models endpoint succeeds, leaderboard returns 5xx → ranking simply
+        // skipped, models still sorted alphabetically. The leaderboard 5xx
+        // must not bubble up as a discovery error.
+        try (var modelsServer = new MockWebServer();
+             var boardServer = new MockWebServer()) {
+            modelsServer.start();
+            boardServer.start();
+            modelsServer.enqueue(jsonResponse(200, """
+                    {"data":[{"id":"openai/gpt-5"},{"id":"anthropic/claude-opus-4-6"}]}
+                    """));
+            boardServer.enqueue(jsonResponse(503, "unavailable"));
+
+            var providerName = "openai-board-down";
+            services.ConfigService.set(
+                    "provider." + providerName + ".leaderboardUrl",
+                    boardServer.url("/").toString());
+            try {
+                var result = ModelDiscoveryService.discover(
+                        providerName, baseUrlOf(modelsServer), "sk-test");
+                var ok = (ModelDiscoveryService.DiscoveryResult.Ok) result;
+                assertEquals(2, ok.models().size());
+                // Alphabetical order, no rankings.
+                assertEquals("anthropic/claude-opus-4-6", ok.models().get(0).get("id"));
+                assertNull(ok.models().get(0).get("leaderboardRank"));
+            } finally {
+                services.ConfigService.set(
+                        "provider." + providerName + ".leaderboardUrl", "");
+            }
+        }
+    }
+
+    // ─── JCLAW-324: inferMaxTokens / inferIsFree / inferPrice edges ──────
+
+    @Test
+    void inferMaxTokensPrefersTopProviderField() {
+        // Branch order in inferMaxTokens: top_provider.max_completion_tokens wins.
+        var obj = JsonParser.parseString("""
+                {"top_provider": {"max_completion_tokens": 4096},
+                 "max_completion_tokens": 8192,
+                 "max_tokens": 16384}
+                """).getAsJsonObject();
+        var json = JsonParser.parseString("{\"data\":[" + obj + "]}").getAsJsonObject();
+        var models = ModelDiscoveryService.parseModels(json);
+        assertEquals(4096, models.get(0).get("maxTokens"));
+    }
+
+    @Test
+    void inferMaxTokensFallsBackToMaxCompletionTokens() {
+        var json = JsonParser.parseString("""
+                {"data":[{"id":"x", "max_completion_tokens": 8192}]}
+                """).getAsJsonObject();
+        assertEquals(8192, ModelDiscoveryService.parseModels(json).get(0).get("maxTokens"));
+    }
+
+    @Test
+    void inferMaxTokensFallsBackToMaxTokens() {
+        var json = JsonParser.parseString("""
+                {"data":[{"id":"x", "max_tokens": 16384}]}
+                """).getAsJsonObject();
+        assertEquals(16384, ModelDiscoveryService.parseModels(json).get(0).get("maxTokens"));
+    }
+
+    @Test
+    void inferIsFreeTrueWhenBothPricesZero() {
+        var json = JsonParser.parseString("""
+                {"data":[{"id":"x",
+                          "pricing":{"prompt":"0","completion":"0"}}]}
+                """).getAsJsonObject();
+        assertEquals(true, ModelDiscoveryService.parseModels(json).get(0).get("isFree"));
+    }
+
+    @Test
+    void inferIsFreeFalseWhenPromptNonZero() {
+        var json = JsonParser.parseString("""
+                {"data":[{"id":"x",
+                          "pricing":{"prompt":"0.000001","completion":"0"}}]}
+                """).getAsJsonObject();
+        assertEquals(false, ModelDiscoveryService.parseModels(json).get(0).get("isFree"));
+    }
+
+    @Test
+    void inferIsFreeFalseOnMalformedPriceString() {
+        var json = JsonParser.parseString("""
+                {"data":[{"id":"x",
+                          "pricing":{"prompt":"NaN","completion":"0"}}]}
+                """).getAsJsonObject();
+        // NumberFormatException short-circuits to false in inferIsFree.
+        assertEquals(false, ModelDiscoveryService.parseModels(json).get(0).get("isFree"));
+    }
+
+    @Test
+    void inferPriceReturnsMinusOneOnMalformedValue() {
+        var obj = JsonParser.parseString("""
+                {"pricing":{"prompt":"NaN"}}
+                """).getAsJsonObject();
+        // NumberFormatException swallowed → fall through to -1.
+        assertEquals(-1, ModelDiscoveryService.inferPrice(obj, "prompt"), 0.001);
+    }
+
+    @Test
+    void detectVisionFromLegacyModalityStringNegative() {
+        // architecture.modality is a single string that doesn't contain "image"
+        // — confirmed text-only via the legacy shape.
+        var obj = JsonParser.parseString("""
+                {"id":"vendor/legacy",
+                 "architecture":{"modality":"text->text"}}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        assertFalse(result.confirmed());
+        assertTrue(result.fromProvider(),
+                "legacy modality string is still a provider-confirmed signal");
     }
 }
