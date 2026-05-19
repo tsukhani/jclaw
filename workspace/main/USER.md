@@ -7,7 +7,7 @@ Location: Kuala Lumpur, Malaysia
 ## Movie Preferences
 
 - **Favorite genres:** Action, sci-fi, thriller
-- **Avoid genres:** Horror, romance, comedy (as primary genre), family/fantasy
+- **Avoid genres:** Horror, romance (as primary genre), family
 - **Minimum rating:** 6.0 IMDb
 - **Preferred eras:** 2020s, 2010s, 2000s
 - **Favorite directors/actors:** None specified
