@@ -466,14 +466,25 @@ public class ToolRegistry {
             // MCP tools default-disabled for non-main agents (operator opts-in
             // per server on the agent detail page). Main agent unaffected.
             if (!agent.isMain()) {
-                // JCLAW-281: bridge pre-281 per-action enablement to the new
-                // server-level handle. If the operator has explicitly
-                // enabled any per-action row for an MCP server, treat the
-                // server-level handle as enabled too — without this, the
-                // LLM would lose access to the parameterized def and the
-                // agent's previously-granted actions would become
-                // unreachable. Once Phase 6 migrates AgentToolConfig rows
-                // to server-level keys, this derivation becomes a no-op.
+                // Per-action enablement propagates to the server-level handle.
+                // The agent detail page's per-tool toggle (PUT
+                // /api/agents/:id/tools/:name → ApiToolsController.updateForAgent)
+                // writes a single AgentToolConfig row keyed by the per-action
+                // tool name (e.g. mcp_jira_create_issue=true) — that's the
+                // cheapest write for the operator UI. But the LLM's function-
+                // calling schema only exposes the server-level handle
+                // (mcp_jira) — JCLAW-281 hides per-action MCP tools from
+                // getToolDefsForAgent. So an enabled per-action row without
+                // an explicit server-level row would otherwise leave the
+                // server-level handle default-disabled, and the LLM could
+                // never reach the granted action.
+                //
+                // This derivation treats the server-level handle as enabled
+                // iff any of its per-action rows is explicitly enabled. The
+                // bulk-toggle path (PUT /api/agents/:id/tool-groups/:group
+                // via updateGroupForAgent) writes the server-level row
+                // explicitly, so the explicitState.containsKey(tool.name())
+                // guard below short-circuits and this derivation is moot.
                 var serversWithEnabledAction = new HashSet<String>();
                 for (var entry : explicitState.entrySet()) {
                     if (!entry.getValue()) continue;
