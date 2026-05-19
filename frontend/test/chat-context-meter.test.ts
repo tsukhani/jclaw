@@ -125,7 +125,7 @@ describe('ChatContextMeter — popover content', () => {
     const html = component.html() + document.body.innerHTML
     expect(html).toContain('Prompt tokens')
     expect(html).toContain('Completion')
-    expect(html).toContain('Total')
+    expect(html).toContain('Current context')
     // Cleanup: close popover so leaked content doesn't bleed into the next test.
     await trigger.trigger('mouseleave')
   })
@@ -177,6 +177,57 @@ describe('ChatContextMeter — popover content', () => {
     await trigger.trigger('mouseenter')
     const html = component.html() + document.body.innerHTML
     expect(html).toContain('Cached tokens')
+    await trigger.trigger('mouseleave')
+  })
+
+  it('shows the conversation-total row when cumulativeTokens > 0', async () => {
+    const component = await mountSuspended(ChatContextMeter, {
+      props: {
+        promptTokens: 100,
+        completionTokens: 50,
+        contextWindow: 50_000,
+        cumulativeTokens: 9_876,
+      },
+    })
+    const trigger = component.find('button')
+    await trigger.trigger('mouseenter')
+    const html = component.html() + document.body.innerHTML
+    expect(html).toContain('Conversation total')
+    expect(html).toContain('9,876')
+    await trigger.trigger('mouseleave')
+  })
+
+  it('hides conversation-total + compactions rows when their values are zero', async () => {
+    const component = await mountSuspended(ChatContextMeter, {
+      props: {
+        promptTokens: 100,
+        completionTokens: 50,
+        contextWindow: 50_000,
+        cumulativeTokens: 0,
+        compactionCount: 0,
+      },
+    })
+    const trigger = component.find('button')
+    await trigger.trigger('mouseenter')
+    const html = component.html() + document.body.innerHTML
+    expect(html).not.toContain('Conversation total')
+    expect(html).not.toContain('Compactions')
+    await trigger.trigger('mouseleave')
+  })
+
+  it('shows the compactions row when compactionCount > 0', async () => {
+    const component = await mountSuspended(ChatContextMeter, {
+      props: {
+        promptTokens: 100,
+        completionTokens: 50,
+        contextWindow: 50_000,
+        compactionCount: 2,
+      },
+    })
+    const trigger = component.find('button')
+    await trigger.trigger('mouseenter')
+    const html = component.html() + document.body.innerHTML
+    expect(html).toContain('Compactions')
     await trigger.trigger('mouseleave')
   })
 })

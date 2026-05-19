@@ -523,6 +523,25 @@ const latestAssistantUsage = computed<MessageUsage | null>(() => {
 })
 
 /**
+ * Cumulative tokens billed across the whole conversation: sum of every
+ * assistant turn's prompt + completion. This double-counts the carried
+ * context (each turn re-sends the prior history), which is the right
+ * thing for "total since the beginning" — it matches what the operator
+ * was actually billed for. Distinct from `latestAssistantUsage` which
+ * reports the *current* context size and shrinks after a compaction.
+ */
+const conversationCumulativeTokens = computed<number>(() => {
+  const msgs = displayMessages.value ?? []
+  let total = 0
+  for (const m of msgs) {
+    if (m && m.role === 'assistant' && m.usage) {
+      total += (m.usage.prompt ?? 0) + (m.usage.completion ?? 0)
+    }
+  }
+  return total
+})
+
+/**
  * Running cost summary for the currently open conversation. Honors each turn's
  * own embedded pricing so mixed-model conversations (e.g. Kimi → Flash) total
  * correctly. Null when the conversation has no assistant turns.
@@ -2393,6 +2412,8 @@ function exportConversation() {
             :reasoning-tokens="latestAssistantUsage?.reasoning ?? 0"
             :cached-tokens="latestAssistantUsage?.cached ?? 0"
             :context-window="(selectedModelInfo?.contextWindow as number | undefined) ?? null"
+            :cumulative-tokens="conversationCumulativeTokens"
+            :compaction-count="currentConversation?.compactionCount ?? 0"
             :cost-label="conversationCostSummary?.label ?? null"
             :cost-tooltip="conversationCostSummary?.tooltip ?? null"
             :turn-count="conversationCostSummary?.turnCount ?? null"

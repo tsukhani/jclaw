@@ -63,6 +63,12 @@ export interface Conversation {
    *  runs from user-initiated chats at a glance. Null/absent for top-level
    *  conversations. */
   parentConversationId?: number | null
+  /** Number of SessionCompaction rows for this conversation. Surfaced in
+   *  the chat-header context meter so the operator can tell whether the
+   *  displayed "current context" reading reflects a fresh prompt or a
+   *  post-compaction prefix (and how many times the conversation has been
+   *  compacted). Optional for backwards-compat; absent → treat as 0. */
+  compactionCount?: number
 }
 
 /**

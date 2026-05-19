@@ -36,7 +36,8 @@ public class ApiConversationsController extends Controller {
                                    String peerId, String createdAt, String updatedAt,
                                    long messageCount, String preview,
                                    String modelProviderOverride, String modelIdOverride,
-                                   Long parentConversationId) {}
+                                   Long parentConversationId,
+                                   long compactionCount) {}
 
     /** Documents the {@code GET /messages} response shape. The actual emission
      *  uses a HashMap because several fields are conditionally absent (only
@@ -455,6 +456,12 @@ public class ApiConversationsController extends Controller {
         if (c.parentConversation != null) {
             map.put("parentConversationId", c.parentConversation.id);
         }
+        // JCLAW: count of SessionCompaction rows for this conversation,
+        // surfaced to the chat-header context meter so the operator can
+        // see at a glance whether the displayed "current context" reading
+        // is a fresh prompt or has been reset by compaction (and how many
+        // times). Cheap COUNT on an indexed column; no need to denormalize.
+        map.put("compactionCount", models.SessionCompaction.count("conversation = ?1", c));
         return map;
     }
 

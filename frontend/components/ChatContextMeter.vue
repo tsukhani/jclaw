@@ -23,6 +23,20 @@ const props = defineProps<{
   /** Prompt-cache reads on the latest assistant turn. */
   cachedTokens?: number | null
   contextWindow?: number | null
+  /**
+   * Sum of (prompt + completion) across every assistant turn in the
+   * conversation — i.e. total billed tokens since the conversation
+   * began. Distinct from the latest turn's "current context" reading,
+   * which shrinks after a compaction; this number monotonically grows.
+   */
+  cumulativeTokens?: number | null
+  /**
+   * Number of SessionCompaction rows for this conversation. Surfaced
+   * so the operator can tell whether "current context" has been reset
+   * (and how many times). Hidden when zero — a chat that has never
+   * been compacted shouldn't carry the row.
+   */
+  compactionCount?: number | null
   /** Running conversation cost string (e.g. "$0.0041"); omitted when pricing is absent. */
   costLabel?: string | null
   /** Hover tooltip on the cost row — the per-component breakdown. */
@@ -37,7 +51,15 @@ const prompt = computed(() => props.promptTokens ?? 0)
 const completion = computed(() => props.completionTokens ?? 0)
 const reasoning = computed(() => props.reasoningTokens ?? 0)
 const cached = computed(() => props.cachedTokens ?? 0)
+/**
+ * "Current context" = the latest turn's prompt + completion. This is
+ * what was in the model's view on the most recent call and approximates
+ * what will be sent next; it drops after a compaction. Drives both the
+ * trigger readout and the context-window % indicator.
+ */
 const total = computed(() => prompt.value + completion.value)
+const cumulative = computed(() => props.cumulativeTokens ?? 0)
+const compactions = computed(() => props.compactionCount ?? 0)
 const capacity = computed(() => props.contextWindow ?? 0)
 
 const percent = computed(() => {
@@ -186,13 +208,37 @@ function handleMouseLeave() {
         />
         <div class="flex items-center justify-between gap-4">
           <dt class="text-muted-foreground">
-            Total
+            Current context
           </dt>
           <dd class="font-mono tabular-nums">
             {{ total.toLocaleString() }}<span
               v-if="capacity"
               class="text-muted-foreground"
             > / {{ capacity.toLocaleString() }}</span>
+          </dd>
+        </div>
+        <div
+          v-if="cumulative > 0"
+          class="flex items-center justify-between gap-4"
+          title="Sum of prompt + completion across every assistant turn in this conversation — total billed tokens since the start."
+        >
+          <dt class="text-muted-foreground">
+            Conversation total
+          </dt>
+          <dd class="font-mono tabular-nums">
+            {{ cumulative.toLocaleString() }}
+          </dd>
+        </div>
+        <div
+          v-if="compactions > 0"
+          class="flex items-center justify-between gap-4"
+          title="Number of times this conversation's prefix has been summarized into a compaction. Each compaction resets the 'Current context' reading."
+        >
+          <dt class="text-muted-foreground">
+            Compactions
+          </dt>
+          <dd class="font-mono tabular-nums">
+            {{ compactions }}
           </dd>
         </div>
         <template v-if="costLabel != null || (turnCount ?? 0) > 0">
