@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Agent } from '~/types/api'
+import { TrashIcon } from '@heroicons/vue/24/outline'
 
 /**
  * JCLAW-271: SubagentRuns admin page. Lists every subagent run with filters
@@ -106,6 +107,101 @@ async function killRun(id: number) {
   }
 }
 
+const { confirm } = useConfirm()
+
+/**
+ * Hard-delete a subagent run and its child agent (which cascades to
+ * the child conversation, its messages, and the run row itself via
+ * AgentService.delete's FK chain). RUNNING rows are rejected by the
+ * backend with 409 — kill first, then delete.
+ */
+async function deleteRun(run: SubagentRun) {
+  const ok = await confirm({
+    title: 'Delete subagent run?',
+    message: `Run #${run.id} (${run.childAgentName ?? 'child'}) and its child agent + transcript will be permanently removed. This cannot be undone.`,
+    confirmText: 'Delete',
+    variant: 'danger',
+  })
+  if (!ok) return
+  try {
+    await $fetch(`/api/subagent-runs/${run.id}`, { method: 'DELETE' })
+    await refresh()
+  }
+  catch (e) {
+    console.error('Failed to delete subagent run:', e)
+  }
+}
+
+/**
+ * Bulk-select state mirroring the agents and tasks pages: row clicks
+ * toggle selection while selectMode is on; the Delete button sweeps
+ * the selected ids through the per-row DELETE endpoint.
+ */
+const selectMode = ref(false)
+const selectedIds = ref<Set<number>>(new Set())
+const deletingBulk = ref(false)
+
+function enterSelectMode() {
+  selectMode.value = true
+  selectedIds.value = new Set()
+}
+
+function exitSelectMode() {
+  selectMode.value = false
+  selectedIds.value = new Set()
+}
+
+function toggleSelection(id: number) {
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedIds.value = next
+}
+
+/**
+ * Selectable rows = everything except RUNNING (the backend rejects
+ * delete on those with 409). Reflected in the header-checkbox state
+ * so "select all" doesn't accidentally include the live rows the
+ * operator can't actually delete from this affordance.
+ */
+const selectableRuns = computed(() => runs.value.filter(r => r.status !== 'RUNNING'))
+
+function toggleSelectAll() {
+  if (!selectableRuns.value.length) return
+  if (selectedIds.value.size === selectableRuns.value.length) {
+    selectedIds.value = new Set()
+  }
+  else {
+    selectedIds.value = new Set(selectableRuns.value.map(r => r.id))
+  }
+}
+
+async function deleteSelected() {
+  if (!selectedIds.value.size) return
+  const count = selectedIds.value.size
+  const ok = await confirm({
+    title: 'Delete subagent runs',
+    message: `Permanently delete ${count} subagent run${count === 1 ? '' : 's'} along with their child agents and transcripts? This cannot be undone.`,
+    confirmText: 'Delete',
+    variant: 'danger',
+  })
+  if (!ok) return
+  deletingBulk.value = true
+  try {
+    for (const id of selectedIds.value) {
+      await $fetch(`/api/subagent-runs/${id}`, { method: 'DELETE' })
+    }
+    exitSelectMode()
+    await refresh()
+  }
+  catch (e) {
+    console.error('Failed to delete selected subagent runs:', e)
+  }
+  finally {
+    deletingBulk.value = false
+  }
+}
+
 // A11y: stable ids for filter inputs.
 const parentSelectId = useId()
 const statusSelectId = useId()
@@ -114,9 +210,41 @@ const sinceInputId = useId()
 
 <template>
   <div>
-    <h1 class="text-lg font-semibold text-fg-strong mb-6">
-      Subagent Runs
-    </h1>
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-lg font-semibold text-fg-strong">
+        Subagent Runs
+      </h1>
+      <div class="flex items-center gap-2">
+        <template v-if="!selectMode">
+          <button
+            :disabled="!selectableRuns.length"
+            class="p-2 border border-input text-fg-muted hover:text-red-400 hover:border-red-700/50 disabled:opacity-40 disabled:hover:text-fg-muted disabled:hover:border-input transition-colors"
+            title="Delete subagent runs"
+            @click="enterSelectMode"
+          >
+            <TrashIcon
+              class="w-4 h-4"
+              aria-hidden="true"
+            />
+          </button>
+        </template>
+        <template v-else>
+          <button
+            class="px-3 py-1.5 border border-input text-fg-muted text-xs hover:text-fg-strong hover:border-neutral-500 transition-colors"
+            @click="exitSelectMode"
+          >
+            Cancel
+          </button>
+          <button
+            :disabled="!selectedIds.size || deletingBulk"
+            class="px-3 py-1.5 bg-red-700 text-white text-xs font-medium hover:bg-red-600 disabled:opacity-40 transition-colors"
+            @click="deleteSelected"
+          >
+            Delete {{ selectedIds.size || '' }}
+          </button>
+        </template>
+      </div>
+    </div>
 
     <!-- Filter bar -->
     <div class="flex flex-wrap gap-3 mb-4">
@@ -174,6 +302,18 @@ const sinceInputId = useId()
       <table class="w-full text-sm">
         <thead>
           <tr class="border-b border-border text-left text-xs text-fg-muted">
+            <th
+              v-if="selectMode"
+              class="px-4 py-2.5 font-medium w-8"
+            >
+              <input
+                type="checkbox"
+                :checked="!!selectableRuns.length && selectedIds.size === selectableRuns.length"
+                :indeterminate.prop="selectedIds.size > 0 && selectedIds.size < selectableRuns.length"
+                aria-label="Select all deletable runs on this page"
+                @change="toggleSelectAll"
+              >
+            </th>
             <th class="px-4 py-2.5 font-medium">
               ID
             </th>
@@ -204,7 +344,24 @@ const sinceInputId = useId()
           <tr
             v-for="run in runs"
             :key="run.id"
+            :class="{
+              'bg-muted/30 cursor-pointer': selectMode && run.status !== 'RUNNING',
+              'opacity-60': selectMode && run.status === 'RUNNING',
+            }"
+            @click="selectMode && run.status !== 'RUNNING' ? toggleSelection(run.id) : undefined"
           >
+            <td
+              v-if="selectMode"
+              class="px-4 py-2.5 w-8"
+            >
+              <input
+                v-if="run.status !== 'RUNNING'"
+                type="checkbox"
+                :checked="selectedIds.has(run.id)"
+                :aria-label="`Select run #${run.id}`"
+                @click.stop="toggleSelection(run.id)"
+              >
+            </td>
             <td class="px-4 py-2.5 font-mono text-xs text-fg-muted">
               #{{ run.id }}
             </td>
@@ -258,19 +415,28 @@ const sinceInputId = useId()
                 no special-casing needed.
               -->
               <NuxtLink
-                v-if="run.childConversationId !== null"
+                v-if="!selectMode && run.childConversationId !== null"
                 :to="`/chat?conversation=${run.childConversationId}`"
                 class="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors mr-3"
+                @click.stop
               >
                 View transcript
               </NuxtLink>
               <button
-                v-if="run.status === 'RUNNING'"
+                v-if="!selectMode && run.status === 'RUNNING'"
                 :disabled="killing.has(run.id)"
-                class="text-xs text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors disabled:opacity-40"
-                @click="killRun(run.id)"
+                class="text-xs text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors disabled:opacity-40 mr-3"
+                @click.stop="killRun(run.id)"
               >
                 {{ killing.has(run.id) ? 'Killing...' : 'Kill' }}
+              </button>
+              <button
+                v-if="!selectMode && run.status !== 'RUNNING'"
+                class="text-xs text-fg-muted hover:text-red-400 transition-colors"
+                :title="`Permanently delete run #${run.id} and its child agent + transcript`"
+                @click.stop="deleteRun(run)"
+              >
+                Delete
               </button>
             </td>
           </tr>

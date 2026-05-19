@@ -151,6 +151,57 @@ public class ApiSubagentRunsController extends Controller {
      * rows, emits SUBAGENT_KILL on success, returns the resulting message
      * in either case.
      */
+    /**
+     * DELETE /api/subagent-runs/{id} — remove a subagent run row and the
+     * child agent it spawned (which cascades to the child conversation,
+     * its messages, the run row itself, and any other rows the agent
+     * delete chain touches).
+     *
+     * <p>Restricted to terminal runs so an active stream isn't left
+     * pointing at a deleted row. Operators wanting to drop a RUNNING
+     * row should kill it first via {@link #kill(Long)} and then delete.
+     *
+     * <p>Cleanup happens by delegating to {@link services.AgentService#delete}
+     * on the child Agent — the child is unique to the run (post the
+     * JCLAW spawn fix that stopped reusing pre-existing operator agents
+     * as children), and {@code AgentService.delete}'s SubagentRun cascade
+     * sweeps the run row as part of the agent's FK chain.
+     */
+    @ApiResponse(responseCode = "200")
+    public static void delete(Long id) {
+        if (id == null) {
+            response.status = 400;
+            renderJSON(gson.toJson(new ErrorResponse("Missing run id.")));
+            return;
+        }
+        var run = (SubagentRun) SubagentRun.findById(id);
+        if (run == null) {
+            response.status = 404;
+            renderJSON(gson.toJson(new ErrorResponse("Run " + id + " not found.")));
+            return;
+        }
+        // Reject mid-flight rows — the stream owner still holds a reference
+        // and would NPE on the next persist. Kill-then-delete is the
+        // two-step path for live runs.
+        if (run.status == SubagentRun.Status.RUNNING) {
+            response.status = 409;
+            renderJSON(gson.toJson(new ErrorResponse(
+                    "Run " + id + " is still RUNNING. Kill it first, then delete.")));
+            return;
+        }
+        var childAgent = run.childAgent;
+        if (childAgent == null) {
+            // Defensive — schema says NOT NULL but historical rows from
+            // pre-FK-tightening might exist. Drop just the run row in
+            // that case so the operator isn't stuck with an orphan.
+            run.delete();
+            renderJSON("{\"status\":\"deleted\",\"id\":" + id + "}");
+            return;
+        }
+        services.AgentService.delete(childAgent);
+        renderJSON("{\"status\":\"deleted\",\"id\":" + id + "}");
+    }
+
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = KillResponse.class)))
     public static void kill(Long id) {
         if (id == null) {
