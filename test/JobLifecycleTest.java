@@ -224,13 +224,6 @@ class JobLifecycleTest extends UnitTest {
         }
     }
 
-    // The "DRAFT sinks produce no checkpoint" test was removed alongside
-    // DRAFT disablement (JCLAW-121). DRAFT is never selected now, so the
-    // recovery-immunity invariant the test enforced is vacuously true and
-    // there is no path to exercise it. EDIT_IN_PLACE checkpoint behavior
-    // is covered by streamingRecoveryFindsOrphanCheckpointAndEditsPlaceholder
-    // elsewhere in this file.
-
     @Test
     void streamingRecoverySkipsConversationsWithoutCheckpoint() {
         // Conversations without a checkpoint (the normal case) must not be

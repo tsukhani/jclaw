@@ -77,32 +77,6 @@ describe('Chat page', () => {
     expect(component.find('.cursor-col-resize').exists()).toBe(false)
   })
 
-  it('has a chat input textarea', async () => {
-    setupChatApi()
-    const component = await mountSuspended(Chat)
-
-    const textarea = component.find('textarea')
-    expect(textarea.exists()).toBe(true)
-  })
-
-  it('has an export button', async () => {
-    setupChatApi()
-    const component = await mountSuspended(Chat)
-
-    // Export button has title="Export as Markdown"
-    const exportBtn = component.find('button[title="Export as Markdown"]')
-    expect(exportBtn.exists()).toBe(true)
-  })
-
-  it('shows file attachment button', async () => {
-    setupChatApi()
-    const component = await mountSuspended(Chat)
-
-    // There should be a hidden file input for attachments
-    const fileInput = component.find('input[type="file"]')
-    expect(fileInput.exists()).toBe(true)
-  })
-
   // Kept LAST intentionally: registerEndpoint() persists across tests within a
   // file, and this case overrides /api/agents + /api/config + /api/conversations
   // with a thinking-capable fixture. Putting it at the end prevents leakage

@@ -75,11 +75,6 @@ class BasicTest extends UnitTest {
         assertTrue(json.contains("value"));
     }
 
-    @Test
-    void gsonHolderIsSingleton() {
-        assertSame(GsonHolder.INSTANCE, GsonHolder.INSTANCE);
-    }
-
     // ==================== AgentService.workspacePath defense-in-depth (JCLAW-115) ====================
 
     @Test

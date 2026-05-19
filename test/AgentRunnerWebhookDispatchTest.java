@@ -1,7 +1,6 @@
 import agents.AgentRunner;
 import models.Agent;
 import models.AgentBinding;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.db.jpa.JPA;
@@ -39,12 +38,6 @@ class AgentRunnerWebhookDispatchTest extends UnitTest {
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
         llm.ProviderRegistry.refresh();
-    }
-
-    @AfterEach
-    void teardown() {
-        // No external resources to release; lifecycle hook retained for
-        // symmetry with the sibling AgentRunner test files.
     }
 
     // ─── processWebhookMessage ──────────────────────────────────────────

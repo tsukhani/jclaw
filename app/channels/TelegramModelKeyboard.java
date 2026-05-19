@@ -2,7 +2,6 @@ package channels;
 
 import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
-import llm.ProviderRegistry;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow;
@@ -206,7 +205,4 @@ public final class TelegramModelKeyboard {
         if (m.name() != null && !m.name().isBlank()) return m.name();
         return m.id();
     }
-
-    @SuppressWarnings("unused")
-    private static final Class<?> _UNUSED_REGISTRY_HOLDER = ProviderRegistry.class;
 }

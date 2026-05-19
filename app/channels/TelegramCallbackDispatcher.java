@@ -5,12 +5,8 @@ import channels.TelegramModelCallback.Kind;
 import channels.TelegramModelCallback.Payload;
 import models.Agent;
 import models.Conversation;
-import services.ConversationService;
-import services.EventLogger;
 import services.Tx;
 import slash.Commands;
-
-import java.util.Optional;
 
 /**
  * Entry point for Telegram {@code callback_query} updates from the
@@ -213,12 +209,4 @@ public final class TelegramCallbackDispatcher {
                 .replace("<", "&lt;")
                 .replace(">", "&gt;");
     }
-
-    // Suppress unused-import warnings until tests reach these symbols.
-    @SuppressWarnings("unused")
-    private static final Class<?> _UNUSED_IMPORT_HOLDER = Optional.class;
-    @SuppressWarnings("unused")
-    private static final Class<?> _UNUSED_CS_HOLDER = ConversationService.class;
-    @SuppressWarnings("unused")
-    private static final Class<?> _UNUSED_EL_HOLDER = EventLogger.class;
 }

@@ -10,8 +10,6 @@ import services.EventLogger;
 import services.Tx;
 import services.scanners.ScannerRegistry;
 
-import java.util.List;
-
 /**
  * Seeds default runtime configuration and default agent on first startup.
  * Only writes values that don't already exist.
@@ -21,7 +19,7 @@ public class DefaultConfigJob extends Job<Void> {
 
     @Override
     public void doJob() {
-        dropOrphanedColumns();
+        applySchemaAdditions();
         seedProviders();
         seedToolConfig();
         seedDefaultAgent();
@@ -66,8 +64,6 @@ public class DefaultConfigJob extends Job<Void> {
      * Settings persists across restarts.
      */
     private void seedDispatcherTuning() {
-        renameKeyIfPresent("provider.llm.dispatcher.maxRequestsPerHost", "dispatcher.llm.maxRequestsPerHost");
-        renameKeyIfPresent("provider.llm.dispatcher.maxRequests", "dispatcher.llm.maxRequests");
         int cores = Runtime.getRuntime().availableProcessors();
         int defaultPerHost = Math.clamp(8L * cores, 64, 256);
         int defaultMax = 2 * defaultPerHost;
@@ -76,40 +72,15 @@ public class DefaultConfigJob extends Job<Void> {
     }
 
     /**
-     * Drop columns left behind by previous model versions, and add columns
-     * introduced in this release that Hibernate's {@code jpa.ddl=update}
-     * wouldn't patch onto a hot-reloaded dev server (DDL only runs at
-     * SessionFactory init, not on class reload). Both paths use the
-     * idempotent {@code IF (NOT) EXISTS} form so a server that's already in
-     * the right state does nothing.
-     *
-     * <p>Stale NOT NULL columns also break inserts when the model stops
-     * setting them — that's the reason the pre-existing {@code is_default}
-     * drop stays here, the reason we drop {@code title_generated} from
-     * the v0.9.6 iteration of the title-regeneration gate, and the reason
-     * {@code title_generation_count} is dropped now that conversation-title
-     * regeneration has been removed entirely.
+     * Add columns and tables introduced in this release that Hibernate's
+     * {@code jpa.ddl=update} wouldn't patch onto a hot-reloaded dev server
+     * (DDL only runs at SessionFactory init, not on class reload). Uses
+     * the idempotent {@code IF NOT EXISTS} form so a server that's already
+     * in the right state does nothing.
      */
-    private void dropOrphanedColumns() {
+    private void applySchemaAdditions() {
         try (var conn = play.db.DB.getDataSource("default").getConnection();
              var stmt = conn.createStatement()) {
-            stmt.execute("ALTER TABLE agent DROP COLUMN IF EXISTS is_default");
-            // JCLAW-165 cleanup: per-agent audio toggle is no longer
-            // meaningful — the transcription pipeline lets every model
-            // consume audio (text-only via transcript, audio-capable via
-            // native input_audio passthrough). The gate that read this
-            // column is gone; the column itself is now dead weight.
-            stmt.execute("ALTER TABLE agent DROP COLUMN IF EXISTS audio_enabled");
-            // The matching vision toggle is also retired: no LLM provider
-            // exposes a vision-off API parameter (vision is implicit in
-            // whether image content parts are sent), and the toggle never
-            // gated anything in the pipeline — it was cosmetic. Operators
-            // can still skip vision by simply not attaching images, and
-            // model-capability gating still keeps non-vision-capable
-            // models from receiving images at all.
-            stmt.execute("ALTER TABLE agent DROP COLUMN IF EXISTS vision_enabled");
-            stmt.execute("ALTER TABLE conversation DROP COLUMN IF EXISTS title_generated");
-            stmt.execute("ALTER TABLE conversation DROP COLUMN IF EXISTS title_generation_count");
             stmt.execute("ALTER TABLE message ADD COLUMN IF NOT EXISTS reasoning TEXT");
             // JCLAW-95: Telegram streaming checkpoint. Non-null rows indicate
             // a placeholder message left dangling by a prior JVM crash — the
@@ -345,7 +316,7 @@ public class DefaultConfigJob extends Job<Void> {
      * with an actionable error.
      */
     /**
-     * JCLAW-282: bring up the in-process JClaw API tool. Three steps:
+     * JCLAW-282: bring up the in-process JClaw API tool. Two steps:
      * <ol>
      *   <li>Mint (or recover) the internal bearer token so {@code jclaw_api}
      *       can authenticate against the same auth filter that gates
@@ -356,10 +327,6 @@ public class DefaultConfigJob extends Job<Void> {
      *       location <em>is</em> the gating mechanism for which agents
      *       can use it. {@link services.SkillPromotionService#copyToAgentWorkspace}
      *       is idempotent.</li>
-     *   <li>Backfill {@link models.AgentToolConfig} rows so existing
-     *       non-main agents from earlier installs get the tool explicitly
-     *       disabled. New non-main agents pick up the same gate from
-     *       {@link AgentService#create}.</li>
      * </ol>
      */
     private void seedJClawApiTooling() {
@@ -369,9 +336,6 @@ public class DefaultConfigJob extends Job<Void> {
 
         // Step 2: install the skill into main's workspace.
         seedJClawApiSkillForMain();
-
-        // Step 3: backfill tool-disable rows for existing non-main agents.
-        backfillJClawApiDisableForNonMain();
     }
 
     /** Mirror of {@link #seedSkillCreatorForMain} for the jclaw-api skill.
@@ -396,36 +360,6 @@ public class DefaultConfigJob extends Job<Void> {
         } catch (java.io.IOException e) {
             play.Logger.warn("Failed to bootstrap jclaw-api skill for main: %s", e.getMessage());
         }
-    }
-
-    /** Existing non-main agents created before JCLAW-282 don't have a
-     *  disable row for {@code jclaw_api}, so the tool would be implicitly
-     *  enabled for them on first boot. Walk every agent once and add the
-     *  disable row where it's missing. Idempotent — only writes rows that
-     *  don't already exist, so re-runs at boot do nothing. */
-    private void backfillJClawApiDisableForNonMain() {
-        services.Tx.run(() -> {
-            List<Agent> all = Agent.findAll();
-            int patched = 0;
-            for (var agent : all) {
-                if (agent.isMain()) continue;
-                var existing = models.AgentToolConfig
-                        .find("agent = ?1 AND toolName = ?2",
-                                agent, tools.JClawApiTool.TOOL_NAME)
-                        .first();
-                if (existing != null) continue;
-                var row = new models.AgentToolConfig();
-                row.agent = agent;
-                row.toolName = tools.JClawApiTool.TOOL_NAME;
-                row.enabled = false;
-                row.save();
-                patched++;
-            }
-            if (patched > 0) {
-                EventLogger.info("agent",
-                        "Backfilled jclaw_api disable for %d non-main agent(s)".formatted(patched));
-            }
-        });
     }
 
     private void seedSkillCreatorForMain() {
