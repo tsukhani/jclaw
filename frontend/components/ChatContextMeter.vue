@@ -33,8 +33,8 @@ const props = defineProps<{
   /**
    * Number of SessionCompaction rows for this conversation. Surfaced
    * so the operator can tell whether "current context" has been reset
-   * (and how many times). Always rendered — operators asked for it
-   * even at zero so the field is discoverable on fresh chats.
+   * (and how many times). Hidden when zero — a chat that has never
+   * been compacted shouldn't carry the row.
    */
   compactionCount?: number | null
   /** Running conversation cost string (e.g. "$0.0041"); omitted when pricing is absent. */
@@ -230,6 +230,7 @@ function handleMouseLeave() {
           </dd>
         </div>
         <div
+          v-if="compactions > 0"
           class="flex items-center justify-between gap-4"
           title="Number of times this conversation's prefix has been summarized into a compaction. Each compaction resets the 'Current context' reading."
         >
