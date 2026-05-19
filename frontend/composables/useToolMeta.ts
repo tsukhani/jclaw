@@ -49,10 +49,16 @@ export interface ToolMeta extends ToolApiMeta {
 // ───── Presentational mappings (frontend-only concerns) ──────────────────
 
 const CATEGORY_STYLES: Record<ToolCategory, { categoryColor: string, iconBg: string, iconColor: string }> = {
+  // System mirrors the other categories' tinted-/15 backgrounds rather than
+  // a solid neutral-800. The solid-dark surface looked fine in dark mode but
+  // rendered as a hard black blob against the light-theme background and
+  // didn't match the rest of the category palette. Switching to a neutral
+  // 15%-opacity tint keeps the colour-coded categorisation while letting
+  // both themes share one rule.
   System: {
-    categoryColor: 'text-neutral-400 bg-neutral-800',
-    iconBg: 'bg-neutral-800',
-    iconColor: 'text-neutral-300',
+    categoryColor: 'text-neutral-600 dark:text-neutral-400 bg-neutral-500/15',
+    iconBg: 'bg-neutral-500/15',
+    iconColor: 'text-neutral-600 dark:text-neutral-300',
   },
   Files: {
     categoryColor: 'text-amber-400 bg-amber-500/15',
@@ -80,7 +86,10 @@ const CATEGORY_STYLES: Record<ToolCategory, { categoryColor: string, iconBg: str
 }
 
 const PILL_CLASSES: Record<ToolCategory, string> = {
-  System: 'bg-neutral-800 border-neutral-700/60 text-neutral-400',
+  // Mirror the CATEGORY_STYLES change for System: tinted-/10 background +
+  // theme-aware text so the chip stays legible against both a white and a
+  // near-black canvas.
+  System: 'bg-neutral-500/10 border-neutral-500/25 text-neutral-600 dark:text-neutral-400',
   Files: 'bg-amber-500/10 border-amber-500/25 text-amber-400',
   Web: 'bg-blue-500/10 border-blue-500/25 text-blue-400',
   Utilities: 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400',
