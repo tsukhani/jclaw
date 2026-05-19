@@ -106,6 +106,13 @@ public class ApiToolsController extends Controller {
 
     /**
      * PUT /api/agents/{id}/tools/{name} — Enable or disable a tool for an agent.
+     *
+     * <p>Per-action MCP tool names (e.g. {@code mcp_jira_create_issue}) are
+     * rejected with 400. MCP tools toggle at the server level only: the
+     * caller should use {@code PUT /api/agents/{id}/tool-groups/{group}}
+     * instead. This is the post-Phase-6 contract — the per-action toggle
+     * is no longer surfaced in the UI and the consolidated server-level
+     * row is the single source of truth for MCP enablement.
      */
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ToolToggleRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ToolToggleResponse.class)))
@@ -117,8 +124,16 @@ public class ApiToolsController extends Controller {
         if (body == null || !body.has("enabled")) badRequest();
         var enabled = body.get("enabled").getAsBoolean();
 
-        // JCLAW-281: no system-tier tools any more; every registered tool is
-        // toggleable by the operator.
+        // Reject per-action MCP toggles. A non-null group on a non-server-
+        // level tool is the signature of an MCP per-action adapter. The
+        // operator's per-server toggle goes through updateGroupForAgent;
+        // direct per-action enable/disable is no longer a supported path.
+        var tool = ToolRegistry.lookupTool(name);
+        if (tool != null && tool.group() != null && !tool.isServerLevel()) {
+            error(400, "Per-action MCP tools are no longer toggleable individually. "
+                    + "Use PUT /api/agents/" + id + "/tool-groups/" + tool.group()
+                    + " to enable or disable the entire '" + tool.group() + "' server.");
+        }
 
         var config = AgentToolConfig.findByAgentAndTool(agent, name);
         if (config == null) {
@@ -142,10 +157,24 @@ public class ApiToolsController extends Controller {
     }
 
     /**
-     * PUT /api/agents/{id}/tool-groups/{group} — Bulk enable/disable every
-     * tool in a group for one agent. Used by the agent detail page so
-     * toggling an MCP server (which contributes N tools) is one HTTP call,
-     * not N. Body: {@code {"enabled": boolean}}.
+     * PUT /api/agents/{id}/tool-groups/{group} — Enable or disable an MCP
+     * server (and therefore every action it advertises) for one agent.
+     * Body: {@code {"enabled": boolean}}.
+     *
+     * <p>Writes a single {@link AgentToolConfig} row keyed by the
+     * server-level handle name ({@code mcp_<group>}). The LLM's
+     * function-calling schema only exposes the server-level handle
+     * — actions are addressed via {@code mcp_<group>}'s {@code tool}
+     * parameter at execution time — so a single row is sufficient to
+     * gate the entire MCP server. Operators who want per-action
+     * granularity must enforce it at the McpAllowlist layer (the
+     * confused-deputy gate at execution time), not via the function-
+     * calling schema.
+     *
+     * <p>Stale per-action rows (legacy: pre-server-level installs that
+     * wrote one row per action) are cleaned up here too — toggling an
+     * MCP server consolidates any per-action rows for that server's
+     * group into the single server-level row.
      */
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ToolToggleRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ToolGroupToggleResponse.class)))
@@ -157,26 +186,42 @@ public class ApiToolsController extends Controller {
         if (body == null || !body.has("enabled")) { badRequest(); return; }
         var enabled = body.get("enabled").getAsBoolean();
 
-        var members = ToolRegistry.listTools().stream()
-                .filter(t -> group.equals(t.group()))
-                .toList();
-        if (members.isEmpty()) notFound();
+        // Find the server-level handle for this group. Every MCP server
+        // registers exactly one isServerLevel()=true tool with group()
+        // equal to the server name.
+        var serverLevel = ToolRegistry.listTools().stream()
+                .filter(t -> group.equals(t.group()) && t.isServerLevel())
+                .findFirst()
+                .orElse(null);
+        if (serverLevel == null) notFound();
 
-        for (var tool : members) {
-            var config = AgentToolConfig.findByAgentAndTool(agent, tool.name());
-            if (config == null) {
-                config = new AgentToolConfig();
-                config.agent = agent;
-                config.toolName = tool.name();
-            }
-            config.enabled = enabled;
-            config.save();
+        // Write the single server-level row.
+        var config = AgentToolConfig.findByAgentAndTool(agent, serverLevel.name());
+        if (config == null) {
+            config = new AgentToolConfig();
+            config.agent = agent;
+            config.toolName = serverLevel.name();
+        }
+        config.enabled = enabled;
+        config.save();
+
+        // Clean up any legacy per-action rows for this group — they no
+        // longer have any read effect now that loadDisabledTools is
+        // server-level-only, but leaving them around would (a) confuse
+        // an operator inspecting the DB, and (b) leave noise for a
+        // future refactor. One DELETE per group toggle keeps the table
+        // tidy as the operator naturally cycles through their servers.
+        for (var tool : ToolRegistry.listTools()) {
+            if (!group.equals(tool.group())) continue;
+            if (tool.isServerLevel()) continue;
+            AgentToolConfig.delete("agent = ?1 AND toolName = ?2",
+                    agent, tool.name());
         }
 
         SkillLoader.clearCache();
         ToolRegistry.invalidateDisabledToolsCache(agent);
 
-        renderJSON(gson.toJson(new ToolGroupToggleResponse(group, enabled, members.size(), "ok")));
+        renderJSON(gson.toJson(new ToolGroupToggleResponse(group, enabled, 1, "ok")));
     }
 
 }

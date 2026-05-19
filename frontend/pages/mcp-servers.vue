@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { McpServer, McpTestResult } from '~/types/api'
-import { ArrowPathIcon, BeakerIcon, ChevronDownIcon, PlusIcon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { ArrowPathIcon, BeakerIcon, ChevronDownIcon, ChevronRightIcon, PlusIcon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 
 const { data: servers, refresh } = await useFetch<McpServer[]>('/api/mcp-servers')
 const { mutate, error: mutationError } = useApiMutation()
@@ -23,6 +23,16 @@ interface FormState {
 
 const editing = ref<FormState | null>(null)
 const expandedRowId = ref<number | null>(null)
+/**
+ * Disclosure state for the per-tool list. Independent of expandedRowId
+ * (which governs the edit panel) so the operator can have the tools list
+ * open on one row while editing another — different intents, different
+ * affordances.
+ */
+const expandedToolsRowId = ref<number | null>(null)
+function toggleToolsExpand(id: number) {
+  expandedToolsRowId.value = expandedToolsRowId.value === id ? null : id
+}
 const testResult = ref<McpTestResult | null>(null)
 const testResultForId = ref<number | null>(null)
 const testing = ref(false)
@@ -553,7 +563,22 @@ function removeHeaderRow(i: number) {
                 >{{ server.status }}</span>
               </td>
               <td class="px-4 py-2.5 text-fg-muted text-xs">
-                {{ server.toolCount }}
+                <button
+                  v-if="server.toolCount > 0"
+                  type="button"
+                  class="inline-flex items-center gap-1 hover:text-fg-strong transition-colors"
+                  :title="expandedToolsRowId === server.id ? 'Hide tool list' : 'Show tool list'"
+                  :aria-label="expandedToolsRowId === server.id ? `Hide tools for ${server.name}` : `Show tools for ${server.name}`"
+                  :aria-expanded="expandedToolsRowId === server.id"
+                  @click="toggleToolsExpand(server.id)"
+                >
+                  <ChevronRightIcon
+                    class="w-3 h-3 transition-transform"
+                    :class="{ 'rotate-90': expandedToolsRowId === server.id }"
+                  />
+                  {{ server.toolCount }}
+                </button>
+                <span v-else>0</span>
               </td>
               <td class="px-4 py-2.5 text-right">
                 <div class="flex items-center justify-end gap-3">
@@ -608,6 +633,31 @@ function removeHeaderRow(i: number) {
                     <TrashIcon class="w-4 h-4" />
                   </button>
                 </div>
+              </td>
+            </tr>
+
+            <!-- Read-only per-tool list. Phase 6 removed individual
+                 toggling; this disclosure exists so the operator can
+                 still see what each server advertises (name + LLM
+                 description) without diving into the agent edit panel. -->
+            <tr v-if="expandedToolsRowId === server.id && server.tools.length">
+              <td
+                colspan="6"
+                class="bg-muted/30 px-4 py-3"
+              >
+                <ul class="space-y-2">
+                  <li
+                    v-for="tool in server.tools"
+                    :key="tool.name"
+                    class="flex flex-col gap-0.5 text-xs"
+                  >
+                    <span class="font-mono text-fg-primary">{{ tool.name }}</span>
+                    <span
+                      v-if="tool.description"
+                      class="text-fg-muted leading-relaxed"
+                    >{{ tool.description }}</span>
+                  </li>
+                </ul>
               </td>
             </tr>
 

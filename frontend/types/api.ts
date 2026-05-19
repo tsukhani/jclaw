@@ -321,6 +321,11 @@ export interface LogEvent {
 /** A tool binding for a specific agent, as returned by GET /api/agents/:id/tools. */
 export interface AgentTool {
   name: string
+  /** Human-readable description from the backend tool registry — shown
+   *  inline beneath an MCP server's name in the read-only per-action
+   *  disclosure (Phase 6). May be empty for tools that don't advertise
+   *  one; the backend stamps an empty string in that case. */
+  description?: string
   enabled: boolean
   /** Optional grouping key: tools sharing one (currently MCP servers) fold
    *  into a single agent-detail-page row with one toggle that flips every
@@ -471,8 +476,23 @@ export interface McpServer {
   lastDisconnectedAt: string | null
   /** Number of MCP tools currently advertised by this server. */
   toolCount: number
+  /**
+   * Per-tool details for every action this server currently advertises.
+   * Sourced from {@code McpConnectionManager.tools(serverName)} at the
+   * moment of the response — empty for DISCONNECTED servers. Drives the
+   * inline-expandable action list on the MCP Servers page and the
+   * read-only action display under each MCP server toggle on the
+   * agent detail page.
+   */
+  tools: McpToolInfo[]
   createdAt: string | null
   updatedAt: string | null
+}
+
+/** One advertised tool on an MCP server. */
+export interface McpToolInfo {
+  name: string
+  description: string
 }
 
 /** Result of POST /api/mcp-servers/{id}/test — synchronous connection probe. */

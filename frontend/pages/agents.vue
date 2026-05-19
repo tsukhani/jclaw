@@ -218,9 +218,14 @@ const toolsByCategory = computed(() => {
 type McpServerRow = {
   key: string
   server: string
-  members: AgentTool[]
   enabled: boolean
-  actionCount: number
+  /**
+   * Per-action read-only display: every tool the server advertises, minus
+   * the server-level handle itself. Post-Phase-6 these aren't individually
+   * toggleable — the agent gets the whole server or nothing — but the
+   * operator still wants to see what the agent has access to.
+   */
+  actions: { name: string, description: string }[]
 }
 const mcpServerRows = computed<McpServerRow[]>(() => {
   const buckets = new Map<string, AgentTool[]>()
@@ -236,23 +241,36 @@ const mcpServerRows = computed<McpServerRow[]>(() => {
   }
   const rows: McpServerRow[] = []
   for (const [server, members] of buckets) {
-    // Members include the McpServerTool handle (one) plus each per-action
-    // wrapper. For the toggle's "all enabled" semantic, every member must
-    // be enabled; for the action count we exclude the server-level handle
-    // so "12 actions" matches what the model can actually invoke.
-    const actions = members.filter(m => m.name !== `mcp_${server}`)
+    // The server-level handle (mcp_<server>) is the row that the toggle
+    // governs and the only one with an explicit AgentToolConfig row post-
+    // Phase-6. Per-action members are shown read-only beneath the toggle.
+    const handleName = `mcp_${server}`
+    const serverHandle = members.find(m => m.name === handleName)
+    const actions = members
+      .filter(m => m.name !== handleName)
+      .map(m => ({ name: m.name, description: m.description ?? '' }))
+      .sort((a, b) => a.name.localeCompare(b.name))
     rows.push({
       key: `mcp:${server}`,
       server,
-      members,
-      enabled: members.every(m => m.enabled),
-      actionCount: actions.length,
+      enabled: serverHandle?.enabled ?? false,
+      actions,
     })
   }
   // Sort alphabetically by server name for stable rendering.
   rows.sort((a, b) => a.server.localeCompare(b.server))
   return rows
 })
+
+/**
+ * Per-server expanded-action-list disclosure state on the agent edit panel.
+ * Tracks the server name (not key) so the state survives a re-fetch that
+ * may rebuild row identities.
+ */
+const expandedMcpServer = ref<string | null>(null)
+function toggleMcpExpand(server: string) {
+  expandedMcpServer.value = expandedMcpServer.value === server ? null : server
+}
 
 const queueMode = ref('queue')
 const execBypassAllowlist = ref(false)
@@ -609,9 +627,13 @@ async function toggleTool(toolName: string, enabled: boolean) {
 async function toggleToolGroup(group: string, enabled: boolean) {
   if (!editing.value) return
   // Optimistic local update so the toggle animates without a roundtrip.
-  for (const t of agentTools.value) {
-    if ((t.group as string | undefined) === group) t.enabled = enabled
-  }
+  // Only flip the server-level handle (mcp_<group>) — that's the single
+  // row the backend writes post-Phase-6; per-action wrappers no longer
+  // carry independent enablement, their `enabled` falls out of the
+  // default policy in ApiToolsController.listForAgent.
+  const handleName = `mcp_${group}`
+  const handle = agentTools.value.find(t => t.name === handleName)
+  if (handle) handle.enabled = enabled
   try {
     await $fetch(`/api/agents/${editing.value.id}/tool-groups/${encodeURIComponent(group)}`, {
       method: 'PUT',
@@ -1679,38 +1701,67 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           <div
             v-for="row in mcpServerRows"
             :key="row.key"
-            class="px-4 py-3 flex items-center gap-3"
           >
-            <div class="w-8 h-8 rounded flex items-center justify-center shrink-0 bg-violet-500/15">
-              <PuzzlePieceIcon
-                class="w-4 h-4 text-violet-400"
-                aria-hidden="true"
-              />
-            </div>
-            <div class="flex-1 min-w-0">
-              <span class="text-sm text-fg-strong font-mono">{{ row.server }}</span>
-              <div class="mt-1.5">
-                <span class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm bg-violet-500/10 border-violet-500/25 text-violet-400">
-                  {{ row.actionCount }} action{{ row.actionCount === 1 ? '' : 's' }}
-                </span>
+            <div class="px-4 py-3 flex items-center gap-3">
+              <button
+                :title="expandedMcpServer === row.server ? `Collapse ${row.server} actions` : `Expand ${row.server} actions`"
+                :aria-label="expandedMcpServer === row.server ? `Collapse ${row.server} actions` : `Expand ${row.server} actions`"
+                :aria-expanded="expandedMcpServer === row.server"
+                class="w-8 h-8 rounded flex items-center justify-center shrink-0 bg-violet-500/15 hover:bg-violet-500/25 transition-colors"
+                @click="toggleMcpExpand(row.server)"
+              >
+                <ChevronRightIcon
+                  class="w-4 h-4 text-violet-400 transition-transform duration-150"
+                  :class="{ 'rotate-90': expandedMcpServer === row.server }"
+                  aria-hidden="true"
+                />
+              </button>
+              <div class="flex-1 min-w-0">
+                <span class="text-sm text-fg-strong font-mono">{{ row.server }}</span>
+                <div class="mt-1.5">
+                  <span class="text-[10px] font-mono px-1.5 py-0.5 border rounded-sm bg-violet-500/10 border-violet-500/25 text-violet-400">
+                    {{ row.actions.length }} action{{ row.actions.length === 1 ? '' : 's' }}
+                  </span>
+                </div>
               </div>
-            </div>
-            <button
-              :title="row.enabled ? `Disable ${row.server} for this agent` : `Enable ${row.server} for this agent`"
-              :aria-label="row.enabled ? `Disable ${row.server} for this agent` : `Enable ${row.server} for this agent`"
-              class="shrink-0"
-              @click="toggleToolGroup(row.server, !row.enabled)"
-            >
-              <div
-                class="relative w-9 h-5 rounded-full transition-colors duration-200"
-                :class="row.enabled ? 'bg-emerald-500' : 'bg-muted'"
+              <button
+                :title="row.enabled ? `Disable ${row.server} for this agent` : `Enable ${row.server} for this agent`"
+                :aria-label="row.enabled ? `Disable ${row.server} for this agent` : `Enable ${row.server} for this agent`"
+                class="shrink-0"
+                @click="toggleToolGroup(row.server, !row.enabled)"
               >
                 <div
-                  class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
-                  :class="row.enabled ? 'left-[18px]' : 'left-0.5'"
-                />
+                  class="relative w-9 h-5 rounded-full transition-colors duration-200"
+                  :class="row.enabled ? 'bg-emerald-500' : 'bg-muted'"
+                >
+                  <div
+                    class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
+                    :class="row.enabled ? 'left-[18px]' : 'left-0.5'"
+                  />
+                </div>
+              </button>
+            </div>
+            <!-- Read-only per-action list. Operators can no longer toggle
+                 individual actions (Phase 6 collapses MCP enablement to
+                 the server level), but they still need visibility into
+                 what each server exposes. Collapsed by default to keep
+                 the agent edit panel scannable. -->
+            <div
+              v-if="expandedMcpServer === row.server && row.actions.length"
+              class="px-4 pb-3 pl-14 space-y-1.5"
+            >
+              <div
+                v-for="action in row.actions"
+                :key="action.name"
+                class="flex flex-col gap-0.5 text-xs"
+              >
+                <span class="font-mono text-fg">{{ action.name }}</span>
+                <span
+                  v-if="action.description"
+                  class="text-neutral-500 leading-relaxed"
+                >{{ action.description }}</span>
               </div>
-            </button>
+            </div>
           </div>
         </div>
       </div>

@@ -65,17 +65,34 @@ public final class McpServerService {
      * fields are exploded out of {@code configJson} so forms can bind
      * directly without re-parsing.
      */
+    /**
+     * Snapshot of a single advertised tool on an MCP server. Exposed
+     * inside {@link View#tools} so the admin UI can render the
+     * inline-expandable action list under each MCP Servers card —
+     * no separate per-server tools endpoint needed.
+     */
+    public record ToolInfo(String name, String description) {}
+
     public record View(Long id, String name, boolean enabled, String transport,
                        String command, List<String> args, Map<String, String> env,
                        String url, Map<String, String> headers,
                        String status, String lastError,
                        String lastConnectedAt, String lastDisconnectedAt,
                        int toolCount,
+                       List<ToolInfo> tools,
                        String createdAt, String updatedAt) {
 
         public static View of(McpServer row) {
             var cfg = explodeConfigJson(row.transport, row.configJson);
-            int tools = McpConnectionManager.tools(row.name).size();
+            var liveTools = McpConnectionManager.tools(row.name);
+            int tools = liveTools.size();
+            // Expose name + description per advertised tool so the UI
+            // can render the action list without a follow-up fetch.
+            // Description falls back to empty string when the MCP server
+            // doesn't supply one — keeps the JSON shape stable.
+            var toolInfo = liveTools.stream()
+                    .map(t -> new ToolInfo(t.name(), t.description() == null ? "" : t.description()))
+                    .toList();
             // Live status preferred over the persisted column. The in-memory
             // state is updated synchronously by connect()/stop() and the
             // watchdog; the DB column lags behind by however long the
@@ -100,6 +117,7 @@ public final class McpServerService {
                     row.lastConnectedAt != null ? row.lastConnectedAt.toString() : null,
                     row.lastDisconnectedAt != null ? row.lastDisconnectedAt.toString() : null,
                     tools,
+                    toolInfo,
                     row.createdAt != null ? row.createdAt.toString() : null,
                     row.updatedAt != null ? row.updatedAt.toString() : null);
         }
