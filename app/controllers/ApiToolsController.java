@@ -193,7 +193,7 @@ public class ApiToolsController extends Controller {
                 .filter(t -> group.equals(t.group()) && t.isServerLevel())
                 .findFirst()
                 .orElse(null);
-        if (serverLevel == null) notFound();
+        if (serverLevel == null) { notFound(); return; }
 
         // Write the single server-level row.
         var config = AgentToolConfig.findByAgentAndTool(agent, serverLevel.name());
