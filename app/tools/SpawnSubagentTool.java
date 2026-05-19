@@ -734,11 +734,16 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                 return Bootstrap.fail(
                         "Error: agentId %d not found.".formatted(requestedAgentId));
             }
-            // Stamp the parent FK even for a pre-existing agent so the lineage
-            // is recorded; if a child was previously spawned by a different
-            // parent the most-recent parent wins (best-effort hierarchy).
-            childAgent.parentAgent = parentAgent;
-            childAgent.save();
+            // Don't mutate Agent.parent_agent_id on a pre-existing row. The
+            // lineage of *this* run is already recorded on the SubagentRun
+            // (parentAgentId + childAgentId), and stamping parent_agent_id
+            // on the Agent row permanently demotes an operator-created
+            // top-level agent into a subagent: it disappears from the
+            // Agents page (ApiAgentsController.list filters parentAgent !=
+            // null) and the operator can't recreate one with the same
+            // name because Agent.name carries a global UNIQUE constraint.
+            // For freshly-created child agents (else branch) the FK is
+            // still set because those rows are genuinely subagents.
         } else {
             // Clone the parent's runtime config (provider, model, thinkingMode)
             // into a fresh row so the child is its own auditable identity.
