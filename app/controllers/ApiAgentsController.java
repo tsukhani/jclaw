@@ -202,6 +202,14 @@ public class ApiAgentsController extends Controller {
             error(409, "The agent name '%s' is reserved for internal use"
                     .formatted(services.LoadTestRunner.LOADTEST_AGENT_NAME));
         }
+        // Agent.name carries a unique constraint at the DB level. Without this
+        // pre-check the duplicate surfaces only at JPA flush time as an
+        // unhandled JdbcSQLIntegrityConstraintViolationException → HTTP 500,
+        // which the operator sees as an opaque error toast. 409 with the
+        // taken name makes the conflict actionable.
+        if (Agent.findByName(name) != null) {
+            error(409, "An agent named '" + name + "' already exists");
+        }
         var modelProvider = body.get("modelProvider").getAsString();
         var modelId = body.get("modelId").getAsString();
         var thinkingMode = readOptionalString(body, "thinkingMode");
@@ -248,6 +256,16 @@ public class ApiAgentsController extends Controller {
         if (isReservedName(name)) {
             error(409, "The agent name '%s' is reserved for internal use"
                     .formatted(services.LoadTestRunner.LOADTEST_AGENT_NAME));
+        }
+        // Rename collision: another agent already owns this name. Skip the
+        // check when the name is unchanged so a PUT that only updates
+        // unrelated fields (thinking-mode, enabled, ...) doesn't false-
+        // positive on its own row.
+        if (!name.equals(agent.name)) {
+            var conflicting = Agent.findByName(name);
+            if (conflicting != null && !conflicting.id.equals(agent.id)) {
+                error(409, "An agent named '" + name + "' already exists");
+            }
         }
         var modelProvider = body.has("modelProvider") ? body.get("modelProvider").getAsString() : agent.modelProvider;
         var modelId = body.has("modelId") ? body.get("modelId").getAsString() : agent.modelId;

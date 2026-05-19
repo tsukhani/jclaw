@@ -276,6 +276,16 @@ const queueMode = ref('queue')
 const execBypassAllowlist = ref(false)
 const execAllowGlobalPaths = ref(false)
 const saving = ref(false)
+/**
+ * Last save-attempt error surfaced to the operator. Set when the agent
+ * create/update POST/PUT returns a non-2xx; cleared on the next attempt
+ * and on form open/close. The backend's `error(409, msg)` from
+ * ApiAgentsController sends `msg` as a plain-text body — $fetch puts it
+ * on the FetchError's `data` field, which we prefer over the generic
+ * status-line `message` so the operator sees the actual cause (e.g.
+ * "An agent named 'Testing' already exists" instead of a 409 number).
+ */
+const saveError = ref<string | null>(null)
 
 // Bulk-delete selection state for the Custom Agents list. When selectMode is on,
 // row clicks toggle selection instead of opening the edit form, and the header
@@ -533,6 +543,7 @@ function newAgent() {
   formBaseline.value = { ...form.value }
   creating.value = true
   editing.value = null
+  saveError.value = null
 }
 
 function editAgent(agent: Agent) {
@@ -547,6 +558,7 @@ function editAgent(agent: Agent) {
   formBaseline.value = { ...form.value }
   editing.value = agent
   creating.value = false
+  saveError.value = null
   loadWorkspaceFile(agent.id, 'AGENT.md')
   loadAgentTools(agent.id)
   loadAgentSkills(agent.id)
@@ -803,6 +815,7 @@ watch(() => form.value.modelProvider, (newProvider) => {
 
 async function saveAgent() {
   saving.value = true
+  saveError.value = null
   try {
     // Empty string means "reasoning off" — send null so the backend clears the
     // column. The model also collapses unknown levels to null defensively, but
@@ -828,6 +841,10 @@ async function saveAgent() {
     refresh()
   }
   catch (e) {
+    const fe = e as { data?: unknown, message?: string }
+    saveError.value = typeof fe.data === 'string' && fe.data.length > 0
+      ? fe.data
+      : (fe.message || 'Failed to save agent')
     console.error('Failed to save agent:', e)
   }
   finally {
@@ -1236,7 +1253,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           class="mt-5"
           @toggle="toggleFormCapability"
         />
-        <div class="flex mt-4">
+        <div class="flex items-center mt-4 gap-3">
           <button
             :disabled="saving || !formDirty || !form.name || !form.modelProvider || !form.modelId"
             class="p-1.5 text-emerald-700 dark:text-emerald-400 hover:text-emerald-600 dark:hover:text-emerald-300 disabled:opacity-40 disabled:hover:text-emerald-700 dark:disabled:hover:text-emerald-400 transition-colors"
@@ -1248,6 +1265,13 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               aria-hidden="true"
             />
           </button>
+          <p
+            v-if="saveError"
+            class="text-xs text-red-500"
+            role="alert"
+          >
+            {{ saveError }}
+          </p>
         </div>
       </div>
 
