@@ -643,21 +643,43 @@ function removeHeaderRow(i: number) {
             <tr v-if="expandedToolsRowId === server.id && server.tools.length">
               <td
                 colspan="6"
-                class="bg-muted/30 px-4 py-3"
+                class="bg-muted/30 px-0 py-0"
               >
-                <ul class="space-y-2">
-                  <li
-                    v-for="tool in server.tools"
-                    :key="tool.name"
-                    class="flex flex-col gap-0.5 text-xs"
-                  >
-                    <span class="font-mono text-fg-primary">{{ tool.name }}</span>
-                    <span
-                      v-if="tool.description"
-                      class="text-fg-muted leading-relaxed"
-                    >{{ tool.description }}</span>
-                  </li>
-                </ul>
+                <!-- Tool catalogue: hairline-divided list inside a
+                     bordered card. Each entry is name (mono accent) +
+                     description (muted body), with a header bar that
+                     names the count so an operator can tell at a
+                     glance whether they're looking at the full set
+                     (e.g. 119 google-workspace actions) without
+                     scanning to the bottom. -->
+                <div class="border-y border-border">
+                  <div class="flex items-center justify-between px-4 py-2 bg-muted/40 border-b border-border">
+                    <span class="text-[11px] uppercase tracking-wider font-medium text-fg-muted">
+                      Tools
+                    </span>
+                    <span class="text-[11px] font-mono tabular-nums text-fg-muted">
+                      {{ server.tools.length }}
+                    </span>
+                  </div>
+                  <ol class="divide-y divide-border/60">
+                    <li
+                      v-for="(tool, idx) in server.tools"
+                      :key="tool.name"
+                      class="grid grid-cols-[2.5rem_1fr] items-baseline gap-x-3 px-4 py-2.5 hover:bg-muted/40 transition-colors"
+                    >
+                      <span class="text-[10px] font-mono tabular-nums text-fg-muted/70 select-none">
+                        {{ String(idx + 1).padStart(3, '0') }}
+                      </span>
+                      <div class="flex flex-col gap-0.5 min-w-0">
+                        <span class="font-mono text-xs text-fg-strong">{{ tool.name }}</span>
+                        <span
+                          v-if="tool.description"
+                          class="text-xs text-fg-muted leading-relaxed"
+                        >{{ tool.description }}</span>
+                      </div>
+                    </li>
+                  </ol>
+                </div>
               </td>
             </tr>
 
