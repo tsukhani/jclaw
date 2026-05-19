@@ -1,20 +1,24 @@
 <script setup lang="ts">
 import {
+  ArrowUturnLeftIcon,
   CheckCircleIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   ChevronUpIcon,
   ClipboardDocumentCheckIcon,
   ClockIcon,
+  Cog6ToothIcon,
   CommandLineIcon,
   ComputerDesktopIcon,
   DocumentTextIcon,
   FolderIcon,
   GlobeAltIcon,
   MagnifyingGlassIcon,
+  PauseIcon,
   PlusIcon,
   PuzzlePieceIcon,
   TrashIcon,
+  UsersIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { Save } from 'lucide-vue-next'
@@ -123,6 +127,10 @@ const TOOL_ICON_COMPONENTS = {
   clock: ClockIcon,
   check: CheckCircleIcon,
   tasks: ClipboardDocumentCheckIcon,
+  users: UsersIcon,
+  pause: PauseIcon,
+  history: ArrowUturnLeftIcon,
+  cog: Cog6ToothIcon,
 } as const
 function toolIconComponent(name: string) {
   const key = getToolMeta(name)?.icon as keyof typeof TOOL_ICON_COMPONENTS | undefined
@@ -1770,20 +1778,43 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                  the server level), but they still need visibility into
                  what each server exposes. Collapsed by default to keep
                  the agent edit panel scannable. -->
+            <!-- Same divider+ordinal layout used on the /mcp-servers page
+                 expanded tool list. Header bar names the row count so the
+                 operator can tell at a glance how many actions a server
+                 actually exposes; hairline dividers + zero-padded indices
+                 break up the otherwise-unstructured wall of names so a
+                 119-tool server (google-workspace) stays scannable. -->
             <div
               v-if="expandedMcpServer === row.server && row.actions.length"
-              class="px-4 pb-3 pl-14 space-y-1.5"
+              class="px-4 pb-3 pl-14"
             >
-              <div
-                v-for="action in row.actions"
-                :key="action.name"
-                class="flex flex-col gap-0.5 text-xs"
-              >
-                <span class="font-mono text-fg">{{ action.name }}</span>
-                <span
-                  v-if="action.description"
-                  class="text-neutral-500 leading-relaxed"
-                >{{ action.description }}</span>
+              <div class="border border-border">
+                <div class="flex items-center justify-between px-4 py-2 bg-muted/40 border-b border-border">
+                  <span class="text-[11px] uppercase tracking-wider font-medium text-fg-muted">
+                    Actions
+                  </span>
+                  <span class="text-[11px] font-mono tabular-nums text-fg-muted">
+                    {{ row.actions.length }}
+                  </span>
+                </div>
+                <ol class="divide-y divide-border/60">
+                  <li
+                    v-for="(action, idx) in row.actions"
+                    :key="action.name"
+                    class="grid grid-cols-[2.5rem_1fr] items-baseline gap-x-3 px-4 py-2.5 hover:bg-muted/40 transition-colors"
+                  >
+                    <span class="text-[10px] font-mono tabular-nums text-fg-muted/70 select-none">
+                      {{ String(idx + 1).padStart(3, '0') }}
+                    </span>
+                    <div class="flex flex-col gap-0.5 min-w-0">
+                      <span class="font-mono text-xs text-fg-strong">{{ action.name }}</span>
+                      <span
+                        v-if="action.description"
+                        class="text-xs text-fg-muted leading-relaxed"
+                      >{{ action.description }}</span>
+                    </div>
+                  </li>
+                </ol>
               </div>
             </div>
           </div>
