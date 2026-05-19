@@ -133,74 +133,31 @@ async function deleteRun(run: SubagentRun) {
 }
 
 /**
- * Bulk-select state mirroring the agents and tasks pages: row clicks
- * toggle selection while selectMode is on; the Delete button sweeps
- * the selected ids through the per-row DELETE endpoint.
+ * Bulk-select wiring shared with tasks.vue via useBulkSelect. The
+ * RUNNING-row exclusion lives in the `selectable` predicate so the
+ * "select all" header checkbox doesn't include live rows the backend
+ * would reject with 409.
  */
-const selectMode = ref(false)
-const selectedIds = ref<Set<number>>(new Set())
-const deletingBulk = ref(false)
-
-function enterSelectMode() {
-  selectMode.value = true
-  selectedIds.value = new Set()
-}
-
-function exitSelectMode() {
-  selectMode.value = false
-  selectedIds.value = new Set()
-}
-
-function toggleSelection(id: number) {
-  const next = new Set(selectedIds.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  selectedIds.value = next
-}
-
-/**
- * Selectable rows = everything except RUNNING (the backend rejects
- * delete on those with 409). Reflected in the header-checkbox state
- * so "select all" doesn't accidentally include the live rows the
- * operator can't actually delete from this affordance.
- */
-const selectableRuns = computed(() => runs.value.filter(r => r.status !== 'RUNNING'))
-
-function toggleSelectAll() {
-  if (!selectableRuns.value.length) return
-  if (selectedIds.value.size === selectableRuns.value.length) {
-    selectedIds.value = new Set()
-  }
-  else {
-    selectedIds.value = new Set(selectableRuns.value.map(r => r.id))
-  }
-}
-
-async function deleteSelected() {
-  if (!selectedIds.value.size) return
-  const count = selectedIds.value.size
-  const ok = await confirm({
+const {
+  selectMode,
+  selectedIds,
+  deletingBulk,
+  selectableRows: selectableRuns,
+  enter: enterSelectMode,
+  exit: exitSelectMode,
+  toggle: toggleSelection,
+  toggleAll: toggleSelectAll,
+  deleteSelected,
+} = useBulkSelect<SubagentRun>({
+  rows: runs,
+  selectable: r => r.status !== 'RUNNING',
+  deleteOne: id => $fetch<unknown>(`/api/subagent-runs/${id}`, { method: 'DELETE' }),
+  onComplete: () => refresh(),
+  confirmCopy: count => ({
     title: 'Delete subagent runs',
     message: `Permanently delete ${count} subagent run${count === 1 ? '' : 's'} along with their child agents and transcripts? This cannot be undone.`,
-    confirmText: 'Delete',
-    variant: 'danger',
-  })
-  if (!ok) return
-  deletingBulk.value = true
-  try {
-    for (const id of selectedIds.value) {
-      await $fetch(`/api/subagent-runs/${id}`, { method: 'DELETE' })
-    }
-    exitSelectMode()
-    await refresh()
-  }
-  catch (e) {
-    console.error('Failed to delete selected subagent runs:', e)
-  }
-  finally {
-    deletingBulk.value = false
-  }
-}
+  }),
+})
 
 // A11y: stable ids for filter inputs.
 const parentSelectId = useId()

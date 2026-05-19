@@ -17,6 +17,33 @@ const { data: tasks, refresh } = await useFetch<Task[]>(url)
 const { mutate } = useApiMutation()
 const { confirm } = useConfirm()
 
+/**
+ * Bulk-select wiring shared with subagents.vue (and the seeded
+ * agents.vue pattern). The composable owns selectMode, selectedIds,
+ * deletingBulk, enter/exit/toggle/toggleAll, and the confirmation
+ * sweep — this page only needs to pin the rows source, the per-id
+ * delete endpoint, and the confirm copy.
+ */
+const {
+  selectMode,
+  selectedIds,
+  deletingBulk,
+  selectableRows,
+  enter: enterSelectMode,
+  exit: exitSelectMode,
+  toggle: toggleSelection,
+  toggleAll: toggleSelectAll,
+  deleteSelected,
+} = useBulkSelect<Task>({
+  rows: tasks,
+  deleteOne: id => $fetch<unknown>(`/api/tasks/${id}`, { method: 'DELETE' }),
+  onComplete: () => refresh(),
+  confirmCopy: count => ({
+    title: 'Delete tasks',
+    message: `Permanently delete ${count} task${count === 1 ? '' : 's'} and their run history? This cannot be undone.`,
+  }),
+})
+
 async function cancelTask(id: number) {
   await mutate(`/api/tasks/${id}/cancel`, { method: 'POST' })
   refresh()
@@ -59,71 +86,6 @@ const statusColors: Record<string, string> = {
 // A11y: stable ids for filter selects
 const statusSelectId = useId()
 const typeSelectId = useId()
-
-/**
- * Bulk-select state mirroring the agents page: row clicks toggle
- * selection while selectMode is on, and a single Delete button
- * sweeps every selected row through the per-row DELETE endpoint.
- */
-const selectMode = ref(false)
-const selectedIds = ref<Set<number>>(new Set())
-const deletingBulk = ref(false)
-
-function enterSelectMode() {
-  selectMode.value = true
-  selectedIds.value = new Set()
-}
-
-function exitSelectMode() {
-  selectMode.value = false
-  selectedIds.value = new Set()
-}
-
-function toggleSelection(id: number) {
-  const next = new Set(selectedIds.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  selectedIds.value = next
-}
-
-function toggleSelectAll() {
-  if (!tasks.value) return
-  if (selectedIds.value.size === tasks.value.length) {
-    selectedIds.value = new Set()
-  }
-  else {
-    selectedIds.value = new Set(tasks.value.map(t => t.id))
-  }
-}
-
-async function deleteSelected() {
-  if (!selectedIds.value.size) return
-  const count = selectedIds.value.size
-  const ok = await confirm({
-    title: 'Delete tasks',
-    message: `Permanently delete ${count} task${count === 1 ? '' : 's'} and their run history? This cannot be undone.`,
-    confirmText: 'Delete',
-    variant: 'danger',
-  })
-  if (!ok) return
-  deletingBulk.value = true
-  try {
-    // Sequential deletes — the selection is small (user-curated) and
-    // each request goes through the same FK-cascade path, so parallel
-    // fires would just contend on H2 row locks for the message rows.
-    for (const id of selectedIds.value) {
-      await $fetch(`/api/tasks/${id}`, { method: 'DELETE' })
-    }
-    exitSelectMode()
-    refresh()
-  }
-  catch (e) {
-    console.error('Failed to delete selected tasks:', e)
-  }
-  finally {
-    deletingBulk.value = false
-  }
-}
 </script>
 
 <template>
@@ -216,8 +178,8 @@ async function deleteSelected() {
             >
               <input
                 type="checkbox"
-                :checked="!!tasks?.length && selectedIds.size === tasks.length"
-                :indeterminate.prop="selectedIds.size > 0 && selectedIds.size < (tasks?.length ?? 0)"
+                :checked="!!selectableRows.length && selectedIds.size === selectableRows.length"
+                :indeterminate.prop="selectedIds.size > 0 && selectedIds.size < selectableRows.length"
                 aria-label="Select all tasks on this page"
                 @change="toggleSelectAll"
               >
