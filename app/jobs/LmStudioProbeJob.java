@@ -21,6 +21,11 @@ public class LmStudioProbeJob extends Job<Void> {
 
     @Override
     public void doJob() {
+        // Skip in test mode — same rationale as OllamaLocalProbeJob: the
+        // probe is operator guidance, contributes zero signal under
+        // autotest (which points providers at 127.0.0.1 mock servers),
+        // and creates a path for external-state flakiness.
+        if (play.Play.runningInTestMode()) return;
         var baseUrl = Tx.run(() -> ConfigService.get("provider.lm-studio.baseUrl"));
         if (baseUrl == null || baseUrl.isBlank()) {
             return;

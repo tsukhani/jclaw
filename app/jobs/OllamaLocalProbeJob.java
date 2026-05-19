@@ -26,6 +26,13 @@ public class OllamaLocalProbeJob extends Job<Void> {
 
     @Override
     public void doJob() {
+        // Skip in test mode. The probe contributes zero signal there —
+        // tests use 127.0.0.1 mock servers, not the developer's real
+        // Ollama instance on :11434 — but the real HTTP call still
+        // costs boot latency on every autotest run and creates a path
+        // for external-state flakiness (Ollama busy/slow → slow boot).
+        // Mirrors the test-mode skip in DbSchedulerBootstrapJob.
+        if (play.Play.runningInTestMode()) return;
         // Read config in its own short tx so the JPA carrier is released
         // before the HTTP probe call — the response timeout is several
         // seconds and we don't want the boot-time tx held open across a
