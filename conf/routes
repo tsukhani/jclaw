@@ -33,6 +33,7 @@ GET     /api/task-runs/search                   ApiTasksController.searchTranscr
 POST    /api/tasks                              ApiTasksController.create
 PATCH   /api/tasks/{id}                         ApiTasksController.update
 POST    /api/tasks/{id}/cancel                  ApiTasksController.cancel
+DELETE  /api/tasks/{id}                         ApiTasksController.delete
 POST    /api/tasks/{id}/retry                   ApiTasksController.retry
 POST    /api/tasks/{id}/run                     ApiTasksController.run
 POST    /api/tasks/{id}/pause                   ApiTasksController.pause

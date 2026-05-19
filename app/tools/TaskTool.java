@@ -69,7 +69,8 @@ public class TaskTool implements ToolRegistry.Tool {
                 new agents.ToolAction("pause",              "Pause a recurring task by name; cadence is preserved, fires no-op until resume"),
                 new agents.ToolAction("resume",             "Resume a previously-paused task by name"),
                 new agents.ToolAction("runNow",             "Fire a task immediately by name; accepts any state (revives CANCELLED to PENDING)"),
-                new agents.ToolAction("cancelTask",         "Cancel a task by name (any type)"),
+                new agents.ToolAction("cancelTask",         "Cancel a task by name (any type) — sets status=CANCELLED, row stays so runNow can revive it later"),
+                new agents.ToolAction("deleteTask",         "Hard-delete a task and its run history by name. Irreversible — the row is gone. Use cancelTask if you might want it back"),
                 new agents.ToolAction("listRecurringTasks", "List the agent's currently active recurring tasks")
         );
     }
@@ -90,15 +91,19 @@ public class TaskTool implements ToolRegistry.Tool {
                 Use updateTask to change fields on an existing task by name. \
                 Use pause/resume to toggle a recurring task without losing its \
                 cadence. Use runNow to fire immediately. Use cancelTask to \
-                terminate. Use listRecurringTasks to see what's configured. \
-                Before creating a new recurring task, call listRecurringTasks \
-                and cancelTask any prior attempts with similar names to avoid \
-                accumulating duplicates. Tasks run asynchronously via the agent.""";
+                stop fires while keeping the row (so runNow can revive it \
+                later); use deleteTask to permanently remove the task and \
+                its run history when you're done with it for good. Use \
+                listRecurringTasks to see what's configured. Before creating \
+                a new recurring task, call listRecurringTasks and \
+                cancelTask/deleteTask any prior attempts with similar names \
+                to avoid accumulating duplicates. Tasks run asynchronously \
+                via the agent.""";
     }
 
     @Override
     public String summary() {
-        return "Manage background tasks via the 'action' parameter: createTask, updateTask, pause, resume, runNow, cancelTask, listRecurringTasks.";
+        return "Manage background tasks via the 'action' parameter: createTask, updateTask, pause, resume, runNow, cancelTask, deleteTask, listRecurringTasks.";
     }
 
     @Override
@@ -107,7 +112,7 @@ public class TaskTool implements ToolRegistry.Tool {
         var props = Map.ofEntries(
                 Map.entry("action", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.ENUM, List.of("createTask", "updateTask", "pause", "resume",
-                                "runNow", "cancelTask", "listRecurringTasks"),
+                                "runNow", "cancelTask", "deleteTask", "listRecurringTasks"),
                         SchemaKeys.DESCRIPTION, "The action to perform")),
                 Map.entry("name", Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "Task name (short identifier)")),
@@ -159,6 +164,7 @@ public class TaskTool implements ToolRegistry.Tool {
             case "resume" -> resume(args, agent);
             case "runNow" -> runNow(args, agent);
             case "cancelTask" -> cancelTask(args, agent);
+            case "deleteTask" -> deleteTask(args, agent);
             case "listRecurringTasks" -> listRecurringTasks(agent);
             default -> "Error: Unknown action '%s'".formatted(action);
         };
@@ -502,6 +508,52 @@ public class TaskTool implements ToolRegistry.Tool {
         return cancelledIds.size() == 1
                 ? "Task '%s' cancelled.".formatted(name)
                 : "%d tasks named '%s' cancelled.".formatted(cancelledIds.size(), name);
+    }
+
+    /**
+     * Hard-delete a task and its run history by name. Unlike cancelTask,
+     * which preserves the Task row so runNow can revive it, deleteTask
+     * removes the row, every TaskRun referencing it, and every
+     * TaskRunMessage under those runs. Agent-scoped — one agent cannot
+     * delete another agent's tasks of the same name.
+     */
+    private String deleteTask(JsonObject args, Agent agent) {
+        if (!args.has("name") || args.get("name").isJsonNull()) {
+            return "Error: 'name' is required";
+        }
+        var name = args.get("name").getAsString();
+        var deletedIds = services.Tx.run(() -> {
+            @SuppressWarnings("unchecked")
+            var raw = (java.util.List<Object>) (java.util.List<?>) Task.find(
+                    "name = ?1 AND agent = ?2", name, agent).fetch();
+            var ids = new ArrayList<Long>(raw.size());
+            var em = play.db.jpa.JPA.em();
+            for (var row : raw) {
+                var task = (Task) row;
+                var taskId = task.id;
+                em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.task.id = :taskId")
+                        .setParameter("taskId", taskId).executeUpdate();
+                em.createQuery("DELETE FROM TaskRun r WHERE r.task.id = :taskId")
+                        .setParameter("taskId", taskId).executeUpdate();
+                task.delete();
+                ids.add(taskId);
+            }
+            return ids;
+        });
+        if (deletedIds.isEmpty()) {
+            return "No task found with name '%s'.".formatted(name);
+        }
+        // Drop scheduler rows outside the Tx — idempotent and JDBC-only.
+        for (var taskId : deletedIds) {
+            services.TaskSchedulingService.cancel(taskId);
+        }
+        EventLogger.info("TASK_MGMT_HARD_DELETE", agent.name, null,
+                "Task '%s' (%d match%s) hard-deleted via tool"
+                        .formatted(name, deletedIds.size(),
+                                deletedIds.size() == 1 ? "" : "es"));
+        return deletedIds.size() == 1
+                ? "Task '%s' deleted.".formatted(name)
+                : "%d tasks named '%s' deleted.".formatted(deletedIds.size(), name);
     }
 
     private String listRecurringTasks(Agent agent) {

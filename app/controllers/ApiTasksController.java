@@ -457,6 +457,48 @@ public class ApiTasksController extends Controller {
         renderJSON(gson.toJson(TaskView.of(task)));
     }
 
+    /**
+     * DELETE /api/tasks/{id} — hard-delete a task and its run history.
+     *
+     * <p>Distinct from {@link #cancel(Long)}: cancel sets the task to
+     * {@link Task.Status#CANCELLED} (row stays, can be revived via
+     * runNow); delete removes the Task row entirely along with every
+     * {@link TaskRun} and {@link TaskRunMessage} that references it.
+     * Use cancel for "stop running, I might want this back"; use
+     * delete for "I'm done with this, get rid of the row".
+     *
+     * <p>FK chain (NOT NULL on both sides):
+     * {@code TaskRunMessage → TaskRun → Task}.  JPQL bulk deletes
+     * cover the descendants in two queries regardless of run-count,
+     * then the scheduler row is dropped (idempotent), then the Task
+     * row itself.
+     */
+    @ApiResponse(responseCode = "200")
+    public static void delete(Long id) {
+        Task task = Task.findById(id);
+        if (task == null) { notFound(); return; }
+
+        var agentName = task.agent != null ? task.agent.name : null;
+        var taskName = task.name;
+        var taskId = task.id;
+
+        var em = play.db.jpa.JPA.em();
+        em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.task.id = :taskId")
+                .setParameter("taskId", taskId).executeUpdate();
+        em.createQuery("DELETE FROM TaskRun r WHERE r.task.id = :taskId")
+                .setParameter("taskId", taskId).executeUpdate();
+        em.flush();
+
+        // Idempotent — harmless if the task is already in a terminal
+        // state and its scheduler row was already removed by cancel.
+        services.TaskSchedulingService.cancel(taskId);
+
+        task.delete();
+        EventLogger.info("TASK_MGMT_HARD_DELETE", agentName, null,
+                "Task '%s' (id=%d) hard-deleted via API".formatted(taskName, taskId));
+        renderJSON("{\"status\":\"deleted\",\"id\":" + taskId + "}");
+    }
+
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
     public static void pause(Long id) {
         Task task = Task.findById(id);

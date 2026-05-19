@@ -14,6 +14,7 @@ const url = computed(() => {
 
 const { data: tasks, refresh } = await useFetch<Task[]>(url)
 const { mutate } = useApiMutation()
+const { confirm } = useConfirm()
 
 async function cancelTask(id: number) {
   await mutate(`/api/tasks/${id}/cancel`, { method: 'POST' })
@@ -22,6 +23,23 @@ async function cancelTask(id: number) {
 
 async function retryTask(id: number) {
   await mutate(`/api/tasks/${id}/retry`, { method: 'POST' })
+  refresh()
+}
+
+/**
+ * Hard-delete a task — distinct from cancelTask which keeps the row.
+ * Always confirms first because the deletion includes every TaskRun
+ * and TaskRunMessage under it, and there's no revive path.
+ */
+async function deleteTask(task: Task) {
+  const ok = await confirm({
+    title: 'Delete task?',
+    message: `"${task.name}" and its run history will be permanently removed. This cannot be undone.`,
+    confirmText: 'Delete',
+    variant: 'danger',
+  })
+  if (!ok) return
+  await mutate(`/api/tasks/${task.id}`, { method: 'DELETE' })
   refresh()
 }
 
@@ -157,6 +175,13 @@ const typeSelectId = useId()
                 @click="retryTask(task.id)"
               >
                 Retry
+              </button>
+              <button
+                class="text-xs text-fg-muted hover:text-red-400 transition-colors"
+                :title="`Permanently delete “${task.name}” and its run history`"
+                @click="deleteTask(task)"
+              >
+                Delete
               </button>
             </td>
           </tr>
