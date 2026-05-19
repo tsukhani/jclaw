@@ -59,7 +59,7 @@ public class ApiTasksController extends Controller {
             return new TaskView(t.id, t.name, t.description, t.type.name(), t.status.name(),
                     t.cronExpression, t.intervalSeconds, t.scheduleDisplay,
                     t.retryCount, t.maxRetries, t.lastError,
-                    t.nextRunAt != null ? t.nextRunAt.toString() : null,
+                    nextRunAtForDisplay(t),
                     t.createdAt.toString(),
                     t.agent != null ? t.agent.id : null,
                     t.agent != null ? t.agent.name : null,
@@ -69,6 +69,37 @@ public class ApiTasksController extends Controller {
                     t.enabledToolNames, t.workdir,
                     t.preCheck, t.script, t.noAgent,
                     t.contextFromTaskIds, t.repeatLimit);
+        }
+
+        /**
+         * Authoritative next-fire instant for the UI.  Task.nextRunAt is
+         * stamped at create/update time and never refreshed by the scheduler
+         * — db-scheduler owns the live next-fire in its own scheduled_tasks
+         * row. For CRON tasks we recompute from the expression so the Tasks
+         * page shows e.g. "tomorrow 09:00" instead of the create timestamp;
+         * for INTERVAL we project from now + intervalSeconds (a reasonable
+         * approximation between fires, since the last-fire timestamp isn't
+         * cheap to surface here). Terminal-status tasks fall back to the
+         * stored value because no further fire is expected.
+         */
+        private static String nextRunAtForDisplay(Task t) {
+            if (t.status != Task.Status.PENDING) {
+                return t.nextRunAt != null ? t.nextRunAt.toString() : null;
+            }
+            try {
+                if (t.type == Task.Type.CRON && t.cronExpression != null) {
+                    var next = services.JClawCronUtils.nextExecution(t.cronExpression);
+                    if (next != null) return next.toString();
+                }
+                if (t.type == Task.Type.INTERVAL && t.intervalSeconds != null && t.intervalSeconds > 0) {
+                    return Instant.now().plusSeconds(t.intervalSeconds).toString();
+                }
+            } catch (RuntimeException _) {
+                // Fall through to the stored value — better to show something
+                // than swallow the row on a malformed expression that somehow
+                // got past validation.
+            }
+            return t.nextRunAt != null ? t.nextRunAt.toString() : null;
         }
     }
 
