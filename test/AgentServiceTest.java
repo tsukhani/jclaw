@@ -75,6 +75,79 @@ class AgentServiceTest extends UnitTest {
     }
 
     @Test
+    void createWithCreateWorkspaceFalseDoesNotMaterializeDirectory() {
+        // The 6-arg overload's createWorkspace=false branch is the seam
+        // SpawnSubagentTool uses to skip the SOUL/IDENTITY/etc. skeleton
+        // for spawned subagents. Verify that no on-disk artefacts land
+        // for that path even though the Agent row itself persists.
+        var agent = AgentService.create("svc-no-workspace", "openrouter", "gpt-4.1",
+                null, null, /* createWorkspace */ false);
+        assertNotNull(agent.id, "Agent row must still persist when workspace is skipped");
+        // The workspace root path resolves regardless (workspaceRoot() is
+        // an idempotent createDirectories on the data/agents/ root), but
+        // the agent's per-name directory must NOT exist.
+        var literalDir = AgentService.workspaceRoot().resolve("svc-no-workspace");
+        assertFalse(Files.exists(literalDir),
+                "createWorkspace=false must skip the on-disk directory; got " + literalDir);
+    }
+
+    @Test
+    void workspacePathForChildAgentResolvesToParentDirectory() {
+        // A subagent inherits the parent's on-disk workspace transparently:
+        // workspacePath(child.name) walks the parentAgent chain and returns
+        // the root parent's path. This is how tools that already pass
+        // agent.name to AgentService keep working after JCLAW-265 spawn —
+        // no per-tool routing required.
+        var parent = AgentService.create("svc-parent-of-child", "openrouter", "gpt-4.1");
+        var child = AgentService.create("svc-child-1", "openrouter", "gpt-4.1",
+                null, null, /* createWorkspace */ false);
+        child.parentAgent = parent;
+        child.save();
+
+        var parentPath = AgentService.workspacePath(parent.name);
+        var childPath = AgentService.workspacePath(child.name);
+        assertEquals(parentPath, childPath,
+                "subagent workspacePath must resolve to the parent's directory");
+        // The child must NOT have a folder of its own.
+        var literalChildDir = AgentService.workspaceRoot().resolve(child.name);
+        assertFalse(Files.exists(literalChildDir),
+                "subagent must have no on-disk workspace directory");
+    }
+
+    @Test
+    void workspacePathWalksMultiHopParentChainToRoot() {
+        // Defence in depth: the depthLimit=1 cap in SpawnSubagentTool
+        // prevents grandchildren in practice, but the walk must handle
+        // the case anyway — a future change to the limit shouldn't
+        // require touching workspacePath.
+        var root = AgentService.create("svc-root", "openrouter", "gpt-4.1");
+        var mid = AgentService.create("svc-mid", "openrouter", "gpt-4.1",
+                null, null, false);
+        mid.parentAgent = root;
+        mid.save();
+        var leaf = AgentService.create("svc-leaf", "openrouter", "gpt-4.1",
+                null, null, false);
+        leaf.parentAgent = mid;
+        leaf.save();
+
+        assertEquals(AgentService.workspacePath("svc-root"),
+                AgentService.workspacePath("svc-leaf"),
+                "two-hop chain leaf must resolve to root");
+    }
+
+    @Test
+    void workspacePathForUnknownNamePreservesPassThroughBehaviour() {
+        // Pre-2026-05 callers that resolved workspace paths before an
+        // Agent row had been committed (admin tooling, certain test
+        // fixtures) relied on workspacePath(name) returning the literal
+        // directory under data/agents/<name>. Unknown names must keep
+        // that contract so the change is backward-compat.
+        var path = AgentService.workspacePath("svc-never-existed");
+        assertTrue(path.endsWith("svc-never-existed"),
+                "unknown name must resolve to its own literal directory: " + path);
+    }
+
+    @Test
     void createDisablesBrowserToolForNonMainAgent() {
         var agent = AgentService.create("svc-browser-non-main", "openrouter", "gpt-4.1");
         AgentToolConfig browser = AgentToolConfig.find("agent.id = ?1 AND toolName = ?2",

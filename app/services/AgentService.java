@@ -70,15 +70,33 @@ public class AgentService {
                     .build());
 
     public static Agent create(String name, String modelProvider, String modelId) {
-        return create(name, modelProvider, modelId, null, null);
+        return create(name, modelProvider, modelId, null, null, true);
     }
 
     public static Agent create(String name, String modelProvider, String modelId, String thinkingMode) {
-        return create(name, modelProvider, modelId, thinkingMode, null);
+        return create(name, modelProvider, modelId, thinkingMode, null, true);
     }
 
     public static Agent create(String name, String modelProvider, String modelId,
                                 String thinkingMode, String description) {
+        return create(name, modelProvider, modelId, thinkingMode, description, true);
+    }
+
+    /**
+     * Six-argument variant with explicit control over workspace folder
+     * materialisation. {@link tools.SpawnSubagentTool#bootstrapChild} passes
+     * {@code createWorkspace=false} because subagents are delegates of their
+     * parent agent — they inherit the parent's workspace via
+     * {@link #workspacePath(String)}'s parent-chain walk and never need
+     * their own on-disk SOUL / IDENTITY / USER / BOOTSTRAP / AGENT skeleton.
+     * Operator-created agents (any caller from the admin UI or
+     * {@link controllers.ApiAgentsController}) still get the full workspace
+     * via the three other {@code create} overloads, which default
+     * {@code createWorkspace=true} and preserve the pre-2026-05 behaviour.
+     */
+    public static Agent create(String name, String modelProvider, String modelId,
+                                String thinkingMode, String description,
+                                boolean createWorkspace) {
         var agent = new Agent();
         agent.name = name;
         agent.modelProvider = modelProvider;
@@ -92,7 +110,9 @@ public class AgentService {
         agent.thinkingMode = normalizeThinkingMode(thinkingMode, modelProvider, modelId);
         agent.save();
 
-        createWorkspace(name);
+        if (createWorkspace) {
+            createWorkspace(name);
+        }
 
         // Disable browser tool for non-main agents (security)
         if (!agent.isMain()) {
@@ -367,12 +387,60 @@ public class AgentService {
      * correct response is to refuse the operation.
      */
     public static Path workspacePath(String agentName) {
-        var contained = resolveContained(workspaceRoot(), agentName);
+        var rootName = resolveWorkspaceOwnerName(agentName);
+        var contained = resolveContained(workspaceRoot(), rootName);
         if (contained == null) {
             throw new SecurityException(
-                    "Agent name '" + agentName + "' resolves outside the workspace root");
+                    "Agent name '" + rootName + "' resolves outside the workspace root");
         }
         return contained;
+    }
+
+    /**
+     * Maximum {@link models.Agent#parentAgent} hops walked by
+     * {@link #resolveWorkspaceOwnerName} before bailing. A cycle in the
+     * parent chain shouldn't be possible — the FK is set exactly once at
+     * spawn time and never re-pointed — but defence in depth keeps a
+     * corrupted DB from spinning the thread forever.
+     */
+    private static final int MAX_PARENT_WALK_DEPTH = 32;
+
+    /**
+     * Resolve an agent name to the on-disk workspace owner. Subagents
+     * (spawned via {@link tools.SpawnSubagentTool}) inherit their parent's
+     * workspace because they're delegates of the parent — anything they
+     * read or write should land in the parent's tree, and they have no
+     * on-disk identity of their own ({@link #create} skips workspace
+     * setup when called with {@code createWorkspace=false}).
+     *
+     * <p>For root agents (no {@code parentAgent}) the lookup is a no-op:
+     * the agent's own name is the workspace owner. For spawned subagents
+     * the chain is walked to the root and the root's name is returned.
+     *
+     * <p>For unknown names (no matching {@link models.Agent} row) the
+     * input is returned verbatim — this preserves the pre-2026-05
+     * behaviour for callers that resolve workspace paths before an agent
+     * row has been committed (admin tooling, tests that use
+     * {@link play.test.Fixtures#deleteDatabase}).
+     *
+     * <p>Performance note: one indexed {@code SELECT … WHERE name = ?}
+     * per call. Hot paths (tool execution, prompt assembly) hit this on
+     * every invocation; the {@code agent.name} column is unique-indexed
+     * so the query is O(log n) on a tiny table. {@link Agent#parentAgent}
+     * is eagerly fetched by default in this project so the walk doesn't
+     * trigger N+1 queries.
+     */
+    private static String resolveWorkspaceOwnerName(String agentName) {
+        return Tx.run(() -> {
+            var agent = (Agent) Agent.find("name = ?1", agentName).first();
+            if (agent == null) return agentName;
+            if (agent.parentAgent == null) return agentName;
+            var cursor = agent.parentAgent;
+            for (int hops = 0; cursor.parentAgent != null && hops < MAX_PARENT_WALK_DEPTH; hops++) {
+                cursor = cursor.parentAgent;
+            }
+            return cursor.name;
+        });
     }
 
     /**

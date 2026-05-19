@@ -749,12 +749,20 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
             // agent later (via agentId) doesn't carry stale per-spawn state.
             var name = buildChildAgentName(parentAgent.name);
             try {
+                // Subagents are delegates of the parent — they inherit the
+                // parent's on-disk workspace via AgentService.workspacePath's
+                // parent-chain walk and never need their own SOUL / IDENTITY /
+                // USER / BOOTSTRAP / AGENT skeleton. The createWorkspace=false
+                // arg suppresses the directory + markdown stubs that the
+                // operator-facing create paths still produce. Subagent tool
+                // calls resolve to the parent's workspace transparently.
                 childAgent = AgentService.create(name,
                         parentAgent.modelProvider, parentAgent.modelId,
                         parentAgent.thinkingMode,
                         label != null && !label.isBlank()
                                 ? label
-                                : "Subagent of " + parentAgent.name);
+                                : "Subagent of " + parentAgent.name,
+                        /* createWorkspace */ false);
             } catch (RuntimeException e) {
                 return Bootstrap.fail("Error: failed to create child agent: " + e.getMessage());
             }
