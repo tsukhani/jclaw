@@ -305,6 +305,19 @@ public class AgentService {
         em.createQuery("DELETE FROM Message m WHERE m.conversation.id IN " +
                         "(SELECT c.id FROM Conversation c WHERE c.agent.id = :agentId)")
                 .setParameter("agentId", agentId).executeUpdate();
+        // SubagentRun rows reference Agent (parent + child) and Conversation
+        // (parent + child) via four NOT NULL FKs. Any run where this agent
+        // is either side, or where any of its conversations is either side,
+        // would block the Conversation and Agent deletes below. The run is
+        // historical metadata; once the conversations it references are
+        // gone, the transcript is gone too, so the row carries no useful
+        // signal. Drop matching rows in one pass before the conversation
+        // delete to keep the FK graph satisfied.
+        em.createQuery("DELETE FROM SubagentRun r WHERE r.parentAgent.id = :agentId "
+                        + "OR r.childAgent.id = :agentId "
+                        + "OR r.parentConversation.id IN (SELECT c.id FROM Conversation c WHERE c.agent.id = :agentId) "
+                        + "OR r.childConversation.id IN (SELECT c.id FROM Conversation c WHERE c.agent.id = :agentId)")
+                .setParameter("agentId", agentId).executeUpdate();
         em.createQuery("DELETE FROM Conversation c WHERE c.agent.id = :agentId")
                 .setParameter("agentId", agentId).executeUpdate();
         em.createQuery("DELETE FROM AgentToolConfig t WHERE t.agent.id = :agentId")
