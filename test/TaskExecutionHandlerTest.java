@@ -332,6 +332,152 @@ class TaskExecutionHandlerTest extends UnitTest {
                 "missing-Task fire must log the warn");
     }
 
+
+    // === Race-tolerant findById (db-scheduler tx-visibility race fix) ===
+
+    @Test
+    void findTaskWithRaceBackoffReturnsExistingTaskOnFirstAttempt() throws Exception {
+        // Happy path: a Task that's already committed must be returned on
+        // the first attempt without any wall-clock cost. Pins the
+        // production scheduler's common case — the race-loss window is
+        // sub-millisecond, so 99.9% of fires resolve on the first try.
+        var agent = createAgent("race-happy-agent");
+        var task = persistTask(agent, "race-happy",
+                "irrelevant — never fires.",
+                Task.Type.IMMEDIATE, null, null, null);
+
+        commitAndReopen();
+
+        var m = invokeFindWithBackoff();
+        long t0 = System.nanoTime();
+        var found = (Task) m.invoke(null, task.id);
+        long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
+
+        assertNotNull(found, "existing Task must be found");
+        assertEquals(task.id, found.id);
+        // Negative-result retries take ~80ms in this config; an immediate
+        // hit must finish in a fraction of that. 30ms cap leaves comfortable
+        // headroom for JVM warmup / CI scheduling jitter without forfeiting
+        // the regression value of the assertion.
+        assertTrue(elapsedMs < 30,
+                "found-on-first-attempt must be fast (<30ms), got %dms"
+                        .formatted(elapsedMs));
+    }
+
+    @Test
+    void findTaskWithRaceBackoffReturnsNullAfterFullBudgetForMissingId() throws Exception {
+        // Negative path: a Task id that genuinely doesn't exist makes the
+        // helper exhaust its retry budget before returning null. The
+        // wall-clock floor is the regression guard — if a future refactor
+        // dropped the retry loop, this assertion would fail because the
+        // helper would return null in <5ms instead of ~80ms.
+        commitAndReopen();
+
+        long missingId = 999_999_999L;
+        var m = invokeFindWithBackoff();
+
+        long t0 = System.nanoTime();
+        var found = (Task) m.invoke(null, missingId);
+        long elapsedMs = (System.nanoTime() - t0) / 1_000_000L;
+
+        assertNull(found, "missing Task id must return null after the budget");
+
+        // Read the budget constants by reflection so this assertion stays
+        // honest if FIND_TASK_ATTEMPTS / FIND_TASK_BACKOFF_MS change. The
+        // floor is (attempts - 1) * sleep — one less sleep than attempts
+        // because the last attempt skips the trailing sleep.
+        var attempts = TaskExecutionHandler.class.getDeclaredField("FIND_TASK_ATTEMPTS");
+        attempts.setAccessible(true);
+        var sleepMs = TaskExecutionHandler.class.getDeclaredField("FIND_TASK_BACKOFF_MS");
+        sleepMs.setAccessible(true);
+        long expectedFloor = ((int) attempts.get(null) - 1) * (long) (int) sleepMs.get(null);
+        // 20ms slack below the floor to absorb sleep-quantum jitter on
+        // loaded CI runners — the SIGNAL is "did we retry at all", not
+        // "did we sleep exactly the documented amount". Without the floor
+        // assertion a no-retry implementation would silently pass.
+        assertTrue(elapsedMs >= expectedFloor - 20,
+                "missing-id lookup must take roughly the full retry budget "
+                        + "(>=%dms), got %dms — the retry loop has been bypassed"
+                                .formatted(expectedFloor - 20, elapsedMs));
+    }
+
+    @Test
+    void findTaskWithRaceBackoffFindsTaskCommittedByAnotherThreadMidRetry() throws Exception {
+        // Race repro: an inserter VT holds an open Tx with the new Task
+        // staged but UNCOMMITTED for ~40ms, then commits. The main thread
+        // starts the helper while the VT is mid-sleep. The first findById
+        // attempts must miss (row uncommitted, isolation hides it from the
+        // main thread's tx); a later attempt — after the VT commits — must
+        // see the row.
+        //
+        // This is the production race shape: db-scheduler's poll thread
+        // sees the scheduled_tasks row before the controller's Tx commits
+        // the Task INSERT in the same Tx. Without the retry loop, the
+        // first findById returns null and the fire is permanently lost.
+        var agent = createAgent("race-late-commit-agent");
+        commitAndReopen();
+        var agentId = agent.id;
+
+        var taskIdRef = new java.util.concurrent.atomic.AtomicLong();
+        var taskInserted = new java.util.concurrent.CountDownLatch(1);
+        var mainCanProceed = new java.util.concurrent.CountDownLatch(1);
+
+        var inserter = Thread.ofVirtual().start(() -> services.Tx.run(() -> {
+            var t = new Task();
+            t.agent = (Agent) Agent.findById(agentId);
+            t.name = "late-commit-race";
+            t.description = "irrelevant";
+            t.type = Task.Type.IMMEDIATE;
+            t.status = Task.Status.PENDING;
+            t.nextRunAt = Instant.now();
+            t.createdAt = Instant.now();
+            t.updatedAt = Instant.now();
+            t.save();
+            // Force the INSERT so the autogenerated id is assigned before
+            // we signal main — without flush() the id is still null in
+            // some Hibernate configs until commit time.
+            play.db.jpa.JPA.em().flush();
+            taskIdRef.set(t.id);
+            taskInserted.countDown();
+            // Hold the Tx open while main starts polling. ~40ms straddles
+            // the first findById attempt's budget without exhausting the
+            // ~80ms total — at least one retry should land after commit.
+            try {
+                mainCanProceed.await(2, java.util.concurrent.TimeUnit.SECONDS);
+                Thread.sleep(40);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+            return null;
+        }));
+
+        // Wait until the inserter has staged the row and we have its id.
+        assertTrue(taskInserted.await(5, java.util.concurrent.TimeUnit.SECONDS),
+                "inserter must publish the new Task id within 5s");
+        long taskId = taskIdRef.get();
+        // Let the inserter sleep with the row uncommitted while we begin
+        // the retry loop. Without this gate the main thread might race
+        // ahead of the VT's commit AND its sleep, which would make the
+        // test pass for the wrong reason (timing rather than retry).
+        mainCanProceed.countDown();
+
+        var m = invokeFindWithBackoff();
+        var found = (Task) m.invoke(null, taskId);
+        inserter.join(10_000);
+
+        assertNotNull(found,
+                "helper must retry until the inserter's Tx commits and the row "
+                        + "becomes visible — retrieved null means the loop bailed early");
+        assertEquals(taskId, found.id);
+    }
+
+    private static java.lang.reflect.Method invokeFindWithBackoff() throws Exception {
+        var m = TaskExecutionHandler.class.getDeclaredMethod(
+                "findTaskWithRaceBackoff", long.class);
+        m.setAccessible(true);
+        return m;
+    }
+
     // === CRON self-reschedule swallows malformed next-fire computation ===
 
     @Test

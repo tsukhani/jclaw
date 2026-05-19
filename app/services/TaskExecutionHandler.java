@@ -109,7 +109,7 @@ public final class TaskExecutionHandler {
                 return defaultCompletion();
             }
 
-            Task jclawTask = Tx.run(() -> (Task) Task.findById(jclawTaskId));
+            Task jclawTask = findTaskWithRaceBackoff(jclawTaskId);
             if (jclawTask == null) {
                 EventLogger.warn("task", null, null,
                         "TaskExecutionHandler: scheduled fire arrived for missing Task id %d; skipping"
@@ -158,6 +158,56 @@ public final class TaskExecutionHandler {
             return scheduleIntervalNextCompletion(task);
         }
         return defaultCompletion();
+    }
+
+    /**
+     * Default attempt budget for {@link #findTaskWithRaceBackoff}.
+     * Visible for tests so a regression test can pin the budget against
+     * the observed sub-millisecond race window without hard-coding it.
+     */
+    static final int FIND_TASK_ATTEMPTS = 5;
+
+    /** Per-attempt sleep in ms — total budget = (attempts - 1) * sleep. */
+    static final int FIND_TASK_BACKOFF_MS = 20;
+
+    /**
+     * Race-tolerant Task lookup. db-scheduler's poll thread can fire a
+     * scheduled row before the controller's INSERT for the Task row has
+     * committed — the schedule row goes into {@code scheduled_tasks} in
+     * the same Tx as the Task INSERT, but the poll reads via a separate
+     * connection / Tx so it can briefly see the schedule before the
+     * Task row. Observed in production at ~1ms separation between
+     * "Scheduled Task '...'" and "missing Task id N; skipping" log
+     * lines; the lost fire never recovers (IMMEDIATE/SCHEDULED Tasks
+     * never retry, INTERVAL/CRON Tasks lose their initial fire AND
+     * their self-reschedule, going invisibly dormant).
+     *
+     * <p>Fix shape: bounded retry-with-backoff on {@code findById}
+     * before giving up. {@link #FIND_TASK_ATTEMPTS} attempts spaced by
+     * {@link #FIND_TASK_BACKOFF_MS} ms — total wall budget ~80 ms —
+     * absorbs the observed window with three orders of magnitude of
+     * headroom. A genuinely-deleted Task (e.g. cancelled and
+     * subsequently removed) still falls through to the skip-and-warn
+     * path after the budget elapses.
+     *
+     * <p>Returns {@code null} if the Task is still not found after all
+     * attempts. Visible for tests in the {@code services} package.
+     */
+    static Task findTaskWithRaceBackoff(long taskId) {
+        for (int i = 0; i < FIND_TASK_ATTEMPTS; i++) {
+            Task t = Tx.run(() -> (Task) Task.findById(taskId));
+            if (t != null) return t;
+            // Skip the sleep after the last attempt; we've done all we can.
+            if (i < FIND_TASK_ATTEMPTS - 1) {
+                try {
+                    Thread.sleep(FIND_TASK_BACKOFF_MS);
+                } catch (InterruptedException _) {
+                    Thread.currentThread().interrupt();
+                    return null;
+                }
+            }
+        }
+        return null;
     }
 
     /**
