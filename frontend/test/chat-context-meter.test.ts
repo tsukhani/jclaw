@@ -197,7 +197,7 @@ describe('ChatContextMeter — popover content', () => {
     await trigger.trigger('mouseleave')
   })
 
-  it('hides conversation-total + compactions rows when their values are zero', async () => {
+  it('hides conversation-total when cumulativeTokens is zero but always shows compactions', async () => {
     const component = await mountSuspended(ChatContextMeter, {
       props: {
         promptTokens: 100,
@@ -211,7 +211,9 @@ describe('ChatContextMeter — popover content', () => {
     await trigger.trigger('mouseenter')
     const html = component.html() + document.body.innerHTML
     expect(html).not.toContain('Conversation total')
-    expect(html).not.toContain('Compactions')
+    // Compactions is always rendered — operators want the field
+    // discoverable even on chats that have never been compacted.
+    expect(html).toContain('Compactions')
     await trigger.trigger('mouseleave')
   })
 
