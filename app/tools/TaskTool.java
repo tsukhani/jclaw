@@ -77,16 +77,23 @@ public class TaskTool implements ToolRegistry.Tool {
     @Override
     public String description() {
         return """
-                Manage background tasks. Single tool, multiple actions selected via the 'action' parameter. \
-                Use createTask with a 'schedule' string: \
+                Manage background tasks — the abstraction for ANY scheduled or \
+                recurring work. If the operator asks for "a subagent that runs \
+                every X" or "something that fires every X minutes", they mean a \
+                Task: subagents (spawn_subagent) fire ONCE and have no schedule \
+                parameter. Single tool, multiple actions selected via the \
+                'action' parameter. Use createTask with a 'schedule' string: \
                 'now' (IMMEDIATE), '30m'/'2h'/'1d' (SCHEDULED at now+duration), \
-                'every 30m'/'every 2h'/'every 1d' (INTERVAL), or Spring 6-field cron \
-                ('0 0 9 * * *') or at-shortcut ('@daily'). \
+                'every 30m'/'every 2h'/'every 1d' (INTERVAL — minimum 1 minute \
+                via shorthand), or Spring 6-field cron ('0 0 9 * * *' or \
+                '0/30 * * * * *' for every 30 seconds) or at-shortcut ('@daily'). \
                 Use updateTask to change fields on an existing task by name. \
-                Use pause/resume to toggle a recurring task without losing its cadence. \
-                Use runNow to fire immediately. Use cancelTask to terminate. \
-                Use listRecurringTasks to see what's configured. \
-                Tasks run asynchronously via the agent.""";
+                Use pause/resume to toggle a recurring task without losing its \
+                cadence. Use runNow to fire immediately. Use cancelTask to \
+                terminate. Use listRecurringTasks to see what's configured. \
+                Before creating a new recurring task, call listRecurringTasks \
+                and cancelTask any prior attempts with similar names to avoid \
+                accumulating duplicates. Tasks run asynchronously via the agent.""";
     }
 
     @Override

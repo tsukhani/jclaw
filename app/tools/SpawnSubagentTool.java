@@ -167,6 +167,12 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         return """
                 Spawn a child subagent to carry out a task on your behalf. The child runs \
                 in its own fresh conversation and you receive its final assistant reply. \
+                Fires ONCE per call — there is no schedule/interval parameter. For \
+                anything recurring or scheduled ("every 30 seconds", "every minute", \
+                "every day at 9am"), even if the operator describes it as a \
+                "subagent", use the `task` tool's createTask action instead — that \
+                is the abstraction that carries cron/interval and can invoke an agent \
+                on each fire. \
                 Use this when a task is well-scoped and benefits from an isolated context \
                 (long research, separate tool surface, exploratory work). \
                 Required: `task` (the instruction the child should execute). \
