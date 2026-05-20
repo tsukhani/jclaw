@@ -618,4 +618,69 @@ class ApiMetricsControllerTest extends FunctionalTest {
         }
         if (err.get() != null) throw new RuntimeException(err.get());
     }
+
+    // --- loadtest body-validation branches (provider/model XOR + helper catch paths) ---
+
+    @Test
+    void loadtestRejectsProviderWithoutModel() {
+        var response = POST(authedLoadtestRequest(),
+                "/api/metrics/loadtest", "application/json",
+                "{\"concurrency\":1,\"turns\":1,\"provider\":\"openrouter\"}");
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    void loadtestRejectsModelWithoutProvider() {
+        var response = POST(authedLoadtestRequest(),
+                "/api/metrics/loadtest", "application/json",
+                "{\"concurrency\":1,\"turns\":1,\"model\":\"gpt-4.1\"}");
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    void loadtestRejectsNonIntegerConcurrency() {
+        // readInt's catch path: getAsInt throws on a non-numeric JSON string.
+        var response = POST(authedLoadtestRequest(),
+                "/api/metrics/loadtest", "application/json",
+                "{\"concurrency\":\"abc\",\"turns\":1}");
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    void loadtestRejectsNonBoolCompress() {
+        // readBool's catch path: getAsBoolean throws on a non-bool-coercible value.
+        var response = POST(authedLoadtestRequest(),
+                "/api/metrics/loadtest", "application/json",
+                "{\"concurrency\":1,\"turns\":1,\"compress\":[1,2,3]}");
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    void loadtestRejectsNonArrayPrompts() {
+        // prompts must be an array; a string here trips the JsonArray cast.
+        var response = POST(authedLoadtestRequest(),
+                "/api/metrics/loadtest", "application/json",
+                "{\"concurrency\":1,\"turns\":1,\"prompts\":\"not-an-array\"}");
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    void loadtestAcceptsNullValuedOptionalField() {
+        // body has "compress": null → readBool's isJsonNull branch returns the
+        // default (false), so the request proceeds past helper validation. We
+        // only assert the request didn't get rejected at the helper stage
+        // (anything other than 400 from those branches is acceptable; loadtest
+        // run may still hit other code paths).
+        var response = POST(authedLoadtestRequest(),
+                "/api/metrics/loadtest", "application/json",
+                "{\"concurrency\":1,\"turns\":1,\"compress\":null,\"prompts\":null}");
+        // Either a successful 200 OR an unrelated error — what matters is the
+        // null-valued helper path was exercised. Reject only on 400 from
+        // helpers (would echo "Invalid <type> for ...").
+        if (response.status.intValue() == 400) {
+            var body = getContent(response);
+            assertFalse(body.contains("Invalid boolean for"),
+                    "compress:null must NOT trip readBool's catch: " + body);
+        }
+    }
 }
