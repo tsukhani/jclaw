@@ -894,4 +894,112 @@ class ApiSkillsControllerTest extends FunctionalTest {
             off.run();
         }
     }
+
+    // ==================== detectTools branch coverage ====================
+
+    private void seedHeuristicSkill(String folder, String bodySuffix) throws Exception {
+        var dir = globalSkillsDir.resolve(folder);
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("SKILL.md"),
+                "---\n"
+              + "name: " + folder + "\n"
+              + "description: legacy skill, no tools declaration\n"
+              + "version: 1.0.0\n"
+              + "---\n"
+              + "# Howto\n\n" + bodySuffix);
+        SkillLoader.clearCache();
+    }
+
+    @Test
+    void detectToolsImpliesExecFromShFence() throws Exception {
+        login();
+        seedHeuristicSkill("sh-fence", "```sh\necho hi\n```\n");
+        var body = getContent(GET("/api/skills/sh-fence/files"));
+        assertTrue(body.contains("\"name\":\"exec\""), "sh fence implies exec: " + body);
+    }
+
+    @Test
+    void detectToolsImpliesExecFromShellFence() throws Exception {
+        login();
+        seedHeuristicSkill("shell-fence", "```shell\necho hi\n```\n");
+        var body = getContent(GET("/api/skills/shell-fence/files"));
+        assertTrue(body.contains("\"name\":\"exec\""), "shell fence implies exec: " + body);
+    }
+
+    @Test
+    void detectToolsImpliesExecFromRunTheCommandPhrase() throws Exception {
+        login();
+        seedHeuristicSkill("run-phrase", "Please run the command and observe.\n");
+        var body = getContent(GET("/api/skills/run-phrase/files"));
+        assertTrue(body.contains("\"name\":\"exec\""), "run-the-command phrase implies exec: " + body);
+    }
+
+    @Test
+    void detectToolsImpliesExecFromExecuteTheCommandPhrase() throws Exception {
+        login();
+        seedHeuristicSkill("exec-phrase", "Then execute the command directly.\n");
+        var body = getContent(GET("/api/skills/exec-phrase/files"));
+        assertTrue(body.contains("\"name\":\"exec\""), "execute-the-command phrase implies exec: " + body);
+    }
+
+    @Test
+    void detectToolsDetectsShellAlias() throws Exception {
+        login();
+        seedHeuristicSkill("shell-alias", "Documentation mentions shell usage in prose.\n");
+        var body = getContent(GET("/api/skills/shell-alias/files"));
+        assertTrue(body.contains("\"name\":\"exec\""), "shell alias must map to exec: " + body);
+    }
+
+    @Test
+    void detectToolsDetectsWriteFileAlias() throws Exception {
+        login();
+        seedHeuristicSkill("write-alias", "Use writeFile here to persist results.\n");
+        var body = getContent(GET("/api/skills/write-alias/files"));
+        assertTrue(body.contains("\"name\":\"filesystem\""),
+                "writeFile alias must resolve to filesystem: " + body);
+    }
+
+    @Test
+    void detectToolsDetectsListFilesAlias() throws Exception {
+        login();
+        seedHeuristicSkill("list-alias", "Call listFiles on the directory.\n");
+        var body = getContent(GET("/api/skills/list-alias/files"));
+        assertTrue(body.contains("\"name\":\"filesystem\""),
+                "listFiles alias must resolve to filesystem: " + body);
+    }
+
+    // ==================== readSkillFileFrom — global traversal ====================
+
+    @Test
+    void readGlobalSkillFileBlocksTraversal() throws Exception {
+        login();
+        seedGlobalSkill("alpha-skill", "alpha", "First test skill");
+        var resp = GET("/api/skills/alpha-skill/files/../../../etc/passwd");
+        var status = resp.status.intValue();
+        assertTrue(status == 403 || status == 404,
+                "traversal must be blocked, got " + status);
+    }
+
+    // ==================== copyToAgent — replacing flag ====================
+
+    @Test
+    void copyToAgentReportsReplacingFlagWhenSkillAlreadyExists() throws Exception {
+        login();
+        var idStr = createAgent("copy-replace-agent");
+        seedGlobalSkill("greeter", "greeter", "Says hi");
+
+        // First copy — replacing should be false (no prior SKILL.md in workspace)
+        var firstResp = POST("/api/agents/" + idStr + "/skills/greeter/copy",
+                "application/json", "{}");
+        assertIsOk(firstResp);
+        assertTrue(getContent(firstResp).contains("\"replaced\":false"),
+                "first copy must report replaced=false: " + getContent(firstResp));
+
+        // Second copy — workspace already has SKILL.md, replacing should be true
+        var secondResp = POST("/api/agents/" + idStr + "/skills/greeter/copy",
+                "application/json", "{}");
+        assertIsOk(secondResp);
+        assertTrue(getContent(secondResp).contains("\"replaced\":true"),
+                "second copy must report replaced=true: " + getContent(secondResp));
+    }
 }
