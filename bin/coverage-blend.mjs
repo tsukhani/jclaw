@@ -157,6 +157,8 @@ function main() {
   const jacocoArg = (args.find((a) => a.startsWith("--jacoco=")) || "").slice(9);
   const lcovArg = (args.find((a) => a.startsWith("--lcov=")) || "").slice(7);
   const lcovBaseArg = (args.find((a) => a.startsWith("--lcov-base=")) || "").slice(12);
+  const topArg = (args.find((a) => a.startsWith("--top=")) || "").slice(6);
+  const topN = topArg ? Math.max(1, parseInt(topArg, 10)) : 0;
 
   const jacocoPath = resolve(PROJECT_ROOT, jacocoArg || "jacoco.xml");
   const lcovPath = resolve(PROJECT_ROOT, lcovArg || "frontend/coverage/lcov.info");
@@ -228,6 +230,27 @@ function main() {
   console.log(`Excluded files: ${excluded.length}`);
   if (verbose) {
     for (const f of excluded) console.log(`  - ${f.path}`);
+  }
+  if (topN > 0) {
+    // Rank by total uncovered (lines + branches). Files with zero executable
+    // lines (interfaces, constants-only classes) are skipped — no signal.
+    const ranked = included
+      .map((f) => ({
+        ...f,
+        uncoveredLines: f.linesToCover - f.coveredLines,
+        uncoveredBranches: f.conditionsToCover - f.coveredConditions,
+      }))
+      .filter((f) => f.linesToCover + f.conditionsToCover > 0)
+      .map((f) => ({ ...f, uncoveredTotal: f.uncoveredLines + f.uncoveredBranches }))
+      .sort((a, b) => b.uncoveredTotal - a.uncoveredTotal)
+      .slice(0, topN);
+    console.log(`\nTop ${topN} files by uncovered (lines + branches):`);
+    console.log("  rank  uncov  lines    branches  file");
+    ranked.forEach((f, i) => {
+      const lineFrac = `${f.coveredLines}/${f.linesToCover}`;
+      const brFrac = `${f.coveredConditions}/${f.conditionsToCover}`;
+      console.log(`  ${String(i + 1).padStart(4)}  ${String(f.uncoveredTotal).padStart(5)}  ${lineFrac.padStart(8)} ${brFrac.padStart(9)}  ${f.path}`);
+    });
   }
   if (!jacoco.present) console.log(`\nWARN: jacoco.xml missing at ${jacocoPath} — backend side absent.`);
   if (!lcov.present) console.log(`\nWARN: lcov.info missing at ${lcovPath} — frontend side absent.`);
