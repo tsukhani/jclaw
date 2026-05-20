@@ -92,4 +92,57 @@ class ApiProvidersControllerTest extends FunctionalTest {
                 "application/json", "{}");
         assertEquals(400, response.status.intValue());
     }
+
+    // --- list ---
+
+    @Test
+    void listRequiresAuth() {
+        assertEquals(401, GET("/api/providers").status.intValue());
+    }
+
+    @Test
+    void listReturnsJsonArray() {
+        login();
+        var resp = GET("/api/providers");
+        assertIsOk(resp);
+        assertContentType("application/json", resp);
+        assertTrue(getContent(resp).startsWith("["));
+    }
+
+    @Test
+    void listReflectsSeededProvider() {
+        // Seed openrouter so ProviderRegistry.refresh() picks it up, then GET
+        // /api/providers must surface it. Exercises the full list+map+toJson
+        // path that the 0%-covered lambda$0 lives inside.
+        login();
+        ConfigService.set("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
+        ConfigService.set("provider.openrouter.apiKey", "sk-test");
+        ConfigService.set("provider.openrouter.models", "[]");
+        llm.ProviderRegistry.refresh();
+        var resp = GET("/api/providers");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"openrouter\""),
+                "seeded provider must appear in listing: " + body);
+    }
+
+    // --- refreshPrices ---
+
+    @Test
+    void refreshPricesRequiresAuth() {
+        assertEquals(401, POST("/api/providers/refresh-prices",
+                "application/json", "{}").status.intValue());
+    }
+
+    @Test
+    void refreshPricesReturnsEnvelopeShape() {
+        login();
+        var resp = POST("/api/providers/refresh-prices", "application/json", "{}");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        // Response shape: skipped + providersScanned + modelsUpdated + warnings.
+        assertTrue(body.contains("\"skipped\""), "envelope missing skipped: " + body);
+        assertTrue(body.contains("\"providersScanned\""), "envelope missing providersScanned: " + body);
+        assertTrue(body.contains("\"modelsUpdated\""), "envelope missing modelsUpdated: " + body);
+    }
 }
