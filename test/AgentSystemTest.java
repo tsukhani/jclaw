@@ -280,6 +280,125 @@ class AgentSystemTest extends UnitTest {
         assertEquals("quoted", SkillLoader.extractYamlValue("name: \"quoted\"", "name"));
     }
 
+    @Test
+    void extractYamlValueReturnsNullForEmptyAfterStrip() {
+        assertNull(SkillLoader.extractYamlValue("name: ", "name"));
+        assertNull(SkillLoader.extractYamlValue("name:    ", "name"));
+    }
+
+    @Test
+    void extractYamlValueHandlesArbitraryKey() {
+        // Default switch arm — anything other than name/description/tools/version.
+        assertEquals("MIT", SkillLoader.extractYamlValue("license: MIT", "license"));
+        assertNull(SkillLoader.extractYamlValue("foo: bar", "license"));
+    }
+
+    @Test
+    void extractYamlListInlineEmpty() {
+        // tools: [] should resolve to an empty list, not the missing-key default.
+        assertEquals(java.util.List.of(), SkillLoader.extractYamlList("tools: []", "tools"));
+    }
+
+    @Test
+    void extractYamlListInlineMultiValue() {
+        var result = SkillLoader.extractYamlList("tools: [a, \"b\", 'c']", "tools");
+        assertEquals(3, result.size());
+        assertTrue(result.contains("a"));
+        assertTrue(result.contains("b"));
+        assertTrue(result.contains("c"));
+    }
+
+    @Test
+    void extractYamlListBlockForm() {
+        var yaml = "tools:\n  - filesystem\n  - exec\n";
+        var result = SkillLoader.extractYamlList(yaml, "tools");
+        assertEquals(2, result.size());
+        assertEquals("filesystem", result.get(0));
+        assertEquals("exec", result.get(1));
+    }
+
+    @Test
+    void extractYamlListReturnsEmptyWhenKeyMissing() {
+        assertEquals(java.util.List.of(),
+                SkillLoader.extractYamlList("other: value", "tools"));
+    }
+
+    @Test
+    void extractYamlListHandlesCustomKey() {
+        // Default key path — anything other than "tools".
+        var yaml = "tags: [alpha, beta]";
+        var result = SkillLoader.extractYamlList(yaml, "tags");
+        assertEquals(2, result.size());
+    }
+
+    @Test
+    void formatSkillsXmlReturnsEmptyStringForEmptyList() {
+        // Early-return branch at line 303 of SkillLoader.
+        assertEquals("", SkillLoader.formatSkillsXml(java.util.List.of()));
+    }
+
+    @Test
+    void isTextFileDetectsByExtension() {
+        assertTrue(SkillLoader.isTextFile("README.md"));
+        assertTrue(SkillLoader.isTextFile("code.py"));
+        assertTrue(SkillLoader.isTextFile("style.css"));
+    }
+
+    @Test
+    void isTextFileDetectsExtensionlessKnownNames() {
+        assertTrue(SkillLoader.isTextFile("Makefile"));
+        assertTrue(SkillLoader.isTextFile("Dockerfile"));
+        assertTrue(SkillLoader.isTextFile("LICENSE"));
+    }
+
+    @Test
+    void isTextFileRejectsBinaryExtensions() {
+        assertFalse(SkillLoader.isTextFile("image.png"));
+        assertFalse(SkillLoader.isTextFile("archive.tar.gz"));
+        assertFalse(SkillLoader.isTextFile("noextension"));
+    }
+
+    @Test
+    void isTextFileStripsDirectoryFromBasenameLookup() {
+        // Path-style input: the base-name fallback only considers the final
+        // segment, so "src/Makefile" still matches the known-file map.
+        assertTrue(SkillLoader.isTextFile("src/Makefile"));
+        assertTrue(SkillLoader.isTextFile("deep/nested/dir/Dockerfile"));
+    }
+
+    @Test
+    void parseSkillContentRequiresNameField() {
+        // Missing name → parseSkillContent returns null (caller falls back to
+        // directory-name path).
+        var info = SkillLoader.parseSkillContent(
+                "---\ndescription: no name here\n---\nbody",
+                java.nio.file.Path.of("/tmp/no-name.md"));
+        assertNull(info, "missing name must yield null");
+    }
+
+    @Test
+    void parseSkillContentHandlesToolsInlineList() {
+        var content = "---\n"
+                + "name: with-tools\n"
+                + "description: Has explicit tools\n"
+                + "tools: [filesystem, exec]\n"
+                + "---\n# body\n";
+        var info = SkillLoader.parseSkillContent(content, java.nio.file.Path.of("/tmp/tools.md"));
+        assertNotNull(info);
+        assertEquals("with-tools", info.name());
+        assertTrue(info.toolsDeclared(), "tools key present means declared=true");
+        assertEquals(2, info.tools().size());
+    }
+
+    @Test
+    void parseSkillContentTreatsMissingToolsKeyAsNotDeclared() {
+        var content = "---\nname: no-tools\ndescription: skill without tools key\n---\n# body\n";
+        var info = SkillLoader.parseSkillContent(content, java.nio.file.Path.of("/tmp/no-tools.md"));
+        assertNotNull(info);
+        assertFalse(info.toolsDeclared(),
+                "absence of tools: line means toolsDeclared=false");
+    }
+
     // --- ConversationService tests ---
 
     @Test
