@@ -130,4 +130,54 @@ class MemoryStoreTest extends UnitTest {
         assertEquals(2, store.list("agent-1").size());
         assertEquals(0, store.list("agent-2").size());
     }
+
+    @Test
+    void paginatedListRespectsLimitAndOffset() {
+        // Covers the (agentId, limit, offset) overload — ordered by updatedAt DESC.
+        var store = MemoryStoreFactory.get();
+        for (int i = 0; i < 5; i++) {
+            store.store("agent-page", "row %d".formatted(i), "fact");
+        }
+
+        var firstTwo = store.list("agent-page", 2, 0);
+        assertEquals(2, firstTwo.size());
+
+        var nextTwo = store.list("agent-page", 2, 2);
+        assertEquals(2, nextTwo.size());
+
+        // No overlap between the two slices.
+        var firstIds = firstTwo.stream().map(MemoryStore.MemoryEntry::id).toList();
+        var nextIds = nextTwo.stream().map(MemoryStore.MemoryEntry::id).toList();
+        for (var id : firstIds) {
+            assertFalse(nextIds.contains(id),
+                    "paginated slices must be disjoint, got overlap on id " + id);
+        }
+    }
+
+    @Test
+    void paginatedListReturnsEmptyForOffsetPastEnd() {
+        var store = MemoryStoreFactory.get();
+        store.store("agent-end", "only row", "fact");
+        var page = store.list("agent-end", 10, 100);
+        assertTrue(page.isEmpty(), "offset beyond row count must return empty");
+    }
+
+    @Test
+    void deleteWithUnknownIdIsNoOp() {
+        // Covers the Memory.findById == null guard in delete(String).
+        var store = MemoryStoreFactory.get();
+        store.store("agent-noop", "keep me", "fact");
+        store.delete("999999999"); // id doesn't exist
+        assertEquals(1, store.list("agent-noop").size(),
+                "delete on unknown id must not affect existing rows");
+    }
+
+    @Test
+    void deleteAllReturnsZeroForUnknownAgent() {
+        var store = MemoryStoreFactory.get();
+        store.store("agent-keep", "stays", "fact");
+        var removed = store.deleteAll("agent-none");
+        assertEquals(0, removed);
+        assertEquals(1, store.list("agent-keep").size());
+    }
 }
