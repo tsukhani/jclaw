@@ -244,6 +244,66 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
         assertEquals(404, resp.status.intValue());
     }
 
+    /**
+     * Hard-delete sweeps the SubagentRun row along with the child agent
+     * it spawned (which cascades to the child conversation, its
+     * messages, and the run row itself via AgentService.delete's FK
+     * chain). Terminal-status only — RUNNING rows must be killed first.
+     */
+    @Test
+    void deleteOnCompletedRunRemovesRunAndChildAgent() {
+        login();
+        var data = commitInFreshTx(() -> {
+            var p = AgentService.create("api-del-p", "openrouter", "gpt-4.1");
+            var c = AgentService.create("api-del-c", "openrouter", "gpt-4.1");
+            var pc = ConversationService.create(p, "web", "u");
+            var cc = ConversationService.create(c, "subagent", null);
+            var runId = persistRun(p, c, pc, cc, SubagentRun.Status.COMPLETED);
+            return new long[]{runId, c.id};
+        });
+        var runId = data[0];
+        var childAgentId = data[1];
+
+        var resp = DELETE("/api/subagent-runs/" + runId);
+        assertIsOk(resp);
+        assertContentMatch("\"status\":\"deleted\"", resp);
+
+        // Clear L1 cache so the next finder hits the DB rather than
+        // returning the stale pre-delete entity reference.
+        JPA.em().clear();
+        assertNull(SubagentRun.findById(runId), "run row gone");
+        assertNull(Agent.findById(childAgentId),
+                "child agent swept by AgentService.delete cascade");
+    }
+
+    @Test
+    void deleteOnRunningRunReturns409() {
+        login();
+        var runId = commitInFreshTx(() -> {
+            var p = AgentService.create("api-del-running-p", "openrouter", "gpt-4.1");
+            var c = AgentService.create("api-del-running-c", "openrouter", "gpt-4.1");
+            var pc = ConversationService.create(p, "web", "u");
+            var cc = ConversationService.create(c, "subagent", null);
+            return persistRun(p, c, pc, cc, SubagentRun.Status.RUNNING);
+        });
+
+        var resp = DELETE("/api/subagent-runs/" + runId);
+        assertEquals(409, resp.status.intValue());
+
+        // Row must still be present — the rejection is the whole point
+        // (the stream owner still holds a reference to it).
+        JPA.em().clear();
+        assertNotNull(SubagentRun.findById(runId),
+                "RUNNING row left in place when delete is rejected");
+    }
+
+    @Test
+    void deleteOnUnknownIdReturns404() {
+        login();
+        var resp = DELETE("/api/subagent-runs/9999999");
+        assertEquals(404, resp.status.intValue());
+    }
+
     // ── helpers ───────────────────────────────────────────────────────
 
     private static long persistRun(Agent p, Agent c, Conversation pc, Conversation cc,
