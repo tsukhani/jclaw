@@ -554,4 +554,200 @@ class ApiConversationsControllerTest extends FunctionalTest {
         assertTrue(content.contains("\"busy\""));
         assertTrue(content.contains("\"queueSize\""));
     }
+
+    // --- deleteMessage tests (DELETE /api/conversations/{id}/messages/{mid}) ---
+
+    @Test
+    void deleteMessageReturns404ForUnknownConversation() {
+        login();
+        var resp = DELETE("/api/conversations/999999/messages/1");
+        assertEquals(404, resp.status.intValue());
+    }
+
+    @Test
+    void deleteMessageReturns404ForUnknownMessage() {
+        login();
+        Long convoId = createConversationForOverride("delete-msg-404");
+        var resp = DELETE("/api/conversations/" + convoId + "/messages/999999");
+        assertEquals(404, resp.status.intValue());
+    }
+
+    @Test
+    void deleteMessageReturns400WhenMessageBelongsToDifferentConversation() {
+        login();
+        Long[] ids = commitInFreshTx(() -> {
+            Agent agent = new Agent();
+            agent.name = "delete-msg-mismatch";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+            var c1 = ConversationService.create(agent, "web", "u1");
+            var c2 = ConversationService.create(agent, "web", "u2");
+            Message msg = new Message();
+            msg.conversation = c1;
+            msg.role = "user";
+            msg.content = "hi";
+            msg.createdAt = Instant.now();
+            msg.save();
+            return new Long[] { c2.id, msg.id };
+        });
+        var resp = DELETE("/api/conversations/" + ids[0] + "/messages/" + ids[1]);
+        assertEquals(400, resp.status.intValue());
+    }
+
+    @Test
+    void deleteMessageSucceedsForMatchingConversation() {
+        login();
+        Long[] ids = commitInFreshTx(() -> {
+            Agent agent = new Agent();
+            agent.name = "delete-msg-ok";
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+            var c = ConversationService.create(agent, "web", "u1");
+            Message msg = new Message();
+            msg.conversation = c;
+            msg.role = "user";
+            msg.content = "delete me";
+            msg.createdAt = Instant.now();
+            msg.save();
+            return new Long[] { c.id, msg.id };
+        });
+        var resp = DELETE("/api/conversations/" + ids[0] + "/messages/" + ids[1]);
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"status\":\"deleted\""));
+        Boolean gone = commitInFreshTx(() -> Message.findById(ids[1]) == null);
+        assertTrue(gone, "message must be deleted from DB");
+    }
+
+    // --- setModelOverride tests (PUT /api/conversations/{id}/model-override) ---
+
+    @Test
+    void setModelOverrideReturns404ForUnknownConversation() {
+        login();
+        var resp = PUT("/api/conversations/999999/model-override", "application/json",
+                "{\"modelProvider\":\"openrouter\",\"modelId\":\"gpt-4.1\"}");
+        assertEquals(404, resp.status.intValue());
+    }
+
+    @Test
+    void setModelOverrideReturns400ForMissingFields() {
+        login();
+        Long convoId = createConversationForOverride("override-400-missing");
+        var resp = PUT("/api/conversations/" + convoId + "/model-override",
+                "application/json", "{}");
+        assertEquals(400, resp.status.intValue());
+    }
+
+    @Test
+    void setModelOverrideReturns400ForBlankProvider() {
+        login();
+        Long convoId = createConversationForOverride("override-400-blank-provider");
+        var resp = PUT("/api/conversations/" + convoId + "/model-override",
+                "application/json",
+                "{\"modelProvider\":\"\",\"modelId\":\"gpt-4.1\"}");
+        assertEquals(400, resp.status.intValue());
+    }
+
+    @Test
+    void setModelOverrideReturns400ForBlankModelId() {
+        login();
+        Long convoId = createConversationForOverride("override-400-blank-model");
+        var resp = PUT("/api/conversations/" + convoId + "/model-override",
+                "application/json",
+                "{\"modelProvider\":\"openrouter\",\"modelId\":\"\"}");
+        assertEquals(400, resp.status.intValue());
+    }
+
+    @Test
+    void setModelOverrideReturns400ForUnknownProvider() {
+        login();
+        Long convoId = createConversationForOverride("override-400-unknown-provider");
+        var resp = PUT("/api/conversations/" + convoId + "/model-override",
+                "application/json",
+                "{\"modelProvider\":\"definitely-not-a-real-provider\",\"modelId\":\"gpt-4.1\"}");
+        assertEquals(400, resp.status.intValue());
+        assertTrue(getContent(resp).contains("is not configured"));
+    }
+
+    @Test
+    void setModelOverrideReturns400ForUnknownModel() {
+        login();
+        seedOpenRouterProvider(
+                "[{\"id\":\"some-other-model\",\"name\":\"X\",\"contextWindow\":1000,\"maxTokens\":100}]");
+        Long convoId = createConversationForOverride("override-400-unknown-model");
+        var resp = PUT("/api/conversations/" + convoId + "/model-override",
+                "application/json",
+                "{\"modelProvider\":\"openrouter\",\"modelId\":\"definitely-not-a-real-model\"}");
+        assertEquals(400, resp.status.intValue());
+        assertTrue(getContent(resp).contains("has no model with id"));
+    }
+
+    @Test
+    void setModelOverrideSucceedsAndPersistsValues() {
+        login();
+        seedOpenRouterProvider(
+                "[{\"id\":\"gpt-4.1\",\"name\":\"GPT-4.1\",\"contextWindow\":1000,\"maxTokens\":100}]");
+        Long convoId = createConversationForOverride("override-ok");
+        var resp = PUT("/api/conversations/" + convoId + "/model-override",
+                "application/json",
+                "{\"modelProvider\":\"openrouter\",\"modelId\":\"gpt-4.1\"}");
+        assertIsOk(resp);
+        var content = getContent(resp);
+        assertTrue(content.contains("openrouter"));
+        assertTrue(content.contains("gpt-4.1"));
+        Boolean persisted = commitInFreshTx(() -> {
+            Conversation c = Conversation.findById(convoId);
+            return "openrouter".equals(c.modelProviderOverride)
+                    && "gpt-4.1".equals(c.modelIdOverride);
+        });
+        assertTrue(persisted, "override fields must persist on conversation row");
+    }
+
+    private void seedOpenRouterProvider(String modelsJson) {
+        commitInFreshTx(() -> {
+            services.ConfigService.set("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
+            services.ConfigService.set("provider.openrouter.apiKey", "sk-test");
+            services.ConfigService.set("provider.openrouter.models", modelsJson);
+            return null;
+        });
+        llm.ProviderRegistry.refresh();
+    }
+
+    // --- clearModelOverride tests (DELETE /api/conversations/{id}/model-override) ---
+
+    @Test
+    void clearModelOverrideReturns404ForUnknownConversation() {
+        login();
+        var resp = DELETE("/api/conversations/999999/model-override");
+        assertEquals(404, resp.status.intValue());
+    }
+
+    @Test
+    void clearModelOverrideRemovesPersistedValues() {
+        login();
+        Long convoId = createConversationForOverride("clear-override");
+        PUT("/api/conversations/" + convoId + "/model-override",
+                "application/json",
+                "{\"modelProvider\":\"openrouter\",\"modelId\":\"gpt-4.1\"}");
+        var resp = DELETE("/api/conversations/" + convoId + "/model-override");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"status\":\"cleared\""));
+        Boolean cleared = commitInFreshTx(() -> {
+            Conversation c = Conversation.findById(convoId);
+            return c.modelProviderOverride == null && c.modelIdOverride == null;
+        });
+        assertTrue(cleared, "override fields must be null after clear");
+    }
+
+    private Long createConversationForOverride(String agentName) {
+        return commitInFreshTx(() -> {
+            Agent agent = new Agent();
+            agent.name = agentName;
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+            return ConversationService.create(agent, "web", "u1").id;
+        });
+    }
 }
