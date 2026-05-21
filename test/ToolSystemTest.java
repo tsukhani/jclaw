@@ -165,6 +165,55 @@ class ToolSystemTest extends UnitTest {
         assertTrue(result.contains("task-1"));
     }
 
+    @Test
+    void taskToolDeleteTaskRequiresName() {
+        var result = ToolRegistry.execute("task_manager",
+                "{\"action\": \"deleteTask\"}", agent);
+        assertTrue(result.startsWith("Error"));
+        assertTrue(result.contains("'name' is required"));
+    }
+
+    @Test
+    void taskToolDeleteTaskReturnsNotFoundForUnknownName() {
+        var result = ToolRegistry.execute("task_manager",
+                "{\"action\": \"deleteTask\", \"name\": \"never-created\"}", agent);
+        assertTrue(result.contains("No task found"),
+                "expected 'No task found' message: " + result);
+    }
+
+    @Test
+    void taskToolDeleteTaskRemovesSingleMatch() {
+        ToolRegistry.execute("task_manager", """
+                {"action": "createTask", "name": "delete-me", "description": "x", "schedule": "now"}
+                """, agent);
+        var result = ToolRegistry.execute("task_manager", """
+                {"action": "deleteTask", "name": "delete-me"}
+                """, agent);
+        assertTrue(result.contains("deleted"),
+                "expected 'deleted' confirmation: " + result);
+        // Re-delete must report not-found now that the row is gone.
+        var again = ToolRegistry.execute("task_manager", """
+                {"action": "deleteTask", "name": "delete-me"}
+                """, agent);
+        assertTrue(again.contains("No task found"));
+    }
+
+    @Test
+    void taskToolDeleteTaskRemovesAllSameNameMatches() {
+        // Same-name tasks for the same agent: deleteTask wipes all of them.
+        ToolRegistry.execute("task_manager", """
+                {"action": "createTask", "name": "dupe", "description": "x", "schedule": "now"}
+                """, agent);
+        ToolRegistry.execute("task_manager", """
+                {"action": "createTask", "name": "dupe", "description": "y", "schedule": "now"}
+                """, agent);
+        var result = ToolRegistry.execute("task_manager", """
+                {"action": "deleteTask", "name": "dupe"}
+                """, agent);
+        assertTrue(result.contains("2 tasks named 'dupe' deleted"),
+                "expected plural deletion message: " + result);
+    }
+
     // --- CheckListTool ---
 
     @Test
