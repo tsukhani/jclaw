@@ -1221,6 +1221,105 @@ class ModelDiscoveryServiceTest extends UnitTest {
     }
 
     @Test
+    void detectVisionFromOllamaCapabilitiesVisionTrue() {
+        // The capabilities array → "vision" string match path.
+        var obj = JsonParser.parseString("""
+                {"id":"local/vl-model","capabilities":["completion","vision"]}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        assertTrue(result.confirmed());
+        assertTrue(result.fromProvider(),
+                "capabilities array is a provider-confirmed signal");
+    }
+
+    @Test
+    void detectVisionFromOllamaCapabilitiesNoVision() {
+        // capabilities present but lacks "vision" → confirmed text-only.
+        var obj = JsonParser.parseString("""
+                {"id":"local/text-only","capabilities":["completion"]}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        assertFalse(result.confirmed());
+        assertTrue(result.fromProvider());
+    }
+
+    @Test
+    void detectVisionFromKnownVisionFamilyId() {
+        // No modality info or capabilities — the id-heuristic kicks in for
+        // well-known vision-capable families. fromProvider=false marks the
+        // result as a heuristic guess.
+        var obj = JsonParser.parseString("""
+                {"id":"openai/gpt-4o"}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        assertTrue(result.confirmed());
+        assertFalse(result.fromProvider(),
+                "id-heuristic is not a provider-confirmed signal");
+    }
+
+    @Test
+    void detectVisionFromUnknownIdAndNoMetadata() {
+        // No modality, no capabilities, id doesn't match the vision-family
+        // heuristic → falls all the way through to false/false.
+        var obj = JsonParser.parseString("""
+                {"id":"vendor/totally-unknown-model"}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectVisionSupport(obj);
+        assertFalse(result.confirmed());
+        assertFalse(result.fromProvider());
+    }
+
+    @Test
+    void detectAudioFromCapabilities() {
+        var obj = JsonParser.parseString("""
+                {"id":"local/voice","capabilities":["audio","completion"]}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectAudioSupport(obj);
+        assertTrue(result.confirmed());
+        assertTrue(result.fromProvider());
+    }
+
+    @Test
+    void detectAudioCapabilitiesPresentNoAudio() {
+        var obj = JsonParser.parseString("""
+                {"id":"local/text","capabilities":["completion"]}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectAudioSupport(obj);
+        assertFalse(result.confirmed());
+        assertTrue(result.fromProvider());
+    }
+
+    @Test
+    void detectAudioFromUnknownModelReturnsAllFalse() {
+        var obj = JsonParser.parseString("""
+                {"id":"vendor/text-only"}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectAudioSupport(obj);
+        assertFalse(result.confirmed());
+        assertFalse(result.fromProvider());
+    }
+
+    @Test
+    void detectThinkingFromCapabilitiesReasoning() {
+        var obj = JsonParser.parseString("""
+                {"id":"local/think","capabilities":["thinking"]}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectThinkingSupport(obj);
+        assertTrue(result.confirmed());
+        assertTrue(result.fromProvider());
+    }
+
+    @Test
+    void detectThinkingFromUnknownIdFallsThrough() {
+        var obj = JsonParser.parseString("""
+                {"id":"vendor/no-thinking"}
+                """).getAsJsonObject();
+        var result = ModelDiscoveryService.detectThinkingSupport(obj);
+        assertFalse(result.confirmed());
+        assertFalse(result.fromProvider());
+    }
+
+    @Test
     void detectVisionFromLegacyModalityStringNegative() {
         // architecture.modality is a single string that doesn't contain "image"
         // — confirmed text-only via the legacy shape.
