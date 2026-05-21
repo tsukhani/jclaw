@@ -139,18 +139,34 @@ function hasSamples<H extends { count: number }>(h: H | undefined | null): h is 
  * selected channel only — callers pick the channel via the dropdown,
  * this helper is single-channel.
  */
+/**
+ * Append all prologue_* children for the prologue parent: the well-known
+ * children in {@link PROLOGUE_CHILDREN_ORDER} first, then any unknown
+ * prologue_* keys in encounter order. Mutates {@code rows} and {@code seen}.
+ */
+function appendPrologueChildren<H extends { count: number }>(
+  metrics: Record<string, H | undefined>,
+  rows: LatencyRow<H>[],
+  seen: Set<string>,
+): void {
+  const emitChild = (key: string, h: H | undefined) => {
+    if (!hasSamples(h)) return
+    rows.push({ key, label: labelForChild(key), h, isChild: true })
+    seen.add(key)
+  }
+
+  for (const child of PROLOGUE_CHILDREN_ORDER) emitChild(child, metrics[child])
+  for (const [mk, mh] of Object.entries(metrics)) {
+    if (seen.has(mk) || !isPrologueChildKey(mk)) continue
+    emitChild(mk, mh)
+  }
+}
+
 export function buildLatencyRows<H extends { count: number } = LatencyHistogram>(
   metrics: Record<string, H | undefined>,
 ): LatencyRow<H>[] {
   const rows: LatencyRow<H>[] = []
   const seen = new Set<string>()
-
-  const emitChild = (key: string) => {
-    const h = metrics[key]
-    if (!hasSamples(h)) return
-    rows.push({ key, label: labelForChild(key), h, isChild: true })
-    seen.add(key)
-  }
 
   for (const key of TOP_LEVEL_ORDER) {
     const h = metrics[key]
@@ -164,13 +180,7 @@ export function buildLatencyRows<H extends { count: number } = LatencyHistogram>
     // prologue_* keys fall through to the unknown-key catch-all below so
     // the operator still sees the data instead of it silently disappearing.
     if (key === 'prologue' && parentEmitted) {
-      for (const child of PROLOGUE_CHILDREN_ORDER) emitChild(child)
-      for (const [mk, mh] of Object.entries(metrics)) {
-        if (seen.has(mk) || !isPrologueChildKey(mk)) continue
-        if (!hasSamples(mh)) continue
-        rows.push({ key: mk, label: labelForChild(mk), h: mh, isChild: true })
-        seen.add(mk)
-      }
+      appendPrologueChildren(metrics, rows, seen)
     }
   }
 

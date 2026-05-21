@@ -48,10 +48,12 @@ function looksPersisted(tc: PersistedToolCall | ToolCall): tc is PersistedToolCa
     && typeof (tc as PersistedToolCall).function.name === 'string'
 }
 
-export function hydrateToolCalls(msgs: RawRow[]): void {
+type ResultsByCallId = Map<string, { text: string, structured: ToolCallResultStructured | null }>
+
+function indexToolResults(msgs: RawRow[]): ResultsByCallId {
   // Index tool-role rows by tool_call_id so the assistant pass can splice
   // result text/structured payloads onto each ToolCall without re-walking.
-  const resultsByCallId = new Map<string, { text: string, structured: ToolCallResultStructured | null }>()
+  const resultsByCallId: ResultsByCallId = new Map()
   for (const m of msgs) {
     if (m.role === 'tool' && typeof m.toolResults === 'string') {
       resultsByCallId.set(m.toolResults, {
@@ -60,32 +62,65 @@ export function hydrateToolCalls(msgs: RawRow[]): void {
       })
     }
   }
+  return resultsByCallId
+}
+
+function normalizeToolCall(
+  raw: PersistedToolCall | ToolCall,
+  resultsByCallId: ResultsByCallId,
+): ToolCall | null {
+  if (!looksPersisted(raw)) {
+    // Already normalized — pass through. Lets callers feed hydrate()
+    // output back in idempotently, and keeps live-SSE test fixtures
+    // working without a parallel hydration path.
+    return raw
+  }
+  if (!raw.id || !raw.function?.name) return null
+  const r = resultsByCallId.get(raw.id)
+  return {
+    id: raw.id,
+    name: raw.function.name,
+    icon: raw.icon ?? 'wrench',
+    arguments: raw.function.arguments ?? '',
+    resultText: r?.text ?? null,
+    resultStructured: r?.structured ?? null,
+  }
+}
+
+function collectNormalizedCalls(
+  rawCalls: Array<PersistedToolCall | ToolCall>,
+  resultsByCallId: ResultsByCallId,
+): ToolCall[] {
+  const out: ToolCall[] = []
+  for (const raw of rawCalls) {
+    if (!raw || typeof raw !== 'object') continue
+    const normalized = normalizeToolCall(raw, resultsByCallId)
+    if (normalized) out.push(normalized)
+  }
+  return out
+}
+
+function attachLeftoverPending(msgs: RawRow[], pending: ToolCall[]): void {
+  // Edge case: a mid-turn reload where the final assistant-with-content row
+  // hasn't landed yet. Attach the leftover calls to the last assistant row
+  // we saw so they render instead of getting dropped silently.
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const row = msgs[i]
+    if (row?.role === 'assistant') {
+      row.toolCalls = pending
+      break
+    }
+  }
+}
+
+export function hydrateToolCalls(msgs: RawRow[]): void {
+  const resultsByCallId = indexToolResults(msgs)
 
   let pending: ToolCall[] = []
   for (const m of msgs) {
     if (m.role !== 'assistant') continue
     if (Array.isArray(m.toolCalls)) {
-      for (const raw of m.toolCalls) {
-        if (!raw || typeof raw !== 'object') continue
-        if (looksPersisted(raw)) {
-          if (!raw.id || !raw.function?.name) continue
-          const r = resultsByCallId.get(raw.id)
-          pending.push({
-            id: raw.id,
-            name: raw.function.name,
-            icon: raw.icon ?? 'wrench',
-            arguments: raw.function.arguments ?? '',
-            resultText: r?.text ?? null,
-            resultStructured: r?.structured ?? null,
-          })
-        }
-        else {
-          // Already normalized — pass through. Lets callers feed hydrate()
-          // output back in idempotently, and keeps live-SSE test fixtures
-          // working without a parallel hydration path.
-          pending.push(raw)
-        }
-      }
+      pending.push(...collectNormalizedCalls(m.toolCalls, resultsByCallId))
       // Drop the raw array — the intermediate row no longer needs it and
       // leaving the persisted shape around would confuse the renderer,
       // which expects the normalized ToolCall[] shape per Message type.
@@ -96,16 +131,5 @@ export function hydrateToolCalls(msgs: RawRow[]): void {
       pending = []
     }
   }
-  // Edge case: a mid-turn reload where the final assistant-with-content row
-  // hasn't landed yet. Attach the leftover calls to the last assistant row
-  // we saw so they render instead of getting dropped silently.
-  if (pending.length) {
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const row = msgs[i]
-      if (row?.role === 'assistant') {
-        row.toolCalls = pending
-        break
-      }
-    }
-  }
+  if (pending.length) attachLeftoverPending(msgs, pending)
 }

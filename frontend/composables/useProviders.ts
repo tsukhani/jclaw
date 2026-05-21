@@ -65,45 +65,62 @@ export interface ConfigData {
  * toggles a provider off in Settings (or the load-test harness flips its
  * own reserved key).
  */
+interface ConfigEntry { key: string, value: string }
+
+/** Pull the provider name from a "provider.NAME.suffix" config key. Returns null when the key isn't a provider key. */
+function providerNameFromKey(key: string): string | null {
+  if (!key.startsWith('provider.')) return null
+  return key.split('.')[1] ?? null
+}
+
+function seedProviders(entries: ConfigEntry[], providerMap: Map<string, Provider>): void {
+  for (const e of entries) {
+    const name = providerNameFromKey(e.key)
+    if (name && !providerMap.has(name)) providerMap.set(name, { name, models: [] })
+  }
+}
+
+function dropProvidersWithoutApiKey(entries: ConfigEntry[], providerMap: Map<string, Provider>): void {
+  for (const e of entries) {
+    if (!e.key.endsWith('.apiKey')) continue
+    const name = providerNameFromKey(e.key)
+    if (name && (!e.value || e.value === '(empty)')) providerMap.delete(name)
+  }
+}
+
+// JCLAW-110: drop providers the user has explicitly disabled. Case-
+// insensitive "false" match matches the backend filter exactly.
+function dropDisabledProviders(entries: ConfigEntry[], providerMap: Map<string, Provider>): void {
+  for (const e of entries) {
+    if (!e.key.endsWith('.enabled')) continue
+    const name = providerNameFromKey(e.key)
+    if (name && e.value && e.value.toLowerCase() === 'false') providerMap.delete(name)
+  }
+}
+
+function attachProviderModels(entries: ConfigEntry[], providerMap: Map<string, Provider>): void {
+  for (const e of entries) {
+    if (!e.key.endsWith('.models')) continue
+    const name = providerNameFromKey(e.key)
+    if (!name) continue
+    const provider = providerMap.get(name)
+    if (!provider) continue
+    try {
+      provider.models = JSON.parse(e.value)
+    }
+    catch { provider.models = [] }
+  }
+}
+
 export function useProviders(configData: Ref<ConfigData | null>) {
   const providers = computed<Provider[]>(() => {
     const entries = configData.value?.entries ?? []
     const providerMap = new Map<string, Provider>()
 
-    for (const e of entries) {
-      if (!e.key.startsWith('provider.')) continue
-      const name = e.key.split('.')[1]!
-      if (!providerMap.has(name)) providerMap.set(name, { name, models: [] })
-    }
-
-    for (const e of entries) {
-      if (e.key.endsWith('.apiKey') && e.key.startsWith('provider.')) {
-        const name = e.key.split('.')[1]!
-        if (!e.value || e.value === '(empty)') providerMap.delete(name)
-      }
-    }
-
-    // JCLAW-110: drop providers the user has explicitly disabled. Case-
-    // insensitive "false" match matches the backend filter exactly.
-    for (const e of entries) {
-      if (e.key.endsWith('.enabled') && e.key.startsWith('provider.')) {
-        const name = e.key.split('.')[1]!
-        if (e.value && e.value.toLowerCase() === 'false') providerMap.delete(name)
-      }
-    }
-
-    for (const e of entries) {
-      if (e.key.endsWith('.models') && e.key.startsWith('provider.')) {
-        const name = e.key.split('.')[1]!
-        const provider = providerMap.get(name)
-        if (provider) {
-          try {
-            provider.models = JSON.parse(e.value)
-          }
-          catch { provider.models = [] }
-        }
-      }
-    }
+    seedProviders(entries, providerMap)
+    dropProvidersWithoutApiKey(entries, providerMap)
+    dropDisabledProviders(entries, providerMap)
+    attachProviderModels(entries, providerMap)
 
     return Array.from(providerMap.values())
   })

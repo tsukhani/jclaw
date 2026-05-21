@@ -300,6 +300,86 @@ export interface FleetCostFilter {
  * already applied server-side via the {@code since} param. Each filter
  * dimension is independent — null means "all values."
  */
+/**
+ * Tokens + cost contribution from one turn, in the shape every fleet
+ * per-dimension aggregation row uses.
+ */
+interface TurnContribution {
+  turnTotal: number
+  prompt: number
+  completion: number
+  reasoning: number
+  cached: number
+}
+
+/** Shared aggregate counters across per-agent/per-channel/per-model rows. */
+interface AggregateCounters {
+  turnCount: number
+  total: number
+  prompt: number
+  completion: number
+  reasoning: number
+  cached: number
+}
+
+function addContribution(row: AggregateCounters, t: TurnContribution): void {
+  row.turnCount++
+  row.total += t.turnTotal
+  row.prompt += t.prompt
+  row.completion += t.completion
+  row.reasoning += t.reasoning
+  row.cached += t.cached
+}
+
+function newCounters(t: TurnContribution): AggregateCounters {
+  return {
+    turnCount: 1,
+    total: t.turnTotal,
+    prompt: t.prompt,
+    completion: t.completion,
+    reasoning: t.reasoning,
+    cached: t.cached,
+  }
+}
+
+/**
+ * Upsert into a per-dimension aggregation map: bump counters on an existing
+ * row, otherwise seed a fresh one via {@code seed}. Centralises the three
+ * near-identical blocks the original computeFleetCost had inline.
+ */
+function upsertAggregate<K, R extends AggregateCounters>(
+  map: Map<K, R>,
+  key: K,
+  t: TurnContribution,
+  seed: () => R,
+): void {
+  const existing = map.get(key)
+  if (existing) addContribution(existing, t)
+  else map.set(key, seed())
+}
+
+function turnContribution(usage: MessageUsage): TurnContribution {
+  const turn = computeUsageCostBreakdown(usage)
+  return {
+    turnTotal: turn?.total ?? 0,
+    prompt: usage.prompt ?? 0,
+    completion: usage.completion ?? 0,
+    reasoning: usage.reasoning ?? 0,
+    cached: usage.cached ?? 0,
+  }
+}
+
+function parseUsage(usageJson: string): MessageUsage | null {
+  try {
+    return JSON.parse(usageJson) as MessageUsage
+  }
+  catch {
+    // Malformed payload — skip rather than crash the whole aggregation.
+    // The conversation-detail view does the same defensive handling.
+    return null
+  }
+}
+
 export function computeFleetCost(
   rows: FleetCostRow[],
   filter: FleetCostFilter,
@@ -307,118 +387,39 @@ export function computeFleetCost(
   const perAgent = new Map<number, FleetCostPerAgent>()
   const perChannel = new Map<string, FleetCostPerChannel>()
   const perModel = new Map<string, FleetCostPerModel>()
-  let total = 0
+  const totals: TurnContribution = { turnTotal: 0, prompt: 0, completion: 0, reasoning: 0, cached: 0 }
   let turnCount = 0
-  let prompt = 0
-  let completion = 0
-  let reasoning = 0
-  let cached = 0
 
   for (const row of rows) {
     if (filter.agentId !== null && row.agentId !== filter.agentId) continue
     if (filter.channelType !== null && row.channelType !== filter.channelType) continue
 
-    let usage: MessageUsage
-    try {
-      usage = JSON.parse(row.usageJson) as MessageUsage
-    }
-    catch {
-      // Malformed payload — skip rather than crash the whole aggregation.
-      // The conversation-detail view does the same defensive handling.
-      continue
-    }
+    const usage = parseUsage(row.usageJson)
+    if (!usage) continue
 
-    const turn = computeUsageCostBreakdown(usage)
-    const turnTotal = turn?.total ?? 0
-    const p = usage.prompt ?? 0
-    const c = usage.completion ?? 0
-    const r = usage.reasoning ?? 0
-    const cd = usage.cached ?? 0
-
-    total += turnTotal
+    const t = turnContribution(usage)
     turnCount++
-    prompt += p
-    completion += c
-    reasoning += r
-    cached += cd
+    totals.turnTotal += t.turnTotal
+    totals.prompt += t.prompt
+    totals.completion += t.completion
+    totals.reasoning += t.reasoning
+    totals.cached += t.cached
 
-    // Per-agent
-    const agentRow = perAgent.get(row.agentId)
-    if (agentRow) {
-      agentRow.turnCount++
-      agentRow.total += turnTotal
-      agentRow.prompt += p
-      agentRow.completion += c
-      agentRow.reasoning += r
-      agentRow.cached += cd
-    }
-    else {
-      perAgent.set(row.agentId, {
-        agentId: row.agentId,
-        turnCount: 1,
-        total: turnTotal,
-        prompt: p,
-        completion: c,
-        reasoning: r,
-        cached: cd,
-      })
-    }
-
-    // Per-channel
-    const channelRow = perChannel.get(row.channelType)
-    if (channelRow) {
-      channelRow.turnCount++
-      channelRow.total += turnTotal
-      channelRow.prompt += p
-      channelRow.completion += c
-      channelRow.reasoning += r
-      channelRow.cached += cd
-    }
-    else {
-      perChannel.set(row.channelType, {
-        channelType: row.channelType,
-        turnCount: 1,
-        total: turnTotal,
-        prompt: p,
-        completion: c,
-        reasoning: r,
-        cached: cd,
-      })
-    }
-
+    upsertAggregate(perAgent, row.agentId, t, () => ({ agentId: row.agentId, ...newCounters(t) }))
+    upsertAggregate(perChannel, row.channelType, t, () => ({ channelType: row.channelType, ...newCounters(t) }))
     // Per-model. Use modelId as key, falling back to '(unknown)' for rows
     // that pre-date JCLAW-107's model-identity capture.
     const modelKey = usage.modelId ?? '(unknown)'
-    const modelRow = perModel.get(modelKey)
-    if (modelRow) {
-      modelRow.turnCount++
-      modelRow.total += turnTotal
-      modelRow.prompt += p
-      modelRow.completion += c
-      modelRow.reasoning += r
-      modelRow.cached += cd
-    }
-    else {
-      perModel.set(modelKey, {
-        modelId: modelKey,
-        modelProvider: usage.modelProvider,
-        turnCount: 1,
-        total: turnTotal,
-        prompt: p,
-        completion: c,
-        reasoning: r,
-        cached: cd,
-      })
-    }
+    upsertAggregate(perModel, modelKey, t, () => ({ modelId: modelKey, modelProvider: usage.modelProvider, ...newCounters(t) }))
   }
 
   return {
-    total,
+    total: totals.turnTotal,
     turnCount,
-    prompt,
-    completion,
-    reasoning,
-    cached,
+    prompt: totals.prompt,
+    completion: totals.completion,
+    reasoning: totals.reasoning,
+    cached: totals.cached,
     // Sort all three breakdowns by cost descending so the highest-spend rows
     // surface first in the table view.
     perAgent: Array.from(perAgent.values()).sort((a, b) => b.total - a.total),

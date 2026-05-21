@@ -930,43 +930,71 @@ function toggleModelsPanel(providerName: string) {
   addingModel.value = false
 }
 
+/**
+ * Indexes discovered models by id and extracts the leaderboard-rank map
+ * for {@link configuredModelRanks}. Done in one pass so we don't walk the
+ * list twice.
+ */
+function indexDiscoveredModels(discovered: DiscoveredModel[]): {
+  rankMap: Map<string, number>
+  discoveredMap: Map<string, DiscoveredModel>
+} {
+  const rankMap = new Map<string, number>()
+  const discoveredMap = new Map<string, DiscoveredModel>()
+  for (const m of discovered) {
+    if (m.leaderboardRank) rankMap.set(m.id, m.leaderboardRank)
+    discoveredMap.set(m.id, m)
+  }
+  return { rankMap, discoveredMap }
+}
+
+/**
+ * Backfill any missing price field on {@code model} from {@code discovered}.
+ * A model field is "missing" when null/undefined; a discovered value counts
+ * as present when ≥ 0 (-1 / undefined are the unset sentinels). Returns true
+ * iff at least one field was filled in.
+ */
+function backfillModelPrices(model: ProviderModelDef, discovered: DiscoveredModel): boolean {
+  const fields: Array<'promptPrice' | 'completionPrice' | 'cachedReadPrice' | 'cacheWritePrice'> = [
+    'promptPrice',
+    'completionPrice',
+    'cachedReadPrice',
+    'cacheWritePrice',
+  ]
+  let updated = false
+  for (const field of fields) {
+    if (model[field] == null && (discovered[field] ?? -1) >= 0) {
+      model[field] = discovered[field]
+      updated = true
+    }
+  }
+  return updated
+}
+
+function backfillConfiguredModelPrices(
+  configured: ProviderModelDef[],
+  discoveredMap: Map<string, DiscoveredModel>,
+): boolean {
+  let updated = false
+  for (const model of configured) {
+    const discovered = discoveredMap.get(model.id)
+    if (discovered && backfillModelPrices(model, discovered)) updated = true
+  }
+  return updated
+}
+
 async function fetchRanksForProvider(providerName: string) {
   if (configuredModelRanks.value.has(providerName)) return
   try {
     const res = await $fetch<DiscoverModelsResponse>(`/api/providers/${providerName}/discover-models`, { method: 'POST' })
-    const rankMap = new Map<string, number>()
-    const discoveredMap = new Map<string, DiscoveredModel>()
-    for (const m of (res.models || [])) {
-      if (m.leaderboardRank) rankMap.set(m.id, m.leaderboardRank)
-      discoveredMap.set(m.id, m)
-    }
+    const { rankMap, discoveredMap } = indexDiscoveredModels(res.models || [])
     configuredModelRanks.value = new Map(configuredModelRanks.value).set(providerName, rankMap)
 
     // Backfill pricing on configured models that are missing it
     const configured = getProviderModels(providerName)
-    let updated = false
-    for (const model of configured) {
-      const discovered = discoveredMap.get(model.id)
-      if (discovered) {
-        if (model.promptPrice == null && (discovered.promptPrice ?? -1) >= 0) {
-          model.promptPrice = discovered.promptPrice
-          updated = true
-        }
-        if (model.completionPrice == null && (discovered.completionPrice ?? -1) >= 0) {
-          model.completionPrice = discovered.completionPrice
-          updated = true
-        }
-        if (model.cachedReadPrice == null && (discovered.cachedReadPrice ?? -1) >= 0) {
-          model.cachedReadPrice = discovered.cachedReadPrice
-          updated = true
-        }
-        if (model.cacheWritePrice == null && (discovered.cacheWritePrice ?? -1) >= 0) {
-          model.cacheWritePrice = discovered.cacheWritePrice
-          updated = true
-        }
-      }
+    if (backfillConfiguredModelPrices(configured, discoveredMap)) {
+      await saveModels(providerName, configured)
     }
-    if (updated) await saveModels(providerName, configured)
   }
   catch {
     // Best-effort — no ranks if discovery fails
