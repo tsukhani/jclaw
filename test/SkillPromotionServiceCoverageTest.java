@@ -542,6 +542,62 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
     }
 
     @Test
+    void buildBatchesBySizeFitsEverythingInOneBatchWhenUnderLimit() throws Exception {
+        var input = new java.util.LinkedHashMap<String, String>();
+        input.put("a.md", "short");      // 5 chars × 2 = 10 bytes (estimate)
+        input.put("b.md", "also short"); // 10 chars × 2 = 20 bytes
+        var result = invokeBuildBatchesBySize(input, 1000);
+        assertEquals(1, result.size(), "everything fits in one batch");
+        assertEquals(2, result.get(0).size());
+    }
+
+    @Test
+    void buildBatchesBySizeSplitsAcrossBatchesWhenOverLimit() throws Exception {
+        // Each entry is ~200 bytes (100 chars × 2). maxBatchBytes=250 forces
+        // each entry into its own batch — accumulation > 250 between entries.
+        var input = new java.util.LinkedHashMap<String, String>();
+        input.put("a.md", "x".repeat(100));
+        input.put("b.md", "y".repeat(100));
+        input.put("c.md", "z".repeat(100));
+        var result = invokeBuildBatchesBySize(input, 250);
+        // First entry alone (200B) fits, second triggers a new batch (400B
+        // would exceed 250), etc.
+        assertTrue(result.size() >= 2,
+                "size cap must split into multiple batches: got " + result.size() + " batches");
+    }
+
+    @Test
+    void buildBatchesBySizeSendsAlwaysAlongWhenSingleEntryExceedsLimit() throws Exception {
+        // An entry larger than maxBatchBytes is sent alone (the controller
+        // can't split inside a single file). currentBatch is initially
+        // empty, so the "isEmpty + over limit" guard doesn't trigger — the
+        // entry just lands in the first batch by itself.
+        var input = new java.util.LinkedHashMap<String, String>();
+        input.put("huge.md", "x".repeat(5000)); // 10_000 bytes
+        var result = invokeBuildBatchesBySize(input, 100); // limit way smaller
+        assertEquals(1, result.size(), "single oversize entry yields one batch");
+        assertEquals(1, result.get(0).size());
+    }
+
+    @Test
+    void buildBatchesBySizeReturnsEmptyForEmptyInput() throws Exception {
+        var input = new java.util.LinkedHashMap<String, String>();
+        var result = invokeBuildBatchesBySize(input, 1000);
+        assertTrue(result.isEmpty(), "empty input → no batches");
+    }
+
+    @SuppressWarnings("unchecked")
+    private java.util.List<java.util.List<java.util.Map.Entry<String, String>>>
+            invokeBuildBatchesBySize(java.util.LinkedHashMap<String, String> input, int max)
+            throws Exception {
+        var m = SkillPromotionService.class.getDeclaredMethod(
+                "buildBatchesBySize", java.util.LinkedHashMap.class, int.class);
+        m.setAccessible(true);
+        return (java.util.List<java.util.List<java.util.Map.Entry<String, String>>>)
+                m.invoke(null, input, max);
+    }
+
+    @Test
     void validateToolRequirementsFailsWhenAgentDisabledTheRequiredTool() throws Exception {
         // The skill declares a real, registered tool (filesystem), but the
         // agent has explicitly disabled it via AgentToolConfig. Exercises the
