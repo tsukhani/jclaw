@@ -889,6 +889,27 @@ class SlashCommandsTest extends UnitTest {
         assertTrue(text.contains("Model:"), "model line present: " + text);
     }
 
+    // --- /stop branches ---
+
+    @Test
+    void stopReturnsFallbackWhenNoConversation() {
+        var result = Commands.handle("/stop", agent, "web", "admin", null);
+        assertTrue(result.isPresent());
+        assertEquals(Commands.Command.STOP, result.get().command());
+        assertTrue(result.get().responseText().contains("No active conversation"),
+                "got: " + result.get().responseText());
+    }
+
+    @Test
+    void stopReportsNothingToStopWhenQueueIdle() {
+        // Fresh conversation with no in-flight work → !isBusy short-circuits.
+        var conv = ConversationService.findOrCreate(agent, "web", "admin");
+        var result = Commands.handle("/stop", agent, "web", "admin", conv);
+        assertTrue(result.isPresent());
+        assertTrue(result.get().responseText().contains("Nothing to stop"),
+                "got: " + result.get().responseText());
+    }
+
     // --- renderThinkingSelection branches ---
 
     private String renderThinkingSelection(Agent agent, llm.LlmTypes.ModelInfo m) throws Exception {
