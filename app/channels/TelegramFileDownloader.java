@@ -85,40 +85,13 @@ public final class TelegramFileDownloader {
                                   String agentName,
                                   String apiBaseUrl,
                                   String fileBaseUrl) {
-        JsonObject getFileResp;
-        try {
-            var url = apiBaseUrl + "/getFile?file_id=" + pending.telegramFileId();
-            var req = new okhttp3.Request.Builder().url(url).get().build();
-            var call = HttpFactories.general().newCall(req);
-            call.timeout().timeout(GETFILE_TIMEOUT.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
-            try (var resp = call.execute()) {
-                if (resp.code() != 200) {
-                    return new DownloadFailed("getFile HTTP " + resp.code());
-                }
-                var body = resp.body().string();
-                getFileResp = JsonParser.parseString(body).getAsJsonObject();
-            }
-        } catch (Exception e) {
-            return new DownloadFailed("getFile: " + e.getMessage());
-        }
-
-        if (!getFileResp.has("ok") || !getFileResp.get("ok").getAsBoolean()) {
-            return new DownloadFailed("getFile error: " + Strings.truncate(getFileResp.toString(), 200));
-        }
-        var result = getFileResp.getAsJsonObject("result");
-        String filePath = result.has("file_path") && !result.get("file_path").isJsonNull()
-                ? result.get("file_path").getAsString() : null;
-        if (filePath == null || filePath.isBlank()) {
-            return new DownloadFailed("getFile response missing file_path");
-        }
-        long reportedSize = result.has("file_size") && !result.get("file_size").isJsonNull()
-                ? result.get("file_size").getAsLong() : pending.sizeBytes();
-        if (reportedSize > MAX_FILE_BYTES) {
-            return new SizeExceeded(reportedSize, MAX_FILE_BYTES);
-        }
+        var meta = fetchFileMetadata(apiBaseUrl, pending);
+        if (meta instanceof MetaFailed(String reason)) return new DownloadFailed(reason);
+        if (meta instanceof MetaSize(long bytes, long limit)) return new SizeExceeded(bytes, limit);
+        var ok = (MetaOk) meta;
 
         var uuid = UUID.randomUUID().toString();
-        var extension = Filenames.extensionOf(pending.suggestedFilename(), filePath);
+        var extension = Filenames.extensionOf(pending.suggestedFilename(), ok.filePath());
         var leaf = uuid + extension;
 
         var stagingDir = AgentService.acquireWorkspacePath(agentName, "attachments/staging");
@@ -129,6 +102,69 @@ public final class TelegramFileDownloader {
         }
         Path stagedPath = AgentService.acquireContained(stagingDir, leaf);
 
+        var stageResult = streamFileToStaging(fileBaseUrl, ok.filePath(), stagedPath);
+        if (stageResult != null) return stageResult;
+
+        var originalFilename = pending.suggestedFilename() != null
+                ? pending.suggestedFilename()
+                : "telegram-" + pending.telegramFileId() + extension;
+        return new Ok(new AttachmentService.Input(
+                uuid, originalFilename, pending.mimeType(), ok.reportedSize(), pending.kind()));
+    }
+
+    /** Sealed result of the getFile metadata fetch. */
+    private sealed interface MetaResult permits MetaOk, MetaFailed, MetaSize {}
+    private record MetaOk(String filePath, long reportedSize) implements MetaResult {}
+    private record MetaFailed(String reason) implements MetaResult {}
+    private record MetaSize(long actualBytes, long limit) implements MetaResult {}
+
+    /**
+     * Issue the Bot API {@code getFile} call and validate the response. Returns
+     * {@link MetaOk} on success, or a failure variant carrying the reason. The
+     * caller is responsible for staging directory setup and the byte transfer.
+     */
+    private static MetaResult fetchFileMetadata(String apiBaseUrl,
+                                                TelegramChannel.PendingAttachment pending) {
+        JsonObject getFileResp;
+        try {
+            var url = apiBaseUrl + "/getFile?file_id=" + pending.telegramFileId();
+            var req = new okhttp3.Request.Builder().url(url).get().build();
+            var call = HttpFactories.general().newCall(req);
+            call.timeout().timeout(GETFILE_TIMEOUT.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+            try (var resp = call.execute()) {
+                if (resp.code() != 200) {
+                    return new MetaFailed("getFile HTTP " + resp.code());
+                }
+                var body = resp.body().string();
+                getFileResp = JsonParser.parseString(body).getAsJsonObject();
+            }
+        } catch (Exception e) {
+            return new MetaFailed("getFile: " + e.getMessage());
+        }
+
+        if (!getFileResp.has("ok") || !getFileResp.get("ok").getAsBoolean()) {
+            return new MetaFailed("getFile error: " + Strings.truncate(getFileResp.toString(), 200));
+        }
+        var result = getFileResp.getAsJsonObject("result");
+        String filePath = result.has("file_path") && !result.get("file_path").isJsonNull()
+                ? result.get("file_path").getAsString() : null;
+        if (filePath == null || filePath.isBlank()) {
+            return new MetaFailed("getFile response missing file_path");
+        }
+        long reportedSize = result.has("file_size") && !result.get("file_size").isJsonNull()
+                ? result.get("file_size").getAsLong() : pending.sizeBytes();
+        if (reportedSize > MAX_FILE_BYTES) {
+            return new MetaSize(reportedSize, MAX_FILE_BYTES);
+        }
+        return new MetaOk(filePath, reportedSize);
+    }
+
+    /**
+     * Stream the file bytes into {@code stagedPath}. Returns {@code null} on
+     * success, or a failure {@link Result} on HTTP error / IO error / size cap.
+     * On any failure the partial staging file is best-effort deleted.
+     */
+    private static Result streamFileToStaging(String fileBaseUrl, String filePath, Path stagedPath) {
         try {
             var downloadUrl = fileBaseUrl + "/" + filePath;
             var req = new okhttp3.Request.Builder().url(downloadUrl).get().build();
@@ -147,16 +183,11 @@ public final class TelegramFileDownloader {
                 bestEffortDelete(stagedPath);
                 return new SizeExceeded(actualSize, MAX_FILE_BYTES);
             }
+            return null;
         } catch (Exception e) {
             bestEffortDelete(stagedPath);
             return new DownloadFailed("download: " + e.getMessage());
         }
-
-        var originalFilename = pending.suggestedFilename() != null
-                ? pending.suggestedFilename()
-                : "telegram-" + pending.telegramFileId() + extension;
-        return new Ok(new AttachmentService.Input(
-                uuid, originalFilename, pending.mimeType(), reportedSize, pending.kind()));
     }
 
     /** Best-effort delete used during download cleanup — swallows IO errors. */

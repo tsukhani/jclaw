@@ -122,36 +122,56 @@ public class ApiTelegramBindingsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
-        if (body.has("botToken")) {
-            String newToken = body.get("botToken").getAsString();
-            if (newToken != null && !newToken.isBlank() && !newToken.equals(binding.botToken)) {
-                var existing = TelegramBinding.findByBotToken(newToken);
-                if (existing != null && !existing.id.equals(binding.id)) {
-                    error(409, "A binding with this bot token already exists");
-                }
-                binding.botToken = newToken;
+        applyBotTokenUpdate(binding, body);
+        applyAgentUpdate(binding, body);
+        applyTelegramUserIdUpdate(binding, body);
+        applyOptionalFieldUpdates(binding, body);
+        binding.save();
+
+        EventLogger.info("channel",
+                binding.agent != null ? binding.agent.name : null, "telegram",
+                "Binding %d updated".formatted(binding.id));
+
+        TelegramPollingRunner.reconcile();
+        renderJSON(gson.toJson(BindingView.of(binding)));
+    }
+
+    private static void applyBotTokenUpdate(TelegramBinding binding, com.google.gson.JsonObject body) {
+        if (!body.has("botToken")) return;
+        String newToken = body.get("botToken").getAsString();
+        if (newToken == null || newToken.isBlank() || newToken.equals(binding.botToken)) return;
+        var existing = TelegramBinding.findByBotToken(newToken);
+        if (existing != null && !existing.id.equals(binding.id)) {
+            error(409, "A binding with this bot token already exists");
+        }
+        binding.botToken = newToken;
+    }
+
+    private static void applyAgentUpdate(TelegramBinding binding, com.google.gson.JsonObject body) {
+        if (!body.has("agentId") || body.get("agentId").isJsonNull()) return;
+        Agent agent = AgentService.findById(body.get("agentId").getAsLong());
+        if (agent == null || !agent.enabled) {
+            error(400, "agentId must reference an enabled agent");
+        }
+        if (binding.agent == null || !agent.id.equals(binding.agent.id)) {
+            var other = TelegramBinding.findByAgent(agent);
+            if (other != null && !other.id.equals(binding.id)) {
+                error(409, "Agent '%s' is already bound to another Telegram binding".formatted(agent.name));
             }
         }
-        if (body.has("agentId") && !body.get("agentId").isJsonNull()) {
-            Agent agent = AgentService.findById(body.get("agentId").getAsLong());
-            if (agent == null || !agent.enabled) {
-                error(400, "agentId must reference an enabled agent");
-            }
-            if (binding.agent == null || !agent.id.equals(binding.agent.id)) {
-                var other = TelegramBinding.findByAgent(agent);
-                if (other != null && !other.id.equals(binding.id)) {
-                    error(409, "Agent '%s' is already bound to another Telegram binding".formatted(agent.name));
-                }
-            }
-            binding.agent = agent;
+        binding.agent = agent;
+    }
+
+    private static void applyTelegramUserIdUpdate(TelegramBinding binding, com.google.gson.JsonObject body) {
+        if (!body.has("telegramUserId")) return;
+        String uid = body.get("telegramUserId").getAsString();
+        if (uid == null || !uid.matches("\\d+")) {
+            error(400, "telegramUserId must be numeric");
         }
-        if (body.has("telegramUserId")) {
-            String uid = body.get("telegramUserId").getAsString();
-            if (uid == null || !uid.matches("\\d+")) {
-                error(400, "telegramUserId must be numeric");
-            }
-            binding.telegramUserId = uid;
-        }
+        binding.telegramUserId = uid;
+    }
+
+    private static void applyOptionalFieldUpdates(TelegramBinding binding, com.google.gson.JsonObject body) {
         if (body.has("transport")) {
             binding.transport = parseTransport(body, binding.transport);
         }
@@ -164,14 +184,6 @@ public class ApiTelegramBindingsController extends Controller {
         if (body.has("enabled")) {
             binding.enabled = body.get("enabled").getAsBoolean();
         }
-        binding.save();
-
-        EventLogger.info("channel",
-                binding.agent != null ? binding.agent.name : null, "telegram",
-                "Binding %d updated".formatted(binding.id));
-
-        TelegramPollingRunner.reconcile();
-        renderJSON(gson.toJson(BindingView.of(binding)));
     }
 
     public static void delete(Long id) {

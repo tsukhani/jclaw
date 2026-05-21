@@ -97,67 +97,8 @@ public final class TelegramOutboundPlanner {
         var seenFiles = new java.util.HashSet<String>();
 
         while (matcher.find()) {
-            // Either the angle-bracket branch or the plain-form branch fired;
-            // read from whichever captured.
-            String path = matcher.group(2) != null ? matcher.group(2) : matcher.group(4);
-            String display = matcher.group(1) != null ? matcher.group(1) : matcher.group(3);
-
-            // External URLs and in-page anchors aren't workspace files — leave
-            // them inside the surrounding text so the formatter renders them
-            // as normal links.
-            if (path.contains("://")) continue;
-            if (path.startsWith("#")) continue;
-
-            // Absolute paths are only resolvable when they match the JClaw
-            // workspace-file serve URL that the Playwright tool (and similar)
-            // hand to the agent. Extract the relative portion; skip any other
-            // absolute path — those are neither workspace files nor something
-            // we can deliver on Telegram.
-            String relative = path;
-            if (path.startsWith("/")) {
-                var apiMatch = API_FILES_URL.matcher(path);
-                if (!apiMatch.matches()) continue;
-                relative = apiMatch.group(1);
-            }
-
-            File resolved = resolveWorkspaceFile(agentName, relative);
-            if (resolved == null) continue;
-
-            String canonical;
-            try {
-                canonical = resolved.getCanonicalPath();
-            } catch (java.io.IOException e) {
-                canonical = resolved.getAbsolutePath();
-            }
-
-            // JCLAW-123: advance cursor past every file-ref match (whether
-            // we're emitting a new segment or deduping a repeat). Pre-JCLAW-123
-            // dedup left the duplicate markdown in the text segment, which the
-            // HTML formatter converted to an anchor pointing at the localhost
-            // /api/agents/... URL — a visible-but-broken link in Telegram.
-            // Cutting the match out uniformly means the surrounding text stays
-            // clean regardless of how many times the LLM mentions the file.
-            String before = markdown.substring(cursor, matcher.start());
-            if (!before.isEmpty()) {
-                appendOrMergeText(segments, before);
-            }
-            cursor = matcher.end();
-
-            if (!seenFiles.add(canonical)) continue;
-
-            boolean isImage = isImageFilename(resolved.getName());
-            segments.add(new FileSegment(display, resolved, isImage, false));
-            // JCLAW-123: Telegram compresses photos aggressively (JPEG re-encode,
-            // downscaled). For image files we also emit a sendDocument pass so
-            // the user gets the original-quality downloadable file alongside
-            // the inline preview. Non-image files already deliver as documents
-            // on the first pass — no duplicate needed. Marked isBackground=true
-            // (JCLAW-126) so the channel fires it async — Telegram document
-            // uploads of a just-sent photo can stall for 2+ minutes, and we
-            // don't want text messages to wait behind that.
-            if (isImage) {
-                segments.add(new FileSegment(display, resolved, false, true));
-            }
+            var processed = processMatch(matcher, markdown, agentName, segments, cursor, seenFiles);
+            if (processed != null) cursor = processed;
         }
 
         if (cursor < markdown.length()) {
@@ -168,6 +109,90 @@ public final class TelegramOutboundPlanner {
         // caller has a single uniform code path.
         if (segments.isEmpty()) return List.of(new TextSegment(markdown));
         return segments;
+    }
+
+    /**
+     * Resolve a single regex match into a file reference (or skip if not a
+     * workspace file). Returns the new cursor position when the match was
+     * consumed, or {@code null} when the match should be left in the
+     * surrounding text. Mutates {@code segments} and {@code seenFiles}.
+     */
+    private static Integer processMatch(Matcher matcher, String markdown, String agentName,
+                                         List<Segment> segments, int cursor,
+                                         java.util.Set<String> seenFiles) {
+        // Either the angle-bracket branch or the plain-form branch fired;
+        // read from whichever captured.
+        String path = matcher.group(2) != null ? matcher.group(2) : matcher.group(4);
+        String display = matcher.group(1) != null ? matcher.group(1) : matcher.group(3);
+
+        String relative = extractWorkspaceRelative(path);
+        if (relative == null) return null;
+
+        File resolved = resolveWorkspaceFile(agentName, relative);
+        if (resolved == null) return null;
+
+        // JCLAW-123: advance cursor past every file-ref match (whether
+        // we're emitting a new segment or deduping a repeat). Pre-JCLAW-123
+        // dedup left the duplicate markdown in the text segment, which the
+        // HTML formatter converted to an anchor pointing at the localhost
+        // /api/agents/... URL — a visible-but-broken link in Telegram.
+        // Cutting the match out uniformly means the surrounding text stays
+        // clean regardless of how many times the LLM mentions the file.
+        String before = markdown.substring(cursor, matcher.start());
+        if (!before.isEmpty()) {
+            appendOrMergeText(segments, before);
+        }
+        int newCursor = matcher.end();
+
+        if (!seenFiles.add(canonicalPath(resolved))) return newCursor;
+
+        boolean isImage = isImageFilename(resolved.getName());
+        segments.add(new FileSegment(display, resolved, isImage, false));
+        // JCLAW-123: Telegram compresses photos aggressively (JPEG re-encode,
+        // downscaled). For image files we also emit a sendDocument pass so
+        // the user gets the original-quality downloadable file alongside
+        // the inline preview. Non-image files already deliver as documents
+        // on the first pass — no duplicate needed. Marked isBackground=true
+        // (JCLAW-126) so the channel fires it async — Telegram document
+        // uploads of a just-sent photo can stall for 2+ minutes, and we
+        // don't want text messages to wait behind that.
+        if (isImage) {
+            segments.add(new FileSegment(display, resolved, false, true));
+        }
+        return newCursor;
+    }
+
+    /**
+     * Reduce a raw link target to its workspace-relative path, or {@code null}
+     * if the target can't be delivered (external URL, anchor, foreign absolute
+     * path). Returns the same string for already-relative paths.
+     */
+    private static String extractWorkspaceRelative(String path) {
+        // External URLs and in-page anchors aren't workspace files — leave
+        // them inside the surrounding text so the formatter renders them
+        // as normal links.
+        if (path.contains("://")) return null;
+        if (path.startsWith("#")) return null;
+
+        // Absolute paths are only resolvable when they match the JClaw
+        // workspace-file serve URL that the Playwright tool (and similar)
+        // hand to the agent. Extract the relative portion; skip any other
+        // absolute path — those are neither workspace files nor something
+        // we can deliver on Telegram.
+        if (path.startsWith("/")) {
+            var apiMatch = API_FILES_URL.matcher(path);
+            if (!apiMatch.matches()) return null;
+            return apiMatch.group(1);
+        }
+        return path;
+    }
+
+    private static String canonicalPath(File resolved) {
+        try {
+            return resolved.getCanonicalPath();
+        } catch (java.io.IOException e) {
+            return resolved.getAbsolutePath();
+        }
     }
 
     /**

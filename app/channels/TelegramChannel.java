@@ -324,27 +324,34 @@ public class TelegramChannel implements Channel {
 
         boolean allOk = true;
         for (var segment : segments) {
-            if (segment instanceof TelegramOutboundPlanner.TextSegment(String markdown)) {
-                if (!sendTextSegment(channel, chatId, markdown)) allOk = false;
-            }
-            else if (segment instanceof TelegramOutboundPlanner.FileSegment fs) {
-                // JCLAW-126: the quality-duplicate document emit (same file as
-                // a just-sent photo) fires on a virtual thread so slow Telegram
-                // document uploads — which we've observed stalling 2+ minutes
-                // for a 1.5 MB screenshot right after the photo sent in 65 s —
-                // don't block text or subsequent segments from reaching the user.
-                // Failures there log at warn and never regress allOk; the reply
-                // has already been delivered by the time the background upload
-                // might fail, so a late error can't retroactively fail the turn.
-                if (fs.isBackground()) {
-                    Thread.ofVirtual().name("telegram-bg-send")
-                            .start(() -> backgroundSendFile(channel, chatId, fs));
-                } else {
-                    if (!sendFileSegment(channel, chatId, fs)) allOk = false;
-                }
-            }
+            if (!dispatchSegment(channel, chatId, segment)) allOk = false;
         }
         return allOk;
+    }
+
+    /** Dispatch one planner segment; returns false only when a foreground send actually fails. */
+    private static boolean dispatchSegment(TelegramChannel channel, String chatId,
+                                           TelegramOutboundPlanner.Segment segment) {
+        if (segment instanceof TelegramOutboundPlanner.TextSegment(String markdown)) {
+            return sendTextSegment(channel, chatId, markdown);
+        }
+        if (segment instanceof TelegramOutboundPlanner.FileSegment fs) {
+            // JCLAW-126: the quality-duplicate document emit (same file as
+            // a just-sent photo) fires on a virtual thread so slow Telegram
+            // document uploads — which we've observed stalling 2+ minutes
+            // for a 1.5 MB screenshot right after the photo sent in 65 s —
+            // don't block text or subsequent segments from reaching the user.
+            // Failures there log at warn and never regress allOk; the reply
+            // has already been delivered by the time the background upload
+            // might fail, so a late error can't retroactively fail the turn.
+            if (fs.isBackground()) {
+                Thread.ofVirtual().name("telegram-bg-send")
+                        .start(() -> backgroundSendFile(channel, chatId, fs));
+                return true;
+            }
+            return sendFileSegment(channel, chatId, fs);
+        }
+        return true;
     }
 
     // Catches Throwable on purpose: this runs at a virtual-thread root, so an
@@ -540,19 +547,46 @@ public class TelegramChannel implements Channel {
         }
 
         var attachments = new java.util.ArrayList<PendingAttachment>();
-        // Highest-resolution PhotoSize wins — the array is sorted ascending by
-        // Telegram, so the last element is the full-quality original.
-        if (msg.hasPhoto() && msg.getPhoto() != null && !msg.getPhoto().isEmpty()) {
-            var sizes = msg.getPhoto();
-            var best = sizes.get(sizes.size() - 1);
-            long bytes = best.getFileSize() != null ? best.getFileSize() : 0L;
-            attachments.add(new PendingAttachment(
-                    best.getFileId(), null, "image/jpeg", bytes,
-                    models.MessageAttachment.KIND_IMAGE));
-        }
-        // Voice notes (OGG Opus) and audio files (mp3/m4a/etc.) both map to
-        // KIND_AUDIO. getMimeType is nullable — finalizeAttachment re-sniffs
-        // with Tika so we're not relying on Telegram's self-report anyway.
+        collectPhotoAttachment(msg, attachments);
+        collectAudioAttachments(msg, attachments);
+        collectFileAttachments(msg, attachments);
+
+        // Caption wins over plain-text when both exist is impossible per
+        // Telegram's shape — a given Message carries either text or caption,
+        // never both. Pick whichever is populated; empty string is fine
+        // (means "user attached a file with no prose context").
+        String text = pickInboundText(msg);
+
+        String mediaGroupId = msg.getMediaGroupId();
+
+        // Fully empty updates (no text, no caption, no attachments) are
+        // nothing we can act on — drop as before.
+        if (text.isEmpty() && attachments.isEmpty()) return null;
+
+        return new InboundMessage(chatId, chatType, text, fromId, fromUsername,
+                attachments, mediaGroupId);
+    }
+
+    /**
+     * Highest-resolution PhotoSize wins — the array is sorted ascending by
+     * Telegram, so the last element is the full-quality original.
+     */
+    private static void collectPhotoAttachment(Message msg, java.util.List<PendingAttachment> attachments) {
+        if (!msg.hasPhoto() || msg.getPhoto() == null || msg.getPhoto().isEmpty()) return;
+        var sizes = msg.getPhoto();
+        var best = sizes.get(sizes.size() - 1);
+        long bytes = best.getFileSize() != null ? best.getFileSize() : 0L;
+        attachments.add(new PendingAttachment(
+                best.getFileId(), null, "image/jpeg", bytes,
+                models.MessageAttachment.KIND_IMAGE));
+    }
+
+    /**
+     * Voice notes (OGG Opus) and audio files (mp3/m4a/etc.) both map to
+     * KIND_AUDIO. getMimeType is nullable — finalizeAttachment re-sniffs
+     * with Tika so we're not relying on Telegram's self-report anyway.
+     */
+    private static void collectAudioAttachments(Message msg, java.util.List<PendingAttachment> attachments) {
         if (msg.getVoice() != null) {
             var v = msg.getVoice();
             long bytes = v.getFileSize() != null ? v.getFileSize() : 0L;
@@ -567,6 +601,10 @@ public class TelegramChannel implements Channel {
                     a.getFileId(), a.getFileName(), a.getMimeType(), bytes,
                     models.MessageAttachment.KIND_AUDIO));
         }
+    }
+
+    /** Documents, videos, and video notes — all map to KIND_FILE, except image/* docs which stay KIND_IMAGE. */
+    private static void collectFileAttachments(Message msg, java.util.List<PendingAttachment> attachments) {
         if (msg.hasDocument() && msg.getDocument() != null) {
             var d = msg.getDocument();
             long bytes = d.getFileSize() != null ? d.getFileSize() : 0L;
@@ -594,28 +632,12 @@ public class TelegramChannel implements Channel {
                     vn.getFileId(), null, null, bytes,
                     models.MessageAttachment.KIND_FILE));
         }
+    }
 
-        // Caption wins over plain-text when both exist is impossible per
-        // Telegram's shape — a given Message carries either text or caption,
-        // never both. Pick whichever is populated; empty string is fine
-        // (means "user attached a file with no prose context").
-        String text;
-        if (msg.hasText()) {
-            text = msg.getText();
-        } else if (msg.getCaption() != null) {
-            text = msg.getCaption();
-        } else {
-            text = "";
-        }
-
-        String mediaGroupId = msg.getMediaGroupId();
-
-        // Fully empty updates (no text, no caption, no attachments) are
-        // nothing we can act on — drop as before.
-        if (text.isEmpty() && attachments.isEmpty()) return null;
-
-        return new InboundMessage(chatId, chatType, text, fromId, fromUsername,
-                attachments, mediaGroupId);
+    private static String pickInboundText(Message msg) {
+        if (msg.hasText()) return msg.getText();
+        if (msg.getCaption() != null) return msg.getCaption();
+        return "";
     }
 
     /**

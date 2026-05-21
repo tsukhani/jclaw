@@ -106,117 +106,143 @@ public final class TelegramMarkdownFormatter {
         }
 
         void emit(Node node) {
+            if (emitWrapped(node)) return;
+            if (emitCodeOrQuote(node)) return;
+            if (emitListOrTable(node)) return;
+            if (emitLink(node)) return;
+            if (emitInline(node)) return;
+            // Fallback: walk children. Covers container nodes we haven't enumerated
+            // (e.g. ListItem is handled by its parent list's walker, but standalone
+            // parent nodes not covered above should still emit their text.)
+            emitChildren(node);
+        }
+
+        /** Simple wrapping nodes — emit open tag, children, close tag. */
+        private boolean emitWrapped(Node node) {
             if (node instanceof Heading) {
-                out.append("<b>");
-                emitChildren(node);
-                out.append("</b>\n\n");
-            }
-            else if (node instanceof Paragraph) {
+                wrapChildren(node, "<b>", "</b>\n\n");
+            } else if (node instanceof Paragraph) {
                 emitChildren(node);
                 out.append("\n\n");
+            } else if (node instanceof StrongEmphasis) {
+                wrapChildren(node, "<b>", "</b>");
+            } else if (node instanceof Emphasis) {
+                wrapChildren(node, "<i>", "</i>");
+            } else if (node instanceof Strikethrough) {
+                wrapChildren(node, "<s>", "</s>");
+            } else {
+                return false;
             }
-            else if (node instanceof StrongEmphasis) {
-                out.append("<b>");
-                emitChildren(node);
-                out.append("</b>");
-            }
-            else if (node instanceof Emphasis) {
-                out.append("<i>");
-                emitChildren(node);
-                out.append("</i>");
-            }
-            else if (node instanceof Strikethrough) {
-                out.append("<s>");
-                emitChildren(node);
-                out.append("</s>");
-            }
-            else if (node instanceof Code code) {
+            return true;
+        }
+
+        private void wrapChildren(Node node, String open, String close) {
+            out.append(open);
+            emitChildren(node);
+            out.append(close);
+        }
+
+        /** Code spans/blocks and blockquotes. */
+        private boolean emitCodeOrQuote(Node node) {
+            if (node instanceof Code code) {
                 out.append("<code>");
                 out.append(escapeHtml(code.getText().toString()));
                 out.append("</code>");
-            }
-            else if (node instanceof FencedCodeBlock fcb) {
+            } else if (node instanceof FencedCodeBlock fcb) {
                 emitFencedCodeBlock(fcb);
-            }
-            else if (node instanceof IndentedCodeBlock icb) {
+            } else if (node instanceof IndentedCodeBlock icb) {
                 out.append(PRE_CODE_OPEN);
                 out.append(escapeHtml(icb.getContentChars().toString()));
                 out.append(PRE_CODE_CLOSE);
                 out.append("\n\n");
-            }
-            else if (node instanceof BlockQuote) {
+            } else if (node instanceof BlockQuote) {
                 out.append("<blockquote>");
                 emitChildren(node);
                 trimTrailingNewlines();
                 out.append("</blockquote>\n\n");
+            } else {
+                return false;
             }
-            else if (node instanceof BulletList bl) {
+            return true;
+        }
+
+        /** List and table nodes. */
+        private boolean emitListOrTable(Node node) {
+            if (node instanceof BulletList bl) {
                 emitBulletList(bl);
-            }
-            else if (node instanceof OrderedList ol) {
+            } else if (node instanceof OrderedList ol) {
                 emitOrderedList(ol);
+            } else if (node instanceof TableBlock tb) {
+                emitTable(tb);
+            } else {
+                return false;
             }
-            else if (node instanceof Link link) {
+            return true;
+        }
+
+        /** Markdown link / autolink. */
+        private boolean emitLink(Node node) {
+            if (node instanceof Link link) {
                 out.append("<a href=\"");
                 out.append(escapeAttr(link.getUrl().toString()));
                 out.append("\">");
                 emitChildren(node);
                 out.append("</a>");
+                return true;
             }
-            else if (node instanceof AutoLink al) {
+            if (node instanceof AutoLink al) {
                 out.append("<a href=\"");
                 out.append(escapeAttr(al.getUrl().toString()));
                 out.append("\">");
                 out.append(escapeHtml(al.getUrl().toString()));
                 out.append("</a>");
+                return true;
             }
-            else if (node instanceof Text t) {
+            return false;
+        }
+
+        /** Text, typographic decorations, breaks, raw HTML pass-through. */
+        private boolean emitInline(Node node) {
+            if (node instanceof Text t) {
                 out.append(escapeHtml(t.getChars().toString()));
-            }
-            else if (node instanceof TypographicSmarts ts) {
+            } else if (node instanceof TypographicSmarts ts) {
                 // --, ---, ..., etc. Flexmark stores replacements as HTML entity
                 // strings (e.g. "&ndash;"); we decode to the actual Unicode
                 // character so the emitted HTML reads cleanly and doesn't need
                 // entity-escaping at the chunk-boundary level.
                 out.append(decodeTypographicEntities(ts.getTypographicText()));
-            }
-            else if (node instanceof TypographicQuotes tq) {
+            } else if (node instanceof TypographicQuotes tq) {
                 out.append(decodeTypographicEntities(tq.getTypographicOpening()));
                 emitChildren(tq);
                 out.append(decodeTypographicEntities(tq.getTypographicClosing()));
-            }
-            else if (node instanceof SoftLineBreak || node instanceof HardLineBreak) {
+            } else if (node instanceof SoftLineBreak || node instanceof HardLineBreak) {
                 out.append("\n");
-            }
-            else if (node instanceof ThematicBreak) {
+            } else if (node instanceof ThematicBreak) {
                 // Telegram has no <hr>; emit a visual separator.
                 out.append("—\n\n");
-            }
-            else if (node instanceof TableBlock tb) {
-                emitTable(tb);
-            }
-            else if (node instanceof HtmlInline || node instanceof HtmlBlock
+            } else if (node instanceof HtmlInline || node instanceof HtmlBlock
                     || node instanceof HtmlCommentBlock || node instanceof HtmlInlineComment) {
-                // Agents occasionally emit raw HTML instead of markdown — usually
-                // simple emphasis tags (e.g. <b>Lazada</b>) that the LLM picked
-                // because the system prompt mentioned Telegram. Telegram's HTML
-                // parse mode supports a small no-attribute tag subset; pass those
-                // through verbatim so the user sees actual bold/italic instead of
-                // literal "<b>...</b>". Anything else (script, attributes, unknown
-                // tags) still goes through escapeHtml so we can't unintentionally
-                // ship dangerous markup.
-                String chars = node.getChars().toString();
-                if (SAFE_TG_TAG.matcher(chars).matches()) {
-                    out.append(chars);
-                } else {
-                    out.append(escapeHtml(chars));
-                }
+                emitRawHtml(node);
+            } else {
+                return false;
             }
-            else {
-                // Fallback: walk children. Covers container nodes we haven't enumerated
-                // (e.g. ListItem is handled by its parent list's walker, but standalone
-                // parent nodes not covered above should still emit their text.)
-                emitChildren(node);
+            return true;
+        }
+
+        // Agents occasionally emit raw HTML instead of markdown — usually
+        // simple emphasis tags (e.g. <b>Lazada</b>) that the LLM picked
+        // because the system prompt mentioned Telegram. Telegram's HTML
+        // parse mode supports a small no-attribute tag subset; pass those
+        // through verbatim so the user sees actual bold/italic instead of
+        // literal "<b>...</b>". Anything else (script, attributes, unknown
+        // tags) still goes through escapeHtml so we can't unintentionally
+        // ship dangerous markup.
+        private void emitRawHtml(Node node) {
+            String chars = node.getChars().toString();
+            if (SAFE_TG_TAG.matcher(chars).matches()) {
+                out.append(chars);
+            } else {
+                out.append(escapeHtml(chars));
             }
         }
 
@@ -283,21 +309,24 @@ public final class TelegramMarkdownFormatter {
             if (body == null) return;
 
             for (Node row = body.getFirstChild(); row != null; row = row.getNext()) {
-                if (!(row instanceof TableRow)) continue;
-                List<TableCell> cells = new ArrayList<>();
-                for (Node c = row.getFirstChild(); c != null; c = c.getNext()) {
-                    if (c instanceof TableCell cell) cells.add(cell);
+                if (row instanceof TableRow) emitTableBodyRow(row, headerLabels);
+            }
+            out.append("\n");
+        }
+
+        private void emitTableBodyRow(Node row, List<String> headerLabels) {
+            List<TableCell> cells = new ArrayList<>();
+            for (Node c = row.getFirstChild(); c != null; c = c.getNext()) {
+                if (c instanceof TableCell cell) cells.add(cell);
+            }
+            if (cells.isEmpty()) return;
+            out.append("• ");
+            for (int i = 0; i < cells.size(); i++) {
+                if (i > 0) out.append(" — ");
+                if (i < headerLabels.size() && !headerLabels.get(i).isBlank()) {
+                    out.append("<b>").append(escapeHtml(headerLabels.get(i))).append("</b>: ");
                 }
-                if (cells.isEmpty()) continue;
-                out.append("• ");
-                for (int i = 0; i < cells.size(); i++) {
-                    if (i > 0) out.append(" — ");
-                    if (i < headerLabels.size() && !headerLabels.get(i).isBlank()) {
-                        out.append("<b>").append(escapeHtml(headerLabels.get(i))).append("</b>: ");
-                    }
-                    emitChildren(cells.get(i));
-                }
-                out.append("\n");
+                emitChildren(cells.get(i));
             }
             out.append("\n");
         }
@@ -443,26 +472,34 @@ public final class TelegramMarkdownFormatter {
 
         for (String block : blocks) {
             if (block.isEmpty()) continue;
-
-            if (block.length() > maxLen) {
-                if (current.length() > 0) {
-                    chunks.add(current.toString());
-                    current.setLength(0);
-                }
-                chunks.addAll(splitOversizedBlock(block, maxLen));
-                continue;
-            }
-
-            int added = current.length() == 0 ? block.length() : current.length() + 2 + block.length();
-            if (added > maxLen) {
-                chunks.add(current.toString());
-                current.setLength(0);
-            }
-            if (current.length() > 0) current.append("\n\n");
-            current.append(block);
+            appendBlock(block, maxLen, current, chunks);
         }
         if (current.length() > 0) chunks.add(current.toString());
         return chunks;
+    }
+
+    /**
+     * Append {@code block} to {@code current}, flushing into {@code chunks} when
+     * the addition would exceed {@code maxLen}. Oversized blocks (a single block
+     * already longer than {@code maxLen}) are flushed and then split via
+     * {@link #splitOversizedBlock}.
+     */
+    private static void appendBlock(String block, int maxLen, StringBuilder current, List<String> chunks) {
+        if (block.length() > maxLen) {
+            if (current.length() > 0) {
+                chunks.add(current.toString());
+                current.setLength(0);
+            }
+            chunks.addAll(splitOversizedBlock(block, maxLen));
+            return;
+        }
+        int added = current.length() == 0 ? block.length() : current.length() + 2 + block.length();
+        if (added > maxLen) {
+            chunks.add(current.toString());
+            current.setLength(0);
+        }
+        if (current.length() > 0) current.append("\n\n");
+        current.append(block);
     }
 
     /**
@@ -519,25 +556,30 @@ public final class TelegramMarkdownFormatter {
         String[] lines = block.split("\n", -1);
         StringBuilder current = new StringBuilder();
         for (String line : lines) {
-            if (line.length() > maxLen) {
-                if (current.length() > 0) {
-                    chunks.add(current.toString());
-                    current.setLength(0);
-                }
-                for (int off = 0; off < line.length(); off += maxLen) {
-                    chunks.add(line.substring(off, Math.min(line.length(), off + maxLen)));
-                }
-                continue;
-            }
-            int added = current.length() == 0 ? line.length() : current.length() + 1 + line.length();
-            if (added > maxLen) {
-                chunks.add(current.toString());
-                current.setLength(0);
-            }
-            if (current.length() > 0) current.append("\n");
-            current.append(line);
+            appendLine(line, maxLen, current, chunks);
         }
         if (current.length() > 0) chunks.add(current.toString());
         return chunks;
+    }
+
+    /** Append {@code line} to {@code current}, flushing when over {@code maxLen}; hard-cut single lines longer than {@code maxLen}. */
+    private static void appendLine(String line, int maxLen, StringBuilder current, List<String> chunks) {
+        if (line.length() > maxLen) {
+            if (current.length() > 0) {
+                chunks.add(current.toString());
+                current.setLength(0);
+            }
+            for (int off = 0; off < line.length(); off += maxLen) {
+                chunks.add(line.substring(off, Math.min(line.length(), off + maxLen)));
+            }
+            return;
+        }
+        int added = current.length() == 0 ? line.length() : current.length() + 1 + line.length();
+        if (added > maxLen) {
+            chunks.add(current.toString());
+            current.setLength(0);
+        }
+        if (current.length() > 0) current.append("\n");
+        current.append(line);
     }
 }

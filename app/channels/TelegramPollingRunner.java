@@ -263,6 +263,9 @@ public final class TelegramPollingRunner {
      * verifies the sender matches {@link TelegramBinding#telegramUserId},
      * and hands the message off to the bound agent.
      */
+    /** Snapshot of binding state pulled inside the transaction, then read off-thread. */
+    private record Ctx(String botToken, String telegramUserId, Agent agent, boolean enabled) {}
+
     private static void dispatch(Long bindingId, Update update) {
         try {
             // JCLAW-109: parse inline-keyboard callbacks first so text-message
@@ -272,20 +275,7 @@ public final class TelegramPollingRunner {
             var msg = callback == null ? TelegramChannel.parseUpdate(update) : null;
             if (callback == null && msg == null) return;
 
-            // Pull everything we need inside the transaction so the outbound send
-            // path doesn't touch JPA-managed state on a non-request thread.
-            record Ctx(String botToken, String telegramUserId, Agent agent, boolean enabled) {}
-            Ctx ctx = services.Tx.run(() -> {
-                TelegramBinding b = TelegramBinding.findById(bindingId);
-                if (b == null) return null;
-                // Force eager read of the agent's name/id to avoid detached-proxy
-                // access later. @ManyToOne is EAGER by default but harmless to touch.
-                if (b.agent != null) {
-                    var _ = b.agent.name;
-                }
-                return new Ctx(b.botToken, b.telegramUserId, b.agent, b.enabled);
-            });
-
+            Ctx ctx = loadCtx(bindingId);
             if (ctx == null || !ctx.enabled() || ctx.agent() == null) {
                 EventLogger.warn("channel", null, "telegram",
                         "Dropping update for missing/disabled binding %d".formatted(bindingId));
@@ -293,43 +283,68 @@ public final class TelegramPollingRunner {
             }
 
             if (callback != null) {
-                if (!ctx.telegramUserId().equals(callback.fromId())) {
-                    EventLogger.warn("channel", ctx.agent().name, "telegram",
-                            "Rejected callback from user %s: binding %d is bound to user %s".formatted(
-                                    callback.fromId(), bindingId, ctx.telegramUserId()));
-                    return;
-                }
-                TelegramCallbackDispatcher.dispatch(ctx.botToken(), ctx.agent(), callback);
+                handleCallback(bindingId, ctx, callback);
                 return;
             }
 
-            if (!ctx.telegramUserId().equals(msg.fromId())) {
-                EventLogger.warn("channel", ctx.agent().name, "telegram",
-                        "Rejected inbound from %s (id=%s): binding %d is bound to user %s".formatted(
-                                msg.fromUsername() != null ? msg.fromUsername() : "?",
-                                msg.fromId(), bindingId, ctx.telegramUserId()));
-                return;
-            }
-
-            EventLogger.info("channel", ctx.agent().name, "telegram",
-                    "Polling received from %s: %s".formatted(
-                            msg.fromUsername() != null ? msg.fromUsername() : msg.fromId(),
-                            utils.Strings.truncate(msg.text(), 50)));
-
-            final String sendToken = ctx.botToken();
-            final Agent sendAgent = ctx.agent();
-            final String userId = ctx.telegramUserId();
-            // JCLAW-136: media_group_id reassembly runs BEFORE attachment
-            // download + dispatch so multi-photo albums collapse into one
-            // turn. Plain-text and single-attachment messages skip the
-            // buffer (null media_group_id → immediate dispatch).
-            TelegramMediaGroupBuffer.add(msg, merged -> dispatchMerged(
-                    sendToken, sendAgent, userId, merged));
+            handleMessage(bindingId, ctx, msg);
         } catch (Exception e) {
             EventLogger.error("channel", null, "telegram",
                     "Polling update processing error for binding %d: %s".formatted(
                             bindingId, e.getMessage()));
         }
+    }
+
+    /**
+     * Pull everything we need inside the transaction so the outbound send
+     * path doesn't touch JPA-managed state on a non-request thread.
+     */
+    private static Ctx loadCtx(Long bindingId) {
+        return services.Tx.run(() -> {
+            TelegramBinding b = TelegramBinding.findById(bindingId);
+            if (b == null) return null;
+            // Force eager read of the agent's name/id to avoid detached-proxy
+            // access later. @ManyToOne is EAGER by default but harmless to touch.
+            if (b.agent != null) {
+                var _ = b.agent.name;
+            }
+            return new Ctx(b.botToken, b.telegramUserId, b.agent, b.enabled);
+        });
+    }
+
+    private static void handleCallback(Long bindingId, Ctx ctx, TelegramChannel.InboundCallback callback) {
+        if (!ctx.telegramUserId().equals(callback.fromId())) {
+            EventLogger.warn("channel", ctx.agent().name, "telegram",
+                    "Rejected callback from user %s: binding %d is bound to user %s".formatted(
+                            callback.fromId(), bindingId, ctx.telegramUserId()));
+            return;
+        }
+        TelegramCallbackDispatcher.dispatch(ctx.botToken(), ctx.agent(), callback);
+    }
+
+    private static void handleMessage(Long bindingId, Ctx ctx, TelegramChannel.InboundMessage msg) {
+        if (!ctx.telegramUserId().equals(msg.fromId())) {
+            EventLogger.warn("channel", ctx.agent().name, "telegram",
+                    "Rejected inbound from %s (id=%s): binding %d is bound to user %s".formatted(
+                            msg.fromUsername() != null ? msg.fromUsername() : "?",
+                            msg.fromId(), bindingId, ctx.telegramUserId()));
+            return;
+        }
+
+        EventLogger.info("channel", ctx.agent().name, "telegram",
+                "Polling received from %s: %s".formatted(
+                        msg.fromUsername() != null ? msg.fromUsername() : msg.fromId(),
+                        utils.Strings.truncate(msg.text(), 50)));
+
+        final String sendToken = ctx.botToken();
+        final Agent sendAgent = ctx.agent();
+        final String userId = ctx.telegramUserId();
+        // JCLAW-136: media_group_id reassembly runs BEFORE attachment
+        // download + dispatch so multi-photo albums collapse into one
+        // turn. Plain-text and single-attachment messages skip the
+        // buffer (null media_group_id → immediate dispatch).
+        TelegramMediaGroupBuffer.add(msg, merged -> dispatchMerged(
+                sendToken, sendAgent, userId, merged));
     }
 
     /**
