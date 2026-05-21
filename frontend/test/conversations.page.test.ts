@@ -204,4 +204,27 @@ describe('Conversations page — list/pagination/filter init', () => {
     const rows = component.findAll('tbody tr')
     expect(rows.length).toBe(3)
   })
+
+  it('serializes preview text into the row markup', async () => {
+    // The DataTable maps each conversation's preview into a cell. With
+    // distinct previews we should see both verbatim in the DOM — this
+    // pins the rowFormatter contract.
+    registerEndpoint('/api/conversations', () => [
+      {
+        id: 401, agentId: 1, agentName: 'main', channelType: 'web', peerId: 'admin',
+        messageCount: 1, preview: 'first-preview-marker',
+        createdAt: '2026-05-04T10:00:00Z', updatedAt: '2026-05-04T10:00:00Z',
+      },
+      {
+        id: 402, agentId: 1, agentName: 'main', channelType: 'web', peerId: 'admin',
+        messageCount: 1, preview: 'second-preview-marker',
+        createdAt: '2026-05-04T10:01:00Z', updatedAt: '2026-05-04T10:01:00Z',
+      },
+    ])
+    const component = await mountSuspended(Conversations)
+    await flushPromises()
+    const html = component.html()
+    expect(html).toContain('first-preview-marker')
+    expect(html).toContain('second-preview-marker')
+  })
 })
