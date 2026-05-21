@@ -190,4 +190,86 @@ class SkillVersionManagerTest extends UnitTest {
         var result = callEnsureVersion(input, "4.0.0");
         assertTrue(result.contains("version: 4.0.0"));
     }
+
+    // --- extractExplicitVersion + parseFrontmatterStringForVersion + resolveVersion ---
+
+    @SuppressWarnings("unchecked")
+    private static <T> T invokePkgPriv(String name, Class<?>[] paramTypes, Object[] args) {
+        try {
+            var m = SkillVersionManager.class.getDeclaredMethod(name, paramTypes);
+            m.setAccessible(true);
+            return (T) m.invoke(null, args);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Test
+    void extractExplicitVersionReturnsNullForNullContent() {
+        String v = invokePkgPriv("extractExplicitVersion",
+                new Class<?>[]{String.class}, new Object[]{null});
+        assertNull(v);
+    }
+
+    @Test
+    void extractExplicitVersionReturnsNullWhenFrontmatterAbsent() {
+        String v = invokePkgPriv("extractExplicitVersion",
+                new Class<?>[]{String.class}, new Object[]{"# just body"});
+        assertNull(v);
+    }
+
+    @Test
+    void extractExplicitVersionReturnsVersionFromFrontmatter() {
+        String v = invokePkgPriv("extractExplicitVersion",
+                new Class<?>[]{String.class},
+                new Object[]{"---\nname: x\nversion: 7.7.7\n---\n# body"});
+        assertEquals("7.7.7", v);
+    }
+
+    @Test
+    void parseFrontmatterStringForVersionDefaultsForNullContent() {
+        String[] v = invokePkgPriv("parseFrontmatterStringForVersion",
+                new Class<?>[]{String.class}, new Object[]{null});
+        assertEquals("0.0.0", v[0]);
+    }
+
+    @Test
+    void parseFrontmatterStringForVersionDefaultsForNoFrontmatter() {
+        String[] v = invokePkgPriv("parseFrontmatterStringForVersion",
+                new Class<?>[]{String.class}, new Object[]{"# body"});
+        assertEquals("0.0.0", v[0]);
+    }
+
+    @Test
+    void parseFrontmatterStringForVersionReturnsExplicitVersion() {
+        String[] v = invokePkgPriv("parseFrontmatterStringForVersion",
+                new Class<?>[]{String.class},
+                new Object[]{"---\nname: x\nversion: 2.4.6\n---\n# body"});
+        assertEquals("2.4.6", v[0]);
+    }
+
+    @Test
+    void resolveVersionPrefersAutoWhenLlmNullOrBlank() {
+        String v1 = invokePkgPriv("resolveVersion",
+                new Class<?>[]{String.class, String.class},
+                new Object[]{null, "1.2.3"});
+        assertEquals("1.2.3", v1);
+        String v2 = invokePkgPriv("resolveVersion",
+                new Class<?>[]{String.class, String.class},
+                new Object[]{"   ", "1.2.3"});
+        assertEquals("1.2.3", v2);
+    }
+
+    @Test
+    void resolveVersionPrefersLlmOnlyWhenStrictlyHigher() {
+        String win = invokePkgPriv("resolveVersion",
+                new Class<?>[]{String.class, String.class},
+                new Object[]{"2.0.0", "1.5.0"});
+        assertEquals("2.0.0", win);
+
+        String fallback = invokePkgPriv("resolveVersion",
+                new Class<?>[]{String.class, String.class},
+                new Object[]{"1.0.0", "1.5.0"});
+        assertEquals("1.5.0", fallback);
+    }
 }
