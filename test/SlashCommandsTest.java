@@ -855,6 +855,40 @@ class SlashCommandsTest extends UnitTest {
         assertEquals(200, result[0]);
     }
 
+    // --- /usage end-to-end ---
+
+    @Test
+    void usageReturnsFallbackWhenNoConversation() {
+        // executeUsage path with current=null. buildUsageResponse short-
+        // circuits to the "No active conversation" fallback.
+        var result = Commands.handle("/usage", agent, "web", "admin", null);
+        assertTrue(result.isPresent());
+        assertEquals(Commands.Command.USAGE, result.get().command());
+        assertTrue(result.get().responseText().contains("No active conversation"),
+                "fallback message present: " + result.get().responseText());
+    }
+
+    @Test
+    void usageRendersTokenCountsForConversationWithAssistantUsage() {
+        // Happy path: create a conversation, append an assistant message
+        // with usageJson carrying real token counts, then run /usage. The
+        // response must surface the input/output token lines.
+        var conv = ConversationService.findOrCreate(agent, "web", "admin");
+        services.Tx.run(() -> {
+            ConversationService.appendUserMessage(conv, "hi");
+            ConversationService.appendAssistantMessage(conv, "hello back",
+                    null, "{\"prompt\":1234,\"completion\":56}");
+            return null;
+        });
+        var result = Commands.handle("/usage", agent, "web", "admin", conv);
+        assertTrue(result.isPresent());
+        var text = result.get().responseText();
+        assertTrue(text.contains("Input:"), "input line present: " + text);
+        assertTrue(text.contains("Output:"), "output line present: " + text);
+        assertTrue(text.contains("Total:"), "total line present: " + text);
+        assertTrue(text.contains("Model:"), "model line present: " + text);
+    }
+
     @Test
     void findLatestAssistantUsageSkipsMalformedJson() throws Exception {
         // Exception-catch path — malformed usageJson must not crash; the
