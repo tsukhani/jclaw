@@ -38,6 +38,20 @@ public class SkillPromotionService {
 
     private static final Gson PRETTY_GSON = new GsonBuilder().setPrettyPrinting().create();
 
+    // Canonical file/path constants for the skill folder layout.
+    private static final String SKILL_FILE_NAME = "SKILL.md";
+    private static final String SKILLS_DIR = "skills";
+    private static final String TOOLS_DIR_PREFIX = "tools/";
+    private static final String CREDENTIALS_DIR_PREFIX = "credentials/";
+
+    // Event-log category for all skill-related entries emitted by this service.
+    private static final String EVENT_CATEGORY_SKILLS = "skills";
+
+    // Notification keys used when publishing promotion failures.
+    private static final String NOTIFICATION_PROMOTE_FAILED = "skill.promote_failed";
+    private static final String KEY_SKILL_NAME = "skillName";
+    private static final String KEY_ERROR = "error";
+
     private SkillPromotionService() {}
 
     // --- Result types ---
@@ -60,7 +74,7 @@ public class SkillPromotionService {
      */
     public static ToolValidationResult validateToolRequirements(Agent agent, String skillName) {
         var globalDir = SkillLoader.globalSkillsPath().resolve(skillName);
-        var skillFile = globalDir.resolve("SKILL.md");
+        var skillFile = globalDir.resolve(SKILL_FILE_NAME);
         if (!Files.exists(skillFile)) return new ToolValidationResult(true, null);
 
         var info = SkillLoader.parseSkillFile(skillFile);
@@ -89,9 +103,9 @@ public class SkillPromotionService {
      */
     public static void copyToAgentWorkspace(Agent agent, String skillName) throws IOException {
         var globalDir = SkillLoader.globalSkillsPath().resolve(skillName);
-        var agentSkillsDir = AgentService.workspacePath(agent.name).resolve("skills");
+        var agentSkillsDir = AgentService.workspacePath(agent.name).resolve(SKILLS_DIR);
         var targetDir = agentSkillsDir.resolve(skillName);
-        var replacing = Files.isDirectory(targetDir) && Files.exists(targetDir.resolve("SKILL.md"));
+        var replacing = Files.isDirectory(targetDir) && Files.exists(targetDir.resolve(SKILL_FILE_NAME));
 
         var stagingDir = agentSkillsDir.resolve(skillName + ".copying-" + System.currentTimeMillis());
         var backupDir = agentSkillsDir.resolve(skillName + ".replacing-" + System.currentTimeMillis());
@@ -157,7 +171,7 @@ public class SkillPromotionService {
             row.toolName = src.toolName;
             row.save();
         }
-        EventLogger.info("skills",
+        EventLogger.info(EVENT_CATEGORY_SKILLS,
                 "Agent '%s' skill '%s' allowlist: %d command(s) snapshotted from registry"
                         .formatted(agent.name, skillName, blessed.size()));
     }
@@ -169,7 +183,7 @@ public class SkillPromotionService {
      */
     public static void revokeAgentAllowlist(Agent agent, String skillName) {
         AgentSkillAllowedTool.deleteByAgentAndSkill(agent, skillName);
-        EventLogger.info("skills",
+        EventLogger.info(EVENT_CATEGORY_SKILLS,
                 "Agent '%s' skill '%s' allowlist revoked".formatted(agent.name, skillName));
     }
 
@@ -193,7 +207,7 @@ public class SkillPromotionService {
     public static boolean hasSkillCreatorCapability(Agent agent) {
         if (agent == null) return false;
         var workspaceSkillMd = services.AgentService.workspacePath(agent.name)
-                .resolve("skills").resolve(SKILL_CREATOR_NAME).resolve("SKILL.md");
+                .resolve(SKILLS_DIR).resolve(SKILL_CREATOR_NAME).resolve(SKILL_FILE_NAME);
         if (!Files.exists(workspaceSkillMd)) return false;
         var cfg = AgentSkillConfig.findByAgentAndSkill(agent, SKILL_CREATOR_NAME);
         return cfg == null || cfg.enabled;
@@ -210,7 +224,7 @@ public class SkillPromotionService {
      * failure notifications so operators can tell which agent tried what.
      */
     public static void promoteInBackground(Path skillDir, String skillName, Long agentId) {
-        EventLogger.info("skills", "Starting background promotion of '%s'".formatted(skillName));
+        EventLogger.info(EVENT_CATEGORY_SKILLS, "Starting background promotion of '%s'".formatted(skillName));
 
         // ── Capability gate: only agents with skill-creator installed + enabled may promote ──
         if (!checkCapabilityGate(skillName, agentId)) return;
@@ -256,21 +270,21 @@ public class SkillPromotionService {
         // explicit type is required so downstream callers see the Agent API.
         Agent agent = Agent.findById(agentId);
         if (agent == null) {
-            EventLogger.warn("skills", "Promotion of '%s' refused: requesting agent id=%d not found"
+            EventLogger.warn(EVENT_CATEGORY_SKILLS, "Promotion of '%s' refused: requesting agent id=%d not found"
                     .formatted(skillName, agentId));
-            NotificationBus.publish("skill.promote_failed", Map.of(
-                    "skillName", skillName,
-                    "error", "Requesting agent not found."
+            NotificationBus.publish(NOTIFICATION_PROMOTE_FAILED, Map.of(
+                    KEY_SKILL_NAME, skillName,
+                    KEY_ERROR, "Requesting agent not found."
             ));
             return false;
         }
         if (!hasSkillCreatorCapability(agent)) {
-            EventLogger.warn("skills",
+            EventLogger.warn(EVENT_CATEGORY_SKILLS,
                     "Promotion of '%s' refused: agent '%s' does not have the skill-creator capability"
                             .formatted(skillName, agent.name));
-            NotificationBus.publish("skill.promote_failed", Map.of(
-                    "skillName", skillName,
-                    "error", "Agent '" + agent.name + "' lacks the skill-creator capability. "
+            NotificationBus.publish(NOTIFICATION_PROMOTE_FAILED, Map.of(
+                    KEY_SKILL_NAME, skillName,
+                    KEY_ERROR, "Agent '" + agent.name + "' lacks the skill-creator capability. "
                             + "Install the skill-creator skill in this agent's workspace first."
             ));
             return false;
@@ -281,7 +295,7 @@ public class SkillPromotionService {
     /** Returns true when promotion should short-circuit (identical or downgrade). */
     private static boolean skipForGlobalCheck(Path skillDir, String skillName) {
         var globalDirCheck = SkillLoader.globalSkillsPath().resolve(skillName);
-        if (!Files.isDirectory(globalDirCheck) || !Files.exists(globalDirCheck.resolve("SKILL.md"))) {
+        if (!Files.isDirectory(globalDirCheck) || !Files.exists(globalDirCheck.resolve(SKILL_FILE_NAME))) {
             return false;
         }
         return isIdenticalToGlobal(skillDir, globalDirCheck, skillName)
@@ -292,11 +306,11 @@ public class SkillPromotionService {
     private static boolean checkMalwareScan(Path skillDir, String skillName) {
         var violations = SkillBinaryScanner.scan(skillDir);
         if (violations.isEmpty()) return true;
-        EventLogger.warn("skills", "Promotion of '%s' refused: malware detected in %d file(s)"
+        EventLogger.warn(EVENT_CATEGORY_SKILLS, "Promotion of '%s' refused: malware detected in %d file(s)"
                 .formatted(skillName, violations.size()));
-        NotificationBus.publish("skill.promote_failed", Map.of(
-                "skillName", skillName,
-                "error", "Malware detected — " + formatViolations(violations)
+        NotificationBus.publish(NOTIFICATION_PROMOTE_FAILED, Map.of(
+                KEY_SKILL_NAME, skillName,
+                KEY_ERROR, "Malware detected — " + formatViolations(violations)
                         + ". Remove the flagged file(s) and try again."
         ));
         return false;
@@ -319,7 +333,7 @@ public class SkillPromotionService {
             });
             return true;
         } catch (IOException e) {
-            EventLogger.error("skills", "Failed to read skill files: " + e.getMessage());
+            EventLogger.error(EVENT_CATEGORY_SKILLS, "Failed to read skill files: " + e.getMessage());
             return false;
         }
     }
@@ -336,12 +350,12 @@ public class SkillPromotionService {
     private static ArrayList<String> enforceBinaryFileStructure(ArrayList<String> sourceBinaryFiles) {
         var binaryFiles = new ArrayList<String>();
         for (var binFile : sourceBinaryFiles) {
-            if (binFile.startsWith("tools/")) {
+            if (binFile.startsWith(TOOLS_DIR_PREFIX)) {
                 binaryFiles.add(binFile);
             } else {
                 var fileName = binFile.contains("/") ? binFile.substring(binFile.lastIndexOf('/') + 1) : binFile;
-                binaryFiles.add("tools/" + fileName);
-                EventLogger.info("skills", "Relocated binary '%s' → 'tools/%s'".formatted(binFile, fileName));
+                binaryFiles.add(TOOLS_DIR_PREFIX + fileName);
+                EventLogger.info(EVENT_CATEGORY_SKILLS, "Relocated binary '%s' → 'tools/%s'".formatted(binFile, fileName));
             }
         }
         return binaryFiles;
@@ -349,7 +363,7 @@ public class SkillPromotionService {
 
     private static void stripCredentialFiles(LinkedHashMap<String, String> textFiles) {
         for (var key : textFiles.keySet().stream().toList()) {
-            if (key.startsWith("credentials/")) {
+            if (key.startsWith(CREDENTIALS_DIR_PREFIX)) {
                 textFiles.put(key, stripCredentialsJson(textFiles.get(key)));
             }
         }
@@ -362,10 +376,10 @@ public class SkillPromotionService {
      * absent (no frontmatter to preserve).
      */
     private static SkillLoader.FrontmatterSplit stashFrontmatter(LinkedHashMap<String, String> textFiles) {
-        if (!textFiles.containsKey("SKILL.md")) return null;
-        var originalSplit = SkillLoader.splitFrontmatter(textFiles.get("SKILL.md"));
+        if (!textFiles.containsKey(SKILL_FILE_NAME)) return null;
+        var originalSplit = SkillLoader.splitFrontmatter(textFiles.get(SKILL_FILE_NAME));
         if (originalSplit.frontmatter() != null) {
-            textFiles.put("SKILL.md", originalSplit.body() != null ? originalSplit.body() : "");
+            textFiles.put(SKILL_FILE_NAME, originalSplit.body() != null ? originalSplit.body() : "");
         }
         return originalSplit;
     }
@@ -373,13 +387,13 @@ public class SkillPromotionService {
     private static void reinjectFrontmatter(SkillLoader.FrontmatterSplit originalSplit,
                                              LinkedHashMap<String, String> sanitized) {
         if (originalSplit == null || originalSplit.frontmatter() == null
-                || !sanitized.containsKey("SKILL.md")) {
+                || !sanitized.containsKey(SKILL_FILE_NAME)) {
             return;
         }
-        var sanitizedSplit = SkillLoader.splitFrontmatter(sanitized.get("SKILL.md"));
-        var sanitizedBody = sanitizedSplit.frontmatter() != null ? sanitizedSplit.body() : sanitized.get("SKILL.md");
+        var sanitizedSplit = SkillLoader.splitFrontmatter(sanitized.get(SKILL_FILE_NAME));
+        var sanitizedBody = sanitizedSplit.frontmatter() != null ? sanitizedSplit.body() : sanitized.get(SKILL_FILE_NAME);
         if (sanitizedBody == null) sanitizedBody = "";
-        sanitized.put("SKILL.md", originalSplit.frontmatter() + sanitizedBody);
+        sanitized.put(SKILL_FILE_NAME, originalSplit.frontmatter() + sanitizedBody);
     }
 
     // --- Internal helpers ---
@@ -389,9 +403,9 @@ public class SkillPromotionService {
         try {
             var workspaceHash = SkillLoader.hashSkillDirectory(skillDir);
             var globalHash = SkillLoader.hashSkillDirectory(globalDir);
-            var wsInfo = SkillLoader.parseSkillFile(skillDir.resolve("SKILL.md"));
-            var globalInfo = SkillLoader.parseSkillFile(globalDir.resolve("SKILL.md"));
-            EventLogger.info("skills",
+            var wsInfo = SkillLoader.parseSkillFile(skillDir.resolve(SKILL_FILE_NAME));
+            var globalInfo = SkillLoader.parseSkillFile(globalDir.resolve(SKILL_FILE_NAME));
+            EventLogger.info(EVENT_CATEGORY_SKILLS,
                     "Promote hash-check '%s': workspace[v=%s, hash=%s] global[v=%s, hash=%s] equal=%s"
                             .formatted(skillName,
                                     wsInfo != null ? wsInfo.version() : "?",
@@ -400,31 +414,31 @@ public class SkillPromotionService {
                                     globalHash.isEmpty() ? "EMPTY" : globalHash.substring(0, 12),
                                     workspaceHash.equals(globalHash)));
             if (workspaceHash.equals(globalHash) && !workspaceHash.isEmpty()) {
-                EventLogger.info("skills", "Promotion of '%s' skipped: workspace copy is identical to global".formatted(skillName));
+                EventLogger.info(EVENT_CATEGORY_SKILLS, "Promotion of '%s' skipped: workspace copy is identical to global".formatted(skillName));
                 NotificationBus.publish("skill.promote_noop", Map.of(
-                        "skillName", skillName,
+                        KEY_SKILL_NAME, skillName,
                         "reason", "Workspace copy is identical to the global skill — nothing to promote."
                 ));
                 return true;
             }
         } catch (IOException e) {
-            EventLogger.warn("skills", "Hash check failed for '%s': %s".formatted(skillName, e.getMessage()));
+            EventLogger.warn(EVENT_CATEGORY_SKILLS, "Hash check failed for '%s': %s".formatted(skillName, e.getMessage()));
         }
         return false;
     }
 
     // Public for SkillPromotionServiceCoverageTest (default-package test cannot access package-private)
     public static boolean isDowngrade(Path skillDir, Path globalDir, String skillName) {
-        var workspaceInfo = SkillLoader.parseSkillFile(skillDir.resolve("SKILL.md"));
-        var globalInfo = SkillLoader.parseSkillFile(globalDir.resolve("SKILL.md"));
+        var workspaceInfo = SkillLoader.parseSkillFile(skillDir.resolve(SKILL_FILE_NAME));
+        var globalInfo = SkillLoader.parseSkillFile(globalDir.resolve(SKILL_FILE_NAME));
         if (workspaceInfo != null && globalInfo != null) {
             int cmp = SkillLoader.compareVersions(workspaceInfo.version(), globalInfo.version());
             if (cmp < 0) {
-                EventLogger.warn("skills", "Promotion of '%s' refused: workspace version %s < global version %s"
+                EventLogger.warn(EVENT_CATEGORY_SKILLS, "Promotion of '%s' refused: workspace version %s < global version %s"
                         .formatted(skillName, workspaceInfo.version(), globalInfo.version()));
-                NotificationBus.publish("skill.promote_failed", Map.of(
-                        "skillName", skillName,
-                        "error", "Workspace version " + workspaceInfo.version()
+                NotificationBus.publish(NOTIFICATION_PROMOTE_FAILED, Map.of(
+                        KEY_SKILL_NAME, skillName,
+                        KEY_ERROR, "Workspace version " + workspaceInfo.version()
                                 + " is older than the global version " + globalInfo.version()
                                 + ". Update the agent's copy from the global skill (it will overwrite the workspace copy) before promoting."
                 ));
@@ -463,9 +477,9 @@ public class SkillPromotionService {
             syncRegistryToolRows(skillName, targetDir);
 
             var action = replacingExisting ? "replaced" : "created";
-            EventLogger.info("skills", "Promotion of '%s' completed (%s)".formatted(skillName, action));
+            EventLogger.info(EVENT_CATEGORY_SKILLS, "Promotion of '%s' completed (%s)".formatted(skillName, action));
             NotificationBus.publish("skill.promoted", Map.of(
-                    "skillName", skillName,
+                    KEY_SKILL_NAME, skillName,
                     "folderName", skillName,
                     "replaced", replacingExisting
             ));
@@ -473,10 +487,10 @@ public class SkillPromotionService {
             if (Files.exists(stagingDir)) {
                 try { deleteRecursive(stagingDir); } catch (IOException _) {}
             }
-            EventLogger.error("skills", "Failed to write promoted skill: " + e.getMessage());
-            NotificationBus.publish("skill.promote_failed", Map.of(
-                    "skillName", skillName,
-                    "error", e.getMessage()
+            EventLogger.error(EVENT_CATEGORY_SKILLS, "Failed to write promoted skill: " + e.getMessage());
+            NotificationBus.publish(NOTIFICATION_PROMOTE_FAILED, Map.of(
+                    KEY_SKILL_NAME, skillName,
+                    KEY_ERROR, e.getMessage()
             ));
         }
     }
@@ -542,7 +556,7 @@ public class SkillPromotionService {
      * for skills that only ship prompt instructions).
      */
     private static void syncRegistryToolRows(String skillName, Path globalSkillDir) {
-        var skillMd = globalSkillDir.resolve("SKILL.md");
+        var skillMd = globalSkillDir.resolve(SKILL_FILE_NAME);
         var info = Files.exists(skillMd) ? SkillLoader.parseSkillFile(skillMd) : null;
         var declared = (info != null && info.commands() != null) ? info.commands() : List.<String>of();
 
@@ -554,7 +568,7 @@ public class SkillPromotionService {
             row.toolName = cmd.strip();
             row.save();
         }
-        EventLogger.info("skills",
+        EventLogger.info(EVENT_CATEGORY_SKILLS,
                 "Registry allowlist for '%s': %d command(s) declared".formatted(skillName, declared.size()));
     }
 
@@ -594,11 +608,11 @@ public class SkillPromotionService {
     );
 
     public static String enforceTextFilePath(String path) {
-        if (path.startsWith("tools/") || path.startsWith("credentials/")) return path;
-        if (path.equals("SKILL.md")) return path;
+        if (path.startsWith(TOOLS_DIR_PREFIX) || path.startsWith(CREDENTIALS_DIR_PREFIX)) return path;
+        if (path.equals(SKILL_FILE_NAME)) return path;
         var lower = path.toLowerCase();
         for (var ext : CREDENTIAL_EXTENSIONS) {
-            if (lower.endsWith(ext)) return "credentials/" + path;
+            if (lower.endsWith(ext)) return CREDENTIALS_DIR_PREFIX + path;
         }
         return path;
     }
@@ -665,7 +679,7 @@ public class SkillPromotionService {
         if (provider == null || modelId == null || modelId.isBlank()) {
             Agent mainAgent = Agent.findByName(Agent.MAIN_AGENT_NAME);
             if (mainAgent == null) {
-                EventLogger.warn("skills", "Sanitization skipped: main agent not found");
+                EventLogger.warn(EVENT_CATEGORY_SKILLS, "Sanitization skipped: main agent not found");
                 return fileContents;
             }
             if (provider == null) provider = ProviderRegistry.get(mainAgent.modelProvider);
@@ -673,15 +687,15 @@ public class SkillPromotionService {
         }
 
         if (provider == null) {
-            EventLogger.warn("skills", "Sanitization skipped: no provider configured");
+            EventLogger.warn(EVENT_CATEGORY_SKILLS, "Sanitization skipped: no provider configured");
             return fileContents;
         }
 
-        EventLogger.info("skills", "Starting LLM sanitization of %d file(s) via %s / %s (batch=%dKB, timeout=%ds)"
+        EventLogger.info(EVENT_CATEGORY_SKILLS, "Starting LLM sanitization of %d file(s) via %s / %s (batch=%dKB, timeout=%ds)"
                 .formatted(fileContents.size(), provider.config().name(), modelId, batchKb, timeoutSeconds));
 
         for (var entry : fileContents.entrySet()) {
-            EventLogger.info("skills", "Sanitizing file: %s (%d chars)"
+            EventLogger.info(EVENT_CATEGORY_SKILLS, "Sanitizing file: %s (%d chars)"
                     .formatted(entry.getKey(), entry.getValue().length()));
         }
 
@@ -690,14 +704,14 @@ public class SkillPromotionService {
         var result = new LinkedHashMap<String, String>();
 
         for (int i = 0; i < batches.size(); i++) {
-            EventLogger.info("skills", "Sending batch %d/%d (%d files)"
+            EventLogger.info(EVENT_CATEGORY_SKILLS, "Sending batch %d/%d (%d files)"
                     .formatted(i + 1, batches.size(), batches.get(i).size()));
 
             var batchResult = sanitizeBatch(provider, modelId, batches.get(i), fileContents, timeoutSeconds);
             result.putAll(batchResult);
         }
 
-        EventLogger.info("skills", "Sanitization complete");
+        EventLogger.info(EVENT_CATEGORY_SKILLS, "Sanitization complete");
         return result;
     }
 
@@ -747,7 +761,7 @@ public class SkillPromotionService {
             var response = provider.chat(modelId, messages, null, null, null, timeoutSeconds, null);
             var text = response.choices().getFirst().message().content().toString().strip();
 
-            EventLogger.info("skills",
+            EventLogger.info(EVENT_CATEGORY_SKILLS,
                     "LLM sanitization batch response (%d chars)".formatted(text.length()));
 
             if (text.startsWith("```")) {
@@ -761,17 +775,17 @@ public class SkillPromotionService {
                     var sanitized = json.get(entry.getKey()).getAsString();
                     var changed = !sanitized.equals(entry.getValue());
                     result.put(entry.getKey(), sanitized);
-                    EventLogger.info("skills", "  %s: %s"
+                    EventLogger.info(EVENT_CATEGORY_SKILLS, "  %s: %s"
                             .formatted(entry.getKey(), changed ? "REDACTED (content changed)" : "clean (no changes)"));
                 } else {
                     result.put(entry.getKey(), originals.get(entry.getKey()));
-                    EventLogger.info("skills", "  %s: not in LLM response, kept original"
+                    EventLogger.info(EVENT_CATEGORY_SKILLS, "  %s: not in LLM response, kept original"
                             .formatted(entry.getKey()));
                 }
             }
             return result;
         } catch (Exception e) {
-            EventLogger.warn("skills", "LLM sanitization batch failed, using originals: " + e.getMessage());
+            EventLogger.warn(EVENT_CATEGORY_SKILLS, "LLM sanitization batch failed, using originals: " + e.getMessage());
             var result = new LinkedHashMap<String, String>();
             for (var entry : batch) {
                 result.put(entry.getKey(), originals.get(entry.getKey()));

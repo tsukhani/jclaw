@@ -38,6 +38,18 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
     private static final int MAX_RETRIES = 3;
     private static final long[] BACKOFF_MS = {1000, 2000, 4000};
 
+    // OpenAI-compatible JSON field names used across request/response (de)serialization
+    // and chunk-usage augmentation. Centralised so a typo can't drift one call site
+    // off the wire shape without the compiler catching it.
+    private static final String JSON_USAGE = "usage";
+    private static final String JSON_MODEL = "model";
+    private static final String JSON_CONTENT = "content";
+    private static final String JSON_TOOL_CALLS = "tool_calls";
+    private static final String JSON_TOOL_CALL_ID = "tool_call_id";
+    private static final String JSON_FINISH_REASON = "finish_reason";
+    // OpenAI tool-call type — the only value the spec defines today.
+    private static final String TYPE_FUNCTION = "function";
+
     // Why: park retry waits on a platform-thread scheduler so a burst of 429s doesn't
     // wedge the LLM virtual-thread dispatcher under JDK-8373224 (Thread.sleep on many
     // concurrent VTs starves the FJP work queue and inflates tail latency).
@@ -210,8 +222,8 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
     private ChatCompletionChunk augmentChunkUsage(ChatCompletionChunk chunk, JsonObject root) {
         if (chunk.usage() == null) return chunk;
         try {
-            if (!root.has("usage") || root.get("usage").isJsonNull()) return chunk;
-            var usageObj = root.getAsJsonObject("usage");
+            if (!root.has(JSON_USAGE) || root.get(JSON_USAGE).isJsonNull()) return chunk;
+            var usageObj = root.getAsJsonObject(JSON_USAGE);
             int reasoning = Math.max(chunk.usage().reasoningTokens(), extractReasoningTokens(usageObj));
             int cached = Math.max(chunk.usage().cachedTokens(), extractCachedTokens(usageObj));
             int cacheCreation = Math.max(chunk.usage().cacheCreationTokens(), extractCacheCreationTokens(usageObj));
@@ -438,7 +450,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
     protected String serializeRequest(ChatRequest request) {
         var obj = new JsonObject();
-        obj.addProperty("model", request.model());
+        obj.addProperty(JSON_MODEL, request.model());
         obj.add("messages", serializeMessages(request.messages()));
         if (request.tools() != null && !request.tools().isEmpty()) {
             obj.add("tools", gson.toJsonTree(request.tools()));
@@ -467,15 +479,15 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
             var obj = new JsonObject();
             obj.addProperty("role", msg.role());
             if (msg.content() instanceof String s) {
-                obj.addProperty("content", s);
+                obj.addProperty(JSON_CONTENT, s);
             } else if (msg.content() != null) {
-                obj.add("content", gson.toJsonTree(msg.content()));
+                obj.add(JSON_CONTENT, gson.toJsonTree(msg.content()));
             }
             if (msg.toolCalls() != null && !msg.toolCalls().isEmpty()) {
-                obj.add("tool_calls", gson.toJsonTree(msg.toolCalls()));
+                obj.add(JSON_TOOL_CALLS, gson.toJsonTree(msg.toolCalls()));
             }
             if (msg.toolCallId() != null) {
-                obj.addProperty("tool_call_id", msg.toolCallId());
+                obj.addProperty(JSON_TOOL_CALL_ID, msg.toolCallId());
             }
             if (msg.toolName() != null) {
                 obj.addProperty("name", msg.toolName());
@@ -488,15 +500,15 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
     protected ChatResponse deserializeResponse(String json) {
         var obj = JsonParser.parseString(json).getAsJsonObject();
         var id = obj.has("id") ? obj.get("id").getAsString() : null;
-        var model = obj.has("model") ? obj.get("model").getAsString() : null;
+        var model = obj.has(JSON_MODEL) ? obj.get(JSON_MODEL).getAsString() : null;
 
         var choices = new ArrayList<Choice>();
         if (obj.has("choices")) {
             for (var choiceEl : obj.getAsJsonArray("choices")) {
                 var choiceObj = choiceEl.getAsJsonObject();
                 var index = choiceObj.get("index").getAsInt();
-                var finishReason = choiceObj.has("finish_reason") && !choiceObj.get("finish_reason").isJsonNull()
-                        ? choiceObj.get("finish_reason").getAsString() : null;
+                var finishReason = choiceObj.has(JSON_FINISH_REASON) && !choiceObj.get(JSON_FINISH_REASON).isJsonNull()
+                        ? choiceObj.get(JSON_FINISH_REASON).getAsString() : null;
                 var msgObj = choiceObj.getAsJsonObject("message");
                 var message = deserializeMessage(msgObj);
                 choices.add(new Choice(index, message, finishReason));
@@ -504,8 +516,8 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         }
 
         Usage usage = null;
-        if (obj.has("usage") && !obj.get("usage").isJsonNull()) {
-            usage = parseUsage(obj.getAsJsonObject("usage"));
+        if (obj.has(JSON_USAGE) && !obj.get(JSON_USAGE).isJsonNull()) {
+            usage = parseUsage(obj.getAsJsonObject(JSON_USAGE));
         }
 
         return new ChatResponse(id, model, choices, usage);
@@ -514,18 +526,18 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
     private ChatMessage deserializeMessage(JsonObject msgObj) {
         var role = msgObj.get("role").getAsString();
         String content = null;
-        if (msgObj.has("content") && !msgObj.get("content").isJsonNull()) {
-            content = msgObj.get("content").getAsString();
+        if (msgObj.has(JSON_CONTENT) && !msgObj.get(JSON_CONTENT).isJsonNull()) {
+            content = msgObj.get(JSON_CONTENT).getAsString();
         }
 
         List<ToolCall> toolCalls = null;
-        if (msgObj.has("tool_calls") && !msgObj.get("tool_calls").isJsonNull()) {
+        if (msgObj.has(JSON_TOOL_CALLS) && !msgObj.get(JSON_TOOL_CALLS).isJsonNull()) {
             toolCalls = new ArrayList<>();
-            for (var tcEl : msgObj.getAsJsonArray("tool_calls")) {
+            for (var tcEl : msgObj.getAsJsonArray(JSON_TOOL_CALLS)) {
                 var tcObj = tcEl.getAsJsonObject();
                 var tcId = tcObj.get("id").getAsString();
-                var tcType = tcObj.has("type") ? tcObj.get("type").getAsString() : "function";
-                var fnObj = tcObj.getAsJsonObject("function");
+                var tcType = tcObj.has("type") ? tcObj.get("type").getAsString() : TYPE_FUNCTION;
+                var fnObj = tcObj.getAsJsonObject(TYPE_FUNCTION);
                 var fnName = fnObj.get("name").getAsString();
                 var fnArgs = fnObj.get("arguments").getAsString();
                 toolCalls.add(new ToolCall(tcId, tcType, new FunctionCall(fnName, fnArgs)));
@@ -533,8 +545,8 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
         }
 
         String toolCallId = null;
-        if (msgObj.has("tool_call_id") && !msgObj.get("tool_call_id").isJsonNull()) {
-            toolCallId = msgObj.get("tool_call_id").getAsString();
+        if (msgObj.has(JSON_TOOL_CALL_ID) && !msgObj.get(JSON_TOOL_CALL_ID).isJsonNull()) {
+            toolCallId = msgObj.get(JSON_TOOL_CALL_ID).getAsString();
         }
 
         return new ChatMessage(role, content, toolCalls, toolCallId, null);
@@ -887,7 +899,7 @@ public abstract sealed class LlmProvider permits OpenAiProvider, OllamaProvider,
 
     public static class ToolCallBuilder {
         public String id;
-        public String type = "function";
+        public String type = TYPE_FUNCTION;
         public String functionName;
         public StringBuilder arguments = new StringBuilder();
 

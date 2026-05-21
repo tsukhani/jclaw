@@ -42,6 +42,24 @@ import java.util.Optional;
  */
 public final class Commands {
 
+    // Event-log category for all entries emitted by the slash dispatcher.
+    private static final String EVENT_CATEGORY_SLASH = "SLASH_COMMAND";
+
+    // Suffix appended to log messages when a conversation id is in scope; the
+    // call sites concatenate ` for conversation ` + current.id to keep grep-able.
+    private static final String FOR_CONVERSATION_SUFFIX = " for conversation ";
+
+    // Capability-display tokens used in the /model output and reused across vision/audio/thinking.
+    private static final String CAP_SUPPORTED = "supported";
+    private static final String CAP_NOT_SUPPORTED = "not supported";
+
+    // Trailing-token line suffix in the /usage response — each line ends "<n> tokens\n".
+    private static final String TOKENS_LINE_SUFFIX = " tokens\n";
+
+    // Common error responses from the /subagent subcommand parser.
+    private static final String MISSING_RUN_ID_MSG = "Missing run id.";
+    private static final String NOT_FOUND_SUFFIX = " not found.";
+
     private Commands() {}
 
     /**
@@ -199,7 +217,7 @@ public final class Commands {
             ConversationService.appendAssistantMessage(conv, NEW_TEXT, null);
             return conv;
         });
-        EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
                 "/new → new conversation %d for peer=%s".formatted(newConv.id, peerId));
         return new Result(newConv, NEW_TEXT, Command.NEW);
     }
@@ -209,7 +227,7 @@ public final class Commands {
             // Nothing to reset. Treat as help-like: tell the user we can't
             // reset because there's no current conversation.
             var fallback = "No active conversation to reset.";
-            EventLogger.warn("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+            EventLogger.warn(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
                     "/reset with no current conversation");
             return new Result(null, fallback, Command.RESET);
         }
@@ -229,7 +247,7 @@ public final class Commands {
             conv.save();
             return conv;
         });
-        EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
                 "/reset for conversation %d".formatted(convId));
         return new Result(updated != null ? updated : current, RESET_TEXT, Command.RESET);
     }
@@ -263,17 +281,17 @@ public final class Commands {
      */
     private static Result executeStop(Agent agent, String channelType, Conversation current) {
         if (current == null) {
-            EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+            EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
                     "/stop with no current conversation");
             return new Result(null, "No active conversation. Nothing to stop.", Command.STOP);
         }
         if (!services.ConversationQueue.isBusy(current.id)) {
-            EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+            EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
                     "/stop for conversation %d — nothing in flight".formatted(current.id));
             return new Result(current, "Nothing to stop.", Command.STOP);
         }
         services.ConversationQueue.cancellationFlag(current.id).set(true);
-        EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
                 "/stop signalled cancellation for conversation %d".formatted(current.id));
         return new Result(current, "Stopped.", Command.STOP);
     }
@@ -301,7 +319,7 @@ public final class Commands {
     private static Result executeCompact(Agent agent, String channelType, Conversation current, String args) {
         if (current == null) {
             var fallback = "No active conversation to compact.";
-            EventLogger.warn("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+            EventLogger.warn(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
                     "/compact with no current conversation");
             return new Result(null, fallback, Command.COMPACT);
         }
@@ -381,7 +399,7 @@ public final class Commands {
                 ConversationService.appendAssistantMessage(conv, responseFinal, null);
             }
         });
-        EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
                 "/compact for conversation %d: %s".formatted(convId, outcome));
     }
 
@@ -395,8 +413,8 @@ public final class Commands {
                 }
             });
         }
-        EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
-                "/help" + (current != null ? " for conversation " + current.id : ""));
+        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
+                "/help" + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : ""));
         return new Result(current, HELP_TEXT, Command.HELP);
     }
 
@@ -441,7 +459,7 @@ public final class Commands {
     private static Result executeModelSummary(Agent agent, String channelType, Conversation current) {
         if ("telegram".equals(channelType) && current != null && agent != null) {
             var delivered = channels.TelegramModelSelector.sendSummary(agent, current);
-            EventLogger.info("SLASH_COMMAND", agent.name, channelType,
+            EventLogger.info(EVENT_CATEGORY_SLASH, agent.name, channelType,
                     "/model (summary+keyboard) for conversation " + current.id
                             + (delivered ? "" : " — delivery failed"));
             return new Result(current, delivered ? "" : buildModelResponse(agent, current), Command.MODEL);
@@ -473,8 +491,8 @@ public final class Commands {
             persistCannedResponseInTx(current, text);
             return text;
         });
-        EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
-                logPrefix + (current != null ? " for conversation " + current.id : ""));
+        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
+                logPrefix + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : ""));
         return new Result(current, responseText, Command.MODEL);
     }
 
@@ -499,8 +517,8 @@ public final class Commands {
             persistCannedResponseInTx(current, text);
             return text;
         });
-        EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
-                "/usage" + (current != null ? " for conversation " + current.id : ""));
+        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
+                "/usage" + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : ""));
         return new Result(current, responseText, Command.USAGE);
     }
 
@@ -556,8 +574,8 @@ public final class Commands {
         }
         var m = model.get();
         var thinkingLine = m.supportsThinking()
-                ? "supported" + renderThinkingSelection(agent, m)
-                : "not supported";
+                ? CAP_SUPPORTED + renderThinkingSelection(agent, m)
+                : CAP_NOT_SUPPORTED;
         var sb = new StringBuilder();
         sb.append("Model: ").append(providerName).append('/').append(modelId).append('\n');
         if (overrideActive) {
@@ -575,8 +593,8 @@ public final class Commands {
         sb.append("Context window: ").append(formatTokenCapacity(m.contextWindow())).append('\n');
         sb.append("Max output: ").append(formatTokenCapacity(m.maxTokens())).append('\n');
         sb.append("Thinking: ").append(thinkingLine).append('\n');
-        sb.append("Vision: ").append(m.supportsVision() ? "supported" : "not supported").append('\n');
-        sb.append("Audio: ").append(m.supportsAudio() ? "supported" : "not supported").append('\n');
+        sb.append("Vision: ").append(m.supportsVision() ? CAP_SUPPORTED : CAP_NOT_SUPPORTED).append('\n');
+        sb.append("Audio: ").append(m.supportsAudio() ? CAP_SUPPORTED : CAP_NOT_SUPPORTED).append('\n');
         sb.append("Pricing (per 1M tokens): ").append(formatPricing(m));
         return sb.toString();
     }
@@ -733,9 +751,9 @@ public final class Commands {
         int total = prompt + completion;
 
         var sb = new StringBuilder();
-        sb.append("Input: ").append(formatTokens(prompt)).append(" tokens\n");
-        sb.append("Output: ").append(formatTokens(completion)).append(" tokens\n");
-        sb.append("Total: ").append(formatTokens(total)).append(" tokens\n");
+        sb.append("Input: ").append(formatTokens(prompt)).append(TOKENS_LINE_SUFFIX);
+        sb.append("Output: ").append(formatTokens(completion)).append(TOKENS_LINE_SUFFIX);
+        sb.append("Total: ").append(formatTokens(total)).append(TOKENS_LINE_SUFFIX);
         sb.append("Context: ").append(renderContextLine(prompt, model)).append('\n');
         sb.append("Model: ")
                 .append(effectiveProvider != null ? effectiveProvider : "?")
@@ -849,10 +867,10 @@ public final class Commands {
             persistCannedResponseInTx(current, text);
             return text;
         });
-        EventLogger.info("SLASH_COMMAND", agent != null ? agent.name : null, channelType,
+        EventLogger.info(EVENT_CATEGORY_SLASH, agent != null ? agent.name : null, channelType,
                 "/subagent " + (sub.kind() != null ? sub.kind() : "(no-args)")
                         + (sub.id() != null ? " " + sub.id() : "")
-                        + (current != null ? " for conversation " + current.id : ""));
+                        + (current != null ? FOR_CONVERSATION_SUFFIX + current.id : ""));
         return new Result(current, responseText, Command.SUBAGENT);
     }
 
@@ -940,9 +958,9 @@ public final class Commands {
     }
 
     private static String renderSubagentInfo(Long runId) {
-        if (runId == null) return "Missing run id.";
+        if (runId == null) return MISSING_RUN_ID_MSG;
         var run = (models.SubagentRun) models.SubagentRun.findById(runId);
-        if (run == null) return "Run " + runId + " not found.";
+        if (run == null) return "Run " + runId + NOT_FOUND_SUFFIX;
         // Pull mode/context from the most recent SUBAGENT_SPAWN event for this
         // run id. Those fields aren't on SubagentRun directly — the typed
         // EventLogger helpers stash them in the JSON details payload.
@@ -976,12 +994,12 @@ public final class Commands {
     }
 
     private static String renderSubagentLog(Long runId) {
-        if (runId == null) return "Missing run id.";
+        if (runId == null) return MISSING_RUN_ID_MSG;
         // The run must exist before we promise log rows for it; surface a
         // clear 404 rather than an empty list (which an operator would
         // misread as "no events" when the id is actually a typo).
         var run = (models.SubagentRun) models.SubagentRun.findById(runId);
-        if (run == null) return "Run " + runId + " not found.";
+        if (run == null) return "Run " + runId + NOT_FOUND_SUFFIX;
 
         // EventLog.details is a JSON blob containing run_id. H2's LIKE on a
         // small set of rows is cheap; we filter further in Java to extract
@@ -1007,7 +1025,7 @@ public final class Commands {
     }
 
     private static String renderSubagentKill(Agent agent, Long runId) {
-        if (runId == null) return "Missing run id.";
+        if (runId == null) return MISSING_RUN_ID_MSG;
         var reason = agent != null
                 ? "Killed by operator via /subagent kill (agent " + agent.name + ")"
                 : "Killed by operator via /subagent kill";
@@ -1031,9 +1049,9 @@ public final class Commands {
      * standard conversation viewer.
      */
     private static String renderSubagentHistory(Agent agent, Long runId) {
-        if (runId == null) return "Missing run id.";
+        if (runId == null) return MISSING_RUN_ID_MSG;
         var run = (models.SubagentRun) models.SubagentRun.findById(runId);
-        if (run == null) return "Run " + runId + " not found.";
+        if (run == null) return "Run " + runId + NOT_FOUND_SUFFIX;
         // Same parent-owned gate as SessionsHistoryTool.
         if (agent == null
                 || run.parentAgent == null
