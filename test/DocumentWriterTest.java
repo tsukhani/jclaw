@@ -131,4 +131,62 @@ class DocumentWriterTest extends UnitTest {
 
         assertTrue(Files.exists(target), "DOCX from empty markdown should still create a file");
     }
+
+    @Test
+    void writeDocxWithBlockQuoteVisitsBlockQuoteBranch() throws IOException {
+        // Exercises DocxVisitor.visitBlockQuote which is 0%-covered. The
+        // markdown engine emits a BlockQuote node for "> ..." lines.
+        var markdown = """
+                # Quoted
+
+                > This is a quoted paragraph.
+                > Continuation of the quote.
+
+                Normal paragraph after the quote.
+                """;
+        var target = tempDir.resolve("blockquote.docx");
+        DocumentWriter.writeDocx(target, markdown);
+
+        assertTrue(Files.exists(target));
+        assertTrue(Files.size(target) > 0, "DOCX with blockquote should not be empty");
+    }
+
+    @Test
+    void writeDocxWithOrderedListVisitsOrderedListBranch() throws IOException {
+        // Exercises DocxVisitor.visitOrderedList — same 0%-covered situation.
+        var markdown = """
+                # Numbered
+
+                1. First item
+                2. Second item
+                3. Third item
+                """;
+        var target = tempDir.resolve("ordered-list.docx");
+        DocumentWriter.writeDocx(target, markdown);
+
+        assertTrue(Files.exists(target));
+        assertTrue(Files.size(target) > 0);
+    }
+
+    @Test
+    void writeDocxWithBulletListAndCodeFence() throws IOException {
+        // Covers visit(BulletList) + visit(FencedCodeBlock) — both inner-
+        // class branches that may be skipped by the simple-markdown test.
+        var markdown = """
+                # Mixed elements
+
+                - Bullet one
+                - Bullet two
+
+                ```
+                code-fence-line-one
+                code-fence-line-two
+                ```
+                """;
+        var target = tempDir.resolve("mixed.docx");
+        DocumentWriter.writeDocx(target, markdown);
+
+        assertTrue(Files.exists(target));
+        assertTrue(Files.size(target) > 0);
+    }
 }
