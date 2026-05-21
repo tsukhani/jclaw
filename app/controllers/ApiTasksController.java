@@ -45,6 +45,23 @@ public class ApiTasksController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    // JSON body keys reused across create/update parsers and per-field tests.
+    private static final String KEY_AGENT_ID = "agentId";
+    private static final String KEY_SCHEDULE = "schedule";
+    private static final String KEY_DESCRIPTION = "description";
+    private static final String KEY_DELIVERY = "delivery";
+    private static final String KEY_PAYLOAD_TYPE = "payloadType";
+    private static final String KEY_MODEL_PROVIDER = "modelProvider";
+    private static final String KEY_MODEL_ID = "modelId";
+    private static final String KEY_ENABLED_TOOL_NAMES = "enabledToolNames";
+    private static final String KEY_WORKDIR = "workdir";
+    private static final String KEY_PRE_CHECK = "preCheck";
+    private static final String KEY_SCRIPT = "script";
+    private static final String KEY_NO_AGENT = "noAgent";
+    private static final String KEY_CONTEXT_FROM_TASK_IDS = "contextFromTaskIds";
+    private static final String KEY_REPEAT_LIMIT = "repeatLimit";
+    private static final String KEY_PAUSED = "paused";
+
     private record TaskView(Long id, String name, String description, String type, String status,
                             String cronExpression, Long intervalSeconds, String scheduleDisplay,
                             int retryCount, int maxRetries, String lastError,
@@ -271,11 +288,11 @@ public class ApiTasksController extends Controller {
      * a non-existent agent named in the request body is bad input.
      */
     private static Agent requireAgentFromBody(com.google.gson.JsonObject body) {
-        if (!body.has("agentId") || body.get("agentId").isJsonNull()) {
+        if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) {
             error(400, "agentId is required");
             return null; // unreachable
         }
-        var agent = (Agent) Agent.findById(body.get("agentId").getAsLong());
+        var agent = (Agent) Agent.findById(body.get(KEY_AGENT_ID).getAsLong());
         if (agent == null) {
             error(400, "agentId does not resolve to an existing agent");
             return null; // unreachable
@@ -297,12 +314,12 @@ public class ApiTasksController extends Controller {
     }
 
     private static ScheduleShorthandParser.ScheduleSpec requireScheduleSpec(com.google.gson.JsonObject body) {
-        if (!body.has("schedule") || body.get("schedule").isJsonNull()) {
+        if (!body.has(KEY_SCHEDULE) || body.get(KEY_SCHEDULE).isJsonNull()) {
             error(400, "schedule is required");
             return null; // unreachable
         }
         try {
-            return ScheduleShorthandParser.parse(body.get("schedule").getAsString());
+            return ScheduleShorthandParser.parse(body.get(KEY_SCHEDULE).getAsString());
         } catch (IllegalArgumentException e) {
             error(400, "Invalid schedule: " + e.getMessage());
             return null; // unreachable
@@ -335,7 +352,7 @@ public class ApiTasksController extends Controller {
         var t = new Task();
         t.agent = agent;
         t.name = name;
-        t.description = readOptionalString(body, "description");
+        t.description = readOptionalString(body, KEY_DESCRIPTION);
         if (t.description == null) t.description = "";
 
         t.type = spec.type();
@@ -349,20 +366,20 @@ public class ApiTasksController extends Controller {
         t.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : Instant.now();
 
         // Plumbing-ahead fields (consumed by JCLAW-295/296/297/298).
-        t.delivery = readOptionalString(body, "delivery");
-        t.payloadType = readOptionalString(body, "payloadType");
-        t.modelProvider = readOptionalString(body, "modelProvider");
-        t.modelId = readOptionalString(body, "modelId");
-        t.enabledToolNames = readOptionalString(body, "enabledToolNames");
-        t.workdir = readOptionalString(body, "workdir");
-        t.preCheck = readOptionalString(body, "preCheck");
-        t.script = readOptionalString(body, "script");
-        if (body.has("noAgent") && !body.get("noAgent").isJsonNull()) {
-            t.noAgent = body.get("noAgent").getAsBoolean();
+        t.delivery = readOptionalString(body, KEY_DELIVERY);
+        t.payloadType = readOptionalString(body, KEY_PAYLOAD_TYPE);
+        t.modelProvider = readOptionalString(body, KEY_MODEL_PROVIDER);
+        t.modelId = readOptionalString(body, KEY_MODEL_ID);
+        t.enabledToolNames = readOptionalString(body, KEY_ENABLED_TOOL_NAMES);
+        t.workdir = readOptionalString(body, KEY_WORKDIR);
+        t.preCheck = readOptionalString(body, KEY_PRE_CHECK);
+        t.script = readOptionalString(body, KEY_SCRIPT);
+        if (body.has(KEY_NO_AGENT) && !body.get(KEY_NO_AGENT).isJsonNull()) {
+            t.noAgent = body.get(KEY_NO_AGENT).getAsBoolean();
         }
-        t.contextFromTaskIds = readOptionalString(body, "contextFromTaskIds");
-        if (body.has("repeatLimit") && !body.get("repeatLimit").isJsonNull()) {
-            t.repeatLimit = body.get("repeatLimit").getAsInt();
+        t.contextFromTaskIds = readOptionalString(body, KEY_CONTEXT_FROM_TASK_IDS);
+        if (body.has(KEY_REPEAT_LIMIT) && !body.get(KEY_REPEAT_LIMIT).isJsonNull()) {
+            t.repeatLimit = body.get(KEY_REPEAT_LIMIT).getAsInt();
         }
 
         t.save();
@@ -418,10 +435,10 @@ public class ApiTasksController extends Controller {
      * @return true if the schedule field was applied.
      */
     private static boolean applyScheduleUpdate(Task task, com.google.gson.JsonObject body) {
-        if (!body.has("schedule") || body.get("schedule").isJsonNull()) return false;
+        if (!body.has(KEY_SCHEDULE) || body.get(KEY_SCHEDULE).isJsonNull()) return false;
         final ScheduleShorthandParser.ScheduleSpec spec;
         try {
-            spec = ScheduleShorthandParser.parse(body.get("schedule").getAsString());
+            spec = ScheduleShorthandParser.parse(body.get(KEY_SCHEDULE).getAsString());
         } catch (IllegalArgumentException e) {
             error(400, "Invalid schedule: " + e.getMessage());
             return false; // unreachable — error() throws
@@ -448,35 +465,35 @@ public class ApiTasksController extends Controller {
 
         // Optional-string fields: present-and-null clears, present-and-blank
         // also clears (readOptionalString collapses both to null).
-        if (body.has("description")) {
-            var v = readOptionalString(body, "description");
+        if (body.has(KEY_DESCRIPTION)) {
+            var v = readOptionalString(body, KEY_DESCRIPTION);
             task.description = v != null ? v : "";
             changed = true;
         }
-        if (body.has("delivery"))          { task.delivery          = readOptionalString(body, "delivery");          changed = true; }
-        if (body.has("payloadType"))       { task.payloadType       = readOptionalString(body, "payloadType");       changed = true; }
-        if (body.has("modelProvider"))     { task.modelProvider     = readOptionalString(body, "modelProvider");     changed = true; }
-        if (body.has("modelId"))           { task.modelId           = readOptionalString(body, "modelId");           changed = true; }
-        if (body.has("enabledToolNames"))  { task.enabledToolNames  = readOptionalString(body, "enabledToolNames");  changed = true; }
-        if (body.has("workdir"))           { task.workdir           = readOptionalString(body, "workdir");           changed = true; }
-        if (body.has("preCheck"))          { task.preCheck          = readOptionalString(body, "preCheck");          changed = true; }
-        if (body.has("script"))            { task.script            = readOptionalString(body, "script");            changed = true; }
-        if (body.has("contextFromTaskIds")){ task.contextFromTaskIds= readOptionalString(body, "contextFromTaskIds");changed = true; }
+        if (body.has(KEY_DELIVERY))            { task.delivery          = readOptionalString(body, KEY_DELIVERY);            changed = true; }
+        if (body.has(KEY_PAYLOAD_TYPE))        { task.payloadType       = readOptionalString(body, KEY_PAYLOAD_TYPE);        changed = true; }
+        if (body.has(KEY_MODEL_PROVIDER))      { task.modelProvider     = readOptionalString(body, KEY_MODEL_PROVIDER);      changed = true; }
+        if (body.has(KEY_MODEL_ID))            { task.modelId           = readOptionalString(body, KEY_MODEL_ID);            changed = true; }
+        if (body.has(KEY_ENABLED_TOOL_NAMES))  { task.enabledToolNames  = readOptionalString(body, KEY_ENABLED_TOOL_NAMES);  changed = true; }
+        if (body.has(KEY_WORKDIR))             { task.workdir           = readOptionalString(body, KEY_WORKDIR);             changed = true; }
+        if (body.has(KEY_PRE_CHECK))           { task.preCheck          = readOptionalString(body, KEY_PRE_CHECK);           changed = true; }
+        if (body.has(KEY_SCRIPT))              { task.script            = readOptionalString(body, KEY_SCRIPT);              changed = true; }
+        if (body.has(KEY_CONTEXT_FROM_TASK_IDS)){ task.contextFromTaskIds= readOptionalString(body, KEY_CONTEXT_FROM_TASK_IDS);changed = true; }
 
         // Boolean fields. Explicit null is rejected (no meaningful semantic)
         // — callers should omit instead.
-        if (body.has("paused") && !body.get("paused").isJsonNull()) {
-            task.paused = body.get("paused").getAsBoolean();
+        if (body.has(KEY_PAUSED) && !body.get(KEY_PAUSED).isJsonNull()) {
+            task.paused = body.get(KEY_PAUSED).getAsBoolean();
             changed = true;
         }
-        if (body.has("noAgent") && !body.get("noAgent").isJsonNull()) {
-            task.noAgent = body.get("noAgent").getAsBoolean();
+        if (body.has(KEY_NO_AGENT) && !body.get(KEY_NO_AGENT).isJsonNull()) {
+            task.noAgent = body.get(KEY_NO_AGENT).getAsBoolean();
             changed = true;
         }
 
         // Integer fields. Explicit null clears (sets back to unlimited).
-        if (body.has("repeatLimit")) {
-            var el = body.get("repeatLimit");
+        if (body.has(KEY_REPEAT_LIMIT)) {
+            var el = body.get(KEY_REPEAT_LIMIT);
             task.repeatLimit = el.isJsonNull() ? null : el.getAsInt();
             changed = true;
         }

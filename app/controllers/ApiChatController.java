@@ -36,6 +36,16 @@ public class ApiChatController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    // JSON body keys (request input + per-attachment metadata) and SSE/response payload keys.
+    private static final String KEY_AGENT_ID = "agentId";
+    private static final String KEY_CONVERSATION_ID = "conversationId";
+    private static final String KEY_ATTACHMENTS = "attachments";
+    private static final String KEY_ATTACHMENT_ID = "attachmentId";
+    private static final String KEY_ORIGINAL_FILENAME = "originalFilename";
+    private static final String KEY_MIME_TYPE = "mimeType";
+    private static final String KEY_SIZE_BYTES = "sizeBytes";
+    private static final String KEY_CONTENT = "content";
+
     /**
      * Pre-built SSE-frame fragments for the per-chunk callbacks fired by
      * the streaming pipeline. The token + reasoning frames fire 50-200
@@ -85,11 +95,11 @@ public class ApiChatController extends Controller {
      * dropping the images.
      */
     private static ChatContext resolveChatContext(JsonObject body) {
-        if (body == null || !body.has("message") || !body.has("agentId")) {
+        if (body == null || !body.has("message") || !body.has(KEY_AGENT_ID)) {
             badRequest();
         }
 
-        var agentId = body.get("agentId").getAsLong();
+        var agentId = body.get(KEY_AGENT_ID).getAsLong();
         // JCLAW-199: streamChat is @NoTransaction so Play does not wrap the
         // request in a JPA tx; explicit short Tx.run for the lookup. Agent has
         // no lazy fields used downstream, so reading String columns on the
@@ -98,8 +108,8 @@ public class ApiChatController extends Controller {
         if (agent == null) notFound();
 
         var messageText = body.get("message").getAsString();
-        Long conversationId = (body.has("conversationId") && !body.get("conversationId").isJsonNull())
-                ? body.get("conversationId").getAsLong() : null;
+        Long conversationId = (body.has(KEY_CONVERSATION_ID) && !body.get(KEY_CONVERSATION_ID).isJsonNull())
+                ? body.get(KEY_CONVERSATION_ID).getAsLong() : null;
 
         var attachments = parseAttachments(body);
         if (services.AttachmentService.anyImage(attachments) && !AgentService.supportsVision(agent)) {
@@ -115,10 +125,10 @@ public class ApiChatController extends Controller {
     }
 
     private static java.util.List<services.AttachmentService.Input> parseAttachments(JsonObject body) {
-        if (body == null || !body.has("attachments") || body.get("attachments").isJsonNull()) {
+        if (body == null || !body.has(KEY_ATTACHMENTS) || body.get(KEY_ATTACHMENTS).isJsonNull()) {
             return java.util.List.of();
         }
-        var arr = body.getAsJsonArray("attachments");
+        var arr = body.getAsJsonArray(KEY_ATTACHMENTS);
         var out = new java.util.ArrayList<services.AttachmentService.Input>(arr.size());
         for (var el : arr) {
             out.add(parseAttachment(el.getAsJsonObject()));
@@ -127,13 +137,13 @@ public class ApiChatController extends Controller {
     }
 
     private static services.AttachmentService.Input parseAttachment(JsonObject o) {
-        var id = o.has("attachmentId") ? o.get("attachmentId").getAsString() : null;
+        var id = o.has(KEY_ATTACHMENT_ID) ? o.get(KEY_ATTACHMENT_ID).getAsString() : null;
         if (id == null || id.isBlank()) {
             error(400, "attachment missing attachmentId");
         }
-        var originalFilename = o.has("originalFilename") ? o.get("originalFilename").getAsString() : null;
-        var mimeType = o.has("mimeType") ? o.get("mimeType").getAsString() : null;
-        var sizeBytes = o.has("sizeBytes") ? o.get("sizeBytes").getAsLong() : 0L;
+        var originalFilename = o.has(KEY_ORIGINAL_FILENAME) ? o.get(KEY_ORIGINAL_FILENAME).getAsString() : null;
+        var mimeType = o.has(KEY_MIME_TYPE) ? o.get(KEY_MIME_TYPE).getAsString() : null;
+        var sizeBytes = o.has(KEY_SIZE_BYTES) ? o.get(KEY_SIZE_BYTES).getAsLong() : 0L;
         var kind = o.has("kind") ? o.get("kind").getAsString() : models.MessageAttachment.KIND_FILE;
         return new services.AttachmentService.Input(id, originalFilename, mimeType, sizeBytes, kind);
     }
@@ -168,10 +178,10 @@ public class ApiChatController extends Controller {
                     slashCmd.get(), ctx.agent(), "web", ctx.username(), current,
                     slash.Commands.extractArgs(ctx.message()));
             var slashResp = new HashMap<String, Object>();
-            slashResp.put("conversationId",
+            slashResp.put(KEY_CONVERSATION_ID,
                     slashResult.conversation() != null ? slashResult.conversation().id : null);
             slashResp.put("response", slashResult.responseText());
-            slashResp.put("agentId", ctx.agent().id);
+            slashResp.put(KEY_AGENT_ID, ctx.agent().id);
             slashResp.put("agentName", ctx.agent().name);
             renderJSON(gson.toJson(slashResp));
         }
@@ -187,9 +197,9 @@ public class ApiChatController extends Controller {
         var result = AgentRunner.run(ctx.agent(), conversation, ctx.message(), ctx.attachments());
 
         var resp = new HashMap<String, Object>();
-        resp.put("conversationId", conversation.id);
+        resp.put(KEY_CONVERSATION_ID, conversation.id);
         resp.put("response", result.response());
-        resp.put("agentId", ctx.agent().id);
+        resp.put(KEY_AGENT_ID, ctx.agent().id);
         resp.put("agentName", ctx.agent().name);
         renderJSON(gson.toJson(resp));
     }
@@ -270,10 +280,10 @@ public class ApiChatController extends Controller {
         Files.copy(f.toPath(), target, StandardCopyOption.REPLACE_EXISTING);
 
         var entry = new HashMap<String, Object>();
-        entry.put("attachmentId", uuid);
-        entry.put("originalFilename", safeName);
-        entry.put("mimeType", sniffedMime);
-        entry.put("sizeBytes", Files.size(target));
+        entry.put(KEY_ATTACHMENT_ID, uuid);
+        entry.put(KEY_ORIGINAL_FILENAME, safeName);
+        entry.put(KEY_MIME_TYPE, sniffedMime);
+        entry.put(KEY_SIZE_BYTES, Files.size(target));
         entry.put("kind", kind);
         return entry;
     }
@@ -451,9 +461,9 @@ public class ApiChatController extends Controller {
                 slashCmd.get(), agent, "web", username, slashConv,
                 slash.Commands.extractArgs(messageText));
         if (slashResult.conversation() != null) {
-            sse.send(Map.of("type", "init", "conversationId", slashResult.conversation().id));
+            sse.send(Map.of("type", "init", KEY_CONVERSATION_ID, slashResult.conversation().id));
         }
-        sse.send(Map.of("type", "complete", "content", slashResult.responseText()));
+        sse.send(Map.of("type", "complete", KEY_CONTENT, slashResult.responseText()));
         sse.close();
         // Slash commands are synthetic turns — no LLM, no prologue → intentionally
         // not instrumented so they don't skew the Chat Performance histograms.
@@ -502,14 +512,14 @@ public class ApiChatController extends Controller {
                         // visualization. Fires once per turn, so the extra
                         // HashMap allocation isn't worth the pre-built-frame
                         // dance the steady-state path uses.
-                        sse.send(Map.of("type", "token", "content", token,
+                        sse.send(Map.of("type", "token", KEY_CONTENT, token,
                                 "timestamp", java.time.Instant.now().toString()));
                     } else {
                         tokenCoalescer.accept(token);
                     }
                 },
                 reasoning -> reasoningCoalescer.accept(reasoning),
-                status -> sse.send(Map.of("type", "status", "content", status)),
+                status -> sse.send(Map.of("type", "status", KEY_CONTENT, status)),
                 ev -> sendToolCallFrame(sse, ev),
                 content -> {
                     // JCLAW-200: drain coalescer buffers before the terminal
@@ -517,13 +527,13 @@ public class ApiChatController extends Controller {
                     // coalescing is disabled (buffers stay empty).
                     tokenCoalescer.drain();
                     reasoningCoalescer.drain();
-                    sse.send(Map.of("type", "complete", "content", content));
+                    sse.send(Map.of("type", "complete", KEY_CONTENT, content));
                     sse.close();
                 },
                 error -> {
                     tokenCoalescer.drain();
                     reasoningCoalescer.drain();
-                    sse.send(Map.of("type", "error", "content", "An error occurred: " + error.getMessage()));
+                    sse.send(Map.of("type", "error", KEY_CONTENT, "An error occurred: " + error.getMessage()));
                     sse.close();
                     EventLogger.error("channel", agent.name, "web",
                             "SSE stream error: %s".formatted(error.getMessage()));
@@ -538,7 +548,7 @@ public class ApiChatController extends Controller {
     }
 
     private static void sendInitFrame(SseStream sse, Agent agent, Conversation conversation) {
-        var initData = new java.util.HashMap<>(Map.of("type", "init", "conversationId", conversation.id));
+        var initData = new java.util.HashMap<>(Map.of("type", "init", KEY_CONVERSATION_ID, conversation.id));
         // Use the agent's persisted thinking mode, gated by the model's
         // current capability — same semantics as AgentRunner so the UI
         // reflects what the LLM will actually receive.

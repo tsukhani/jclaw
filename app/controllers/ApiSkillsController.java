@@ -27,6 +27,20 @@ public class ApiSkillsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    // Filesystem layout — skills live under {workspace}/skills/{folder}/SKILL.md.
+    private static final String SKILL_MD = "SKILL.md";
+    private static final String SKILLS_DIR = "skills";
+
+    // Canonical tool name used both as an alias target and a body-text heuristic.
+    private static final String TOOL_FILESYSTEM = "filesystem";
+
+    // JSON request/response payload keys.
+    private static final String KEY_STATUS = "status";
+    private static final String KEY_ENABLED = "enabled";
+    private static final String KEY_NEW_NAME = "newName";
+    private static final String KEY_DESCRIPTION = "description";
+    private static final String KEY_SKILL_NAME = "skillName";
+
     public record SkillView(String name, String description, boolean isGlobal, String location,
                             List<String> tools, List<String> commands, String author, String icon,
                             String version, String folderName) {}
@@ -72,7 +86,7 @@ public class ApiSkillsController extends Controller {
         if (Files.isDirectory(globalDir)) {
             try (var dirs = Files.list(globalDir)) {
                 dirs.filter(Files::isDirectory).forEach(dir -> {
-                    var skillFile = dir.resolve("SKILL.md");
+                    var skillFile = dir.resolve(SKILL_MD);
                     if (Files.exists(skillFile)) {
                         var info = SkillLoader.parseSkillFile(skillFile);
                         if (info != null) skills.add(info);
@@ -89,7 +103,7 @@ public class ApiSkillsController extends Controller {
     /** GET /api/skills/{name} — Get a global skill with full content. */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillDetailView.class)))
     public static void get(String name) {
-        var path = resolveSkillName(SkillLoader.globalSkillsPath(), name).resolve("SKILL.md");
+        var path = resolveSkillName(SkillLoader.globalSkillsPath(), name).resolve(SKILL_MD);
         if (!Files.exists(path)) notFound();
         try {
             var info = SkillLoader.parseSkillFile(path);
@@ -105,9 +119,9 @@ public class ApiSkillsController extends Controller {
     // The canonical tool list itself is derived live from ToolRegistry via ToolCatalog.
     private static final java.util.Map<String, String> TOOL_ALIASES = java.util.Map.ofEntries(
             java.util.Map.entry("shell", "exec"),
-            java.util.Map.entry("readFile", "filesystem"),
-            java.util.Map.entry("writeFile", "filesystem"),
-            java.util.Map.entry("listFiles", "filesystem")
+            java.util.Map.entry("readFile", TOOL_FILESYSTEM),
+            java.util.Map.entry("writeFile", TOOL_FILESYSTEM),
+            java.util.Map.entry("listFiles", TOOL_FILESYSTEM)
     );
 
     /** GET /api/skills/{name}/files — List all files in a skill folder with metadata and detected tool dependencies. */
@@ -132,7 +146,7 @@ public class ApiSkillsController extends Controller {
      * to the body-text heuristic only for legacy skills that predate the declaration.
      */
     private static java.util.List<java.util.Map<String, String>> resolveSkillTools(Path skillDir, String allContent) {
-        var skillFile = skillDir.resolve("SKILL.md");
+        var skillFile = skillDir.resolve(SKILL_MD);
         if (Files.exists(skillFile)) {
             var info = SkillLoader.parseSkillFile(skillFile);
             if (info != null && info.toolsDeclared()) {
@@ -144,7 +158,7 @@ public class ApiSkillsController extends Controller {
                             .orElse(null);
                     result.add(java.util.Map.of(
                             "name", name,
-                            "description", tool != null && tool.description() != null ? tool.description() : ""
+                            KEY_DESCRIPTION, tool != null && tool.description() != null ? tool.description() : ""
                     ));
                 }
                 return result;
@@ -171,7 +185,7 @@ public class ApiSkillsController extends Controller {
         for (var tool : agents.ToolRegistry.listTools()) {
             if (content.contains(tool.name()) && seen.add(tool.name())) {
                 detectedTools.add(java.util.Map.of("name", tool.name(),
-                        "description", tool.description() != null ? tool.description() : ""));
+                        KEY_DESCRIPTION, tool.description() != null ? tool.description() : ""));
             }
         }
     }
@@ -184,7 +198,7 @@ public class ApiSkillsController extends Controller {
                 var canonical = entry.getValue();
                 var tool = lookupToolByName(canonical);
                 detectedTools.add(java.util.Map.of("name", canonical,
-                        "description", tool != null && tool.description() != null ? tool.description() : ""));
+                        KEY_DESCRIPTION, tool != null && tool.description() != null ? tool.description() : ""));
             }
         }
     }
@@ -200,7 +214,7 @@ public class ApiSkillsController extends Controller {
         }
         var tool = lookupToolByName("exec");
         detectedTools.add(java.util.Map.of("name", "exec",
-                "description", tool != null && tool.description() != null ? tool.description() : "Shell command execution"));
+                KEY_DESCRIPTION, tool != null && tool.description() != null ? tool.description() : "Shell command execution"));
     }
 
     private static agents.ToolRegistry.Tool lookupToolByName(String name) {
@@ -237,12 +251,12 @@ public class ApiSkillsController extends Controller {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
 
-        var agentDir = AgentService.workspacePath(agent.name).resolve("skills");
+        var agentDir = AgentService.workspacePath(agent.name).resolve(SKILLS_DIR);
         var skills = new java.util.ArrayList<SkillLoader.SkillInfo>();
         if (Files.isDirectory(agentDir)) {
             try (var dirs = Files.list(agentDir)) {
                 dirs.filter(Files::isDirectory).forEach(dir -> {
-                    var skillFile = dir.resolve("SKILL.md");
+                    var skillFile = dir.resolve(SKILL_MD);
                     if (Files.exists(skillFile)) {
                         var info = SkillLoader.parseSkillFile(skillFile);
                         if (info != null) skills.add(info);
@@ -259,7 +273,7 @@ public class ApiSkillsController extends Controller {
 
         var result = skills.stream().map(s -> {
             var map = skillToMap(s, false);
-            map.put("enabled", configMap.getOrDefault(s.name(), true));
+            map.put(KEY_ENABLED, configMap.getOrDefault(s.name(), true));
             return map;
         }).toList();
         renderJSON(gson.toJson(result));
@@ -273,8 +287,8 @@ public class ApiSkillsController extends Controller {
         if (agent == null) notFound();
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has("enabled")) badRequest();
-        var enabled = body.get("enabled").getAsBoolean();
+        if (body == null || !body.has(KEY_ENABLED)) badRequest();
+        var enabled = body.get(KEY_ENABLED).getAsBoolean();
 
         var config = AgentSkillConfig.findByAgentAndSkill(agent, name);
         if (config == null) {
@@ -285,7 +299,7 @@ public class ApiSkillsController extends Controller {
         config.enabled = enabled;
         config.save();
 
-        renderJSON(gson.toJson(java.util.Map.of("name", name, "enabled", enabled, "status", "ok")));
+        renderJSON(gson.toJson(java.util.Map.of("name", name, KEY_ENABLED, enabled, KEY_STATUS, "ok")));
     }
 
     /** POST /api/agents/{id}/skills/{name}/copy — Copy a global skill into the agent's workspace. */
@@ -314,9 +328,9 @@ public class ApiSkillsController extends Controller {
                     .formatted(name, agent.name, formatViolations(copyViolations)));
         }
 
-        var agentSkillsDir = AgentService.workspacePath(agent.name).resolve("skills");
+        var agentSkillsDir = AgentService.workspacePath(agent.name).resolve(SKILLS_DIR);
         var targetDir = resolveSkillName(agentSkillsDir, name);
-        var replacing = Files.isDirectory(targetDir) && Files.exists(targetDir.resolve("SKILL.md"));
+        var replacing = Files.isDirectory(targetDir) && Files.exists(targetDir.resolve(SKILL_MD));
 
         try {
             services.SkillPromotionService.copyToAgentWorkspace(agent, name);
@@ -330,7 +344,7 @@ public class ApiSkillsController extends Controller {
 
             renderJSON(gson.toJson(java.util.Map.of(
                     "name", name,
-                    "status", "ok",
+                    KEY_STATUS, "ok",
                     "replaced", replacing
             )));
         } catch (IOException e) {
@@ -347,7 +361,7 @@ public class ApiSkillsController extends Controller {
     public static void listAgentSkillFiles(Long id, String name) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
-        var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve("skills"), name);
+        var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
         if (!Files.isDirectory(dir)) notFound();
         listSkillFilesFrom(dir);
     }
@@ -357,7 +371,7 @@ public class ApiSkillsController extends Controller {
     public static void readAgentSkillFile(Long id, String name, String filePath) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
-        var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve("skills"), name);
+        var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
         readSkillFileFrom(dir, filePath);
     }
 
@@ -366,7 +380,7 @@ public class ApiSkillsController extends Controller {
     public static void deleteAgentSkill(Long id, String name) {
         Agent agent = Agent.findById(id);
         if (agent == null) notFound();
-        var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve("skills"), name);
+        var dir = resolveSkillName(AgentService.workspacePath(agent.name).resolve(SKILLS_DIR), name);
         if (!Files.isDirectory(dir)) notFound();
         // Revoke the skill's shell-allowlist grants for this agent BEFORE deleting
         // the workspace copy — if the filesystem delete fails halfway we'd rather
@@ -385,17 +399,17 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillPromoteResponse.class)))
     public static void promote() {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has("agentId") || !body.has("skillName")) badRequest();
+        if (body == null || !body.has("agentId") || !body.has(KEY_SKILL_NAME)) badRequest();
 
         var agentId = body.get("agentId").getAsLong();
-        var skillName = body.get("skillName").getAsString();
+        var skillName = body.get(KEY_SKILL_NAME).getAsString();
 
         Agent agent = Agent.findById(agentId);
         if (agent == null) notFound();
 
         var agentName = agent.name;
-        var skillDir = AgentService.workspacePath(agentName).resolve("skills").resolve(skillName);
-        if (!Files.isDirectory(skillDir) || !Files.exists(skillDir.resolve("SKILL.md"))) {
+        var skillDir = AgentService.workspacePath(agentName).resolve(SKILLS_DIR).resolve(skillName);
+        if (!Files.isDirectory(skillDir) || !Files.exists(skillDir.resolve(SKILL_MD))) {
             error(404, "Skill '%s' not found in agent workspace".formatted(skillName));
         }
 
@@ -413,7 +427,7 @@ public class ApiSkillsController extends Controller {
             }
         });
 
-        renderJSON(gson.toJson(java.util.Map.of("status", "promoting", "skillName", skillName)));
+        renderJSON(gson.toJson(java.util.Map.of(KEY_STATUS, "promoting", KEY_SKILL_NAME, skillName)));
     }
 
     /** PUT /api/skills/{name}/rename — Rename a global skill folder. */
@@ -421,9 +435,9 @@ public class ApiSkillsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillRenameResponse.class)))
     public static void rename(String name) {
         var body = JsonBodyReader.readJsonBody();
-        if (body == null || !body.has("newName")) badRequest();
+        if (body == null || !body.has(KEY_NEW_NAME)) badRequest();
 
-        var newName = body.get("newName").getAsString().strip();
+        var newName = body.get(KEY_NEW_NAME).getAsString().strip();
         if (newName.isEmpty()) badRequest();
 
         var globalDir = SkillLoader.globalSkillsPath();
@@ -438,7 +452,7 @@ public class ApiSkillsController extends Controller {
         try {
             Files.move(sourceDir, targetDir);
             SkillLoader.clearCache();
-            renderJSON(gson.toJson(java.util.Map.of("oldName", name, "newName", newName, "status", "ok")));
+            renderJSON(gson.toJson(java.util.Map.of("oldName", name, KEY_NEW_NAME, newName, KEY_STATUS, "ok")));
         } catch (IOException e) {
             error(500, "Failed to rename skill: " + e.getMessage());
         }
@@ -503,7 +517,7 @@ public class ApiSkillsController extends Controller {
      * Surfaced here so the detail page can render a "Commands" pill row.
      */
     private static SkillMeta readSkillMeta(Path dir) {
-        var skillMd = dir.resolve("SKILL.md");
+        var skillMd = dir.resolve(SKILL_MD);
         if (!Files.exists(skillMd)) return SkillMeta.empty();
         var info = SkillLoader.parseSkillFile(skillMd);
         if (info == null) return SkillMeta.empty();
@@ -538,7 +552,7 @@ public class ApiSkillsController extends Controller {
         try {
             SkillPromotionService.deleteRecursive(dir);
             SkillLoader.clearCache();
-            renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
+            renderJSON(gson.toJson(java.util.Map.of(KEY_STATUS, "ok")));
         } catch (IOException e) {
             error(500, "Failed to delete skill: " + e.getMessage());
         }
@@ -562,7 +576,7 @@ public class ApiSkillsController extends Controller {
     private static HashMap<String, Object> skillToMap(SkillLoader.SkillInfo s, boolean isGlobal) {
         var map = new HashMap<String, Object>();
         map.put("name", s.name());
-        map.put("description", s.description());
+        map.put(KEY_DESCRIPTION, s.description());
         map.put("isGlobal", isGlobal);
         map.put("location", s.location() != null ? s.location().toString() : "");
         map.put("tools", s.tools() != null ? s.tools() : List.of());

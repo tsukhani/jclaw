@@ -28,6 +28,19 @@ public class ApiTelegramBindingsController extends Controller {
 
     private static final Gson gson = INSTANCE;
 
+    // JSON body keys reused across create/update parsers.
+    private static final String KEY_BOT_TOKEN = "botToken";
+    private static final String KEY_AGENT_ID = "agentId";
+    private static final String KEY_TELEGRAM_USER_ID = "telegramUserId";
+    private static final String KEY_WEBHOOK_SECRET = "webhookSecret";
+    private static final String KEY_WEBHOOK_URL = "webhookUrl";
+    private static final String KEY_ENABLED = "enabled";
+    private static final String KEY_TRANSPORT = "transport";
+
+    // EventLogger category + channel identifier for this binding type.
+    private static final String EVENT_CATEGORY_CHANNEL = "channel";
+    private static final String CHANNEL_TELEGRAM = "telegram";
+
     /** Flat projection the frontend consumes. {@code botToken} and
      *  {@code webhookSecret} are elided — they're secrets. {@code webhookUrl}
      *  is surfaced so the Edit UI can pre-populate it; Telegram calls it
@@ -70,10 +83,10 @@ public class ApiTelegramBindingsController extends Controller {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) badRequest();
 
-        String botToken = readRequiredString(body, "botToken");
-        Long agentId = body.has("agentId") && !body.get("agentId").isJsonNull()
-                ? body.get("agentId").getAsLong() : null;
-        String telegramUserId = readRequiredString(body, "telegramUserId");
+        String botToken = readRequiredString(body, KEY_BOT_TOKEN);
+        Long agentId = body.has(KEY_AGENT_ID) && !body.get(KEY_AGENT_ID).isJsonNull()
+                ? body.get(KEY_AGENT_ID).getAsLong() : null;
+        String telegramUserId = readRequiredString(body, KEY_TELEGRAM_USER_ID);
 
         if (botToken == null || agentId == null || telegramUserId == null) {
             error(400, "botToken, agentId, and telegramUserId are required");
@@ -101,12 +114,12 @@ public class ApiTelegramBindingsController extends Controller {
         binding.agent = agent;
         binding.telegramUserId = telegramUserId;
         binding.transport = parseTransport(body, ChannelTransport.POLLING);
-        binding.webhookSecret = readOptionalString(body, "webhookSecret");
-        binding.webhookUrl = readOptionalString(body, "webhookUrl");
-        binding.enabled = body.has("enabled") ? body.get("enabled").getAsBoolean() : true;
+        binding.webhookSecret = readOptionalString(body, KEY_WEBHOOK_SECRET);
+        binding.webhookUrl = readOptionalString(body, KEY_WEBHOOK_URL);
+        binding.enabled = body.has(KEY_ENABLED) ? body.get(KEY_ENABLED).getAsBoolean() : true;
         binding.save();
 
-        EventLogger.info("channel", agent.name, "telegram",
+        EventLogger.info(EVENT_CATEGORY_CHANNEL, agent.name, CHANNEL_TELEGRAM,
                 "Binding %d created (user=%s)".formatted(binding.id, telegramUserId));
 
         TelegramPollingRunner.reconcile();
@@ -128,8 +141,8 @@ public class ApiTelegramBindingsController extends Controller {
         applyOptionalFieldUpdates(binding, body);
         binding.save();
 
-        EventLogger.info("channel",
-                binding.agent != null ? binding.agent.name : null, "telegram",
+        EventLogger.info(EVENT_CATEGORY_CHANNEL,
+                binding.agent != null ? binding.agent.name : null, CHANNEL_TELEGRAM,
                 "Binding %d updated".formatted(binding.id));
 
         TelegramPollingRunner.reconcile();
@@ -137,8 +150,8 @@ public class ApiTelegramBindingsController extends Controller {
     }
 
     private static void applyBotTokenUpdate(TelegramBinding binding, com.google.gson.JsonObject body) {
-        if (!body.has("botToken")) return;
-        String newToken = body.get("botToken").getAsString();
+        if (!body.has(KEY_BOT_TOKEN)) return;
+        String newToken = body.get(KEY_BOT_TOKEN).getAsString();
         if (newToken == null || newToken.isBlank() || newToken.equals(binding.botToken)) return;
         var existing = TelegramBinding.findByBotToken(newToken);
         if (existing != null && !existing.id.equals(binding.id)) {
@@ -148,8 +161,8 @@ public class ApiTelegramBindingsController extends Controller {
     }
 
     private static void applyAgentUpdate(TelegramBinding binding, com.google.gson.JsonObject body) {
-        if (!body.has("agentId") || body.get("agentId").isJsonNull()) return;
-        Agent agent = AgentService.findById(body.get("agentId").getAsLong());
+        if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) return;
+        Agent agent = AgentService.findById(body.get(KEY_AGENT_ID).getAsLong());
         if (agent == null || !agent.enabled) {
             error(400, "agentId must reference an enabled agent");
         }
@@ -163,8 +176,8 @@ public class ApiTelegramBindingsController extends Controller {
     }
 
     private static void applyTelegramUserIdUpdate(TelegramBinding binding, com.google.gson.JsonObject body) {
-        if (!body.has("telegramUserId")) return;
-        String uid = body.get("telegramUserId").getAsString();
+        if (!body.has(KEY_TELEGRAM_USER_ID)) return;
+        String uid = body.get(KEY_TELEGRAM_USER_ID).getAsString();
         if (uid == null || !uid.matches("\\d+")) {
             error(400, "telegramUserId must be numeric");
         }
@@ -172,17 +185,17 @@ public class ApiTelegramBindingsController extends Controller {
     }
 
     private static void applyOptionalFieldUpdates(TelegramBinding binding, com.google.gson.JsonObject body) {
-        if (body.has("transport")) {
+        if (body.has(KEY_TRANSPORT)) {
             binding.transport = parseTransport(body, binding.transport);
         }
-        if (body.has("webhookSecret")) {
-            binding.webhookSecret = readOptionalString(body, "webhookSecret");
+        if (body.has(KEY_WEBHOOK_SECRET)) {
+            binding.webhookSecret = readOptionalString(body, KEY_WEBHOOK_SECRET);
         }
-        if (body.has("webhookUrl")) {
-            binding.webhookUrl = readOptionalString(body, "webhookUrl");
+        if (body.has(KEY_WEBHOOK_URL)) {
+            binding.webhookUrl = readOptionalString(body, KEY_WEBHOOK_URL);
         }
-        if (body.has("enabled")) {
-            binding.enabled = body.get("enabled").getAsBoolean();
+        if (body.has(KEY_ENABLED)) {
+            binding.enabled = body.get(KEY_ENABLED).getAsBoolean();
         }
     }
 
@@ -191,7 +204,7 @@ public class ApiTelegramBindingsController extends Controller {
         if (binding == null) notFound();
         String agentName = binding.agent != null ? binding.agent.name : null;
         binding.delete();
-        EventLogger.info("channel", agentName, "telegram",
+        EventLogger.info(EVENT_CATEGORY_CHANNEL, agentName, CHANNEL_TELEGRAM,
                 "Binding %d deleted".formatted(id));
         TelegramPollingRunner.reconcile();
         renderJSON(gson.toJson(java.util.Map.of("status", "ok")));
@@ -215,8 +228,8 @@ public class ApiTelegramBindingsController extends Controller {
 
     private static ChannelTransport parseTransport(com.google.gson.JsonObject body,
                                                     ChannelTransport fallback) {
-        String raw = body.has("transport") && !body.get("transport").isJsonNull()
-                ? body.get("transport").getAsString() : null;
+        String raw = body.has(KEY_TRANSPORT) && !body.get(KEY_TRANSPORT).isJsonNull()
+                ? body.get(KEY_TRANSPORT).getAsString() : null;
         return ChannelTransport.parse(raw, fallback);
     }
 }
