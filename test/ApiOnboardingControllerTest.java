@@ -131,4 +131,38 @@ class ApiOnboardingControllerTest extends FunctionalTest {
         assertEquals(401, response.status.intValue());
     }
 
+    @Test
+    void recordProgressRejectsNonIntegerStep() {
+        // getAsInt throws on a non-numeric value — the controller's catch
+        // block surfaces this as 400.
+        var response = POST("/api/onboarding/tour-progress",
+                "application/json", "{\"step\":\"abc\"}");
+        assertEquals(400, response.status.intValue());
+    }
+
+    @Test
+    void recordProgressIsIdempotentWhenStepEqualsExisting() {
+        // Two writes at the same step exercise the newMax == existing branch
+        // (no ConfigService.set call, no event log entry).
+        var first = POST("/api/onboarding/tour-progress",
+                "application/json", "{\"step\":4}");
+        assertIsOk(first);
+        var second = POST("/api/onboarding/tour-progress",
+                "application/json", "{\"step\":4}");
+        assertIsOk(second);
+        assertTrue(getContent(second).contains("\"maxStepReached\":4"));
+    }
+
+    @Test
+    void recordProgressKeepsHigherExistingWhenLowerStepSubmitted() {
+        // newMax = Math.max(existing, step) — a later request for a smaller
+        // step must not regress the max.
+        assertIsOk(POST("/api/onboarding/tour-progress",
+                "application/json", "{\"step\":5}"));
+        var resp = POST("/api/onboarding/tour-progress",
+                "application/json", "{\"step\":2}");
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("\"maxStepReached\":5"),
+                "smaller step must not lower the max: " + getContent(resp));
+    }
 }
