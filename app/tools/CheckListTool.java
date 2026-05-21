@@ -82,21 +82,9 @@ public class CheckListTool implements ToolRegistry.Tool {
 
         int inProgressCount = 0;
         for (int i = 0; i < itemsArray.size(); i++) {
-            var el = itemsArray.get(i);
-            if (!el.isJsonObject()) {
-                return "Error: Item %d must be an object.".formatted(i);
-            }
-            var item = el.getAsJsonObject();
-            String content = optString(item, "content");
-            if (content == null) return "Error: Item %d is missing required field `content`.".formatted(i);
-            String status = optString(item, "status");
-            if (status == null) return "Error: Item %d is missing required field `status`.".formatted(i);
-            String activeForm = optString(item, "activeForm");
-            if (activeForm == null) return "Error: Item %d is missing required field `activeForm`.".formatted(i);
-
-            if (content.isBlank()) return "Error: All items must have non-blank content.";
-            if (activeForm.isBlank()) return "Error: All items must have non-blank activeForm.";
-            if ("in_progress".equals(status)) inProgressCount++;
+            var validation = validateItem(itemsArray.get(i), i);
+            if (validation.error() != null) return validation.error();
+            if (validation.inProgress()) inProgressCount++;
         }
 
         if (inProgressCount > 1) {
@@ -104,6 +92,29 @@ public class CheckListTool implements ToolRegistry.Tool {
         }
 
         return "Checklist updated successfully (%d items).".formatted(itemsArray.size());
+    }
+
+    /** Per-item validation result. {@code error} non-null short-circuits the loop. */
+    private record ItemValidation(String error, boolean inProgress) {
+        static ItemValidation fail(String msg) { return new ItemValidation(msg, false); }
+        static ItemValidation ok(boolean inProgress) { return new ItemValidation(null, inProgress); }
+    }
+
+    private static ItemValidation validateItem(com.google.gson.JsonElement el, int i) {
+        if (!el.isJsonObject()) {
+            return ItemValidation.fail("Error: Item %d must be an object.".formatted(i));
+        }
+        var item = el.getAsJsonObject();
+        String content = optString(item, "content");
+        if (content == null) return ItemValidation.fail("Error: Item %d is missing required field `content`.".formatted(i));
+        String status = optString(item, "status");
+        if (status == null) return ItemValidation.fail("Error: Item %d is missing required field `status`.".formatted(i));
+        String activeForm = optString(item, "activeForm");
+        if (activeForm == null) return ItemValidation.fail("Error: Item %d is missing required field `activeForm`.".formatted(i));
+
+        if (content.isBlank()) return ItemValidation.fail("Error: All items must have non-blank content.");
+        if (activeForm.isBlank()) return ItemValidation.fail("Error: All items must have non-blank activeForm.");
+        return ItemValidation.ok("in_progress".equals(status));
     }
 
     private static String optString(com.google.gson.JsonObject item, String key) {

@@ -129,33 +129,13 @@ public class SessionsHistoryTool implements ToolRegistry.Tool {
     @Override
     public String execute(String argsJson, Agent callingAgent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
-        var runIdStr = optString(args, "runId");
-        if (runIdStr == null || runIdStr.isBlank()) {
-            return "Error: 'runId' is required.";
-        }
-        long runId;
-        try {
-            runId = Long.parseLong(runIdStr);
-        } catch (NumberFormatException _) {
-            return "Error: 'runId' must be a numeric run id (got '" + runIdStr + "').";
-        }
-        var requestedLimit = optInt(args, "limit", DEFAULT_LIMIT);
-        if (requestedLimit <= 0) requestedLimit = DEFAULT_LIMIT;
-        if (requestedLimit > MAX_LIMIT) requestedLimit = MAX_LIMIT;
-        var limit = requestedLimit;
+        var parsed = parseArgs(args);
+        if (parsed.error() != null) return parsed.error();
 
-        var beforeStr = optString(args, "beforeMessageId");
-        Long beforeMessageId = null;
-        if (beforeStr != null && !beforeStr.isBlank()) {
-            try {
-                beforeMessageId = Long.parseLong(beforeStr);
-            } catch (NumberFormatException _) {
-                return "Error: 'beforeMessageId' must be numeric (got '" + beforeStr + "').";
-            }
-        }
-
+        final var runId = parsed.runId();
+        final var limit = parsed.limit();
+        final var beforeId = parsed.beforeMessageId();
         final var callingAgentId = callingAgent.id;
-        final var beforeId = beforeMessageId;
         return Tx.run(() -> {
             var run = (SubagentRun) SubagentRun.findById(runId);
             if (run == null) {
@@ -174,6 +154,41 @@ public class SessionsHistoryTool implements ToolRegistry.Tool {
             }
             return renderHistoryJson(run, childConv, limit, beforeId);
         });
+    }
+
+    /** Parsed-args bundle. {@code error} non-null short-circuits execute. */
+    private record ParsedArgs(String error, long runId, int limit, Long beforeMessageId) {
+        static ParsedArgs fail(String msg) { return new ParsedArgs(msg, 0L, 0, null); }
+        static ParsedArgs ok(long runId, int limit, Long beforeMessageId) {
+            return new ParsedArgs(null, runId, limit, beforeMessageId);
+        }
+    }
+
+    private static ParsedArgs parseArgs(JsonObject args) {
+        var runIdStr = optString(args, "runId");
+        if (runIdStr == null || runIdStr.isBlank()) {
+            return ParsedArgs.fail("Error: 'runId' is required.");
+        }
+        long runId;
+        try {
+            runId = Long.parseLong(runIdStr);
+        } catch (NumberFormatException _) {
+            return ParsedArgs.fail("Error: 'runId' must be a numeric run id (got '" + runIdStr + "').");
+        }
+        var requestedLimit = optInt(args, "limit", DEFAULT_LIMIT);
+        if (requestedLimit <= 0) requestedLimit = DEFAULT_LIMIT;
+        if (requestedLimit > MAX_LIMIT) requestedLimit = MAX_LIMIT;
+
+        var beforeStr = optString(args, "beforeMessageId");
+        Long beforeMessageId = null;
+        if (beforeStr != null && !beforeStr.isBlank()) {
+            try {
+                beforeMessageId = Long.parseLong(beforeStr);
+            } catch (NumberFormatException _) {
+                return ParsedArgs.fail("Error: 'beforeMessageId' must be numeric (got '" + beforeStr + "').");
+            }
+        }
+        return ParsedArgs.ok(runId, requestedLimit, beforeMessageId);
     }
 
     /** Build the JSON payload. Must be called inside an active Tx. */

@@ -371,25 +371,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
                                   int maxOutputBytes, Map<String, String> env, long startTime,
                                   Agent agent) {
         try {
-            var pb = new ProcessBuilder("/bin/sh", "-c", command);
-            pb.directory(workdir.toFile());
-            pb.redirectErrorStream(true);
-            pb.environment().clear();
-            pb.environment().putAll(env);
-
-            var process = pb.start();
-
-            // Read output with blocking reads and a watchdog thread that
-            // enforces the overall deadline. Previous approach used
-            // is.available() polling + 100ms sleep (busy-wait) and a 5-second
-            // idle timeout that prematurely cut off slow commands (npm install,
-            // long builds) that simply paused between writes. Blocking is.read()
-            // on a virtual thread is free (no platform thread consumed during
-            // the block) and returns naturally when the process writes or exits.
-            var is = process.getInputStream();
-            var out = new StringBuilder();
-            int totalRead = 0;
-            boolean truncated = false;
+            var process = startProcess(command, workdir, env);
 
             // Watchdog: destroy the process after the configured timeout.
             // When destroyed, is.read() in the main loop returns -1 or throws,
@@ -407,46 +389,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 } catch (InterruptedException _) { Thread.currentThread().interrupt(); }
             });
 
-            // Blocking read loop — wrap in InputStreamReader with explicit UTF-8
-            // so multi-byte characters split across read() boundaries are decoded
-            // correctly (raw new String(byte[]) corrupts partial sequences).
-            var reader = new java.io.InputStreamReader(is, java.nio.charset.StandardCharsets.UTF_8);
-            var cbuf = new char[4096];
-            int n;
-            while ((n = reader.read(cbuf)) != -1) {
-                totalRead += n;
-                if (!truncated) {
-                    int remaining = maxOutputBytes - out.length();
-                    if (remaining <= 0) {
-                        truncated = true;
-                    } else if (n > remaining) {
-                        out.append(cbuf, 0, remaining);
-                        truncated = true;
-                    } else {
-                        out.append(cbuf, 0, n);
-                    }
-                }
-
-                // Check for terminal image — if found, return early but keep process alive
-                if (hasTerminalImage(out.toString())) {
-                    var processedOutput = replaceTerminalImagesInOutput(out.toString(), agent);
-                    long durationMs = System.currentTimeMillis() - startTime;
-
-                    // The watchdog thread already babysits the process for the
-                    // full timeout. We just return; the process stays alive so
-                    // the user can interact (e.g., scan QR code).
-                    var result = new JsonObject();
-                    result.addProperty("exitCode", -1);
-                    result.addProperty("output", processedOutput
-                            + "\n[Process still running in background — waiting for user interaction. Will timeout after %d seconds."
-                                    .formatted(timeoutSec)
-                            + " The image above is already visible to the user in the chat. Do NOT try to read or fetch it.]");
-                    result.addProperty("durationMs", durationMs);
-                    result.addProperty("truncated", truncated);
-                    result.addProperty("timedOut", false);
-                    return result.toString();
-                }
-            }
+            var readResult = readProcessOutput(process, maxOutputBytes, agent, timeoutSec, startTime);
+            if (readResult.earlyReturn() != null) return readResult.earlyReturn();
 
             // Ensure process is fully dead before collecting exit code.
             if (!process.waitFor(1, TimeUnit.SECONDS)) {
@@ -454,9 +398,10 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 process.waitFor(1, TimeUnit.SECONDS);
             }
 
-            if (truncated) {
+            var out = readResult.output();
+            if (readResult.truncated()) {
                 out.append("\n[Output truncated at %dKB. Total output: %d bytes]"
-                        .formatted(maxOutputBytes / 1024, totalRead));
+                        .formatted(maxOutputBytes / 1024, readResult.totalRead()));
             }
 
             long durationMs = System.currentTimeMillis() - startTime;
@@ -466,7 +411,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
             result.addProperty("exitCode", timedOut.get() ? -1 : process.exitValue());
             result.addProperty("output", processedOutput + (timedOut.get() ? "\n[Process killed: timeout after %d seconds]".formatted(timeoutSec) : ""));
             result.addProperty("durationMs", durationMs);
-            result.addProperty("truncated", truncated);
+            result.addProperty("truncated", readResult.truncated());
             result.addProperty("timedOut", timedOut.get());
             return result.toString();
 
@@ -476,6 +421,102 @@ public class ShellExecTool implements ToolRegistry.Tool {
             Thread.currentThread().interrupt();
             return "Error: Command execution interrupted.";
         }
+    }
+
+    private static Process startProcess(String command, Path workdir, Map<String, String> env)
+            throws IOException {
+        var pb = new ProcessBuilder("/bin/sh", "-c", command);
+        pb.directory(workdir.toFile());
+        pb.redirectErrorStream(true);
+        pb.environment().clear();
+        pb.environment().putAll(env);
+        return pb.start();
+    }
+
+    /** Output read result. {@code earlyReturn} non-null short-circuits the
+     *  caller — used by the terminal-image early-return path. */
+    private record ReadResult(StringBuilder output, int totalRead, boolean truncated, String earlyReturn) {}
+
+    /**
+     * Blocking-read loop. Reads the process's combined stdout/stderr through
+     * a UTF-8 decoder, applying the {@code maxOutputBytes} truncation cap and
+     * watching for terminal-image (QR-code) block art. When a terminal image
+     * is detected mid-stream the method short-circuits with a fully-rendered
+     * result envelope so the user sees the image without waiting for the
+     * (potentially long-running) interactive process to exit.
+     */
+    private ReadResult readProcessOutput(Process process, int maxOutputBytes, Agent agent,
+                                         int timeoutSec, long startTime) throws IOException {
+        // Read output with blocking reads and a watchdog thread that
+        // enforces the overall deadline. Previous approach used
+        // is.available() polling + 100ms sleep (busy-wait) and a 5-second
+        // idle timeout that prematurely cut off slow commands (npm install,
+        // long builds) that simply paused between writes. Blocking is.read()
+        // on a virtual thread is free (no platform thread consumed during
+        // the block) and returns naturally when the process writes or exits.
+        var out = new StringBuilder();
+        int totalRead = 0;
+        boolean truncated = false;
+
+        // Blocking read loop — wrap in InputStreamReader with explicit UTF-8
+        // so multi-byte characters split across read() boundaries are decoded
+        // correctly (raw new String(byte[]) corrupts partial sequences).
+        var reader = new java.io.InputStreamReader(process.getInputStream(),
+                java.nio.charset.StandardCharsets.UTF_8);
+        var cbuf = new char[4096];
+        int n;
+        while ((n = reader.read(cbuf)) != -1) {
+            totalRead += n;
+            truncated = appendBounded(out, cbuf, n, maxOutputBytes, truncated);
+
+            // Check for terminal image — if found, return early but keep process alive
+            if (hasTerminalImage(out.toString())) {
+                return new ReadResult(out, totalRead, truncated,
+                        buildTerminalImageEarlyReturn(out.toString(), agent, timeoutSec,
+                                startTime, truncated));
+            }
+        }
+        return new ReadResult(out, totalRead, truncated, null);
+    }
+
+    /**
+     * Append {@code n} chars from {@code cbuf} to {@code out} respecting the
+     * {@code maxOutputBytes} cap. Returns the new truncated flag.
+     */
+    private static boolean appendBounded(StringBuilder out, char[] cbuf, int n,
+                                         int maxOutputBytes, boolean truncated) {
+        if (truncated) return true;
+        int remaining = maxOutputBytes - out.length();
+        if (remaining <= 0) return true;
+        if (n > remaining) {
+            out.append(cbuf, 0, remaining);
+            return true;
+        }
+        out.append(cbuf, 0, n);
+        return false;
+    }
+
+    /**
+     * Build the early-return envelope when a terminal image is detected
+     * mid-stream. The watchdog thread already babysits the process for the
+     * full timeout. We just return; the process stays alive so the user can
+     * interact (e.g., scan QR code).
+     */
+    private String buildTerminalImageEarlyReturn(String rawOutput, Agent agent,
+                                                  int timeoutSec, long startTime, boolean truncated) {
+        var processedOutput = replaceTerminalImagesInOutput(rawOutput, agent);
+        long durationMs = System.currentTimeMillis() - startTime;
+
+        var result = new JsonObject();
+        result.addProperty("exitCode", -1);
+        result.addProperty("output", processedOutput
+                + "\n[Process still running in background — waiting for user interaction. Will timeout after %d seconds."
+                        .formatted(timeoutSec)
+                + " The image above is already visible to the user in the chat. Do NOT try to read or fetch it.]");
+        result.addProperty("durationMs", durationMs);
+        result.addProperty("truncated", truncated);
+        result.addProperty("timedOut", false);
+        return result.toString();
     }
 
     // --- Terminal image rendering ---
@@ -489,34 +530,32 @@ public class ShellExecTool implements ToolRegistry.Tool {
         var lines = output.split("\n");
         var result = new StringBuilder();
         var qrLines = new java.util.ArrayList<String>();
-        boolean inQrBlock = false;
 
         for (var line : lines) {
-            boolean isBlockLine = isBlockArtLine(line);
-
-            if (isBlockLine) {
-                inQrBlock = true;
+            if (isBlockArtLine(line)) {
                 qrLines.add(line);
             } else {
-                if (inQrBlock) {
-                    // End of block art — render if substantial
-                    if (qrLines.size() >= 5) {
-                        var imageUrl = renderBlockArtToPng(qrLines, agent);
-                        if (imageUrl != null) {
-                            result.append(imageUrl).append("\n");
-                        }
-                    } else {
-                        // Too small, keep original lines
-                        for (var ql : qrLines) result.append(ql).append("\n");
-                    }
-                    qrLines.clear();
-                    inQrBlock = false;
-                }
+                flushQrBlock(qrLines, result, agent);
                 result.append(line).append("\n");
             }
         }
         // Handle block art at end of output
-        if (inQrBlock && qrLines.size() >= 5) {
+        flushQrBlock(qrLines, result, agent);
+
+        return result.toString().stripTrailing();
+    }
+
+    /**
+     * Drain the accumulated block-art lines into {@code result}: render as a
+     * PNG image link when the block is substantial enough ({@code >= 5}
+     * lines), or emit verbatim when it's too small to be a real terminal
+     * image. Either way the buffer ends empty so the caller can start a new
+     * block on the next non-block line.
+     */
+    private void flushQrBlock(java.util.ArrayList<String> qrLines,
+                              StringBuilder result, Agent agent) {
+        if (qrLines.isEmpty()) return;
+        if (qrLines.size() >= 5) {
             var imageUrl = renderBlockArtToPng(qrLines, agent);
             if (imageUrl != null) {
                 result.append(imageUrl).append("\n");
@@ -524,8 +563,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
         } else {
             for (var ql : qrLines) result.append(ql).append("\n");
         }
-
-        return result.toString().stripTrailing();
+        qrLines.clear();
     }
 
     /** Quick check if the output contains enough consecutive block art lines to constitute a terminal image. */
@@ -585,52 +623,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
             g.setColor(java.awt.Color.WHITE);
             g.fillRect(0, 0, imgWidth, imgHeight);
 
-            for (int row = 0; row < lines.size(); row++) {
-                var line = lines.get(row);
-                int py = row * cellH * 2; // pixel y for this character row
-
-                for (int col = 0; col < line.length(); col++) {
-                    char c = line.charAt(col);
-                    int px = col * cellW;
-
-                    // Determine top half and bottom half colors
-                    boolean topBlack = false, bottomBlack = false;
-                    switch (c) {
-                        case '\u2588': // █ full block
-                        case '\u258A': // ▊
-                        case '\u258B': // ▋
-                            topBlack = true; bottomBlack = true; break;
-                        case '\u2580': // ▀ upper half
-                            topBlack = true; break;
-                        case '\u2584': // ▄ lower half
-                            bottomBlack = true; break;
-                        case '\u258C': // ▌ left half — treat as full for QR
-                        case '\u2590': // ▐ right half
-                            topBlack = true; bottomBlack = true; break;
-                        case '\u2593': // ▓ dark shade
-                            topBlack = true; bottomBlack = true; break;
-                        case '\u2592': // ▒ medium shade — treat as white
-                        case '\u2591': // ░ light shade — treat as white
-                        case ' ':       // literal whitespace
-                            break;
-                        default:
-                            // Unknown char — treat as black if it's a block-range char
-                            if (c >= '\u2580' && c <= '\u259F') {
-                                topBlack = true; bottomBlack = true;
-                            }
-                            break;
-                    }
-
-                    if (topBlack) {
-                        g.setColor(java.awt.Color.BLACK);
-                        g.fillRect(px, py, cellW, cellH);
-                    }
-                    if (bottomBlack) {
-                        g.setColor(java.awt.Color.BLACK);
-                        g.fillRect(px, py + cellH, cellW, cellH);
-                    }
-                }
-            }
+            paintBlockArt(g, lines, cellW, cellH);
             g.dispose();
 
             var timestamp = System.currentTimeMillis();
@@ -646,5 +639,58 @@ public class ShellExecTool implements ToolRegistry.Tool {
             services.EventLogger.warn("tool", "Failed to render terminal image: %s".formatted(e.getMessage()));
             return null;
         }
+    }
+
+    /**
+     * Paint the block-art {@code lines} into the {@link java.awt.Graphics2D}
+     * context using {@code cellW × cellH} cells (each character is two
+     * vertically-stacked half-cells per the Unicode half-block encoding).
+     */
+    private static void paintBlockArt(java.awt.Graphics2D g, List<String> lines,
+                                      int cellW, int cellH) {
+        for (int row = 0; row < lines.size(); row++) {
+            var line = lines.get(row);
+            int py = row * cellH * 2; // pixel y for this character row
+            for (int col = 0; col < line.length(); col++) {
+                char c = line.charAt(col);
+                int px = col * cellW;
+                var halves = halfBlocksFor(c);
+                if (halves.topBlack()) {
+                    g.setColor(java.awt.Color.BLACK);
+                    g.fillRect(px, py, cellW, cellH);
+                }
+                if (halves.bottomBlack()) {
+                    g.setColor(java.awt.Color.BLACK);
+                    g.fillRect(px, py + cellH, cellW, cellH);
+                }
+            }
+        }
+    }
+
+    /** Encoded top/bottom-half occupancy for one half-block character. */
+    private record HalfBlock(boolean topBlack, boolean bottomBlack) {
+        private static final HalfBlock EMPTY = new HalfBlock(false, false);
+        private static final HalfBlock FULL = new HalfBlock(true, true);
+        private static final HalfBlock TOP = new HalfBlock(true, false);
+        private static final HalfBlock BOTTOM = new HalfBlock(false, true);
+    }
+
+    private static HalfBlock halfBlocksFor(char c) {
+        return switch (c) {
+            // █ full block, ▊, ▋ — treat as full for QR
+            case '\u2588', '\u258A', '\u258B' -> HalfBlock.FULL;
+            // ▀ upper half
+            case '\u2580' -> HalfBlock.TOP;
+            // ▄ lower half
+            case '\u2584' -> HalfBlock.BOTTOM;
+            // ▌ left half, ▐ right half — treat as full for QR
+            case '\u258C', '\u2590' -> HalfBlock.FULL;
+            // ▓ dark shade
+            case '\u2593' -> HalfBlock.FULL;
+            // ▒ medium shade, ░ light shade, literal space — treat as white
+            case '\u2592', '\u2591', ' ' -> HalfBlock.EMPTY;
+            // Unknown char — treat as black if it's a block-range char
+            default -> (c >= '\u2580' && c <= '\u259F') ? HalfBlock.FULL : HalfBlock.EMPTY;
+        };
     }
 }

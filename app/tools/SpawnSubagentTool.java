@@ -256,52 +256,8 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
     @Override
     public String execute(String argsJson, Agent parentAgent) {
         var args = JsonParser.parseString(argsJson).getAsJsonObject();
-
-        var task = optString(args, "task");
-        if (task == null || task.isBlank()) {
-            return "Error: 'task' is required.";
-        }
-        var label = optString(args, "label");
-        var requestedAgentId = optLong(args, "agentId");
-        var modelProviderOverride = optString(args, "modelProvider");
-        var modelIdOverride = optString(args, "modelId");
-        var timeoutSeconds = optInt(args, "runTimeoutSeconds", DEFAULT_TIMEOUT_SECONDS);
-        if (timeoutSeconds <= 0) timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
-        // JCLAW-267: mode parameter — "session" (default) materializes a fresh
-        // child Conversation; "inline" runs the child in the parent's
-        // Conversation with messages tagged so the chat UI folds them.
-        var requestedMode = optString(args, "mode");
-        var mode = requestedMode == null || requestedMode.isBlank()
-                ? DEFAULT_MODE
-                : requestedMode.toLowerCase();
-        if (!ALLOWED_MODES.contains(mode)) {
-            return "Error: 'mode' must be one of " + ALLOWED_MODES + " (got '" + requestedMode + "').";
-        }
-        // JCLAW-268: context parameter — "fresh" (default) is the JCLAW-265
-        // behavior; "inherit" summarizes the parent's recent turns and unions
-        // tool grants. Validate strictly so an LLM typo produces a clear
-        // error rather than silently degrading.
-        var requestedContext = optString(args, "context");
-        var context = requestedContext == null || requestedContext.isBlank()
-                ? DEFAULT_CONTEXT
-                : requestedContext.toLowerCase();
-        if (!ALLOWED_CONTEXTS.contains(context)) {
-            return "Error: 'context' must be one of " + ALLOWED_CONTEXTS + " (got '" + requestedContext + "').";
-        }
-
-        // JCLAW-270: async parameter — false (default) preserves the synchronous
-        // JCLAW-265 flow; true dispatches the child run to a background VT and
-        // returns the run id immediately. Async + inline is rejected because
-        // inline mode embeds the child's messages directly into the parent
-        // transcript; returning control to the LLM before the child finishes
-        // would leave a half-written nested block dangling. The completion-card
-        // post-flow (announce Message into the parent conversation) is the
-        // async equivalent of inline's inline-rendering — they're alternatives
-        // for surfacing child output, not complements.
-        var asyncRequested = optBool(args, "async");
-        if (asyncRequested && MODE_INLINE.equals(mode)) {
-            return "Error: 'async' is only compatible with mode=\"session\" (inline mode embeds child messages directly into the parent transcript, which has no meaningful semantics before the child finishes).";
-        }
+        var parsed = parseSpawnArgs(args);
+        if (parsed.error() != null) return parsed.error();
 
         // JCLAW-266: enforce recursion caps before touching the DB. Both checks
         // run inside a Tx so the ancestor walk and the RUNNING-row count see a
@@ -327,49 +283,9 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                     .formatted(parentAgent.name);
         }
 
-        // JCLAW-268: inherit-mode pre-step. We do two things outside the
-        // bootstrap Tx so the LLM-bound summarize call doesn't hold a DB
-        // connection:
-        //   1. Snapshot the parent's recent messages inside a short Tx
-        //      (the snapshot is detached from JPA and safe to consume).
-        //   2. Call the LLM synchronously to produce the parent-context
-        //      summary. On failure we degrade to fresh and emit
-        //      SUBAGENT_ERROR (no run_id yet — that's deliberate; the
-        //      reason field carries the failure cause).
-        // Result feeds bootstrapChild as the parent-context blob to stamp
-        // on the child Conversation. For fresh-mode and for failure
-        // degradation, parentContextSummary stays null and bootstrap
-        // skips the stamping + union grant.
-        String parentContextSummary = null;
-        String summaryErrorReason = null;
-        boolean inheritRequested = CONTEXT_INHERIT.equals(context);
-        if (inheritRequested) {
-            try {
-                parentContextSummary = buildParentContextSummary(parentAgent, parentConv.id);
-            } catch (Exception e) {
-                summaryErrorReason = "Parent-context summarization failed: " + e.getMessage();
-            }
-        }
-
-        // Step 1+2: materialize child Agent + Conversation in one short Tx so
-        // both rows commit before we open SubagentRun. AgentService.create
-        // already runs its own internal sub-work (workspace seed, default
-        // tool-config rows) and tolerates being inside an outer Tx.run via
-        // Tx's "inside-tx → reuse" branch.
-        final String resolvedLabel = label;
-        final String resolvedModelProvider = modelProviderOverride;
-        final String resolvedModelId = modelIdOverride;
-        final Long resolvedAgentIdParam = requestedAgentId;
-        final boolean applyInheritGrants = inheritRequested && parentContextSummary != null;
-        final String resolvedParentContext = parentContextSummary;
-        final boolean inlineMode = MODE_INLINE.equals(mode);
-        var bootstrap = Tx.run(() -> bootstrapChild(
-                parentAgent, parentConv, resolvedAgentIdParam,
-                resolvedLabel, resolvedModelProvider, resolvedModelId,
-                applyInheritGrants, resolvedParentContext, inlineMode));
-        if (bootstrap.error() != null) {
-            return bootstrap.error();
-        }
+        var summary = buildInheritSummary(parentAgent, parentConv.id, parsed.context());
+        var bootstrap = bootstrapChildInTx(parentAgent, parentConv, parsed, summary);
+        if (bootstrap.error() != null) return bootstrap.error();
         var childAgentId = bootstrap.childAgentId();
         var childConvId = bootstrap.childConvId();
 
@@ -377,21 +293,11 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         // its own short Tx so the row commits and is visible from any thread
         // we hand the run to.
         final var parentConvIdFinal = parentConv.id;
-        var runId = Tx.run(() -> {
-            var run = new SubagentRun();
-            run.parentAgent = Agent.findById(parentAgentId);
-            run.childAgent = Agent.findById(childAgentId);
-            run.parentConversation = Conversation.findById(parentConvIdFinal);
-            run.childConversation = Conversation.findById(childConvId);
-            // status defaults to RUNNING, startedAt populated by @PrePersist.
-            run.save();
-            return run.id;
-        });
-
+        var runId = insertSubagentRun(parentAgentId, childAgentId, parentConvIdFinal, childConvId);
         var runIdStr = String.valueOf(runId);
         EventLogger.recordSubagentSpawn(
                 parentAgent.name, lookupAgentName(childAgentId),
-                runIdStr, mode, context);
+                runIdStr, parsed.mode(), parsed.context());
 
         // JCLAW-268: surface inherit-mode summarization failure as a SUBAGENT_ERROR
         // immediately after spawn. The child still runs (degraded to fresh-mode
@@ -399,34 +305,15 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         // skipped, see bootstrapChild). The spawn-time event makes the
         // degradation auditable; the terminal event below covers the run
         // itself once it finishes.
-        if (summaryErrorReason != null) {
+        if (summary.errorReason() != null) {
             EventLogger.recordSubagentError(
                     parentAgent.name, lookupAgentName(childAgentId),
-                    runIdStr, mode, context, summaryErrorReason);
+                    runIdStr, parsed.mode(), parsed.context(), summary.errorReason());
         }
 
-        // JCLAW-267: inline-mode boundary-start marker. Written into the
-        // parent Conversation BEFORE the child reasons so the chat UI's
-        // collapsible block can fold from this marker forward. The marker is
-        // an assistant-role row carrying the task instruction and stamped
-        // with the SubagentRun id so it groups with the child's own messages.
-        // The start marker's content becomes the header label on the
-        // collapsed block.
-        final String resolvedTaskForMarker = task;
-        final String resolvedSpawnLabel = label;
+        final boolean inlineMode = MODE_INLINE.equals(parsed.mode());
         if (inlineMode) {
-            Tx.run(() -> {
-                var conv = Conversation.<Conversation>findById(parentConvIdFinal);
-                ConversationService.withSubagentRunIdMarker(runId, () -> {
-                    var startContent = "Spawning subagent: "
-                            + (resolvedSpawnLabel != null && !resolvedSpawnLabel.isBlank()
-                                    ? resolvedSpawnLabel + " — "
-                                    : "")
-                            + resolvedTaskForMarker;
-                    ConversationService.appendAssistantMessage(conv, startContent, null);
-                    return null;
-                });
-            });
+            writeInlineStartMarker(parentConvIdFinal, runId, parsed.label(), parsed.task());
         }
 
         // JCLAW-270: async branch — dispatch the run to a background VT and
@@ -436,42 +323,237 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         // on terminal state (completion / failure / timeout). Async + inline
         // was already rejected up top so this branch can hard-assume session
         // mode (inlineMode == false, runIdForMarker == null).
-        if (asyncRequested) {
-            final var parentAgentName = parentAgent.name;
-            final var asyncMode = mode;
-            final var asyncContext = context;
-            final var asyncLabel = label;
-            final var asyncTimeoutSeconds = timeoutSeconds;
-            final var asyncTask = task;
-            Thread.ofVirtual().name("subagent-async-" + runId).start(() ->
-                    runAsyncAndAnnounce(runId, childAgentId, childConvId, parentConvIdFinal,
-                            parentAgentName, asyncMode, asyncContext, asyncLabel,
-                            asyncTimeoutSeconds, asyncTask));
-            var asyncPayload = new LinkedHashMap<String, Object>();
-            asyncPayload.put("run_id", runIdStr);
-            asyncPayload.put("conversation_id", String.valueOf(childConvId));
-            asyncPayload.put("status", SubagentRun.Status.RUNNING.name());
-            return utils.GsonHolder.INSTANCE.toJson(asyncPayload, Map.class);
+        if (parsed.asyncRequested()) {
+            return launchAsyncSpawn(runId, childAgentId, childConvId, parentConvIdFinal,
+                    parentAgent.name, parsed, runIdStr);
         }
 
         // Step 4: synchronous AgentRunner.run on a VT so we can enforce the
-        // wall-clock budget via Future.get(timeout). The child Agent +
-        // Conversation are re-fetched inside the VT so they're managed in a
-        // fresh persistence context.
-        //
-        // JCLAW-267: inline mode wraps the runner in
-        // {@link ConversationService#withSubagentRunIdMarker} so every Message
-        // AgentRunner persists during the child run carries the SubagentRun id
-        // for the chat UI's nested-turn folding. Session mode passes the null
-        // marker through, leaving Message.subagentRunId null on child rows
-        // (they're in their own Conversation row anyway).
+        // wall-clock budget via Future.get(timeout).
+        var runOutcome = runChildSynchronously(runId, childAgentId, childConvId,
+                parsed.task(), parsed.timeoutSeconds(), inlineMode);
+
+        // Step 5: write the terminal SubagentRun update in its own short Tx.
+        if (!runOutcome.killedByOperator()) {
+            persistTerminalRun(runId, runOutcome.terminalStatus(), runOutcome.terminalOutcome());
+        }
+
+        // JCLAW-267: inline-mode boundary-end marker. Skipped on kill (see
+        // writeInlineEndMarker javadoc for the double-render rationale).
+        if (inlineMode && !runOutcome.killedByOperator()) {
+            writeInlineEndMarker(parentConvIdFinal, runId, runOutcome.terminalStatus(),
+                    runOutcome.reply(), runOutcome.replyTruncated());
+        }
+
+        // Step 6: emit the terminal lifecycle event. JCLAW-291: kill path
+        // already emitted SUBAGENT_KILL — don't duplicate as SUBAGENT_ERROR.
+        if (!runOutcome.killedByOperator()) {
+            emitTerminalEvent(parentAgent.name, childAgentId, runIdStr,
+                    parsed.mode(), parsed.context(),
+                    runOutcome.terminalStatus(), runOutcome.errorReason());
+        }
+
+        // Tool return — the LLM will see this JSON string.
+        var payload = new LinkedHashMap<String, Object>();
+        payload.put("run_id", runIdStr);
+        payload.put("conversation_id", String.valueOf(childConvId));
+        payload.put("reply", runOutcome.reply());
+        payload.put("status", runOutcome.terminalStatus().name());
+        // JCLAW-291: hint to the parent LLM that the child's reply was cut
+        // off — useful when the parent decides whether to re-summarize or
+        // to surface the truncation to the user.
+        if (runOutcome.replyTruncated()) payload.put("truncated", Boolean.TRUE);
+        return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+    }
+
+    /** Parsed-args bundle for the spawn flow. {@code error} non-null
+     *  short-circuits execute. */
+    private record SpawnArgs(
+            String error,
+            String task, String label, Long requestedAgentId,
+            String modelProvider, String modelId,
+            String mode, String context, int timeoutSeconds, boolean asyncRequested) {
+        static SpawnArgs fail(String msg) {
+            return new SpawnArgs(msg, null, null, null, null, null, null, null, 0, false);
+        }
+    }
+
+    /** Result of {@link #buildInheritSummary}: either the populated summary
+     *  text (or null when fresh / nothing to summarize) plus an optional
+     *  failure reason that maps to a deferred SUBAGENT_ERROR event. */
+    private record InheritSummary(String text, String errorReason) {
+        static final InheritSummary NONE = new InheritSummary(null, null);
+    }
+
+    /** Result of the synchronous child run + Future.get await. */
+    private record SyncRunOutcome(
+            String reply, SubagentRun.Status terminalStatus,
+            String terminalOutcome, String errorReason,
+            boolean killedByOperator, boolean replyTruncated) {}
+
+    private static SpawnArgs parseSpawnArgs(JsonObject args) {
+        var task = optString(args, "task");
+        if (task == null || task.isBlank()) {
+            return SpawnArgs.fail("Error: 'task' is required.");
+        }
+        var label = optString(args, "label");
+        var requestedAgentId = optLong(args, "agentId");
+        var modelProviderOverride = optString(args, "modelProvider");
+        var modelIdOverride = optString(args, "modelId");
+        var timeoutSeconds = optInt(args, "runTimeoutSeconds", DEFAULT_TIMEOUT_SECONDS);
+        if (timeoutSeconds <= 0) timeoutSeconds = DEFAULT_TIMEOUT_SECONDS;
+        // JCLAW-267: mode parameter — "session" (default) materializes a fresh
+        // child Conversation; "inline" runs the child in the parent's
+        // Conversation with messages tagged so the chat UI folds them.
+        var requestedMode = optString(args, "mode");
+        var mode = requestedMode == null || requestedMode.isBlank()
+                ? DEFAULT_MODE
+                : requestedMode.toLowerCase();
+        if (!ALLOWED_MODES.contains(mode)) {
+            return SpawnArgs.fail("Error: 'mode' must be one of " + ALLOWED_MODES + " (got '" + requestedMode + "').");
+        }
+        // JCLAW-268: context parameter — "fresh" (default) is the JCLAW-265
+        // behavior; "inherit" summarizes the parent's recent turns and unions
+        // tool grants. Validate strictly so an LLM typo produces a clear
+        // error rather than silently degrading.
+        var requestedContext = optString(args, "context");
+        var context = requestedContext == null || requestedContext.isBlank()
+                ? DEFAULT_CONTEXT
+                : requestedContext.toLowerCase();
+        if (!ALLOWED_CONTEXTS.contains(context)) {
+            return SpawnArgs.fail("Error: 'context' must be one of " + ALLOWED_CONTEXTS + " (got '" + requestedContext + "').");
+        }
+
+        // JCLAW-270: async parameter — false (default) preserves the synchronous
+        // JCLAW-265 flow; true dispatches the child run to a background VT and
+        // returns the run id immediately. Async + inline is rejected because
+        // inline mode embeds the child's messages directly into the parent
+        // transcript; returning control to the LLM before the child finishes
+        // would leave a half-written nested block dangling. The completion-card
+        // post-flow (announce Message into the parent conversation) is the
+        // async equivalent of inline's inline-rendering — they're alternatives
+        // for surfacing child output, not complements.
+        var asyncRequested = optBool(args, "async");
+        if (asyncRequested && MODE_INLINE.equals(mode)) {
+            return SpawnArgs.fail("Error: 'async' is only compatible with mode=\"session\" (inline mode embeds child messages directly into the parent transcript, which has no meaningful semantics before the child finishes).");
+        }
+
+        return new SpawnArgs(null, task, label, requestedAgentId,
+                modelProviderOverride, modelIdOverride,
+                mode, context, timeoutSeconds, asyncRequested);
+    }
+
+    /**
+     * JCLAW-268: inherit-mode pre-step. Snapshot the parent's recent messages
+     * inside a short Tx, then call the LLM synchronously to produce the
+     * summary outside of any Tx so the round-trip doesn't hold a DB
+     * connection. On failure we degrade to fresh and surface the reason as a
+     * deferred SUBAGENT_ERROR. Fresh-mode requests return {@link
+     * InheritSummary#NONE} unconditionally.
+     */
+    private static InheritSummary buildInheritSummary(Agent parentAgent, Long parentConvId,
+                                                       String context) {
+        if (!CONTEXT_INHERIT.equals(context)) return InheritSummary.NONE;
+        try {
+            var text = buildParentContextSummary(parentAgent, parentConvId);
+            return new InheritSummary(text, null);
+        } catch (Exception e) {
+            return new InheritSummary(null,
+                    "Parent-context summarization failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Step 1+2 wrapper. Materializes child Agent + Conversation in one short
+     * Tx so both rows commit before the SubagentRun row is opened.
+     */
+    private static Bootstrap bootstrapChildInTx(Agent parentAgent, Conversation parentConv,
+                                                SpawnArgs parsed, InheritSummary summary) {
+        final boolean inheritRequested = CONTEXT_INHERIT.equals(parsed.context());
+        final boolean applyInheritGrants = inheritRequested && summary.text() != null;
+        final boolean inlineMode = MODE_INLINE.equals(parsed.mode());
+        return Tx.run(() -> bootstrapChild(
+                parentAgent, parentConv, parsed.requestedAgentId(),
+                parsed.label(), parsed.modelProvider(), parsed.modelId(),
+                applyInheritGrants, summary.text(), inlineMode));
+    }
+
+    /** Insert the SubagentRun audit row in its own short Tx and return the
+     *  generated id. */
+    private static Long insertSubagentRun(Long parentAgentId, Long childAgentId,
+                                           Long parentConvId, Long childConvId) {
+        return Tx.run(() -> {
+            var run = new SubagentRun();
+            run.parentAgent = Agent.findById(parentAgentId);
+            run.childAgent = Agent.findById(childAgentId);
+            run.parentConversation = Conversation.findById(parentConvId);
+            run.childConversation = Conversation.findById(childConvId);
+            // status defaults to RUNNING, startedAt populated by @PrePersist.
+            run.save();
+            return run.id;
+        });
+    }
+
+    /**
+     * JCLAW-267: inline-mode boundary-start marker. Written into the parent
+     * Conversation BEFORE the child reasons so the chat UI's collapsible
+     * block can fold from this marker forward. The marker is an
+     * assistant-role row carrying the task instruction and stamped with the
+     * SubagentRun id so it groups with the child's own messages. The start
+     * marker's content becomes the header label on the collapsed block.
+     */
+    private static void writeInlineStartMarker(Long parentConvId, Long runId,
+                                                String label, String task) {
+        Tx.run(() -> {
+            var conv = Conversation.<Conversation>findById(parentConvId);
+            ConversationService.withSubagentRunIdMarker(runId, () -> {
+                var startContent = "Spawning subagent: "
+                        + (label != null && !label.isBlank() ? label + " — " : "")
+                        + task;
+                ConversationService.appendAssistantMessage(conv, startContent, null);
+                return null;
+            });
+        });
+    }
+
+    /** Launch the async-spawn background VT and return the immediate JSON
+     *  acknowledgement payload. */
+    private static String launchAsyncSpawn(Long runId, Long childAgentId, Long childConvId,
+                                            Long parentConvId, String parentAgentName,
+                                            SpawnArgs parsed, String runIdStr) {
+        Thread.ofVirtual().name("subagent-async-" + runId).start(() ->
+                runAsyncAndAnnounce(runId, childAgentId, childConvId, parentConvId,
+                        parentAgentName, parsed.mode(), parsed.context(), parsed.label(),
+                        parsed.timeoutSeconds(), parsed.task()));
+        var asyncPayload = new LinkedHashMap<String, Object>();
+        asyncPayload.put("run_id", runIdStr);
+        asyncPayload.put("conversation_id", String.valueOf(childConvId));
+        asyncPayload.put("status", SubagentRun.Status.RUNNING.name());
+        return utils.GsonHolder.INSTANCE.toJson(asyncPayload, Map.class);
+    }
+
+    /**
+     * Step 4: dispatch the child run to a virtual thread, enforce the
+     * wall-clock budget via Future.get(timeout), and translate the await
+     * outcome into a {@link SyncRunOutcome}. The child Agent + Conversation
+     * are re-fetched inside the VT so they're managed in a fresh persistence
+     * context.
+     *
+     * <p>JCLAW-267: inline mode wraps the runner in
+     * {@link ConversationService#withSubagentRunIdMarker} so every Message
+     * AgentRunner persists during the child run carries the SubagentRun id
+     * for the chat UI's nested-turn folding. Session mode passes the null
+     * marker through.
+     *
+     * <p>JCLAW-291: cooperative-cancel registration via
+     * {@link services.SubagentRegistry}. We deliberately do NOT capture the
+     * carrier Thread — see services.SubagentRegistry's class comment for
+     * the H2 FileChannel post-mortem.
+     */
+    private static SyncRunOutcome runChildSynchronously(Long runId, Long childAgentId,
+                                                        Long childConvId, String task,
+                                                        int timeoutSeconds, boolean inlineMode) {
         final Long runIdForMarker = inlineMode ? runId : null;
-        // JCLAW-291: cooperative-cancel registration. The /subagent kill
-        // path flips a flag on this registry entry; AgentRunner's
-        // checkpoints poll it at safe boundaries and throw
-        // RunCancelledException. We deliberately do NOT capture the
-        // carrier Thread — see services.SubagentRegistry's class comment
-        // for the H2 FileChannel post-mortem.
         var future = new java.util.concurrent.CompletableFuture<AgentRunner.RunResult>();
         services.SubagentRegistry.register(runId, future);
         Thread.ofVirtual().name("subagent-" + runId).start(() -> {
@@ -501,153 +583,119 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
             }
         });
 
-        String reply;
-        SubagentRun.Status terminalStatus;
-        String terminalOutcome;
-        String errorReason = null;
-        // JCLAW-291: set when the runner bailed via RunCancelledException.
-        // Causes the terminal-status write below to be skipped entirely —
-        // the kill primitive has already stamped KILLED with the operator's
-        // reason, and overwriting that would lose the signal.
-        boolean killedByOperator = false;
-        // JCLAW-291: child's reply was cut off by max_tokens. Plumbed into
-        // the inline-mode end marker (so the inline subagent block's last
-        // assistant Message carries truncated=true) and into the tool-return
-        // payload (so the parent LLM sees a "truncated" signal next to its
-        // synthesized reply).
-        boolean replyTruncated = false;
-
         try {
-            try {
-                var result = future.get(timeoutSeconds, TimeUnit.SECONDS);
-                reply = result == null ? "" : result.response();
-                replyTruncated = result != null && result.truncated();
-                terminalStatus = SubagentRun.Status.COMPLETED;
-                terminalOutcome = reply;
-            } catch (TimeoutException te) {
-                future.cancel(false);
-                terminalStatus = SubagentRun.Status.TIMEOUT;
-                errorReason = "Subagent run exceeded %d-second budget".formatted(timeoutSeconds);
-                terminalOutcome = errorReason;
-                reply = "";
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                terminalStatus = SubagentRun.Status.FAILED;
-                errorReason = "Parent thread interrupted while awaiting subagent";
-                terminalOutcome = errorReason;
-                reply = "";
-            } catch (java.util.concurrent.CancellationException ce) {
-                // JCLAW-291: kill primitive cancelled our Future. The
-                // registry already stamped KILLED; bail without overwriting.
-                killedByOperator = true;
-                terminalStatus = SubagentRun.Status.KILLED;
-                terminalOutcome = "Killed by operator";
-                reply = "";
-            } catch (ExecutionException ee) {
-                var cause = ee.getCause() != null ? ee.getCause() : ee;
-                if (cause instanceof agents.RunCancelledException) {
-                    // JCLAW-291: runner observed the cancel flag at a
-                    // checkpoint and threw. Registry already KILLED; do
-                    // not touch the audit row.
-                    killedByOperator = true;
-                    terminalStatus = SubagentRun.Status.KILLED;
-                    terminalOutcome = "Killed by operator";
-                    reply = "";
-                } else {
-                    terminalStatus = SubagentRun.Status.FAILED;
-                    errorReason = cause.getMessage() != null ? cause.getMessage() : cause.toString();
-                    terminalOutcome = errorReason;
-                    reply = "";
-                }
-            }
+            return awaitFuture(future, timeoutSeconds);
         } finally {
             services.SubagentRegistry.unregister(runId);
         }
+    }
 
-        // Step 5: write the terminal SubagentRun update in its own short Tx.
-        // JCLAW-271 / JCLAW-291: skip the terminal write when the kill
-        // primitive already stamped KILLED — its outcome ("Killed by
-        // operator") is the operator-visible truth, and overwriting it
-        // with a TIMEOUT/FAILED reason from this thread's await result
-        // would lose that signal. We check both via the local
-        // killedByOperator flag (set when our catch saw the cancel path)
-        // AND via the row's status in DB (belt-and-suspenders against a
-        // race where the kill flipped the row but our future.get returned
-        // a non-cancel exception path first).
-        if (!killedByOperator) {
-            final var finalStatus = terminalStatus;
-            final var finalOutcome = terminalOutcome;
-            Tx.run(() -> {
-                var fresh = (SubagentRun) SubagentRun.findById(runId);
-                if (fresh != null && fresh.status != SubagentRun.Status.KILLED) {
-                    fresh.status = finalStatus;
-                    fresh.endedAt = Instant.now();
-                    fresh.outcome = finalOutcome;
-                    fresh.save();
-                }
-            });
-        }
-
-        // JCLAW-267: inline-mode boundary-end marker. Written into the parent
-        // Conversation AFTER the child run terminates so the chat UI's
-        // collapsible block has a clear end. The marker carries the terminal
-        // status in its content so the collapsed header can render
-        // "Completed / Failed / Timed out" without a separate join to
-        // SubagentRun. Stamped with the same SubagentRun id as the start
-        // marker and the runner-produced rows in between so they all fold
-        // together.
-        //
-        // JCLAW-291: when killed by operator, the kill confirmation in the
-        // operator's slash-command response is the user-facing signal; we
-        // skip the inline end marker (and the terminal lifecycle event
-        // below) so a kill doesn't double-render as both
-        // "Killed by operator" and a synthesized "Subagent killed" line.
-        if (inlineMode && !killedByOperator) {
-            final var statusForMarker = terminalStatus;
-            final var replyForMarker = reply;
-            final var truncatedForMarker = replyTruncated;
-            Tx.run(() -> {
-                var conv = Conversation.<Conversation>findById(parentConvIdFinal);
-                ConversationService.withSubagentRunIdMarker(runId, () -> {
-                    var endContent = "Subagent " + statusForMarker.name().toLowerCase()
-                            + (replyForMarker != null && !replyForMarker.isBlank()
-                                    ? ": " + replyForMarker
-                                    : "");
-                    // JCLAW-291: stamp truncated on the inline run's terminal
-                    // marker so the chat UI surfaces the marker on the inline
-                    // subagent block's last assistant row.
-                    ConversationService.appendAssistantMessage(conv, endContent, null, null, null,
-                            truncatedForMarker);
-                    return null;
-                });
-            });
-        }
-
-        // Step 6: emit the terminal lifecycle event. JCLAW-291: kill path
-        // already emitted SUBAGENT_KILL — don't duplicate as SUBAGENT_ERROR.
-        if (!killedByOperator) {
-            var childName = lookupAgentName(childAgentId);
-            switch (terminalStatus) {
-                case COMPLETED -> EventLogger.recordSubagentComplete(
-                        parentAgent.name, childName, runIdStr, mode, context, "ok");
-                case TIMEOUT -> EventLogger.recordSubagentTimeout(parentAgent.name, runIdStr);
-                default -> EventLogger.recordSubagentError(
-                        parentAgent.name, childName, runIdStr,
-                        mode, context, errorReason);
+    /**
+     * Await the child future, translating every terminal path (success,
+     * timeout, interrupt, cancellation, runner exception) into a uniform
+     * {@link SyncRunOutcome}. Keeping the catch ladder isolated here removes
+     * the bulk of the cognitive complexity from {@link #execute}.
+     */
+    private static SyncRunOutcome awaitFuture(
+            java.util.concurrent.CompletableFuture<AgentRunner.RunResult> future,
+            int timeoutSeconds) {
+        try {
+            var result = future.get(timeoutSeconds, TimeUnit.SECONDS);
+            var reply = result == null ? "" : result.response();
+            var truncated = result != null && result.truncated();
+            return new SyncRunOutcome(reply, SubagentRun.Status.COMPLETED,
+                    reply, null, false, truncated);
+        } catch (TimeoutException te) {
+            future.cancel(false);
+            var reason = "Subagent run exceeded %d-second budget".formatted(timeoutSeconds);
+            return new SyncRunOutcome("", SubagentRun.Status.TIMEOUT,
+                    reason, reason, false, false);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            var reason = "Parent thread interrupted while awaiting subagent";
+            return new SyncRunOutcome("", SubagentRun.Status.FAILED,
+                    reason, reason, false, false);
+        } catch (java.util.concurrent.CancellationException ce) {
+            // JCLAW-291: kill primitive cancelled our Future. The registry
+            // already stamped KILLED; bail without overwriting.
+            return new SyncRunOutcome("", SubagentRun.Status.KILLED,
+                    "Killed by operator", null, true, false);
+        } catch (ExecutionException ee) {
+            var cause = ee.getCause() != null ? ee.getCause() : ee;
+            if (cause instanceof agents.RunCancelledException) {
+                // JCLAW-291: runner observed the cancel flag at a checkpoint
+                // and threw. Registry already KILLED; do not touch the audit row.
+                return new SyncRunOutcome("", SubagentRun.Status.KILLED,
+                        "Killed by operator", null, true, false);
             }
+            var reason = cause.getMessage() != null ? cause.getMessage() : cause.toString();
+            return new SyncRunOutcome("", SubagentRun.Status.FAILED,
+                    reason, reason, false, false);
         }
+    }
 
-        // Tool return — the LLM will see this JSON string.
-        var payload = new LinkedHashMap<String, Object>();
-        payload.put("run_id", runIdStr);
-        payload.put("conversation_id", String.valueOf(childConvId));
-        payload.put("reply", reply);
-        payload.put("status", terminalStatus.name());
-        // JCLAW-291: hint to the parent LLM that the child's reply was cut
-        // off — useful when the parent decides whether to re-summarize or
-        // to surface the truncation to the user.
-        if (replyTruncated) payload.put("truncated", Boolean.TRUE);
-        return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+    /**
+     * Step 5: write the terminal SubagentRun update in its own short Tx.
+     * JCLAW-271 / JCLAW-291: belt-and-suspenders against a race where the
+     * kill flipped the row but our future.get returned a non-cancel
+     * exception path first — re-check the row's status in DB before
+     * overwriting.
+     */
+    private static void persistTerminalRun(Long runId, SubagentRun.Status status, String outcome) {
+        Tx.run(() -> {
+            var fresh = (SubagentRun) SubagentRun.findById(runId);
+            if (fresh != null && fresh.status != SubagentRun.Status.KILLED) {
+                fresh.status = status;
+                fresh.endedAt = Instant.now();
+                fresh.outcome = outcome;
+                fresh.save();
+            }
+        });
+    }
+
+    /**
+     * JCLAW-267: inline-mode boundary-end marker. Written into the parent
+     * Conversation AFTER the child run terminates so the chat UI's
+     * collapsible block has a clear end. The marker carries the terminal
+     * status in its content so the collapsed header can render
+     * "Completed / Failed / Timed out" without a separate join to
+     * SubagentRun.
+     *
+     * <p>JCLAW-291: when killed by operator, the kill confirmation in the
+     * operator's slash-command response is the user-facing signal; the
+     * caller skips this writer so a kill doesn't double-render as both
+     * "Killed by operator" and a synthesized "Subagent killed" line.
+     */
+    private static void writeInlineEndMarker(Long parentConvId, Long runId,
+                                              SubagentRun.Status status, String reply,
+                                              boolean replyTruncated) {
+        Tx.run(() -> {
+            var conv = Conversation.<Conversation>findById(parentConvId);
+            ConversationService.withSubagentRunIdMarker(runId, () -> {
+                var endContent = "Subagent " + status.name().toLowerCase()
+                        + (reply != null && !reply.isBlank() ? ": " + reply : "");
+                // JCLAW-291: stamp truncated on the inline run's terminal
+                // marker so the chat UI surfaces the marker on the inline
+                // subagent block's last assistant row.
+                ConversationService.appendAssistantMessage(conv, endContent, null, null, null,
+                        replyTruncated);
+                return null;
+            });
+        });
+    }
+
+    private static void emitTerminalEvent(String parentAgentName, Long childAgentId,
+                                           String runIdStr, String mode, String context,
+                                           SubagentRun.Status status, String errorReason) {
+        var childName = lookupAgentName(childAgentId);
+        switch (status) {
+            case COMPLETED -> EventLogger.recordSubagentComplete(
+                    parentAgentName, childName, runIdStr, mode, context, "ok");
+            case TIMEOUT -> EventLogger.recordSubagentTimeout(parentAgentName, runIdStr);
+            default -> EventLogger.recordSubagentError(
+                    parentAgentName, childName, runIdStr,
+                    mode, context, errorReason);
+        }
     }
 
     // ----- internals -----
@@ -733,53 +781,9 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                                             boolean applyInheritGrants,
                                             String parentContextSummary,
                                             boolean inlineMode) {
-        Agent childAgent;
-        if (requestedAgentId != null) {
-            childAgent = Agent.findById(requestedAgentId);
-            if (childAgent == null) {
-                return Bootstrap.fail(
-                        "Error: agentId %d not found.".formatted(requestedAgentId));
-            }
-            // Don't mutate Agent.parent_agent_id on a pre-existing row. The
-            // lineage of *this* run is already recorded on the SubagentRun
-            // (parentAgentId + childAgentId), and stamping parent_agent_id
-            // on the Agent row permanently demotes an operator-created
-            // top-level agent into a subagent: it disappears from the
-            // Agents page (ApiAgentsController.list filters parentAgent !=
-            // null) and the operator can't recreate one with the same
-            // name because Agent.name carries a global UNIQUE constraint.
-            // For freshly-created child agents (else branch) the FK is
-            // still set because those rows are genuinely subagents.
-        } else {
-            // Clone the parent's runtime config (provider, model, thinkingMode)
-            // into a fresh row so the child is its own auditable identity.
-            // JCLAW-269: child Agent ALWAYS inherits the parent's defaults; the
-            // per-spawn modelProvider/modelId override (when supplied) lands on
-            // the child Conversation below, not on this row. Keeping the Agent
-            // row clean of one-shot overrides means re-running the same child
-            // agent later (via agentId) doesn't carry stale per-spawn state.
-            var name = buildChildAgentName(parentAgent.name);
-            try {
-                // Subagents are delegates of the parent — they inherit the
-                // parent's on-disk workspace via AgentService.workspacePath's
-                // parent-chain walk and never need their own SOUL / IDENTITY /
-                // USER / BOOTSTRAP / AGENT skeleton. The createWorkspace=false
-                // arg suppresses the directory + markdown stubs that the
-                // operator-facing create paths still produce. Subagent tool
-                // calls resolve to the parent's workspace transparently.
-                childAgent = AgentService.create(name,
-                        parentAgent.modelProvider, parentAgent.modelId,
-                        parentAgent.thinkingMode,
-                        label != null && !label.isBlank()
-                                ? label
-                                : "Subagent of " + parentAgent.name,
-                        /* createWorkspace */ false);
-            } catch (RuntimeException e) {
-                return Bootstrap.fail("Error: failed to create child agent: " + e.getMessage());
-            }
-            childAgent.parentAgent = parentAgent;
-            childAgent.save();
-        }
+        var resolved = resolveChildAgent(parentAgent, requestedAgentId, label);
+        if (resolved.error() != null) return Bootstrap.fail(resolved.error());
+        var childAgent = resolved.agent();
 
         // JCLAW-268: inherit-mode tool union. Snapshot the parent's enabled
         // tool set and flip every tool the parent has enabled but the child
@@ -793,6 +797,98 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
             unionParentToolGrants(parentAgent, childAgent);
         }
 
+        var childConv = resolveChildConversation(childAgent, parentConv,
+                modelProviderOverride, modelIdOverride,
+                applyInheritGrants ? parentContextSummary : null, inlineMode);
+
+        return Bootstrap.ok(childAgent.id, childConv.id);
+    }
+
+    /** {@code error} non-null short-circuits {@link #bootstrapChild}. */
+    private record ResolvedChildAgent(Agent agent, String error) {
+        static ResolvedChildAgent ok(Agent a) { return new ResolvedChildAgent(a, null); }
+        static ResolvedChildAgent fail(String msg) { return new ResolvedChildAgent(null, msg); }
+    }
+
+    /**
+     * Resolve the child {@link Agent}: either look up an existing row by
+     * {@code requestedAgentId} or clone the parent into a fresh subagent
+     * row. The {@code parent_agent_id} FK is only set on freshly-created
+     * rows (see in-method commentary for the rationale).
+     */
+    private static ResolvedChildAgent resolveChildAgent(Agent parentAgent,
+                                                        Long requestedAgentId, String label) {
+        if (requestedAgentId != null) {
+            Agent existing = Agent.findById(requestedAgentId);
+            if (existing == null) {
+                return ResolvedChildAgent.fail(
+                        "Error: agentId %d not found.".formatted(requestedAgentId));
+            }
+            // Don't mutate Agent.parent_agent_id on a pre-existing row. The
+            // lineage of *this* run is already recorded on the SubagentRun
+            // (parentAgentId + childAgentId), and stamping parent_agent_id
+            // on the Agent row permanently demotes an operator-created
+            // top-level agent into a subagent: it disappears from the
+            // Agents page (ApiAgentsController.list filters parentAgent !=
+            // null) and the operator can't recreate one with the same
+            // name because Agent.name carries a global UNIQUE constraint.
+            // For freshly-created child agents (else branch) the FK is
+            // still set because those rows are genuinely subagents.
+            return ResolvedChildAgent.ok(existing);
+        }
+        // Clone the parent's runtime config (provider, model, thinkingMode)
+        // into a fresh row so the child is its own auditable identity.
+        // JCLAW-269: child Agent ALWAYS inherits the parent's defaults; the
+        // per-spawn modelProvider/modelId override (when supplied) lands on
+        // the child Conversation, not on this row. Keeping the Agent row
+        // clean of one-shot overrides means re-running the same child agent
+        // later (via agentId) doesn't carry stale per-spawn state.
+        var name = buildChildAgentName(parentAgent.name);
+        Agent created;
+        try {
+            // Subagents are delegates of the parent — they inherit the
+            // parent's on-disk workspace via AgentService.workspacePath's
+            // parent-chain walk and never need their own SOUL / IDENTITY /
+            // USER / BOOTSTRAP / AGENT skeleton. The createWorkspace=false
+            // arg suppresses the directory + markdown stubs that the
+            // operator-facing create paths still produce. Subagent tool
+            // calls resolve to the parent's workspace transparently.
+            created = AgentService.create(name,
+                    parentAgent.modelProvider, parentAgent.modelId,
+                    parentAgent.thinkingMode,
+                    label != null && !label.isBlank()
+                            ? label
+                            : "Subagent of " + parentAgent.name,
+                    /* createWorkspace */ false);
+        } catch (RuntimeException e) {
+            return ResolvedChildAgent.fail(
+                    "Error: failed to create child agent: " + e.getMessage());
+        }
+        created.parentAgent = parentAgent;
+        created.save();
+        return ResolvedChildAgent.ok(created);
+    }
+
+    /**
+     * Resolve the child {@link Conversation}: inline mode reuses the
+     * parent's row, session mode creates a fresh row stamped with the
+     * per-spawn model override and inherited parent-context summary.
+     *
+     * <p>Per-spawn model override + inherited parent-context blob only apply
+     * to session mode: they live on the *child* Conversation row, and in
+     * inline mode that "child" is the parent itself — writing them there
+     * would clobber the parent's effective model and context for the rest
+     * of the parent's turns. Inline-mode children effectively run with the
+     * parent's settings (same model, same prompt assembly); the model
+     * override and parent-context summary parameters are no-ops in this
+     * mode by design.
+     */
+    private static Conversation resolveChildConversation(Agent childAgent,
+                                                          Conversation parentConv,
+                                                          String modelProviderOverride,
+                                                          String modelIdOverride,
+                                                          String parentContextSummary,
+                                                          boolean inlineMode) {
         // JCLAW-267: inline mode reuses the parent Conversation as the child's
         // run target — the SubagentRun row points its childConversation FK at
         // the same row as parentConversation, and AgentRunner persists the
@@ -801,45 +897,33 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
         // No new Conversation row is created. Session mode keeps the existing
         // JCLAW-265 behavior: fresh child Conversation, separate transcript,
         // visible as its own row in the sidebar.
-        //
-        // Per-spawn model override + inherited parent-context blob only apply
-        // to session mode: they live on the *child* Conversation row, and in
-        // inline mode that "child" is the parent itself — writing them there
-        // would clobber the parent's effective model and context for the rest
-        // of the parent's turns. Inline-mode children effectively run with the
-        // parent's settings (same model, same prompt assembly); the model
-        // override and parent-context summary parameters are no-ops in this
-        // mode by design.
-        final Conversation childConv;
         if (inlineMode) {
-            childConv = parentConv;
-        } else {
-            childConv = ConversationService.create(childAgent, SUBAGENT_CHANNEL, null);
-            childConv.parentConversation = parentConv;
-            // JCLAW-269: persist the per-spawn override on the child Conversation so
-            // AgentRunner's ModelOverrideResolver picks it up for this run, and so
-            // the JCLAW-28 cost dashboard's
-            // COALESCE(c.modelProviderOverride, c.agent.modelProvider) attributes
-            // spend to the actually-used model. Both columns are set together or
-            // neither — half-set is undefined per Conversation.java's contract.
-            if (modelProviderOverride != null && !modelProviderOverride.isBlank()
-                    && modelIdOverride != null && !modelIdOverride.isBlank()) {
-                childConv.modelProviderOverride = modelProviderOverride;
-                childConv.modelIdOverride = modelIdOverride;
-            }
-            // JCLAW-268: stamp the inherited parent-context summary on the child
-            // Conversation. AgentRunner re-injects this into the child's system
-            // prompt every turn via SessionCompactor.appendParentContextToPrompt.
-            // Null in fresh mode, in the summarization-failure degradation path,
-            // and when the parent had no usable history — all of which leave
-            // the column null and turn the injection into a no-op.
-            if (applyInheritGrants && parentContextSummary != null && !parentContextSummary.isBlank()) {
-                childConv.parentContext = parentContextSummary;
-            }
-            childConv.save();
+            return parentConv;
         }
-
-        return Bootstrap.ok(childAgent.id, childConv.id);
+        var childConv = ConversationService.create(childAgent, SUBAGENT_CHANNEL, null);
+        childConv.parentConversation = parentConv;
+        // JCLAW-269: persist the per-spawn override on the child Conversation so
+        // AgentRunner's ModelOverrideResolver picks it up for this run, and so
+        // the JCLAW-28 cost dashboard's
+        // COALESCE(c.modelProviderOverride, c.agent.modelProvider) attributes
+        // spend to the actually-used model. Both columns are set together or
+        // neither — half-set is undefined per Conversation.java's contract.
+        if (modelProviderOverride != null && !modelProviderOverride.isBlank()
+                && modelIdOverride != null && !modelIdOverride.isBlank()) {
+            childConv.modelProviderOverride = modelProviderOverride;
+            childConv.modelIdOverride = modelIdOverride;
+        }
+        // JCLAW-268: stamp the inherited parent-context summary on the child
+        // Conversation. AgentRunner re-injects this into the child's system
+        // prompt every turn via SessionCompactor.appendParentContextToPrompt.
+        // Null in fresh mode, in the summarization-failure degradation path,
+        // and when the parent had no usable history — all of which leave
+        // the column null and turn the injection into a no-op.
+        if (parentContextSummary != null && !parentContextSummary.isBlank()) {
+            childConv.parentContext = parentContextSummary;
+        }
+        childConv.save();
+        return childConv;
     }
 
     /**
@@ -1013,25 +1097,65 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                                             Long parentConvId, String parentAgentName,
                                             String mode, String context, String label,
                                             int timeoutSeconds, String task) {
-        SubagentRun.Status terminalStatus;
-        String reply;
-        String errorReason = null;
-        // JCLAW-291: set when /subagent kill flipped the registry flag and
-        // the runner bailed via RunCancelledException (or the Future was
-        // cancelled outright by the kill primitive). Causes us to skip the
-        // audit-row write, the announce post, and the terminal lifecycle
-        // event — the kill primitive's SUBAGENT_KILL + KILLED row stamp
-        // is the operator-visible truth, and the operator initiated the
-        // kill so an announce card would be redundant noise.
-        boolean killedByOperator = false;
-        // JCLAW-291: child's reply was cut off by max_tokens. Plumbed into
-        // the announce-message metadata so the chat-page card can render
-        // a truncation marker on the announce body.
-        boolean replyTruncated = false;
+        var future = startAsyncChild(runId, childAgentId, childConvId, task);
+        SyncRunOutcome outcome;
+        try {
+            outcome = awaitAsyncFuture(future, timeoutSeconds);
+        } finally {
+            services.SubagentRegistry.unregister(runId);
+        }
 
-        // JCLAW-291: cooperative-cancel registration. See sync-path comment +
-        // services.SubagentRegistry's class doc for why we don't capture the
-        // carrier thread.
+        // JCLAW-291: kill primitive owns the terminal state on this path —
+        // skip every downstream side effect (audit write, announce post,
+        // lifecycle event, yield resume). The operator's slash-command
+        // response is the user-visible kill confirmation.
+        if (outcome.killedByOperator()) {
+            EventLogger.flush();
+            return;
+        }
+
+        // Update the SubagentRun audit row (terminal status + outcome).
+        // JCLAW-271: skip the write when /subagent kill already stamped
+        // KILLED — the operator's reason is the source of truth, and
+        // overwriting it here would replace "Killed by operator" with the
+        // TIMEOUT / FAILED message we synthesized when the cancelled
+        // Future threw.
+        persistAsyncTerminalRun(runId, outcome);
+
+        // Build + post the announce Message into the parent Conversation.
+        var yieldedFlag = postAnnounceAndReadYieldFlag(runId, childConvId, parentConvId,
+                label, outcome);
+
+        emitTerminalEvent(parentAgentName, childAgentId, String.valueOf(runId),
+                mode, context, outcome.terminalStatus(), outcome.errorReason());
+        EventLogger.flush();
+
+        // JCLAW-273: resume the parent agent's logical turn for a yielded
+        // caller. The announce Message we just posted is the parent's next
+        // user input; calling AgentRunner.run kicks off a fresh turn that
+        // picks up the announce via ConversationService.loadRecentMessages
+        // (which keeps USER-role announce rows visible to the LLM) and
+        // produces a final assistant reply.
+        if (Boolean.TRUE.equals(yieldedFlag)) {
+            try {
+                resumeParentAfterYield(parentConvId, runId);
+            } catch (Throwable t) {
+                EventLogger.warn("subagent",
+                        "Failed to resume parent for yielded run " + runId
+                                + ": " + t.getMessage());
+            }
+        }
+    }
+
+    /**
+     * JCLAW-270 / JCLAW-291: spin up the inner runner VT and register the
+     * future with {@link services.SubagentRegistry} for cooperative cancel.
+     * The carrier thread is intentionally NOT captured — see
+     * {@code services.SubagentRegistry}'s class doc for the H2 FileChannel
+     * post-mortem.
+     */
+    private static CompletableFuture<AgentRunner.RunResult> startAsyncChild(
+            Long runId, Long childAgentId, Long childConvId, String task) {
         var future = new CompletableFuture<AgentRunner.RunResult>();
         services.SubagentRegistry.register(runId, future);
         Thread.ofVirtual().name("subagent-async-runner-" + runId).start(() -> {
@@ -1047,81 +1171,47 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                 future.completeExceptionally(t);
             }
         });
+        return future;
+    }
 
+    /**
+     * Async variant of {@link #awaitFuture}: identical catch ladder plus a
+     * top-level {@link Throwable} guard so this background VT never leaks an
+     * unchecked failure (which would lose the announce + terminal event
+     * entirely).
+     */
+    @SuppressWarnings("java:S1181")
+    private static SyncRunOutcome awaitAsyncFuture(
+            CompletableFuture<AgentRunner.RunResult> future, int timeoutSeconds) {
         try {
-            try {
-                var result = future.get(timeoutSeconds, TimeUnit.SECONDS);
-                reply = result == null ? "" : result.response();
-                replyTruncated = result != null && result.truncated();
-                terminalStatus = SubagentRun.Status.COMPLETED;
-            } catch (TimeoutException te) {
-                future.cancel(false);
-                terminalStatus = SubagentRun.Status.TIMEOUT;
-                errorReason = "Subagent run exceeded %d-second budget".formatted(timeoutSeconds);
-                reply = "";
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                terminalStatus = SubagentRun.Status.FAILED;
-                errorReason = "Async subagent VT interrupted";
-                reply = "";
-            } catch (java.util.concurrent.CancellationException ce) {
-                // JCLAW-291: kill primitive cancelled our Future before the
-                // runner reached a checkpoint. Registry already stamped
-                // KILLED; nothing more to do.
-                killedByOperator = true;
-                terminalStatus = SubagentRun.Status.KILLED;
-                reply = "";
-            } catch (ExecutionException ee) {
-                var cause = ee.getCause() != null ? ee.getCause() : ee;
-                if (cause instanceof agents.RunCancelledException) {
-                    killedByOperator = true;
-                    terminalStatus = SubagentRun.Status.KILLED;
-                    reply = "";
-                } else {
-                    terminalStatus = SubagentRun.Status.FAILED;
-                    errorReason = cause.getMessage() != null ? cause.getMessage() : cause.toString();
-                    reply = "";
-                }
-            } catch (Throwable t) {
-                // Top-level guard: this is a background VT — must never let an
-                // unchecked failure escape (it would lose the announce + terminal
-                // event entirely). Stamp the audit row + announce as FAILED with
-                // the throwable's string form.
-                terminalStatus = SubagentRun.Status.FAILED;
-                errorReason = t.getMessage() != null ? t.getMessage() : t.toString();
-                reply = "";
-            }
-        } finally {
-            services.SubagentRegistry.unregister(runId);
+            return awaitFuture(future, timeoutSeconds);
+        } catch (Throwable t) {
+            // Top-level guard: see method javadoc.
+            var reason = t.getMessage() != null ? t.getMessage() : t.toString();
+            return new SyncRunOutcome("", SubagentRun.Status.FAILED,
+                    reason, reason, false, false);
         }
+    }
 
-        // JCLAW-291: kill primitive owns the terminal state on this path —
-        // skip every downstream side effect (audit write, announce post,
-        // lifecycle event, yield resume). The operator's slash-command
-        // response is the user-visible kill confirmation.
-        if (killedByOperator) {
-            EventLogger.flush();
-            return;
-        }
-
-        // Update the SubagentRun audit row (terminal status + outcome).
-        // JCLAW-271: skip the write when /subagent kill already stamped
-        // KILLED — the operator's reason is the source of truth, and
-        // overwriting it here would replace "Killed by operator" with the
-        // TIMEOUT / FAILED message we synthesized when the cancelled
-        // Future threw.
-        final var finalStatus = terminalStatus;
-        final var finalReply = reply;
-        final var finalErrorReason = errorReason;
+    /**
+     * Async variant of {@link #persistTerminalRun}: wraps the Tx in a
+     * Throwable catch so a persistence failure logs but never aborts the
+     * announce post. {@link SubagentRun#outcome} is the reply on COMPLETED
+     * and the error reason otherwise — matches the synchronous path's
+     * semantics.
+     */
+    private static void persistAsyncTerminalRun(Long runId, SyncRunOutcome outcome) {
+        final var finalStatus = outcome.terminalStatus();
+        final var outcomeText = finalStatus == SubagentRun.Status.COMPLETED
+                ? outcome.reply()
+                : outcome.errorReason();
         try {
             Tx.run(() -> {
                 var fresh = (SubagentRun) SubagentRun.findById(runId);
                 if (fresh != null && fresh.status != SubagentRun.Status.KILLED) {
                     fresh.status = finalStatus;
                     fresh.endedAt = Instant.now();
-                    fresh.outcome = finalStatus == SubagentRun.Status.COMPLETED
-                            ? finalReply
-                            : finalErrorReason;
+                    fresh.outcome = outcomeText;
                     fresh.save();
                 }
             });
@@ -1130,30 +1220,37 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
                     "Failed to persist terminal SubagentRun update for run " + runId
                             + ": " + t.getMessage());
         }
+    }
 
-        // Build + post the announce Message into the parent Conversation.
-        var announceBody = finalStatus == SubagentRun.Status.COMPLETED
-                ? finalReply
-                : (finalErrorReason != null ? finalErrorReason : "");
-        // NB: the local `displayTruncatedBody` is the 4000-char display cap on
-        // the announce body, NOT the JCLAW-291 model-output truncation flag.
-        // The two flow through postAnnounceMessage as separate parameters.
+    /**
+     * JCLAW-273: read the yield flag inside the same Tx that persists the
+     * announce so the role-decision and the message insert see a consistent
+     * snapshot of {@link SubagentRun#yielded}. A parent that called
+     * yield_to_subagent expects USER-role delivery (the announce IS its next
+     * user message); a fire-and-forget async caller expects SYSTEM-role
+     * (the JCLAW-270 semantics — visible card, never feeds back into LLM
+     * context).
+     *
+     * <p>NB: the local {@code displayTruncatedBody} is the 4000-char display
+     * cap on the announce body, NOT the JCLAW-291 model-output truncation
+     * flag. The two flow through {@link #postAnnounceMessage} as separate
+     * parameters.
+     */
+    @SuppressWarnings("java:S1181")
+    private static Boolean postAnnounceAndReadYieldFlag(Long runId, Long childConvId,
+                                                        Long parentConvId, String label,
+                                                        SyncRunOutcome outcome) {
+        var status = outcome.terminalStatus();
+        var announceBody = status == SubagentRun.Status.COMPLETED
+                ? outcome.reply()
+                : (outcome.errorReason() != null ? outcome.errorReason() : "");
         var displayTruncatedBody = truncateForAnnounce(announceBody);
-        final var modelOutputTruncated = replyTruncated;
-
-        // JCLAW-273: read the yield flag inside the same Tx that persists the
-        // announce so the role-decision and the message insert see a
-        // consistent snapshot of SubagentRun.yielded. A parent that called
-        // yield_to_subagent expects USER-role delivery (the announce IS its
-        // next user message); a fire-and-forget async caller expects
-        // SYSTEM-role (the JCLAW-270 semantics — visible card, never feeds
-        // back into LLM context).
-        Boolean yieldedFlag;
+        final var modelOutputTruncated = outcome.replyTruncated();
         try {
-            yieldedFlag = Tx.run(() -> {
+            return Tx.run(() -> {
                 var run = (SubagentRun) SubagentRun.findById(runId);
                 boolean isYielded = run != null && run.yielded;
-                postAnnounceMessage(parentConvId, runId, label, finalStatus,
+                postAnnounceMessage(parentConvId, runId, label, status,
                         displayTruncatedBody, childConvId, isYielded, modelOutputTruncated);
                 return isYielded;
             });
@@ -1161,41 +1258,7 @@ public class SpawnSubagentTool implements ToolRegistry.Tool {
             EventLogger.warn("subagent",
                     "Failed to post announce Message for run " + runId
                             + ": " + t.getMessage());
-            yieldedFlag = Boolean.FALSE;
-        }
-
-        // Emit the terminal lifecycle event. The childName lookup runs in its
-        // own tx to dodge detached-entity issues on the VT.
-        var childName = lookupAgentName(childAgentId);
-        var runIdStr = String.valueOf(runId);
-        switch (finalStatus) {
-            case COMPLETED -> EventLogger.recordSubagentComplete(
-                    parentAgentName, childName, runIdStr, mode, context, "ok");
-            case TIMEOUT -> EventLogger.recordSubagentTimeout(parentAgentName, runIdStr);
-            default -> EventLogger.recordSubagentError(
-                    parentAgentName, childName, runIdStr,
-                    mode, context, finalErrorReason);
-        }
-        EventLogger.flush();
-
-        // JCLAW-273: resume the parent agent's logical turn. The announce
-        // Message we just posted is the parent's next user input; calling
-        // AgentRunner.run kicks off a fresh turn that picks up the announce
-        // via ConversationService.loadRecentMessages (which keeps USER-role
-        // announce rows visible to the LLM) and produces a final assistant
-        // reply. Matches the inbound-trigger shape used by webhook handlers
-        // and scheduled tasks — a background context calling AgentRunner.run
-        // on a conversation with the new prompt as the user message. The Tx
-        // re-fetch dodges detached-entity issues on the async VT carrier
-        // thread.
-        if (Boolean.TRUE.equals(yieldedFlag)) {
-            try {
-                resumeParentAfterYield(parentConvId, runId);
-            } catch (Throwable t) {
-                EventLogger.warn("subagent",
-                        "Failed to resume parent for yielded run " + runId
-                                + ": " + t.getMessage());
-            }
+            return Boolean.FALSE;
         }
     }
 

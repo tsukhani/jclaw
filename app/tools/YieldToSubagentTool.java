@@ -145,43 +145,7 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
         // already-terminal structured JSON envelope (when the child raced
         // ahead of yield's lookup). Both paths short-circuit the sentinel
         // build below.
-        var shortCircuit = Tx.run(() -> {
-            var run = (SubagentRun) SubagentRun.findById(runId);
-            if (run == null) {
-                return "Error: no SubagentRun found for runId " + runId + ".";
-            }
-            // Parent-ownership gate: a parent can only yield into its own
-            // running children. Yielding into a sibling's or unrelated
-            // agent's run would let one parent hijack another's suspension
-            // semantics.
-            if (run.parentAgent == null || !parentAgentId.equals(run.parentAgent.id)) {
-                return "Error: runId " + runId + " is not owned by the calling agent.";
-            }
-            // Race-fix follow-up: if the child finished between spawn returning
-            // {status:RUNNING} and yield's findById acquiring the row, there's
-            // no yield semantics to install — the async-finalize VT has either
-            // already posted the announce (as SYSTEM since yielded was still
-            // false) or is about to. Either way, the parent's suspend would
-            // wait for an event that's already happened. Return the recorded
-            // outcome directly as a structured "already_terminal" envelope so
-            // the LLM gets the answer immediately rather than being told its
-            // yield failed. The announce-as-SYSTEM stays visible in the chat
-            // UI; we just hand the LLM a usable result for its current turn.
-            if (run.status != SubagentRun.Status.RUNNING) {
-                var alreadyDone = new LinkedHashMap<String, Object>();
-                alreadyDone.put("action", "already_terminal");
-                alreadyDone.put("runId", String.valueOf(runId));
-                alreadyDone.put("status", run.status.name());
-                alreadyDone.put("reply", run.outcome != null ? run.outcome : "");
-                if (run.childConversation != null) {
-                    alreadyDone.put("conversation_id", String.valueOf(run.childConversation.id));
-                }
-                return utils.GsonHolder.INSTANCE.toJson(alreadyDone, Map.class);
-            }
-            run.yielded = true;
-            run.save();
-            return null;
-        });
+        var shortCircuit = Tx.run(() -> installYield(runId, parentAgentId));
         if (shortCircuit != null) return shortCircuit;
 
         // Sentinel payload — AgentRunner scans tool-result text for
@@ -193,6 +157,55 @@ public class YieldToSubagentTool implements ToolRegistry.Tool {
         payload.put("action", "yielded");
         payload.put("runId", String.valueOf(runId));
         return utils.GsonHolder.INSTANCE.toJson(payload, Map.class);
+    }
+
+    /**
+     * Look up the run, validate parent ownership, then either short-circuit
+     * (error / already-terminal envelope) or flip {@code yielded=true} and
+     * return null. Must be called inside an active Tx.
+     */
+    private static String installYield(long runId, Long parentAgentId) {
+        var run = (SubagentRun) SubagentRun.findById(runId);
+        if (run == null) {
+            return "Error: no SubagentRun found for runId " + runId + ".";
+        }
+        // Parent-ownership gate: a parent can only yield into its own
+        // running children. Yielding into a sibling's or unrelated
+        // agent's run would let one parent hijack another's suspension
+        // semantics.
+        if (run.parentAgent == null || !parentAgentId.equals(run.parentAgent.id)) {
+            return "Error: runId " + runId + " is not owned by the calling agent.";
+        }
+        if (run.status != SubagentRun.Status.RUNNING) {
+            return alreadyTerminalEnvelope(run, runId);
+        }
+        run.yielded = true;
+        run.save();
+        return null;
+    }
+
+    /**
+     * Race-fix follow-up: if the child finished between spawn returning
+     * {status:RUNNING} and yield's findById acquiring the row, there's no
+     * yield semantics to install — the async-finalize VT has either already
+     * posted the announce (as SYSTEM since yielded was still false) or is
+     * about to. Either way, the parent's suspend would wait for an event
+     * that's already happened. Return the recorded outcome directly as a
+     * structured "already_terminal" envelope so the LLM gets the answer
+     * immediately rather than being told its yield failed. The
+     * announce-as-SYSTEM stays visible in the chat UI; we just hand the
+     * LLM a usable result for its current turn.
+     */
+    private static String alreadyTerminalEnvelope(SubagentRun run, long runId) {
+        var alreadyDone = new LinkedHashMap<String, Object>();
+        alreadyDone.put("action", "already_terminal");
+        alreadyDone.put("runId", String.valueOf(runId));
+        alreadyDone.put("status", run.status.name());
+        alreadyDone.put("reply", run.outcome != null ? run.outcome : "");
+        if (run.childConversation != null) {
+            alreadyDone.put("conversation_id", String.valueOf(run.childConversation.id));
+        }
+        return utils.GsonHolder.INSTANCE.toJson(alreadyDone, Map.class);
     }
 
     private static String optString(JsonObject obj, String key) {
