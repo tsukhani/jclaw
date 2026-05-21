@@ -399,6 +399,47 @@ class AgentSystemTest extends UnitTest {
                 "absence of tools: line means toolsDeclared=false");
     }
 
+    @Test
+    void formatSkillsXmlSwitchesToCompactWhenOverflow() {
+        // MAX_SKILLS_CHARS is 30_000. Construct 4 skills whose full entries
+        // collectively blow past that so formatSkillsXml falls back to the
+        // compact variant. The compact entries should still fit and produce
+        // an <available_skills> envelope.
+        var skills = new java.util.ArrayList<SkillLoader.SkillInfo>();
+        // A 12KB description guarantees the full entry is > 12KB on its own.
+        var bigDesc = "x".repeat(12_000);
+        for (int i = 0; i < 4; i++) {
+            skills.add(new SkillLoader.SkillInfo(
+                    "skill-" + i, bigDesc, java.nio.file.Path.of("/tmp/skill-" + i)));
+        }
+        var xml = SkillLoader.formatSkillsXml(skills);
+        assertTrue(xml.startsWith("<available_skills>"),
+                "envelope opens correctly: " + xml.substring(0, Math.min(60, xml.length())));
+        assertTrue(xml.endsWith("</available_skills>"),
+                "envelope closes correctly: " + xml.substring(Math.max(0, xml.length() - 60)));
+        // Overflow path: ANSI total length is capped, so the result must be ≤
+        // ~30K + envelope tags. If the full-fat branch had won, we'd see
+        // closer to 48K (4 × 12K + framing).
+        assertTrue(xml.length() < 35_000,
+                "compact fallback must keep output bounded: length=" + xml.length());
+    }
+
+    @Test
+    void formatSkillsXmlIncludesRichMetadataInFullEntry() {
+        // formatSkillsXml indirectly tests formatSkillEntry's full-entry
+        // branches (icon, author, commands list). A single skill with all
+        // fields populated → the rich block surfaces in the response.
+        var skill = new SkillLoader.SkillInfo(
+                "rich-skill", "Has rich metadata", java.nio.file.Path.of("/tmp/rich"),
+                java.util.List.of("filesystem"), true, "1.0.0",
+                java.util.List.of("ls", "cat"), "alice", "🎉",
+                java.util.List.of());
+        var xml = SkillLoader.formatSkillsXml(java.util.List.of(skill));
+        assertTrue(xml.contains("rich-skill"));
+        assertTrue(xml.contains("🎉"), "icon must surface: " + xml);
+        assertTrue(xml.contains("filesystem"), "tools must surface: " + xml);
+    }
+
     // --- ConversationService tests ---
 
     @Test
