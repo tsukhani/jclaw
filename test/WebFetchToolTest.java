@@ -252,4 +252,63 @@ class WebFetchToolTest extends UnitTest {
                     "filename has disallowed chars: " + filename);
         }
     }
+
+    // --- extractText branch coverage (reflection) ---
+
+    private String extractText(String html, String url) throws Exception {
+        var tool = new tools.WebFetchTool();
+        var m = tools.WebFetchTool.class.getDeclaredMethod(
+                "extractText", String.class, String.class);
+        m.setAccessible(true);
+        return (String) m.invoke(tool, html, url);
+    }
+
+    @Test
+    void extractTextPrependsTitleWhenPresent() throws Exception {
+        var html = "<html><head><title>My Page</title></head>"
+                + "<body><p>Hello world</p></body></html>";
+        var text = extractText(html, "http://example.test/");
+        assertTrue(text.startsWith("# My Page"),
+                "title must be rendered as H1 prefix: " + text);
+        assertTrue(text.contains("Hello world"));
+    }
+
+    @Test
+    void extractTextOmitsTitleWhenBlank() throws Exception {
+        var html = "<html><body><p>Body only</p></body></html>";
+        var text = extractText(html, "http://example.test/");
+        assertFalse(text.startsWith("# "),
+                "blank-title path must skip the H1 prefix: " + text);
+        assertTrue(text.contains("Body only"));
+    }
+
+    @Test
+    void extractTextStripsScriptAndStyleAndNav() throws Exception {
+        var html = "<html><head><title>X</title></head><body>"
+                + "<nav>NAV-CONTENT</nav>"
+                + "<script>alert('SCRIPT-CONTENT')</script>"
+                + "<style>.x{color:red;}/* STYLE-CONTENT */</style>"
+                + "<p>Real body text</p>"
+                + "<footer>FOOTER-CONTENT</footer>"
+                + "</body></html>";
+        var text = extractText(html, "http://example.test/");
+        assertTrue(text.contains("Real body text"));
+        assertFalse(text.contains("NAV-CONTENT"), "nav stripped: " + text);
+        assertFalse(text.contains("SCRIPT-CONTENT"), "script stripped: " + text);
+        assertFalse(text.contains("STYLE-CONTENT"), "style stripped: " + text);
+        assertFalse(text.contains("FOOTER-CONTENT"), "footer stripped: " + text);
+    }
+
+    @Test
+    void extractTextTruncatesWhenOverMaxLength() throws Exception {
+        // Inject a body big enough that extractText hits the > MAX_TEXT_LENGTH
+        // truncation branch.
+        var sb = new StringBuilder("<html><body>");
+        for (int i = 0; i < 50000; i++) sb.append("<p>line ").append(i).append("</p>");
+        sb.append("</body></html>");
+        var text = extractText(sb.toString(), "http://example.test/");
+        assertTrue(text.contains("[Truncated:"),
+                "long input must trip truncation marker: tail=" +
+                text.substring(Math.max(0, text.length() - 100)));
+    }
 }
