@@ -201,4 +201,40 @@ class ConfigServiceTest extends UnitTest {
         assertNull(ConfigService.get("search.ollama.apiKey"));
         assertNull(ConfigService.get("search.ollama.enabled"));
     }
+
+    @Test
+    void setWithSideEffectsRejectsShellPrivilegeForNonMainAgent() {
+        // The shell-exec privilege gate only allows the main agent to bypass
+        // the allowlist. A non-main agent → rejection message returned.
+        services.AgentService.create("non-main-shell", "openrouter", "gpt-4.1");
+        var error = ConfigService.setWithSideEffects(
+                "agent.non-main-shell.shell.bypassAllowlist", "true");
+        assertNotNull(error);
+        assertTrue(error.contains("main agent"), "rejection message: " + error);
+    }
+
+    @Test
+    void setWithSideEffectsRejectsShellPrivilegeForUnknownAgent() {
+        // Unknown-agent path of the gate — same rejection.
+        var error = ConfigService.setWithSideEffects(
+                "agent.does-not-exist.shell.allowGlobalPaths", "true");
+        assertNotNull(error);
+        assertTrue(error.contains("main agent"));
+    }
+
+    @Test
+    void setWithSideEffectsAppliesDispatcherCapLive() {
+        // dispatcher.* keys trigger HttpFactories.applyDispatcherConfig.
+        // We verify no exception escapes — the apply branch must be hit.
+        var error = ConfigService.setWithSideEffects(
+                "dispatcher.llm.maxRequestsPerHost", "32");
+        assertNull(error);
+    }
+
+    @Test
+    void setWithSideEffectsAppliesDispatcherTotalCapLive() {
+        var error = ConfigService.setWithSideEffects(
+                "dispatcher.llm.maxRequests", "200");
+        assertNull(error);
+    }
 }
