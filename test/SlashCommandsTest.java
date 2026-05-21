@@ -699,4 +699,69 @@ class SlashCommandsTest extends UnitTest {
         assertTrue(result.isPresent());
         assertEquals(Commands.Command.HELP, result.get().command());
     }
+
+    // --- private static helpers (reflection access) ---
+
+    private String summarizeToolField(String s) throws Exception {
+        var m = Commands.class.getDeclaredMethod("summarizeToolField", String.class);
+        m.setAccessible(true);
+        return (String) m.invoke(null, s);
+    }
+
+    private String extractJsonField(String json, String key) throws Exception {
+        var m = Commands.class.getDeclaredMethod("extractJsonField", String.class, String.class);
+        m.setAccessible(true);
+        return (String) m.invoke(null, json, key);
+    }
+
+    @Test
+    void summarizeToolFieldFormatsShortStringInline() throws Exception {
+        var result = summarizeToolField("short input");
+        assertEquals("(11 chars) short input", result);
+    }
+
+    @Test
+    void summarizeToolFieldTruncatesAtCapAndAppendsEllipsis() throws Exception {
+        var big = "x".repeat(200);
+        var result = summarizeToolField(big);
+        assertTrue(result.startsWith("(200 chars) "), "got: " + result);
+        assertTrue(result.endsWith("..."), "got: " + result);
+    }
+
+    @Test
+    void summarizeToolFieldCollapsesInternalWhitespace() throws Exception {
+        var result = summarizeToolField("a\n\nb   c\td");
+        assertTrue(result.contains("a b c d"), "whitespace collapsed: " + result);
+        assertFalse(result.contains("\n"), "newlines removed: " + result);
+    }
+
+    @Test
+    void extractJsonFieldReturnsNullForNullInput() throws Exception {
+        assertNull(extractJsonField(null, "any"));
+    }
+
+    @Test
+    void extractJsonFieldReturnsNullForBlankInput() throws Exception {
+        assertNull(extractJsonField("   ", "any"));
+    }
+
+    @Test
+    void extractJsonFieldReturnsNullForMissingKey() throws Exception {
+        assertNull(extractJsonField("{\"other\":\"value\"}", "missing"));
+    }
+
+    @Test
+    void extractJsonFieldReturnsNullForNullValue() throws Exception {
+        assertNull(extractJsonField("{\"k\":null}", "k"));
+    }
+
+    @Test
+    void extractJsonFieldReturnsNullForMalformedJson() throws Exception {
+        assertNull(extractJsonField("{not json", "k"));
+    }
+
+    @Test
+    void extractJsonFieldReturnsStringValueForFlatKey() throws Exception {
+        assertEquals("v", extractJsonField("{\"k\":\"v\"}", "k"));
+    }
 }
