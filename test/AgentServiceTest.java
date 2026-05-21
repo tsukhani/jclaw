@@ -532,4 +532,35 @@ class AgentServiceTest extends UnitTest {
             // best-effort cleanup
         }
     }
+
+    // --- supportsVision branch coverage ---
+
+    @Test
+    void supportsVisionReturnsFalseForNullAgent() {
+        // hasModelCapability's first guard — null agent → false.
+        assertFalse(AgentService.supportsVision(null));
+    }
+
+    @Test
+    void supportsVisionReturnsFalseWhenProviderNotConfigured() {
+        // Test JVM has no providers configured by default; supportsVision
+        // must return false rather than throw NPE on the registry lookup.
+        var agent = AgentService.create("svc-no-provider",
+                "definitely-not-a-registered-provider", "any-model");
+        assertFalse(AgentService.supportsVision(agent));
+    }
+
+    @Test
+    void supportsVisionReturnsFalseWhenModelNotInProviderList() {
+        // Seed openrouter with a model that does NOT include the agent's
+        // model id → findFirst().isEmpty → orElse(false).
+        services.ConfigService.set("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
+        services.ConfigService.set("provider.openrouter.apiKey", "sk-test");
+        services.ConfigService.set("provider.openrouter.models",
+                "[{\"id\":\"some-other-model\",\"name\":\"X\",\"contextWindow\":1000,\"maxTokens\":100}]");
+        llm.ProviderRegistry.refresh();
+
+        var agent = AgentService.create("svc-no-match", "openrouter", "missing-model-id");
+        assertFalse(AgentService.supportsVision(agent));
+    }
 }
