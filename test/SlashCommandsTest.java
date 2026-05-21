@@ -889,6 +889,43 @@ class SlashCommandsTest extends UnitTest {
         assertTrue(text.contains("Model:"), "model line present: " + text);
     }
 
+    // --- formatTokenCapacity branches ---
+
+    private String formatTokenCapacity(int tokens) throws Exception {
+        var m = Commands.class.getDeclaredMethod("formatTokenCapacity", int.class);
+        m.setAccessible(true);
+        return (String) m.invoke(null, tokens);
+    }
+
+    @Test
+    void formatTokenCapacityReturnsQuestionMarkForZeroOrNegative() throws Exception {
+        assertEquals("?", formatTokenCapacity(0));
+        assertEquals("?", formatTokenCapacity(-1));
+    }
+
+    @Test
+    void formatTokenCapacityFormatsRoundMillions() throws Exception {
+        // Even-million path: 2_000_000 → "2M".
+        assertEquals("2M", formatTokenCapacity(2_000_000));
+    }
+
+    @Test
+    void formatTokenCapacityFormatsFractionalMillions() throws Exception {
+        // Non-even-million path: 1_500_000 → "1.5M".
+        assertEquals("1.5M", formatTokenCapacity(1_500_000));
+    }
+
+    @Test
+    void formatTokenCapacityFormatsKilo() throws Exception {
+        // Sub-million ≥ 1K → integer-divide K rendering.
+        assertEquals("128K", formatTokenCapacity(128_000));
+    }
+
+    @Test
+    void formatTokenCapacityFormatsSmallValuesVerbatim() throws Exception {
+        assertEquals("42", formatTokenCapacity(42));
+    }
+
     // --- buildCompactResponseText branches ---
 
     private String callBuildCompactResponseText(services.SessionCompactor.CompactionResult result, String args)
