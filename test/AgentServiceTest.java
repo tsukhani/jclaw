@@ -533,6 +533,54 @@ class AgentServiceTest extends UnitTest {
         }
     }
 
+    // --- syncEnabledStates branch coverage ---
+
+    @Test
+    void syncEnabledStatesIsNoopWhenAgentsAlreadyMatch() {
+        // No agents that need flipping → the early-return short-circuit path.
+        // No assertions on side effects; we just want the no-change branch
+        // hit cleanly.
+        AgentService.syncEnabledStates();
+    }
+
+    @Test
+    void syncEnabledStatesReEnablesMainAgent() {
+        // Main agent must stay enabled. Construct one in a disabled state
+        // and verify sync flips it back.
+        var main = services.Tx.run(() -> {
+            Agent a = new Agent();
+            a.name = models.Agent.MAIN_AGENT_NAME;
+            a.modelProvider = "openrouter";
+            a.modelId = "gpt-4.1";
+            a.enabled = false;
+            a.save();
+            return a;
+        });
+        AgentService.syncEnabledStates();
+        Agent reread = services.Tx.run(() -> (Agent) Agent.findById(main.id));
+        assertTrue(reread.enabled, "main agent must be auto-enabled by sync");
+    }
+
+    @Test
+    void syncEnabledStatesDisablesNonMainWithoutConfiguredProvider() {
+        // A non-main agent whose modelProvider isn't registered in
+        // ProviderRegistry (the test JVM has none seeded) must be flipped to
+        // disabled by the sync.
+        var agent = AgentService.create("svc-sync-disable",
+                "definitely-no-provider", "any-model");
+        // Force enabled true to set up the divergence.
+        services.Tx.run(() -> {
+            Agent a = (Agent) Agent.findById(agent.id);
+            a.enabled = true;
+            a.save();
+            return null;
+        });
+        AgentService.syncEnabledStates();
+        Agent reread = services.Tx.run(() -> (Agent) Agent.findById(agent.id));
+        assertFalse(reread.enabled,
+                "agent with unregistered provider must be flipped to disabled");
+    }
+
     // --- supportsVision branch coverage ---
 
     @Test
