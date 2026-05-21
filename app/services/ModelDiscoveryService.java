@@ -28,6 +28,49 @@ public class ModelDiscoveryService {
     private static final int DISCOVER_TIMEOUT_SECONDS = 15;
     private static final int LEADERBOARD_TIMEOUT_SECONDS = 10;
 
+    // --- Normalized model-map keys (returned to the frontend) ---
+    private static final String KEY_ID = "id";
+    private static final String KEY_NAME = "name";
+    private static final String KEY_CONTEXT_WINDOW = "contextWindow";
+    private static final String KEY_MAX_TOKENS = "maxTokens";
+    private static final String KEY_SUPPORTS_THINKING = "supportsThinking";
+    private static final String KEY_THINKING_DETECTED_FROM_PROVIDER = "thinkingDetectedFromProvider";
+    private static final String KEY_ALWAYS_THINKS = "alwaysThinks";
+    private static final String KEY_ALWAYS_THINKS_DETECTED_FROM_PROVIDER = "alwaysThinksDetectedFromProvider";
+    private static final String KEY_SUPPORTS_VISION = "supportsVision";
+    private static final String KEY_VISION_DETECTED_FROM_PROVIDER = "visionDetectedFromProvider";
+    private static final String KEY_SUPPORTS_AUDIO = "supportsAudio";
+    private static final String KEY_AUDIO_DETECTED_FROM_PROVIDER = "audioDetectedFromProvider";
+    private static final String KEY_PROMPT_PRICE = "promptPrice";
+    private static final String KEY_COMPLETION_PRICE = "completionPrice";
+    private static final String KEY_CACHED_READ_PRICE = "cachedReadPrice";
+    private static final String KEY_CACHE_WRITE_PRICE = "cacheWritePrice";
+    private static final String KEY_IS_FREE = "isFree";
+    private static final String KEY_LEADERBOARD_RANK = "leaderboardRank";
+
+    // --- Provider JSON field names ---
+    private static final String FIELD_MODELS = "models";
+    private static final String FIELD_DATA = "data";
+    private static final String FIELD_ARCHITECTURE = "architecture";
+    private static final String FIELD_INSTRUCT_TYPE = "instruct_type";
+    private static final String FIELD_CAPABILITIES = "capabilities";
+    private static final String FIELD_SUPPORTED_PARAMETERS = "supported_parameters";
+    private static final String FIELD_INPUT_MODALITIES = "input_modalities";
+    private static final String FIELD_MODALITY = "modality";
+    private static final String FIELD_CONTEXT_LENGTH = "context_length";
+    private static final String FIELD_CONTEXT_WINDOW = "context_window";
+    private static final String FIELD_TOP_PROVIDER = "top_provider";
+    private static final String FIELD_MAX_COMPLETION_TOKENS = "max_completion_tokens";
+    private static final String FIELD_MAX_TOKENS = "max_tokens";
+    private static final String FIELD_MAX_CONTEXT_LENGTH = "max_context_length";
+    private static final String FIELD_MODEL_INFO = "model_info";
+    private static final String FIELD_PRICING = "pricing";
+    private static final String FIELD_PROMPT = "prompt";
+    private static final String FIELD_COMPLETION = "completion";
+
+    // --- Value literals ---
+    private static final String INSTRUCT_TYPE_DEEPSEEK_R1 = "deepseek-r1";
+
     /** Result of a model discovery call. */
     public sealed interface DiscoveryResult {
         record Ok(List<Map<String, Object>> models) implements DiscoveryResult {}
@@ -80,7 +123,7 @@ public class ModelDiscoveryService {
     @SuppressWarnings("java:S1193") // Catches Exception broadly; instanceof InterruptedException restores interrupt status defensively
     private static DiscoveryResult discoverOpenAiCompat(String providerName, String baseUrl, String apiKey) {
         try {
-            var url = baseUrl.endsWith("/") ? baseUrl + "models" : baseUrl + "/models";
+            var url = baseUrl.endsWith("/") ? baseUrl + FIELD_MODELS : baseUrl + "/" + FIELD_MODELS;
             var req = new okhttp3.Request.Builder()
                     .url(url)
                     .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
@@ -114,24 +157,9 @@ public class ModelDiscoveryService {
             // pattern. Safe to apply universally — chat-model ids never
             // collide with the embedding/audio/image-gen prefixes the
             // filter checks for.
-            models.removeIf(m -> EmbeddingModelFilter.isLikelyNonChat((String) m.get("id")));
+            models.removeIf(m -> EmbeddingModelFilter.isLikelyNonChat((String) m.get(KEY_ID)));
 
-            var leaderboardUrl = ConfigService.get("provider." + providerName + ".leaderboardUrl");
-            var rankings = fetchLeaderboard(leaderboardUrl);
-            if (!rankings.isEmpty()) {
-                applyRankings(models, rankings);
-            }
-
-            models.sort((a, b) -> {
-                var rankA = a.get("leaderboardRank");
-                var rankB = b.get("leaderboardRank");
-                if (rankA != null && rankB != null) return Integer.compare((int) rankA, (int) rankB);
-                if (rankA != null) return -1;
-                if (rankB != null) return 1;
-                var nameA = a.get("name") != null ? a.get("name").toString() : a.get("id").toString();
-                var nameB = b.get("name") != null ? b.get("name").toString() : b.get("id").toString();
-                return nameA.compareToIgnoreCase(nameB);
-            });
+            applyLeaderboardAndSort(providerName, models);
 
             return new DiscoveryResult.Ok(models);
 
@@ -142,6 +170,36 @@ public class ModelDiscoveryService {
             play.Logger.warn("[discover/%s] connect/parse failed: %s", providerName, e.getMessage());
             return new DiscoveryResult.Error(502, "Failed to connect to provider: %s".formatted(e.getMessage()));
         }
+    }
+
+    /**
+     * Fetch the configured leaderboard for {@code providerName} (if any),
+     * apply rankings to {@code models}, then sort by {@code leaderboardRank}
+     * with name fallback. Shared by the OpenAI-compat and Ollama-native
+     * discovery paths.
+     */
+    private static void applyLeaderboardAndSort(String providerName, List<Map<String, Object>> models) {
+        var leaderboardUrl = ConfigService.get("provider." + providerName + ".leaderboardUrl");
+        var rankings = fetchLeaderboard(leaderboardUrl);
+        if (!rankings.isEmpty()) {
+            applyRankings(models, rankings);
+        }
+        models.sort(ModelDiscoveryService::compareByRankThenName);
+    }
+
+    /**
+     * Comparator: rank-bearing entries first (ascending rank), then everything
+     * else by name (id fallback), case-insensitive.
+     */
+    private static int compareByRankThenName(Map<String, Object> a, Map<String, Object> b) {
+        var rankA = a.get(KEY_LEADERBOARD_RANK);
+        var rankB = b.get(KEY_LEADERBOARD_RANK);
+        if (rankA != null && rankB != null) return Integer.compare((int) rankA, (int) rankB);
+        if (rankA != null) return -1;
+        if (rankB != null) return 1;
+        var nameA = a.get(KEY_NAME) != null ? a.get(KEY_NAME).toString() : a.get(KEY_ID).toString();
+        var nameB = b.get(KEY_NAME) != null ? b.get(KEY_NAME).toString() : b.get(KEY_ID).toString();
+        return nameA.compareToIgnoreCase(nameB);
     }
 
     // --- Model parsing ---
@@ -161,10 +219,10 @@ public class ModelDiscoveryService {
             dataArray = body.getAsJsonArray();
         } else if (body.isJsonObject()) {
             var obj = body.getAsJsonObject();
-            if (obj.has("data") && obj.get("data").isJsonArray()) {
-                dataArray = obj.getAsJsonArray("data");
-            } else if (obj.has("models") && obj.get("models").isJsonArray()) {
-                dataArray = obj.getAsJsonArray("models");
+            if (obj.has(FIELD_DATA) && obj.get(FIELD_DATA).isJsonArray()) {
+                dataArray = obj.getAsJsonArray(FIELD_DATA);
+            } else if (obj.has(FIELD_MODELS) && obj.get(FIELD_MODELS).isJsonArray()) {
+                dataArray = obj.getAsJsonArray(FIELD_MODELS);
             }
         }
 
@@ -175,29 +233,29 @@ public class ModelDiscoveryService {
             var obj = el.getAsJsonObject();
 
             var model = new LinkedHashMap<String, Object>();
-            model.put("id", getString(obj, "id", ""));
-            model.put("name", inferName(obj));
-            model.put("contextWindow", inferContextWindow(obj));
-            model.put("maxTokens", inferMaxTokens(obj));
+            model.put(KEY_ID, getString(obj, KEY_ID, ""));
+            model.put(KEY_NAME, inferName(obj));
+            model.put(KEY_CONTEXT_WINDOW, inferContextWindow(obj));
+            model.put(KEY_MAX_TOKENS, inferMaxTokens(obj));
             var thinking = detectThinkingSupport(obj);
-            model.put("supportsThinking", thinking.confirmed());
-            model.put("thinkingDetectedFromProvider", thinking.fromProvider());
+            model.put(KEY_SUPPORTS_THINKING, thinking.confirmed());
+            model.put(KEY_THINKING_DETECTED_FROM_PROVIDER, thinking.fromProvider());
             var alwaysThinks = detectAlwaysThinks(obj);
-            model.put("alwaysThinks", alwaysThinks.confirmed());
-            model.put("alwaysThinksDetectedFromProvider", alwaysThinks.fromProvider());
+            model.put(KEY_ALWAYS_THINKS, alwaysThinks.confirmed());
+            model.put(KEY_ALWAYS_THINKS_DETECTED_FROM_PROVIDER, alwaysThinks.fromProvider());
             var vision = detectVisionSupport(obj);
-            model.put("supportsVision", vision.confirmed());
-            model.put("visionDetectedFromProvider", vision.fromProvider());
+            model.put(KEY_SUPPORTS_VISION, vision.confirmed());
+            model.put(KEY_VISION_DETECTED_FROM_PROVIDER, vision.fromProvider());
             var audio = detectAudioSupport(obj);
-            model.put("supportsAudio", audio.confirmed());
-            model.put("audioDetectedFromProvider", audio.fromProvider());
-            model.put("promptPrice", inferPrice(obj, "prompt"));
-            model.put("completionPrice", inferPrice(obj, "completion"));
-            model.put("cachedReadPrice", inferPrice(obj, "input_cache_read"));
-            model.put("cacheWritePrice", inferPrice(obj, "input_cache_write"));
-            model.put("isFree", inferIsFree(obj));
+            model.put(KEY_SUPPORTS_AUDIO, audio.confirmed());
+            model.put(KEY_AUDIO_DETECTED_FROM_PROVIDER, audio.fromProvider());
+            model.put(KEY_PROMPT_PRICE, inferPrice(obj, FIELD_PROMPT));
+            model.put(KEY_COMPLETION_PRICE, inferPrice(obj, FIELD_COMPLETION));
+            model.put(KEY_CACHED_READ_PRICE, inferPrice(obj, "input_cache_read"));
+            model.put(KEY_CACHE_WRITE_PRICE, inferPrice(obj, "input_cache_write"));
+            model.put(KEY_IS_FREE, inferIsFree(obj));
 
-            if (model.get("id").toString().isBlank()) continue;
+            if (model.get(KEY_ID).toString().isBlank()) continue;
 
             result.add(model);
         }
@@ -206,10 +264,10 @@ public class ModelDiscoveryService {
     }
 
     private static String inferName(JsonObject obj) {
-        if (obj.has("name") && !obj.get("name").isJsonNull()) {
-            return obj.get("name").getAsString();
+        if (obj.has(KEY_NAME) && !obj.get(KEY_NAME).isJsonNull()) {
+            return obj.get(KEY_NAME).getAsString();
         }
-        var id = getString(obj, "id", "");
+        var id = getString(obj, KEY_ID, "");
         if (id.contains("/")) {
             id = id.substring(id.lastIndexOf('/') + 1);
         }
@@ -217,27 +275,27 @@ public class ModelDiscoveryService {
     }
 
     private static int inferContextWindow(JsonObject obj) {
-        if (obj.has("context_length") && !obj.get("context_length").isJsonNull()) {
-            return obj.get("context_length").getAsInt();
+        if (obj.has(FIELD_CONTEXT_LENGTH) && !obj.get(FIELD_CONTEXT_LENGTH).isJsonNull()) {
+            return obj.get(FIELD_CONTEXT_LENGTH).getAsInt();
         }
-        if (obj.has("context_window") && !obj.get("context_window").isJsonNull()) {
-            return obj.get("context_window").getAsInt();
+        if (obj.has(FIELD_CONTEXT_WINDOW) && !obj.get(FIELD_CONTEXT_WINDOW).isJsonNull()) {
+            return obj.get(FIELD_CONTEXT_WINDOW).getAsInt();
         }
         return 0;
     }
 
     private static int inferMaxTokens(JsonObject obj) {
-        if (obj.has("top_provider") && obj.get("top_provider").isJsonObject()) {
-            var tp = obj.getAsJsonObject("top_provider");
-            if (tp.has("max_completion_tokens") && !tp.get("max_completion_tokens").isJsonNull()) {
-                return tp.get("max_completion_tokens").getAsInt();
+        if (obj.has(FIELD_TOP_PROVIDER) && obj.get(FIELD_TOP_PROVIDER).isJsonObject()) {
+            var tp = obj.getAsJsonObject(FIELD_TOP_PROVIDER);
+            if (tp.has(FIELD_MAX_COMPLETION_TOKENS) && !tp.get(FIELD_MAX_COMPLETION_TOKENS).isJsonNull()) {
+                return tp.get(FIELD_MAX_COMPLETION_TOKENS).getAsInt();
             }
         }
-        if (obj.has("max_completion_tokens") && !obj.get("max_completion_tokens").isJsonNull()) {
-            return obj.get("max_completion_tokens").getAsInt();
+        if (obj.has(FIELD_MAX_COMPLETION_TOKENS) && !obj.get(FIELD_MAX_COMPLETION_TOKENS).isJsonNull()) {
+            return obj.get(FIELD_MAX_COMPLETION_TOKENS).getAsInt();
         }
-        if (obj.has("max_tokens") && !obj.get("max_tokens").isJsonNull()) {
-            return obj.get("max_tokens").getAsInt();
+        if (obj.has(FIELD_MAX_TOKENS) && !obj.get(FIELD_MAX_TOKENS).isJsonNull()) {
+            return obj.get(FIELD_MAX_TOKENS).getAsInt();
         }
         return 0;
     }
@@ -268,17 +326,17 @@ public class ModelDiscoveryService {
         // OpenRouter publishes architecture.instruct_type — the only
         // provider-surfaced signal we get for "always thinks." For the
         // R1 family it's exactly "deepseek-r1"; treat as confirmed.
-        if (obj.has("architecture") && obj.get("architecture").isJsonObject()) {
-            var arch = obj.getAsJsonObject("architecture");
-            if (arch.has("instruct_type") && arch.get("instruct_type").isJsonPrimitive()) {
-                var instructType = arch.get("instruct_type").getAsString().toLowerCase();
-                if ("deepseek-r1".equals(instructType)) {
+        if (obj.has(FIELD_ARCHITECTURE) && obj.get(FIELD_ARCHITECTURE).isJsonObject()) {
+            var arch = obj.getAsJsonObject(FIELD_ARCHITECTURE);
+            if (arch.has(FIELD_INSTRUCT_TYPE) && arch.get(FIELD_INSTRUCT_TYPE).isJsonPrimitive()) {
+                var instructType = arch.get(FIELD_INSTRUCT_TYPE).getAsString().toLowerCase();
+                if (INSTRUCT_TYPE_DEEPSEEK_R1.equals(instructType)) {
                     return new CapabilityDetection(true, true);
                 }
             }
         }
 
-        var id = getString(obj, "id", "").toLowerCase();
+        var id = getString(obj, KEY_ID, "").toLowerCase();
         if (matchesReasoningOnlyFamily(id)) {
             return new CapabilityDetection(true, false);
         }
@@ -299,7 +357,7 @@ public class ModelDiscoveryService {
         if (id.matches("^(?:[^/]+/)?o[1-9](?:-(?:mini|pro|preview))?(?::.+)?$")) return true;
         // DeepSeek-R1 family — explicit hyphen so we don't match bare "r1"
         // tokens in unrelated names. Covers distill variants too.
-        if (id.contains("deepseek-r1")) return true;
+        if (id.contains(INSTRUCT_TYPE_DEEPSEEK_R1)) return true;
         // Qwen QwQ (Question with Question). No non-pure-reasoner variant
         // currently ships under this family name.
         if (id.contains("qwq")) return true;
@@ -309,38 +367,50 @@ public class ModelDiscoveryService {
     public record ThinkingDetection(boolean confirmed, boolean fromProvider) {}
 
     public static ThinkingDetection detectThinkingSupport(JsonObject obj) {
-        if (obj.has("supported_parameters") && obj.get("supported_parameters").isJsonArray()) {
-            for (var param : obj.getAsJsonArray("supported_parameters")) {
-                if (param.isJsonPrimitive()) {
-                    var val = param.getAsString();
-                    if ("reasoning".equals(val) || "reasoning_effort".equals(val)) {
-                        return new ThinkingDetection(true, true);
-                    }
-                }
-            }
-            return new ThinkingDetection(false, true);
+        if (obj.has(FIELD_SUPPORTED_PARAMETERS) && obj.get(FIELD_SUPPORTED_PARAMETERS).isJsonArray()) {
+            var hit = arrayContainsAny(
+                    obj.getAsJsonArray(FIELD_SUPPORTED_PARAMETERS),
+                    false,
+                    "reasoning", "reasoning_effort");
+            return new ThinkingDetection(hit, true);
         }
 
         // Ollama /api/show exposes capabilities as a bare array (JCLAW-118).
         // Mirrors the same precedence in detectVisionSupport /
         // detectAudioSupport — if the provider reports the array at all, we
         // trust it and mark fromProvider=true.
-        if (obj.has("capabilities") && obj.get("capabilities").isJsonArray()) {
-            for (var c : obj.getAsJsonArray("capabilities")) {
-                if (c.isJsonPrimitive() && "thinking".equalsIgnoreCase(c.getAsString())) {
-                    return new ThinkingDetection(true, true);
-                }
-            }
-            return new ThinkingDetection(false, true);
+        if (obj.has(FIELD_CAPABILITIES) && obj.get(FIELD_CAPABILITIES).isJsonArray()) {
+            var hit = arrayContainsAny(obj.getAsJsonArray(FIELD_CAPABILITIES), true, "thinking");
+            return new ThinkingDetection(hit, true);
         }
 
-        var id = getString(obj, "id", "").toLowerCase();
+        var id = getString(obj, KEY_ID, "").toLowerCase();
         if (id.contains("o1") || id.contains("o3") || id.contains("o4-mini")
-                || id.contains("deepseek-r1") || id.contains("qwq")) {
+                || id.contains(INSTRUCT_TYPE_DEEPSEEK_R1) || id.contains("qwq")) {
             return new ThinkingDetection(true, false);
         }
 
         return new ThinkingDetection(false, false);
+    }
+
+    /**
+     * Return {@code true} if any JSON-primitive element of {@code array} equals
+     * one of the {@code needles}. {@code caseInsensitive} toggles between
+     * {@link String#equals} and {@link String#equalsIgnoreCase}. Used by the
+     * capability detectors to scan provider-reported arrays
+     * ({@code supported_parameters}, {@code capabilities}).
+     */
+    private static boolean arrayContainsAny(JsonArray array, boolean caseInsensitive, String... needles) {
+        for (var el : array) {
+            if (!el.isJsonPrimitive()) continue;
+            var val = el.getAsString();
+            for (var needle : needles) {
+                if (caseInsensitive ? needle.equalsIgnoreCase(val) : needle.equals(val)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -363,16 +433,12 @@ public class ModelDiscoveryService {
         var provider = extractModalities(obj, "image");
         if (provider != null) return provider;
 
-        if (obj.has("capabilities") && obj.get("capabilities").isJsonArray()) {
-            for (var c : obj.getAsJsonArray("capabilities")) {
-                if (c.isJsonPrimitive() && "vision".equalsIgnoreCase(c.getAsString())) {
-                    return new CapabilityDetection(true, true);
-                }
-            }
-            return new CapabilityDetection(false, true);
+        if (obj.has(FIELD_CAPABILITIES) && obj.get(FIELD_CAPABILITIES).isJsonArray()) {
+            var hit = arrayContainsAny(obj.getAsJsonArray(FIELD_CAPABILITIES), true, "vision");
+            return new CapabilityDetection(hit, true);
         }
 
-        var id = getString(obj, "id", "").toLowerCase();
+        var id = getString(obj, KEY_ID, "").toLowerCase();
         if (id.contains("gpt-4o") || id.contains("gpt-4.1") || id.contains("gpt-4-vision")
                 || id.contains("gpt-5") || id.contains("claude-3") || id.contains("claude-opus")
                 || id.contains("claude-sonnet") || id.contains("claude-haiku")
@@ -394,16 +460,12 @@ public class ModelDiscoveryService {
         var provider = extractModalities(obj, "audio");
         if (provider != null) return provider;
 
-        if (obj.has("capabilities") && obj.get("capabilities").isJsonArray()) {
-            for (var c : obj.getAsJsonArray("capabilities")) {
-                if (c.isJsonPrimitive() && "audio".equalsIgnoreCase(c.getAsString())) {
-                    return new CapabilityDetection(true, true);
-                }
-            }
-            return new CapabilityDetection(false, true);
+        if (obj.has(FIELD_CAPABILITIES) && obj.get(FIELD_CAPABILITIES).isJsonArray()) {
+            var hit = arrayContainsAny(obj.getAsJsonArray(FIELD_CAPABILITIES), true, "audio");
+            return new CapabilityDetection(hit, true);
         }
 
-        var id = getString(obj, "id", "").toLowerCase();
+        var id = getString(obj, KEY_ID, "").toLowerCase();
         // JCLAW-160: "-audio-preview" is OpenAI's stable suffix for audio-capable
         // models on /v1/models. Match the suffix anchored on a leading dash so
         // future variants (gpt-4o-mini-audio-preview, gpt-5-audio-preview, …)
@@ -428,20 +490,16 @@ public class ModelDiscoveryService {
      * metadata — caller should fall through to other signals otherwise.
      */
     private static CapabilityDetection extractModalities(JsonObject obj, String modality) {
-        if (!obj.has("architecture") || !obj.get("architecture").isJsonObject()) return null;
-        var arch = obj.getAsJsonObject("architecture");
+        if (!obj.has(FIELD_ARCHITECTURE) || !obj.get(FIELD_ARCHITECTURE).isJsonObject()) return null;
+        var arch = obj.getAsJsonObject(FIELD_ARCHITECTURE);
 
-        if (arch.has("input_modalities") && arch.get("input_modalities").isJsonArray()) {
-            for (var m : arch.getAsJsonArray("input_modalities")) {
-                if (m.isJsonPrimitive() && modality.equalsIgnoreCase(m.getAsString())) {
-                    return new CapabilityDetection(true, true);
-                }
-            }
-            return new CapabilityDetection(false, true);
+        if (arch.has(FIELD_INPUT_MODALITIES) && arch.get(FIELD_INPUT_MODALITIES).isJsonArray()) {
+            var hit = arrayContainsAny(arch.getAsJsonArray(FIELD_INPUT_MODALITIES), true, modality);
+            return new CapabilityDetection(hit, true);
         }
 
-        if (arch.has("modality") && arch.get("modality").isJsonPrimitive()) {
-            var s = arch.get("modality").getAsString().toLowerCase();
+        if (arch.has(FIELD_MODALITY) && arch.get(FIELD_MODALITY).isJsonPrimitive()) {
+            var s = arch.get(FIELD_MODALITY).getAsString().toLowerCase();
             return new CapabilityDetection(s.contains(modality), true);
         }
 
@@ -449,8 +507,8 @@ public class ModelDiscoveryService {
     }
 
     public static double inferPrice(JsonObject obj, String type) {
-        if (obj.has("pricing") && obj.get("pricing").isJsonObject()) {
-            var pricing = obj.getAsJsonObject("pricing");
+        if (obj.has(FIELD_PRICING) && obj.get(FIELD_PRICING).isJsonObject()) {
+            var pricing = obj.getAsJsonObject(FIELD_PRICING);
             if (pricing.has(type) && !pricing.get(type).isJsonNull()) {
                 try {
                     var perToken = Double.parseDouble(pricing.get(type).getAsString());
@@ -462,13 +520,13 @@ public class ModelDiscoveryService {
     }
 
     private static boolean inferIsFree(JsonObject obj) {
-        if (obj.has("pricing") && obj.get("pricing").isJsonObject()) {
-            var pricing = obj.getAsJsonObject("pricing");
+        if (obj.has(FIELD_PRICING) && obj.get(FIELD_PRICING).isJsonObject()) {
+            var pricing = obj.getAsJsonObject(FIELD_PRICING);
             try {
-                var prompt = pricing.has("prompt") && !pricing.get("prompt").isJsonNull()
-                        ? Double.parseDouble(pricing.get("prompt").getAsString()) : -1;
-                var completion = pricing.has("completion") && !pricing.get("completion").isJsonNull()
-                        ? Double.parseDouble(pricing.get("completion").getAsString()) : -1;
+                var prompt = pricing.has(FIELD_PROMPT) && !pricing.get(FIELD_PROMPT).isJsonNull()
+                        ? Double.parseDouble(pricing.get(FIELD_PROMPT).getAsString()) : -1;
+                var completion = pricing.has(FIELD_COMPLETION) && !pricing.get(FIELD_COMPLETION).isJsonNull()
+                        ? Double.parseDouble(pricing.get(FIELD_COMPLETION).getAsString()) : -1;
                 return prompt == 0 && completion == 0;
             } catch (NumberFormatException _) {}
         }
@@ -501,8 +559,8 @@ public class ModelDiscoveryService {
                 if (json.isJsonArray()) {
                     return parseJsonLeaderboard(json.getAsJsonArray());
                 }
-                if (json.isJsonObject() && json.getAsJsonObject().has("data")) {
-                    return parseJsonLeaderboard(json.getAsJsonObject().getAsJsonArray("data"));
+                if (json.isJsonObject() && json.getAsJsonObject().has(FIELD_DATA)) {
+                    return parseJsonLeaderboard(json.getAsJsonObject().getAsJsonArray(FIELD_DATA));
                 }
             } catch (JsonSyntaxException _) {}
 
@@ -519,46 +577,57 @@ public class ModelDiscoveryService {
         for (var el : array) {
             if (!el.isJsonObject()) continue;
             var obj = el.getAsJsonObject();
-            var id = getString(obj, "id", getString(obj, "slug", getString(obj, "name", "")));
+            var id = getString(obj, KEY_ID, getString(obj, "slug", getString(obj, KEY_NAME, "")));
             if (!id.isBlank()) result.add(id.toLowerCase());
         }
         return result;
     }
 
+    private static final String[] HREF_PREFIX_BLOCKLIST =
+            {"docs/", "api/", "_next/", "images/", "settings/"};
+    private static final String[] USAGE_PREFIX_BLOCKLIST = {"api/", "docs/", "_next/"};
+
     static List<String> parseHtmlLeaderboard(String html) {
         var result = new ArrayList<String>();
         var seen = new HashSet<String>();
 
-        var hrefMatcher = HREF_PATTERN.matcher(html);
-        while (hrefMatcher.find()) {
-            var slug = hrefMatcher.group(1).toLowerCase();
-            if (slug.startsWith("docs/") || slug.startsWith("api/") || slug.startsWith("_next/")
-                    || slug.startsWith("images/") || slug.startsWith("settings/")) {
-                continue;
-            }
-            var baseSlug = slug.contains(":") ? slug.substring(0, slug.indexOf(':')) : slug;
-            if (seen.add(baseSlug)) result.add(baseSlug);
-        }
-
+        scanLeaderboardMatches(HREF_PATTERN.matcher(html), HREF_PREFIX_BLOCKLIST, seen, result);
         if (result.isEmpty()) {
-            var usageMatcher = USAGE_PATTERN.matcher(html);
-            while (usageMatcher.find()) {
-                var slug = usageMatcher.group(1).toLowerCase();
-                var baseSlug = slug.contains(":") ? slug.substring(0, slug.indexOf(':')) : slug;
-                if (!baseSlug.startsWith("api/") && !baseSlug.startsWith("docs/")
-                        && !baseSlug.startsWith("_next/")
-                        && seen.add(baseSlug)) {
-                    result.add(baseSlug);
-                }
-            }
+            scanLeaderboardMatches(USAGE_PATTERN.matcher(html), USAGE_PREFIX_BLOCKLIST, seen, result);
         }
 
         return result;
     }
 
+    /**
+     * Walk a leaderboard regex matcher, lower-case + strip-variant each slug,
+     * filter out blocklisted prefixes, and append deduped survivors to
+     * {@code out}. Shared by the {@code href} and {@code usage} passes — the
+     * only difference is the blocklist set.
+     */
+    private static void scanLeaderboardMatches(
+            java.util.regex.Matcher matcher,
+            String[] prefixBlocklist,
+            HashSet<String> seen,
+            ArrayList<String> out) {
+        while (matcher.find()) {
+            var slug = matcher.group(1).toLowerCase();
+            var baseSlug = stripVariant(slug);
+            if (hasAnyPrefix(baseSlug, prefixBlocklist)) continue;
+            if (seen.add(baseSlug)) out.add(baseSlug);
+        }
+    }
+
+    private static boolean hasAnyPrefix(String s, String[] prefixes) {
+        for (var p : prefixes) {
+            if (s.startsWith(p)) return true;
+        }
+        return false;
+    }
+
     static void applyRankings(List<Map<String, Object>> models, List<String> rankings) {
         for (var model : models) {
-            var modelId = model.get("id").toString().toLowerCase();
+            var modelId = model.get(KEY_ID).toString().toLowerCase();
             var modelBase = stripVariant(modelId);
             int bestRank = Integer.MAX_VALUE;
 
@@ -572,7 +641,7 @@ public class ModelDiscoveryService {
             }
 
             if (bestRank < Integer.MAX_VALUE) {
-                model.put("leaderboardRank", bestRank);
+                model.put(KEY_LEADERBOARD_RANK, bestRank);
             }
         }
     }
@@ -646,11 +715,7 @@ public class ModelDiscoveryService {
             var body = JsonParser.parseString(responseBody).getAsJsonObject();
             var models = parseLmStudioNativeResponse(body);
 
-            models.sort((a, b) -> {
-                var nameA = a.get("name") != null ? a.get("name").toString() : a.get("id").toString();
-                var nameB = b.get("name") != null ? b.get("name").toString() : b.get("id").toString();
-                return nameA.compareToIgnoreCase(nameB);
-            });
+            models.sort(ModelDiscoveryService::compareByRankThenName);
 
             return new DiscoveryResult.Ok(models);
         } catch (Exception e) {
@@ -673,55 +738,55 @@ public class ModelDiscoveryService {
      */
     public static List<Map<String, Object>> parseLmStudioNativeResponse(JsonObject body) {
         var results = new ArrayList<Map<String, Object>>();
-        if (!body.has("data") || !body.get("data").isJsonArray()) return results;
+        if (!body.has(FIELD_DATA) || !body.get(FIELD_DATA).isJsonArray()) return results;
 
-        for (var el : body.getAsJsonArray("data")) {
+        for (var el : body.getAsJsonArray(FIELD_DATA)) {
             if (!el.isJsonObject()) continue;
             var entry = el.getAsJsonObject();
 
             var type = getString(entry, "type", "").toLowerCase();
             if (!"llm".equals(type) && !"vlm".equals(type)) continue;
 
-            var id = getString(entry, "id", "");
+            var id = getString(entry, KEY_ID, "");
             if (id.isBlank()) continue;
 
-            var ctxWin = entry.has("max_context_length") && !entry.get("max_context_length").isJsonNull()
-                    ? entry.get("max_context_length").getAsInt()
+            var ctxWin = entry.has(FIELD_MAX_CONTEXT_LENGTH) && !entry.get(FIELD_MAX_CONTEXT_LENGTH).isJsonNull()
+                    ? entry.get(FIELD_MAX_CONTEXT_LENGTH).getAsInt()
                     : 0;
 
             var model = new LinkedHashMap<String, Object>();
-            model.put("id", id);
-            model.put("name", id.contains("/") ? id.substring(id.lastIndexOf('/') + 1) : id);
-            model.put("contextWindow", ctxWin);
-            model.put("maxTokens", 0);
+            model.put(KEY_ID, id);
+            model.put(KEY_NAME, id.contains("/") ? id.substring(id.lastIndexOf('/') + 1) : id);
+            model.put(KEY_CONTEXT_WINDOW, ctxWin);
+            model.put(KEY_MAX_TOKENS, 0);
 
             // Vision is authoritative from the type field.
             boolean isVlm = "vlm".equals(type);
-            model.put("supportsVision", isVlm);
-            model.put("visionDetectedFromProvider", true);
+            model.put(KEY_SUPPORTS_VISION, isVlm);
+            model.put(KEY_VISION_DETECTED_FROM_PROVIDER, true);
 
             // Thinking and audio aren't enumerated in the native API.
             // Leave fromProvider=false so the existing id-based heuristic
             // picks up known thinking models (deepseek-r1, qwq, etc.)
             // without overriding a confirmed answer here.
-            model.put("supportsThinking", false);
-            model.put("thinkingDetectedFromProvider", false);
+            model.put(KEY_SUPPORTS_THINKING, false);
+            model.put(KEY_THINKING_DETECTED_FROM_PROVIDER, false);
             // alwaysThinks runs the id-pattern detector regardless: locally
             // run R1 / QwQ models are still pure reasoners.
             var lmIdOnly = new JsonObject();
-            lmIdOnly.addProperty("id", id);
+            lmIdOnly.addProperty(KEY_ID, id);
             var lmAlwaysThinks = detectAlwaysThinks(lmIdOnly);
-            model.put("alwaysThinks", lmAlwaysThinks.confirmed());
-            model.put("alwaysThinksDetectedFromProvider", lmAlwaysThinks.fromProvider());
-            model.put("supportsAudio", false);
-            model.put("audioDetectedFromProvider", false);
+            model.put(KEY_ALWAYS_THINKS, lmAlwaysThinks.confirmed());
+            model.put(KEY_ALWAYS_THINKS_DETECTED_FROM_PROVIDER, lmAlwaysThinks.fromProvider());
+            model.put(KEY_SUPPORTS_AUDIO, false);
+            model.put(KEY_AUDIO_DETECTED_FROM_PROVIDER, false);
 
             // Local models — no pricing data.
-            model.put("promptPrice", -1.0);
-            model.put("completionPrice", -1.0);
-            model.put("cachedReadPrice", -1.0);
-            model.put("cacheWritePrice", -1.0);
-            model.put("isFree", false);
+            model.put(KEY_PROMPT_PRICE, -1.0);
+            model.put(KEY_COMPLETION_PRICE, -1.0);
+            model.put(KEY_CACHED_READ_PRICE, -1.0);
+            model.put(KEY_CACHE_WRITE_PRICE, -1.0);
+            model.put(KEY_IS_FREE, false);
 
             results.add(model);
         }
@@ -740,54 +805,15 @@ public class ModelDiscoveryService {
      * virtual threads so a provider with dozens of models discovers in
      * one round-trip's worth of wall time rather than N.
      */
-    @SuppressWarnings("java:S1141") // Inner try-catch handles per-future timeouts inside the executor loop; extracting would lose access to modelIds.get(i)
     static DiscoveryResult discoverOllamaNative(String providerName, String baseUrl, String apiKey) {
         try {
             var nativeBase = stripV1Suffix(baseUrl);
-            var tagsReq = new okhttp3.Request.Builder()
-                    .url(nativeBase + "/api/tags")
-                    .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + (apiKey != null ? apiKey : ""))
-                    .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
-                    .get()
-                    .build();
-            var tagsCall = utils.HttpFactories.llmSingleShot().newCall(tagsReq);
-            tagsCall.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-
-            int tagsStatus;
-            String tagsResponseBody;
-            try (var tagsResp = tagsCall.execute()) {
-                tagsStatus = tagsResp.code();
-                tagsResponseBody = tagsResp.body() != null ? tagsResp.body().string() : "";
-            }
-            if (tagsStatus != 200) {
-                return new DiscoveryResult.Error(502,
-                        "Provider returned HTTP %d from /api/tags: %s".formatted(
-                                tagsStatus, Strings.truncate(tagsResponseBody, 200)));
-            }
-            var tagsBody = JsonParser.parseString(tagsResponseBody).getAsJsonObject();
-            var modelIds = extractTagIds(tagsBody);
+            var tagsResult = fetchOllamaTags(nativeBase, apiKey);
+            if (tagsResult.error() != null) return tagsResult.error();
+            var modelIds = tagsResult.modelIds();
             if (modelIds.isEmpty()) return new DiscoveryResult.Ok(List.of());
 
-            var showUrl = nativeBase + "/api/show";
-            var results = new ArrayList<Map<String, Object>>(modelIds.size());
-            try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-                var futures = modelIds.stream()
-                        .map(id -> executor.submit(() -> fetchOllamaShow(showUrl, apiKey, id)))
-                        .toList();
-                for (int i = 0; i < futures.size(); i++) {
-                    try {
-                        var model = futures.get(i).get(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-                        if (model != null) results.add(model);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        play.Logger.warn("Ollama /api/show interrupted for %s",
-                                modelIds.get(i));
-                    } catch (Exception e) {
-                        play.Logger.warn("Ollama /api/show failed for %s: %s",
-                                modelIds.get(i), e.getMessage());
-                    }
-                }
-            }
+            var results = fanOutOllamaShow(nativeBase + "/api/show", apiKey, modelIds);
             if (results.isEmpty()) {
                 // JCLAW-183: covers both "every /api/show call failed" and
                 // "every model was filtered out as non-chat" (e.g. an Ollama
@@ -797,20 +823,7 @@ public class ModelDiscoveryService {
                         "No chat-capable models discovered for provider " + providerName);
             }
 
-            var leaderboardUrl = ConfigService.get("provider." + providerName + ".leaderboardUrl");
-            var rankings = fetchLeaderboard(leaderboardUrl);
-            if (!rankings.isEmpty()) applyRankings(results, rankings);
-
-            results.sort((a, b) -> {
-                var rankA = a.get("leaderboardRank");
-                var rankB = b.get("leaderboardRank");
-                if (rankA != null && rankB != null) return Integer.compare((int) rankA, (int) rankB);
-                if (rankA != null) return -1;
-                if (rankB != null) return 1;
-                var nameA = a.get("name") != null ? a.get("name").toString() : a.get("id").toString();
-                var nameB = b.get("name") != null ? b.get("name").toString() : b.get("id").toString();
-                return nameA.compareToIgnoreCase(nameB);
-            });
+            applyLeaderboardAndSort(providerName, results);
 
             return new DiscoveryResult.Ok(results);
 
@@ -823,6 +836,83 @@ public class ModelDiscoveryService {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
             return new DiscoveryResult.Error(502,
                     "Failed to connect to provider: %s".formatted(e.getMessage()));
+        }
+    }
+
+    /**
+     * Internal carrier for the /api/tags step: either an {@code error} (non-200
+     * upstream) or a {@code modelIds} list. Exactly one is non-null.
+     */
+    private record TagsResult(DiscoveryResult.Error error, List<String> modelIds) {}
+
+    /**
+     * GET {@code <nativeBase>/api/tags} and extract the model id list. On
+     * non-200, returns a {@link TagsResult} carrying a populated {@link DiscoveryResult.Error}.
+     */
+    private static TagsResult fetchOllamaTags(String nativeBase, String apiKey) throws java.io.IOException {
+        var tagsReq = new okhttp3.Request.Builder()
+                .url(nativeBase + "/api/tags")
+                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + (apiKey != null ? apiKey : ""))
+                .header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
+                .get()
+                .build();
+        var tagsCall = utils.HttpFactories.llmSingleShot().newCall(tagsReq);
+        tagsCall.timeout().timeout(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+
+        int tagsStatus;
+        String tagsResponseBody;
+        try (var tagsResp = tagsCall.execute()) {
+            tagsStatus = tagsResp.code();
+            tagsResponseBody = tagsResp.body() != null ? tagsResp.body().string() : "";
+        }
+        if (tagsStatus != 200) {
+            return new TagsResult(new DiscoveryResult.Error(502,
+                    "Provider returned HTTP %d from /api/tags: %s".formatted(
+                            tagsStatus, Strings.truncate(tagsResponseBody, 200))),
+                    null);
+        }
+        var tagsBody = JsonParser.parseString(tagsResponseBody).getAsJsonObject();
+        return new TagsResult(null, extractTagIds(tagsBody));
+    }
+
+    /**
+     * Fan out {@code /api/show} calls on virtual threads, one per model id.
+     * Per-future timeouts and parse failures are logged and skipped — the
+     * caller only sees the survivors. Models filtered out by
+     * {@link #parseOllamaShow} (no {@code "completion"} capability) are also
+     * absent from the return.
+     */
+    private static List<Map<String, Object>> fanOutOllamaShow(
+            String showUrl, String apiKey, List<String> modelIds) {
+        var results = new ArrayList<Map<String, Object>>(modelIds.size());
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            var futures = modelIds.stream()
+                    .map(id -> executor.submit(() -> fetchOllamaShow(showUrl, apiKey, id)))
+                    .toList();
+            for (int i = 0; i < futures.size(); i++) {
+                collectShowResult(futures.get(i), modelIds.get(i), results);
+            }
+        }
+        return results;
+    }
+
+    /**
+     * Await a single {@code /api/show} future. Logs per-model failures (including
+     * timeouts) without aborting the broader discovery; restores the interrupt
+     * status on {@link InterruptedException} for cooperative cancellation.
+     */
+    private static void collectShowResult(
+            java.util.concurrent.Future<Map<String, Object>> future,
+            String modelId,
+            List<Map<String, Object>> out) {
+        try {
+            var model = future.get(DISCOVER_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            if (model != null) out.add(model);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            play.Logger.warn("Ollama /api/show interrupted for %s", modelId);
+        } catch (Exception e) {
+            play.Logger.warn("Ollama /api/show failed for %s: %s", modelId, e.getMessage());
         }
     }
 
@@ -848,11 +938,11 @@ public class ModelDiscoveryService {
      */
     public static List<String> extractTagIds(JsonObject body) {
         var out = new ArrayList<String>();
-        if (!body.has("models") || !body.get("models").isJsonArray()) return out;
-        for (var el : body.getAsJsonArray("models")) {
+        if (!body.has(FIELD_MODELS) || !body.get(FIELD_MODELS).isJsonArray()) return out;
+        for (var el : body.getAsJsonArray(FIELD_MODELS)) {
             if (!el.isJsonObject()) continue;
             var o = el.getAsJsonObject();
-            var id = getString(o, "name", getString(o, "model", ""));
+            var id = getString(o, KEY_NAME, getString(o, "model", ""));
             if (!id.isBlank()) out.add(id);
         }
         return out;
@@ -906,53 +996,54 @@ public class ModelDiscoveryService {
         // drops it from the discovery list. A model with no capabilities
         // array (older Ollama versions) is kept; the existing detectors
         // fall back to id-based heuristics.
-        if (show.has("capabilities") && show.get("capabilities").isJsonArray()) {
-            var caps = show.getAsJsonArray("capabilities");
-            if (caps.size() > 0) {
-                boolean hasCompletion = false;
-                for (var c : caps) {
-                    if (c.isJsonPrimitive() && "completion".equalsIgnoreCase(c.getAsString())) {
-                        hasCompletion = true;
-                        break;
-                    }
-                }
-                if (!hasCompletion) return null;
-            }
-        }
+        if (!ollamaCapabilitiesAllowChat(show)) return null;
 
         var model = new LinkedHashMap<String, Object>();
-        model.put("id", id);
-        model.put("name", id);
-        model.put("contextWindow", extractOllamaContextLength(show));
-        model.put("maxTokens", 0);
+        model.put(KEY_ID, id);
+        model.put(KEY_NAME, id);
+        model.put(KEY_CONTEXT_WINDOW, extractOllamaContextLength(show));
+        model.put(KEY_MAX_TOKENS, 0);
 
         var forDetect = new JsonObject();
-        forDetect.addProperty("id", id);
-        if (show.has("capabilities") && show.get("capabilities").isJsonArray()) {
-            forDetect.add("capabilities", show.getAsJsonArray("capabilities"));
+        forDetect.addProperty(KEY_ID, id);
+        if (show.has(FIELD_CAPABILITIES) && show.get(FIELD_CAPABILITIES).isJsonArray()) {
+            forDetect.add(FIELD_CAPABILITIES, show.getAsJsonArray(FIELD_CAPABILITIES));
         }
         var thinking = detectThinkingSupport(forDetect);
-        model.put("supportsThinking", thinking.confirmed());
-        model.put("thinkingDetectedFromProvider", thinking.fromProvider());
+        model.put(KEY_SUPPORTS_THINKING, thinking.confirmed());
+        model.put(KEY_THINKING_DETECTED_FROM_PROVIDER, thinking.fromProvider());
         var alwaysThinks = detectAlwaysThinks(forDetect);
-        model.put("alwaysThinks", alwaysThinks.confirmed());
-        model.put("alwaysThinksDetectedFromProvider", alwaysThinks.fromProvider());
+        model.put(KEY_ALWAYS_THINKS, alwaysThinks.confirmed());
+        model.put(KEY_ALWAYS_THINKS_DETECTED_FROM_PROVIDER, alwaysThinks.fromProvider());
         var vision = detectVisionSupport(forDetect);
-        model.put("supportsVision", vision.confirmed());
-        model.put("visionDetectedFromProvider", vision.fromProvider());
+        model.put(KEY_SUPPORTS_VISION, vision.confirmed());
+        model.put(KEY_VISION_DETECTED_FROM_PROVIDER, vision.fromProvider());
         var audio = detectAudioSupport(forDetect);
-        model.put("supportsAudio", audio.confirmed());
-        model.put("audioDetectedFromProvider", audio.fromProvider());
+        model.put(KEY_SUPPORTS_AUDIO, audio.confirmed());
+        model.put(KEY_AUDIO_DETECTED_FROM_PROVIDER, audio.fromProvider());
 
         // Ollama doesn't publish pricing via the API. -1 means "unset" —
         // the frontend skips these fields when saving.
-        model.put("promptPrice", -1.0);
-        model.put("completionPrice", -1.0);
-        model.put("cachedReadPrice", -1.0);
-        model.put("cacheWritePrice", -1.0);
-        model.put("isFree", false);
+        model.put(KEY_PROMPT_PRICE, -1.0);
+        model.put(KEY_COMPLETION_PRICE, -1.0);
+        model.put(KEY_CACHED_READ_PRICE, -1.0);
+        model.put(KEY_CACHE_WRITE_PRICE, -1.0);
+        model.put(KEY_IS_FREE, false);
 
         return model;
+    }
+
+    /**
+     * Return {@code false} when {@code show.capabilities} is a non-empty array
+     * that lacks {@code "completion"} — i.e. the model is embedding-only and
+     * not chat-capable. Returns {@code true} when capabilities are absent,
+     * empty, or contain {@code "completion"}.
+     */
+    private static boolean ollamaCapabilitiesAllowChat(JsonObject show) {
+        if (!show.has(FIELD_CAPABILITIES) || !show.get(FIELD_CAPABILITIES).isJsonArray()) return true;
+        var caps = show.getAsJsonArray(FIELD_CAPABILITIES);
+        if (caps.isEmpty()) return true;
+        return arrayContainsAny(caps, true, FIELD_COMPLETION);
     }
 
     /**
@@ -964,10 +1055,11 @@ public class ModelDiscoveryService {
      * misbehaving family key doesn't mask a correct one.
      */
     public static int extractOllamaContextLength(JsonObject show) {
-        if (show == null || !show.has("model_info") || !show.get("model_info").isJsonObject()) return 0;
-        var mi = show.getAsJsonObject("model_info");
+        if (show == null || !show.has(FIELD_MODEL_INFO) || !show.get(FIELD_MODEL_INFO).isJsonObject()) return 0;
+        var mi = show.getAsJsonObject(FIELD_MODEL_INFO);
+        var suffix = "." + FIELD_CONTEXT_LENGTH;
         for (var entry : mi.entrySet()) {
-            if (entry.getKey().endsWith(".context_length") && entry.getValue().isJsonPrimitive()) {
+            if (entry.getKey().endsWith(suffix) && entry.getValue().isJsonPrimitive()) {
                 try {
                     return entry.getValue().getAsInt();
                 } catch (NumberFormatException _) {
