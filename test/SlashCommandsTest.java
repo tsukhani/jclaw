@@ -764,4 +764,113 @@ class SlashCommandsTest extends UnitTest {
     void extractJsonFieldReturnsStringValueForFlatKey() throws Exception {
         assertEquals("v", extractJsonField("{\"k\":\"v\"}", "k"));
     }
+
+    // --- formatPrice + findLatestAssistantUsage helpers ---
+
+    private String formatPrice(double perMillion) throws Exception {
+        var m = Commands.class.getDeclaredMethod("formatPrice", double.class);
+        m.setAccessible(true);
+        return (String) m.invoke(null, perMillion);
+    }
+
+    @Test
+    void formatPriceReturnsNaForNegative() throws Exception {
+        assertEquals("n/a", formatPrice(-1.0));
+    }
+
+    @Test
+    void formatPriceReturnsFreeForZero() throws Exception {
+        assertEquals("free", formatPrice(0.0));
+    }
+
+    @Test
+    void formatPriceUsesThreeDecimalsBelowOneDollar() throws Exception {
+        // sub-dollar prices render with 3 decimals for granularity
+        var result = formatPrice(0.125);
+        assertEquals("$0.125", result);
+    }
+
+    @Test
+    void formatPriceUsesTwoDecimalsAtOrAboveOneDollar() throws Exception {
+        var result = formatPrice(1.50);
+        assertEquals("$1.50", result);
+    }
+
+    private int[] findLatestAssistantUsage(java.util.List<models.Message> messages) throws Exception {
+        var m = Commands.class.getDeclaredMethod("findLatestAssistantUsage", java.util.List.class);
+        m.setAccessible(true);
+        return (int[]) m.invoke(null, messages);
+    }
+
+    @Test
+    void findLatestAssistantUsageReturnsNullForNullList() throws Exception {
+        assertNull(findLatestAssistantUsage(null));
+    }
+
+    @Test
+    void findLatestAssistantUsageReturnsNullForEmptyList() throws Exception {
+        assertNull(findLatestAssistantUsage(java.util.List.of()));
+    }
+
+    @Test
+    void findLatestAssistantUsageSkipsNonAssistantAndBlankUsage() throws Exception {
+        // user role + blank-usage assistant must both be skipped; only the
+        // last well-formed assistant row contributes.
+        var messages = new java.util.ArrayList<models.Message>();
+        var user = new models.Message();
+        user.role = "user";
+        user.content = "hi";
+        messages.add(user);
+        var blank = new models.Message();
+        blank.role = "assistant";
+        blank.usageJson = "";
+        messages.add(blank);
+        var good = new models.Message();
+        good.role = "assistant";
+        good.usageJson = "{\"prompt\":100,\"completion\":50}";
+        messages.add(good);
+
+        var result = findLatestAssistantUsage(messages);
+        assertNotNull(result);
+        assertEquals(100, result[0]);
+        assertEquals(50, result[1]);
+    }
+
+    @Test
+    void findLatestAssistantUsageSkipsDurationOnlyRows() throws Exception {
+        // assistant row whose usageJson lacks "prompt" must be skipped — it's
+        // a cancelled-turn artifact. Scanner walks back to the earlier good row.
+        var messages = new java.util.ArrayList<models.Message>();
+        var good = new models.Message();
+        good.role = "assistant";
+        good.usageJson = "{\"prompt\":200,\"completion\":30}";
+        messages.add(good);
+        var partial = new models.Message();
+        partial.role = "assistant";
+        partial.usageJson = "{\"durationMs\":1500}"; // no "prompt"
+        messages.add(partial);
+
+        var result = findLatestAssistantUsage(messages);
+        assertNotNull(result);
+        assertEquals(200, result[0]);
+    }
+
+    @Test
+    void findLatestAssistantUsageSkipsMalformedJson() throws Exception {
+        // Exception-catch path — malformed usageJson must not crash; the
+        // scanner moves on.
+        var messages = new java.util.ArrayList<models.Message>();
+        var good = new models.Message();
+        good.role = "assistant";
+        good.usageJson = "{\"prompt\":42,\"completion\":7}";
+        messages.add(good);
+        var malformed = new models.Message();
+        malformed.role = "assistant";
+        malformed.usageJson = "{not valid";
+        messages.add(malformed);
+
+        var result = findLatestAssistantUsage(messages);
+        assertNotNull(result);
+        assertEquals(42, result[0]);
+    }
 }
