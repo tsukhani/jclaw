@@ -863,7 +863,7 @@ public class ModelDiscoveryService {
         String tagsResponseBody;
         try (var tagsResp = tagsCall.execute()) {
             tagsStatus = tagsResp.code();
-            tagsResponseBody = tagsResp.body() != null ? tagsResp.body().string() : "";
+            tagsResponseBody = tagsResp.body().string();
         }
         if (tagsStatus != 200) {
             return new TagsResult(new DiscoveryResult.Error(502,

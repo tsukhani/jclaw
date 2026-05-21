@@ -130,10 +130,10 @@ public class ApiTelegramBindingsController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TelegramBinding.class)))
     public static void update(Long id) {
         var binding = TelegramBinding.<TelegramBinding>findById(id);
-        if (binding == null) notFound();
+        if (binding == null) { notFound(); return; }
 
         var body = JsonBodyReader.readJsonBody();
-        if (body == null) badRequest();
+        if (body == null) { badRequest(); return; }
 
         applyBotTokenUpdate(binding, body);
         applyAgentUpdate(binding, body);

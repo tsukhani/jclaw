@@ -290,12 +290,12 @@ public class ApiTasksController extends Controller {
     private static Agent requireAgentFromBody(com.google.gson.JsonObject body) {
         if (!body.has(KEY_AGENT_ID) || body.get(KEY_AGENT_ID).isJsonNull()) {
             error(400, "agentId is required");
-            return null; // unreachable
+            throw new AssertionError("unreachable: error() throws");
         }
         var agent = (Agent) Agent.findById(body.get(KEY_AGENT_ID).getAsLong());
         if (agent == null) {
             error(400, "agentId does not resolve to an existing agent");
-            return null; // unreachable
+            throw new AssertionError("unreachable: error() throws");
         }
         return agent;
     }

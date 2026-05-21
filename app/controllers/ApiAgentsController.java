@@ -62,7 +62,10 @@ public class ApiAgentsController extends Controller {
 
     private static Agent requireAgent(Long id) {
         var agent = AgentService.findById(id);
-        if (agent == null || isReservedName(agent.name)) notFound();
+        if (agent == null || isReservedName(agent.name)) {
+            notFound();
+            throw new AssertionError("unreachable: notFound() throws");
+        }
         return agent;
     }
 

@@ -464,7 +464,7 @@ public class ApiMetricsController extends Controller {
             return java.time.Instant.parse(sinceParam);
         } catch (java.time.format.DateTimeParseException e) {
             error(400, "Invalid 'since' — must be ISO-8601 instant (e.g. 2026-04-10T00:00:00Z)");
-            return null; // unreachable — error() throws
+            throw new AssertionError("unreachable: error() throws");
         }
     }
 

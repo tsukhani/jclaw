@@ -213,9 +213,9 @@ public class ApiChatController extends Controller {
      * insertion) happens in {@link AgentRunner} when the send lands.
      */
     public static void uploadChatFiles(Long agentId, play.data.Upload[] files) {
-        if (agentId == null) badRequest();
+        if (agentId == null) { badRequest(); return; }
         Agent agent = Agent.findById(agentId);
-        if (agent == null) notFound();
+        if (agent == null) { notFound(); return; }
 
         validateUploads(files);
         java.nio.file.Path stagingDir = acquireStagingDir(agent);
