@@ -541,4 +541,38 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
         SkillRegistryTool.deleteBySkill("widget");
     }
 
+    @Test
+    void validateToolRequirementsFailsWhenAgentDisabledTheRequiredTool() throws Exception {
+        // The skill declares a real, registered tool (filesystem), but the
+        // agent has explicitly disabled it via AgentToolConfig. Exercises the
+        // "disabled" arm of validateToolRequirements that the existing
+        // unknown-tool test doesn't reach.
+        var agent = createAgent("vtool-disabled");
+        var dir = globalSkillsDir.resolve("needs-disabled");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("SKILL.md"),
+                "---\n"
+              + "name: needs-disabled\n"
+              + "description: depends on a tool the agent has disabled\n"
+              + "version: 1.0.0\n"
+              + "tools: [filesystem]\n"
+              + "---\n# body\n");
+        agents.SkillLoader.clearCache();
+
+        services.Tx.run(() -> {
+            var cfg = new models.AgentToolConfig();
+            cfg.agent = agent;
+            cfg.toolName = "filesystem";
+            cfg.enabled = false;
+            cfg.save();
+            return null;
+        });
+
+        var result = SkillPromotionService.validateToolRequirements(agent, "needs-disabled");
+        assertFalse(result.ok(),
+                "disabled-tool dependency must fail validation");
+        assertTrue(result.message().contains("disabled"),
+                "error message must call out the disabled list: " + result.message());
+    }
+
 }
