@@ -889,6 +889,47 @@ class SlashCommandsTest extends UnitTest {
         assertTrue(text.contains("Model:"), "model line present: " + text);
     }
 
+    // --- performModelSwitch edge guards ---
+
+    @Test
+    void modelSwitchWithNoConversationReturnsFallback() {
+        var result = Commands.handle("/model openrouter/gpt-4.1", agent, "web", "admin", null);
+        assertTrue(result.isPresent());
+        assertTrue(result.get().responseText().contains("No active conversation"),
+                "got: " + result.get().responseText());
+    }
+
+    @Test
+    void modelSwitchWithEmptyProviderRejected() {
+        // arg "/gpt-4.1" → slash at 0 → fails the "slash <= 0" guard.
+        var conv = ConversationService.findOrCreate(agent, "web", "admin");
+        var result = Commands.handle("/model /gpt-4.1", agent, "web", "admin", conv);
+        assertTrue(result.isPresent());
+        assertTrue(result.get().responseText().contains("Unrecognized model format"),
+                "got: " + result.get().responseText());
+    }
+
+    @Test
+    void modelSwitchWithEmptyModelIdRejected() {
+        // arg "openrouter/" → slash at end → fails the "slash == length-1" guard.
+        var conv = ConversationService.findOrCreate(agent, "web", "admin");
+        var result = Commands.handle("/model openrouter/", agent, "web", "admin", conv);
+        assertTrue(result.isPresent());
+        assertTrue(result.get().responseText().contains("Unrecognized model format"),
+                "got: " + result.get().responseText());
+    }
+
+    @Test
+    void modelSwitchWithWhitespaceOnlyComponentRejected() {
+        // "  /  " — slash is not at edges but the strip()'d components are
+        // both empty → second-tier guard.
+        var conv = ConversationService.findOrCreate(agent, "web", "admin");
+        var result = Commands.handle("/model   /  ", agent, "web", "admin", conv);
+        assertTrue(result.isPresent());
+        assertTrue(result.get().responseText().contains("Unrecognized model format"),
+                "got: " + result.get().responseText());
+    }
+
     // --- performModelReset branches ---
 
     @Test
