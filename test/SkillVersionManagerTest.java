@@ -260,6 +260,38 @@ class SkillVersionManagerTest extends UnitTest {
         assertEquals("1.2.3", v2);
     }
 
+    // --- finalizeSkillMdWrite branches ---
+
+    @Test
+    void finalizeSkillMdWriteWrapsNewContentForMissingTarget() throws Exception {
+        // !Files.exists(targetPath) branch: pass a path that doesn't exist.
+        // The result should have version frontmatter injected (defaulting to
+        // "1.0.0" when content doesn't carry one).
+        var target = java.nio.file.Path.of("/tmp/never-existed-skill-" + System.nanoTime() + ".md");
+        var result = SkillVersionManager.finalizeSkillMdWrite(target, "# Body only");
+        assertTrue(result.startsWith("---\nversion: 1.0.0"),
+                "missing-target path injects 1.0.0 default: " + result);
+        assertTrue(result.contains("# Body only"));
+    }
+
+    @Test
+    void finalizeSkillMdWriteHonorsLlmVersionForMissingTarget() throws Exception {
+        // Same branch but LLM put an explicit version in the new content.
+        var target = java.nio.file.Path.of("/tmp/never-existed-skill-" + System.nanoTime() + ".md");
+        var content = "---\nname: x\nversion: 2.5.0\n---\n# body";
+        var result = SkillVersionManager.finalizeSkillMdWrite(target, content);
+        assertTrue(result.contains("version: 2.5.0"), "LLM version honored: " + result);
+    }
+
+    @Test
+    void finalizeSkillMdWriteCoercesNullContentToEmpty() throws Exception {
+        // Null content → coerced to "" then wrapped with default version.
+        var target = java.nio.file.Path.of("/tmp/null-content-skill-" + System.nanoTime() + ".md");
+        var result = SkillVersionManager.finalizeSkillMdWrite(target, null);
+        assertNotNull(result);
+        assertTrue(result.contains("version: 1.0.0"));
+    }
+
     @Test
     void resolveVersionPrefersLlmOnlyWhenStrictlyHigher() {
         String win = invokePkgPriv("resolveVersion",
