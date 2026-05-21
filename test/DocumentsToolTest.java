@@ -279,4 +279,72 @@ class DocumentsToolTest extends UnitTest {
         assertEquals("reports/q4/new.docx",
                 DocumentsTool.replaceFinalSegment("reports/q4/old.docx", "new.docx"));
     }
+
+    // ----- execute() dispatcher branches ------------------------------------
+
+    @Test
+    void execute_unknownActionReturnsError() throws Exception {
+        var tool = new DocumentsTool();
+        var agent = freshAgent("docs-unknown-action");
+        var result = tool.execute(
+                "{\"action\":\"nonsenseAction\",\"path\":\"foo.txt\"}", agent);
+        assertTrue(result.startsWith("Error"));
+        assertTrue(result.contains("Unknown action"));
+    }
+
+    @Test
+    void execute_writeDocumentWithoutContentReturnsError() throws Exception {
+        var tool = new DocumentsTool();
+        var agent = freshAgent("docs-no-content");
+        var result = tool.execute(
+                "{\"action\":\"writeDocument\",\"path\":\"out.html\",\"content\":\"\"}", agent);
+        assertTrue(result.startsWith("Error"));
+        assertTrue(result.contains("requires 'content'"), "got: " + result);
+    }
+
+    @Test
+    void execute_writeDocumentUnknownFormatReturnsError() throws Exception {
+        var tool = new DocumentsTool();
+        var agent = freshAgent("docs-bad-format");
+        var result = tool.execute(
+                "{\"action\":\"writeDocument\",\"path\":\"out.xyz\",\"content\":\"# Hello\"}", agent);
+        assertTrue(result.startsWith("Error"));
+    }
+
+    @Test
+    void execute_writeDocumentExplicitUnsupportedFormatReturnsError() throws Exception {
+        var tool = new DocumentsTool();
+        var agent = freshAgent("docs-unsupported-format");
+        var result = tool.execute(
+                "{\"action\":\"writeDocument\",\"path\":\"out.html\",\"content\":\"# x\",\"format\":\"txt\"}",
+                agent);
+        assertTrue(result.startsWith("Error"));
+        assertTrue(result.contains("Unsupported format"), "got: " + result);
+    }
+
+    @Test
+    void execute_renderDocumentRequiresSourcePath() throws Exception {
+        var tool = new DocumentsTool();
+        var agent = freshAgent("docs-render-no-src");
+        var result = tool.execute(
+                "{\"action\":\"renderDocument\",\"path\":\"out.html\"}", agent);
+        assertTrue(result.startsWith("Error"));
+        assertTrue(result.contains("sourcePath"), "got: " + result);
+    }
+
+    @Test
+    void execute_renderDocumentMissingSourceFileReturnsError() throws Exception {
+        var tool = new DocumentsTool();
+        var agent = freshAgent("docs-render-missing");
+        var result = tool.execute(
+                "{\"action\":\"renderDocument\",\"path\":\"out.html\",\"sourcePath\":\"does-not-exist.md\"}",
+                agent);
+        assertTrue(result.startsWith("Error"));
+        assertTrue(result.contains("not found"), "got: " + result);
+    }
+
+    private models.Agent freshAgent(String name) {
+        play.test.Fixtures.deleteDatabase();
+        return services.AgentService.create(name, "openrouter", "gpt-4.1");
+    }
 }
