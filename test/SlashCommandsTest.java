@@ -889,6 +889,32 @@ class SlashCommandsTest extends UnitTest {
         assertTrue(text.contains("Model:"), "model line present: " + text);
     }
 
+    // --- performModelReset branches ---
+
+    @Test
+    void modelResetWithNoOverrideExplainsThatAgentDefaultRemains() {
+        // performModelReset's hadOverride=false path: the conversation has
+        // no override set, /model reset is a no-op but should still produce
+        // a helpful "no override; agent default X/Y remains in effect"
+        // message.
+        var conv = ConversationService.findOrCreate(agent, "web", "admin");
+        // No override set — fresh conversation.
+        var result = Commands.handle("/model reset", agent, "web", "admin", conv);
+        assertTrue(result.isPresent());
+        var text = result.get().responseText();
+        assertTrue(text.contains("no override"), "got: " + text);
+        assertTrue(text.contains(agent.modelProvider), "must echo agent provider: " + text);
+        assertTrue(text.contains(agent.modelId), "must echo agent model: " + text);
+    }
+
+    @Test
+    void modelResetWithNoActiveConversationReturnsFallback() {
+        var result = Commands.handle("/model reset", agent, "web", "admin", null);
+        assertTrue(result.isPresent());
+        assertTrue(result.get().responseText().contains("No active conversation"),
+                "got: " + result.get().responseText());
+    }
+
     // --- formatHistoryMessage + truncateContent branches ---
 
     private String formatHistoryMessage(models.Message msg) throws Exception {
