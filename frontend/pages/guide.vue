@@ -42,7 +42,7 @@ function setupObserver() {
     let topY = Number.POSITIVE_INFINITY
     for (const entry of entries) {
       if (!entry.isIntersecting) continue
-      const id = entry.target.getAttribute('data-section-id')
+      const id = (entry.target as HTMLElement).dataset.sectionId ?? null
       if (!id) continue
       const top = entry.boundingClientRect.top
       if (top < topY) {

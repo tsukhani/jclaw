@@ -196,9 +196,9 @@ public class SessionsHistoryTool implements ToolRegistry.Tool {
         if (hasMore) rows = rows.subList(0, limit);
         // Caller expects chronological order (oldest first within the page);
         // we fetched DESC to make the pagination cursor cheap, so reverse
-        // before serializing.
-        var ordered = new ArrayList<>(rows);
-        java.util.Collections.reverse(ordered);
+        // before serializing. {@code List.reversed()} returns a view; safe
+        // here because {@code ordered} is read-only after this point.
+        var ordered = new ArrayList<>(rows).reversed();
 
         var messages = new ArrayList<Map<String, Object>>(ordered.size());
         for (var msg : ordered) {

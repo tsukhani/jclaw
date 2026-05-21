@@ -826,31 +826,41 @@ async function copyReasoning(msg: Message) {
  * calls sendMessage() with the user's original text so the backend runs a
  * fresh turn against the pre-existing conversation history.
  */
+/**
+ * Find the index of the most recent user message at-or-before {@code fromIdx}.
+ * Returns -1 if none is found.
+ */
+function findPriorUserMessageIdx(fromIdx: number): number {
+  for (let i = fromIdx - 1; i >= 0; i--) {
+    if (messages.value[i]!.role === 'user') return i
+  }
+  return -1
+}
+
+/**
+ * Best-effort server-side delete of messages [startIdx..end). Failures are
+ * swallowed because the local truncate happens regardless.
+ */
+async function deleteServerMessagesFrom(convoId: number, startIdx: number) {
+  for (let i = startIdx; i < messages.value.length; i++) {
+    const m = messages.value[i]!
+    if (!m.id) continue
+    try {
+      await $fetch(`/api/conversations/${convoId}/messages/${m.id}`, { method: 'DELETE' })
+    }
+    catch { /* best-effort — local truncate still happens */ }
+  }
+}
+
 async function regenerateMessage(msg: Message) {
   if (streaming.value) return
   const convoId = selectedConvoId.value
   const idx = messages.value.indexOf(msg)
   if (idx < 0) return
-  let userIdx = -1
-  for (let i = idx - 1; i >= 0; i--) {
-    if (messages.value[i]!.role === 'user') {
-      userIdx = i
-      break
-    }
-  }
+  const userIdx = findPriorUserMessageIdx(idx)
   if (userIdx < 0) return
   const userContent = messages.value[userIdx]!.content ?? ''
-  if (convoId) {
-    for (let i = userIdx; i < messages.value.length; i++) {
-      const m = messages.value[i]!
-      if (m.id) {
-        try {
-          await $fetch(`/api/conversations/${convoId}/messages/${m.id}`, { method: 'DELETE' })
-        }
-        catch { /* best-effort — local truncate still happens */ }
-      }
-    }
-  }
+  if (convoId) await deleteServerMessagesFrom(convoId, userIdx)
   messages.value = messages.value.slice(0, userIdx)
   input.value = userContent
   await nextTick()
@@ -883,11 +893,20 @@ const tokStatsHoverKey = ref<string | number | null>(null)
  * reply). The role-stack walk skips those intermediates without false
  * pairings: a local row whose role's stack runs dry stays id-less.
  */
-function backfillServerIds(local: Message[], fresh: Message[]): boolean {
-  const localTakenIds = new Set<number>()
+/** Set of message ids already present on local rows. */
+function collectLocalTakenIds(local: Message[]): Set<number> {
+  const ids = new Set<number>()
   for (const L of local) {
-    if (typeof L.id === 'number') localTakenIds.add(L.id)
+    if (typeof L.id === 'number') ids.add(L.id)
   }
+  return ids
+}
+
+/**
+ * Build a per-role LIFO stack of unpaired server ids, skipping any id
+ * already present locally so it can't be re-stolen.
+ */
+function groupUnpairedServerIdsByRole(fresh: Message[], localTakenIds: Set<number>): Map<string, number[]> {
   const idsByRole = new Map<string, number[]>()
   for (const R of fresh) {
     if (typeof R.id !== 'number' || !R.role) continue
@@ -896,14 +915,26 @@ function backfillServerIds(local: Message[], fresh: Message[]): boolean {
     list.push(R.id)
     idsByRole.set(R.role, list)
   }
-  // Index server rows by id so the post-pairing pass below can also copy
-  // server-side flags (currently just JCLAW-291 truncated) onto the local
-  // optimistic rows. Without this the in-flight assistant bubble would
-  // never gain its truncation marker until a hard reload.
+  return idsByRole
+}
+
+/** Index server rows by id for fast post-pairing flag-copy lookups. */
+function indexFreshById(fresh: Message[]): Map<number, Message> {
   const freshById = new Map<number, Message>()
   for (const R of fresh) {
     if (typeof R.id === 'number') freshById.set(R.id, R)
   }
+  return freshById
+}
+
+function backfillServerIds(local: Message[], fresh: Message[]): boolean {
+  const localTakenIds = collectLocalTakenIds(local)
+  const idsByRole = groupUnpairedServerIdsByRole(fresh, localTakenIds)
+  // Index server rows by id so the post-pairing pass below can also copy
+  // server-side flags (currently just JCLAW-291 truncated) onto the local
+  // optimistic rows. Without this the in-flight assistant bubble would
+  // never gain its truncation marker until a hard reload.
+  const freshById = indexFreshById(fresh)
   let mutated = false
   for (let li = local.length - 1; li >= 0; li--) {
     const L = local[li]
@@ -1140,9 +1171,8 @@ function pendingAsyncRunId(m: Message): string | null {
  *      never fire on the same-page spawn-and-wait path, and the user would
  *      have to navigate away to see the announce land.
  */
-function hasPendingAsyncAnnounce(): boolean {
-  const msgs = messages.value
-  if (!msgs.length) return false
+/** Collect the set of run-ids that have already produced an announce row. */
+function collectAnnouncedRunIds(msgs: Message[]): Set<string> {
   const announcedRunIds = new Set<string>()
   for (const m of msgs) {
     if (m.messageKind !== 'subagent_announce') continue
@@ -1150,15 +1180,30 @@ function hasPendingAsyncAnnounce(): boolean {
     const rid = meta?.runId
     if (rid != null) announcedRunIds.add(String(rid))
   }
+  return announcedRunIds
+}
+
+/**
+ * Check whether {@code m}'s assistant toolCalls contain a pending async
+ * spawn whose run-id has not yet been announced.
+ */
+function hasUnannouncedToolCallPending(m: Message, announcedRunIds: Set<string>): boolean {
+  if (m.role !== 'assistant' || !m.toolCalls?.length) return false
+  for (const tc of m.toolCalls) {
+    const tcPending = pendingAsyncRunIdFromResultText(tc.resultText)
+    if (tcPending && !announcedRunIds.has(tcPending)) return true
+  }
+  return false
+}
+
+function hasPendingAsyncAnnounce(): boolean {
+  const msgs = messages.value
+  if (!msgs.length) return false
+  const announcedRunIds = collectAnnouncedRunIds(msgs)
   for (const m of msgs) {
     const pending = pendingAsyncRunId(m)
     if (pending && !announcedRunIds.has(pending)) return true
-    if (m.role === 'assistant' && m.toolCalls?.length) {
-      for (const tc of m.toolCalls) {
-        const tcPending = pendingAsyncRunIdFromResultText(tc.resultText)
-        if (tcPending && !announcedRunIds.has(tcPending)) return true
-      }
-    }
+    if (hasUnannouncedToolCallPending(m, announcedRunIds)) return true
   }
   return false
 }
@@ -1615,6 +1660,322 @@ watch(() => route.query.conversation, async (raw) => {
   await resolveAndLoadConversation(id)
 })
 
+/**
+ * Mutable cursor that the SSE handlers share. {@code assistantIdx} is updated
+ * by the {@code init} handler when the server mints a new conversation and
+ * the local history is reset to just the streaming placeholder.
+ */
+interface StreamContext {
+  assistantIdx: number
+  readonly sentConversationId: number | null
+}
+
+/**
+ * Upload any attached files and return the server-side handles. Sets
+ * {@code attachError} and returns null on failure so the caller can bail.
+ */
+async function uploadOrReportAttachError(): Promise<UploadedAttachment[] | null> {
+  if (!attachedFiles.value.length || !selectedAgentId.value) return []
+  try {
+    return await uploadAttachments(selectedAgentId.value)
+  }
+  catch (e: unknown) {
+    const err = e as { data?: { error?: string }, message?: string } | undefined
+    attachError.value = 'Upload failed: ' + (err?.data?.error || err?.message || 'unknown error')
+    return null
+  }
+}
+
+/** Revoke blob URLs held for the about-to-be-sent attachments. */
+function revokeAttachmentPreviews(pending: File[]) {
+  for (const f of pending) {
+    const url = attachmentPreviews.value.get(f)
+    if (url) URL.revokeObjectURL(url)
+    attachmentPreviews.value.delete(f)
+  }
+}
+
+/**
+ * Translate uploaded server handles into the shape the chat bubble's
+ * optimistic-attachment chips expect (attachmentId → uuid). Returns
+ * undefined when there were no uploads so the field is omitted entirely.
+ */
+function buildOptimisticAttachments(uploaded: UploadedAttachment[]) {
+  if (!uploaded.length) return undefined
+  return uploaded.map(u => ({
+    uuid: u.attachmentId,
+    originalFilename: u.originalFilename,
+    mimeType: u.mimeType,
+    sizeBytes: u.sizeBytes,
+    kind: u.kind,
+  }))
+}
+
+/** Reset all streaming buffers and flip the {@code streaming} flag on. */
+function beginStreamingState() {
+  streaming.value = true
+  streamContent.value = ''
+  streamReasoning.value = ''
+  streamStatus.value = ''
+  streamContentHtml.value = ''
+  streamReasoningHtml.value = ''
+}
+
+/**
+ * JCLAW-26: if the backend minted a NEW conversation (e.g. /new slash-
+ * command), discard the stale visible history and re-anchor to just the
+ * streaming placeholder so the view matches what the new conversation
+ * actually contains.
+ */
+function handleInitConversationSwap(ctx: StreamContext, newConversationId: number) {
+  if (ctx.sentConversationId === null) return
+  if (ctx.sentConversationId === newConversationId) return
+  const placeholder = messages.value[ctx.assistantIdx]
+  if (!placeholder) return
+  messages.value = [placeholder]
+  ctx.assistantIdx = 0
+  triggerRef(messages)
+}
+
+function handleStreamInitEvent(ctx: StreamContext, event: { conversationId?: number, thinkingMode?: string }) {
+  if (!event.conversationId) return
+  handleInitConversationSwap(ctx, event.conversationId)
+  selectedConvoId.value = event.conversationId
+  if (event.thinkingMode) {
+    streamStatus.value = `thinking (${event.thinkingMode})...`
+  }
+}
+
+/** Parse a status frame that may carry a usage JSON payload. Returns true if it was consumed as usage. */
+function tryApplyUsageFromStatusContent(ctx: StreamContext, content: string): boolean {
+  if (!content.startsWith('{') || !content.includes('"usage"')) return false
+  try {
+    const parsed = JSON.parse(content)
+    if (!parsed.usage) return false
+    messages.value[ctx.assistantIdx]!.usage = parsed.usage
+    triggerRef(messages)
+    // The metrics pill renders below the bubble the moment usage lands.
+    // Without this scroll the per-token scroller leaves the viewport
+    // pinned to the pre-metrics bottom and the user sees a half-cropped
+    // stats row.
+    scrollToBottom()
+    return true
+  }
+  catch {
+    return false
+  }
+}
+
+function handleStreamStatusEvent(ctx: StreamContext, event: { content?: string }) {
+  const content = event.content
+  if (content && tryApplyUsageFromStatusContent(ctx, content)) return
+  streamStatus.value = content ?? ''
+}
+
+/**
+ * Stamp the once-per-turn "thinking started" fields on the first reasoning
+ * chunk. Subsequent chunks are no-ops here to avoid Vue reactivity churn.
+ */
+function markThinkingStartedIfFirst(m: StreamingMessage): boolean {
+  if (m._thinkingStartedAt) return false
+  m._thinkingStartedAt = Date.now()
+  m._thinkingInProgress = true
+  m._thinkingDurationMs = null
+  m.thinkingCollapsed = false
+  return true
+}
+
+function handleStreamReasoningEvent(ctx: StreamContext, event: { content: string }) {
+  const m = messages.value[ctx.assistantIdx] as StreamingMessage
+  const stateChanged = markThinkingStartedIfFirst(m)
+  streamReasoning.value += event.content
+  // Property mutation on a shallowRef-held object does not trigger
+  // reactivity. The streaming bubble reads streamReasoningHtml.value
+  // (throttled markdown render below) instead of msg.reasoning, so
+  // the user still sees the live update. msg.reasoning is kept in
+  // sync so the post-stream renderMarkdown(msg.reasoning) path
+  // displays the final text after the finally{} triggerRef.
+  m.reasoning = streamReasoning.value
+  scheduleStreamReasoningRender()
+  if (stateChanged) triggerRef(messages)
+  if (!streamContent.value) {
+    streamStatus.value = 'thinking...'
+  }
+  scrollToBottom()
+}
+
+/**
+ * Stamp the reasoning→content transition exactly once. Returns true if
+ * the transition fired so the caller can decide whether to triggerRef.
+ */
+function finalizeThinkingOnTransition(m: StreamingMessage): boolean {
+  if (m._thinkingInProgress !== true) return false
+  m._thinkingDurationMs = Date.now() - (m._thinkingStartedAt ?? Date.now())
+  m._thinkingInProgress = false
+  m.thinkingCollapsed = true
+  return true
+}
+
+function handleStreamTokenEvent(ctx: StreamContext, event: { content?: string, timestamp?: string }) {
+  // Empty-content token events are emitted by OpenAI-compatible providers
+  // (observed on Kimi K2.5 via OpenRouter) interleaved with every reasoning
+  // chunk — the `content` field is always present in the API schema and
+  // defaults to "" when the chunk only carries reasoning. Treating those as
+  // a real reasoning→content transition was the "Thought for 0.01 seconds
+  // during streaming" bug: the second empty-content token after the first
+  // reasoning event was tripping the flip. Skip them entirely so the
+  // transition fires only on the first byte of genuine content.
+  if (!event.content) return
+  const m = messages.value[ctx.assistantIdx] as StreamingMessage
+  const transitioned = finalizeThinkingOnTransition(m)
+  streamStatus.value = ''
+  if (event.timestamp) m.createdAt = event.timestamp
+  streamContent.value += event.content
+  m.content = streamContent.value
+  scheduleStreamContentRender()
+  // Trigger a single re-render at the reasoning→content transition so the
+  // thinking card collapses and the content bubble appears. Subsequent
+  // content tokens flow through streamContentHtml without touching the
+  // messages-array reactivity, which is the whole point of the shallowRef
+  // migration.
+  if (transitioned) triggerRef(messages)
+  scrollToBottom()
+}
+
+interface ToolCallEvent {
+  id: string
+  name: string
+  icon?: string
+  arguments?: string
+  resultText?: string | null
+  resultStructured?: ToolCall['resultStructured']
+}
+
+function handleStreamToolCallEvent(ctx: StreamContext, event: ToolCallEvent) {
+  // JCLAW-170: a tool invocation completed on the backend. Append the
+  // structured payload to the streaming assistant message's toolCalls
+  // array so the collapsible block surfaces it live. The accordion starts
+  // expanded so users see in-progress activity the instant the first tool
+  // finishes; once content begins to stream they can collapse it
+  // themselves, and it auto-collapses on reload for historical turns.
+  // Per-call: collapse any prior calls and auto-expand the just-arrived
+  // one so its results are visible without an extra click.
+  const m = messages.value[ctx.assistantIdx] as StreamingMessage
+  if (!m.toolCalls) {
+    m.toolCalls = []
+    m.toolCallsCollapsed = false
+  }
+  for (const prev of m.toolCalls) prev._expanded = false
+  m.toolCalls.push({
+    id: event.id,
+    name: event.name,
+    icon: event.icon || 'wrench',
+    arguments: event.arguments ?? '',
+    resultText: event.resultText ?? null,
+    resultStructured: event.resultStructured ?? null,
+    _expanded: true,
+  })
+  triggerRef(messages)
+  scrollToBottom()
+}
+
+function handleStreamCompleteEvent(ctx: StreamContext, event: { content?: string }) {
+  const m = messages.value[ctx.assistantIdx] as StreamingMessage
+  // Reasoning-only turn (no content streamed): finalize duration here.
+  finalizeThinkingOnTransition(m)
+  streamStatus.value = ''
+  m.content = event.content || streamContent.value
+  // Collapsing thinking + swapping in final content shifts layout height.
+  // Re-pin to the bottom so the next thing the user sees (the metrics pill
+  // landing on the subsequent status event) is fully in view.
+  scrollToBottom()
+}
+
+function handleStreamErrorEvent(ctx: StreamContext, event: { content: string }) {
+  messages.value[ctx.assistantIdx]!.content = event.content
+  triggerRef(messages)
+}
+
+function handleStreamQueuedEvent(ctx: StreamContext, event: { position?: number | string }) {
+  messages.value[ctx.assistantIdx]!.content = 'Your message has been queued (position: ' + (event.position || '?') + '). Processing shortly...'
+  triggerRef(messages)
+}
+
+/** Dispatch one SSE event to its dedicated handler. */
+function dispatchStreamEvent(ctx: StreamContext, event: { type?: string } & Record<string, unknown>) {
+  switch (event.type) {
+    case 'init':
+      handleStreamInitEvent(ctx, event as { conversationId?: number, thinkingMode?: string })
+      break
+    case 'status':
+      handleStreamStatusEvent(ctx, event as { content?: string })
+      break
+    case 'reasoning':
+      handleStreamReasoningEvent(ctx, event as { content: string })
+      break
+    case 'token':
+      handleStreamTokenEvent(ctx, event as { content?: string, timestamp?: string })
+      break
+    case 'tool_call':
+      handleStreamToolCallEvent(ctx, event as unknown as ToolCallEvent)
+      break
+    case 'complete':
+      handleStreamCompleteEvent(ctx, event as { content?: string })
+      break
+    case 'error':
+      handleStreamErrorEvent(ctx, event as { content: string })
+      break
+    case 'queued':
+      handleStreamQueuedEvent(ctx, event as { position?: number | string })
+      break
+  }
+}
+
+/** Parse one `data: …` SSE line and dispatch; swallow malformed JSON. */
+function processStreamLine(ctx: StreamContext, line: string) {
+  if (!line.startsWith('data: ')) return
+  try {
+    const event = JSON.parse(line.slice(6))
+    dispatchStreamEvent(ctx, event)
+  }
+  catch {
+    // Skip malformed events
+  }
+}
+
+/** Drain the SSE response stream, dispatching each event line as it arrives. */
+async function consumeStreamResponse(ctx: StreamContext, res: Response) {
+  if (!res.body) throw new Error('No response body')
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+    for (const line of lines) processStreamLine(ctx, line)
+  }
+}
+
+/** Render the user-visible message into the assistant placeholder when the stream throws. */
+function applyStreamErrorToPlaceholder(assistantIdx: number, e: unknown) {
+  const err = e as { name?: string, message?: string } | undefined
+  if (err?.name === 'AbortError') {
+    // AbortError is expected when the user clicks Stop — preserve any content
+    // that was already streamed and append a small "(stopped)" marker instead
+    // of replacing the bubble with a scary error.
+    const existing = messages.value[assistantIdx]!.content || streamContent.value || ''
+    messages.value[assistantIdx]!.content = existing
+      ? existing.replace(/\s*$/, '') + '\n\n_(stopped)_'
+      : '_(stopped before any response)_'
+  }
+  else {
+    messages.value[assistantIdx]!.content = 'Error: ' + (err?.message || 'Failed to get response')
+  }
+}
+
 async function sendMessage() {
   if (streaming.value || !selectedAgentId.value) return
   // Subagent transcripts are read-only — the user reached this view via a
@@ -1626,17 +1987,8 @@ async function sendMessage() {
 
   attachError.value = null
   const pending = attachedFiles.value.slice()
-  let uploaded: UploadedAttachment[] = []
-  if (pending.length) {
-    try {
-      uploaded = await uploadAttachments(selectedAgentId.value)
-    }
-    catch (e: unknown) {
-      const err = e as { data?: { error?: string }, message?: string } | undefined
-      attachError.value = 'Upload failed: ' + (err?.data?.error || err?.message || 'unknown error')
-      return
-    }
-  }
+  const uploaded = await uploadOrReportAttachError()
+  if (uploaded === null) return
 
   // JCLAW-25: message.content is the user's raw text. Attachment metadata
   // rides in the `attachments` field; the backend persists chat_message_attachment
@@ -1645,50 +1997,31 @@ async function sendMessage() {
   const text = rawText
 
   input.value = ''
-  // Revoke any blob preview URLs still held for the just-sent attachments.
-  for (const f of pending) {
-    const url = attachmentPreviews.value.get(f)
-    if (url) URL.revokeObjectURL(url)
-    attachmentPreviews.value.delete(f)
-  }
+  revokeAttachmentPreviews(pending)
   attachedFiles.value = []
   if (chatInput.value) chatInput.value.style.height = 'auto'
   // Map the just-uploaded attachments onto the optimistic user bubble so
   // the file chips render immediately. Without this, the chips stayed
   // hidden until the next /messages refetch surfaced the persisted
   // {@link MessageAttachment} rows — observable as "I uploaded a file
-  // but it doesn't show until I leave and come back." Field shapes are
-  // close-enough copies; the only translation is `attachmentId` → `uuid`,
-  // since both refer to the same opaque /api/attachments/{id} key.
-  const optimisticAttachments = uploaded.length
-    ? uploaded.map(u => ({
-        uuid: u.attachmentId,
-        originalFilename: u.originalFilename,
-        mimeType: u.mimeType,
-        sizeBytes: u.sizeBytes,
-        kind: u.kind,
-      }))
-    : undefined
-  messages.value.push({ _key: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString(), attachments: optimisticAttachments })
+  // but it doesn't show until I leave and come back."
+  messages.value.push({ _key: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString(), attachments: buildOptimisticAttachments(uploaded) })
   triggerRef(messages)
   scrollToBottom()
 
-  streaming.value = true
-  streamContent.value = ''
-  streamReasoning.value = ''
-  streamStatus.value = ''
-  streamContentHtml.value = ''
-  streamReasoningHtml.value = ''
+  beginStreamingState()
 
   // Capture the conversation id we're sending — if the server returns a
   // DIFFERENT id in the init frame, the backend minted a new conversation
   // (e.g. /new slash-command, JCLAW-26). We need to discard the stale
   // visible history from the prior conversation so the view matches what
   // the new conversation row actually contains on reload.
-  const sentConversationId = selectedConvoId.value
+  const ctx: StreamContext = {
+    assistantIdx: messages.value.length,
+    sentConversationId: selectedConvoId.value,
+  }
 
   // Add placeholder for streaming response
-  let assistantIdx = messages.value.length
   const assistantKey = crypto.randomUUID()
   messages.value.push({ _key: assistantKey, role: 'assistant', content: '', createdAt: new Date().toISOString() })
   streamingMessageKey.value = assistantKey
@@ -1708,206 +2041,11 @@ async function sendMessage() {
         attachments: uploaded,
       }),
     })
-
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    if (!res.body) throw new Error('No response body')
-
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        try {
-          const event = JSON.parse(line.slice(6))
-          if (event.type === 'init' && event.conversationId) {
-            // JCLAW-26: if the server minted a new conversation (e.g.
-            // /new), reset the visible history to match what the new
-            // row actually contains — the assistant placeholder we're
-            // about to stream into. The optimistic user bubble and the
-            // prior conversation's loaded history get dropped.
-            if (sentConversationId !== null && sentConversationId !== event.conversationId) {
-              const placeholder = messages.value[assistantIdx]
-              if (placeholder) {
-                messages.value = [placeholder]
-                assistantIdx = 0
-                triggerRef(messages)
-              }
-            }
-            selectedConvoId.value = event.conversationId
-            if (event.thinkingMode) {
-              streamStatus.value = `thinking (${event.thinkingMode})...`
-            }
-          }
-          else if (event.type === 'status') {
-            // Check if this is a usage JSON payload
-            if (event.content?.startsWith('{') && event.content.includes('"usage"')) {
-              try {
-                const parsed = JSON.parse(event.content)
-                if (parsed.usage) {
-                  messages.value[assistantIdx]!.usage = parsed.usage
-                  triggerRef(messages)
-                  // The metrics pill renders below the bubble the moment
-                  // usage lands. Without this scroll the per-token scroller
-                  // leaves the viewport pinned to the pre-metrics bottom
-                  // and the user sees a half-cropped stats row.
-                  scrollToBottom()
-                }
-              }
-              catch { /* not JSON, treat as status text */ }
-            }
-            else {
-              streamStatus.value = event.content
-            }
-          }
-          else if (event.type === 'reasoning') {
-            const m = messages.value[assistantIdx] as StreamingMessage
-            // Bubble state is set once on the first reasoning chunk. Writing
-            // these properties again on every subsequent chunk — even to the
-            // same value — triggers Vue reactivity and makes the bubble
-            // visibly reflow/flicker (observed as "expands and contracts over
-            // and over"). The protective _thinkingInProgress=true flag is
-            // enough to pin the "Thinking" label for the duration of the
-            // reasoning phase; no need to re-pin it per chunk.
-            const stateChanged = !m._thinkingStartedAt
-            if (stateChanged) {
-              m._thinkingStartedAt = Date.now()
-              m._thinkingInProgress = true
-              m._thinkingDurationMs = null
-              m.thinkingCollapsed = false
-            }
-            streamReasoning.value += event.content
-            // Property mutation on a shallowRef-held object does not trigger
-            // reactivity. The streaming bubble reads streamReasoningHtml.value
-            // (throttled markdown render below) instead of msg.reasoning, so
-            // the user still sees the live update. msg.reasoning is kept in
-            // sync so the post-stream renderMarkdown(msg.reasoning) path
-            // displays the final text after the finally{} triggerRef.
-            m.reasoning = streamReasoning.value
-            scheduleStreamReasoningRender()
-            if (stateChanged) triggerRef(messages)
-            if (!streamContent.value) {
-              streamStatus.value = 'thinking...'
-            }
-            scrollToBottom()
-          }
-          else if (event.type === 'token') {
-            // Empty-content token events are emitted by OpenAI-compatible
-            // providers (observed on Kimi K2.5 via OpenRouter) interleaved
-            // with every reasoning chunk — the `content` field is always
-            // present in the API schema and defaults to "" when the chunk
-            // only carries reasoning. Treating those as a real reasoning→
-            // content transition was the "Thought for 0.01 seconds during
-            // streaming" bug: the second empty-content token after the
-            // first reasoning event was tripping the flip. Skip them
-            // entirely so the transition fires only on the first byte of
-            // genuine content.
-            if (!event.content) continue
-            const m = messages.value[assistantIdx] as StreamingMessage
-            // Reasoning→content transition: stamp duration, flip flag,
-            // auto-collapse. Guarded by _thinkingInProgress so the stamp
-            // fires exactly once at the transition — subsequent content
-            // tokens are no-ops on this branch.
-            const transitioned = m._thinkingInProgress === true
-            if (transitioned) {
-              m._thinkingDurationMs = Date.now() - (m._thinkingStartedAt ?? Date.now())
-              m._thinkingInProgress = false
-              m.thinkingCollapsed = true
-            }
-            streamStatus.value = ''
-            if (event.timestamp) m.createdAt = event.timestamp
-            streamContent.value += event.content
-            m.content = streamContent.value
-            scheduleStreamContentRender()
-            // Trigger a single re-render at the reasoning→content transition
-            // so the thinking card collapses and the content bubble appears.
-            // Subsequent content tokens flow through streamContentHtml without
-            // touching the messages-array reactivity, which is the whole point
-            // of the shallowRef migration.
-            if (transitioned) triggerRef(messages)
-            scrollToBottom()
-          }
-          else if (event.type === 'tool_call') {
-            // JCLAW-170: a tool invocation completed on the backend. Append
-            // the structured payload to the streaming assistant message's
-            // toolCalls array so the collapsible block surfaces it live.
-            // The accordion starts expanded so users see in-progress activity
-            // the instant the first tool finishes; once content begins to
-            // stream they can collapse it themselves, and it auto-collapses
-            // on reload for historical turns. Per-call: collapse any prior
-            // calls and auto-expand the just-arrived one so its results are
-            // visible without an extra click.
-            const m = messages.value[assistantIdx] as StreamingMessage
-            if (!m.toolCalls) {
-              m.toolCalls = []
-              m.toolCallsCollapsed = false
-            }
-            for (const prev of m.toolCalls) prev._expanded = false
-            m.toolCalls.push({
-              id: event.id,
-              name: event.name,
-              icon: event.icon || 'wrench',
-              arguments: event.arguments ?? '',
-              resultText: event.resultText ?? null,
-              resultStructured: event.resultStructured ?? null,
-              _expanded: true,
-            })
-            triggerRef(messages)
-            scrollToBottom()
-          }
-          else if (event.type === 'complete') {
-            const m = messages.value[assistantIdx] as StreamingMessage
-            // Reasoning-only turn (no content streamed): finalize duration here.
-            if (m._thinkingInProgress) {
-              m._thinkingDurationMs = Date.now() - (m._thinkingStartedAt ?? Date.now())
-              m._thinkingInProgress = false
-              m.thinkingCollapsed = true
-            }
-            streamStatus.value = ''
-            m.content = event.content || streamContent.value
-            // Collapsing thinking + swapping in final content shifts layout
-            // height. Re-pin to the bottom so the next thing the user sees
-            // (the metrics pill landing on the subsequent status event) is
-            // fully in view.
-            scrollToBottom()
-          }
-          else if (event.type === 'error') {
-            messages.value[assistantIdx]!.content = event.content
-            triggerRef(messages)
-          }
-          else if (event.type === 'queued') {
-            messages.value[assistantIdx]!.content = 'Your message has been queued (position: ' + (event.position || '?') + '). Processing shortly...'
-            triggerRef(messages)
-          }
-        }
-        catch {
-          // Skip malformed events
-        }
-      }
-    }
+    await consumeStreamResponse(ctx, res)
   }
   catch (e: unknown) {
-    // AbortError is expected when the user clicks Stop — preserve any content
-    // that was already streamed and append a small "(stopped)" marker instead
-    // of replacing the bubble with a scary error.
-    const err = e as { name?: string, message?: string } | undefined
-    if (err?.name === 'AbortError') {
-      const existing = messages.value[assistantIdx]!.content || streamContent.value || ''
-      messages.value[assistantIdx]!.content = existing
-        ? existing.replace(/\s*$/, '') + '\n\n_(stopped)_'
-        : '_(stopped before any response)_'
-    }
-    else {
-      messages.value[assistantIdx]!.content = 'Error: ' + (err?.message || 'Failed to get response')
-    }
+    applyStreamErrorToPlaceholder(ctx.assistantIdx, e)
   }
   finally {
     streaming.value = false
